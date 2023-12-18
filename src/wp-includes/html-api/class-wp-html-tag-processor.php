@@ -1073,6 +1073,10 @@ class WP_HTML_Tag_Processor {
 					continue;
 				}
 
+				if ( $this->bytes_already_parsed >= $doc_length ) {
+					return false;
+				}
+
 				if ( '>' === $html[ $this->bytes_already_parsed ] ) {
 					$this->bytes_already_parsed = $closer_potentially_starts_at;
 					return true;
