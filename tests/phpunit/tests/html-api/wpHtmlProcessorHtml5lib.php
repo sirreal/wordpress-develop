@@ -94,12 +94,6 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 				continue;
 			}
 
-			// These tests contain no tags, which isn't yet
-			// supported by the HTML API.
-			if ( 'comments01.dat' === $entry ) {
-				continue;
-			}
-
 			foreach ( self::parse_html5_dat_testfile( $test_dir . $entry ) as $k => $test ) {
 				// strip .dat extension from filename
 				$test_suite = substr( $entry, 0, -4 );
@@ -120,34 +114,74 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 	 */
 	public static function build_html5_treelike_string( $fragment_context, $html ) {
 		$p = WP_HTML_Processor::create_fragment( $html, "<{$fragment_context}>" );
+
 		if ( null === $p ) {
 			return null;
 		}
 
 		$output = "<html>\n  <head>\n  <body>\n";
-		while ( $p->next_tag() ) {
-			$indent = '';
 
-			// Breadcrumbs include this tag, so skip 1 nesting level.
-			foreach ( $p->get_breadcrumbs() as $index => $_ ) {
-				if ( $index ) {
-					$indent .= '  ';
-				}
+		// If we haven't set our bookmark, assume we're 2 levels deep:
+		// html > body > [position]
+		$indent_level = 2;
+		$indent = '  ';
+
+		while ( $p->next_token() ) {
+			if ( $p->get_last_error() !== null ) {
+				return null;
 			}
-			$t       = strtolower( $p->get_tag() );
-			$output .= "{$indent}<{$t}>\n";
 
-			$attribute_names = $p->get_attribute_names_with_prefix( '' );
-			sort( $attribute_names, SORT_STRING );
+			switch ( $p->get_token_type() ) {
+				case '#tag':
+					if ( $p->is_tag_closer() ) {
+						$indent_level--;
+						break;
+					}
 
-			foreach ( $attribute_names as $attribute_name ) {
-				$val = $p->get_attribute( $attribute_name );
-				// Attributes with no value are `true` with the HTML API,
-				// We map use the empty string value in the tree structure.
-				if ( true === $val ) {
-					$val = '';
-				}
-				$output .= "{$indent}  {$attribute_name}=\"{$val}\"\n";
+					$indent_level = count( $p->get_breadcrumbs() );
+
+					$t       = strtolower( $p->get_tag() );
+					$output .= str_repeat( $indent, $indent_level - 1 ) . "<{$t}>\n";
+
+					$attribute_names = $p->get_attribute_names_with_prefix( '' );
+					if ( $attribute_names ) {
+						sort( $attribute_names, SORT_STRING );
+
+						foreach ( $attribute_names as $attribute_name ) {
+							$val = $p->get_attribute( $attribute_name );
+							// Attributes with no value are `true` with the HTML API,
+							// We map use the empty string value in the tree structure.
+							if ( true === $val ) {
+								$val = '';
+							}
+							$output .= str_repeat( $indent, $indent_level ) . "{$attribute_name}=\"{$val}\"\n";
+						}
+					}
+					break;
+
+				case '#text':
+					$output .= str_repeat( $indent, $indent_level ) . "\"{$p->get_modifiable_text()}\"\n";
+					break;
+
+				case '#cdata-section':
+					break;
+
+				case '#processing-instruction':
+					break;
+
+				case '#comment':
+					// Comments must be "<" then "!-- " then the data then " -->".
+					$output .= str_repeat( $indent, $indent_level ) . "<!-- {$p->get_modifiable_text()} -->\n";
+					break;
+
+				case '#doctype':
+					break;
+
+				case '#presumptuous-tag':
+					break;
+
+				case '#funky-comment':
+					break;
 			}
 		}
 
@@ -159,7 +193,7 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 			return null;
 		}
 
-		return $output;
+		return $output . "\n";
 	}
 
 	/**
@@ -258,40 +292,9 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 				 */
 				case 'document':
 					if ( '|' === $line[0] ) {
-						$candidate = substr( $line, 2 );
-
-						// Remove leading spaces and the trailing newline
-						$trimmed = ltrim( substr( $candidate, 0, -1 ) );
-
-						// Text: "…
-						if ( '"' === $trimmed[0] ) {
-							// Skip for now
-							break;
-						}
-
-						// Attribute: name="value"
-						if ( '"' === $trimmed[ strlen( $trimmed ) - 1 ] ) {
-							$test_dom .= $candidate;
-							break;
-						}
-
-						// Tags: <tag-name>
-						// Comments: <!-- comment text -->
-						// Doctypes: <!DOCTYPE … >
-						// Processing instructions: <?target >
-						if ( '<' === $trimmed[0] && '>' === $trimmed[ strlen( $trimmed ) - 1 ] ) {
-							// Tags: <tag-name>
-							if ( ctype_alpha( $trimmed[1] ) ) {
-								$test_dom .= $candidate;
-								break;
-							}
-							// Skip everything else for now
-							break;
-						}
+						$test_dom .= substr( $line, 2 );
 					} else {
-						// This is a text node that includes unescaped newlines.
-						// Everything else should be singles lines starting with "| ".
-						// @todo Skip for now, add to $test_dom when we handle text nodes.
+						$test_dom .= $line;
 					}
 					break;
 			}
