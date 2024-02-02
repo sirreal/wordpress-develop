@@ -156,11 +156,15 @@ class WP_HTML_Open_Elements {
 	 *
 	 * @see https://html.spec.whatwg.org/#has-an-element-in-the-specific-scope
 	 *
-	 * @param string   $tag_name         Name of tag check.
-	 * @param string[] $termination_list List of elements that terminate the search.
+	 * @param string   $tag_name             Name of tag check.
+	 * @param string[] $termination_list     List of elements that terminate the search.
+	 * @param string   $termination_behavior Optional. "include" or "exclude". If "include"
+	 *                                       (default), the terminate when any tag in
+	 *                                       `$termination_list` is reached. Otherwise,
+	 *                                       terminate when any _other_ tag is reached.
 	 * @return bool Whether the element was found in a specific scope.
 	 */
-	public function has_element_in_specific_scope( $tag_name, $termination_list ) {
+	public function has_element_in_specific_scope( $tag_name, $termination_list, $termination_behavior = 'include' ) {
 		foreach ( $this->walk_up() as $node ) {
 			if ( $node->node_name === $tag_name ) {
 				return true;
@@ -178,7 +182,10 @@ class WP_HTML_Open_Elements {
 					return false;
 			}
 
-			if ( in_array( $node->node_name, $termination_list, true ) ) {
+			$terminate = 'include' === $termination_behavior
+				? in_array( $node->node_name, $termination_list, true )
+				: ! in_array( $node->node_name, $termination_list, true );
+			if ( $terminate ) {
 				return false;
 			}
 		}
@@ -269,19 +276,25 @@ class WP_HTML_Open_Elements {
 	/**
 	 * Returns whether a particular element is in select scope.
 	 *
-	 * @since 6.4.0
+	 * @since 6.4.0 Stub implementation (throws).
+	 * @since 6.7.0 Full implementation.
 	 *
 	 * @see https://html.spec.whatwg.org/#has-an-element-in-select-scope
 	 *
-	 * @throws WP_HTML_Unsupported_Exception Always until this function is implemented.
+	 * > The stack of open elements is said to have a particular element in select scope when it has
+	 * > that element in the specific scope consisting of all element types except the following:
+	 * > - optgroup in the HTML namespace
+	 * > - option in the HTML namespace
 	 *
 	 * @param string $tag_name Name of tag to check.
 	 * @return bool Whether given element is in scope.
 	 */
 	public function has_element_in_select_scope( $tag_name ) {
-		throw new WP_HTML_Unsupported_Exception( 'Cannot process elements depending on select scope.' );
-
-		return false; // The linter requires this unreachable code until the function is implemented and can return.
+		return $this->has_element_in_specific_scope(
+			$tag_name,
+			array( 'OPTION', 'OPTGROUP' ),
+			'exclude'
+		);
 	}
 
 	/**
