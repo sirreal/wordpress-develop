@@ -1439,7 +1439,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case 'BGSOUND':
 			case 'BODY':
 			case 'FORM':
+			case 'FRAME':
 			case 'FRAMESET':
+			case 'HEAD':
 			case 'HTML':
 			case 'IFRAME':
 			case 'LINK':
