@@ -361,7 +361,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	public function next_tag( $query = null ) {
 		if ( null === $query ) {
 			while ( $this->step() ) {
-				if ( ! $this->is_tag_closer() ) {
+				if ( $this->get_token_type() === '#tag' ) {
 					return true;
 				}
 			}
@@ -384,6 +384,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		if ( ! ( array_key_exists( 'breadcrumbs', $query ) && is_array( $query['breadcrumbs'] ) ) ) {
 			while ( $this->step() ) {
+				if ( $this->get_token_type() !== '#tag' ) {
+					continue;
+				}
 				if ( ! $this->is_tag_closer() ) {
 					return true;
 				}
@@ -405,6 +408,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$match_offset = isset( $query['match_offset'] ) ? (int) $query['match_offset'] : 1;
 
 		while ( $match_offset > 0 && $this->step() ) {
+			if ( $this->get_token_type() !== '#tag' ) {
+				continue;
+			}
 			if ( $this->matches_breadcrumbs( $breadcrumbs ) && 0 === --$match_offset ) {
 				return true;
 			}
@@ -428,13 +434,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool
 	 */
 	public function next_token() {
-		$found_a_token = parent::next_token();
-
-		if ( '#tag' === $this->get_token_type() ) {
-			$this->step( self::PROCESS_CURRENT_NODE );
-		}
-
-		return $found_a_token;
+		return $this->step();
 	}
 
 	/**
@@ -535,13 +535,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		if ( self::PROCESS_NEXT_NODE === $node_to_process ) {
-			while ( parent::next_token() && '#tag' !== $this->get_token_type() ) {
-				continue;
-			}
+			parent::next_token();
 		}
 
 		// Finish stepping when there are no more tokens in the document.
-		if ( null === $this->get_tag() ) {
+		if (
+			$this->parser_state === self::STATE_COMPLETE ||
+			$this->parser_state === self::STATE_INCOMPLETE_INPUT
+		) {
 			return false;
 		}
 
@@ -619,6 +620,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_body() {
+		switch ( $this->get_token_type() ) {
+			case '#text':
+				$this->reconstruct_active_formatting_elements();
+				return true;
+
+			case '#cdata-section':
+			case '#comment':
+			case '#doctype':
+			case '#presumptuous-tag':
+			case '#funky-comment':
+				return true;
+		}
+
 		$tag_name = $this->get_tag();
 		$op_sigil = $this->is_tag_closer() ? '-' : '+';
 		$op       = "{$op_sigil}{$tag_name}";
@@ -1251,6 +1265,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case 'forward':
 				// When moving forwards, reparse the document until reaching the same location as the original bookmark.
 				while ( $this->step() ) {
+					if ( $this->get_token_type() !== '#tag' ) {
+						continue;
+					}
 					if ( $bookmark_starts_at === $this->bookmarks[ $this->state->current_token->bookmark_name ]->start ) {
 						return true;
 					}

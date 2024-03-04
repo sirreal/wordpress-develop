@@ -53,9 +53,15 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	 */
 	public function test_get_tag_is_null_once_document_is_finished() {
 		$processor = WP_HTML_Processor::create_fragment( '<div class="test">Test</div>' );
-		$processor->next_tag();
+		// Opener
+		$this->assertTrue( $processor->next_tag() );
 		$this->assertSame( 'DIV', $processor->get_tag() );
 
+		// Closer
+		$this->assertTrue( $processor->next_tag() );
+		$this->assertSame( 'DIV', $processor->get_tag() );
+
+		// End of document
 		$this->assertFalse( $processor->next_tag() );
 		$this->assertNull( $processor->get_tag() );
 	}
