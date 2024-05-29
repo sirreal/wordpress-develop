@@ -39,7 +39,7 @@ class WP_HTML_Decoder {
 
 		while ( $search_at < $search_length && $haystack_at < $haystack_end ) {
 			$chars_match = $loose_case
-				? strtolower( $haystack[ $haystack_at ] ) === strtolower( $search_text[ $search_at ] )
+				? 0 === strcasecmp( $haystack[ $haystack_at ], $search_text[ $search_at ] )
 				: $haystack[ $haystack_at ] === $search_text[ $search_at ];
 
 			$is_introducer = '&' === $haystack[ $haystack_at ];
