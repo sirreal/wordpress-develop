@@ -2830,18 +2830,27 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * different from generating end tags in the normal sense.
 	 *
 	 * @since 6.4.0
+	 * @since 6.7.0 Support "option", "optgroup", and table-structure elements.
 	 *
 	 * @see WP_HTML_Processor::generate_implied_end_tags
 	 * @see https://html.spec.whatwg.org/#generate-implied-end-tags
 	 */
 	private function generate_implied_end_tags_thoroughly() {
 		$elements_with_implied_end_tags = array(
+			'CAPTION',
+			'COLGROUP',
 			'DD',
 			'DT',
 			'LI',
 			'OPTGROUP',
 			'OPTION',
 			'P',
+			'TBODY',
+			'TD',
+			'TFOOT',
+			'TH',
+			'THEAD',
+			'TR',
 		);
 
 		while ( in_array( $this->state->stack_of_open_elements->current_node(), $elements_with_implied_end_tags, true ) ) {
