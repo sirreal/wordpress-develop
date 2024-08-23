@@ -1231,14 +1231,17 @@ class WP_XML_Tag_Processor {
 			 *
 			 *     STag ::= '<' Name (S Attribute)* S? '>'
 			 *
-			 * @see https://www.w3.org/TR/xml/#NT-STag
+			 * Reference:
+			 * * https://www.w3.org/TR/xml/#NT-STag
+			 * * https://www.w3.org/TR/xml/#NT-Name
 			 */
-			$tag_name = $this->parse_name( $at + 1 );
-			if ( isset( $tag_name ) ) {
+			$tag_name_length = $this->parse_name( $at + 1 );
+			if ( $tag_name_length > 0 ) {
+				++$at;
 				$this->parser_state         = self::STATE_MATCHED_TAG;
-				$this->tag_name_starts_at   = $at + 1;
-				$this->tag_name_length      = strlen( $tag_name );
-				$this->bytes_already_parsed = $this->tag_name_starts_at + $this->tag_name_length;
+				$this->tag_name_starts_at   = $at;
+				$this->tag_name_length      = $tag_name_length;
+				$this->bytes_already_parsed = $at + $this->tag_name_length;
 
 				return true;
 			}
@@ -1485,8 +1488,13 @@ class WP_XML_Tag_Processor {
 				! $this->is_closing_tag &&
 				'?' === $xml[ $at + 1 ]
 			) {
+				if ( $at + 4 >= $doc_length ) {
+					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+
+					return false;
+				}
+
 				if ( ! (
-					$at + 4 <= $doc_length &&
 					( 'x' === $xml[ $at + 2 ] || 'X' === $xml[ $at + 2 ] ) &&
 					( 'm' === $xml[ $at + 3 ] || 'M' === $xml[ $at + 3 ] ) &&
 					( 'l' === $xml[ $at + 4 ] || 'L' === $xml[ $at + 4 ] )
@@ -1559,9 +1567,9 @@ class WP_XML_Tag_Processor {
 			return false;
 		}
 
-		$attribute_start = $this->bytes_already_parsed;
-		$attribute_name  = $this->parse_name( $this->bytes_already_parsed );
-		if ( ! isset( $attribute_name ) ) {
+		$attribute_start       = $this->bytes_already_parsed;
+		$attribute_name_length = $this->parse_name( $this->bytes_already_parsed );
+		if ( 0 === $attribute_name_length ) {
 			$this->last_error = self::ERROR_SYNTAX;
 			_doing_it_wrong(
 				__METHOD__,
@@ -1569,7 +1577,8 @@ class WP_XML_Tag_Processor {
 				'WP_VERSION'
 			);
 		}
-		$this->bytes_already_parsed += strlen( $attribute_name );
+		$this->bytes_already_parsed += $attribute_name_length;
+		$attribute_name              = substr( $this->xml, $attribute_start, $attribute_name_length );
 		$this->skip_whitespace();
 
 		// Parse attribute value.
@@ -1606,32 +1615,15 @@ class WP_XML_Tag_Processor {
 				 *
 				 * @see https://www.w3.org/TR/xml/#NT-AttValue
 				 */
-				$terminating_quote_at = strpos( $this->xml, $quote, $value_start );
-				if ( false === $terminating_quote_at ) {
+				$value_length  = strcspn( $this->xml, "<$quote", $value_start );
+				$attribute_end = $value_start + $value_length + 1;
+
+				if ( $attribute_end - 1 >= strlen( $this->xml ) ) {
 					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 					return false;
 				}
 
-				$value_length  = $terminating_quote_at - $value_start - 1;
-				$attribute_end = $value_start + $value_length + 1;
-
-				$error_at  = $value_start;
-				$error_end = $value_start + $value_length;
-				while ( $error_at < $error_end ) {
-					$error_at += strcspn( $this->xml, '<&', $error_at, $error_end - $error_at );
-					if ( $error_at >= $error_end ) {
-						break;
-					}
-
-					// Could this be a real entity? If it is, it's not an error.
-					if ( '&' === $this->xml[ $error_at ] ) {
-						$entity = WP_XML_Decoder::next_entity( $this->xml, $error_at, $error_end, $entity_at );
-						if ( isset( $entity ) ) {
-							$error_at = $entity_at + strlen( $entity );
-							continue;
-						}
-					}
-
+				if ( $this->xml[ $attribute_end - 1 ] !== $quote ) {
 					$this->last_error = self::ERROR_SYNTAX;
 					_doing_it_wrong(
 						__METHOD__,
@@ -1644,7 +1636,6 @@ class WP_XML_Tag_Processor {
 						'WP_VERSION'
 					);
 				}
-
 				$this->bytes_already_parsed = $attribute_end;
 				break;
 
@@ -1698,63 +1689,36 @@ class WP_XML_Tag_Processor {
 		$this->bytes_already_parsed += strspn( $this->xml, " \t\f\r\n", $this->bytes_already_parsed );
 	}
 
-	/**
-	 * Matches an XML NT-NAME token.
-	 *
-	 *     NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] |
-	 *                       [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] |
-	 *                       [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] |
-	 *                       [#x10000-#xEFFFF]
-	 *
-	 *     NameChar      ::= NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-	 *
-	 * @since {WP_VERSION}
-	 *
-	 * @see https://www.w3.org/TR/xml/#NT-Name
-	 */
-	const P_NAME = <<<'REGEXP'
-		~
-		# The match must start at the given offset.
-		\G
-			# NameStartChar
-			[:a-z_A-Z\x{C0}-\x{D6}\x{D8}-\x{F6}\x{F8}-\x{2FF}\x{370}-\x{37D}\x{37F}-\x{1FFF}\x{200C}-\x{200D}\x{2070}-\x{218F}\x{2C00}-\x{2FEF}\x{3001}-\x{D7FF}\x{F900}-\x{FDCF}\x{FDF0}-\x{FFFD}\x{10000}-\x{EFFFF}]
-
-			# NameChar*
-			[-.0-9\x{B7}\x{0300}-\x{036F}\x{203F}-\x{2040}:a-z_A-Z\x{C0}-\x{D6}\x{D8}-\x{F6}\x{F8}-\x{2FF}\x{370}-\x{37D}\x{37F}-\x{1FFF}\x{200C}-\x{200D}\x{2070}-\x{218F}\x{2C00}-\x{2FEF}\x{3001}-\x{D7FF}\x{F900}-\x{FDCF}\x{FDF0}-\x{FFFD}\x{10000}-\x{EFFFF}]*
-
-		# u - The escape sequences refer to Unicode code points encoded as UTF-8.
-		#     They are not bytes, as they would be interpreted with the `u` flag.
-		# x - Use the extended syntax, which allows for these comments,
-		#     and to ignore whitespace outside of character groups.
-		~ux
-REGEXP;
-
-	/**
-	 * Attempts to parse an XML NT-NAME token.
-	 *
-	 * > NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] |
-	 * >                   [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] |
-	 * >                   [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] |
-	 * >                   [#x10000-#xEFFFF]
-	 * >
-	 * > NameChar      ::= NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-	 *
-	 * @since {WP_VERSION}
-	 *
-	 * @see https://www.w3.org/TR/xml/#NT-Name
-	 *
-	 * @param int|null $offset Optional. Byte offset at which to start parsing.
-	 *                         Default is to start at the current cursor position.
-	 * @return string|null Parsed NT-NAME token, if parsed, otherwise `null`.
-	 */
-	private function parse_name( int $offset = null ): ?string {
-		if ( ! isset( $offset ) ) {
-			$offset = $this->bytes_already_parsed;
+	// Describes the first character of the attribute name:
+	// NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+	// See https://www.w3.org/TR/xml/#NT-Name
+	const NAME_START_CHAR_PATTERN = ':a-z_A-Z\x{C0}-\x{D6}\x{D8}-\x{F6}\x{F8}-\x{2FF}\x{370}-\x{37D}\x{37F}-\x{1FFF}\x{200C}-\x{200D}\x{2070}-\x{218F}\x{2C00}-\x{2FEF}\x{3001}-\x{D7FF}\x{F900}-\x{FDCF}\x{FDF0}-\x{FFFD}\x{10000}-\x{EFFFF}';
+	const NAME_CHAR_PATTERN       = '\-\.0-9\x{B7}\x{0300}-\x{036F}\x{203F}-\x{2040}:a-z_A-Z\x{C0}-\x{D6}\x{D8}-\x{F6}\x{F8}-\x{2FF}\x{370}-\x{37D}\x{37F}-\x{1FFF}\x{200C}-\x{200D}\x{2070}-\x{218F}\x{2C00}-\x{2FEF}\x{3001}-\x{D7FF}\x{F900}-\x{FDCF}\x{FDF0}-\x{FFFD}\x{10000}-\x{EFFFF}';
+	private function parse_name( $offset ) {
+		if ( 1 !== preg_match(
+			'~[' . self::NAME_START_CHAR_PATTERN . ']~Ssu',
+			$this->xml[ $offset ],
+			$matches
+		) ) {
+			return 0;
 		}
 
-		return 1 === preg_match( self::P_NAME, $this->xml, $name_match, 0, $offset )
-			? $name_match[0]
-			: null;
+		$name_length = 1;
+
+		// Consume the rest of the name
+		preg_match(
+			'~\G([' . self::NAME_CHAR_PATTERN . ']+)~Ssu',
+			$this->xml,
+			$matches,
+			0,
+			$offset + 1
+		);
+
+		if ( is_array( $matches ) && count( $matches ) > 0 ) {
+			$name_length += strlen( $matches[0] );
+		}
+
+		return $name_length;
 	}
 
 	/**
@@ -1913,6 +1877,19 @@ REGEXP;
 	public function has_bookmark( $bookmark_name ) {
 		return array_key_exists( $bookmark_name, $this->bookmarks );
 	}
+
+	public function get_processed_xml() {
+		// Flush updates
+		$this->get_updated_xml();
+		return substr( $this->xml, 0, $this->bytes_already_parsed );
+	}
+
+	public function get_unprocessed_xml() {
+		// Flush updates
+		$this->get_updated_xml();
+		return substr( $this->xml, $this->bytes_already_parsed );
+	}
+
 
 	/**
 	 * Move the internal cursor in the Tag Processor to a given bookmark's location.
