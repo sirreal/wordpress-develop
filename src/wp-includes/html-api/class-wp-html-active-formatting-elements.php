@@ -144,11 +144,7 @@ class WP_HTML_Active_Formatting_Elements {
 		 */
 		$count = 0;
 		foreach ( $this->walk_up_until_marker() as $item ) {
-			if (
-				$item->namespace === $afe->namespace &&
-				$item->tag_name === $afe->tag_name &&
-				$item->attributes === $afe->attributes
-			) {
+			if ( $item->is_equivalent( $afe ) ) {
 				if ( ++$count >= 3 ) {
 					return;
 				}
@@ -293,6 +289,23 @@ class AFE_Element {
 	public $attributes;
 	/** @var WP_HTML_Token */
 	public $token;
+
+	public function is_equivalent( self $afe ): bool {
+		if (
+			$this->namespace !== $afe->namespace ||
+			$this->tag_name !== $afe->tag_name ||
+			count( $this->attributes ) !== count( $afe->attributes )
+		) {
+			return false;
+		}
+
+		foreach ( $this->attributes as $name => $value ) {
+			if ( ! array_key_exists( $name, $afe->attributes ) || $value !== $afe->attributes[ $name ] ) {
+				return false;
+			}
+		}
+		return true;
+	}
 
 	public function __construct( string $tag_namespace, string $tag_name, array $attributes, WP_HTML_Token $token ) {
 		$this->namespace  = $tag_namespace;
