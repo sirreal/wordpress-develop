@@ -128,6 +128,11 @@ class WP_HTML_Active_Formatting_Elements {
 	 * @param AFE_Element|AFE_Marker $token Push this node onto the stack.
 	 */
 	public function push( AFE_Element|AFE_Marker $afe ): void {
+		if ( $afe instanceof AFE_Marker ) {
+			$this->stack[] = $afe;
+			return;
+		}
+
 		/*
 		 * > If there are already three elements in the list of active formatting elements after the last marker,
 		 * > if any, or anywhere in the list if there are no markers, that have the same tag name, namespace, and
@@ -136,9 +141,19 @@ class WP_HTML_Active_Formatting_Elements {
 		 * > created by the parser; two elements have the same attributes if all their parsed attributes can be
 		 * > paired such that the two attributes in each pair have identical names, namespaces, and values
 		 * > (the order of the attributes does not matter).
-		 *
-		 * @todo Implement the "Noah's Ark clause" to only add up to three of any given kind of formatting elements to the stack.
 		 */
+		$count = 0;
+		foreach ( $this->walk_up_until_marker() as $item ) {
+			if (
+				$item->namespace === $afe->namespace &&
+				$item->tag_name === $afe->tag_name &&
+				$item->attributes === $afe->attributes
+			) {
+				if ( ++$count >= 3 ) {
+					return;
+				}
+			}
+		}
 		$this->stack[] = $afe;
 	}
 
@@ -213,6 +228,31 @@ class WP_HTML_Active_Formatting_Elements {
 	public function walk_up() {
 		for ( $i = count( $this->stack ) - 1; $i >= 0; $i-- ) {
 			yield $this->stack[ $i ];
+		}
+	}
+
+	/**
+	 * Steps through the stack starting from the last added and stopping at the first marker, if present.
+	 *
+	 * This generator function is designed to be used inside a "foreach" loop.
+	 *
+	 * Example:
+	 *
+	 *     $html = '<em><table><td><i>We are here';
+	 *     foreach ( $stack->walk_up_until_marker() as $node ) {
+	 *         echo "{$node->node_name} -> ";
+	 *     }
+	 *     > I
+	 *
+	 * @since 6.7.0
+	 */
+	public function walk_up_until_marker() {
+		foreach ( $this->walk_up() as $item ) {
+			if ( $item instanceof AFE_Marker ) {
+				break;
+			}
+
+			yield $item;
 		}
 	}
 

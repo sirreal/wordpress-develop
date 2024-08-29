@@ -5451,6 +5451,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * >    element entry was created, to obtain new element.
 		 */
 		create:
+		if ( array() !== $entry->attributes ) {
+			$this->bail( 'Cannot create active formatting elements with attributes.' );
+		}
 		$this->insert_html_element( $entry->token );
 
 		/*
@@ -6223,6 +6226,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		foreach ( $proc->get_attribute_names_with_prefix( '' ) as $name ) {
 			$attributes[ $name ] = $proc->get_attribute( $name );
 		}
+		sort( $attributes );
 		$afe = new AFE_Element(
 			$token->namespace,
 			$token->node_name,
