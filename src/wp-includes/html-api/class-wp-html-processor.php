@@ -442,7 +442,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$active_formats = array();
 		foreach ( $this->state->active_formatting_elements->walk_down() as $item ) {
-			$active_formats[] = $item->node_name;
+			$active_formats[] = $item instanceof AFE_Marker ? '(marker)' : $item->tag_name;
 		}
 
 		$this->last_error = self::ERROR_UNSUPPORTED;
@@ -2350,10 +2350,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			case '+A':
 				foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
-					switch ( $item->node_name ) {
-						case 'marker':
-							break;
-
+					if ( $item instanceof AFE_Marker ) {
+						break;
+					}
+					switch ( $item->tag_name ) {
 						case 'A':
 							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
@@ -2364,7 +2364,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_active_formatting_element( $this->state->current_token );
 				return true;
 
 			/*
@@ -2385,7 +2385,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '+U':
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_active_formatting_element( $this->state->current_token );
 				return true;
 
 			/*
@@ -2401,7 +2401,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_active_formatting_element( $this->state->current_token );
 				return true;
 
 			/*
@@ -5121,7 +5121,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
-				if ( 'context-node' === $item->bookmark_name ) {
+				if ( 'context-node' === $item->token->bookmark_name ) {
 					break;
 				}
 
@@ -5401,8 +5401,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * >    elements, then there is nothing to reconstruct; stop this algorithm.
 		 */
 		if (
-			'marker' === $last_entry->node_name ||
-			$this->state->stack_of_open_elements->contains_node( $last_entry )
+			$last_entry instanceof AFE_Marker ||
+			$this->state->stack_of_open_elements->contains_node( $last_entry->token )
 		) {
 			return false;
 		}
@@ -5433,8 +5433,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * >    the stack of open elements, go to the step labeled rewind.
 		 */
 		if (
-			'marker' !== $entry->node_name &&
-			! $this->state->stack_of_open_elements->contains_node( $entry )
+			! $entry instanceof AFE_Marker &&
+			! $this->state->stack_of_open_elements->contains_node( $entry->token )
 		) {
 			goto rewind;
 		}
@@ -5451,7 +5451,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * >    element entry was created, to obtain new element.
 		 */
 		create:
-		$this->insert_html_element( $entry );
+		$this->insert_html_element( $entry->token );
 
 		/*
 		 * > 9. Replace the entry for entry in the list with an entry for new element.
@@ -5690,11 +5690,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			$formatting_element = null;
 			foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
-				if ( 'marker' === $item->node_name ) {
+				if ( $item instanceof AFE_Marker ) {
 					break;
 				}
 
-				if ( $subject === $item->node_name ) {
+				if ( $subject === $item->tag_name ) {
 					$formatting_element = $item;
 					break;
 				}
@@ -5706,13 +5706,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
-			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
+			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element->token ) ) {
 				$this->state->active_formatting_elements->remove_node( $formatting_element );
 				return;
 			}
 
 			// > If formatting element is in the stack of open elements, but the element is not in scope, then this is a parse error; return.
-			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
+			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->tag_name ) ) {
 				return;
 			}
 
@@ -5723,7 +5723,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$is_above_formatting_element = true;
 			$furthest_block              = null;
 			foreach ( $this->state->stack_of_open_elements->walk_down() as $item ) {
-				if ( $is_above_formatting_element && $formatting_element->bookmark_name !== $item->bookmark_name ) {
+				if ( $is_above_formatting_element && $formatting_element->token->bookmark_name !== $item->bookmark_name ) {
 					continue;
 				}
 
@@ -5747,7 +5747,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
 					$this->state->stack_of_open_elements->pop();
 
-					if ( $formatting_element->bookmark_name === $item->bookmark_name ) {
+					if ( $formatting_element->token->bookmark_name === $item->bookmark_name ) {
 						$this->state->active_formatting_elements->remove_node( $formatting_element );
 						return;
 					}
@@ -6211,4 +6211,24 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @access private
 	 */
 	const CONSTRUCTOR_UNLOCK_CODE = 'Use WP_HTML_Processor::create_fragment() instead of calling the class constructor directly.';
+
+	private function push_active_formatting_element( WP_HTML_Token $token ) {
+		$bookmark = $this->bookmarks[ $token->bookmark_name ];
+		$proc     = new WP_HTML_Tag_Processor(
+			substr( $this->html, $bookmark->start, $bookmark->length )
+		);
+		$proc->change_parsing_namespace( $token->namespace );
+		$proc->next_tag();
+		$attributes = array();
+		foreach ( $proc->get_attribute_names_with_prefix( '' ) as $name ) {
+			$attributes[ $name ] = $proc->get_attribute( $name );
+		}
+		$afe = new AFE_Element(
+			$token->namespace,
+			$token->node_name,
+			$attributes,
+			$token
+		);
+		$this->state->active_formatting_elements->push( $afe );
+	}
 }
