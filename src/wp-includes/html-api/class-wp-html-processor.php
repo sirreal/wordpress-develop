@@ -5760,8 +5760,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
 					$this->state->stack_of_open_elements->pop();
 
-					if ( $formatting_element === $item ) {
-						$this->state->active_formatting_elements->remove_node( $formatting_element );
+					if ( $formatting_element->token === $item ) {
+						$this->state->active_formatting_elements->remove_node( $formatting_element->token );
 						break;
 					}
 				}
