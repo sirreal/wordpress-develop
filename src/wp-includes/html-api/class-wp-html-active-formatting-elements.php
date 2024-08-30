@@ -39,9 +39,25 @@ class WP_HTML_Active_Formatting_Elements {
 	 *
 	 * @since 6.4.0
 	 *
-	 * @var WP_HTML_Token[]
+	 * @var Array<AFE_Element|AFE_Marker>
 	 */
 	private $stack = array();
+
+	/**
+	 * Returns the node at the given 1-offset index in the list of active formatting elements.
+	 *
+	 * Do not use this method; it is meant to be used only by the HTML Processor.
+	 *
+	 * @since 6.7.0
+	 *
+	 * @access private
+	 *
+	 * @param int $index Number of nodes from the top node to return.
+	 * @return AFE_Element|AFE_Marker|null Node at the given index in the stack, if one exists, otherwise null.
+	 */
+	public function at( $nth ): AFE_Element|AFE_Marker|null {
+		return $this->stack[ $nth - 1 ];
+	}
 
 	/**
 	 * Reports if a specific node is in the stack of active formatting elements.
@@ -51,9 +67,9 @@ class WP_HTML_Active_Formatting_Elements {
 	 * @param WP_HTML_Token $token Look for this node in the stack.
 	 * @return bool Whether the referenced node is in the stack of active formatting elements.
 	 */
-	public function contains_node( WP_HTML_Token $token ) {
+	public function contains_node( WP_HTML_Token $token ): bool {
 		foreach ( $this->walk_up() as $item ) {
-			if ( $token->bookmark_name === $item->bookmark_name ) {
+			if ( $item instanceof AFE_Element && $token->bookmark_name === $item->token->bookmark_name ) {
 				return true;
 			}
 		}
@@ -87,7 +103,7 @@ class WP_HTML_Active_Formatting_Elements {
 	}
 
 	/**
-	 * Inserts a "marker" at the end of the list of active formatting elements.
+	 * Inserts a marker at the end of the list of active formatting elements.
 	 *
 	 * > The markers are inserted when entering applet, object, marquee,
 	 * > template, td, th, and caption elements, and are used to prevent
@@ -99,7 +115,7 @@ class WP_HTML_Active_Formatting_Elements {
 	 * @since 6.7.0
 	 */
 	public function insert_marker(): void {
-		$this->push( new WP_HTML_Token( null, 'marker', false ) );
+		$this->push( new AFE_Marker() );
 	}
 
 	/**
@@ -109,9 +125,14 @@ class WP_HTML_Active_Formatting_Elements {
 	 *
 	 * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
 	 *
-	 * @param WP_HTML_Token $token Push this node onto the stack.
+	 * @param AFE_Element|AFE_Marker $token Push this node onto the stack.
 	 */
-	public function push( WP_HTML_Token $token ) {
+	public function push( AFE_Element|AFE_Marker $afe ): void {
+		if ( $afe instanceof AFE_Marker ) {
+			$this->stack[] = $afe;
+			return;
+		}
+
 		/*
 		 * > If there are already three elements in the list of active formatting elements after the last marker,
 		 * > if any, or anywhere in the list if there are no markers, that have the same tag name, namespace, and
@@ -120,11 +141,16 @@ class WP_HTML_Active_Formatting_Elements {
 		 * > created by the parser; two elements have the same attributes if all their parsed attributes can be
 		 * > paired such that the two attributes in each pair have identical names, namespaces, and values
 		 * > (the order of the attributes does not matter).
-		 *
-		 * @todo Implement the "Noah's Ark clause" to only add up to three of any given kind of formatting elements to the stack.
 		 */
-		// > Add element to the list of active formatting elements.
-		$this->stack[] = $token;
+		$count = 0;
+		foreach ( $this->walk_up_until_marker() as $item ) {
+			if ( $item->is_equivalent( $afe ) ) {
+				if ( ++$count >= 3 ) {
+					return;
+				}
+			}
+		}
+		$this->stack[] = $afe;
 	}
 
 	/**
@@ -132,12 +158,12 @@ class WP_HTML_Active_Formatting_Elements {
 	 *
 	 * @since 6.4.0
 	 *
-	 * @param WP_HTML_Token $token Remove this node from the stack, if it's there already.
+	 * @param WP_HTML_Token $node Remove this node from the stack, if it's there already.
 	 * @return bool Whether the node was found and removed from the stack of active formatting elements.
 	 */
-	public function remove_node( WP_HTML_Token $token ) {
+	public function remove_node( WP_HTML_Token $node ) {
 		foreach ( $this->walk_up() as $position_from_end => $item ) {
-			if ( $token->bookmark_name !== $item->bookmark_name ) {
+			if ( $item instanceof AFE_Element && $node->bookmark_name !== $item->token->bookmark_name ) {
 				continue;
 			}
 
@@ -202,6 +228,31 @@ class WP_HTML_Active_Formatting_Elements {
 	}
 
 	/**
+	 * Steps through the stack starting from the last added and stopping at the first marker, if present.
+	 *
+	 * This generator function is designed to be used inside a "foreach" loop.
+	 *
+	 * Example:
+	 *
+	 *     $html = '<em><table><td><i>We are here';
+	 *     foreach ( $stack->walk_up_until_marker() as $node ) {
+	 *         echo "{$node->node_name} -> ";
+	 *     }
+	 *     > I
+	 *
+	 * @since 6.7.0
+	 */
+	public function walk_up_until_marker() {
+		foreach ( $this->walk_up() as $item ) {
+			if ( $item instanceof AFE_Marker ) {
+				break;
+			}
+
+			yield $item;
+		}
+	}
+
+	/**
 	 * Clears the list of active formatting elements up to the last marker.
 	 *
 	 * > When the steps below require the UA to clear the list of active formatting elements up to
@@ -221,9 +272,45 @@ class WP_HTML_Active_Formatting_Elements {
 	public function clear_up_to_last_marker(): void {
 		foreach ( $this->walk_up() as $item ) {
 			array_pop( $this->stack );
-			if ( 'marker' === $item->node_name ) {
+			if ( $item instanceof AFE_Marker ) {
 				break;
 			}
 		}
+	}
+}
+
+class AFE_Marker {}
+class AFE_Element {
+	/** @var string */
+	public $namespace;
+	/** @var string */
+	public $tag_name;
+	/** @var array<string, string|bool|null> */
+	public $attributes;
+	/** @var WP_HTML_Token */
+	public $token;
+
+	public function is_equivalent( self $afe ): bool {
+		if (
+			$this->namespace !== $afe->namespace ||
+			$this->tag_name !== $afe->tag_name ||
+			count( $this->attributes ) !== count( $afe->attributes )
+		) {
+			return false;
+		}
+
+		foreach ( $this->attributes as $name => $value ) {
+			if ( ! array_key_exists( $name, $afe->attributes ) || $value !== $afe->attributes[ $name ] ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public function __construct( string $tag_namespace, string $tag_name, array $attributes, WP_HTML_Token $token ) {
+		$this->namespace  = $tag_namespace;
+		$this->tag_name   = $tag_name;
+		$this->attributes = $attributes;
+		$this->token      = $token;
 	}
 }
