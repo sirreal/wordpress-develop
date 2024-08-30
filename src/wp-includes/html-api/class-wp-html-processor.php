@@ -5699,7 +5699,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$formatting_element = null;
 			foreach ( $this->state->active_formatting_elements->walk_up_until_marker() as $item ) {
 				if ( $subject === $item->tag_name ) {
-					$formatting_element = $item;
+					$formatting_element = $item->token;
 					break;
 				}
 			}
@@ -5716,8 +5716,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > 4. If formatting element is not in the stack of open elements, then
 			 * >    this is a parse error; remove the element from the list, and return.
 			 */
-			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element->token ) ) {
-				$this->state->active_formatting_elements->remove_node( $formatting_element->token );
+			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
+				$this->state->active_formatting_elements->remove_node( $formatting_element );
 				return null;
 			}
 
@@ -5725,7 +5725,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > 5. If formatting element is in the stack of open elements, but the element
 			 * >    is not in scope, then this is a parse error; return.
 			 */
-			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->tag_name ) ) {
+			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
 				return null;
 			}
 
@@ -5754,8 +5754,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
 					$this->state->stack_of_open_elements->pop();
 
-					if ( $formatting_element->token === $item ) {
-						$this->state->active_formatting_elements->remove_node( $formatting_element->token );
+					if ( $formatting_element === $item ) {
+						$this->state->active_formatting_elements->remove_node( $formatting_element );
 						break;
 					}
 				}
@@ -5767,7 +5767,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * >    formatting element in the stack of open elements.
 			 */
 			$common_ancestor = null;
-			foreach ( $this->state->stack_of_open_elements->walk_up( $formatting_element->token ) as $item ) {
+			foreach ( $this->state->stack_of_open_elements->walk_up( $formatting_element ) as $item ) {
 				$common_ancestor = $item;
 				break;
 			}
