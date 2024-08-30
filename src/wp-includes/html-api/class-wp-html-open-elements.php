@@ -624,9 +624,9 @@ class WP_HTML_Open_Elements {
 	 * @since 6.4.0
 	 * @since 6.7.0 Accepts $below_this_node to start traversal below a given node, if it exists.
 	 *
-	 * @param ?WP_HTML_Token $below_this_node Start traversing below this node, if provided and if the node exists.
+	 * @param WP_HTML_Token|null $below_this_node Start traversing below this node, if provided and if the node exists.
 	 */
-	public function walk_down( $below_this_node = null ) {
+	public function walk_down( WP_HTML_Token $below_this_node = null ) {
 		$has_found_node = null === $below_this_node;
 		$count          = count( $this->stack );
 
