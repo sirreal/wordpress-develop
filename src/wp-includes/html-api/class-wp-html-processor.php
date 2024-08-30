@@ -2349,10 +2349,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > A start tag whose tag name is "a"
 			 */
 			case '+A':
-				foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
-					if ( $item instanceof AFE_Marker ) {
-						break;
-					}
+				foreach ( $this->state->active_formatting_elements->walk_up_until_marker() as $item ) {
 					switch ( $item->tag_name ) {
 						case 'A':
 							if ( 'any-other-end-tag' === $this->run_adoption_agency_algorithm() ) {
@@ -5698,12 +5695,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * >        if any, or the start of the list otherwise,
 			 * >      - and has the tag name subject.
 			 */
-			$formatting_element = null;
-			foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
-				if ( $item instanceof AFE_Marker ) {
-					break;
-				}
 
+			$formatting_element = null;
+			foreach ( $this->state->active_formatting_elements->walk_up_until_marker() as $item ) {
 				if ( $subject === $item->tag_name ) {
 					$formatting_element = $item;
 					break;
