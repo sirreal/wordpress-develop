@@ -131,12 +131,13 @@ class WP_HTML_Open_Elements {
 	 *
 	 * @since 6.7.0
 	 *
-	 * @param string $node_name Name of node for which to check.
+	 * @param string $node_name      Name of node for which to check.
+	 * @param string $node_namespace Optional. Tag namespace. One of 'html', 'svg', or 'math'. Default 'html'.
 	 * @return bool Whether a node of the given name is in the stack of open elements.
 	 */
-	public function contains( string $node_name ): bool {
+	public function contains( string $node_name, string $node_namespace = 'html' ): bool {
 		foreach ( $this->walk_up() as $item ) {
-			if ( $node_name === $item->node_name ) {
+			if ( $node_name === $item->node_name && $node_namespace === $item->namespace ) {
 				return true;
 			}
 		}
@@ -201,6 +202,9 @@ class WP_HTML_Open_Elements {
 	 *     // Is the current node a DIV element?
 	 *     $stack->current_node_is( 'DIV' );
 	 *
+	 *     // Is the current node a TEMPLATE element in the svg namespace?
+	 *     $stack->current_node_is( 'TEMPLATE', 'svg' );
+	 *
 	 *     // Is the current node any element/tag?
 	 *     $stack->current_node_is( '#tag' );
 	 *
@@ -211,16 +215,22 @@ class WP_HTML_Open_Elements {
 	 *
 	 * @access private
 	 *
-	 * @param string $identity Check if the current node has this name or type (depending on what is provided).
+	 * @param string $identity       Check if the current node has this name or type (depending on what is provided).
+	 * @param string $node_namespace Optional. Namespace of the node to check. One of 'html', 'svg', or 'math' or null.
+	 *                               Default null (ignore the namespace).
 	 * @return bool Whether there is a current element that matches the given identity, whether a token name or type.
 	 */
-	public function current_node_is( string $identity ): bool {
+	public function current_node_is( string $identity, ?string $node_namespace = null ): bool {
 		$current_node = end( $this->stack );
 		if ( false === $current_node ) {
 			return false;
 		}
 
 		$current_node_name = $current_node->node_name;
+
+		if ( null !== $node_namespace && $current_node->namespace !== $node_namespace ) {
+			return false;
+		}
 
 		return (
 			$current_node_name === $identity ||
@@ -790,9 +800,11 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TABLE' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace && (
+					'TABLE' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -814,11 +826,13 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_body_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TBODY' === $item->node_name ||
-				'TFOOT' === $item->node_name ||
-				'THEAD' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace && (
+					'TBODY' === $item->node_name ||
+					'TFOOT' === $item->node_name ||
+					'THEAD' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -840,9 +854,11 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_row_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TR' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace && (
+					'TR' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}

@@ -1483,7 +1483,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->generate_implied_end_tags_thoroughly();
-				if ( ! $this->state->stack_of_open_elements->current_node_is( 'TEMPLATE' ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( 'TEMPLATE', 'html' ) ) {
 					// @todo Indicate a parse error once it's possible.
 				}
 
@@ -2077,7 +2077,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				if ( $is_li ? 'LI' === $node->node_name : ( 'DD' === $node->node_name || 'DT' === $node->node_name ) ) {
 					$node_name = $is_li ? 'LI' : $node->node_name;
 					$this->generate_implied_end_tags( $node_name );
-					if ( ! $this->state->stack_of_open_elements->current_node_is( $node_name ) ) {
+					if ( ! $this->state->stack_of_open_elements->current_node_is( $node_name, 'html' ) ) {
 						// @todo Indicate a parse error once it's possible. This error does not impact the logic here.
 					}
 
@@ -2185,7 +2185,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->generate_implied_end_tags();
-				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name, 'html' ) ) {
 					// @todo Record parse error: this error doesn't impact parsing.
 				}
 				$this->state->stack_of_open_elements->pop_until( $token_name );
@@ -2235,7 +2235,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 					$this->generate_implied_end_tags();
 
-					if ( ! $this->state->stack_of_open_elements->current_node_is( 'FORM' ) ) {
+					if ( ! $this->state->stack_of_open_elements->current_node_is( 'FORM', 'html' ) ) {
 						// @todo Indicate a parse error once it's possible. This error does not impact the logic here.
 					}
 
@@ -2293,7 +2293,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				$this->generate_implied_end_tags( $token_name );
 
-				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name, 'html' ) ) {
 					// @todo Indicate a parse error once it's possible. This error does not impact the logic here.
 				}
 
@@ -2320,7 +2320,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				$this->generate_implied_end_tags();
 
-				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name, 'html' ) ) {
 					// @todo Record parse error: this error doesn't impact parsing.
 				}
 
@@ -2431,7 +2431,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->generate_implied_end_tags();
-				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( $token_name, 'html' ) ) {
 					// This is a parse error.
 				}
 
@@ -2632,7 +2632,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			case '+OPTGROUP':
 			case '+OPTION':
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 				}
 				$this->reconstruct_active_formatting_elements();
@@ -2647,7 +2647,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				if ( $this->state->stack_of_open_elements->has_element_in_scope( 'RUBY' ) ) {
 					$this->generate_implied_end_tags();
 
-					if ( $this->state->stack_of_open_elements->current_node_is( 'RUBY' ) ) {
+					if ( $this->state->stack_of_open_elements->current_node_is( 'RUBY', 'html' ) ) {
 						// @todo Indicate a parse error once it's possible.
 					}
 				}
@@ -3093,7 +3093,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->generate_implied_end_tags();
-				if ( ! $this->state->stack_of_open_elements->current_node_is( 'CAPTION' ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( 'CAPTION', 'html' ) ) {
 					// @todo Indicate a parse error once it's possible.
 				}
 
@@ -3201,7 +3201,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > An end tag whose tag name is "colgroup"
 			 */
 			case '-COLGROUP':
-				if ( ! $this->state->stack_of_open_elements->current_node_is( 'COLGROUP' ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( 'COLGROUP', 'html' ) ) {
 					// @todo Indicate a parse error once it's possible.
 					return $this->step();
 				}
@@ -3229,7 +3229,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		/*
 		 * > Anything else
 		 */
-		if ( ! $this->state->stack_of_open_elements->current_node_is( 'COLGROUP' ) ) {
+		if ( ! $this->state->stack_of_open_elements->current_node_is( 'COLGROUP', 'html' ) ) {
 			// @todo Indicate a parse error once it's possible.
 			return $this->step();
 		}
@@ -3490,7 +3490,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 *       HTML element of the given name, such as `<center>`, and a foreign element of
 				 *       the same given name.
 				 */
-				if ( ! $this->state->stack_of_open_elements->current_node_is( $tag_name ) ) {
+				if ( ! $this->state->stack_of_open_elements->current_node_is( $tag_name, 'html' ) ) {
 					// @todo Indicate a parse error once it's possible.
 				}
 
@@ -3621,7 +3621,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > A start tag whose tag name is "option"
 			 */
 			case '+OPTION':
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 				}
 				$this->insert_html_element( $this->state->current_token );
@@ -3636,11 +3636,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			case '+OPTGROUP':
 			case '+HR':
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 				}
 
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTGROUP' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTGROUP', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 				}
 
@@ -3661,7 +3661,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					}
 				}
 
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTGROUP' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTGROUP', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 					return true;
 				}
@@ -3673,7 +3673,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > An end tag whose tag name is "option"
 			 */
 			case '-OPTION':
-				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'OPTION', 'html' ) ) {
 					$this->state->stack_of_open_elements->pop();
 					return true;
 				}
@@ -4080,7 +4080,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * > If the current node is the root html element, then this is a parse error;
 				 * > ignore the token. (fragment case)
 				 */
-				if ( $this->state->stack_of_open_elements->current_node_is( 'HTML' ) ) {
+				if ( $this->state->stack_of_open_elements->current_node_is( 'HTML', 'html' ) ) {
 					return $this->step();
 				}
 
@@ -4094,7 +4094,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * > (fragment case), and the current node is no longer a frameset element, then
 				 * > switch the insertion mode to "after frameset".
 				 */
-				if ( ! isset( $this->context_node ) && ! $this->state->stack_of_open_elements->current_node_is( 'FRAMESET' ) ) {
+				if ( ! isset( $this->context_node ) && ! $this->state->stack_of_open_elements->current_node_is( 'FRAMESET', 'html' ) ) {
 					$this->state->insertion_mode = WP_HTML_Processor_State::INSERTION_MODE_AFTER_FRAMESET;
 				}
 
@@ -5280,7 +5280,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$no_exclusions = ! isset( $except_for_this_element );
 
 		while (
-			( $no_exclusions || ! $this->state->stack_of_open_elements->current_node_is( $except_for_this_element ) ) &&
+			( $no_exclusions || ! $this->state->stack_of_open_elements->current_node_is( $except_for_this_element, 'html' ) ) &&
 			in_array( $this->state->stack_of_open_elements->current_node()->node_name, $elements_with_implied_end_tags, true )
 		) {
 			$this->state->stack_of_open_elements->pop();
