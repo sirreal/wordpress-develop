@@ -31,6 +31,18 @@ class WP_Script_Modules {
 	private $enqueued_before_registered = array();
 
 	/**
+	 * Holds script module identifiers that have been requested for exposure.
+	 *
+	 * "Exposed" indicates that the script module should be exposed in the
+	 * import map regardless of whether it is a dependency of another script
+	 * module.
+	 *
+	 * @since 6.8.0
+	 * @var array<string, true>
+	 */
+	private $exposed = array();
+
+	/**
 	 * Tracks whether the @wordpress/a11y script module is available.
 	 *
 	 * Some additional HTML is required on the page for the module to work. Track
@@ -149,6 +161,17 @@ class WP_Script_Modules {
 	}
 
 	/**
+	 * Marks the script module so it will be exposed in the import map.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param string $id The identifier of the script module.
+	 */
+	public function expose( string $id ) {
+		$this->exposed[ $id ] = true;
+	}
+
+	/**
 	 * Unmarks the script module so it will no longer be enqueued in the page.
 	 *
 	 * @since 6.5.0
@@ -262,12 +285,14 @@ class WP_Script_Modules {
 	 *
 	 * @since 6.5.0
 	 *
-	 * @return array Array with an `imports` key mapping to an array of script module identifiers and their respective
-	 *               URLs, including the version query.
+	 * @return array Array with an `imports` key mapping to an array of script
+	 *               module identifiers and their respective URLs, including
+	 *               the version query.
 	 */
 	private function get_import_map(): array {
-		$imports = array();
-		foreach ( $this->get_dependencies( array_keys( $this->get_marked_for_enqueue() ) ) as $id => $script_module ) {
+		$imports           = array();
+		$script_module_ids = array_unique( array_keys( $this->exposed ) + array_keys( $this->get_marked_for_enqueue() ) );
+		foreach ( $this->get_dependencies( $script_module_ids ) as $id => $script_module ) {
 			$imports[ $id ] = $this->get_src( $id );
 		}
 		return array( 'imports' => $imports );
