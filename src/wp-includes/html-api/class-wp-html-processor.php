@@ -355,6 +355,109 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		return $processor;
 	}
 
+	public function set_inner_html( $html ) {
+		if ( $this->is_virtual() ) {
+			return false;
+		}
+
+		if ( $this->get_token_type() !== '#tag' ) {
+			return false;
+		}
+
+		if ( $this->is_tag_closer() ) {
+			return false;
+		}
+
+		if ( ! $this->expects_closer() ) {
+			return false;
+		}
+
+		if (
+			'html' !== $this->state->current_token->namespace &&
+			$this->state->current_token->has_self_closing_flag
+		) {
+			return false;
+		}
+
+		$html_for_replacement = $this->normalize( $html );
+		if ( empty( $html_for_replacement ) ) {
+			return false;
+		}
+
+		// @todo apply modifications if there are any???
+
+		if ( ! parent::set_bookmark( 'SET_INNER_HTML: opener' ) ) {
+			return false;
+		}
+
+		if ( ! $this->seek_to_matching_closer() ) {
+			parent::seek( 'SET_INNER_HTML: opener' );
+			return false;
+		}
+
+		if ( ! parent::set_bookmark( 'SET_INNER_HTML: closer' ) ) {
+			return false;
+		}
+
+		$inner_html_start  = $this->bookmarks['SET_INNER_HTML: opener']->start + $this->bookmarks['SET_INNER_HTML: opener']->length;
+		$inner_html_length = $this->bookmarks['SET_INNER_HTML: closer']->start - $inner_html_start;
+
+		echo 'INNER HTML: ' . substr( $this->html, $inner_html_start, $inner_html_length ) . "\n";
+
+		echo "BEFORE:\n";
+		var_dump( $this->get_updated_html() );
+
+		$this->lexical_updates['innerHTML'] = new WP_HTML_Text_Replacement(
+			$inner_html_start,
+			$inner_html_length,
+			$html_for_replacement
+		);
+
+		parent::seek( 'SET_INNER_HTML: opener' );
+		parent::release_bookmark( 'SET_INNER_HTML: opener' );
+		parent::release_bookmark( 'SET_INNER_HTML: closer' );
+		echo "AFTER:\n";
+		var_dump( $this->get_updated_html() );
+
+		// @todo check for whether that html will make a mess!
+		// Will it break out of tags?
+
+		return true;
+	}
+
+	public function seek_to_matching_closer(): bool {
+		$tag_name = $this->get_tag();
+
+		if ( null === $tag_name ) {
+			return false;
+		}
+
+		if ( $this->is_tag_closer() ) {
+			return false;
+		}
+
+		if ( ! $this->expects_closer() ) {
+			return false;
+		}
+
+		$breadcrumbs = $this->breadcrumbs;
+		array_pop( $breadcrumbs );
+
+		// @todo Can't use these queries together
+		while ( $this->next_tag(
+			array(
+				'tag_name'    => $this->get_tag(),
+				'tag_closers' => 'visit',
+			)
+		) ) {
+			if ( $this->get_breadcrumbs() === $breadcrumbs ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+
 	/**
 	 * Constructor.
 	 *
@@ -522,6 +625,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
 	 *     @type string|null $class_name   Tag must contain this whole class name to match.
+	 *     @type string      $tag_name     Tag name to match.
 	 *     @type string[]    $breadcrumbs  DOM sub-path at which element is found, e.g. `array( 'FIGURE', 'IMG' )`.
 	 *                                     May also contain the wildcard `*` which matches a single element, e.g. `array( 'SECTION', '*' )`.
 	 * }
@@ -545,7 +649,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		if ( is_string( $query ) ) {
-			$query = array( 'breadcrumbs' => array( $query ) );
+			$query = array( 'tag_name' => $query );
 		}
 
 		if ( ! is_array( $query ) ) {
