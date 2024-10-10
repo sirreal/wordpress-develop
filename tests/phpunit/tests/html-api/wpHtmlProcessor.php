@@ -863,4 +863,30 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 			'Found the wrong namespace for the transformed "IMAGE"/"IMG" element.'
 		);
 	}
+
+	/**
+	 * @ticket TBD
+	 *
+	 * @dataProvider data_set_inner_html
+	 */
+	public function test_set_inner_html( string $html, string $replacement, string $expected ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+		while ( $processor->next_tag() ) {
+			if ( $processor->get_attribute( 'target' ) ) {
+				break;
+			}
+		}
+		$processor->set_inner_html( $replacement );
+		$this->assertSame( $expected, $processor->get_updated_html() );
+	}
+
+	public static function data_set_inner_html() {
+		return array(
+			'image in mathml' => array(
+				'<div target>replace me</div>',
+				'with me!',
+				'<div target>with me!</div>',
+			),
+		);
+	}
 }
