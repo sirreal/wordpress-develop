@@ -869,23 +869,94 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_set_inner_html
 	 */
-	public function test_set_inner_html( string $html, string $replacement, string $expected ) {
+	public function test_set_inner_html( string $html, ?string $replacement, string $expected ) {
 		$processor = WP_HTML_Processor::create_fragment( $html );
 		while ( $processor->next_tag() ) {
 			if ( $processor->get_attribute( 'target' ) ) {
 				break;
 			}
 		}
-		$processor->set_inner_html( $replacement );
+
+		$this->assertTrue( $processor->set_inner_html( $replacement ) );
 		$this->assertSame( $expected, $processor->get_updated_html() );
 	}
 
 	public static function data_set_inner_html() {
 		return array(
-			'image in mathml' => array(
+			array(
 				'<div target>replace me</div>',
 				'with me!',
 				'<div target>with me!</div>',
+			),
+			array(
+				'<div target><div><p><a>replace me</div></div>',
+				'with me!',
+				'<div target>with me!</div>',
+			),
+			array(
+				'<table target><td>replace me</table>',
+				'<td>with me!',
+				'<table target><td>with me!</td></table>',
+			),
+		);
+	}
+
+	/**
+	 * @ticket TBD
+	 *
+	 * @dataProvider data_set_inner_html_not_allowed
+	 */
+	public function test_set_inner_html_not_allowed( string $html, string $replacement ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+		while ( $processor->next_tag() ) {
+			if ( $processor->get_attribute( 'target' ) ) {
+				break;
+			}
+		}
+		$this->assertFalse( $processor->set_inner_html( $replacement ) );
+		$this->assertSame( $html, $processor->get_updated_html() );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_set_inner_html_not_allowed(): array {
+		return array(
+			'not allowed in void tags' => array(
+				'<br target>',
+				'anything',
+			),
+			'not allowed in self-closing tags' => array(
+				'<svg><text target />',
+				'anything',
+			),
+			'must have closing tag' => array(
+				'<body><div target></body>',
+				'anything',
+			),
+
+			'a in a' => array(
+				'<a target></a>',
+				'<a>',
+			),
+			'a nested in a' => array(
+				'<a><i><em><strong target></a>',
+				'<a>A cannot nest inside a',
+			),
+
+			'text in table' => array(
+				'<table target><td>hello</table>',
+				'text triggers forstering - not allowed',
+			),
+			'text in thead' => array(
+				'<table><thead target><td>hello</thead>',
+				'text triggers forstering - not allowed',
+			),
+			'text in tr' => array(
+				'<table><tr target>hello</tr>',
+				'text triggers forstering - not allowed',
 			),
 		);
 	}
