@@ -402,11 +402,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$inner_html_start  = $this->bookmarks['SET_INNER_HTML: opener']->start + $this->bookmarks['SET_INNER_HTML: opener']->length;
 		$inner_html_length = $this->bookmarks['SET_INNER_HTML: closer']->start - $inner_html_start;
 
-		echo 'INNER HTML: ' . substr( $this->html, $inner_html_start, $inner_html_length ) . "\n";
-
-		echo "BEFORE:\n";
-		var_dump( $this->get_updated_html() );
-
 		$this->lexical_updates['innerHTML'] = new WP_HTML_Text_Replacement(
 			$inner_html_start,
 			$inner_html_length,
@@ -416,8 +411,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		parent::seek( 'SET_INNER_HTML: opener' );
 		parent::release_bookmark( 'SET_INNER_HTML: opener' );
 		parent::release_bookmark( 'SET_INNER_HTML: closer' );
-		echo "AFTER:\n";
-		var_dump( $this->get_updated_html() );
 
 		// @todo check for whether that html will make a mess!
 		// Will it break out of tags?
