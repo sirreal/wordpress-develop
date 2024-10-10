@@ -379,7 +379,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$html = $html ? $this->normalize( $html ) : '';
+		if ( null === $html ) {
+			$html = '';
+		}
+		if ( '' !== $html ) {
+			$fragment_parser = $this->spawn_fragment_parser( $html );
+			if (
+				null === $fragment_parser
+			) {
+				return false;
+			}
+
+			try {
+				$html = $fragment_parser->serialize();
+			} catch ( Exception $e ) {
+				return false;
+			}
+		}
 
 		// @todo apply modifications if there are any???
 
