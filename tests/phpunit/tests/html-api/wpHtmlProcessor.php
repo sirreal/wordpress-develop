@@ -896,7 +896,7 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 			array(
 				'<table target><td>replace me</table>',
 				'<td>with me!',
-				'<table target><td>with me!</td></table>',
+				'<table target><tbody><tr><td>with me!</td></tr></tbody></table>',
 			),
 		);
 	}
