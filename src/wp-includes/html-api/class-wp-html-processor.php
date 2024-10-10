@@ -355,7 +355,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		return $processor;
 	}
 
-	public function set_inner_html( $html ) {
+	public function set_inner_html( ?string $html ) {
 		if ( $this->is_virtual() ) {
 			return false;
 		}
@@ -379,10 +379,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$html_for_replacement = $this->normalize( $html );
-		if ( empty( $html_for_replacement ) ) {
-			return false;
-		}
+		$html = $html ? $this->normalize( $html ) : '';
 
 		// @todo apply modifications if there are any???
 
@@ -405,7 +402,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->lexical_updates['innerHTML'] = new WP_HTML_Text_Replacement(
 			$inner_html_start,
 			$inner_html_length,
-			$html_for_replacement
+			$html
 		);
 
 		parent::seek( 'SET_INNER_HTML: opener' );
