@@ -913,7 +913,7 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 				break;
 			}
 		}
-		$this->assertFalse( $processor->set_inner_html( $replacement ) );
+		$this->assertFalse( $processor->set_inner_html( $replacement ), "Should have failed but produced: {$processor->get_updated_html()}" );
 		$this->assertSame( $html, $processor->get_updated_html() );
 	}
 
