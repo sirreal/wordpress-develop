@@ -355,6 +355,115 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		return $processor;
 	}
 
+	public function set_inner_html( ?string $html ) {
+		if ( $this->is_virtual() ) {
+			return false;
+		}
+
+		if ( $this->get_token_type() !== '#tag' ) {
+			return false;
+		}
+
+		if ( $this->is_tag_closer() ) {
+			return false;
+		}
+
+		if ( ! $this->expects_closer() ) {
+			return false;
+		}
+
+		if (
+			'html' !== $this->state->current_token->namespace &&
+			$this->state->current_token->has_self_closing_flag
+		) {
+			return false;
+		}
+
+		if ( null === $html ) {
+			$html = '';
+		}
+		if ( '' !== $html ) {
+			$fragment_parser = $this->spawn_fragment_parser( $html );
+			if (
+				null === $fragment_parser
+			) {
+				return false;
+			}
+
+			try {
+				$html = $fragment_parser->serialize();
+			} catch ( Exception $e ) {
+				return false;
+			}
+		}
+
+		// @todo apply modifications if there are any???
+
+		if ( ! parent::set_bookmark( 'SET_INNER_HTML: opener' ) ) {
+			return false;
+		}
+
+		if ( ! $this->seek_to_matching_closer() ) {
+			parent::seek( 'SET_INNER_HTML: opener' );
+			return false;
+		}
+
+		if ( ! parent::set_bookmark( 'SET_INNER_HTML: closer' ) ) {
+			return false;
+		}
+
+		$inner_html_start  = $this->bookmarks['SET_INNER_HTML: opener']->start + $this->bookmarks['SET_INNER_HTML: opener']->length;
+		$inner_html_length = $this->bookmarks['SET_INNER_HTML: closer']->start - $inner_html_start;
+
+		$this->lexical_updates['innerHTML'] = new WP_HTML_Text_Replacement(
+			$inner_html_start,
+			$inner_html_length,
+			$html
+		);
+
+		parent::seek( 'SET_INNER_HTML: opener' );
+		parent::release_bookmark( 'SET_INNER_HTML: opener' );
+		parent::release_bookmark( 'SET_INNER_HTML: closer' );
+
+		// @todo check for whether that html will make a mess!
+		// Will it break out of tags?
+
+		return true;
+	}
+
+	public function seek_to_matching_closer(): bool {
+		$tag_name = $this->get_tag();
+
+		if ( null === $tag_name ) {
+			return false;
+		}
+
+		if ( $this->is_tag_closer() ) {
+			return false;
+		}
+
+		if ( ! $this->expects_closer() ) {
+			return false;
+		}
+
+		$breadcrumbs = $this->breadcrumbs;
+		array_pop( $breadcrumbs );
+
+		// @todo Can't use these queries together
+		while ( $this->next_tag(
+			array(
+				'tag_name'    => $this->get_tag(),
+				'tag_closers' => 'visit',
+			)
+		) ) {
+			if ( $this->get_breadcrumbs() === $breadcrumbs ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+
 	/**
 	 * Constructor.
 	 *
@@ -422,6 +531,61 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->release_internal_bookmark_on_destruct = function ( string $name ): void {
 			parent::release_bookmark( $name );
 		};
+	}
+
+	/**
+	 * Creates a fragment processor with the current node as its context element.
+	 *
+	 * @see https://html.spec.whatwg.org/multipage/parsing.html#html-fragment-parsing-algorithm
+	 *
+	 * @param string $html     Input HTML fragment to process.
+	 * @return static|null     The created processor if successful, otherwise null.
+	 */
+	public function spawn_fragment_parser( string $html ): ?self {
+		if ( $this->get_token_type() !== '#tag' ) {
+			return null;
+		}
+
+		$namespace = $this->get_namespace();
+
+		/*
+		 * Prevent creating fragments at "self-contained" nodes.
+		 *
+		 * @see https://github.com/WordPress/wordpress-develop/pull/7141
+		 * @see https://github.com/WordPress/wordpress-develop/pull/7198
+		 */
+		if (
+			'html' === $namespace &&
+			in_array( $this->get_tag(), array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true )
+		) {
+			return null;
+		}
+
+		$fragment_processor              = self::create_fragment( $html );
+		$fragment_processor->compat_mode = $this->compat_mode;
+
+		$fragment_processor->context_node                = clone $this->state->current_token;
+		$fragment_processor->context_node->bookmark_name = 'context-node';
+		$fragment_processor->context_node->on_destroy    = null;
+
+		$context_element = array( $fragment_processor->context_node->node_name, array() );
+		foreach ( $this->get_attribute_names_with_prefix( '' ) as $name => $value ) {
+			$context_element[1][ $name ] = $value;
+		}
+
+		$fragment_processor->breadcrumbs = array();
+
+		if ( 'TEMPLATE' === $context_element[0] ) {
+			$fragment_processor->state->stack_of_template_insertion_modes[] = WP_HTML_Processor_State::INSERTION_MODE_IN_TEMPLATE;
+		}
+
+		$fragment_processor->reset_insertion_mode_appropriately();
+
+		// @todo Set the parser's form element pointer.
+
+		$fragment_processor->state->encoding_confidence = 'irrelevant';
+
+		return $fragment_processor;
 	}
 
 	/**
@@ -522,6 +686,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
 	 *     @type string|null $class_name   Tag must contain this whole class name to match.
+	 *     @type string      $tag_name     Tag name to match.
 	 *     @type string[]    $breadcrumbs  DOM sub-path at which element is found, e.g. `array( 'FIGURE', 'IMG' )`.
 	 *                                     May also contain the wildcard `*` which matches a single element, e.g. `array( 'SECTION', '*' )`.
 	 * }
@@ -545,7 +710,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		if ( is_string( $query ) ) {
-			$query = array( 'breadcrumbs' => array( $query ) );
+			$query = array( 'tag_name' => $query );
 		}
 
 		if ( ! is_array( $query ) ) {
