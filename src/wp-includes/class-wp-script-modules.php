@@ -31,6 +31,18 @@ class WP_Script_Modules {
 	private $enqueued_before_registered = array();
 
 	/**
+	 * Holds script module identifiers that have been requested for exposure.
+	 *
+	 * "Exposed" indicates that the script module should be exposed in the
+	 * import map regardless of whether it is a dependency of another script
+	 * module.
+	 *
+	 * @since 6.8.0
+	 * @var array<string, true>
+	 */
+	private $exposed = array();
+
+	/**
 	 * Tracks whether the @wordpress/a11y script module is available.
 	 *
 	 * Some additional HTML is required on the page for the module to work. Track
@@ -149,6 +161,17 @@ class WP_Script_Modules {
 	}
 
 	/**
+	 * Marks the script module so it will be exposed in the import map.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param string $id The identifier of the script module.
+	 */
+	public function expose( string $id ) {
+		$this->exposed[ $id ] = true;
+	}
+
+	/**
 	 * Unmarks the script module so it will no longer be enqueued in the page.
 	 *
 	 * @since 6.5.0
@@ -208,10 +231,15 @@ class WP_Script_Modules {
 	 */
 	public function print_enqueued_script_modules() {
 		foreach ( $this->get_marked_for_enqueue() as $id => $script_module ) {
+			$src = $this->get_src( $id );
+			if ( null === $src ) {
+				continue;
+			}
+
 			wp_print_script_tag(
 				array(
 					'type' => 'module',
-					'src'  => $this->get_src( $id ),
+					'src'  => $src,
 					'id'   => $id . '-js-module',
 				)
 			);
@@ -228,11 +256,16 @@ class WP_Script_Modules {
 	 */
 	public function print_script_module_preloads() {
 		foreach ( $this->get_dependencies( array_keys( $this->get_marked_for_enqueue() ), array( 'static' ) ) as $id => $script_module ) {
+			$src = $this->get_src( $id );
+			if ( null === $src ) {
+				continue;
+			}
+
 			// Don't preload if it's marked for enqueue.
 			if ( true !== $script_module['enqueue'] ) {
 				echo sprintf(
 					'<link rel="modulepreload" href="%s" id="%s">',
-					esc_url( $this->get_src( $id ) ),
+					esc_url( $src ),
 					esc_attr( $id . '-js-modulepreload' )
 				);
 			}
@@ -262,13 +295,19 @@ class WP_Script_Modules {
 	 *
 	 * @since 6.5.0
 	 *
-	 * @return array Array with an `imports` key mapping to an array of script module identifiers and their respective
-	 *               URLs, including the version query.
+	 * @return array Array with an `imports` key mapping to an array of script
+	 *               module identifiers and their respective URLs, including
+	 *               the version query.
 	 */
 	private function get_import_map(): array {
-		$imports = array();
-		foreach ( $this->get_dependencies( array_keys( $this->get_marked_for_enqueue() ) ) as $id => $script_module ) {
-			$imports[ $id ] = $this->get_src( $id );
+		$imports           = array();
+		$script_module_ids = array_unique( array_keys( $this->exposed ) + array_keys( $this->get_marked_for_enqueue() ) );
+		foreach ( $this->get_dependencies( $script_module_ids ) as $id => $script_module ) {
+			$src = $this->get_src( $id );
+			if ( null === $src ) {
+				continue;
+			}
+			$imports[ $id ] = $src;
 		}
 		return array( 'imports' => $imports );
 	}
@@ -335,11 +374,11 @@ class WP_Script_Modules {
 	 * @since 6.5.0
 	 *
 	 * @param string $id The script module identifier.
-	 * @return string The script module src with a version if relevant.
+	 * @return string|null The script module src with a version if relevant.
 	 */
-	private function get_src( string $id ): string {
+	private function get_src( string $id ): ?string {
 		if ( ! isset( $this->registered[ $id ] ) ) {
-			return '';
+			return null;
 		}
 
 		$script_module = $this->registered[ $id ];
