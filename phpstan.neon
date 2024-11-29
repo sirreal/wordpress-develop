@@ -1,5 +1,5 @@
 parameters:
-	level: 2
+	level: max
 	phpVersion: 70224
 	paths:
 		- src/wp-includes/html-api/class-wp-css-selectors.php
