@@ -1,0 +1,7 @@
+parameters:
+	level: 2
+	phpVersion: 70224
+	paths:
+		- src/wp-includes/html-api/class-wp-css-selectors.php
+	scanDirectories:
+		- src/wp-includes/html-api
