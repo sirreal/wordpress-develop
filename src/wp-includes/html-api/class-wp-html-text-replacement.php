@@ -18,6 +18,7 @@
  * @since 6.5.0 Replace `end` with `length` to more closely match `substr()`.
  *
  * @see WP_HTML_Tag_Processor
+ * @codeCoverageIgnore
  */
 class WP_HTML_Text_Replacement {
 	/**

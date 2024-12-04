@@ -17,6 +17,8 @@
  *
  * @access private
  *
+ * @codeCoverageIgnore
+ *
  * @see WP_HTML_Processor
  */
 class WP_HTML_Token {

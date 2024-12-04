@@ -14,6 +14,7 @@
  *
  * @access private
  * @since 6.6.0
+ * @codeCoverageIgnore
  *
  * @see WP_HTML_Processor
  */

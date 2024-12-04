@@ -25,6 +25,7 @@
  *
  * @access private
  *
+ * @codeCoverageIgnore
  * @see WP_HTML_Processor
  */
 class WP_HTML_Unsupported_Exception extends Exception {

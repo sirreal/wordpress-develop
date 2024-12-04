@@ -20,6 +20,8 @@
  * @since 6.2.0
  * @since 6.5.0 Replaced `end` with `length` to more closely align with `substr()`.
  *
+ * @codeCoverageIgnore
+ *
  * @see WP_HTML_Tag_Processor
  */
 class WP_HTML_Span {

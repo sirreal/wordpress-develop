@@ -136,6 +136,7 @@
  * these situations and will bail.
  *
  * @since 6.4.0
+ * @codeCoverageIgnore
  *
  * @see WP_HTML_Tag_Processor
  * @see https://html.spec.whatwg.org/

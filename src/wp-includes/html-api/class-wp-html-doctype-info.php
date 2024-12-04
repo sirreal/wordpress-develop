@@ -49,6 +49,7 @@
  * @see https://www.iso.org/standard/16387.html
  *
  * @since 6.7.0
+ * @codeCoverageIgnore
  *
  * @see WP_HTML_Processor
  */

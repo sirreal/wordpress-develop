@@ -14,6 +14,7 @@
  *
  * @package WordPress
  * @since 6.6.0
+ * @codeCoverageIgnore
  */
 
 // phpcs:disable

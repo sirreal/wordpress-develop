@@ -8,6 +8,7 @@
  * @package WordPress
  * @subpackage HTML-API
  * @since 6.6.0
+ * @codeCoverageIgnore
  */
 class WP_HTML_Decoder {
 	/**

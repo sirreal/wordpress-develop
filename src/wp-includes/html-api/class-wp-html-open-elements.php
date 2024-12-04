@@ -21,6 +21,7 @@
  * > for misnested tags).
  *
  * @since 6.4.0
+ * @codeCoverageIgnore
  *
  * @access private
  *
