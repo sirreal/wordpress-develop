@@ -48,4 +48,49 @@ class Tests_HtmlApi_WpCssComplexSelectorList extends WP_UnitTestCase {
 		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
 		$this->assertNull( $result );
 	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_single_selector() {
+		$input  = 'div.class';
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
+		$this->assertNotNull( $result );
+	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_selector_list_with_whitespace() {
+		$input  = "  div.class1  ,\n\t  span#id2  ,   p[attr='value']  ";
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
+		$this->assertNotNull( $result );
+	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_selector_list_with_unsupported_sibling_combinator() {
+		$input  = 'div + p, span.class';
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
+		$this->assertNull( $result );
+	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_selector_list_with_trailing_comma() {
+		$input  = 'div.class,';
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
+		$this->assertNull( $result );
+	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_selector_list_with_leading_comma() {
+		$input  = ',div.class';
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $input );
+		$this->assertNull( $result );
+	}
 }

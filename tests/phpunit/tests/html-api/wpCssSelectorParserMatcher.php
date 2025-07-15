@@ -84,6 +84,19 @@ class Tests_HtmlApi_WpCssSelectorParserMatcher extends WP_UnitTestCase {
 			'can start with --\31 23'            => array( '--\31 23', '--123', '' ),
 			'ident ends before ]'                => array( 'ident]', 'ident', ']' ),
 
+			// Unicode normalization tests
+			'combining-chars'                    => array( 'café', 'café', '' ),
+			'high-codepoint'                     => array( '🌟element', '🌟element', '' ),
+			'rtl-text'                           => array( 'العربية', 'العربية', '' ),
+			'cyrillic'                           => array( 'элемент', 'элемент', '' ),
+			'chinese'                            => array( '元素', '元素', '' ),
+			'zero-width-joiner'                  => array( '👨‍💻', '👨‍💻', '' ),
+			'mixed-scripts'                      => array( 'element元素', 'element元素', '' ),
+			'private-use-area'                   => array( "\u{E000}test", "\u{E000}test", '' ),
+			'surrogate-pair'                     => array( '𝒜', '𝒜', '' ),
+			'normalization-nfc'                  => array( 'é', 'é', '' ), // pre-composed
+			'normalization-nfd'                  => array( "e\u{0301}", "e\u{0301}", '' ), // decomposed
+
 			// Invalid
 			'Invalid: (empty string)'            => array( '' ),
 			'Invalid: bad start >'               => array( '>ident' ),
