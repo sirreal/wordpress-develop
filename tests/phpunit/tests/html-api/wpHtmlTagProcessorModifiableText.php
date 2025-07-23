@@ -499,4 +499,39 @@ HTML
 
 		);
 	}
+
+	/**
+	 * Ensures that script tag contents are safely updated.
+	 *
+	 * @ticket 62797
+	 *
+	 * @dataProvider data_script_tag_text_updates
+	 *
+	 * @param string $html     HTML containing a SCRIPT tag to be modified.
+	 * @param string $update   Update containing possibly-compromising text.
+	 * @param string $expected Expected result.
+	 */
+	public function test_safely_updates_dangerous_javascript_script_tag_contents( string $html, string $update, string $expected ) {
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag( 'SCRIPT' ) );
+		$this->assertTrue( $processor->set_modifiable_text( $update ) );
+		$this->assertSame( $expected, $processor->get_updated_html() );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_script_tag_text_updates(): array {
+		return array(
+			'Simple update'         => array( '<script></script>', '{}', '<script>{}</script>' ),
+			'var script;1<script>0' => array( '<script></script>', 'var script;1<script>0', '<script>var script;1<\u0073cript>0</script>' ),
+			'1</script>/'           => array( '<script></script>', '1</script>/', '<script>1</\u0073cript>/</script>' ),
+			'var SCRIPT;1<SCRIPT>0' => array( '<script></script>', 'var SCRIPT;1<SCRIPT>0', '<script>var SCRIPT;1<\u0053CRIPT>0</script>' ),
+			'1</SCRIPT>/'           => array( '<script></script>', '1</SCRIPT>/', '<script>1</\u0053CRIPT>/</script>' ),
+			'"</script>"'           => array( '<script></script>', '"</script>"', '<script>"</\u0073cript>"</script>' ),
+			'"</ScRiPt>"'           => array( '<script></script>', '"</ScRiPt>"', '<script>"</\u0053cRiPt>"</script>' ),
+		);
+	}
 }
