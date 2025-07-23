@@ -486,11 +486,17 @@ HTML
 	 */
 	public static function data_unallowed_modifiable_text_updates() {
 		return array(
-			'Comment with -->'                 => array( '<!-- this is a comment -->', 'Comments end in -->' ),
-			'Comment with --!>'                => array( '<!-- this is a comment -->', 'Invalid but legitimate comments end in --!>' ),
-			'SCRIPT with </script>'            => array( '<script>Replace me</script>', 'Just a </script>' ),
-			'SCRIPT with </script attributes>' => array( '<script>Replace me</script>', 'before</script id=sneak>after' ),
-			'SCRIPT with "<script " opener'    => array( '<script>Replace me</script>', '<!--<script ' ),
+			'Comment with -->'     => array( '<!-- this is a comment -->', 'Comments end in -->' ),
+			'Comment with --!>'    => array( '<!-- this is a comment -->', 'Invalid but legitimate comments end in --!>' ),
+			'XML type SCRIPT'      => array( '<script type="text/xml">Replace me</script>', 'Just a </script>' ),
+			'Non-JavaSript SCRIPT' => array( '<script language="plaintext">Replace me</script>', 'before</script id=sneak>after' ),
+
+			// We can handle these now!
+			//'SCRIPT with </script>'            => array( '<script>Replace me</script>', 'Just a </script>' ),
+			//'SCRIPT with </script attributes>' => array( '<script>Replace me</script>', 'before</script id=sneak>after' ),
+			//'SCRIPT with "<script " opener'    => array( '<script>Replace me</script>', '<!--<script ' ),
+
+
 		);
 	}
 }
