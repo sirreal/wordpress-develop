@@ -774,7 +774,7 @@ function block_editor_rest_api_preload( array $preload_paths, $block_editor_cont
 		'wp-api-fetch',
 		sprintf(
 			'wp.apiFetch.use( wp.apiFetch.createPreloadingMiddleware( %s ) );',
-			wp_json_encode( $preload_data, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES )
+			wp_json_encode( $preload_data, JSON_UNESCAPED_SLASHES )
 		),
 		'after'
 	);
