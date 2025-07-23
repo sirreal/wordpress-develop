@@ -130,18 +130,24 @@ function wp_print_scripts( $handles = false ) {
 function wp_add_inline_script( $handle, $data, $position = 'after' ) {
 	_wp_scripts_maybe_doing_it_wrong( __FUNCTION__, $handle );
 
-	if ( false !== stripos( $data, '</script>' ) ) {
-		_doing_it_wrong(
-			__FUNCTION__,
-			sprintf(
-				/* translators: 1: <script>, 2: wp_add_inline_script() */
-				__( 'Do not pass %1$s tags to %2$s.' ),
-				'<code>&lt;script&gt;</code>',
-				'<code>wp_add_inline_script()</code>'
-			),
-			'4.5.0'
-		);
-		$data = trim( preg_replace( '#<script[^>]*>(.*)</script>#is', '$1', $data ) );
+	if ( false !== stripos( $data, '<script>' ) ) {
+
+		// The script tag should be the only token, otherwise it's not a <script> tag.
+		$processor = new WP_HTML_Tag_Processor( $data );
+		$processor->next_token();
+		if ( $processor->get_tag() === 'SCRIPT' ) {
+			_doing_it_wrong(
+				__FUNCTION__,
+				sprintf(
+					/* translators: 1: <script>, 2: wp_add_inline_script() */
+					__( 'Do not pass %1$s tags to %2$s.' ),
+					'<code>&lt;script&gt;</code>',
+					'<code>wp_add_inline_script()</code>'
+				),
+				'4.5.0'
+			);
+			$data = $processor->get_modifiable_text();
+		}
 	}
 
 	return wp_scripts()->add_inline_script( $handle, $data, $position );
