@@ -448,13 +448,14 @@ HTML
 	 * the structure of the containing element, such as in a script or comment.
 	 *
 	 * @ticket 61617
+	 * @ticket 62797
 	 *
 	 * @dataProvider data_unallowed_modifiable_text_updates
 	 *
 	 * @param string $html_with_nonempty_modifiable_text Will be used to find the test element.
 	 * @param string $invalid_update                     Update containing possibly-compromising text.
 	 */
-	public function test_rejects_updates_with_unallowed_substrings( string $html_with_nonempty_modifiable_text, string $invalid_update ) {
+	public function test_rejects_dangerous_updates( string $html_with_nonempty_modifiable_text, string $invalid_update ) {
 		$processor = new WP_HTML_Tag_Processor( $html_with_nonempty_modifiable_text );
 
 		while ( '' === $processor->get_modifiable_text() && $processor->next_token() ) {
@@ -486,22 +487,17 @@ HTML
 	 */
 	public static function data_unallowed_modifiable_text_updates() {
 		return array(
-			'Comment with -->'     => array( '<!-- this is a comment -->', 'Comments end in -->' ),
-			'Comment with --!>'    => array( '<!-- this is a comment -->', 'Invalid but legitimate comments end in --!>' ),
-			'XML type SCRIPT'      => array( '<script type="text/xml">Replace me</script>', 'Just a </script>' ),
-			'Non-JavaSript SCRIPT' => array( '<script language="plaintext">Replace me</script>', 'before</script id=sneak>after' ),
-
-			// We can handle these now!
-			//'SCRIPT with </script>'            => array( '<script>Replace me</script>', 'Just a </script>' ),
-			//'SCRIPT with </script attributes>' => array( '<script>Replace me</script>', 'before</script id=sneak>after' ),
-			//'SCRIPT with "<script " opener'    => array( '<script>Replace me</script>', '<!--<script ' ),
-
-
+			'Comment with -->'                        => array( '<!-- this is a comment -->', 'Comments end in -->' ),
+			'Comment with --!>'                       => array( '<!-- this is a comment -->', 'Invalid but legitimate comments end in --!>' ),
+			'Non-JS SCRIPT with <script>'             => array( '<script type="text/html">Replace me</script>', '<!-- Just a <script>' ),
+			'Non-JS SCRIPT with </script>'            => array( '<script type="text/html">Replace me</script>', 'Just a </script>' ),
+			'Non-JS SCRIPT with <script attributes>'  => array( '<script language="text">Replace me</script>', '<!-- <script sneaky>after' ),
+			'Non-JS SCRIPT with </script attributes>' => array( '<script language="text">Replace me</script>', 'before</script sneaky>after' ),
 		);
 	}
 
 	/**
-	 * Ensures that script tag contents are safely updated.
+	 * Ensures that JavaScript script tag contents are safely updated.
 	 *
 	 * @ticket 62797
 	 *
@@ -511,7 +507,7 @@ HTML
 	 * @param string $update   Update containing possibly-compromising text.
 	 * @param string $expected Expected result.
 	 */
-	public function test_safely_updates_dangerous_JavaScript_script_tag_contents( string $html, string $update, string $expected ) {
+	public function test_safely_updates_script_tag_contents( string $html, string $update, string $expected ) {
 		$processor = new WP_HTML_Tag_Processor( $html );
 		$this->assertTrue( $processor->next_tag( 'SCRIPT' ) );
 		$this->assertTrue( $processor->set_modifiable_text( $update ) );
@@ -525,17 +521,18 @@ HTML
 	 */
 	public static function data_script_tag_text_updates(): array {
 		return array(
-			'Simple update'         => array( '<script></script>', '{}', '<script>{}</script>' ),
-			'Needs no replacement'  => array( '<script></script>', '<!--<scriptish>', '<script><!--<scriptish></script>' ),
-			'var script;1<script>0' => array( '<script></script>', 'var script;1<script>0', '<script>var script;1<\u0073cript>0</script>' ),
-			'1</script>/'           => array( '<script></script>', '1</script>/', '<script>1</\u0073cript>/</script>' ),
-			'var SCRIPT;1<SCRIPT>0' => array( '<script></script>', 'var SCRIPT;1<SCRIPT>0', '<script>var SCRIPT;1<\u0053CRIPT>0</script>' ),
-			'1</SCRIPT>/'           => array( '<script></script>', '1</SCRIPT>/', '<script>1</\u0053CRIPT>/</script>' ),
-			'"</script>"'           => array( '<script></script>', '"</script>"', '<script>"</\u0073cript>"</script>' ),
-			'"</ScRiPt>"'           => array( '<script></script>', '"</ScRiPt>"', '<script>"</\u0053cRiPt>"</script>' ),
-			'Module tag'            => array( '<script type="module"></script>', '"<script>"', '<script type="module">"<\u0073cript>"</script>' ),
-			'Tag with type'         => array( '<script type="text/javascript"></script>', '"<script>"', '<script type="text/javascript">"<\u0073cript>"</script>' ),
-			'Tag with language'     => array( '<script language="javascript"></script>', '"<script>"', '<script language="javascript">"<\u0073cript>"</script>' ),
+			'Simple update'                         => array( '<script></script>', '{}', '<script>{}</script>' ),
+			'Needs no replacement'                  => array( '<script></script>', '<!--<scriptish>', '<script><!--<scriptish></script>' ),
+			'var script;1<script>0'                 => array( '<script></script>', 'var script;1<script>0', '<script>var script;1<\u0073cript>0</script>' ),
+			'1</script>/'                           => array( '<script></script>', '1</script>/', '<script>1</\u0073cript>/</script>' ),
+			'var SCRIPT;1<SCRIPT>0'                 => array( '<script></script>', 'var SCRIPT;1<SCRIPT>0', '<script>var SCRIPT;1<\u0053CRIPT>0</script>' ),
+			'1</SCRIPT>/'                           => array( '<script></script>', '1</SCRIPT>/', '<script>1</\u0053CRIPT>/</script>' ),
+			'"</script>"'                           => array( '<script></script>', '"</script>"', '<script>"</\u0073cript>"</script>' ),
+			'"</ScRiPt>"'                           => array( '<script></script>', '"</ScRiPt>"', '<script>"</\u0053cRiPt>"</script>' ),
+			'Module tag'                            => array( '<script type="module"></script>', '"<script>"', '<script type="module">"<\u0073cript>"</script>' ),
+			'Tag with type'                         => array( '<script type="text/javascript"></script>', '"<script>"', '<script type="text/javascript">"<\u0073cript>"</script>' ),
+			'Tag with language'                     => array( '<script language="javascript"></script>', '"<script>"', '<script language="javascript">"<\u0073cript>"</script>' ),
+			'Non-JS script, save HTML-like content' => array( '<script type="text/html"></script>', '<h1>This & that</h1>', '<script type="text/html"><h1>This & that</h1></script>' ),
 		);
 	}
 }
