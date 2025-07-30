@@ -3972,7 +3972,7 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * > A string is a JavaScript MIME type essence match if it is an ASCII case-insensitive
 		 * > match for one of the JavaScript MIME type essence strings.
-
+		 *
 		 * > A JavaScript MIME type is any MIME type whose essence is one of the following:
 		 * >
 		 * > - application/ecmascript
@@ -3992,8 +3992,8 @@ class WP_HTML_Tag_Processor {
 		 * > - text/x-ecmascript
 		 * > - text/x-javascript
 		 *
-		 * @see https://mimesniff.spec.whatwg.org/#javascript-mime-type
 		 * @see https://mimesniff.spec.whatwg.org/#javascript-mime-type-essence-match
+		 * @see https://mimesniff.spec.whatwg.org/#javascript-mime-type
 		 */
 		switch ( strtolower( $type_string ) ) {
 			case 'application/ecmascript':
@@ -4015,11 +4015,11 @@ class WP_HTML_Tag_Processor {
 				return true;
 
 			/*
-			* > Otherwise, if the script block's type string is an ASCII case-insensitive match for
-			* > the string "module", then set el's type to "module".
-			*
-			* A module is evaluated as JavaScript
-			*/
+			 * > Otherwise, if the script block's type string is an ASCII case-insensitive match for
+			 * > the string "module", then set el's type to "module".
+			 *
+			 * A module is evaluated as JavaScript.
+			 */
 			case 'module':
 				return true;
 		}
