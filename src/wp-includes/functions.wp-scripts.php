@@ -130,9 +130,22 @@ function wp_print_scripts( $handles = false ) {
 function wp_add_inline_script( $handle, $data, $position = 'after' ) {
 	_wp_scripts_maybe_doing_it_wrong( __FUNCTION__, $handle );
 
-	if ( false !== stripos( $data, '<script>' ) ) {
-
-		// The script tag should be the only token, otherwise it's not a <script> tag.
+	/*
+	 * Check whether the script data appears to be enclosed in an HTML <script> tag.
+	 */
+	if (
+		strlen( $data ) >= 17 &&
+		0 === substr_compare( $data, '<script', 0, 7, true ) &&
+		(
+			"\t" === $data[7] ||
+			"\n" === $data[7] ||
+			"\f" === $data[7] ||
+			' ' === $data[7] ||
+			'/' === $data[7] ||
+			'>' === $data[7]
+		)
+	) {
+		// Try to parse and extract the script contents.
 		$processor = new WP_HTML_Tag_Processor( $data );
 		$processor->next_token();
 		if ( $processor->get_tag() === 'SCRIPT' ) {
