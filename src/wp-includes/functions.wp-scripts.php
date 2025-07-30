@@ -139,6 +139,11 @@ function wp_add_inline_script( $handle, $data, $position = 'after' ) {
 		(
 			"\t" === $data[7] ||
 			"\n" === $data[7] ||
+			/*
+			 * \r\n and \r are normalized to \n in HTML newline normalization.
+			 * Therefore, \r always behaves like \n and terminates a tag name.
+			 */
+			"\r" === $data[7] ||
 			"\f" === $data[7] ||
 			' ' === $data[7] ||
 			'/' === $data[7] ||

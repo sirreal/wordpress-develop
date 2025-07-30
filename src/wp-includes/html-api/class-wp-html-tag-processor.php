@@ -3831,6 +3831,7 @@ class WP_HTML_Tag_Processor {
 				 *     4. One of the following characters:
 				 *        - \t
 				 *        - \n
+				 *        - \r (\r and \r\n newlines are normalized to \n in HTML pre-processing)
 				 *        - \f
 				 *        - " " (U+0020 SPACE)
 				 *        - /
@@ -3838,10 +3839,7 @@ class WP_HTML_Tag_Processor {
 				 *
 				 * @see https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-state
 				 */
-				if (
-					false !== stripos( $plaintext_content, '</script' ) ||
-					false !== stripos( $plaintext_content, '<script' )
-				) {
+				if ( preg_match( '~</?script[\t\r\n\f />]~i', $plaintext_content ) ) {
 					/*
 					 * JavaScript can be safely escaped.
 					 * Non-JavaScript script tags have unknown semantics.
@@ -3850,12 +3848,12 @@ class WP_HTML_Tag_Processor {
 					 */
 					if ( $this->is_javascript_script_tag() ) {
 						$plaintext_content = preg_replace_callback(
-							'~<(/?)(s)(cript)~i',
+							'~<(/?)(s)(cript)([\t\r\n\f />])~i',
 							static function ( $matches ) {
 								$escaped_s_char = 's' === $matches[2]
 									? '\\u0073'
 									: '\\u0053';
-								return "<{$matches[1]}{$escaped_s_char}{$matches[3]}";
+								return "<{$matches[1]}{$escaped_s_char}{$matches[3]}{$matches[4]}";
 							},
 							$plaintext_content
 						);
