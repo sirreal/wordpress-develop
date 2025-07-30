@@ -3927,7 +3927,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @since {WP_VERSION}
 	 *
-	 * @return boolean True if the script tag will be evaluated as JavaScript.
+	 * @return bool True if the script tag will be evaluated as JavaScript.
 	 */
 	public function is_javascript_script_tag(): bool {
 		if ( 'SCRIPT' !== $this->get_tag() || $this->get_namespace() !== 'html' ) {
