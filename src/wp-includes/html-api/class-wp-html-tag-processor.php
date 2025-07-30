@@ -3811,23 +3811,32 @@ class WP_HTML_Tag_Processor {
 
 		switch ( $this->get_tag() ) {
 			case 'SCRIPT':
-				/**
-				 * This is over-protective, but ensures the update doesn't break
-				 * the HTML structure of the SCRIPT element.
+				/*
+				 * SCRIPT tag contents can be dangerous.
 				 *
-				 * More thorough analysis could track the HTML tokenizer states
-				 * and to ensure that the SCRIPT element closes at the expected
-				 * SCRIPT close tag as is done in {@see ::skip_script_data()}.
+				 * The text `</script>` could close the SCRIPT element prematurely.
 				 *
-				 * A SCRIPT element could be closed prematurely by contents
-				 * like `</script>`. A SCRIPT element could be prevented from
-				 * closing by contents like `<!--<script>`.
+				 * The text `<script>` could enter the "script data double escaped state", preventing the
+				 * SCRIPT element from closing as expected, for example:
 				 *
-				 * The following strings are essential for dangerous content,
-				 * although they are insufficient on their own. This trade-off
-				 * prevents dangerous scripts from being sent to the browser.
-				 * It is also unlikely to produce HTML that may confuse more
-				 * basic HTML tooling.
+				 *     <script>
+				 *     // If this "<!--" then "<script>" the closing tag will not be recognized.
+				 *     </script>
+				 *     <h1>This appears inside the preceding SCRIPT element.</h1>
+				 *
+				 * The relevant state transitions happen on text like:
+				 *     1. <
+				 *     2. / (optional)
+				 *     3. script (case-insensitive)
+				 *     4. One of the following characters:
+				 *        - \t
+				 *        - \n
+				 *        - \f
+				 *        - " " (U+0020 SPACE)
+				 *        - /
+				 *        - >
+				 *
+				 * @see https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-state
 				 */
 				if (
 					false !== stripos( $plaintext_content, '</script' ) ||
