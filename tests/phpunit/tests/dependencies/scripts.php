@@ -4122,4 +4122,139 @@ HTML;
 			'Expected _doing_it_wrong() notice to indicate missing dependencies for enqueued script.'
 		);
 	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter allows modifying localized script data.
+	 *
+	 * @ticket TBD
+	 * @covers WP_Scripts::localize
+	 */
+	public function test_script_data_filter_modifies_localized_data() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+		wp_localize_script( 'test-script', 'testData', array( 'foo' => 'bar' ) );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $l10n, $object_name, $handle ) {
+				$this->assertSame( 'testData', $object_name );
+				$this->assertSame( 'test-script', $handle );
+				$this->assertIsArray( $l10n );
+				$this->assertSame( 'bar', $l10n['foo'] );
+				$l10n['baz'] = 'qux';
+				return $l10n;
+			},
+			10,
+			3
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertStringContainsString( '"foo":"bar"', $output );
+		$this->assertStringContainsString( '"baz":"qux"', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter receives correct parameters.
+	 *
+	 * @ticket TBD
+	 * @covers WP_Scripts::localize
+	 */
+	public function test_script_data_filter_receives_correct_parameters() {
+		wp_enqueue_script( 'test-handle', '/test.js', array(), null );
+		wp_localize_script( 'test-handle', 'myObject', array( 'key' => 'value' ) );
+
+		$filter_called = false;
+		add_filter(
+			'script_data_test-handle',
+			function ( $l10n, $object_name, $handle ) use ( &$filter_called ) {
+				$filter_called = true;
+				$this->assertSame( array( 'key' => 'value' ), $l10n );
+				$this->assertSame( 'myObject', $object_name );
+				$this->assertSame( 'test-handle', $handle );
+				return $l10n;
+			},
+			10,
+			3
+		);
+
+		get_echo( 'wp_print_scripts' );
+
+		$this->assertTrue( $filter_called, 'Filter should have been called' );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter works with multiple localizations.
+	 *
+	 * @ticket TBD
+	 * @covers WP_Scripts::localize
+	 */
+	public function test_script_data_filter_with_multiple_localizations() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+		wp_localize_script( 'test-script', 'data1', array( 'a' => '1' ) );
+		wp_localize_script( 'test-script', 'data2', array( 'b' => '2' ) );
+
+		$filter_call_count = 0;
+		add_filter(
+			'script_data_test-script',
+			function ( $l10n ) use ( &$filter_call_count ) {
+				$filter_call_count++;
+				$l10n['modified'] = 'yes';
+				return $l10n;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertSame( 2, $filter_call_count, 'Filter should be called twice for two localizations' );
+		$this->assertStringContainsString( '"modified":"yes"', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter can return the data unmodified.
+	 *
+	 * @ticket TBD
+	 * @covers WP_Scripts::localize
+	 */
+	public function test_script_data_filter_returns_data_unmodified() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+		wp_localize_script( 'test-script', 'testData', array( 'foo' => 'bar' ) );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $l10n ) {
+				// Return data unmodified.
+				return $l10n;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertStringContainsString( 'var testData = {"foo":"bar"};', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter works correctly with jquery handle remapping.
+	 *
+	 * @ticket TBD
+	 * @covers WP_Scripts::localize
+	 */
+	public function test_script_data_filter_with_jquery_handle() {
+		wp_enqueue_script( 'jquery' );
+		wp_localize_script( 'jquery', 'jqueryData', array( 'test' => 'value' ) );
+
+		$filter_called = false;
+		add_filter(
+			'script_data_jquery-core',
+			function ( $l10n ) use ( &$filter_called ) {
+				$filter_called = true;
+				$l10n['filtered'] = 'true';
+				return $l10n;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertTrue( $filter_called, 'Filter should be called for jquery-core handle' );
+		$this->assertStringContainsString( '"filtered":"true"', $output );
+	}
 }

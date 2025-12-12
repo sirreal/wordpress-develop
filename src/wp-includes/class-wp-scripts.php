@@ -634,6 +634,23 @@ class WP_Scripts extends WP_Dependencies {
 			}
 		}
 
+		/**
+		 * Filters data associated with a given script.
+		 *
+		 * The dynamic portion of the hook name, `$handle`, refers to the script handle.
+		 *
+		 * This filter allows developers to modify the data passed to a script via
+		 * wp_localize_script() before it is output. This is analogous to the
+		 * `script_module_data_{$module_id}` filter for script modules.
+		 *
+		 * @since 6.8.0
+		 *
+		 * @param array|string $l10n        The data to be localized.
+		 * @param string       $object_name The JavaScript object name.
+		 * @param string       $handle      The script handle.
+		 */
+		$l10n = apply_filters( "script_data_{$handle}", $l10n, $object_name, $handle );
+
 		$script = "var $object_name = " . wp_json_encode( $l10n, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES ) . ';';
 
 		if ( ! empty( $after ) ) {
