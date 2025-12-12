@@ -533,6 +533,10 @@ class WP_Scripts extends WP_Dependencies {
 				$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES;
 			}
 
+			/*
+			 * Return the data script tag as a string (third parameter false) rather than echoing it.
+			 * This allows it to be included with the script tag in the concatenated output.
+			 */
 			$data_tag = wp_print_inline_script_tag(
 				(string) wp_json_encode(
 					$script_data,
