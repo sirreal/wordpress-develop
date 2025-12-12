@@ -542,7 +542,7 @@ HTML
 
 
 	/**
-	 * @ticket 62797
+	 * @ticket TBD
 	 */
 	public function test_javascript_and_json_escaping() {
 		$processor = new WP_HTML_Tag_Processor( "<script></script>\n<script></script>\n<h1>OK</h1>" );
