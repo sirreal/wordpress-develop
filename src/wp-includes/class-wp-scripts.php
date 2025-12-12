@@ -1196,14 +1196,41 @@ JS;
 	 * @since 6.8.0
 	 */
 	public function print_script_data() {
-		$scripts = array();
-
-		// Collect all enqueued scripts and their dependencies.
-		foreach ( array_unique( $this->queue ) as $handle ) {
-			$scripts[ $handle ] = true;
+		/*
+		 * Determine JSON encoding flags once, outside the loop.
+		 * The charset won't change during iteration.
+		 *
+		 * This data will be printed as JSON inside a script tag like this:
+		 *   <script type="application/json"></script>
+		 *
+		 * A script tag must be closed by a sequence beginning with `</`. It's impossible to
+		 * close a script tag without using `<`. We ensure that `<` is escaped and `/` can
+		 * remain unescaped, so `</script>` will be printed as `\u003C/script>`.
+		 *
+		 *   - JSON_HEX_TAG: All < and > are converted to \u003C and \u003E.
+		 *   - JSON_UNESCAPED_SLASHES: Don't escape /.
+		 *
+		 * If the page will use UTF-8 encoding, it's safe to print unescaped unicode:
+		 *
+		 *   - JSON_UNESCAPED_UNICODE: Encode multibyte Unicode characters literally (instead of as `\uXXXX`).
+		 *   - JSON_UNESCAPED_LINE_TERMINATORS: The line terminators are kept unescaped when
+		 *     JSON_UNESCAPED_UNICODE is supplied. It uses the same behaviour as it was
+		 *     before PHP 7.1 without this constant. Available as of PHP 7.1.0.
+		 *
+		 * The JSON specification requires encoding in UTF-8, so if the generated HTML page
+		 * is not encoded in UTF-8 then it's not safe to include those literals. They must
+		 * be escaped to avoid encoding issues.
+		 *
+		 * @see https://www.rfc-editor.org/rfc/rfc8259.html for details on encoding requirements.
+		 * @see https://www.php.net/manual/en/json.constants.php for details on these constants.
+		 * @see https://html.spec.whatwg.org/#script-data-state for details on script tag parsing.
+		 */
+		$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS;
+		if ( ! is_utf8_charset() ) {
+			$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES;
 		}
 
-		foreach ( array_keys( $scripts ) as $handle ) {
+		foreach ( array_unique( $this->queue ) as $handle ) {
 			/**
 			 * Filters data associated with a given script.
 			 *
@@ -1253,38 +1280,7 @@ JS;
 			 */
 			$data = apply_filters( "script_data_{$handle}", array() );
 
-			if ( is_array( $data ) && array() !== $data ) {
-				/*
-				 * This data will be printed as JSON inside a script tag like this:
-				 *   <script type="application/json"></script>
-				 *
-				 * A script tag must be closed by a sequence beginning with `</`. It's impossible to
-				 * close a script tag without using `<`. We ensure that `<` is escaped and `/` can
-				 * remain unescaped, so `</script>` will be printed as `\u003C/script>`.
-				 *
-				 *   - JSON_HEX_TAG: All < and > are converted to \u003C and \u003E.
-				 *   - JSON_UNESCAPED_SLASHES: Don't escape /.
-				 *
-				 * If the page will use UTF-8 encoding, it's safe to print unescaped unicode:
-				 *
-				 *   - JSON_UNESCAPED_UNICODE: Encode multibyte Unicode characters literally (instead of as `\uXXXX`).
-				 *   - JSON_UNESCAPED_LINE_TERMINATORS: The line terminators are kept unescaped when
-				 *     JSON_UNESCAPED_UNICODE is supplied. It uses the same behaviour as it was
-				 *     before PHP 7.1 without this constant. Available as of PHP 7.1.0.
-				 *
-				 * The JSON specification requires encoding in UTF-8, so if the generated HTML page
-				 * is not encoded in UTF-8 then it's not safe to include those literals. They must
-				 * be escaped to avoid encoding issues.
-				 *
-				 * @see https://www.rfc-editor.org/rfc/rfc8259.html for details on encoding requirements.
-				 * @see https://www.php.net/manual/en/json.constants.php for details on these constants.
-				 * @see https://html.spec.whatwg.org/#script-data-state for details on script tag parsing.
-				 */
-				$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS;
-				if ( ! is_utf8_charset() ) {
-					$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES;
-				}
-
+			if ( is_array( $data ) && ! empty( $data ) ) {
 				wp_print_inline_script_tag(
 					(string) wp_json_encode(
 						$data,
