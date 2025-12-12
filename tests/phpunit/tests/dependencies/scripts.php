@@ -4124,132 +4124,171 @@ HTML;
 	}
 
 	/**
-	 * Tests that the script_data_{$handle} filter allows modifying localized script data.
+	 * Tests that the script_data_{$handle} filter outputs JSON script tags.
 	 *
-	 * @covers WP_Scripts::localize
+	 * @covers WP_Scripts::print_script_data
 	 */
-	public function test_script_data_filter_modifies_localized_data() {
+	public function test_script_data_filter_outputs_json_script_tag() {
 		wp_enqueue_script( 'test-script', '/test.js', array(), null );
-		wp_localize_script( 'test-script', 'testData', array( 'foo' => 'bar' ) );
 
 		add_filter(
 			'script_data_test-script',
-			function ( $l10n, $object_name, $handle ) {
-				$this->assertSame( 'testData', $object_name );
-				$this->assertSame( 'test-script', $handle );
-				$this->assertIsArray( $l10n );
-				$this->assertSame( 'bar', $l10n['foo'] );
-				$l10n['baz'] = 'qux';
-				return $l10n;
-			},
-			10,
-			3
+			function ( $data ) {
+				$data['foo'] = 'bar';
+				return $data;
+			}
 		);
 
-		$output = get_echo( 'wp_print_scripts' );
+		$output = get_echo( 'wp_print_script_data' );
 
+		$this->assertStringContainsString( '<script type="application/json" id="wp-script-data-test-script">', $output );
 		$this->assertStringContainsString( '"foo":"bar"', $output );
-		$this->assertStringContainsString( '"baz":"qux"', $output );
 	}
 
 	/**
-	 * Tests that the script_data_{$handle} filter receives correct parameters.
+	 * Tests that the script_data_{$handle} filter receives an empty array by default.
 	 *
-	 * @covers WP_Scripts::localize
+	 * @covers WP_Scripts::print_script_data
 	 */
-	public function test_script_data_filter_receives_correct_parameters() {
-		wp_enqueue_script( 'test-handle', '/test.js', array(), null );
-		wp_localize_script( 'test-handle', 'myObject', array( 'key' => 'value' ) );
+	public function test_script_data_filter_receives_empty_array() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
 
 		$filter_called = false;
 		add_filter(
-			'script_data_test-handle',
-			function ( $l10n, $object_name, $handle ) use ( &$filter_called ) {
+			'script_data_test-script',
+			function ( $data ) use ( &$filter_called ) {
 				$filter_called = true;
-				$this->assertSame( array( 'key' => 'value' ), $l10n );
-				$this->assertSame( 'myObject', $object_name );
-				$this->assertSame( 'test-handle', $handle );
-				return $l10n;
-			},
-			10,
-			3
+				$this->assertSame( array(), $data );
+				return $data;
+			}
 		);
 
-		get_echo( 'wp_print_scripts' );
+		get_echo( 'wp_print_script_data' );
 
 		$this->assertTrue( $filter_called, 'Filter should have been called' );
 	}
 
 	/**
-	 * Tests that the script_data_{$handle} filter works with multiple localizations.
+	 * Tests that the script_data_{$handle} filter doesn't output anything for empty data.
 	 *
-	 * @covers WP_Scripts::localize
+	 * @covers WP_Scripts::print_script_data
 	 */
-	public function test_script_data_filter_with_multiple_localizations() {
+	public function test_script_data_filter_no_output_for_empty_data() {
 		wp_enqueue_script( 'test-script', '/test.js', array(), null );
-		wp_localize_script( 'test-script', 'data1', array( 'a' => '1' ) );
-		wp_localize_script( 'test-script', 'data2', array( 'b' => '2' ) );
-
-		$filter_call_count = 0;
-		add_filter(
-			'script_data_test-script',
-			function ( $l10n ) use ( &$filter_call_count ) {
-				$filter_call_count++;
-				$l10n['modified'] = 'yes';
-				return $l10n;
-			}
-		);
-
-		$output = get_echo( 'wp_print_scripts' );
-
-		$this->assertSame( 2, $filter_call_count, 'Filter should be called twice for two localizations' );
-		$this->assertStringContainsString( '"modified":"yes"', $output );
-	}
-
-	/**
-	 * Tests that the script_data_{$handle} filter can return the data unmodified.
-	 *
-	 * @covers WP_Scripts::localize
-	 */
-	public function test_script_data_filter_returns_data_unmodified() {
-		wp_enqueue_script( 'test-script', '/test.js', array(), null );
-		wp_localize_script( 'test-script', 'testData', array( 'foo' => 'bar' ) );
 
 		add_filter(
 			'script_data_test-script',
-			function ( $l10n ) {
-				// Return data unmodified.
-				return $l10n;
+			function ( $data ) {
+				// Return empty array.
+				return $data;
 			}
 		);
 
-		$output = get_echo( 'wp_print_scripts' );
+		$output = get_echo( 'wp_print_script_data' );
 
-		$this->assertStringContainsString( 'var testData = {"foo":"bar"};', $output );
+		$this->assertSame( '', $output );
 	}
 
 	/**
-	 * Tests that the script_data_{$handle} filter works correctly with jquery handle remapping.
+	 * Tests that the script_data_{$handle} filter is called for each enqueued script.
 	 *
-	 * @covers WP_Scripts::localize
+	 * @covers WP_Scripts::print_script_data
 	 */
-	public function test_script_data_filter_with_jquery_handle() {
-		wp_enqueue_script( 'jquery' );
-		wp_localize_script( 'jquery', 'jqueryData', array( 'test' => 'value' ) );
+	public function test_script_data_filter_called_for_each_enqueued_script() {
+		wp_enqueue_script( 'script-1', '/script-1.js', array(), null );
+		wp_enqueue_script( 'script-2', '/script-2.js', array(), null );
 
-		$filter_called = false;
+		$filter_calls = array();
 		add_filter(
-			'script_data_jquery-core',
-			function ( $l10n ) use ( &$filter_called ) {
-				$filter_called = true;
-				$l10n['filtered'] = 'true';
-				return $l10n;
+			'script_data_script-1',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'script-1';
+				$data['script'] = '1';
+				return $data;
 			}
 		);
 
-		$output = get_echo( 'wp_print_scripts' );
+		add_filter(
+			'script_data_script-2',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'script-2';
+				$data['script'] = '2';
+				return $data;
+			}
+		);
 
-		$this->assertTrue( $filter_called, 'Filter should be called for jquery-core handle' );
-		$this->assertStringContainsString( '"filtered":"true"', $output );
+		$output = get_echo( 'wp_print_script_data' );
+
+		$this->assertSame( array( 'script-1', 'script-2' ), $filter_calls );
+		$this->assertStringContainsString( 'wp-script-data-script-1', $output );
+		$this->assertStringContainsString( 'wp-script-data-script-2', $output );
+		$this->assertStringContainsString( '"script":"1"', $output );
+		$this->assertStringContainsString( '"script":"2"', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter is only called for enqueued scripts.
+	 *
+	 * @covers WP_Scripts::print_script_data
+	 */
+	public function test_script_data_filter_only_called_for_enqueued_scripts() {
+		wp_register_script( 'registered-only', '/registered-only.js', array(), null );
+		wp_enqueue_script( 'enqueued', '/enqueued.js', array(), null );
+
+		$filter_calls = array();
+		add_filter(
+			'script_data_registered-only',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'registered-only';
+				return $data;
+			}
+		);
+
+		add_filter(
+			'script_data_enqueued',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'enqueued';
+				$data['test'] = 'value';
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_script_data' );
+
+		$this->assertSame( array( 'enqueued' ), $filter_calls );
+		$this->assertStringNotContainsString( 'wp-script-data-registered-only', $output );
+		$this->assertStringContainsString( 'wp-script-data-enqueued', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter works independently from wp_localize_script.
+	 *
+	 * @covers WP_Scripts::print_script_data
+	 */
+	public function test_script_data_filter_independent_from_localize() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+		wp_localize_script( 'test-script', 'myData', array( 'localized' => 'value' ) );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $data ) {
+				$data['filtered'] = 'data';
+				return $data;
+			}
+		);
+
+		$script_output = get_echo( 'wp_print_scripts' );
+		$data_output   = get_echo( 'wp_print_script_data' );
+
+		// Check localized data is in script output as JavaScript.
+		$this->assertStringContainsString( 'var myData = {"localized":"value"};', $script_output );
+
+		// Check filtered data is in data output as JSON.
+		$this->assertStringContainsString( '<script type="application/json" id="wp-script-data-test-script">', $data_output );
+		$this->assertStringContainsString( '"filtered":"data"', $data_output );
+
+		// Data output should not contain the localized script data.
+		$this->assertStringNotContainsString( 'myData', $data_output );
+		$this->assertStringNotContainsString( 'localized', $data_output );
 	}
 }
