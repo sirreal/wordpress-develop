@@ -361,7 +361,6 @@ add_action( 'wp_head', 'wp_custom_css_cb', 101 );
 add_action( 'wp_head', 'wp_site_icon', 99 );
 add_action( 'wp_footer', 'wp_print_speculation_rules' );
 add_action( 'wp_footer', 'wp_print_footer_scripts', 20 );
-add_action( 'wp_footer', 'wp_print_script_data', 21 );
 add_action( 'template_redirect', 'wp_shortlink_header', 11, 0 );
 add_action( 'wp_print_footer_scripts', '_wp_footer_scripts' );
 add_action( 'init', '_register_core_block_patterns_and_categories' );

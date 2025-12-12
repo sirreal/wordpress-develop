@@ -450,20 +450,3 @@ function wp_script_is( $handle, $status = 'enqueued' ) {
 function wp_script_add_data( $handle, $key, $value ) {
 	return wp_scripts()->add_data( $handle, $key, $value );
 }
-
-/**
- * Prints data associated with enqueued scripts.
- *
- * @since 6.8.0
- *
- * @see WP_Scripts::print_script_data()
- */
-function wp_print_script_data() {
-	global $wp_scripts;
-
-	if ( ! ( $wp_scripts instanceof WP_Scripts ) ) {
-		return;
-	}
-
-	$wp_scripts->print_script_data();
-}
