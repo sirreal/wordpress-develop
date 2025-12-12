@@ -3851,12 +3851,19 @@ class WP_HTML_Tag_Processor {
 					 */
 					if ( $this->is_javascript_script_tag() ) {
 						$plaintext_content = preg_replace_callback(
-							'~<(/?)(s)(cript)([\t\r\n\f />])~i',
+							/*
+							 * This case-insensitive pattern consists of three groups:
+							 *
+							 * 1: "<" or "</"
+							 * 2: "s"
+							 * 3: "cript" + a trailing character that terminates a tag name.
+							 */
+							'~(</?)(s)(cript[\\t\\r\\n\\f />])~i',
 							static function ( $matches ) {
 								$escaped_s_char = 's' === $matches[2]
 									? '\\u0073'
 									: '\\u0053';
-								return "<{$matches[1]}{$escaped_s_char}{$matches[3]}{$matches[4]}";
+								return "{$matches[1]}{$escaped_s_char}{$matches[3]}";
 							},
 							$plaintext_content
 						);
