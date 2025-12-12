@@ -4126,7 +4126,6 @@ HTML;
 	/**
 	 * Tests that the script_data_{$handle} filter allows modifying localized script data.
 	 *
-	 * @ticket TBD
 	 * @covers WP_Scripts::localize
 	 */
 	public function test_script_data_filter_modifies_localized_data() {
@@ -4156,7 +4155,6 @@ HTML;
 	/**
 	 * Tests that the script_data_{$handle} filter receives correct parameters.
 	 *
-	 * @ticket TBD
 	 * @covers WP_Scripts::localize
 	 */
 	public function test_script_data_filter_receives_correct_parameters() {
@@ -4185,7 +4183,6 @@ HTML;
 	/**
 	 * Tests that the script_data_{$handle} filter works with multiple localizations.
 	 *
-	 * @ticket TBD
 	 * @covers WP_Scripts::localize
 	 */
 	public function test_script_data_filter_with_multiple_localizations() {
@@ -4212,7 +4209,6 @@ HTML;
 	/**
 	 * Tests that the script_data_{$handle} filter can return the data unmodified.
 	 *
-	 * @ticket TBD
 	 * @covers WP_Scripts::localize
 	 */
 	public function test_script_data_filter_returns_data_unmodified() {
@@ -4235,7 +4231,6 @@ HTML;
 	/**
 	 * Tests that the script_data_{$handle} filter works correctly with jquery handle remapping.
 	 *
-	 * @ticket TBD
 	 * @covers WP_Scripts::localize
 	 */
 	public function test_script_data_filter_with_jquery_handle() {
