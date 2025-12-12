@@ -3845,9 +3845,6 @@ class WP_HTML_Tag_Processor {
 				) {
 					/*
 					 * JavaScript can be safely escaped.
-					 * Non-JavaScript script tags have unknown semantics.
-					 *
-					 * @todo consider applying to JSON and importmap script tags as well.
 					 */
 					if ( $this->is_javascript_script_tag() ) {
 						$plaintext_content = preg_replace_callback(
@@ -3869,14 +3866,16 @@ class WP_HTML_Tag_Processor {
 						);
 					} elseif ( $this->is_json_script_tag() ) {
 						/*
-						 * To JSON escape JSON, the `<` character can be replaced
-						 * everywhere.
+						 * JSON can be safely escaped.
 						 */
 						$plaintext_content = strtr(
 							$plaintext_content,
 							array( '<' => '\\u003C' )
 						);
 					} else {
+						/*
+						 * Other types of script tags cannot be escaped safely.
+						 */
 						return false;
 					}
 				}
