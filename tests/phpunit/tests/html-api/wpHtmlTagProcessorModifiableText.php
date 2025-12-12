@@ -539,4 +539,38 @@ HTML
 			'Non-JS script, save HTML-like content' => array( '<script type="text/html"></script>', '<h1>This & that</h1>', '<script type="text/html"><h1>This & that</h1></script>' ),
 		);
 	}
+
+
+	/**
+	 * @ticket 62797
+	 */
+	public function test_javascript_and_json_escaping() {
+		$processor = new WP_HTML_Tag_Processor( "<script></script>\n<script></script>\n<h1>OK</h1>" );
+		$processor->next_tag( 'SCRIPT' );
+		$processor->set_attribute( 'type', 'importmap' );
+		$importmap = array(
+			'imports' => array(
+				'</SCRIPT>\\<!--\\<script>' => "./script",
+			),
+		);
+		$importmap = json_encode(
+			$importmap,
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS
+		);
+
+		$processor->set_modifiable_text( $importmap );
+		$processor->next_tag( 'SCRIPT' );
+		$processor->set_attribute( 'type', 'module' );
+		$javascript = <<<'JS'
+import '</SCRIPT>\\<!--\\<script>';
+JS;
+		$processor->set_modifiable_text( $javascript );
+
+		$expected = <<<'HTML'
+<script type="importmap">{"imports":{"\u003C/SCRIPT>\\\u003C!--\\\u003Cscript>":"./script"}}</script>
+<script type="module">import '</\u0053CRIPT>\\<!--\\<\u0073cript>';</script>
+<h1>OK</h1>
+HTML;
+		$this->assertEqualHTML( $expected, $processor->get_updated_html() );
+	}
 }

@@ -3867,6 +3867,15 @@ class WP_HTML_Tag_Processor {
 							},
 							$plaintext_content
 						);
+					} elseif ( $this->is_json_script_tag() ) {
+						/*
+						 * To JSON escape JSON, the `<` character can be replaced
+						 * everywhere.
+						 */
+						$plaintext_content = strtr(
+							$plaintext_content,
+							array( '<' => '\\u003C' )
+						);
 					} else {
 						return false;
 					}
@@ -4041,6 +4050,50 @@ class WP_HTML_Tag_Processor {
 		/*
 		 * > Otherwise, return. (No script is executed, and el's type is left as null.)
 		 */
+		return false;
+	}
+
+	/**
+	 * Indicates if the currently matched tag is a JSON script tag.
+	 *
+	 * @since {WP_VERSION}
+	 *
+	 * @return bool True if the script tag should be treated as JSON.
+	 */
+	public function is_json_script_tag(): bool {
+		if ( 'SCRIPT' !== $this->get_tag() || $this->get_namespace() !== 'html' ) {
+			return false;
+		}
+
+		$type_attr = $this->get_attribute( 'type' );
+
+		if ( empty( $type_attr ) || true === $type_attr ) {
+			return false;
+		}
+
+		$type_string = strtolower( trim( $type_attr, " \t\f\r\n" ) );
+
+		/*
+		 * > …
+		 * > Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "importmap", then set el's type to "importmap".
+		 * > Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "speculationrules", then set el's type to "speculationrules".
+		 * @see https://html.spec.whatwg.org/#script-processing-model
+		 *
+		 * > A JSON MIME type is any MIME type whose subtype ends in "+json" or whose essence
+		 * > is "application/json" or "text/json".
+		 *
+		 * @see https://mimesniff.spec.whatwg.org/#json-mime-type
+		 */
+		if (
+			'application/json' === $type_string
+			|| 'importmap' === $type_string
+			|| 'speculationrules' === $type_string
+			|| 'text/json' === $type_string
+			|| str_ends_with( $type_string, '+json' )
+		) {
+			return true;
+		}
+
 		return false;
 	}
 
