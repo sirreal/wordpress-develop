@@ -4124,11 +4124,11 @@ HTML;
 	}
 
 	/**
-	 * Tests that the script_data_{$handle} filter outputs JSON script tags.
+	 * Tests that print_script_data outputs JSON script tags.
 	 *
 	 * @covers WP_Scripts::print_script_data
 	 */
-	public function test_script_data_filter_outputs_json_script_tag() {
+	public function test_print_script_data_outputs_json_script_tag() {
 		wp_enqueue_script( 'test-script', '/test.js', array(), null );
 
 		add_filter(

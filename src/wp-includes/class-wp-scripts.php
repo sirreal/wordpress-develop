@@ -1280,7 +1280,7 @@ JS;
 			 */
 			$data = apply_filters( "script_data_{$handle}", array() );
 
-			if ( is_array( $data ) && ! empty( $data ) ) {
+			if ( ! empty( $data ) ) {
 				wp_print_inline_script_tag(
 					(string) wp_json_encode(
 						$data,
