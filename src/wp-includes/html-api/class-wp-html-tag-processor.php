@@ -3839,7 +3839,10 @@ class WP_HTML_Tag_Processor {
 				 *
 				 * @see https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-state
 				 */
-				if ( preg_match( '~</?script[\t\r\n\f />]~i', $plaintext_content ) ) {
+				if (
+					false !== stripos( $plaintext_content, '</script' ) ||
+					false !== stripos( $plaintext_content, '<script' )
+				) {
 					/*
 					 * JavaScript can be safely escaped.
 					 * Non-JavaScript script tags have unknown semantics.
