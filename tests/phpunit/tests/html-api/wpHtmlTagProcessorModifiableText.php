@@ -540,25 +540,32 @@ HTML
 		);
 	}
 
-
 	/**
 	 * @ticket TBD
 	 */
-	public function test_javascript_and_json_escaping() {
+	public function test_complex_javascript_and_json_auto_escaping() {
 		$processor = new WP_HTML_Tag_Processor( "<script></script>\n<script></script>\n<h1>OK</h1>" );
 		$processor->next_tag( 'SCRIPT' );
 		$processor->set_attribute( 'type', 'importmap' );
-		$importmap = array(
+		$importmap_data = array(
 			'imports' => array(
 				'</SCRIPT>\\<!--\\<script>' => "./script",
 			),
 		);
+
 		$importmap = json_encode(
-			$importmap,
+			$importmap_data,
 			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS
 		);
 
 		$processor->set_modifiable_text( $importmap );
+		$decoded_importmap = json_decode( $processor->get_modifiable_text(), true, 512, JSON_THROW_ON_ERROR );
+		$this->assertEquals(
+			$importmap_data,
+			$decoded_importmap,
+			'Precondition failed: importmap JSON did not decode/encode as expected: ' . json_last_error_msg()
+		);
+
 		$processor->next_tag( 'SCRIPT' );
 		$processor->set_attribute( 'type', 'module' );
 		$javascript = <<<'JS'
@@ -571,6 +578,56 @@ JS;
 <script type="module">import '</\u0053CRIPT>\\<!--\\<\u0073cript>';</script>
 <h1>OK</h1>
 HTML;
-		$this->assertEqualHTML( $expected, $processor->get_updated_html() );
+		$updated_html = $processor->get_updated_html();
+		$this->assertEqualHTML( $expected, $updated_html );
+
+		// Re-process and verify the JSON is correct.
+		$processor = new WP_HTML_Tag_Processor( $updated_html );
+		$processor->next_tag( 'SCRIPT' );
+		$this->assertSame( 'importmap', $processor->get_attribute( 'type' ) );
+		$importmap_json = $processor->get_modifiable_text();
+		$decoded_importmap = json_decode( $importmap_json, true );
+		$this->assertSame( 'No error', json_last_error_msg() );
+		$this->assertEquals(
+			$importmap_data,
+			$decoded_importmap,
+			'Precondition failed: re-processed importmap JSON did not decode/encode as expected: ' . json_last_error_msg()
+		);
+	}
+
+	/**
+	 * @ticket TBD
+	 */
+	public function test_json_auto_escaping() {
+		// This is not a typical JSON encoding or escaping, but it is valid.
+		$json_text             = '"Escaped BS: \\\\; Escaped BS+LT: \\\\<; Unescaped LT: <; Script closer: </script>"';
+		$expected_decoded_json = 'Escaped BS: \\; Escaped BS+LT: \\<; Unescaped LT: <; Script closer: </script>';
+		$decoded_json          = json_decode( $json_text, false, 512, JSON_THROW_ON_ERROR );
+		$this->assertSame(
+			$expected_decoded_json,
+			$decoded_json,
+			'Precondition failed: test JSON text did not decode as expected.'
+		);
+
+		$processor = new WP_HTML_Tag_Processor( '<script type="application/json"></script>' );
+		$processor->next_tag( 'SCRIPT' );
+
+		$processor->set_modifiable_text( $json_text );
+
+		$expected = <<<'HTML'
+<script type="application/json">"Escaped BS: \\; Escaped BS+LT: \\\u003C; Unescaped LT: \u003C; Script closer: \u003C/script>"</script>
+HTML;
+
+		$updated_html = $processor->get_updated_html();
+		$this->assertEqualHTML( $expected, $updated_html );
+
+		// Reprocess to ensure JSON value survives HTML round trip:
+		$processor = new WP_HTML_Tag_Processor( $expected );
+		$processor->next_tag( 'SCRIPT' );
+		$decoded_json_from_html = json_decode( $processor->get_modifiable_text(), true, 512, JSON_THROW_ON_ERROR );
+		$this->assertEquals(
+			$expected_decoded_json,
+			$decoded_json_from_html,
+		);
 	}
 }
