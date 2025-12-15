@@ -3865,9 +3865,19 @@ class WP_HTML_Tag_Processor {
 							$plaintext_content
 						);
 					} elseif ( $this->is_json_script_tag() ) {
-						/*
+						/**
 						 * JSON can be safely escaped.
+						 *
+						 * The following replacement may appear insuficcient, "<" is replaced
+						 * with its JSON escape sequence "\u003C" without considering whether
+						 * the "<" is preceded by an escaping slash. JSON does not support
+						 * arbitrary character escaping (like JavaScript strings) so "\<"
+						 * is invalid JSON and would have to be preceded by
+						 * an escaped backslash: "\\<".
+						 *
+						 * @see https://www.json.org/json-en.html
 						 */
+
 						$plaintext_content = strtr(
 							$plaintext_content,
 							array( '<' => '\\u003C' )
