@@ -494,13 +494,13 @@ class WP_Scripts extends WP_Dependencies {
 		 *     // data.myConfig.key === 'value';
 		 *     initMyScriptWithData( data );
 		 *
-		 * @since 6.8.0
+		 * @since 7.0.0
 		 *
 		 * @param array $data The data associated with the script.
 		 */
 		$script_data = apply_filters( "script_data_{$handle}", array() );
 
-		$data_tag = '';
+		$script_data_tag = '';
 		if ( ! empty( $script_data ) ) {
 			/*
 			 * This data will be printed as JSON inside a script tag like this:
@@ -537,8 +537,8 @@ class WP_Scripts extends WP_Dependencies {
 			 * Return the data script tag as a string (third parameter false) rather than echoing it.
 			 * This allows it to be included with the script tag in the concatenated output.
 			 */
-			$data_tag = wp_print_inline_script_tag(
-				(string) wp_json_encode(
+			$script_data_tag = wp_print_inline_script_tag(
+				wp_json_encode(
 					$script_data,
 					$json_encode_flags
 				),
@@ -550,7 +550,7 @@ class WP_Scripts extends WP_Dependencies {
 			);
 		}
 
-		$tag  = $translations . $before_script . $data_tag;
+		$tag  = $translations . $before_script . $script_data_tag;
 		$tag .= wp_get_script_tag( $attr );
 		$tag .= $after_script;
 
@@ -1280,5 +1280,4 @@ JS;
 			implode( ', ', $missing_dependency_handles )
 		);
 	}
-
 }
