@@ -21,7 +21,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	 * @param string $html             HTML containing a script tag.
 	 * @param bool   $expected_result  Whether the script tag should be identified as JavaScript.
 	 */
-	public function test_is_javascript_script_tag( $html, $expected_result ) {
+	public function test_is_javascript_script_tag( string $html, bool $expected_result ) {
 		$processor = new WP_HTML_Tag_Processor( $html );
 		$processor->next_tag();
 
@@ -149,7 +149,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	 * @param string $html             HTML containing a script tag.
 	 * @param bool   $expected_result  Whether the script tag should be identified as JSON.
 	 */
-	public function test_is_json_script_tag( $html, $expected_result ) {
+	public function test_is_json_script_tag( string $html, bool $expected_result ) {
 		$processor = new WP_HTML_Tag_Processor( $html );
 		$processor->next_tag();
 
