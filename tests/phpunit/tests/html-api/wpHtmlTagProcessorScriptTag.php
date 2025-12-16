@@ -116,7 +116,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	 * @covers WP_HTML_Tag_Processor::is_javascript_script_tag
 	 */
 	public function test_is_javascript_script_tag_returns_false_before_finding_tags() {
-		$processor = new WP_HTML_Tag_Processor( '<script type="text/javascript"></script>' );
+		$processor = new WP_HTML_Tag_Processor( 'Just some text' );
 
 		$this->assertFalse(
 			$processor->is_javascript_script_tag(),
@@ -213,7 +213,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	 * @covers WP_HTML_Tag_Processor::is_json_script_tag
 	 */
 	public function test_is_json_script_tag_returns_false_before_finding_tags() {
-		$processor = new WP_HTML_Tag_Processor( '<script type="application/json"></script>' );
+		$processor = new WP_HTML_Tag_Processor( 'Just some text' );
 
 		$this->assertFalse(
 			$processor->is_json_script_tag(),
