@@ -512,6 +512,8 @@ class WP_Scripts extends WP_Dependencies {
 			 *
 			 *   - JSON_HEX_TAG: All < and > are converted to \u003C and \u003E.
 			 *   - JSON_UNESCAPED_SLASHES: Don't escape /.
+			 *   - JSON_INVALID_UTF8_SUBSTITUTE: Substitute invalid UTF-8 characters with the Unicode
+			 *     replacement character U+FFFD (�) instead of failing.
 			 *
 			 * If the page will use UTF-8 encoding, it's safe to print unescaped unicode:
 			 *
@@ -528,9 +530,9 @@ class WP_Scripts extends WP_Dependencies {
 			 * @see https://www.php.net/manual/en/json.constants.php for details on these constants.
 			 * @see https://html.spec.whatwg.org/#script-data-state for details on script tag parsing.
 			 */
-			$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS;
+			$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS | JSON_INVALID_UTF8_SUBSTITUTE;
 			if ( ! is_utf8_charset() ) {
-				$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES;
+				$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
 			}
 
 			/*
