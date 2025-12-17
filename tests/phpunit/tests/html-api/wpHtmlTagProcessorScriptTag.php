@@ -10,9 +10,8 @@
  * @coversDefaultClass WP_HTML_Tag_Processor
  */
 class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
-
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_javascript_script_tag
 	 *
@@ -112,7 +111,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_javascript_script_tag
 	 */
@@ -127,7 +126,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_javascript_script_tag
 	 */
@@ -142,7 +141,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_json_script_tag
 	 *
@@ -211,7 +210,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_json_script_tag
 	 */
@@ -226,7 +225,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @ticket TBD
+	 * @ticket 64419
 	 *
 	 * @covers WP_HTML_Tag_Processor::is_json_script_tag
 	 */
