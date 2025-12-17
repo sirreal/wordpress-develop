@@ -25,6 +25,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 		$processor = new WP_HTML_Tag_Processor( $html );
 		$processor->next_tag();
 
+		$this->assertSame( 'SCRIPT', $processor->get_tag(), 'Should be positioned on a SCRIPT tag' );
 		$this->assertSame(
 			$expected_result,
 			$processor->is_javascript_script_tag(),
@@ -121,7 +122,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 
 		$this->assertFalse(
 			$processor->is_javascript_script_tag(),
-			'Should return false when no tag has been selected'
+			'Should return false when not stopped on script tag'
 		);
 	}
 
@@ -154,6 +155,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 		$processor = new WP_HTML_Tag_Processor( $html );
 		$processor->next_tag();
 
+		$this->assertSame( 'SCRIPT', $processor->get_tag(), 'Should be positioned on a SCRIPT tag' );
 		$this->assertSame(
 			$expected_result,
 			$processor->is_json_script_tag(),
@@ -219,7 +221,7 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 
 		$this->assertFalse(
 			$processor->is_json_script_tag(),
-			'Should return false when no tag has been selected'
+			'Should return false when not stopped on script tag'
 		);
 	}
 
