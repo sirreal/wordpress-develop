@@ -47,9 +47,15 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 			'Script tag with empty type attribute'       => array( '<script type=""></script>', true ),
 			'Script tag with boolean type attribute'     => array( '<script type></script>', true ),
 
+			// Script tags with falsy but non-empty type attribute.
+			'Script tag with type="0"'                   => array( '<script type="0"></script>', false ),
+
 			// Script tags without type but with language attribute - should be JavaScript.
 			'Script tag with empty language attribute'   => array( '<script language=""></script>', true ),
 			'Script tag with boolean language attribute' => array( '<script language></script>', true ),
+
+			// Script tags with falsy but non-empty language attribute.
+			'Script tag with language="0"'               => array( '<script language="0"></script>', false ),
 
 			// Script tags with JavaScript MIME types - should be JavaScript.
 			'Script tag with application/ecmascript'     => array( '<script type="application/ecmascript"></script>', true ),
@@ -197,6 +203,10 @@ class Tests_HtmlApi_WpHtmlTagProcessorScriptTag extends WP_UnitTestCase {
 			'Script tag without type attribute'          => array( '<script></script>', false ),
 			'Script tag with empty type attribute'       => array( '<script type=""></script>', false ),
 			'Script tag with boolean type attribute'     => array( '<script type></script>', false ),
+
+			// Script tags with falsy but non-empty type attribute.
+			'Script tag with type="0"'                   => array( '<script type="0"></script>', false ),
+
 			'Script tag with text/javascript type'       => array( '<script type="text/javascript"></script>', false ),
 			'Script tag with module type'                => array( '<script type="module"></script>', false ),
 			'Script tag with unknown MIME type'          => array( '<script type="text/plain"></script>', false ),
