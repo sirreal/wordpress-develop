@@ -1341,6 +1341,18 @@ HTML
 		$this->assertSame( $expected, $wrapper_block );
 	}
 
+	/**
+	 * @ticket TBD
+	 */
+	public function test_nested_empty_block_parsing() {
+		$html =  '<!-- wp:wrap --><!-- wp:empty --><!-- /wp:empty --><!-- /wp:wrap -->';
+		$processor = new WP_Block_Processor( $html );
+		assert( $processor->next_block(), 'Failed to find block in markup.' );
+		$wrapper_block = $processor->extract_full_block_and_advance();
+		$expected = parse_blocks( $html )[0];
+		$this->assertSame( $expected, $wrapper_block );
+	}
+
 	//
 	// Test helpers.
 	//
