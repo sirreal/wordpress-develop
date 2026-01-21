@@ -1314,7 +1314,8 @@ HTML
 	 * @ticket TBD
 	 */
 	public function test_nested_void_block_innerhtml_parsing() {
-		$processor = new WP_Block_Processor( '<!-- wp:wrap -->a<!-- wp:void /-->b<!-- /wp:wrap -->' );
+		$html =  '<!-- wp:wrap -->012<!-- wp:void /-->a<hr>b<!-- /wp:wrap -->' ;
+		$processor = new WP_Block_Processor( $html );
 		assert( $processor->next_block(), 'Failed to find block in markup.' );
 		$wrapper_block = $processor->extract_full_block_and_advance();
 		$expected      = array(
@@ -1329,13 +1330,14 @@ HTML
 					'innerContent' => array(),
 				),
 			),
-			'innerHTML'    => 'ab',
+			'innerHTML'    => '012abc',
 			'innerContent' => array(
-				'a',
+				'012',
 				null,
-				'b',
+				'abc',
 			),
 		);
+		$expected = parse_blocks( $html )[0];
 		$this->assertSame( $expected, $wrapper_block );
 	}
 
