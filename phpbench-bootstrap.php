@@ -44,7 +44,7 @@ tests_reset__SERVER();
 
 define( 'WP_TESTS_TABLE_PREFIX', $table_prefix );
 
-define( 'DIR_TESTDATA', __DIR__ . '/tests/data' );
+define( 'DIR_TESTDATA', __DIR__ . '/tests/phpunit/data' );
 define( 'WP_LANG_DIR', realpath( DIR_TESTDATA . '/languages' ) );
 
 /*
