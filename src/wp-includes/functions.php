@@ -2192,19 +2192,14 @@ function wp_normalize_path( $path ) {
 		$wrapper .= '://';
 	}
 
-	// - Standardize all paths to use '/'.
-	// - Replace multiple slashes down to a singular, allowing for network shares having two slashes.
+	// Standardize all paths to use '/'.
+	$path = str_replace( '\\', '/', $path );
 
-	for (
-		$at = strcspn( $path, '\\/' );
-		$at < \strlen( $path );
-		$at += strcspn( $path, '\\/', ++$at )
-	) {
-		$path = substr_replace( $path, '/', $at, strspn( $path, '\\/', $at ) );
-	}
+	// Replace multiple slashes down to a singular, allowing for network shares having two slashes.
+	$path = preg_replace( '|(?<=.)/+|', '/', $path );
 
 	// Windows paths should uppercase the drive letter.
-	if ( ':' === ( $path[1] ?? null ) ) {
+	if ( ':' === substr( $path, 1, 1 ) ) {
 		$path = ucfirst( $path );
 	}
 
