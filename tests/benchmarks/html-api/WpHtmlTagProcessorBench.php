@@ -5,6 +5,8 @@
  * @package WordPress
  */
 
+declare(strict_types=1);
+
 use PhpBench\Attributes as Bench;
 
 #[Bench\Warmup( 3 )]
@@ -17,7 +19,7 @@ class WpHtmlTagProcessorBench {
 	 * @param array{0: WP_HTML_Tag_Processor, 1: string} $params
 	 */
 	#[Bench\ParamProviders( 'provide_script_tag_processor' )]
-	public function bench_javascript_custom_escape( array $params  ): void {
+	public function bench_javascript_custom_escape( array $params ): void {
 		[$processor, $source_text] = $params;
 		assert( $processor->set_modifiable_text( $source_text ), 'Failed to set modifiable text.' );
 	}
