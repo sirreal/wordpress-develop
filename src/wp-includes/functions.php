@@ -2192,18 +2192,34 @@ function wp_normalize_path( $path ) {
 		$wrapper .= '://';
 	}
 
-	// Standardize all paths to use '/'.
-	$path = str_replace( '\\', '/', $path );
+	// - Standardize all paths to use '/'.
+	// - Replace multiple slashes down to a singular, allowing for network shares having two slashes.
 
-	// Replace multiple slashes down to a singular, allowing for network shares having two slashes.
-	$path = preg_replace( '|(?<=.)/+|', '/', $path );
+	$len             = \strlen( $path );
+	$normalized_path = ( $len > 0 && '\\' === $path[0] ) ? '/' : '';
+	$was_at          = 0;
+	$at              = strcspn( $path, '\\/', );
 
-	// Windows paths should uppercase the drive letter.
-	if ( ':' === substr( $path, 1, 1 ) ) {
-		$path = ucfirst( $path );
+	/* echo "\n===init===\n"; */
+	/* var_dump( substr( $path, $at ), $normalized_path, $at, $was_at ); */
+
+	while ( $at < $len ) {
+		$normalized_path .= substr( $path, $was_at, $at - $was_at ) . '/';
+
+		$at    += strspn( $path, '\\/', $at );
+		$was_at = $at;
+		$at    += strcspn( $path, '\\/', $at );
+	}
+	if ( $was_at < $len ) {
+		$normalized_path .= substr( $path, $was_at );
 	}
 
-	return $wrapper . $path;
+	// Windows paths should uppercase the drive letter.
+	if ( \strlen( $normalized_path ) > 0 && ':' === $normalized_path[1] ) {
+		$normalized_path = ucfirst( $normalized_path );
+	}
+
+	return $wrapper . $normalized_path;
 }
 
 /**
