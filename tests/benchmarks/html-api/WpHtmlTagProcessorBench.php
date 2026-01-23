@@ -14,8 +14,9 @@ class WpHtmlTagProcessorBench {
 
 	/**
 	 * Benchmark normalizing simple Unix paths.
+	 * @param array{0: WP_HTML_Tag_Processor, 1: string} $params
 	 */
-	#[Bench\ParamProviders( 'provide_processor' )]
+	#[Bench\ParamProviders( 'provide_script_tag_processor' )]
 	public function bench_javascript_custom_escape( array $params  ): void {
 		[$processor, $source_text] = $params;
 		assert( $processor->set_modifiable_text( $source_text ), 'Failed to set modifiable text.' );
@@ -24,7 +25,7 @@ class WpHtmlTagProcessorBench {
 	/**
 	 * @return iterable<array{0: WP_HTML_Tag_Processor, 1: string}>
 	 */
-	public static function provide_processor(): iterable {
+	public static function provide_script_tag_processor(): iterable {
 		foreach ( self::provide_javascript() as $name => $source_text ) {
 			$processor = new WP_HTML_Tag_Processor( '<script></script>' );
 			$processor->next_tag();
