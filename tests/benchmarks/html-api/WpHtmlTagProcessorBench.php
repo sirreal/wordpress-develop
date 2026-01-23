@@ -103,4 +103,47 @@ class WpHtmlTagProcessorBench {
 			/* Good luck! */
 			JS;
 	}
+
+
+	/**
+	 * Benchmark HTML parsing.
+	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 */
+	#[Bench\ParamProviders( 'provide_html' )]
+	public function bench_tag_processor_html_parsing( array $params ): void {
+		$processor = new WP_HTML_Tag_Processor( $params[0] );
+		while ( $processor->next_token() ) {
+			// No-op.
+		}
+	}
+
+	/**
+	 * Benchmark HTML parsing.
+	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 */
+	#[Bench\ParamProviders( 'provide_html' )]
+	public function bench_html_fragment_parsing( array $params ): void {
+		$processor = WP_HTML_Processor::create_fragment( $params[0] );
+		while ( $processor->next_token() ) {
+			// No-op.
+		}
+	}
+
+	/**
+	 * Benchmark HTML parsing.
+	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 */
+	#[Bench\ParamProviders( 'provide_html' )]
+	public function bench_html_full_parsing( array $params ): void {
+		$processor = WP_HTML_Processor::create_full_parser( $params[0] );
+		while ( $processor->next_token() ) {
+			// No-op.
+		}
+	}
+
+	public static function provide_html(): iterable {
+		yield 'Empty string' => array( '' );
+		yield 'Short doc' => array( '<h1>Hello, world!</h1>' );
+		yield 'HTML Standard' => array( file_get_contents( DIR_TESTDATA . '/html-api/html-standard.html' ) );
+	}
 }
