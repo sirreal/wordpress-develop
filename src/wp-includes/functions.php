@@ -2186,20 +2186,28 @@ function path_join( $base, $path ) {
 function wp_normalize_path( $path ) {
 	$wrapper = '';
 
+	// Cast to string to handle edge cases where non-string values are passed.
+	$path = (string) $path;
+
 	if ( wp_is_stream( $path ) ) {
 		list( $wrapper, $path ) = explode( '://', $path, 2 );
 
 		$wrapper .= '://';
 	}
 
-	// Standardize all paths to use '/'.
-	$path = str_replace( '\\', '/', $path );
+	// Standardize all paths to use '/' - only if backslashes exist.
+	if ( strpos( $path, '\\' ) !== false ) {
+		$path = strtr( $path, '\\', '/' );
+	}
 
 	// Replace multiple slashes down to a singular, allowing for network shares having two slashes.
-	$path = preg_replace( '|(?<=.)/+|', '/', $path );
+	// Only run regex if consecutive slashes exist after position 0.
+	if ( isset( $path[1] ) && strpos( $path, '//', 1 ) !== false ) {
+		$path = preg_replace( '|(?<=.)/+|', '/', $path );
+	}
 
-	// Windows paths should uppercase the drive letter.
-	if ( ':' === substr( $path, 1, 1 ) ) {
+	// Windows paths should uppercase the drive letter - only if lowercase.
+	if ( isset( $path[1] ) && ':' === $path[1] && ctype_lower( $path[0] ) ) {
 		$path = ucfirst( $path );
 	}
 
