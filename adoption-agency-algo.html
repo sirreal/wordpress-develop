@@ -1,0 +1,62 @@
+<div data-algorithm="">
+  <p id="adoptionAgency">The <dfn id="adoption-agency-algorithm">adoption agency algorithm</dfn>, which takes as its only argument
+  a token <var>token</var> for which the algorithm is being run, consists of the following
+  steps:</p>
+
+  <ol><li><p>Let <var>subject</var> be <var>token</var>'s tag name.</p></li><li><p>If the <a href="#current-node" id="parsing-main-inbody:current-node-32">current node</a> is an <a href="infrastructure.html#html-elements" id="parsing-main-inbody:html-elements-17">HTML element</a>
+   whose tag name is <var>subject</var>, and the <a href="#current-node" id="parsing-main-inbody:current-node-33">current node</a> is not in the
+   <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-4">list of active formatting elements</a>, then pop the <a href="#current-node" id="parsing-main-inbody:current-node-34">current node</a> off the
+   <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-77">stack of open elements</a> and return.</p></li><li><p>Let <var>outerLoopCounter</var> be 0.</p></li><li>
+    <p>While true:</p>
+
+    <ol><li><p>If <var>outerLoopCounter</var> is greater than or equal to 8, then return.</p></li><li><p>Increment <var>outerLoopCounter</var> by 1.</p></li><li>
+      <p>Let <var>formattingElement</var> be the last element in the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-5">list of active
+      formatting elements</a> that:</p>
+
+      <ul><li>is between the end of the list and the last <a href="#concept-parser-marker" id="parsing-main-inbody:concept-parser-marker-4">marker</a> in the list, if any, or the start of the list
+       otherwise, and</li><li>has the tag name <var>subject</var>.</li></ul>
+
+      <p>If there is no such element, then return and instead act as described in the "any other end
+      tag" entry above.</p>
+     </li><li><p>If <var>formattingElement</var> is not in the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-78">stack of open elements</a>, then
+     this is a <a href="#parse-errors" id="parsing-main-inbody:parse-errors-49">parse error</a>; remove the element from the list, and return.</p></li><li><p>If <var>formattingElement</var> is in the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-79">stack of open elements</a>, but the
+     element is not <a href="#has-an-element-in-scope" id="parsing-main-inbody:has-an-element-in-scope-23">in scope</a>, then this is a
+     <a href="#parse-errors" id="parsing-main-inbody:parse-errors-50">parse error</a>; return.</p></li><li><p>If <var>formattingElement</var> is not the <a href="#current-node" id="parsing-main-inbody:current-node-35">current node</a>, this is a
+     <a href="#parse-errors" id="parsing-main-inbody:parse-errors-51">parse error</a>. (But do not return.)</p></li><li><p>Let <var>furthestBlock</var> be the topmost node in the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-80">stack of open
+     elements</a> that is lower in the stack than <var>formattingElement</var>, and is an
+     element in the <a href="#special" id="parsing-main-inbody:special-4">special</a> category. There might not be one.</p></li><li><p>If there is no <var>furthestBlock</var>, then the UA must first pop all the nodes from
+     the bottom of the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-81">stack of open elements</a>, from the <a href="#current-node" id="parsing-main-inbody:current-node-36">current node</a> up to
+     and including <var>formattingElement</var>, then remove <var>formattingElement</var> from the
+     <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-6">list of active formatting elements</a>, and finally return.</p></li><li><p>Let <var>commonAncestor</var> be the element immediately above
+     <var>formattingElement</var> in the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-82">stack of open elements</a>.</p></li><li><p>Let a bookmark note the position of <var>formattingElement</var> in the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-7">list of
+     active formatting elements</a> relative to the elements on either side of it in the
+     list.</p></li><li><p>Let <var>node</var> and <var>lastNode</var> be <var>furthestBlock</var>.</p></li><li><p>Let <var>innerLoopCounter</var> be 0.</p></li><li>
+      <p>While true:</p>
+
+      <ol><li><p>Increment <var>innerLoopCounter</var> by 1.</p></li><li><p>Let <var>node</var> be the element immediately above <var>node</var> in the
+       <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-83">stack of open elements</a>, or if <var>node</var> is no longer in the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-84">stack of
+       open elements</a> (e.g. because it got removed by this algorithm), the element that was immediately above <var>node</var> in
+       the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-85">stack of open elements</a> before <var>node</var> was removed.</p></li><li><p>If <var>node</var> is <var>formattingElement</var>, then <a id="parsing-main-inbody:break" href="https://infra.spec.whatwg.org/#iteration-break" data-x-internal="break">break</a>.</p></li><li><p>If <var>innerLoopCounter</var> is greater than 3 and <var>node</var> is in the
+       <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-8">list of active formatting elements</a>, then remove <var>node</var> from the
+       <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-9">list of active formatting elements</a>.</p></li><li><p>If <var>node</var> is not in the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-10">list of active
+       formatting elements</a>, then remove <var>node</var> from the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-86">stack of open
+       elements</a> and <a id="parsing-main-inbody:continue" href="https://infra.spec.whatwg.org/#iteration-continue" data-x-internal="continue">continue</a>.</p></li><li><p><a href="#create-an-element-for-the-token" id="parsing-main-inbody:create-an-element-for-the-token">Create an element for the token</a> for which the element <var>node</var> was
+       created, in the <a id="parsing-main-inbody:html-namespace-2" href="https://infra.spec.whatwg.org/#html-namespace" data-x-internal="html-namespace-2">HTML namespace</a>, with <var>commonAncestor</var> as the intended
+       parent; replace the entry for <var>node</var> in the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-11">list of active formatting
+       elements</a> with an entry for the new element, replace the entry for <var>node</var> in
+       the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-87">stack of open elements</a> with an entry for the new element, and let
+       <var>node</var> be the new element.</p></li><li><p>If <var>lastNode</var> is <var>furthestBlock</var>, then move the aforementioned
+       bookmark to be immediately after the new <var>node</var> in the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-12">list of active
+       formatting elements</a>.</p></li><li><p><a href="https://dom.spec.whatwg.org/#concept-node-append" id="parsing-main-inbody:concept-node-append" data-x-internal="concept-node-append">Append</a> <var>lastNode</var> to
+       <var>node</var>.</p></li><li><p>Set <var>lastNode</var> to <var>node</var>.</p></li></ol>
+     </li><li><p>Insert whatever <var>lastNode</var> ended up being in the previous step at the
+     <a href="#appropriate-place-for-inserting-a-node" id="parsing-main-inbody:appropriate-place-for-inserting-a-node">appropriate place for inserting a node</a>, but using <var>commonAncestor</var>
+     as the <i>override target</i>.</p></li><li><p><a href="#create-an-element-for-the-token" id="parsing-main-inbody:create-an-element-for-the-token-2">Create an element for the token</a> for which <var>formattingElement</var> was created,
+     in the <a id="parsing-main-inbody:html-namespace-2-2" href="https://infra.spec.whatwg.org/#html-namespace" data-x-internal="html-namespace-2">HTML namespace</a>, with <var>furthestBlock</var> as the intended parent.</p></li><li><p>Take all of the child nodes of <var>furthestBlock</var> and append them to the
+     element created in the last step.</p></li><li><p>Append that new element to <var>furthestBlock</var>.</p></li><li><p>Remove <var>formattingElement</var> from the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-13">list of active formatting
+     elements</a>, and insert the new element into the <a href="#list-of-active-formatting-elements" id="parsing-main-inbody:list-of-active-formatting-elements-14">list of active formatting
+     elements</a> at the position of the aforementioned bookmark.</p></li><li><p>Remove <var>formattingElement</var> from the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-88">stack of open
+     elements</a>, and insert the new element into the <a href="#stack-of-open-elements" id="parsing-main-inbody:stack-of-open-elements-89">stack of open elements</a>
+     immediately below the position of <var>furthestBlock</var> in that stack.</p></li></ol>
+   </li></ol>
+  </div>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<phpunit
+	bootstrap="bootstrap.php"
+	testdox="true"
+	colors="true"
+	enforceTimeLimit="true"
+	defaultTimeLimit="1"
+	timeoutForSmallTests="1"
+	timeoutForMediumTests="1"
+	timeoutForLargeTests="1"
+>
+
+	<php>
+<!--        <const name="DEBUG" value="FALSE"/>-->
+    </php>
+	<testsuites>
+		<testsuite name="html-api">
+
+<!-- CSS -->
+
+	<!--<file>wpCssCompoundSelectorList.php</file>-->
+	<!--<file>wpCssComplexSelectorList.php</file>-->
+	<!--<file>wpCssAttributeSelector.php</file>-->
+	<!--<file>wpCssClassSelector.php</file>-->
+	<!--<file>wpCssComplexSelector.php</file>-->
+	<!--<file>wpCssComplexSelectorList.php</file>-->
+	<!--<file>wpCssCompoundSelector.php</file>-->
+	<!--<file>wpCssCompoundSelectorList.php</file>-->
+	<!--<file>wpCssIdSelector.php</file>-->
+	<!--<file>wpCssSelectorParserMatcher.php</file>-->
+	<!--<file>wpCssTypeSelector.php</file>-->
+
+	<!--<file>wpHtmlProcessor-select.php</file>-->
+	<!--<file>wpHtmlTagProcessor-select.php</file>-->
+
+<!-- /CSS -->
+
+<!-- <file>wpHtmlTemplate.php</file> -->
+
+<!--
+
+<file>wpHtmlDecoder.php</file>
+<file>wpHtmlDoctypeInfo.php</file>
+<file>wpHtmlProcessor-bookmark.php</file>
+<file>wpHtmlProcessor-serialize.php</file>
+<file>wpHtmlProcessor.php</file>
+<file>wpHtmlProcessorBreadcrumbs.php</file>
+<file>wpHtmlProcessorComments.php</file>
+<file>wpHtmlProcessorSemanticRules.php</file>
+<file>wpHtmlProcessorSemanticRulesHeadingElements.php</file>
+<file>wpHtmlProcessorSemanticRulesListElements.php</file>
+<file>wpHtmlSupportRequiredActiveFormatReconstruction.php</file>
+<file>wpHtmlTagProcessor-bookmark.php</file>
+<file>wpHtmlTagProcessor-token-scanning.php</file>
+<file>wpHtmlTagProcessor.php</file>
+<file>wpHtmlTagProcessorModifiableText.php</file>
+<file>wpHtmlProcessorHtml5lib.php</file>
+
+-->
+<!-- <file>wpHtmlProcessor.php</file> -->
+<file>wpHtmlProcessorHtml5lib.php</file>
+
+		</testsuite>
+	</testsuites>
+</phpunit>
+
