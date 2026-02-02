@@ -25,3 +25,7 @@
 2026-02-02T22:52:30.654066Z  INFO ralph::loop_runner: All done! LOOP_COMPLETE detected.
 2026-02-02T22:52:30.654190Z  INFO ralph_core::event_loop: Wrapping up: completed. 4 iterations in 15m 20s. reason=completed iterations=4 duration=15m 20s
 2026-02-02T22:52:30.664331Z  INFO ralph_core::landing: Beginning landing sequence loop_id=primary
+2026-02-02T22:52:30.804499Z  INFO ralph_core::landing: Auto-committed changes during landing loop_id=primary commit=Some("7553926b614aa37f7da10db8f242f6bd6a6f8fab") files=22
+2026-02-02T22:52:31.515029Z  INFO ralph_core::landing: Generated handoff file loop_id=primary path=/Users/jonsurrell/a8c/ralph-playground/wordpress/html-support/.ralph/agent/handoff.md completed=4 open=0
+2026-02-02T22:52:31.544873Z  INFO ralph_core::loop_completion: Landing completed with auto-commit commit=Some("7553926b614aa37f7da10db8f242f6bd6a6f8fab") handoff=/Users/jonsurrell/a8c/ralph-playground/wordpress/html-support/.ralph/agent/handoff.md
+2026-02-02T22:52:31.544899Z  INFO ralph::loop_runner: Primary loop landed successfully committed=true handoff=/Users/jonsurrell/a8c/ralph-playground/wordpress/html-support/.ralph/agent/handoff.md open_tasks=0
