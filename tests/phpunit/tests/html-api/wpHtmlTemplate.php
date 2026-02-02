@@ -17,7 +17,7 @@ use WP_HTML_Template as T;
 
 class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	public function test_1() {
-		$t = T::from( '<p>Hello, </%name>!</p>' );
+		$t      = T::from( '<p>Hello, </%name>!</p>' );
 		$result = $t->render( array( 'name' => 'World' ) );
 		$this->assertSame( $result, T::sprintf( '<p>Hello, </%name>!</p>', array( 'name' => 'World' ) ) );
 
@@ -30,9 +30,9 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public function test_2() {
 		$template_string = '<p>Hello, </%placeholder>!</p>';
-		$replacements = array( 'placeholder' => 'Alice & Bob' );
+		$replacements    = array( 'placeholder' => 'Alice & Bob' );
 
-		$t = T::from( $template_string );
+		$t      = T::from( $template_string );
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
@@ -45,9 +45,9 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public function test_3() {
 		$template_string = '<p>Hello, </%1>, </%1>, </%2>, & </%2>!</p>';
-		$replacements = array( 'Alice', 'Bob' );
+		$replacements    = array( 'Alice', 'Bob' );
 
-		$t = T::from( $template_string );
+		$t      = T::from( $template_string );
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
@@ -60,9 +60,9 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public function test_4() {
 		$template_string = '<p>Hello, </%html>';
-		$replacements = array( 'html' => T::from( '<i>Alice</i> & <i>Bob</i>' ) );
+		$replacements    = array( 'html' => T::from( '<i>Alice</i> & <i>Bob</i>' ) );
 
-		$t = T::from( $template_string );
+		$t      = T::from( $template_string );
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
@@ -75,12 +75,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public function test_attr() {
 		$template_string = '<meta name="</%n>" content="</%c>">';
-		$replacements = array(
+		$replacements    = array(
 			'n' => 'the name',
 			'c' => 'the "content" & whatever else',
 		);
 
-		$t = T::from( $template_string );
+		$t      = T::from( $template_string );
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
@@ -96,8 +96,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_attr_rejects_html() {
 		$template_string = '<meta name="not-allowed" description="</%html>">';
-		$replacements = array(
-			'html' => T::from( '<strong>This is not allowed!</strong>') ,
+		$replacements    = array(
+			'html' => T::from( '<strong>This is not allowed!</strong>' ),
 		);
 		$this->assertFalse( T::sprintf( $template_string, $replacements ) );
 	}
@@ -116,13 +116,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public static function data_template() {
 		return array(
-			'Basic template' => array(
+			'Basic template'                  => array(
 				'<p>Hi!</p>',
 				array(),
 				'<p>Hi!</p>',
 			),
 
-			'HTML text replacement (basic)' => array(
+			'HTML text replacement (basic)'   => array(
 				'<p>Hello, </%name>!</p>',
 				array( 'name' => 'World!' ),
 				'<p>Hello, World!</p>',
@@ -134,10 +134,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<p>Hello, &lt;little-bobby-tags&gt;</p>',
 			),
 
-			'HTML replacement with template' => array(
+			'HTML replacement with template'  => array(
 				'<p>Hello, </%name>!</p>',
 				array(
-					'name' => WP_HTML_Template::from( '<i>World</i>' )
+					'name' => WP_HTML_Template::from( '<i>World</i>' ),
 				),
 				'<p>Hello, <i>World</i>!</p>',
 			),
