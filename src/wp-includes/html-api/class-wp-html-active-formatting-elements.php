@@ -226,4 +226,50 @@ class WP_HTML_Active_Formatting_Elements {
 			}
 		}
 	}
+
+	/**
+	 * Gets the entry at a specific index in the list.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param int $index Zero-based index from the start of the list.
+	 * @return WP_HTML_Token|null The token at that index, or null if out of bounds.
+	 */
+	public function get_at( int $index ): ?WP_HTML_Token {
+		return $this->stack[ $index ] ?? null;
+	}
+
+	/**
+	 * Replaces the entry at a specific index with a new token.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param int           $index Zero-based index from the start of the list.
+	 * @param WP_HTML_Token $token The new token to place at that index.
+	 * @return bool Whether the replacement was successful.
+	 */
+	public function replace_at( int $index, WP_HTML_Token $token ): bool {
+		if ( $index < 0 || $index >= count( $this->stack ) ) {
+			return false;
+		}
+		$this->stack[ $index ] = $token;
+		return true;
+	}
+
+	/**
+	 * Finds the index of a token in the list.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param WP_HTML_Token $token The token to find.
+	 * @return int|null The index, or null if not found.
+	 */
+	public function index_of( WP_HTML_Token $token ): ?int {
+		foreach ( $this->stack as $index => $item ) {
+			if ( $token->bookmark_name === $item->bookmark_name ) {
+				return $index;
+			}
+		}
+		return null;
+	}
 }
