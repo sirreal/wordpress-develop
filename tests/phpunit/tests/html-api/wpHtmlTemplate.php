@@ -143,4 +143,234 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			),
 		);
 	}
+
+	/**
+	 * Test real-world patterns from WordPress core.
+	 *
+	 * @dataProvider data_real_world_examples
+	 *
+	 * @ticket 60229
+	 * @covers ::sprintf
+	 */
+	public function test_real_world_examples( string $template_string, array $replacements, string $expected ) {
+		$result = WP_HTML_Template::sprintf( $template_string, $replacements );
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	/**
+	 * Data provider with real-world patterns from WordPress core.
+	 *
+	 * Each test case is based on actual code patterns found in WordPress core
+	 * that could benefit from the WP_HTML_Template API.
+	 *
+	 * @return array[]
+	 */
+	public static function data_real_world_examples() {
+		return array(
+			/*
+			 * Group 1: Simple sprintf patterns with manual escaping.
+			 *
+			 * These patterns currently require developers to manually choose
+			 * the correct escape function (esc_url, esc_attr, esc_html).
+			 */
+
+			// src/wp-includes/formatting.php:3476 - Smiley image
+			'formatting.php:3476 - smiley image tag' => array(
+				'<img src="</%src>" alt="</%alt>" class="wp-smiley" style="height: 1em; max-height: 1em;" />',
+				array(
+					'src' => 'https://example.com/smilies/:).png',
+					'alt' => ':)',
+				),
+				'<img src="https://example.com/smilies/:).png" alt=":)" class="wp-smiley" style="height: 1em; max-height: 1em;" />',
+			),
+
+			// src/wp-includes/blocks/post-title.php:41 - Post title link
+			'blocks/post-title.php:41 - post title link' => array(
+				'<a href="</%url>" target="</%target>"></%title></a>',
+				array(
+					'url'    => 'https://example.com/hello-world/',
+					'target' => '_blank',
+					'title'  => 'Hello World',
+				),
+				'<a href="https://example.com/hello-world/" target="_blank">Hello World</a>',
+			),
+
+			// Same pattern with escaping needed
+			'blocks/post-title.php:41 - post title link with special chars' => array(
+				'<a href="</%url>" target="</%target>"></%title></a>',
+				array(
+					'url'    => 'https://example.com/hello-world/?foo=1&bar=2',
+					'target' => '_blank',
+					'title'  => 'Hello <World> & "Friends"',
+				),
+				'<a href="https://example.com/hello-world/?foo=1&amp;bar=2" target="_blank">Hello &lt;World&gt; &amp; "Friends"</a>',
+			),
+
+			/*
+			 * Group 2: Translation patterns with embedded HTML.
+			 *
+			 * These patterns have HTML directly in translatable strings.
+			 */
+
+			// src/wp-includes/functions.php:1620 - Error message (static, no placeholders)
+			'functions.php:1620 - static error message' => array(
+				'<strong>Error:</strong> This is not a valid feed template.',
+				array(),
+				'<strong>Error:</strong> This is not a valid feed template.',
+			),
+
+			// src/wp-includes/functions.php:1844-1845 - Database repair link
+			'functions.php:1844 - database repair link' => array(
+				'One or more database tables are unavailable. The database may need to be <a href="</%url>">repaired</a>.',
+				array(
+					'url' => 'maint/repair.php?referrer=is_blog_installed',
+				),
+				'One or more database tables are unavailable. The database may need to be <a href="maint/repair.php?referrer=is_blog_installed">repaired</a>.',
+			),
+
+			// src/wp-admin/edit-form-advanced.php:185 - Scheduled post date
+			'edit-form-advanced.php:185 - scheduled post date' => array(
+				'Post scheduled for: <strong></%date></strong>.',
+				array(
+					'date' => 'March 15, 2025 at 10:30 am',
+				),
+				'Post scheduled for: <strong>March 15, 2025 at 10:30 am</strong>.',
+			),
+
+			// src/wp-includes/blocks/latest-posts.php:164-166 - Read more link with nested elements
+			'blocks/latest-posts.php:164 - read more link with screen reader text' => array(
+				'… <a class="wp-block-latest-posts__read-more" href="</%url>" rel="noopener noreferrer">Read more<span class="screen-reader-text">: </%title></span></a>',
+				array(
+					'url'   => 'https://example.com/my-post/',
+					'title' => 'My Amazing Post',
+				),
+				'… <a class="wp-block-latest-posts__read-more" href="https://example.com/my-post/" rel="noopener noreferrer">Read more<span class="screen-reader-text">: My Amazing Post</span></a>',
+			),
+
+			// Same pattern with escaping needed
+			'blocks/latest-posts.php:164 - read more with XSS attempt' => array(
+				'… <a class="wp-block-latest-posts__read-more" href="</%url>" rel="noopener noreferrer">Read more<span class="screen-reader-text">: </%title></span></a>',
+				array(
+					'url'   => 'javascript:alert("xss")',
+					'title' => '<script>alert("xss")</script>',
+				),
+				'… <a class="wp-block-latest-posts__read-more" href="javascript:alert(&quot;xss&quot;)" rel="noopener noreferrer">Read more<span class="screen-reader-text">: &lt;script&gt;alert("xss")&lt;/script&gt;</span></a>',
+			),
+
+			// src/wp-includes/theme.php:978-979 - Theme error with name
+			'theme.php:978 - theme error message' => array(
+				'<strong>Error:</strong> Current WordPress and PHP versions do not meet minimum requirements for </%theme_name>.',
+				array(
+					'theme_name' => 'Twenty Twenty-Five',
+				),
+				'<strong>Error:</strong> Current WordPress and PHP versions do not meet minimum requirements for Twenty Twenty-Five.',
+			),
+
+			// src/wp-admin/includes/privacy-tools.php:404 - Code tag in error
+			'privacy-tools.php:404 - code in error message' => array(
+				'The <code></%meta_key></code> post meta must be an array.',
+				array(
+					'meta_key' => '_export_data_grouped',
+				),
+				'The <code>_export_data_grouped</code> post meta must be an array.',
+			),
+
+			/*
+			 * Group 3: Edge cases.
+			 */
+
+			// Placeholder reuse (same placeholder multiple times)
+			'placeholder reuse' => array(
+				'<label for="</%id>">Name:</label> <input id="</%id>" name="</%id>" type="text" />',
+				array(
+					'id' => 'user_name',
+				),
+				'<label for="user_name">Name:</label> <input id="user_name" name="user_name" type="text" />',
+			),
+
+			// Numeric placeholders like sprintf
+			'numeric placeholders' => array(
+				'<a href="</%0>"></%1></a> by <a href="</%2>"></%3></a>',
+				array(
+					'https://example.com/post/',
+					'Post Title',
+					'https://example.com/author/',
+					'Author Name',
+				),
+				'<a href="https://example.com/post/">Post Title</a> by <a href="https://example.com/author/">Author Name</a>',
+			),
+
+			// Nested template (pre-escaped HTML)
+			'nested template for complex structure' => array(
+				'<div class="error"></%icon> </%message></div>',
+				array(
+					'icon'    => WP_HTML_Template::from( '<span class="dashicons dashicons-warning"></span>' ),
+					'message' => 'Something went wrong.',
+				),
+				'<div class="error"><span class="dashicons dashicons-warning"></span> Something went wrong.</div>',
+			),
+
+			// Empty replacement
+			'empty replacement value' => array(
+				'<p>Hello</%suffix></p>',
+				array(
+					'suffix' => '',
+				),
+				'<p>Hello</p>',
+			),
+
+			// HTML entities in template (should be preserved)
+			'HTML entities in template' => array(
+				'<p>&#8220;</%quote>&#8221;</p>',
+				array(
+					'quote' => 'Hello World',
+				),
+				'<p>&#8220;Hello World&#8221;</p>',
+			),
+
+			// Multiple attributes on same element
+			'multiple attributes on element' => array(
+				'<input type="</%type>" name="</%name>" value="</%value>" placeholder="</%placeholder>" />',
+				array(
+					'type'        => 'text',
+					'name'        => 'user_email',
+					'value'       => 'test@example.com',
+					'placeholder' => 'Enter your email',
+				),
+				'<input type="text" name="user_email" value="test@example.com" placeholder="Enter your email" />',
+			),
+
+			// Attribute value with quotes and special characters
+			'attribute with quotes and ampersands' => array(
+				'<a href="</%url>" title="</%title>">Link</a>',
+				array(
+					'url'   => 'https://example.com/?a=1&b=2',
+					'title' => 'Click "here" for Tom & Jerry',
+				),
+				'<a href="https://example.com/?a=1&amp;b=2" title="Click &quot;here&quot; for Tom &amp; Jerry">Link</a>',
+			),
+
+			// Self-closing void element
+			'self-closing meta tag' => array(
+				'<meta name="</%name>" content="</%content>">',
+				array(
+					'name'    => 'description',
+					'content' => 'A page about "cats" & dogs',
+				),
+				'<meta name="description" content="A page about &quot;cats&quot; &amp; dogs">',
+			),
+
+			// src/wp-includes/blocks/avatar.php:68 - Complex link with aria-label
+			'blocks/avatar.php:68 - avatar link' => array(
+				'<a href="</%url>" target="</%target>" aria-label="</%aria_label>" class="wp-block-avatar__link"></%inner></a>',
+				array(
+					'url'        => 'https://example.com/author/johndoe/',
+					'target'     => '_blank',
+					'aria_label' => '(John Doe author archive, opens in a new tab)',
+					'inner'      => WP_HTML_Template::from( '<img src="https://example.com/avatar.jpg" alt="John Doe" />' ),
+				),
+				'<a href="https://example.com/author/johndoe/" target="_blank" aria-label="(John Doe author archive, opens in a new tab)" class="wp-block-avatar__link"><img src="https://example.com/avatar.jpg" alt="John Doe" /></a>',
+			),
+		);
+	}
 }
