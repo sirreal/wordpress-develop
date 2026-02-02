@@ -86,7 +86,25 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 		$expected =
 			<<<'HTML'
-			<meta name="name" content="the &quot;content&quot; &amp; whatever else">
+			<meta name="the name" content="the &quot;content&quot; &amp; whatever else">
+			HTML;
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public function test_attribute_with_spaces() {
+		$template_string = "<meta name='</%\tn\n>' content='</% c\r\f>'>";
+		$replacements    = array(
+			'n' => 'the name',
+			'c' => 'the "content" & whatever else',
+		);
+
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected =
+			<<<'HTML'
+			<meta name="the name" content="the &quot;content&quot; &amp; whatever else">
 			HTML;
 		$this->assertEqualHTML( $expected, $result );
 	}
