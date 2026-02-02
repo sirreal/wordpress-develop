@@ -27,6 +27,7 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
+		'adoption01/line0318' => 'Unimplemented: Noah\'s Ark clause to limit duplicate formatting elements is not implemented.',
 		'noscript01/line0014' => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests14/line0022'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests14/line0055'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',

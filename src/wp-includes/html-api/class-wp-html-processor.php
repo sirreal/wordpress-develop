@@ -5873,15 +5873,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether any formatting elements needed to be reconstructed.
 	 */
 	private function reconstruct_active_formatting_elements(): bool {
+		$active_formatting_elements = $this->state->active_formatting_elements;
+		$stack_of_open_elements     = $this->state->stack_of_open_elements;
+
 		/*
 		 * > If there are no entries in the list of active formatting elements, then there is nothing
 		 * > to reconstruct; stop this algorithm.
 		 */
-		if ( 0 === $this->state->active_formatting_elements->count() ) {
+		if ( 0 === $active_formatting_elements->count() ) {
 			return false;
 		}
 
-		$last_entry = $this->state->active_formatting_elements->current_node();
+		$last_entry = $active_formatting_elements->current_node();
 		if (
 
 			/*
@@ -5895,12 +5898,131 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > element that is in the stack of open elements, then there is nothing to reconstruct;
 			 * > stop this algorithm.
 			 */
-			$this->state->stack_of_open_elements->contains_node( $last_entry )
+			$stack_of_open_elements->contains_node( $last_entry )
 		) {
 			return false;
 		}
 
-		$this->bail( 'Cannot reconstruct active formatting elements when advancing and rewinding is required.' );
+		/*
+		 * > Let entry be the last (most recently added) element in the list of active formatting elements.
+		 */
+		$entry_index = $active_formatting_elements->count() - 1;
+
+		/*
+		 * REWIND: Walk backwards to find where reconstruction should start.
+		 *
+		 * > Rewind: If there are no entries before entry in the list of active formatting elements,
+		 * > then jump to the step labeled create.
+		 * > Let entry be the entry one earlier than entry in the list of active formatting elements.
+		 * > If entry is neither a marker nor an element that is also in the stack of open elements,
+		 * > go to the step labeled rewind.
+		 */
+		while ( $entry_index > 0 ) {
+			--$entry_index;
+			$entry = $active_formatting_elements->get_at( $entry_index );
+
+			/*
+			 * Stop rewinding if a marker or an element in the stack is found.
+			 */
+			if (
+				'marker' === $entry->node_name ||
+				$stack_of_open_elements->contains_node( $entry )
+			) {
+				/*
+				 * > Advance: Let entry be the element one later than entry in the list of
+				 * > active formatting elements.
+				 */
+				++$entry_index;
+				break;
+			}
+		}
+
+		/*
+		 * ADVANCE and CREATE: Walk forwards, creating and inserting elements.
+		 *
+		 * > Create: Insert an HTML element for the token for which the element entry was created,
+		 * > to obtain new element.
+		 * > Replace the entry for entry in the list with an entry for new element.
+		 * > If the entry for new element in the list of active formatting elements is not the
+		 * > last entry in the list, return to the step labeled advance.
+		 */
+		$last_index = $active_formatting_elements->count() - 1;
+		while ( $entry_index <= $last_index ) {
+			$entry = $active_formatting_elements->get_at( $entry_index );
+
+			/*
+			 * Create an element for the token and insert it.
+			 */
+			$new_element = $this->create_element_for_formatting_token( $entry );
+			$this->insert_html_element( $new_element );
+
+			/*
+			 * Replace the entry in the list with the newly created element.
+			 */
+			$active_formatting_elements->replace_at( $entry_index, $new_element );
+
+			++$entry_index;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Creates a new element token for reconstructing a formatting element.
+	 *
+	 * This creates a "virtual" element that represents a reconstructed
+	 * formatting element. It uses the same tag name as the original
+	 * but gets a new bookmark pointing to the current position.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When the entry has attributes that cannot be cloned.
+	 *
+	 * @param WP_HTML_Token $entry The active formatting element entry.
+	 * @return WP_HTML_Token The newly created element token.
+	 */
+	private function create_element_for_formatting_token( WP_HTML_Token $entry ): WP_HTML_Token {
+		/*
+		 * Check if this entry has attributes that need to be cloned.
+		 *
+		 * The bookmark span length for a simple tag like `<b>` is 3 characters.
+		 * If the span is longer than `< + tagname + >`, there are attributes
+		 * present that this algorithm cannot currently clone. In that case,
+		 * bail out rather than producing incorrect output.
+		 *
+		 * Virtual nodes (already reconstructed) have a span length of 0,
+		 * so they pass this check.
+		 */
+		if ( isset( $entry->bookmark_name ) && isset( $this->bookmarks[ $entry->bookmark_name ] ) ) {
+			$entry_bookmark = $this->bookmarks[ $entry->bookmark_name ];
+			// Minimum length is `<` + tag name + `>` = strlen(tag_name) + 2
+			$min_length = strlen( $entry->node_name ) + 2;
+			if ( $entry_bookmark->length > $min_length ) {
+				$this->bail( 'Cannot reconstruct active formatting element with attributes.' );
+			}
+		}
+
+		/*
+		 * Create a virtual bookmark for this reconstructed element.
+		 * This follows the same pattern as insert_virtual_node().
+		 */
+		$bookmark_name = $this->bookmark_token();
+
+		/*
+		 * The bookmark points to the current token's position with zero length,
+		 * indicating this is a virtual element without source HTML.
+		 */
+		$here                             = $this->bookmarks[ $this->state->current_token->bookmark_name ];
+		$this->bookmarks[ $bookmark_name ] = new WP_HTML_Span( $here->start, 0 );
+
+		/*
+		 * Create new token with same tag name as the original.
+		 * Formatting elements are always in the HTML namespace.
+		 */
+		$new_token            = new WP_HTML_Token( $bookmark_name, $entry->node_name, false );
+		$new_token->namespace = 'html';
+
+		return $new_token;
 	}
 
 	/**

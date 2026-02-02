@@ -185,18 +185,19 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Ensures that support is added for reconstructing active formatting elements
-	 * before the HTML Processor handles situations with unclosed formats requiring it.
+	 * Ensures that active formatting elements are properly reconstructed across paragraphs.
 	 *
 	 * @ticket 58517
 	 *
 	 * @covers WP_HTML_Processor::reconstruct_active_formatting_elements
 	 */
-	public function test_fails_to_reconstruct_formatting_elements() {
+	public function test_reconstructs_active_formatting_elements() {
 		$processor = WP_HTML_Processor::create_fragment( '<p><em>One<p><em>Two<p><em>Three<p><em>Four' );
 
 		$this->assertTrue( $processor->next_tag( 'EM' ), 'Could not find first EM.' );
-		$this->assertFalse( $processor->next_tag( 'EM' ), 'Should have aborted before finding second EM as it required reconstructing the first EM.' );
+		$this->assertTrue( $processor->next_tag( 'EM' ), 'Could not find second EM (should be reconstructed from first).' );
+		$this->assertTrue( $processor->next_tag( 'EM' ), 'Could not find third EM.' );
+		$this->assertTrue( $processor->next_tag( 'EM' ), 'Could not find fourth EM.' );
 	}
 
 	/**
