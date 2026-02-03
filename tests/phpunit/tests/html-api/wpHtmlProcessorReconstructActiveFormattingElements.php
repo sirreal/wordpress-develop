@@ -372,4 +372,44 @@ class Tests_HtmlApi_WpHtmlProcessorReconstructActiveFormattingElements extends W
 		$this->assertSame( '4', $processor->get_attribute( 'size' ), 'Reconstructed FONT should have size attribute.' );
 		$this->assertSame( 'red', $processor->get_attribute( 'color' ), 'Reconstructed FONT should have color attribute.' );
 	}
+
+	/**
+	 * Verifies that get_attribute_names_with_prefix() returns correct values for reconstructed elements.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Processor::get_attribute_names_with_prefix
+	 */
+	public function test_get_attribute_names_with_prefix_works_for_reconstructed_element() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b id="x" class="y" data-test="z">text<p>more' );
+
+		// Navigate past the first paragraph.
+		$processor->next_tag( 'P' );
+		$processor->next_tag( 'B' );
+
+		// Navigate to second paragraph (triggers reconstruction).
+		$processor->next_tag( 'P' );
+
+		// Find the reconstructed B and verify its attribute names.
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find reconstructed B.' );
+
+		// All attributes (empty prefix).
+		$all_attributes = $processor->get_attribute_names_with_prefix( '' );
+		$this->assertIsArray( $all_attributes, 'Should return array of attribute names.' );
+		$this->assertCount( 3, $all_attributes, 'Should have 3 attributes.' );
+		$this->assertContains( 'id', $all_attributes, 'Should contain id attribute.' );
+		$this->assertContains( 'class', $all_attributes, 'Should contain class attribute.' );
+		$this->assertContains( 'data-test', $all_attributes, 'Should contain data-test attribute.' );
+
+		// Prefix filter.
+		$data_attributes = $processor->get_attribute_names_with_prefix( 'data-' );
+		$this->assertIsArray( $data_attributes, 'Should return array for data- prefix.' );
+		$this->assertCount( 1, $data_attributes, 'Should have 1 data- attribute.' );
+		$this->assertContains( 'data-test', $data_attributes, 'Should contain data-test attribute.' );
+
+		// Non-matching prefix.
+		$aria_attributes = $processor->get_attribute_names_with_prefix( 'aria-' );
+		$this->assertIsArray( $aria_attributes, 'Should return array for aria- prefix.' );
+		$this->assertCount( 0, $aria_attributes, 'Should have 0 aria- attributes.' );
+	}
 }

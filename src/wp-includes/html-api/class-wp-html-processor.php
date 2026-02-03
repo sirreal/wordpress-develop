@@ -5407,6 +5407,30 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return array|null List of attribute names, or `null` when no tag opener is matched.
 	 */
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * return matching attribute names from stored attributes.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			if ( $this->is_tag_closer() ) {
+				return null;
+			}
+
+			$comparable = strtolower( $prefix );
+			$matches    = array();
+
+			foreach ( array_keys( $this->current_element->token->attributes ) as $name ) {
+				if ( str_starts_with( $name, $comparable ) ) {
+					$matches[] = $name;
+				}
+			}
+
+			return $matches;
+		}
+
 		return $this->is_virtual() ? null : parent::get_attribute_names_with_prefix( $prefix );
 	}
 
