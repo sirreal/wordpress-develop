@@ -272,16 +272,22 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 		// Same pattern with escaping needed
 		yield 'blocks/post-title.php:41 - post title link with special chars' => array(
-			'<a href="</%url>" target="</%target>"></%title></a>',
+			"<a href='</%url>' target='</%target>'>\n</%title>\n</a>",
 			array(
 				'url'    => 'https://example.com/hello-world/?foo=1&bar=2',
 				'target' => '_blank',
-				'title'  => <<<'TEXT'
-				Hello <World> & "Friends"
-				TEXT,
+				'title'  => WP_HTML_Template::from(
+					'\'<i></%italic></i>\' & <b>"</%bold>"</b>',
+					array(
+						'italic' => 'This',
+						'bold'   => 'That',
+					)
+				),
 			),
 			<<<'HTML'
-			<a href="https://example.com/hello-world/?foo=1&amp;bar=2" target="_blank">Hello &lt;World&gt; &amp; "Friends"</a>
+			<a href="https://example.com/hello-world/?foo=1&amp;bar=2" target="_blank">
+			&apos;<i>This</i>' &amp; <b>&quot;That"</b>
+			</a>
 			HTML,
 		);
 
