@@ -119,6 +119,20 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
+	public function test_attr_no_produce_character_reference() {
+		$template_string = '<meta name="&</% placeholder >;">';
+		$replacements    = array( 'placeholder' => 'not' );
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected =
+			<<<'HTML'
+			<meta name="&amp;not;">
+			HTML;
+		$this->assertEqualHTML( $expected, $result );
+	}
+
 	/**
 	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
