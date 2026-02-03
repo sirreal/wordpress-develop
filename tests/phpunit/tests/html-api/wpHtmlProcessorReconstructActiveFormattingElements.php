@@ -412,4 +412,148 @@ class Tests_HtmlApi_WpHtmlProcessorReconstructActiveFormattingElements extends W
 		$this->assertIsArray( $aria_attributes, 'Should return array for aria- prefix.' );
 		$this->assertCount( 0, $aria_attributes, 'Should have 0 aria- attributes.' );
 	}
+
+	/**
+	 * Verifies that Noah's Ark clause limits identical elements to 3.
+	 *
+	 * When more than 3 identical formatting elements are pushed to the active
+	 * formatting elements list, the earliest duplicate should be removed.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Active_Formatting_Elements::push
+	 */
+	public function test_noahs_ark_limits_identical_elements_to_three() {
+		// Four identical <b> tags, only 3 should be reconstructed.
+		$processor = WP_HTML_Processor::create_fragment( '<p><b><b><b><b><p><span target>' );
+
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
+			'Should have found the target SPAN element.'
+		);
+
+		// Breadcrumbs should show only 3 B elements reconstructed.
+		$breadcrumbs = $processor->get_breadcrumbs();
+		$b_count     = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+		$this->assertSame( 3, $b_count, "Noah's Ark should limit to 3 identical formatting elements." );
+	}
+
+	/**
+	 * Verifies that elements with different attributes are not considered identical.
+	 *
+	 * The Noah's Ark clause only removes duplicate elements with the same
+	 * tag name, namespace, and attributes. Elements with different attributes
+	 * should all be preserved.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Active_Formatting_Elements::push
+	 */
+	public function test_noahs_ark_different_attributes_are_different_elements() {
+		// Four <b> elements with different classes - all should be reconstructed.
+		$processor = WP_HTML_Processor::create_fragment(
+			'<p><b class="a"><b class="b"><b class="c"><b class="d"><p><span target>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
+			'Should have found the target SPAN element.'
+		);
+
+		// All 4 should be reconstructed since they have different attributes.
+		$breadcrumbs = $processor->get_breadcrumbs();
+		$b_count     = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+		$this->assertSame( 4, $b_count, 'Elements with different attributes should all be reconstructed.' );
+	}
+
+	/**
+	 * Verifies that Noah's Ark respects markers in the active formatting elements list.
+	 *
+	 * When a marker is present (while inside BUTTON, TD, etc.), Noah's Ark only
+	 * considers elements after the last marker. This test verifies the behavior
+	 * by having identical elements both inside and outside a scoped element.
+	 *
+	 * Note: When the button closes, the marker is removed via clear_up_to_last_marker(),
+	 * so after the button, all elements are considered together again.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Active_Formatting_Elements::push
+	 */
+	public function test_noahs_ark_respects_markers() {
+		// Two <b> elements inside a BUTTON (marker separates them during push).
+		// Inside the button, only those 2 count toward Noah's Ark limit.
+		// Then 2 more <b> after the button. After button closes, marker is gone,
+		// so all 4 identical B elements are counted, and Noah's Ark reduces to 3.
+		$processor = WP_HTML_Processor::create_fragment(
+			'<p><b><b><button></button><b><b><p><span target>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
+			'Should have found the target SPAN element.'
+		);
+
+		// After button closes, marker is removed, so Noah's Ark sees all 4 identical B elements.
+		// It removes the earliest, leaving 3.
+		$breadcrumbs = $processor->get_breadcrumbs();
+		$b_count     = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+		$this->assertSame( 3, $b_count, "After button closes, marker is removed, so Noah's Ark limits all identical elements to 3." );
+	}
+
+	/**
+	 * Verifies that attribute order does not affect Noah's Ark comparison.
+	 *
+	 * Two elements with the same attributes in different order should be
+	 * considered identical for Noah's Ark purposes.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Active_Formatting_Elements::push
+	 */
+	public function test_noahs_ark_attribute_order_independent() {
+		// Four <b> elements with same attributes but different order - should be limited to 3.
+		$processor = WP_HTML_Processor::create_fragment(
+			'<p><b class="x" id="y"><b id="y" class="x"><b class="x" id="y"><b id="y" class="x"><p><span target>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
+			'Should have found the target SPAN element.'
+		);
+
+		// Only 3 should be reconstructed since they are identical.
+		$breadcrumbs = $processor->get_breadcrumbs();
+		$b_count     = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+		$this->assertSame( 3, $b_count, 'Same attributes in different order should be considered identical.' );
+	}
+
+	/**
+	 * Verifies that different attribute values make elements non-identical.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Active_Formatting_Elements::push
+	 */
+	public function test_noahs_ark_different_attribute_values_are_different_elements() {
+		// Four <b> elements with same attribute name but different values.
+		$processor = WP_HTML_Processor::create_fragment(
+			'<p><b class="a"><b class="A"><b class="a "><b class=""><p><span target>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
+			'Should have found the target SPAN element.'
+		);
+
+		// All 4 should be reconstructed since they have different attribute values.
+		$breadcrumbs = $processor->get_breadcrumbs();
+		$b_count     = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+		$this->assertSame( 4, $b_count, 'Elements with different attribute values should all be reconstructed.' );
+	}
 }
