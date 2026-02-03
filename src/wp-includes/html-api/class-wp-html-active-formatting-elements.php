@@ -272,4 +272,72 @@ class WP_HTML_Active_Formatting_Elements {
 		}
 		return null;
 	}
+
+	/**
+	 * Determines if two tokens represent the same formatting element.
+	 *
+	 * Two elements are considered identical if they have the same:
+	 * - Tag name
+	 * - Namespace
+	 * - Attributes (names, namespaces, and values)
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param WP_HTML_Token $a First token.
+	 * @param WP_HTML_Token $b Second token.
+	 * @return bool Whether the tokens represent identical formatting elements.
+	 */
+	private static function elements_have_same_identity( WP_HTML_Token $a, WP_HTML_Token $b ): bool {
+		// Tag name must match.
+		if ( $a->node_name !== $b->node_name ) {
+			return false;
+		}
+
+		// Namespace must match.
+		if ( $a->namespace !== $b->namespace ) {
+			return false;
+		}
+
+		// Attributes must match.
+		return self::attributes_are_equal(
+			$a->attributes ?? array(),
+			$b->attributes ?? array()
+		);
+	}
+
+	/**
+	 * Determines if two attribute arrays are equal.
+	 *
+	 * Comparison is case-insensitive for names (keys are already lowercase),
+	 * exact for values, and order-independent.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param array $a First attributes array.
+	 * @param array $b Second attributes array.
+	 * @return bool Whether the attributes are equal.
+	 */
+	private static function attributes_are_equal( array $a, array $b ): bool {
+		// Different count means different attributes.
+		if ( count( $a ) !== count( $b ) ) {
+			return false;
+		}
+
+		// Empty arrays are equal.
+		if ( 0 === count( $a ) ) {
+			return true;
+		}
+
+		// Compare each attribute (keys already lowercase from capture).
+		foreach ( $a as $name => $value ) {
+			if ( ! array_key_exists( $name, $b ) ) {
+				return false;
+			}
+			if ( $value !== $b[ $name ] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
