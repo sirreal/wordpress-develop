@@ -113,6 +113,8 @@ class WP_HTML_Active_Formatting_Elements {
 	 */
 	public function push( WP_HTML_Token $token ) {
 		/*
+		 * Noah's Ark clause: Limit to 3 identical formatting elements.
+		 *
 		 * > If there are already three elements in the list of active formatting elements after the last marker,
 		 * > if any, or anywhere in the list if there are no markers, that have the same tag name, namespace, and
 		 * > attributes as element, then remove the earliest such element from the list of active formatting
@@ -121,8 +123,32 @@ class WP_HTML_Active_Formatting_Elements {
 		 * > paired such that the two attributes in each pair have identical names, namespaces, and values
 		 * > (the order of the attributes does not matter).
 		 *
-		 * @todo Implement the "Noah's Ark clause" to only add up to three of any given kind of formatting elements to the stack.
+		 * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
 		 */
+		$dominated_count      = 0;
+		$earliest_match_index = null;
+
+		// Walk backwards, counting matches until we hit a marker.
+		for ( $i = count( $this->stack ) - 1; $i >= 0; $i-- ) {
+			$entry = $this->stack[ $i ];
+
+			// Markers stop the search.
+			if ( 'marker' === $entry->node_name ) {
+				break;
+			}
+
+			// Check if this entry matches the token being pushed.
+			if ( self::elements_have_same_identity( $token, $entry ) ) {
+				++$dominated_count;
+				$earliest_match_index = $i;
+			}
+		}
+
+		// If 3 identical elements exist, remove the earliest.
+		if ( $dominated_count >= 3 && null !== $earliest_match_index ) {
+			array_splice( $this->stack, $earliest_match_index, 1 );
+		}
+
 		// > Add element to the list of active formatting elements.
 		$this->stack[] = $token;
 	}
