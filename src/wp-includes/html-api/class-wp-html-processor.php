@@ -2792,6 +2792,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
@@ -2813,6 +2814,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '+U':
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
@@ -2829,6 +2831,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
