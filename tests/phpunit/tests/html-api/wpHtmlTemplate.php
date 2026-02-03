@@ -73,6 +73,16 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
+	public function test_prevent_sneaky_tag_in_html() {
+		$template_string = 'a<</%tag-name>>s';
+		$replacements    = array( 'tag-name' => 'i' );
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+
+		$expected = 'a&lt;i&gt;s';
+		$this->assertEqualHTML( $expected, $result );
+	}
+
 	public function test_attr() {
 		$template_string = '<meta name="</%n>" content="</%c>">';
 		$replacements    = array(
