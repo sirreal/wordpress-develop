@@ -134,3 +134,178 @@ Test commands:
 
 ---
 
+# Iteration 2: Attribute Handling and Noah's Ark Clause
+
+---
+
+## Q8: What is the relationship between these two features?
+
+The two goals for this iteration are:
+1. **Attribute handling** - Clone attributes when reconstructing formatting elements
+2. **Noah's Ark clause** - Limit duplicate formatting elements to 3 (by tag name AND attributes)
+
+These are related since Noah's Ark requires comparing attributes to determine if elements are "duplicates."
+
+Should we:
+1. **Implement together** - Both features in one pass, since Noah's Ark depends on having attribute data available
+2. **Attribute handling first** - Get attribute cloning working, then add Noah's Ark as a follow-up
+3. **Noah's Ark first** - Implement the duplicate limiting logic, then enhance with full attribute comparison
+
+Which approach makes sense?
+
+**A8:** Attribute handling first (option 2). Get attribute cloning working, then add Noah's Ark as a follow-up.
+
+---
+
+## Q9: How should attributes be stored for active formatting elements?
+
+Currently, `WP_HTML_Token` stored in active formatting elements has:
+- `bookmark_name` - reference to position in HTML source
+- `node_name` - tag name
+- `has_self_closing_flag`
+- `namespace`
+
+For attribute cloning, we need to store attribute data. Options:
+
+1. **Store attribute snapshot at push time** - When adding to active formatting elements, capture current attributes as an array/object on the token
+2. **Re-read from bookmark** - Use the existing bookmark to read attributes from the original source position when needed
+3. **New data structure** - Create a separate attribute storage mechanism linked to the token
+
+The spec says "create an element for the token for which the element entry was created" - suggesting we need the attributes as they were when the element was first seen.
+
+Which storage approach fits best with the existing architecture?
+
+**A9:** Unknown - all options should be considered and explored during research/implementation. The tradeoffs of each approach need to be evaluated against the existing architecture.
+
+---
+
+## Q10: What attribute data needs to be preserved?
+
+When cloning attributes for reconstruction, we need to determine what exactly to store. Attributes have:
+- Name (e.g., `class`, `href`, `style`)
+- Value (e.g., `"bold"`, `"https://example.com"`)
+- Potentially: case sensitivity, quote style, ordering
+
+For spec compliance, should we:
+
+1. **Name and value only** - Store a simple key-value mapping (normalized)
+2. **Preserve ordering** - Maintain the order attributes appeared in the source
+3. **Preserve exact representation** - Keep quote style, casing, whitespace as in source
+
+What level of fidelity is needed?
+
+**A10:** Name and value only (option 1). Store a simple key-value mapping with normalized attribute data. Exact representation (quote style, ordering, casing) is not required.
+
+---
+
+## Q11: How should reconstructed elements apply cloned attributes?
+
+When a formatting element is reconstructed, the new element needs to have the cloned attributes. The current `create_element_for_formatting_token()` creates a virtual element with a zero-length bookmark.
+
+For applying attributes to reconstructed elements:
+
+1. **Virtual attributes** - Store attributes on the token object itself, make them accessible via a new API
+2. **Synthetic HTML source** - Generate HTML-like source text that can be parsed for attributes
+3. **Direct attribute injection** - Bypass normal attribute reading and inject directly when the element is created
+
+How should the reconstructed element expose its attributes to callers (e.g., `$processor->get_attribute('class')`)?
+
+**A11:** Virtual attributes (option 1). Store attributes on the token object itself and make them accessible via a new API. The processor's `get_attribute()` method would need to check for virtual attributes when the current element is a reconstructed one.
+
+---
+
+## Q12: What is the threshold for the Noah's Ark clause?
+
+The HTML5 spec's "Noah's Ark" clause limits duplicate formatting elements. The spec says:
+
+> "If there are already three elements in the list of active formatting elements after the last marker, if any, or anywhere in the list if there is no marker, that have the same tag name, namespace, and attributes as element, then remove the earliest such element from the list."
+
+So the threshold is **3** - if adding a 4th identical element, remove the oldest one.
+
+Is this threshold (3) fixed per the spec, or should it be configurable for any reason?
+
+**A12:** No, it should not be configurable. The threshold of 3 is fixed per the HTML5 specification.
+
+---
+
+## Q13: How should attribute equality be determined for Noah's Ark?
+
+The Noah's Ark clause requires determining if two elements have "the same attributes." This means comparing:
+- Same set of attribute names
+- Same values for each attribute
+
+Questions about the comparison:
+
+1. **Case sensitivity** - Should attribute names be compared case-insensitively (standard for HTML)?
+2. **Value comparison** - Exact string match, or normalized (trimmed whitespace, etc.)?
+3. **Order independence** - `class="a" id="b"` equals `id="b" class="a"`?
+
+What are the requirements for attribute equality comparison?
+
+**A13:** All three considerations apply:
+- **Case insensitive** - Attribute names compared case-insensitively (HTML standard)
+- **Exact value match** - Values compared as exact strings
+- **Order independent** - `class="a" id="b"` equals `id="b" class="a"`
+- **Note:** Duplicate attributes are ignored per HTML parsing rules; only the first occurrence of an attribute name is recognized.
+
+---
+
+## Q14: Where should the Noah's Ark check be performed?
+
+The Noah's Ark clause triggers when pushing a formatting element onto the active formatting elements list. Currently this happens via:
+- `WP_HTML_Active_Formatting_Elements::push()`
+
+The check needs to:
+1. Look at existing entries (after last marker, or entire list if no marker)
+2. Find elements with same tag name, namespace, and attributes
+3. If 3 already exist, remove the earliest one before adding the new one
+
+Should the Noah's Ark logic be:
+
+1. **Inside `push()` method** - The list class handles it internally
+2. **In the processor before calling `push()`** - Logic lives in `WP_HTML_Processor`
+3. **New dedicated method** - e.g., `push_with_noahs_ark_check()` or similar
+
+Where should this logic live?
+
+**A14:** To be determined during implementation. Evaluate the tradeoffs of each approach against the existing architecture and choose the most appropriate location.
+
+---
+
+## Q15: Are there specific html5lib tests that target these features?
+
+The previous iteration identified 29 tests blocked by "Cannot reconstruct active formatting elements when advancing and rewinding is required."
+
+For this iteration:
+- Are there additional tests currently skipped that specifically require attribute handling?
+- Are there tests that exercise the Noah's Ark clause?
+
+Should we identify these tests upfront to use as success criteria, or discover them as we implement?
+
+**A15:** Identify them upfront. Research should include scanning the html5lib test suite and current skip reasons to find tests that specifically require attribute handling and/or Noah's Ark clause support. These will serve as success criteria.
+
+---
+
+## Q16: Success criteria for this iteration?
+
+Building on the previous iteration's criteria (no regressions, incremental progress acceptable), what defines success for this iteration?
+
+1. **Attribute handling complete** - Reconstructed elements have correct attributes accessible via `get_attribute()`
+2. **Noah's Ark implemented** - Duplicate limiting works per spec
+3. **Test improvements** - Specific number of previously-skipped tests now pass
+4. **All of the above**
+
+What are the success criteria?
+
+**A16:** All of the above (option 4):
+1. Attribute handling complete - Reconstructed elements have correct attributes accessible via `get_attribute()`
+2. Noah's Ark implemented - Duplicate limiting works per spec (threshold of 3)
+3. Test improvements - Previously-skipped tests that require these features now pass
+4. No regressions - All currently passing tests continue to pass
+
+---
+
+**Requirements clarification complete.** Proceeding to research phase.
+
+
+

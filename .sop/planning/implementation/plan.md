@@ -1,301 +1,754 @@
-# Implementation Plan: Reconstruct Active Formatting Elements
+# Implementation Plan: Attribute Handling and Noah's Ark Clause
 
 ## Checklist
 
-- [ ] Step 1: Add index-based access methods to WP_HTML_Active_Formatting_Elements
-- [ ] Step 2: Write unit tests for the reconstruct algorithm
-- [ ] Step 3: Implement the REWIND phase
-- [ ] Step 4: Implement element creation for formatting tokens
-- [ ] Step 5: Implement the ADVANCE phase and complete the algorithm
-- [ ] Step 6: Run html5lib tests and fix edge cases
-- [ ] Step 7: Final validation and cleanup
+- [ ] Step 1: Add `$attributes` property to WP_HTML_Token
+- [ ] Step 2: Add attribute capture helper to WP_HTML_Processor
+- [ ] Step 3: Capture attributes when pushing formatting elements
+- [ ] Step 4: Clone attributes during reconstruction
+- [ ] Step 5: Implement virtual attribute access in get_attribute()
+- [ ] Step 6: Implement virtual attribute access in get_attribute_names_with_prefix()
+- [ ] Step 7: Write unit tests for attribute handling
+- [ ] Step 8: Add element identity comparison helpers
+- [ ] Step 9: Implement Noah's Ark clause in push()
+- [ ] Step 10: Write unit tests for Noah's Ark
+- [ ] Step 11: Remove Noah's Ark skip from html5lib test file
+- [ ] Step 12: Run html5lib tests and validate
+- [ ] Step 13: Final cleanup and validation
 
 ---
 
-## Step 1: Add index-based access methods to WP_HTML_Active_Formatting_Elements
+## Step 1: Add `$attributes` property to WP_HTML_Token
 
-**Objective:** Extend the active formatting elements class with methods needed for index-based traversal and replacement.
+**Objective:** Extend the token class to store attributes for active formatting elements.
 
 **Implementation guidance:**
 
-Add three new methods to `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php`:
+Edit `src/wp-includes/html-api/class-wp-html-token.php`:
 
-1. `get_at( int $index ): ?WP_HTML_Token` - Returns the entry at a specific index
-2. `replace_at( int $index, WP_HTML_Token $token ): bool` - Replaces entry at index
-3. `index_of( WP_HTML_Token $token ): ?int` - Finds index of a token by bookmark name
+1. Add new public property after `$on_destroy`:
 
-These methods provide clean access to the internal `$stack` array without exposing it directly.
-
-**Test requirements:**
-
-Create tests in a new file or add to existing active formatting elements tests:
-- Test `get_at()` returns correct element at each position
-- Test `get_at()` returns null for out-of-bounds index
-- Test `replace_at()` successfully replaces an entry
-- Test `replace_at()` returns false for invalid index
-- Test `index_of()` finds correct index
-- Test `index_of()` returns null for non-existent token
-
-**Integration with previous work:** N/A - this is the first step.
-
-**Demo:** After this step, you can demonstrate:
 ```php
-$afe = new WP_HTML_Active_Formatting_Elements();
-$token1 = new WP_HTML_Token( 'b1', 'B', false );
-$token2 = new WP_HTML_Token( 'b2', 'I', false );
-$afe->push( $token1 );
-$afe->push( $token2 );
-
-// Demonstrate index access
-assert( $afe->get_at( 0 )->node_name === 'B' );
-assert( $afe->get_at( 1 )->node_name === 'I' );
-assert( $afe->index_of( $token2 ) === 1 );
-
-// Demonstrate replacement
-$token3 = new WP_HTML_Token( 'b3', 'STRONG', false );
-$afe->replace_at( 0, $token3 );
-assert( $afe->get_at( 0 )->node_name === 'STRONG' );
+/**
+ * Attributes associated with this token.
+ *
+ * For formatting elements in the active formatting elements list,
+ * this stores the attributes as they were when the element was created.
+ * Used for reconstruction and Noah's Ark duplicate detection.
+ *
+ * Keys are lowercase attribute names, values are decoded strings
+ * or `true` for boolean attributes.
+ *
+ * @since 6.8.0
+ *
+ * @var array<string, string|true>|null
+ */
+public $attributes = null;
 ```
 
----
+**Test requirements:** No tests yet - this is infrastructure.
 
-## Step 2: Write unit tests for the reconstruct algorithm
-
-**Objective:** Create failing tests that define the expected behavior of the reconstruct algorithm before implementing it.
-
-**Implementation guidance:**
-
-Create `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php` with tests for:
-
-1. **Single formatting element reconstruction**
-   - Input: `<p><b>Bold<p>More`
-   - Verify: Second `<p>` has `<b>` in breadcrumbs
-
-2. **Multiple nested formatting elements**
-   - Input: `<p><b><i>Text<p>More`
-   - Verify: Second `<p>` has both `<b>` and `<i>` in breadcrumbs (in correct order)
-
-3. **Marker stops reconstruction**
-   - Input with table cell (which inserts marker)
-   - Verify: Formatting before marker is not reconstructed after it
-
-4. **Element already in stack (no reconstruction needed)**
-   - Input: `<p><b>Text</b>More`
-   - Verify: No reconstruction occurs, breadcrumbs are correct
-
-5. **Empty list (no reconstruction needed)**
-   - Input: `<p>Plain text`
-   - Verify: No reconstruction occurs
-
-**Test requirements:** Tests should initially fail (red phase of TDD), then pass after Steps 3-5.
-
-**Integration with previous work:** Uses the methods from Step 1.
-
-**Demo:** After this step, you can run:
-```bash
-WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api --filter Reconstruct
-```
-Tests will fail, demonstrating the expected behavior is not yet implemented.
-
----
-
-## Step 3: Implement the REWIND phase
-
-**Objective:** Implement the backwards traversal that finds where reconstruction should start.
-
-**Implementation guidance:**
-
-In `src/wp-includes/html-api/class-wp-html-processor.php`, modify `reconstruct_active_formatting_elements()`:
-
-1. Keep existing early-return checks (empty list, last entry is marker/in stack)
-2. After those checks, instead of calling `bail()`:
-   - Initialize `$entry_index` to `count() - 1`
-   - Loop backwards while `$entry_index > 0`:
-     - Decrement index
-     - Get entry at that index
-     - If entry is marker OR in stack of open elements, increment index and break
-3. Store the final `$entry_index` as the starting point for the ADVANCE phase
-4. For now, add a temporary `bail()` before the ADVANCE phase with message indicating rewind is complete
-
-**Test requirements:**
-
-Add a test that verifies rewind finds correct starting point:
-- Mock or inspect internal state to verify correct index is found
-- Test with various configurations of markers and stack elements
-
-**Integration with previous work:** Uses `get_at()` from Step 1.
-
-**Demo:** After this step:
-- The algorithm no longer bails immediately
-- It correctly identifies where to start reconstruction
-- A new, more specific bail message appears: "REWIND complete, ADVANCE not yet implemented"
-
----
-
-## Step 4: Implement element creation for formatting tokens
-
-**Objective:** Create the helper method that produces new element tokens for reconstructed formatting elements.
-
-**Implementation guidance:**
-
-Add new private method `create_element_for_formatting_token( WP_HTML_Token $entry ): WP_HTML_Token`:
-
-1. Generate a new bookmark name using `$this->bookmark_token()`
-2. Create a bookmark span pointing to current token's position (zero-length span)
-3. Create new `WP_HTML_Token` with:
-   - The new bookmark name
-   - Same `node_name` as the entry
-   - `has_self_closing_flag = false`
-4. Set namespace to 'html' (formatting elements are always HTML)
-5. Return the new token
-
-This follows the pattern used in `insert_virtual_node()`.
-
-**Test requirements:**
-
-Test the helper method:
-- Verify created token has correct node_name
-- Verify created token has a valid bookmark
-- Verify created token has html namespace
-- Verify multiple calls create distinct bookmarks
-
-**Integration with previous work:** Will be called by the ADVANCE phase in Step 5.
-
-**Demo:** After this step, you can demonstrate element creation:
-```php
-// Inside processor context
-$entry = new WP_HTML_Token( 'orig', 'B', false );
-$new_element = $this->create_element_for_formatting_token( $entry );
-assert( $new_element->node_name === 'B' );
-assert( $new_element->bookmark_name !== 'orig' );
-assert( $new_element->namespace === 'html' );
-```
-
----
-
-## Step 5: Implement the ADVANCE phase and complete the algorithm
-
-**Objective:** Complete the reconstruct algorithm by implementing the forward traversal that creates and inserts elements.
-
-**Implementation guidance:**
-
-Continue in `reconstruct_active_formatting_elements()` after the REWIND phase:
-
-1. Remove the temporary bail from Step 3
-2. Loop from `$entry_index` to `count() - 1`:
-   - Get entry at current index using `get_at()`
-   - Call `create_element_for_formatting_token()` to create new element
-   - Call `insert_html_element()` to push onto stack of open elements
-   - Call `replace_at()` to update the active formatting elements list
-   - Increment index
-3. Return `true` to indicate reconstruction occurred
-
-**Test requirements:**
-
-The tests from Step 2 should now pass:
-- Single element reconstruction
-- Multiple nested elements
-- Marker boundary respected
-- Correct breadcrumbs after reconstruction
-
-Run full test suite to check for regressions:
-```bash
-WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api
-```
-
-**Integration with previous work:**
-- Uses `get_at()`, `replace_at()` from Step 1
-- Uses REWIND logic from Step 3
-- Uses `create_element_for_formatting_token()` from Step 4
+**Integration with previous work:** Builds on existing WP_HTML_Token class.
 
 **Demo:** After this step:
 ```php
-$processor = WP_HTML_Processor::create_fragment( '<p><b>Bold<p>More' );
-$processor->next_tag( 'P' );
+$token = new WP_HTML_Token( 'bookmark', 'B', false );
+$token->attributes = array( 'class' => 'bold' );
+assert( $token->attributes['class'] === 'bold' );
+```
+
+---
+
+## Step 2: Add attribute capture helper to WP_HTML_Processor
+
+**Objective:** Create a method to capture all attributes from the current token.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-processor.php`:
+
+Add new private method (near other helper methods):
+
+```php
+/**
+ * Captures all attributes from the current token as an array.
+ *
+ * Returns an associative array with lowercase attribute names as keys
+ * and decoded attribute values as values. Boolean attributes have
+ * the value `true`.
+ *
+ * @since 6.8.0
+ *
+ * @return array<string, string|true> Attribute name-value pairs.
+ */
+private function get_current_token_attributes(): array {
+    $attributes = array();
+    $names = $this->get_attribute_names_with_prefix( '' );
+
+    if ( null === $names ) {
+        return $attributes;
+    }
+
+    foreach ( $names as $name ) {
+        $attributes[ $name ] = $this->get_attribute( $name );
+    }
+
+    return $attributes;
+}
+```
+
+**Test requirements:** Will be tested indirectly through Step 7.
+
+**Integration with previous work:** Uses existing `get_attribute_names_with_prefix()` and `get_attribute()`.
+
+**Demo:** After this step, the method exists but isn't called yet.
+
+---
+
+## Step 3: Capture attributes when pushing formatting elements
+
+**Objective:** Store attributes on tokens before pushing to active formatting elements list.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-processor.php`:
+
+Find all three locations where formatting elements are pushed (search for `active_formatting_elements->push`):
+
+1. Line ~2769 (for `<a>` tags)
+2. Line ~2790 (for `b`, `big`, `code`, `em`, `font`, `i`, `s`, `small`, `strike`, `strong`, `tt`, `u`)
+3. Line ~2806 (for `<nobr>`)
+
+Update each location from:
+```php
+$this->state->active_formatting_elements->push( $this->state->current_token );
+```
+
+To:
+```php
+$this->state->current_token->attributes = $this->get_current_token_attributes();
+$this->state->active_formatting_elements->push( $this->state->current_token );
+```
+
+**Test requirements:** Will be tested in Step 7.
+
+**Integration with previous work:** Uses method from Step 2.
+
+**Demo:** After this step:
+```php
+$processor = WP_HTML_Processor::create_fragment( '<b class="bold">text' );
 $processor->next_tag( 'B' );
-$processor->next_tag( 'P' );
-// Breadcrumbs now include reconstructed B
-assert( $processor->get_breadcrumbs() === array( 'HTML', 'BODY', 'P', 'B' ) );
+// Internally, the token now has attributes stored
 ```
 
 ---
 
-## Step 6: Run html5lib tests and fix edge cases
+## Step 4: Clone attributes during reconstruction
 
-**Objective:** Validate implementation against the html5lib test suite and fix any discovered issues.
+**Objective:** Copy stored attributes to newly created tokens during reconstruction.
 
 **Implementation guidance:**
 
-1. Run the html5lib test suite:
-   ```bash
-   ./vendor/bin/phpunit -c tests/phpunit/tests/html-api/phpunit.xml
-   ```
+Edit `src/wp-includes/html-api/class-wp-html-processor.php`:
 
-2. Compare results to baseline:
-   - Previously: 1087 passing, 421 skipped
-   - Target: 29 fewer skipped tests (those with "Cannot reconstruct" message)
+Modify `create_element_for_formatting_token()`:
 
-3. For any remaining failures:
-   - Identify the specific test case
-   - Analyze expected vs actual output
-   - Determine if it's a reconstruction issue or unrelated
-   - Fix or document as out of scope
+1. **Remove** the bail check for attributes (the `if ( $entry_bookmark->length > $min_length )` block)
 
-4. Common edge cases to watch for:
-   - Reconstruction at document boundaries
-   - Interaction with specific insertion modes
-   - Multiple consecutive reconstructions
+2. **Add** attribute cloning before returning the new token:
 
-**Test requirements:**
+```php
+/*
+ * Clone attributes from the original entry.
+ * This ensures reconstructed elements have the same attributes
+ * as the token for which they were created.
+ */
+if ( null !== $entry->attributes ) {
+    $new_token->attributes = $entry->attributes;
+}
 
-- All previously passing tests still pass (no regressions)
-- At least some of the 29 reconstruction-related tests now pass
-- Any remaining skips have clear, documented reasons
-
-**Integration with previous work:** Validates all previous steps working together.
-
-**Demo:** After this step, show test results:
+return $new_token;
 ```
-Before: Tests: 1508, Assertions: 1087, Skipped: 421
-After:  Tests: 1508, Assertions: 1116, Skipped: 392  (example improvement)
+
+**Test requirements:** Will be tested in Step 7.
+
+**Integration with previous work:** Modifies existing reconstruction method from Iteration 1.
+
+**Demo:** After this step, reconstructed elements have attributes, but they're not yet accessible via `get_attribute()`.
+
+---
+
+## Step 5: Implement virtual attribute access in get_attribute()
+
+**Objective:** Make reconstructed elements expose their attributes via the standard API.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-processor.php`:
+
+The processor already overrides `get_attribute()`. Add virtual attribute check at the beginning:
+
+```php
+public function get_attribute( $name ) {
+    /*
+     * For reconstructed elements with virtual attributes,
+     * return the stored attribute value.
+     */
+    if (
+        isset( $this->state->current_token ) &&
+        null !== $this->state->current_token->attributes
+    ) {
+        $comparable = strtolower( $name );
+        if ( array_key_exists( $comparable, $this->state->current_token->attributes ) ) {
+            return $this->state->current_token->attributes[ $comparable ];
+        }
+        // Virtual element has no other attributes beyond what's stored
+        return null;
+    }
+
+    // Standard attribute lookup from source HTML
+    return parent::get_attribute( $name );
+}
+```
+
+**Note:** If the processor doesn't already override `get_attribute()`, you'll need to add this override.
+
+**Test requirements:** Will be tested in Step 7.
+
+**Integration with previous work:** Extends existing attribute access.
+
+**Demo:** After this step:
+```php
+$processor = WP_HTML_Processor::create_fragment( '<p><b class="bold">text<p>more' );
+// Navigate to reconstructed B in second paragraph
+// ...
+$processor->get_attribute( 'class' ); // Returns 'bold'
 ```
 
 ---
 
-## Step 7: Final validation and cleanup
+## Step 6: Implement virtual attribute access in get_attribute_names_with_prefix()
 
-**Objective:** Ensure code quality, documentation, and prepare for review.
+**Objective:** Make reconstructed elements list their attribute names via the standard API.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-processor.php`:
+
+Override or modify `get_attribute_names_with_prefix()`:
+
+```php
+public function get_attribute_names_with_prefix( $prefix ): ?array {
+    /*
+     * For reconstructed elements with virtual attributes,
+     * return matching attribute names from stored attributes.
+     */
+    if (
+        isset( $this->state->current_token ) &&
+        null !== $this->state->current_token->attributes
+    ) {
+        if ( $this->is_tag_closer() ) {
+            return null;
+        }
+
+        $comparable = strtolower( $prefix );
+        $matches = array();
+
+        foreach ( array_keys( $this->state->current_token->attributes ) as $name ) {
+            if ( str_starts_with( $name, $comparable ) ) {
+                $matches[] = $name;
+            }
+        }
+
+        return $matches;
+    }
+
+    return parent::get_attribute_names_with_prefix( $prefix );
+}
+```
+
+**Test requirements:** Will be tested in Step 7.
+
+**Integration with previous work:** Extends existing attribute name access.
+
+**Demo:** After this step:
+```php
+$processor->get_attribute_names_with_prefix( '' ); // Returns ['class'] for reconstructed element
+```
+
+---
+
+## Step 7: Write unit tests for attribute handling
+
+**Objective:** Validate attribute capture, cloning, and access for reconstructed elements.
+
+**Implementation guidance:**
+
+Update `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php`:
+
+Add tests:
+
+```php
+/**
+ * Tests that reconstructed formatting elements preserve their attributes.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_reconstructed_element_preserves_single_attribute() {
+    $processor = WP_HTML_Processor::create_fragment( '<p><b class="bold">text<p>more' );
+
+    // Navigate past first paragraph and its contents
+    $this->assertTrue( $processor->next_tag( 'P' ) );
+    $this->assertTrue( $processor->next_tag( 'B' ) );
+
+    // Navigate to second paragraph (triggers reconstruction)
+    $this->assertTrue( $processor->next_tag( 'P' ) );
+
+    // The reconstructed B should have the class attribute
+    $this->assertSame(
+        array( 'HTML', 'BODY', 'P', 'B' ),
+        $processor->get_breadcrumbs()
+    );
+
+    // Find the reconstructed B and check its attribute
+    $this->assertTrue( $processor->next_tag( 'B' ) );
+    $this->assertSame( 'bold', $processor->get_attribute( 'class' ) );
+}
+
+/**
+ * Tests that reconstructed elements preserve multiple attributes.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_reconstructed_element_preserves_multiple_attributes() {
+    $processor = WP_HTML_Processor::create_fragment(
+        '<p><font size="4" color="red">text<p>more'
+    );
+
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'FONT' );
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'FONT' );
+
+    $this->assertSame( '4', $processor->get_attribute( 'size' ) );
+    $this->assertSame( 'red', $processor->get_attribute( 'color' ) );
+}
+
+/**
+ * Tests that get_attribute_names_with_prefix works for reconstructed elements.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_reconstructed_element_lists_attribute_names() {
+    $processor = WP_HTML_Processor::create_fragment(
+        '<p><b id="x" class="y">text<p>more'
+    );
+
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+
+    $names = $processor->get_attribute_names_with_prefix( '' );
+    $this->assertContains( 'id', $names );
+    $this->assertContains( 'class', $names );
+}
+
+/**
+ * Tests that reconstructed elements without attributes work correctly.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_reconstructed_element_without_attributes() {
+    $processor = WP_HTML_Processor::create_fragment( '<p><b>text<p>more' );
+
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+
+    $this->assertNull( $processor->get_attribute( 'class' ) );
+    $this->assertSame( array(), $processor->get_attribute_names_with_prefix( '' ) );
+}
+```
+
+**Test requirements:** Run with `WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --filter Reconstruct`
+
+**Integration with previous work:** Extends existing reconstruct tests.
+
+**Demo:** After this step:
+```bash
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --filter Reconstruct
+# All attribute-related tests pass
+```
+
+---
+
+## Step 8: Add element identity comparison helpers
+
+**Objective:** Create methods to compare elements for Noah's Ark duplicate detection.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php`:
+
+Add two new private static methods:
+
+```php
+/**
+ * Determines if two tokens represent the same formatting element.
+ *
+ * Two elements are considered identical if they have the same:
+ * - Tag name
+ * - Namespace
+ * - Attributes (names, namespaces, and values)
+ *
+ * @since 6.8.0
+ *
+ * @param WP_HTML_Token $a First token.
+ * @param WP_HTML_Token $b Second token.
+ * @return bool Whether the tokens represent identical formatting elements.
+ */
+private static function elements_have_same_identity( WP_HTML_Token $a, WP_HTML_Token $b ): bool {
+    // Tag name must match.
+    if ( $a->node_name !== $b->node_name ) {
+        return false;
+    }
+
+    // Namespace must match.
+    if ( $a->namespace !== $b->namespace ) {
+        return false;
+    }
+
+    // Attributes must match.
+    return self::attributes_are_equal(
+        $a->attributes ?? array(),
+        $b->attributes ?? array()
+    );
+}
+
+/**
+ * Determines if two attribute arrays are equal.
+ *
+ * Comparison is case-insensitive for names (keys are already lowercase),
+ * exact for values, and order-independent.
+ *
+ * @since 6.8.0
+ *
+ * @param array $a First attributes array.
+ * @param array $b Second attributes array.
+ * @return bool Whether the attributes are equal.
+ */
+private static function attributes_are_equal( array $a, array $b ): bool {
+    // Different count means different attributes.
+    if ( count( $a ) !== count( $b ) ) {
+        return false;
+    }
+
+    // Empty arrays are equal.
+    if ( 0 === count( $a ) ) {
+        return true;
+    }
+
+    // Compare each attribute (keys already lowercase from capture).
+    foreach ( $a as $name => $value ) {
+        if ( ! array_key_exists( $name, $b ) ) {
+            return false;
+        }
+        if ( $value !== $b[ $name ] ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+**Test requirements:** Will be tested indirectly via Step 10.
+
+**Integration with previous work:** New methods in existing class.
+
+**Demo:** After this step, comparison helpers exist but aren't used yet.
+
+---
+
+## Step 9: Implement Noah's Ark clause in push()
+
+**Objective:** Limit duplicate formatting elements to 3 when pushing to the list.
+
+**Implementation guidance:**
+
+Edit `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php`:
+
+Replace the `push()` method:
+
+```php
+/**
+ * Pushes a node onto the stack of active formatting elements.
+ *
+ * @since 6.4.0
+ *
+ * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
+ *
+ * @param WP_HTML_Token $token Push this node onto the stack.
+ */
+public function push( WP_HTML_Token $token ) {
+    /*
+     * Noah's Ark clause: Limit to 3 identical formatting elements.
+     *
+     * > If there are already three elements in the list of active formatting
+     * > elements after the last marker, if any, or anywhere in the list if
+     * > there are no markers, that have the same tag name, namespace, and
+     * > attributes as element, then remove the earliest such element from
+     * > the list of active formatting elements.
+     *
+     * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
+     */
+    $dominated_count = 0;
+    $earliest_match_index = null;
+
+    // Walk backwards, counting matches until we hit a marker.
+    for ( $i = count( $this->stack ) - 1; $i >= 0; $i-- ) {
+        $entry = $this->stack[ $i ];
+
+        // Markers stop the search.
+        if ( 'marker' === $entry->node_name ) {
+            break;
+        }
+
+        // Check if this entry matches the token being pushed.
+        if ( self::elements_have_same_identity( $token, $entry ) ) {
+            ++$dominated_count;
+            $earliest_match_index = $i;
+        }
+    }
+
+    // If 3 identical elements exist, remove the earliest.
+    if ( $dominated_count >= 3 && null !== $earliest_match_index ) {
+        array_splice( $this->stack, $earliest_match_index, 1 );
+    }
+
+    // Add element to the list of active formatting elements.
+    $this->stack[] = $token;
+}
+```
+
+**Test requirements:** Will be tested in Step 10.
+
+**Integration with previous work:** Uses helpers from Step 8, replaces existing push() with @todo.
+
+**Demo:** After this step, Noah's Ark is active.
+
+---
+
+## Step 10: Write unit tests for Noah's Ark
+
+**Objective:** Validate Noah's Ark duplicate limiting behavior.
+
+**Implementation guidance:**
+
+Add to or create `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php`:
+
+```php
+/**
+ * Tests Noah's Ark clause limits identical elements to 3.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_noahs_ark_limits_identical_elements_to_three() {
+    // Four identical <b> tags, only 3 should be reconstructed
+    $processor = WP_HTML_Processor::create_fragment( '<p><b><b><b><b><p>X' );
+
+    // Navigate past first paragraph with 4 B elements
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+
+    // Navigate to second paragraph
+    $processor->next_tag( 'P' );
+
+    // Breadcrumbs should show only 3 B elements reconstructed
+    $breadcrumbs = $processor->get_breadcrumbs();
+    $b_count = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+    $this->assertSame( 3, $b_count, 'Noah\'s Ark should limit to 3 identical formatting elements' );
+}
+
+/**
+ * Tests that elements with different attributes are not considered identical.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_noahs_ark_different_attributes_are_different_elements() {
+    // Four <b> elements with different classes - all should be reconstructed
+    $processor = WP_HTML_Processor::create_fragment(
+        '<p><b class="a"><b class="b"><b class="c"><b class="d"><p>X'
+    );
+
+    $processor->next_tag( 'P' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'B' );
+    $processor->next_tag( 'P' );
+
+    // All 4 should be reconstructed since they have different attributes
+    $breadcrumbs = $processor->get_breadcrumbs();
+    $b_count = count( array_filter( $breadcrumbs, fn( $tag ) => 'B' === $tag ) );
+
+    $this->assertSame( 4, $b_count, 'Elements with different attributes should all be reconstructed' );
+}
+
+/**
+ * Tests that Noah's Ark respects markers.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_noahs_ark_respects_markers() {
+    // Markers (from table cells) reset the duplicate count
+    // This test may need adjustment based on current table support
+}
+
+/**
+ * Tests element identity comparison with various attribute combinations.
+ *
+ * @ticket [ticket_number]
+ */
+public function test_noahs_ark_attribute_comparison() {
+    // Same tag, same attributes (same order) - should match
+    // Same tag, same attributes (different order) - should match
+    // Same tag, different attribute values - should not match
+    // Same tag, different attribute count - should not match
+}
+```
+
+**Test requirements:** Run with `WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --filter noahs_ark`
+
+**Integration with previous work:** Tests Noah's Ark implementation from Step 9.
+
+**Demo:** After this step:
+```bash
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --filter noahs_ark
+# All Noah's Ark tests pass
+```
+
+---
+
+## Step 11: Remove Noah's Ark skip from html5lib test file
+
+**Objective:** Enable the Noah's Ark test case in the html5lib test suite.
+
+**Implementation guidance:**
+
+Edit `tests/phpunit/tests/html-api/wpHtmlProcessorHtml5lib.php`:
+
+Remove this line from the `SKIP_TESTS` array:
+
+```php
+'adoption01/line0318' => 'Unimplemented: Noah\'s Ark clause to limit duplicate formatting elements is not implemented.',
+```
+
+**Test requirements:** The test should now pass instead of being skipped.
+
+**Integration with previous work:** Enables integration test.
+
+**Demo:** After this step:
+```bash
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --filter "adoption01/line0318"
+# Test passes instead of being skipped
+```
+
+---
+
+## Step 12: Run html5lib tests and validate
+
+**Objective:** Verify all target tests pass and no regressions occur.
+
+**Implementation guidance:**
+
+Run the full test suite:
+
+```bash
+# Full html-api test suite
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api
+
+# html5lib tests specifically
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api-html5lib-tests
+```
+
+**Expected results:**
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Passing tests | 1105 | 1114+ |
+| Skipped tests | 402 | ~393 |
+
+**Target tests that should now pass:**
+
+1. tests23/line0001
+2. tests23/line0041
+3. tests23/line0069
+4. tests23/line0101
+5. tests26/line0001
+6. tests26/line0263
+7. adoption01/line0159
+8. adoption01/line0318 (Noah's Ark)
+9. tricky01/line0078
+
+If any tests fail:
+1. Identify the specific test case
+2. Analyze expected vs actual output
+3. Debug and fix the implementation
+4. Re-run tests
+
+**Test requirements:** All tests pass, no regressions.
+
+**Integration with previous work:** Validates entire implementation.
+
+**Demo:** After this step:
+```
+Tests: 1507, Assertions: 1114, Skipped: 393
+(or similar improvement)
+```
+
+---
+
+## Step 13: Final cleanup and validation
+
+**Objective:** Ensure code quality and prepare for review.
 
 **Implementation guidance:**
 
 1. **Code review checklist:**
-   - All new methods have proper PHPDoc comments
-   - Code follows WordPress PHP coding standards
-   - No debug code or temporary comments remain
+   - [ ] All new methods have proper PHPDoc comments with `@since 6.8.0`
+   - [ ] Code follows WordPress PHP coding standards
+   - [ ] No debug code or temporary comments remain
+   - [ ] Remove any `@todo` comments that are now resolved
 
-2. **Documentation:**
-   - Update any relevant inline documentation
-   - Ensure `@since` tags are correct for new methods
+2. **Run coding standards check:**
+   ```bash
+   composer phpcs
+   ```
 
 3. **Final test runs:**
    ```bash
    # Full html-api test suite
    WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api
 
-   # html5lib tests specifically
-   ./vendor/bin/phpunit -c tests/phpunit/tests/html-api/phpunit.xml
+   # html5lib tests
+   WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api-html5lib-tests
    ```
 
-4. **Commit preparation:**
-   - Review all changed files
-   - Ensure changes are minimal and focused
-   - Prepare clear commit message
+4. **Review changed files:**
+   - `src/wp-includes/html-api/class-wp-html-token.php`
+   - `src/wp-includes/html-api/class-wp-html-processor.php`
+   - `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php`
+   - `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php`
+   - `tests/phpunit/tests/html-api/wpHtmlProcessorHtml5lib.php`
 
-**Test requirements:**
-
-- All tests pass
-- No PHP warnings or notices
-- Code coverage maintained or improved
+**Test requirements:** All tests pass, no PHP warnings or notices.
 
 **Integration with previous work:** Final validation of entire implementation.
 
@@ -308,12 +761,18 @@ After:  Tests: 1508, Assertions: 1116, Skipped: 392  (example improvement)
 
 ## Summary
 
-| Step | Description | Key Files | Tests |
-|------|-------------|-----------|-------|
-| 1 | Index-based access methods | class-wp-html-active-formatting-elements.php | Unit tests for new methods |
-| 2 | Write reconstruct tests | wpHtmlProcessorReconstructActiveFormattingElements.php | Failing tests (TDD red) |
-| 3 | REWIND phase | class-wp-html-processor.php | Partial algorithm working |
-| 4 | Element creation helper | class-wp-html-processor.php | Helper method tests |
-| 5 | ADVANCE phase | class-wp-html-processor.php | All unit tests pass (TDD green) |
-| 6 | html5lib validation | N/A | Integration test improvements |
-| 7 | Cleanup | All modified files | Final validation |
+| Step | Description | Key Files |
+|------|-------------|-----------|
+| 1 | Add attributes property to token | class-wp-html-token.php |
+| 2 | Add attribute capture helper | class-wp-html-processor.php |
+| 3 | Capture attributes on push | class-wp-html-processor.php |
+| 4 | Clone attributes on reconstruct | class-wp-html-processor.php |
+| 5 | Virtual get_attribute() | class-wp-html-processor.php |
+| 6 | Virtual get_attribute_names_with_prefix() | class-wp-html-processor.php |
+| 7 | Unit tests for attributes | wpHtmlProcessorReconstructActiveFormattingElements.php |
+| 8 | Element comparison helpers | class-wp-html-active-formatting-elements.php |
+| 9 | Noah's Ark in push() | class-wp-html-active-formatting-elements.php |
+| 10 | Unit tests for Noah's Ark | wpHtmlProcessorReconstructActiveFormattingElements.php |
+| 11 | Remove Noah's Ark skip | wpHtmlProcessorHtml5lib.php |
+| 12 | html5lib validation | N/A |
+| 13 | Final cleanup | All modified files |

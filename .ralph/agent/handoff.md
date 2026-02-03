@@ -1,11 +1,11 @@
 # Session Handoff
 
-_Generated: 2026-02-02 22:52:31 UTC_
+_Generated: 2026-02-02 23:00:25 UTC_
 
 ## Git Context
 
 - **Branch:** `html-support-2`
-- **HEAD:** 7553926b61: chore: auto-commit before merge (loop primary)
+- **HEAD:** 7518fefb7f: chore: auto-commit before merge (loop primary)
 
 ## Tasks
 
@@ -21,6 +21,7 @@ _Generated: 2026-02-02 22:52:31 UTC_
 
 Recently modified:
 
+- `.ralph/agent/handoff.md`
 - `.ralph/agent/scratchpad.md`
 - `.ralph/agent/summary.md`
 - `.ralph/agent/tasks.jsonl`
@@ -28,9 +29,8 @@ Recently modified:
 - `.ralph/current-events`
 - `.ralph/current-loop-id`
 - `.ralph/diagnostics/logs/ralph-2026-02-02T23-37-09.log`
-- `.ralph/events-20260202-223709.jsonl`
-- `.ralph/history.jsonl`
-- `.ralph/history.jsonl.lock`
+- `.ralph/diagnostics/logs/ralph-2026-02-02T23-57-30.log`
+- `.ralph/diagnostics/logs/ralph-2026-02-02T23-58-41.log`
 
 ## Next Session
 

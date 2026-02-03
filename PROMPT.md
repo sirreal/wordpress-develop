@@ -1,55 +1,55 @@
-# Implement Reconstruct Active Formatting Elements Algorithm
+# Implement Attribute Handling and Noah's Ark Clause
 
 ## Objective
 
-Complete the `reconstruct_active_formatting_elements()` method in `WP_HTML_Processor` to enable the HTML parser to properly handle misnested formatting elements per the HTML5 specification.
+Implement attribute handling for active formatting element reconstruction and the Noah's Ark clause in the WordPress HTML API. This enables reconstructed formatting elements to preserve their original attributes and limits duplicate formatting elements to 3 per identical tag+attribute combination.
 
 ## Key Requirements
 
-- Add index-based access methods to `WP_HTML_Active_Formatting_Elements`:
-  - `get_at(int $index): ?WP_HTML_Token`
-  - `replace_at(int $index, WP_HTML_Token $token): bool`
-  - `index_of(WP_HTML_Token $token): ?int`
+### Attribute Handling
+- Add `$attributes` property to `WP_HTML_Token` class
+- Capture all attributes when pushing formatting elements to the active formatting elements list
+- Clone attributes from original entry when reconstructing elements
+- Override `get_attribute()` to return virtual attributes for reconstructed elements
+- Override `get_attribute_names_with_prefix()` for reconstructed elements
 
-- Implement the full reconstruct algorithm with REWIND and ADVANCE phases:
-  - REWIND: Walk backwards through the list to find the starting point
-  - ADVANCE: Walk forwards creating new elements and updating the list
+### Noah's Ark Clause
+- Implement in `WP_HTML_Active_Formatting_Elements::push()` method
+- When pushing, count matching elements (same tag, namespace, attributes) after last marker
+- If 3 identical elements exist, remove the earliest before adding new one
+- Attribute comparison: case-insensitive names, exact value match, order-independent
 
-- Create helper method `create_element_for_formatting_token()` for virtual element creation
-  - Follow the pattern used in `insert_virtual_node()`
-  - Use `bookmark_token()` to generate virtual bookmarks
+## Files to Modify
 
-- Tag-name-only reconstruction initially (attribute cloning is future work)
+1. `src/wp-includes/html-api/class-wp-html-token.php` - Add `$attributes` property
+2. `src/wp-includes/html-api/class-wp-html-processor.php` - Attribute capture, cloning, virtual access
+3. `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php` - Noah's Ark logic
+4. `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php` - Unit tests
+5. `tests/phpunit/tests/html-api/wpHtmlProcessorHtml5lib.php` - Remove Noah's Ark skip
 
 ## Acceptance Criteria
 
-- [ ] All 1087 currently passing html-api tests continue to pass (no regressions)
-- [ ] Tests previously skipped with "Cannot reconstruct active formatting elements when advancing and rewinding is required" now pass
-- [ ] New unit tests cover the reconstruct algorithm behavior
-- [ ] Code follows WordPress PHP coding standards
-- [ ] All new methods have proper PHPDoc comments with `@since` tags
+- [ ] Reconstructed elements expose attributes via `get_attribute()`
+- [ ] Reconstructed elements list attributes via `get_attribute_names_with_prefix()`
+- [ ] Noah's Ark limits identical formatting elements to 3
+- [ ] All existing tests pass (no regressions)
+- [ ] 8 attribute-related html5lib tests pass
+- [ ] 1 Noah's Ark html5lib test passes (adoption01/line0318)
 
 ## Test Commands
 
 ```bash
-# Fast html-api tests
+# Run all html-api tests
 WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api
 
-# html5lib tests
-./vendor/bin/phpunit -c tests/phpunit/tests/html-api/phpunit.xml
+# Run html5lib tests
+WP_TESTS_SKIP_INSTALL=1 ./vendor/bin/phpunit --group html-api-html5lib-tests
 ```
 
-## Reference Documents
+## Detailed Design
 
-- **Detailed Design:** `.sop/planning/design/detailed-design.md`
-- **Implementation Plan:** `.sop/planning/implementation/plan.md`
-- **Research:** `.sop/planning/research/html5-spec-algorithms.md`
+See `.sop/planning/design/detailed-design.md` for complete architecture, code examples, and implementation details.
 
-## Key Files to Modify
+## Implementation Plan
 
-- `src/wp-includes/html-api/class-wp-html-active-formatting-elements.php`
-- `src/wp-includes/html-api/class-wp-html-processor.php`
-
-## Key Files to Create
-
-- `tests/phpunit/tests/html-api/wpHtmlProcessorReconstructActiveFormattingElements.php`
+See `.sop/planning/implementation/plan.md` for the 13-step checklist with detailed guidance for each step.
