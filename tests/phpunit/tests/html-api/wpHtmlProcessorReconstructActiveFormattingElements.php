@@ -192,27 +192,32 @@ class Tests_HtmlApi_WpHtmlProcessorReconstructActiveFormattingElements extends W
 	/**
 	 * Verifies that reconstruction bails when an element has attributes.
 	 *
-	 * The current implementation cannot clone attributes from the original
-	 * formatting element to the reconstructed element. It should bail rather
-	 * than produce incorrect output.
+	 * Verifies that attributes are cloned from the original formatting element
+	 * to the reconstructed element.
 	 *
 	 * @ticket 62357
 	 *
 	 * @covers WP_HTML_Processor::reconstruct_active_formatting_elements
 	 */
-	public function test_bails_when_formatting_element_has_attributes() {
+	public function test_reconstructed_element_preserves_attributes() {
 		$processor = WP_HTML_Processor::create_fragment( '<p><b class="bold">Bold<p><span target>' );
 
-		// The processor should bail when trying to reconstruct <b class="bold">.
-		$this->assertFalse(
-			$processor->next_tag( array( 'tag_name' => 'SPAN' ) ),
-			'Should have bailed due to attribute cloning limitation.'
-		);
+		// Navigate past the first paragraph.
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Failed to find first P.' );
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find original B.' );
+		$this->assertSame( 'bold', $processor->get_attribute( 'class' ), 'Original B should have class attribute.' );
 
+		// Navigate to second paragraph (triggers reconstruction).
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Failed to find second P.' );
+
+		// Navigate to the span inside the reconstructed formatting.
+		$this->assertTrue( $processor->next_tag( 'SPAN' ), 'Failed to find SPAN.' );
+
+		// Breadcrumbs should show the reconstructed B.
 		$this->assertSame(
-			WP_HTML_Processor::ERROR_UNSUPPORTED,
-			$processor->get_last_error(),
-			'Should have set unsupported error.'
+			array( 'HTML', 'BODY', 'P', 'B', 'SPAN' ),
+			$processor->get_breadcrumbs(),
+			'Breadcrumbs should include reconstructed B.'
 		);
 	}
 

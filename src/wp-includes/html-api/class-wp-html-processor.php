@@ -6012,26 +6012,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function create_element_for_formatting_token( WP_HTML_Token $entry ): WP_HTML_Token {
 		/*
-		 * Check if this entry has attributes that need to be cloned.
-		 *
-		 * The bookmark span length for a simple tag like `<b>` is 3 characters.
-		 * If the span is longer than `< + tagname + >`, there are attributes
-		 * present that this algorithm cannot currently clone. In that case,
-		 * bail out rather than producing incorrect output.
-		 *
-		 * Virtual nodes (already reconstructed) have a span length of 0,
-		 * so they pass this check.
-		 */
-		if ( isset( $entry->bookmark_name ) && isset( $this->bookmarks[ $entry->bookmark_name ] ) ) {
-			$entry_bookmark = $this->bookmarks[ $entry->bookmark_name ];
-			// Minimum length is `<` + tag name + `>` = strlen(tag_name) + 2
-			$min_length = strlen( $entry->node_name ) + 2;
-			if ( $entry_bookmark->length > $min_length ) {
-				$this->bail( 'Cannot reconstruct active formatting element with attributes.' );
-			}
-		}
-
-		/*
 		 * Create a virtual bookmark for this reconstructed element.
 		 * This follows the same pattern as insert_virtual_node().
 		 */
@@ -6050,6 +6030,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 */
 		$new_token            = new WP_HTML_Token( $bookmark_name, $entry->node_name, false );
 		$new_token->namespace = 'html';
+
+		/*
+		 * Clone attributes from the original entry.
+		 * This ensures reconstructed elements have the same attributes
+		 * as the token for which they were created.
+		 */
+		if ( null !== $entry->attributes ) {
+			$new_token->attributes = $entry->attributes;
+		}
 
 		return $new_token;
 	}
