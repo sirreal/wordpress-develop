@@ -708,7 +708,7 @@ class WP_HTML_Tag_Processor {
 	 * @since 6.2.0
 	 * @var WP_HTML_Attribute_Token[]
 	 */
-	private $attributes = array();
+	protected $attributes = array();
 
 	/**
 	 * Tracks spans of duplicate attributes on a given tag, used for removing
