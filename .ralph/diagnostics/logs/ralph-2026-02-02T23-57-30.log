@@ -1,6 +1,0 @@
-2026-02-02T22:57:30.484552Z  INFO ralph_core::event_loop: Memory injection check: enabled=true, inject=Auto, workspace_root="/Users/jonsurrell/a8c/ralph-playground/wordpress/html-support"
-2026-02-02T22:57:30.484653Z  INFO ralph_core::event_loop: Looking for memories at: "/Users/jonsurrell/a8c/ralph-playground/wordpress/html-support/.ralph/agent/memories.md" (exists: false)
-2026-02-02T22:57:30.484671Z  INFO ralph_core::event_loop: Successfully loaded 0 memories from store
-2026-02-02T22:57:30.484681Z  INFO ralph_core::event_loop: Memory store is empty - no memories to inject
-2026-02-02T22:57:30.484865Z  INFO ralph_core::event_loop: Injecting ready tasks (0 ready, 0 open, 4 closed) into prompt
-2026-02-02T22:58:39.450317Z  INFO ralph_tui::app: Ctrl+C detected, signaling main loop
