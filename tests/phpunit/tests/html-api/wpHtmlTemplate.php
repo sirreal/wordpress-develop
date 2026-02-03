@@ -44,7 +44,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	public function test_3() {
-		$template_string = '<p>Hello, </%1>, </%1>, </%2>, & </%2>!</p>';
+		$template_string = '<p>Hello, </%0>, </% 0 >, </%1>, & </%1>!</p>';
 		$replacements    = array( 'Alice', 'Bob' );
 
 		$t      = T::from( $template_string );
