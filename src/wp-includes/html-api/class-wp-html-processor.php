@@ -889,6 +889,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Captures all attributes from the current token as an array.
+	 *
+	 * Returns an associative array with lowercase attribute names as keys
+	 * and decoded attribute values as values. Boolean attributes have
+	 * the value `true`.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @return array<string, string|true> Attribute name-value pairs.
+	 */
+	private function get_current_token_attributes(): array {
+		$attributes = array();
+		$names      = $this->get_attribute_names_with_prefix( '' );
+
+		if ( null === $names ) {
+			return $attributes;
+		}
+
+		foreach ( $names as $name ) {
+			$attributes[ $name ] = $this->get_attribute( $name );
+		}
+
+		return $attributes;
+	}
+
+	/**
 	 * Indicates if the currently-matched tag matches the given breadcrumbs.
 	 *
 	 * A "*" represents a single tag wildcard, where any tag matches, but not no tags.
