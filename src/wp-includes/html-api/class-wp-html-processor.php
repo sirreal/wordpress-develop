@@ -5435,6 +5435,115 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Returns the adjusted attribute name for the currently matched tag.
+	 *
+	 * For virtual/reconstructed elements with stored attributes, returns the
+	 * stored attribute name (already lowercase). Applies foreign attribute
+	 * adjustments for SVG and MathML namespaces as needed.
+	 *
+	 * @since 6.8.0 Subclassed for the HTML Processor.
+	 *
+	 * @param string $attribute_name Attribute name to adjust.
+	 * @return string|null Adjusted attribute name, or `null` if not available.
+	 */
+	public function get_qualified_attribute_name( $attribute_name ): ?string {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * the attribute name is already lowercase. Apply foreign
+		 * attribute adjustments if needed.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			$comparable = strtolower( $attribute_name );
+			if ( ! array_key_exists( $comparable, $this->current_element->token->attributes ) ) {
+				return null;
+			}
+
+			$namespace = $this->get_namespace();
+
+			// Apply foreign attribute adjustments for MathML.
+			if ( 'math' === $namespace && 'definitionurl' === $comparable ) {
+				return 'definitionURL';
+			}
+
+			// Apply foreign attribute adjustments for SVG.
+			if ( 'svg' === $namespace ) {
+				$svg_adjusted = array(
+					'attributename'       => 'attributeName',
+					'attributetype'       => 'attributeType',
+					'basefrequency'       => 'baseFrequency',
+					'baseprofile'         => 'baseProfile',
+					'calcmode'            => 'calcMode',
+					'clippathunits'       => 'clipPathUnits',
+					'diffuseconstant'     => 'diffuseConstant',
+					'edgemode'            => 'edgeMode',
+					'filterunits'         => 'filterUnits',
+					'glyphref'            => 'glyphRef',
+					'gradienttransform'   => 'gradientTransform',
+					'gradientunits'       => 'gradientUnits',
+					'kernelmatrix'        => 'kernelMatrix',
+					'kernelunitlength'    => 'kernelUnitLength',
+					'keypoints'           => 'keyPoints',
+					'keysplines'          => 'keySplines',
+					'keytimes'            => 'keyTimes',
+					'lengthadjust'        => 'lengthAdjust',
+					'limitingconeangle'   => 'limitingConeAngle',
+					'markerheight'        => 'markerHeight',
+					'markerunits'         => 'markerUnits',
+					'markerwidth'         => 'markerWidth',
+					'maskcontentunits'    => 'maskContentUnits',
+					'maskunits'           => 'maskUnits',
+					'numoctaves'          => 'numOctaves',
+					'pathlength'          => 'pathLength',
+					'patterncontentunits' => 'patternContentUnits',
+					'patterntransform'    => 'patternTransform',
+					'patternunits'        => 'patternUnits',
+					'pointsatx'           => 'pointsAtX',
+					'pointsaty'           => 'pointsAtY',
+					'pointsatz'           => 'pointsAtZ',
+					'preservealpha'       => 'preserveAlpha',
+					'preserveaspectratio' => 'preserveAspectRatio',
+					'primitiveunits'      => 'primitiveUnits',
+					'refx'                => 'refX',
+					'refy'                => 'refY',
+					'repeatcount'         => 'repeatCount',
+					'repeatdur'           => 'repeatDur',
+					'requiredextensions'  => 'requiredExtensions',
+					'requiredfeatures'    => 'requiredFeatures',
+					'specularconstant'    => 'specularConstant',
+					'specularexponent'    => 'specularExponent',
+					'spreadmethod'        => 'spreadMethod',
+					'startoffset'         => 'startOffset',
+					'stddeviation'        => 'stdDeviation',
+					'stitchtiles'         => 'stitchTiles',
+					'surfacescale'        => 'surfaceScale',
+					'systemlanguage'      => 'systemLanguage',
+					'tablevalues'         => 'tableValues',
+					'targetx'             => 'targetX',
+					'targety'             => 'targetY',
+					'textlength'          => 'textLength',
+					'viewbox'             => 'viewBox',
+					'viewtarget'          => 'viewTarget',
+					'xchannelselector'    => 'xChannelSelector',
+					'ychannelselector'    => 'yChannelSelector',
+					'zoomandpan'          => 'zoomAndPan',
+				);
+
+				if ( isset( $svg_adjusted[ $comparable ] ) ) {
+					return $svg_adjusted[ $comparable ];
+				}
+			}
+
+			// Return the lowercase attribute name for HTML namespace.
+			return $comparable;
+		}
+
+		return $this->is_virtual() ? null : parent::get_qualified_attribute_name( $attribute_name );
+	}
+
+	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.

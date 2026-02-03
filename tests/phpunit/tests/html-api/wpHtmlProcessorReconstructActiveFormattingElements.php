@@ -414,6 +414,35 @@ class Tests_HtmlApi_WpHtmlProcessorReconstructActiveFormattingElements extends W
 	}
 
 	/**
+	 * Verifies that get_qualified_attribute_name() returns correct values for reconstructed elements.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Processor::get_qualified_attribute_name
+	 */
+	public function test_get_qualified_attribute_name_works_for_reconstructed_element() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b id="x" class="y" DATA-TEST="z">text<p>more' );
+
+		// Navigate past the first paragraph.
+		$processor->next_tag( 'P' );
+		$processor->next_tag( 'B' );
+
+		// Navigate to second paragraph (triggers reconstruction).
+		$processor->next_tag( 'P' );
+
+		// Find the reconstructed B and verify its qualified attribute names.
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find reconstructed B.' );
+
+		// Attribute names should be lowercase.
+		$this->assertSame( 'id', $processor->get_qualified_attribute_name( 'id' ), 'Should return lowercase attribute name.' );
+		$this->assertSame( 'class', $processor->get_qualified_attribute_name( 'class' ), 'Should return lowercase attribute name.' );
+		$this->assertSame( 'data-test', $processor->get_qualified_attribute_name( 'DATA-TEST' ), 'Should return lowercase attribute name.' );
+
+		// Non-existent attribute should return null.
+		$this->assertNull( $processor->get_qualified_attribute_name( 'nonexistent' ), 'Non-existent attribute should return null.' );
+	}
+
+	/**
 	 * Verifies that Noah's Ark clause limits identical elements to 3.
 	 *
 	 * When more than 3 identical formatting elements are pushed to the active
