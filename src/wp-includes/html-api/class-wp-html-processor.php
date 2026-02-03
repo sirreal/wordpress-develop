@@ -5313,6 +5313,22 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
 	 */
 	public function get_attribute( $name ) {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * return the stored attribute value.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			$comparable = strtolower( $name );
+			if ( array_key_exists( $comparable, $this->current_element->token->attributes ) ) {
+				return $this->current_element->token->attributes[ $comparable ];
+			}
+			// Virtual element has no other attributes beyond what's stored.
+			return null;
+		}
+
 		return $this->is_virtual() ? null : parent::get_attribute( $name );
 	}
 

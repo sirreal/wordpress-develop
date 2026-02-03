@@ -320,4 +320,56 @@ class Tests_HtmlApi_WpHtmlProcessorReconstructActiveFormattingElements extends W
 			'Breadcrumbs should show reconstructed EM element.'
 		);
 	}
+
+	/**
+	 * Verifies that get_attribute() returns the correct value for reconstructed elements.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Processor::get_attribute
+	 */
+	public function test_get_attribute_works_for_reconstructed_element() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b class="bold">text<p>more' );
+
+		// Navigate past the first paragraph.
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Failed to find first P.' );
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find original B.' );
+		$this->assertSame( 'bold', $processor->get_attribute( 'class' ), 'Original B should have class attribute.' );
+
+		// Navigate to second paragraph (triggers reconstruction).
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Failed to find second P.' );
+
+		// Find the reconstructed B and verify its attribute.
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find reconstructed B.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'P', 'B' ),
+			$processor->get_breadcrumbs(),
+			'Should be inside the second P with reconstructed B.'
+		);
+		$this->assertSame( 'bold', $processor->get_attribute( 'class' ), 'Reconstructed B should have class attribute.' );
+		$this->assertNull( $processor->get_attribute( 'nonexistent' ), 'Nonexistent attribute should return null.' );
+	}
+
+	/**
+	 * Verifies that get_attribute() returns correct values for reconstructed elements with multiple attributes.
+	 *
+	 * @ticket 62357
+	 *
+	 * @covers WP_HTML_Processor::get_attribute
+	 */
+	public function test_get_attribute_works_for_reconstructed_element_with_multiple_attributes() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><font size="4" color="red">text<p>more' );
+
+		// Navigate past the first paragraph.
+		$processor->next_tag( 'P' );
+		$processor->next_tag( 'FONT' );
+
+		// Navigate to second paragraph (triggers reconstruction).
+		$processor->next_tag( 'P' );
+
+		// Find the reconstructed FONT and verify its attributes.
+		$this->assertTrue( $processor->next_tag( 'FONT' ), 'Failed to find reconstructed FONT.' );
+		$this->assertSame( '4', $processor->get_attribute( 'size' ), 'Reconstructed FONT should have size attribute.' );
+		$this->assertSame( 'red', $processor->get_attribute( 'color' ), 'Reconstructed FONT should have color attribute.' );
+	}
 }
