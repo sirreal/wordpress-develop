@@ -83,6 +83,36 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
+	public function test_attr_repeat() {
+		$template_string = '<meta a="</%replace></%replace-2>" a="</% no-replace >">';
+		$replacements    = array(
+			'replace' => 'O',
+			'replace-2' => 'K',
+			'no-replace' => 'FAIL',
+		);
+
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected = '<meta a="OK">';
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public function test_attr_no_recursive_replacement() {
+		$template_string = '<meta a="</%replace>">';
+		$replacements    = array(
+			'replace' => '<%/replace>',
+		);
+
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected = '<meta a="&lt;%/replace&gt;">';
+		$this->assertEqualHTML( $expected, $result );
+	}
+
 	public function test_attr() {
 		$template_string = '<meta name="</%n>" content="</%c>">';
 		$replacements    = array(
