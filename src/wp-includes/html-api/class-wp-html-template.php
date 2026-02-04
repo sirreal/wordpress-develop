@@ -25,57 +25,48 @@ class WP_HTML_Template {
 	}
 
 	/**
-	 * Render a template string with the given replacements.
+	 * Creates a template from a string.
 	 *
 	 * @since 7.0.0
 	 *
-	 * @param string $template_string The template string with placeholders.
-	 * @param array  $replacements    The replacement values.
-	 * @return string|false The rendered HTML, or false on error.
+	 * @param string $template The template string with placeholders.
+	 * @return static The template instance.
 	 */
-	public static function sprintf( string $template_string, array $replacements = array() ) {
-		return self::from( $template_string, $replacements )->render();
+	public static function from( string $template ): static {
+		return new static( $template, array() );
 	}
 
 	/**
-	 * @param string $template_string The template string with placeholders.
-	 * @param array  $replacements    The replacement values.
-	 */
-	public static function from( string $template_string, array $replacements = array() ): static {
-		if ( ! is_string( $template_string ) ) {
-			_doing_it_wrong(
-				__METHOD__,
-				__( 'The template string must be a string.' ),
-				'7.0.0'
-			);
-			$template_string = '';
-		}
-		return new static( $template_string, $replacements );
-	}
-
-	/**
-	 * Render the template with the given replacements.
+	 * Returns a new immutable instance with replacements bound.
 	 *
 	 * @since 7.0.0
 	 *
-	 * @param array $replacements Optional. The replacement values. They may be provided at template creation time.
+	 * @param array $replacements The replacement values.
+	 * @return static A new template instance with the replacements bound.
+	 */
+	public function bind( array $replacements ): static {
+		return new static( $this->template_string, $replacements );
+	}
+
+	/**
+	 * Renders the template to an HTML string.
+	 *
+	 * Returns false on any error:
+	 * - Missing replacement key (placeholder without corresponding replacement)
+	 * - Unused replacement key (replacement without corresponding placeholder)
+	 * - Template in attribute context
+	 * - HTML processing/normalization failure
+	 *
+	 * @since 7.0.0
+	 *
 	 * @return string|false The rendered HTML, or false on error.
 	 */
-	public function render( ?array $replacements = null ) {
-		if ( \is_array( $replacements ) ) {
-			$this->replacements = $replacements;
-		} elseif ( null !== $replacements ) {
-			_doing_it_wrong(
-				__METHOD__,
-				__( 'The replacements must be an array.' ),
-				'7.0.0'
-			);
-		}
-
+	public function render(): string|false {
 		if ( empty( $this->replacements ) ) {
 			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
 		}
 
+		$used_keys      = array();
 		$processor      = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
 			/**
 			 * Returns the HTML string being processed.
@@ -158,7 +149,11 @@ class WP_HTML_Template {
 						break;
 					}
 
-					$replacement = $this->get_replacement( $placeholder );
+					$replacement = $this->get_replacement( $placeholder, $used_keys );
+					if ( null === $replacement ) {
+						$error_occurred = true;
+						break;
+					}
 					if ( \is_string( $replacement ) ) {
 						$processor->add_lexical_update(
 							new WP_HTML_Text_Replacement(
@@ -177,11 +172,16 @@ class WP_HTML_Template {
 							)
 						);
 					} elseif ( $replacement instanceof WP_HTML_Template ) {
+						$rendered = $replacement->render();
+						if ( false === $rendered ) {
+							$error_occurred = true;
+							break;
+						}
 						$processor->add_lexical_update(
 							new WP_HTML_Text_Replacement(
 								$start,
 								$length,
-								$replacement->render()
+								$rendered
 							)
 						);
 					}
@@ -220,7 +220,11 @@ class WP_HTML_Template {
 							)
 							&& $matches[0][1] < $end
 						) {
-							$replacement = $this->get_replacement( $matches[1][0] );
+							$replacement = $this->get_replacement( $matches[1][0], $used_keys );
+							if ( null === $replacement ) {
+								$error_occurred = true;
+								break 2; // Break out of while and foreach.
+							}
 							if ( is_string( $replacement ) ) {
 								$match_at     = $matches[0][1];
 								$match_length = strlen( $matches[0][0] );
@@ -261,12 +265,7 @@ class WP_HTML_Template {
 								);
 								$last_offset = $match_at + $match_length;
 							} elseif ( $replacement instanceof self ) {
-								_doing_it_wrong(
-									__METHOD__,
-									// @todo improve this message, include the placeholder in the string.
-									__( 'Attribute values cannot contain HTML. Use a plain string.' ),
-									'7.0.0'
-								);
+								// Template in attribute context is an error.
 								return false;
 							}
 
@@ -274,6 +273,16 @@ class WP_HTML_Template {
 						}
 					}
 			}
+		}
+
+		// Return false if any placeholder was missing a replacement.
+		if ( $error_occurred ) {
+			return false;
+		}
+
+		// Return false if any replacement key was not used.
+		if ( count( $used_keys ) !== count( $this->replacements ) ) {
+			return false;
 		}
 
 		$html = $processor->get_updated_html();
@@ -285,27 +294,30 @@ class WP_HTML_Template {
 	 * Get the replacement value for a placeholder key.
 	 *
 	 * Handles both named keys (like 'name') and numeric keys (like 0).
+	 * Tracks which keys are used for validation.
 	 *
 	 * @since 7.0.0
 	 *
-	 * @param string $key          The placeholder key.
-	 * @return mixed|null The replacement value, or null if not found.
+	 * @param string $key       The placeholder key.
+	 * @param array  $used_keys Reference to array tracking used keys.
+	 * @return self|string|null The replacement value, or null if not found.
 	 */
-	private function get_replacement( string $key ): self|string|null {
-		$replacement = $this->replacements[ $key ] ?? null;
+	private function get_replacement( string $key, array &$used_keys ): self|string|null {
+		// Try string key first, then numeric if the key looks numeric.
+		if ( array_key_exists( $key, $this->replacements ) ) {
+			$replacement = $this->replacements[ $key ];
+		} elseif ( ctype_digit( $key ) && array_key_exists( (int) $key, $this->replacements ) ) {
+			$key         = (int) $key;
+			$replacement = $this->replacements[ $key ];
+		} else {
+			return null;
+		}
+
+		$used_keys[ $key ] = true;
+
 		if ( \is_string( $replacement ) || ( $replacement instanceof WP_HTML_Template ) ) {
 			return $replacement;
 		}
-
-		_doing_it_wrong(
-			__METHOD__,
-			sprintf(
-				__( 'Invalid replacement for %1$s of type `%2$s`. Must be a string or template.' ),
-				esc_html( $key ),
-				esc_html( gettype( $replacement ) )
-			),
-			'7.0.0'
-		);
 
 		return null;
 	}
