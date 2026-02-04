@@ -21,7 +21,7 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 
 	private function __construct( string $template_string, array $replacements ) {
 		$this->template_string = $template_string;
-		$this->replacements = $replacements;
+		$this->replacements    = $replacements;
 	}
 
 	/**
@@ -34,7 +34,7 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 	 * @return string|false The rendered HTML, or false on error.
 	 */
 	public static function sprintf( string $template_string, array $replacements = array() ) {
-		return self::from( $template_string, $replacements  )->render();
+		return self::from( $template_string, $replacements )->render();
 	}
 
 	/**
@@ -76,7 +76,6 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
 		}
 
-
 		$processor      = new WP_HTML_Tag_Processor( $this->template_string );
 		$error_occurred = false;
 
@@ -113,15 +112,14 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 						break;
 					}
 					$placeholder = trim( \substr( $processor->html, $start + 3, $length - 4 ), " \t\n\r\f" );
-					// var_dump( substr( $processor->html, $start, $length ), $start, $length, $placeholder );
 
 					// Valid placeholders match `/a-z0-9_-/i`.
-					if ( \strlen( $placeholder ) !== \strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-') ) {
+					if ( \strlen( $placeholder ) !== \strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
 						break;
 					}
 
 					$replacement = $this->get_replacement( $placeholder );
-					if ( is_string( $replacement ) ) {
+					if ( \is_string( $replacement ) ) {
 						$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
 							$start,
 							$length,
@@ -162,13 +160,13 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 						}
 
 						$last_offset = $attribute->value_starts_at;
-						$offset = $attribute->value_starts_at;
-						$end = $offset + $attribute->value_length;
+						$offset      = $attribute->value_starts_at;
+						$end         = $offset + $attribute->value_length;
 						/**
 						 * @todo preg_match does not accept length, so this will happily search
 						 * beyond the attribute value.
 						 */
-						while(
+						while (
 							1 === preg_match(
 								'#</%[ \\t\\r\\f\\n]*([a-z0-9_-]+)[ \\t\\r\\f\\n]*>#i',
 								$processor->html,
@@ -213,7 +211,7 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 										)
 									)
 								);
-								$last_offset = $match_at + $match_length;
+								$last_offset                  = $match_at + $match_length;
 							} elseif ( $replacement instanceof self ) {
 								_doing_it_wrong(
 									__METHOD__,
