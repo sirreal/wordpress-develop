@@ -135,6 +135,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @covers ::from
 	 * @covers ::bind
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::bind
 	 */
 	public function test_rejects_nested_template_in_attribute_value() {
 		$template_string = '<meta name="not-allowed" description="</%html>">';
@@ -753,6 +755,48 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				"<pre>\nline1\nline2</pre>",
 			),
 		);
+	}
+
+	/**
+	 * Verifies bind() warns on missing replacement key.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::bind
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 */
+	public function test_bind_warns_on_missing_key() {
+		$template = T::from( '<p></%name> </%age></p>' );
+		$template->bind( array( 'name' => 'Alice' ) );
+	}
+
+	/**
+	 * Verifies bind() warns on unused replacement key.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::bind
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 */
+	public function test_bind_warns_on_unused_key() {
+		$template = T::from( '<p></%name></p>' );
+		$template->bind( array( 'name' => 'Alice', 'extra' => 'ignored' ) );
+	}
+
+	/**
+	 * Verifies bind() warns when template used in attribute context.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::bind
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 */
+	public function test_bind_warns_on_template_in_attribute_context() {
+		$template = T::from( '<meta content="</%html>">' );
+		$template->bind( array( 'html' => T::from( '<b>nested</b>' ) ) );
 	}
 
 	/**
