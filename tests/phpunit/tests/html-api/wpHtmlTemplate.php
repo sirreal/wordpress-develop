@@ -618,4 +618,155 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			HTML;
 		$this->assertEqualHTML( $expected, $result );
 	}
+
+	/**
+	 * Verifies that attributes are replaced in atomic elements (SCRIPT, STYLE, TITLE).
+	 *
+	 * These elements have special parsing rules that skip their content,
+	 * but attributes should still be processed normally.
+	 *
+	 * @ticket 60229
+	 *
+	 * @dataProvider data_atomic_element_attributes
+	 *
+	 * @covers ::from
+	 * @covers ::render
+	 * @covers ::sprintf
+	 */
+	public function test_atomic_element_attributes_are_replaced( string $template_string, array $replacements, string $expected ) {
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$this->assertSame( $expected, $result );
+	}
+
+	public static function data_atomic_element_attributes() {
+		return array(
+			'SCRIPT element attributes'   => array(
+				'<script src="</%src>">console.log("hi")</script>',
+				array( 'src' => '/js/app.js' ),
+				'<script src="/js/app.js">console.log("hi")</script>',
+			),
+
+			'STYLE element attributes'    => array(
+				'<style media="</%media>">.foo { color: red; }</style>',
+				array( 'media' => 'screen' ),
+				'<style media="screen">.foo { color: red; }</style>',
+			),
+
+			'TITLE element attributes'    => array(
+				'<title lang="</%lang>">Page Title</title>',
+				array( 'lang' => 'en' ),
+				'<title lang="en">Page Title</title>',
+			),
+
+			'TEXTAREA element attributes' => array(
+				'<textarea name="</%name>">Some content</textarea>',
+				array( 'name' => 'my-textarea' ),
+				'<textarea name="my-textarea">Some content</textarea>',
+			),
+		);
+	}
+
+	/**
+	 * Verifies content placeholder behavior in elements with special parsing.
+	 *
+	 * - RAWTEXT elements (SCRIPT, STYLE): Content is skipped, placeholders preserved literally.
+	 * - RCDATA elements (TITLE, TEXTAREA): Content is processed but placeholders are not
+	 *   recognized - they're treated as literal text and HTML-escaped.
+	 *
+	 * @ticket 60229
+	 *
+	 * @dataProvider data_atomic_element_content_placeholders
+	 *
+	 * @covers ::from
+	 * @covers ::render
+	 * @covers ::sprintf
+	 */
+	public function test_special_element_content_placeholder_behavior( string $template_string, array $replacements, string $expected ) {
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$this->assertSame( $expected, $result );
+	}
+
+	public static function data_atomic_element_content_placeholders() {
+		return array(
+			// RAWTEXT elements (SCRIPT, STYLE): Content is truly skipped, placeholders preserved literally.
+			'SCRIPT content placeholder ignored'          => array(
+				'<script>var x = "</%name>";</script>',
+				array( 'name' => 'SHOULD NOT APPEAR' ),
+				'<script>var x = "</%name>";</script>',
+			),
+
+			'STYLE content placeholder ignored'           => array(
+				'<style>.foo { content: "</%content>"; }</style>',
+				array( 'content' => 'SHOULD NOT APPEAR' ),
+				'<style>.foo { content: "</%content>"; }</style>',
+			),
+
+			// RCDATA elements (TITLE, TEXTAREA): Content is processed but placeholder
+			// patterns are not recognized - they're treated as literal text and escaped.
+			'TITLE content placeholder not recognized'    => array(
+				'<title>Hello </%name></title>',
+				array( 'name' => 'SHOULD NOT APPEAR' ),
+				'<title>Hello &lt;/%name&gt;</title>',
+			),
+
+			'TEXTAREA content placeholder not recognized' => array(
+				'<textarea></%placeholder></textarea>',
+				array( 'placeholder' => 'SHOULD NOT APPEAR' ),
+				'<textarea>&lt;/%placeholder&gt;</textarea>',
+			),
+		);
+	}
+
+	/**
+	 * Verifies leading newline behavior in PRE elements.
+	 *
+	 * HTML5 specifies that a single leading newline immediately after the
+	 * <pre> start tag is ignored. This test documents the template behavior.
+	 *
+	 * @ticket 60229
+	 *
+	 * @dataProvider data_pre_element_leading_newline
+	 *
+	 * @covers ::from
+	 * @covers ::render
+	 * @covers ::sprintf
+	 */
+	public function test_pre_element_leading_newline_behavior( string $template_string, array $replacements, string $expected ) {
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$this->assertSame( $expected, $result );
+	}
+
+	public static function data_pre_element_leading_newline() {
+		return array(
+			'PRE without newline'        => array(
+				"<pre></%code></pre>",
+				array( 'code' => "line1\nline2"),
+				"<pre>line1\nline2</pre>",
+			),
+
+			'PRE with newline' => array(
+				"<pre>\n</%code></pre>",
+				array( 'code' =>  "line1\nline2"),
+				"<pre>line1\nline2</pre>",
+			),
+
+			'PRE with newline in replacement' => array(
+				"<pre>\n</%code></pre>",
+				array( 'code' =>   "line1\nline2"),
+				"<pre>line1\nline2</pre>",
+			),
+
+			'PRE with newline and newline in replacement' => array(
+				"<pre>\n</%code></pre>",
+				array( 'code' =>    "\nline1\nline2"),
+				"<pre>\nline1\nline2</pre>",
+			),
+		);
+	}
 }
