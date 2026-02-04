@@ -32,6 +32,28 @@ class WP_HTML_Template {
 	private ?array $compiled = null;
 
 	/**
+	 * Text normalizations discovered during compilation.
+	 *
+	 * Array of [start, length, normalized_text] tuples for #text tokens
+	 * whose serialized form differs from the original HTML.
+	 *
+	 * @since 7.0.0
+	 * @var array
+	 */
+	private array $text_normalizations = array();
+
+	/**
+	 * Attribute text segments needing escaping.
+	 *
+	 * Array of [start, length] pairs for text between/before placeholders
+	 * within attribute values.
+	 *
+	 * @since 7.0.0
+	 * @var array
+	 */
+	private array $attr_escapes = array();
+
+	/**
 	 * Returns the compiled placeholder metadata.
 	 *
 	 * Triggers compilation if not already done.
@@ -59,7 +81,9 @@ class WP_HTML_Template {
 			return;
 		}
 
-		$this->compiled = array();
+		$this->compiled            = array();
+		$this->text_normalizations = array();
+		$this->attr_escapes        = array();
 
 		$processor = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
 			public function get_html(): string {
@@ -77,6 +101,29 @@ class WP_HTML_Template {
 
 		while ( $processor->next_token() ) {
 			switch ( $processor->get_token_type() ) {
+				/*
+				 * Track text normalizations to prevent something like
+				 * `a<</%tag-name>u` from becoming `a<i>u` after replacement.
+				 */
+				case '#text':
+					$processor->set_bookmark( 'text' );
+					$mark = $processor->get_bookmark( 'text' );
+					if ( null === $mark ) {
+						break;
+					}
+					$normalized = $processor->serialize_token();
+					/*
+					 * Compare using substr_compare with min length to match
+					 * the original behavior: when serialize_token() returns
+					 * empty (e.g. leading newline after <pre>), the comparison
+					 * length is 0, which always matches. This leaves the text
+					 * unchanged for normalize() to handle at the end.
+					 */
+					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, min( $mark->length, strlen( $normalized ) ) ) ) {
+						$this->text_normalizations[] = array( $mark->start, $mark->length, $normalized );
+					}
+					break;
+
 				case '#funky-comment':
 					$processor->set_bookmark( 'placeholder' );
 					$mark = $processor->get_bookmark( 'placeholder' );
@@ -126,8 +173,9 @@ class WP_HTML_Template {
 							continue;
 						}
 
-						$offset = $attribute->value_starts_at;
-						$end    = $offset + $attribute->value_length;
+						$last_offset = $attribute->value_starts_at;
+						$offset      = $attribute->value_starts_at;
+						$end         = $offset + $attribute->value_length;
 
 						while (
 							1 === preg_match(
@@ -143,6 +191,11 @@ class WP_HTML_Template {
 							$match_start  = $matches[0][1];
 							$match_length = strlen( $matches[0][0] );
 
+							// Track text segment before this placeholder for escaping.
+							if ( $match_start > $last_offset ) {
+								$this->attr_escapes[] = array( $last_offset, $match_start - $last_offset );
+							}
+
 							if ( ! isset( $this->compiled[ $placeholder ] ) ) {
 								$this->compiled[ $placeholder ] = array(
 									'offsets' => array(),
@@ -155,7 +208,8 @@ class WP_HTML_Template {
 
 							$this->compiled[ $placeholder ]['offsets'][] = array( $match_start, $match_length );
 
-							$offset = $match_start + $match_length;
+							$last_offset = $match_start + $match_length;
+							$offset      = $last_offset;
 						}
 					}
 					break;
@@ -273,12 +327,19 @@ class WP_HTML_Template {
 		}
 
 		$new = new static( $this->template_string, $replacements );
-		$new->compiled = $this->compiled;
+		$new->compiled            = $this->compiled;
+		$new->text_normalizations = $this->text_normalizations;
+		$new->attr_escapes        = $this->attr_escapes;
 		return $new;
 	}
 
 	/**
 	 * Renders the template to an HTML string.
+	 *
+	 * Uses pre-compiled placeholder metadata to perform replacements
+	 * without re-parsing. Collects all updates (placeholder replacements,
+	 * text normalizations, attribute text escaping) and applies them
+	 * from end to start using substr_replace() to preserve positions.
 	 *
 	 * Returns false on any error:
 	 * - Missing replacement key (placeholder without corresponding replacement)
@@ -291,222 +352,67 @@ class WP_HTML_Template {
 	 * @return string|false The rendered HTML, or false on error.
 	 */
 	public function render(): string|false {
+		$this->compile();
+
 		if ( empty( $this->replacements ) ) {
 			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
 		}
 
-		$used_keys      = array();
-		$processor      = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
-			/**
-			 * Returns the HTML string being processed.
-			 *
-			 * @return string The HTML string.
-			 */
-			public function get_html(): string {
-				return $this->html;
+		$escape_map = array(
+			'&' => '&amp;',
+			'<' => '&lt;',
+			'>' => '&gt;',
+			"'" => '&apos;',
+			'"' => '&quot;',
+		);
+
+		$html      = $this->template_string;
+		$used_keys = array();
+
+		/*
+		 * Collect all updates as [start, length, replacement_text] tuples.
+		 */
+		$updates = array();
+
+		// 1. Placeholder replacements.
+		foreach ( $this->compiled as $placeholder => $info ) {
+			$placeholder = (string) $placeholder;
+
+			// Look up the replacement value.
+			if ( array_key_exists( $placeholder, $this->replacements ) ) {
+				$key = $placeholder;
+			} elseif ( ctype_digit( $placeholder ) && array_key_exists( (int) $placeholder, $this->replacements ) ) {
+				$key = (int) $placeholder;
+			} else {
+				return false;
 			}
 
-			/**
-			 * Returns a bookmark by name.
-			 *
-			 * @param string $name The bookmark name.
-			 * @return WP_HTML_Span|null The bookmark span, or null if not found.
-			 */
-			public function get_bookmark( string $name ) {
-				return $this->bookmarks[ $name ] ?? null;
+			$used_keys[ $key ] = true;
+			$value             = $this->replacements[ $key ];
+
+			if ( $value instanceof self ) {
+				// Templates in attribute context are an error.
+				if ( 'attribute' === $info['context'] ) {
+					return false;
+				}
+
+				$rendered = $value->render();
+				if ( false === $rendered ) {
+					return false;
+				}
+
+				foreach ( $info['offsets'] as list( $start, $length ) ) {
+					$updates[] = array( $start, $length, $rendered );
+				}
+			} elseif ( is_string( $value ) ) {
+				$escaped = strtr( $value, $escape_map );
+
+				foreach ( $info['offsets'] as list( $start, $length ) ) {
+					$updates[] = array( $start, $length, $escaped );
+				}
+			} else {
+				return false;
 			}
-
-			/**
-			 * Returns the tag attributes array.
-			 *
-			 * @return array The attributes array.
-			 */
-			public function get_tag_attributes(): array {
-				return $this->attributes;
-			}
-
-			/**
-			 * Adds a lexical update.
-			 *
-			 * @param WP_HTML_Text_Replacement $update The text replacement to add.
-			 */
-			public function add_lexical_update( WP_HTML_Text_Replacement $update ): void {
-				$this->lexical_updates[] = $update;
-			}
-		};
-		$error_occurred = false;
-
-		while ( $processor->next_token() ) {
-			switch ( $processor->get_token_type() ) {
-				/*
-				 * It's important that #text be normalized to prevent something like
-				 * `i<</%tag-name>u` from becoming `i<a>u` after replacement and altering HTML.
-				 */
-				case '#text':
-					$processor->set_bookmark( 'text' );
-					$mark = $processor->get_bookmark( 'text' );
-					assert( null !== $mark );
-					$normalized = $processor->serialize_token();
-					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, min( $mark->length, strlen( $normalized ) ) ) ) {
-						$processor->add_lexical_update(
-							new WP_HTML_Text_Replacement(
-								$mark->start,
-								$mark->length,
-								$normalized
-							)
-						);
-					}
-					break;
-
-				case '#funky-comment':
-					// Does it look like a placeholder?
-					$processor->set_bookmark( 'placeholder' );
-					$mark = $processor->get_bookmark( 'placeholder' );
-					assert( null !== $mark );
-					// A funky comment looks at least like </%…>
-					$start  = $mark->start;
-					$length = $mark->length;
-					$html   = $processor->get_html();
-					// This is not the funky comment we're looking for.
-					if ( $length < 5 || ! $html[ $start + 2 ] === '%' ) {
-						break;
-					}
-					$placeholder = trim( \substr( $html, $start + 3, $length - 4 ), " \t\n\r\f" );
-
-					// Valid placeholders match `/a-z0-9_-/i`.
-					if ( \strlen( $placeholder ) !== \strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
-						break;
-					}
-
-					$replacement = $this->get_replacement( $placeholder, $used_keys );
-					if ( null === $replacement ) {
-						$error_occurred = true;
-						break;
-					}
-					if ( \is_string( $replacement ) ) {
-						$processor->add_lexical_update(
-							new WP_HTML_Text_Replacement(
-								$start,
-								$length,
-								strtr(
-									$replacement,
-									array(
-										'<' => '&lt;',
-										'>' => '&gt;',
-										"'" => '&apos;',
-										'"' => '&quot;',
-										'&' => '&amp;',
-									)
-								)
-							)
-						);
-					} elseif ( $replacement instanceof WP_HTML_Template ) {
-						$rendered = $replacement->render();
-						if ( false === $rendered ) {
-							$error_occurred = true;
-							break;
-						}
-						$processor->add_lexical_update(
-							new WP_HTML_Text_Replacement(
-								$start,
-								$length,
-								$rendered
-							)
-						);
-					}
-					break;
-
-				case '#tag':
-					if ( $processor->is_tag_closer() ) {
-						break;
-					}
-
-					$html = $processor->get_html();
-					foreach ( $processor->get_tag_attributes() as $attribute ) {
-						// Boolean attributes cannot contain placeholders.
-						if ( $attribute->is_true ) {
-							continue;
-						}
-						// At least `</%x>` to contain a placeholder.
-						if ( $attribute->value_length < 5 ) {
-							continue;
-						}
-
-						$last_offset = $attribute->value_starts_at;
-						$offset      = $attribute->value_starts_at;
-						$end         = $offset + $attribute->value_length;
-						/**
-						 * @todo preg_match does not accept length, so this will happily search
-						 * beyond the attribute value.
-						 */
-						while (
-							1 === preg_match(
-								'#</%[ \\t\\r\\f\\n]*([a-z0-9_-]+)[ \\t\\r\\f\\n]*>#i',
-								$html,
-								$matches,
-								PREG_OFFSET_CAPTURE,
-								$offset
-							)
-							&& $matches[0][1] < $end
-						) {
-							$replacement = $this->get_replacement( $matches[1][0], $used_keys );
-							if ( null === $replacement ) {
-								$error_occurred = true;
-								break 2; // Break out of while and foreach.
-							}
-							if ( is_string( $replacement ) ) {
-								$match_at     = $matches[0][1];
-								$match_length = strlen( $matches[0][0] );
-
-								// Capture and clean the preceding attribute text.
-								$processor->add_lexical_update(
-									new WP_HTML_Text_Replacement(
-										$last_offset,
-										$match_at - $last_offset,
-										strtr(
-											substr( $html, $last_offset, $match_at - $last_offset ),
-											array(
-												'<' => '&lt;',
-												'>' => '&gt;',
-												"'" => '&apos;',
-												'"' => '&quot;',
-												'&' => '&amp;',
-											)
-										)
-									)
-								);
-
-								$processor->add_lexical_update(
-									new WP_HTML_Text_Replacement(
-										$match_at,
-										strlen( $matches[0][0] ),
-										strtr(
-											$replacement,
-											array(
-												'<' => '&lt;',
-												'>' => '&gt;',
-												"'" => '&apos;',
-												'"' => '&quot;',
-												'&' => '&amp;',
-											)
-										)
-									)
-								);
-								$last_offset = $match_at + $match_length;
-							} elseif ( $replacement instanceof self ) {
-								// Template in attribute context is an error.
-								return false;
-							}
-
-							$offset = $matches[0][1] + strlen( $matches[0][0] );
-						}
-					}
-			}
-		}
-
-		// Return false if any placeholder was missing a replacement.
-		if ( $error_occurred ) {
-			return false;
 		}
 
 		// Return false if any replacement key was not used.
@@ -514,40 +420,27 @@ class WP_HTML_Template {
 			return false;
 		}
 
-		$html = $processor->get_updated_html();
+		// 2. Text normalizations.
+		foreach ( $this->text_normalizations as list( $start, $length, $normalized ) ) {
+			$updates[] = array( $start, $length, $normalized );
+		}
+
+		// 3. Attribute text escaping.
+		foreach ( $this->attr_escapes as list( $start, $length ) ) {
+			$original  = substr( $html, $start, $length );
+			$updates[] = array( $start, $length, strtr( $original, $escape_map ) );
+		}
+
+		// Sort by start position descending so replacements don't shift positions.
+		usort( $updates, static function ( $a, $b ) {
+			return $b[0] <=> $a[0];
+		} );
+
+		// Apply all replacements from end to start.
+		foreach ( $updates as list( $start, $length, $replacement ) ) {
+			$html = substr_replace( $html, $replacement, $start, $length );
+		}
 
 		return WP_HTML_Processor::normalize( $html ) ?? $html;
-	}
-
-	/**
-	 * Get the replacement value for a placeholder key.
-	 *
-	 * Handles both named keys (like 'name') and numeric keys (like 0).
-	 * Tracks which keys are used for validation.
-	 *
-	 * @since 7.0.0
-	 *
-	 * @param string $key       The placeholder key.
-	 * @param array  $used_keys Reference to array tracking used keys.
-	 * @return self|string|null The replacement value, or null if not found.
-	 */
-	private function get_replacement( string $key, array &$used_keys ): self|string|null {
-		// Try string key first, then numeric if the key looks numeric.
-		if ( array_key_exists( $key, $this->replacements ) ) {
-			$replacement = $this->replacements[ $key ];
-		} elseif ( ctype_digit( $key ) && array_key_exists( (int) $key, $this->replacements ) ) {
-			$key         = (int) $key;
-			$replacement = $this->replacements[ $key ];
-		} else {
-			return null;
-		}
-
-		$used_keys[ $key ] = true;
-
-		if ( \is_string( $replacement ) || ( $replacement instanceof WP_HTML_Template ) ) {
-			return $replacement;
-		}
-
-		return null;
 	}
 }
