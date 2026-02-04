@@ -109,6 +109,56 @@ class WP_HTML_Template {
 
 					$this->compiled[ $placeholder ]['offsets'][] = array( $start, $length );
 					break;
+
+				case '#tag':
+					if ( $processor->is_tag_closer() ) {
+						break;
+					}
+
+					$html = $processor->get_html();
+					foreach ( $processor->get_tag_attributes() as $attribute ) {
+						// Boolean attributes cannot contain placeholders.
+						if ( $attribute->is_true ) {
+							continue;
+						}
+						// At least `</%x>` to contain a placeholder.
+						if ( $attribute->value_length < 5 ) {
+							continue;
+						}
+
+						$offset = $attribute->value_starts_at;
+						$end    = $offset + $attribute->value_length;
+
+						while (
+							1 === preg_match(
+								'#</%[ \\t\\r\\f\\n]*([a-z0-9_-]+)[ \\t\\r\\f\\n]*>#i',
+								$html,
+								$matches,
+								PREG_OFFSET_CAPTURE,
+								$offset
+							)
+							&& $matches[0][1] < $end
+						) {
+							$placeholder  = $matches[1][0];
+							$match_start  = $matches[0][1];
+							$match_length = strlen( $matches[0][0] );
+
+							if ( ! isset( $this->compiled[ $placeholder ] ) ) {
+								$this->compiled[ $placeholder ] = array(
+									'offsets' => array(),
+									'context' => 'attribute',
+								);
+							} else {
+								// Promote text context to attribute context.
+								$this->compiled[ $placeholder ]['context'] = 'attribute';
+							}
+
+							$this->compiled[ $placeholder ]['offsets'][] = array( $match_start, $match_length );
+
+							$offset = $match_start + $match_length;
+						}
+					}
+					break;
 			}
 		}
 	}
