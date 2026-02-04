@@ -7,7 +7,7 @@
  * @since 7.0.0
  */
 
-class WP_HTML_Template extends WP_HTML_Tag_Processor {
+class WP_HTML_Template {
 	/**
 	 * The template string.
 	 *
@@ -76,7 +76,44 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
 		}
 
-		$processor      = new WP_HTML_Tag_Processor( $this->template_string );
+		$processor      = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
+			/**
+			 * Returns the HTML string being processed.
+			 *
+			 * @return string The HTML string.
+			 */
+			public function get_html(): string {
+				return $this->html;
+			}
+
+			/**
+			 * Returns a bookmark by name.
+			 *
+			 * @param string $name The bookmark name.
+			 * @return WP_HTML_Span|null The bookmark span, or null if not found.
+			 */
+			public function get_bookmark( string $name ) {
+				return $this->bookmarks[ $name ] ?? null;
+			}
+
+			/**
+			 * Returns the tag attributes array.
+			 *
+			 * @return array The attributes array.
+			 */
+			public function get_tag_attributes(): array {
+				return $this->attributes;
+			}
+
+			/**
+			 * Adds a lexical update.
+			 *
+			 * @param WP_HTML_Text_Replacement $update The text replacement to add.
+			 */
+			public function add_lexical_update( WP_HTML_Text_Replacement $update ): void {
+				$this->lexical_updates[] = $update;
+			}
+		};
 		$error_occurred = false;
 
 		while ( $processor->next_token() ) {
@@ -87,14 +124,16 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 				 */
 				case '#text':
 					$processor->set_bookmark( 'text' );
-					$mark = $processor->bookmarks['text'] ?? null;
+					$mark = $processor->get_bookmark( 'text' );
 					assert( null !== $mark );
 					$normalized = $processor->serialize_token();
-					if ( 0 !== substr_compare( $processor->html, $normalized, $mark->start, min( $mark->length, strlen( $normalized ) ) ) ) {
-						$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
-							$mark->start,
-							$mark->length,
-							$normalized
+					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, min( $mark->length, strlen( $normalized ) ) ) ) {
+						$processor->add_lexical_update(
+							new WP_HTML_Text_Replacement(
+								$mark->start,
+								$mark->length,
+								$normalized
+							)
 						);
 					}
 					break;
@@ -102,16 +141,17 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 				case '#funky-comment':
 					// Does it look like a placeholder?
 					$processor->set_bookmark( 'placeholder' );
-					$mark = $processor->bookmarks['placeholder'] ?? null;
+					$mark = $processor->get_bookmark( 'placeholder' );
 					assert( null !== $mark );
 					// A funky comment looks at least like </%…>
 					$start  = $mark->start;
 					$length = $mark->length;
+					$html   = $processor->get_html();
 					// This is not the funky comment we're looking for.
-					if ( $length < 5 || ! $processor->html[ $start + 2 ] === '%' ) {
+					if ( $length < 5 || ! $html[ $start + 2 ] === '%' ) {
 						break;
 					}
-					$placeholder = trim( \substr( $processor->html, $start + 3, $length - 4 ), " \t\n\r\f" );
+					$placeholder = trim( \substr( $html, $start + 3, $length - 4 ), " \t\n\r\f" );
 
 					// Valid placeholders match `/a-z0-9_-/i`.
 					if ( \strlen( $placeholder ) !== \strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
@@ -120,25 +160,29 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 
 					$replacement = $this->get_replacement( $placeholder );
 					if ( \is_string( $replacement ) ) {
-						$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
-							$start,
-							$length,
-							strtr(
-								$replacement,
-								array(
-									'<' => '&lt;',
-									'>' => '&gt;',
-									"'" => '&apos;',
-									'"' => '&quot;',
-									'&' => '&amp;',
+						$processor->add_lexical_update(
+							new WP_HTML_Text_Replacement(
+								$start,
+								$length,
+								strtr(
+									$replacement,
+									array(
+										'<' => '&lt;',
+										'>' => '&gt;',
+										"'" => '&apos;',
+										'"' => '&quot;',
+										'&' => '&amp;',
+									)
 								)
 							)
 						);
 					} elseif ( $replacement instanceof WP_HTML_Template ) {
-						$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
-							$start,
-							$length,
-							$replacement->render()
+						$processor->add_lexical_update(
+							new WP_HTML_Text_Replacement(
+								$start,
+								$length,
+								$replacement->render()
+							)
 						);
 					}
 					break;
@@ -148,7 +192,8 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 						break;
 					}
 
-					foreach ( $processor->attributes as $attribute ) {
+					$html = $processor->get_html();
+					foreach ( $processor->get_tag_attributes() as $attribute ) {
 						// Boolean attributes cannot contain placeholders.
 						if ( $attribute->is_true ) {
 							continue;
@@ -168,7 +213,7 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 						while (
 							1 === preg_match(
 								'#</%[ \\t\\r\\f\\n]*([a-z0-9_-]+)[ \\t\\r\\f\\n]*>#i',
-								$processor->html,
+								$html,
 								$matches,
 								PREG_OFFSET_CAPTURE,
 								$offset
@@ -181,32 +226,36 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 								$match_length = strlen( $matches[0][0] );
 
 								// Capture and clean the preceding attribute text.
-								$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
-									$last_offset,
-									$match_at - $last_offset,
-									strtr(
-										substr( $processor->html, $last_offset, $match_at - $last_offset ),
-										array(
-											'<' => '&lt;',
-											'>' => '&gt;',
-											"'" => '&apos;',
-											'"' => '&quot;',
-											'&' => '&amp;',
+								$processor->add_lexical_update(
+									new WP_HTML_Text_Replacement(
+										$last_offset,
+										$match_at - $last_offset,
+										strtr(
+											substr( $html, $last_offset, $match_at - $last_offset ),
+											array(
+												'<' => '&lt;',
+												'>' => '&gt;',
+												"'" => '&apos;',
+												'"' => '&quot;',
+												'&' => '&amp;',
+											)
 										)
 									)
 								);
 
-								$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
-									$match_at,
-									strlen( $matches[0][0] ),
-									strtr(
-										$replacement,
-										array(
-											'<' => '&lt;',
-											'>' => '&gt;',
-											"'" => '&apos;',
-											'"' => '&quot;',
-											'&' => '&amp;',
+								$processor->add_lexical_update(
+									new WP_HTML_Text_Replacement(
+										$match_at,
+										strlen( $matches[0][0] ),
+										strtr(
+											$replacement,
+											array(
+												'<' => '&lt;',
+												'>' => '&gt;',
+												"'" => '&apos;',
+												'"' => '&quot;',
+												'&' => '&amp;',
+											)
 										)
 									)
 								);
