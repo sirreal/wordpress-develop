@@ -211,6 +211,11 @@ class WP_HTML_Template {
 							$last_offset = $match_start + $match_length;
 							$offset      = $last_offset;
 						}
+
+						// Track trailing text segment after last placeholder.
+						if ( $last_offset < $end ) {
+							$this->attr_escapes[] = array( $last_offset, $end - $last_offset );
+						}
 					}
 					break;
 			}
@@ -426,9 +431,14 @@ class WP_HTML_Template {
 		}
 
 		// 3. Attribute text escaping.
+		// Static text in attribute values needs escaping to prevent character
+		// reference injection (e.g. "&" + "not" = "&not;" = "¬"). Decode
+		// existing character references first, then re-encode to avoid
+		// double-escaping (e.g. "&amp;" should stay "&amp;", not become "&amp;amp;").
 		foreach ( $this->attr_escapes as list( $start, $length ) ) {
-			$original  = substr( $html, $start, $length );
-			$updates[] = array( $start, $length, strtr( $original, $escape_map ) );
+			$original = substr( $html, $start, $length );
+			$decoded  = WP_HTML_Decoder::decode_attribute( $original );
+			$updates[] = array( $start, $length, strtr( $decoded, $escape_map ) );
 		}
 
 		// Sort by start position descending so replacements don't shift positions.

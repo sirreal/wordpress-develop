@@ -882,6 +882,47 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @covers ::get_placeholders
 	 */
+	/**
+	 * Verifies that static text around placeholders in attributes is escaped.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_escapes_static_text_around_placeholder_in_attribute() {
+		// Leading static text (prefix before placeholder)
+		$result = T::from( '<a href="/path/</%slug>">Link</a>' )
+			->bind( array( 'slug' => 'hello' ) )
+			->render();
+		$this->assertEqualHTML( '<a href="/path/hello">Link</a>', $result );
+
+		// Trailing static text (suffix after placeholder)
+		$result = T::from( '<a href="</%slug>/page">Link</a>' )
+			->bind( array( 'slug' => 'hello' ) )
+			->render();
+		$this->assertEqualHTML( '<a href="hello/page">Link</a>', $result );
+
+		// Ampersand in trailing static text must be escaped
+		$result = T::from( '<a href="</%base>&amp;extra=1">Link</a>' )
+			->bind( array( 'base' => '/search?q=test' ) )
+			->render();
+		$this->assertEqualHTML( '<a href="/search?q=test&amp;extra=1">Link</a>', $result );
+
+		// Ampersand entity in leading static text must not be double-escaped
+		$result = T::from( '<a href="/search?a=1&amp;b=</%val>">Link</a>' )
+			->bind( array( 'val' => '2' ) )
+			->render();
+		$this->assertEqualHTML( '<a href="/search?a=1&amp;b=2">Link</a>', $result );
+
+		// Character reference in trailing static text is preserved (not double-escaped)
+		$result = T::from( '<meta name="</%placeholder>&not;">' )
+			->bind( array( 'placeholder' => '' ) )
+			->render();
+		$this->assertEqualHTML( '<meta name="¬">', $result );
+	}
+
 	public function test_context_promotion_text_to_attribute() {
 		$template = T::from( '<a href="</%url>"></%url></a>' );
 
