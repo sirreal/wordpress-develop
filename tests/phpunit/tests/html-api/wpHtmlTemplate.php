@@ -772,4 +772,41 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertSame( 'attribute', $placeholders['class']['context'] );
 		$this->assertSame( 'text', $placeholders['content']['context'] );
 	}
+
+	/**
+	 * Verifies text placeholders are extracted with correct offsets.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::get_placeholders
+	 */
+	public function test_extracts_text_placeholders_with_offsets() {
+		$template = T::from( '<p></%name></p>' );
+
+		$placeholders = $template->get_placeholders();
+
+		$this->assertArrayHasKey( 'name', $placeholders );
+		$this->assertSame( 'text', $placeholders['name']['context'] );
+		$this->assertCount( 1, $placeholders['name']['offsets'] );
+		// <p> is 3 chars, so </%name> starts at offset 3
+		$this->assertSame( 3, $placeholders['name']['offsets'][0][0] );
+		// </%name> is 8 chars
+		$this->assertSame( 8, $placeholders['name']['offsets'][0][1] );
+	}
+
+	/**
+	 * Verifies repeated text placeholders are captured.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::get_placeholders
+	 */
+	public function test_extracts_repeated_text_placeholders() {
+		$template = T::from( '<p></%name> and </%name></p>' );
+
+		$placeholders = $template->get_placeholders();
+
+		$this->assertArrayHasKey( 'name', $placeholders );
+		$this->assertCount( 2, $placeholders['name']['offsets'] );
+	}
 }
