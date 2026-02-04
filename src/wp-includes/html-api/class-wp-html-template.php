@@ -48,13 +48,69 @@ class WP_HTML_Template {
 	/**
 	 * Compiles the template to extract placeholder metadata.
 	 *
+	 * Parses the template once and caches placeholder positions, lengths,
+	 * and contexts. If a placeholder appears in both text and attribute
+	 * contexts, the attribute context takes precedence (more restrictive).
+	 *
 	 * @since 7.0.0
 	 */
 	private function compile(): void {
 		if ( null !== $this->compiled ) {
 			return;
 		}
+
 		$this->compiled = array();
+
+		$processor = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
+			public function get_html(): string {
+				return $this->html;
+			}
+
+			public function get_bookmark( string $name ) {
+				return $this->bookmarks[ $name ] ?? null;
+			}
+
+			public function get_tag_attributes(): array {
+				return $this->attributes;
+			}
+		};
+
+		while ( $processor->next_token() ) {
+			switch ( $processor->get_token_type() ) {
+				case '#funky-comment':
+					$processor->set_bookmark( 'placeholder' );
+					$mark = $processor->get_bookmark( 'placeholder' );
+					if ( null === $mark ) {
+						break;
+					}
+
+					$start  = $mark->start;
+					$length = $mark->length;
+					$html   = $processor->get_html();
+
+					// Must be at least `</%x>` (5 chars) and start with `</%`
+					if ( $length < 5 || '%' !== $html[ $start + 2 ] ) {
+						break;
+					}
+
+					$placeholder = trim( substr( $html, $start + 3, $length - 4 ), " \t\n\r\f" );
+
+					// Valid placeholders match `/[a-z0-9_-]+/i`
+					if ( strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
+						break;
+					}
+
+					if ( ! isset( $this->compiled[ $placeholder ] ) ) {
+						$this->compiled[ $placeholder ] = array(
+							'offsets' => array(),
+							'context' => 'text',
+						);
+					}
+
+					$this->compiled[ $placeholder ]['offsets'][] = array( $start, $length );
+					break;
+			}
+		}
 	}
 
 	private function __construct( string $template_string, array $replacements ) {
