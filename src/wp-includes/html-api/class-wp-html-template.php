@@ -134,8 +134,7 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 								)
 							)
 						);
-					}
-					if ( $replacement instanceof WP_HTML_Template ) {
+					} elseif ( $replacement instanceof WP_HTML_Template ) {
 						$processor->lexical_updates[] = new WP_HTML_Text_Replacement(
 							$start,
 							$length,
@@ -272,6 +271,17 @@ class WP_HTML_Template extends WP_HTML_Tag_Processor {
 		if ( \is_string( $replacement ) || ( $replacement instanceof WP_HTML_Template ) ) {
 			return $replacement;
 		}
+
+		_doing_it_wrong(
+			__METHOD__,
+			sprintf(
+				__( 'Invalid replacement for %1$s of type `%2$s`. Must be a string or template.' ),
+				esc_html( $key ),
+				esc_html( gettype( $replacement ) )
+			),
+			'7.0.0'
+		);
+
 		return null;
 	}
 }
