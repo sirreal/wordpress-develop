@@ -16,7 +16,7 @@
 use WP_HTML_Template as T;
 
 class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
-	public function test_1() {
+	public function test_basic_text_replacement() {
 		$t      = T::from( '<p>Hello, </%name>!</p>' );
 		$result = $t->render( array( 'name' => 'World' ) );
 		$this->assertSame( $result, T::sprintf( '<p>Hello, </%name>!</p>', array( 'name' => 'World' ) ) );
@@ -28,7 +28,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
-	public function test_2() {
+	public function test_escapes_special_characters() {
 		$template_string = '<p>Hello, </%placeholder>!</p>';
 		$replacements    = array( 'placeholder' => 'Alice & Bob' );
 
@@ -43,22 +43,34 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
-	public function test_3() {
-		$template_string = '<p>Hello, </%0>, </% 0 >, </%1>, & </%1>!</p>';
+	public function test_numeric_placeholders() {
+		$template_string = '<p>Hello, </%0> and </%1>!</p>';
 		$replacements    = array( 'Alice', 'Bob' );
 
 		$t      = T::from( $template_string );
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
-		$expected =
-			<<<'HTML'
-			<p>Hello, Alice, Alice, Bob, &amp; Bob!</p>
-			HTML;
+		$expected = '<p>Hello, Alice and Bob!</p>';
 		$this->assertEqualHTML( $expected, $result );
 	}
 
-	public function test_4() {
+	public function test_repeated_placeholders() {
+		$template_string = '<p></%0>, </% 0 >, </%name>, & </%name>!</p>';
+		$replacements    = array(
+			'Alice',
+			'name' => 'Bob',
+		);
+
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected = '<p>Alice, Alice, Bob, &amp; Bob!</p>';
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public function test_nested_template_replacement() {
 		$template_string = '<p>Hello, </%html>';
 		$replacements    = array( 'html' => T::from( '<i>Alice</i> & <i>Bob</i>' ) );
 
@@ -114,10 +126,24 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
-	public function test_attr() {
+	public function test_replaces_attribute_values() {
 		$template_string = '<meta name="</%n>" content="</%c>">';
 		$replacements    = array(
 			'n' => 'the name',
+			'c' => 'the content',
+		);
+
+		$t      = T::from( $template_string );
+		$result = $t->render( $replacements );
+		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+
+		$expected = '<meta name="the name" content="the content">';
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public function test_escapes_attribute_values() {
+		$template_string = '<meta content="</%c>">';
+		$replacements    = array(
 			'c' => 'the "content" & whatever else',
 		);
 
@@ -125,10 +151,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$result = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
-		$expected =
-			<<<'HTML'
-			<meta name="the name" content="the &quot;content&quot; &amp; whatever else">
-			HTML;
+		$expected = '<meta content="the &quot;content&quot; &amp; whatever else">';
 		$this->assertEqualHTML( $expected, $result );
 	}
 
