@@ -281,30 +281,6 @@ class WP_HTML_Template {
 		return WP_HTML_Processor::normalize( $html ) ?? $html;
 	}
 
-	private function preg_attribute_replace_callback( $matches ) {
-		$key = $matches[1];
-
-		$replacement = $this->get_replacement( $key );
-
-		// Keep placeholder if no replacement found.
-		if ( null === $replacement ) {
-			return $matches[0];
-		}
-
-		// HTML cannot be embedded in attribute values.
-		if ( $replacement instanceof self ) {
-			_doing_it_wrong(
-				__METHOD__,
-				// @todo improve this message, include the placeholder in the string.
-				__( 'Attribute values cannot contain HTML. Use a plain string.' ),
-				'7.0.0'
-			);
-			return '';
-		}
-
-		return $replacement;
-	}
-
 	/**
 	 * Get the replacement value for a placeholder key.
 	 *
