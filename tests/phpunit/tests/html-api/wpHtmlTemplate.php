@@ -486,4 +486,103 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			HTML,
 		);
 	}
+
+	public function test_multi_replace() {
+		$row_template_string = "<dt></%term></dt>\n<dd></%definition></dd>";
+
+		// @todo It should be possible to produce templates from an original.
+		$row_replacements = array();
+		for ( $i = 0; $i <= 3; $i++ ) {
+			$row_replacements[ "row-{$i}" ] = WP_HTML_Template::from(
+				$row_template_string,
+				array(
+					'term'       => "Term \"{$i}\"",
+					'definition' => WP_HTML_Template::from(
+						'<abbr title="</%expansion>">IYKYK</abbr>: </%i>',
+						array(
+							'i'         => (string) $i,
+							'expansion' => '"If You Know You Know"',
+						)
+					),
+				)
+			);
+		}
+
+		$result = WP_HTML_Template::sprintf(
+			<<<'HTML'
+			<dl>
+			</%row-1>
+			</%row-2>
+			</%row-3>
+			</dl>
+			HTML,
+			$row_replacements
+		);
+
+		$expected =
+			<<<'HTML'
+			<dl>
+			<dt>Term &quot;1&quot;</dt>
+			<dd><abbr title="&quot;If You Know You Know&quot;">IYKYK</abbr>: 1</dd>
+			<dt>Term &quot;2&quot;</dt>
+			<dd><abbr title="&quot;If You Know You Know&quot;">IYKYK</abbr>: 2</dd>
+			<dt>Term &quot;3&quot;</dt>
+			<dd><abbr title="&quot;If You Know You Know&quot;">IYKYK</abbr>: 3</dd>
+			</dl>
+			HTML;
+
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public function test_multi_replace_table() {
+		$this->markTestSkipped( 'IN TABLE templates are not supported yet.' );
+		$header_tpl = WP_HTML_Template::from(
+			'<tr><th></% ID ><th></% name ><th></% value ><th></% link >',
+			array(
+				'ID'    => 'ID',
+				'name'  => 'Name',
+				'value' => 'Value',
+				'link'  => 'Link',
+			)
+		);
+		$row_tpl    = WP_HTML_Template::from( '<tr><td></% ID ><td></% name ><td></% value ><td></% link >' );
+
+		$row_gen = ( function () {
+			static $i = 1;
+			yield array(
+				'ID'    => $i,
+				'name'  => 'Name {$i}',
+				'value' => WP_HTML_Template::from( 'Value <b>{$i}</b>', array( 'i' => $i ) ),
+				'link'  => WP_HTML_Template::from(
+					'<a href="</%url>"></%link-name></a>',
+					array(
+						'url'       => '/example/1',
+						'link-name' => 'Click here',
+					),
+				),
+			);
+		} )();
+
+		$result = WP_HTML_Template::sprintf(
+			<<<'HTML'
+			<table>
+			<thead></%header>
+			<tbody>
+			</%row-1>
+			</%row-2>
+			</%row-3>
+			HTML,
+			array(
+				'header' => $header_tpl,
+				'row-1'  => $row_tpl->render( $row_gen->next() ),
+				'row-2'  => $row_tpl->render( $row_gen->next() ),
+				'row-3'  => $row_tpl->render( $row_gen->next() ),
+			)
+		);
+
+		$expected =
+			<<<'HTML'
+			HTML;
+		$this->assertEqualHTML( $expected, $result );
+	}
 }
