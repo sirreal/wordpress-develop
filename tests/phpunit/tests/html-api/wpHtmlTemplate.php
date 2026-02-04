@@ -22,13 +22,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_escapes_text_adjacent_to_angle_brackets() {
 		$template_string = 'a<</%tag-name>>s';
 		$replacements    = array( 'tag-name' => 'i' );
-		$t               = T::from( $template_string );
-		$result          = $t->render( $replacements );
+		$result          = T::from( $template_string )->bind( $replacements )->render();
 
 		$expected = 'a&lt;i&gt;s';
 		$this->assertEqualHTML( $expected, $result );
@@ -37,23 +37,24 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	/**
 	 * Verifies that only the first of duplicate attributes is replaced.
 	 *
+	 * Note: Duplicate attributes are stripped per HTML spec, so placeholders
+	 * in duplicate attributes are ignored. Providing a replacement for such
+	 * placeholders would be an unused key error.
+	 *
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_replaces_only_in_first_duplicate_attribute() {
 		$template_string = '<meta a="</%replace></%replace-2>" a="</% no-replace >">';
 		$replacements    = array(
-			'replace'    => 'O',
-			'replace-2'  => 'K',
-			'no-replace' => 'FAIL',
+			'replace'   => 'O',
+			'replace-2' => 'K',
 		);
 
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 
 		$expected = '<meta a="OK">';
 		$this->assertEqualHTML( $expected, $result );
@@ -65,8 +66,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_attribute_replacement_is_not_recursive() {
 		$template_string = '<meta a="</%replace>">';
@@ -74,9 +75,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'replace' => '<%/replace>',
 		);
 
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 
 		$expected = '<meta a="&lt;%/replace&gt;">';
 		$this->assertEqualHTML( $expected, $result );
@@ -88,8 +87,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_placeholder_names_allow_surrounding_whitespace() {
 		$template_string = "<meta name='</%\tn\n>' content='</% c\r\f>'>";
@@ -98,9 +97,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'c' => 'the "content" & whatever else',
 		);
 
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 
 		$expected =
 			<<<'HTML'
@@ -115,15 +112,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_escapes_ampersand_to_prevent_character_reference_injection() {
 		$template_string = '<meta name="&</% placeholder >;">';
 		$replacements    = array( 'placeholder' => 'not' );
-		$t               = T::from( $template_string );
-		$result          = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result          = T::from( $template_string )->bind( $replacements )->render();
 
 		$expected =
 			<<<'HTML'
@@ -137,16 +132,16 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::sprintf
-	 *
-	 * @expectedIncorrectUsage WP_HTML_Template::render
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
 	 */
 	public function test_rejects_nested_template_in_attribute_value() {
 		$template_string = '<meta name="not-allowed" description="</%html>">';
 		$replacements    = array(
 			'html' => T::from( '<strong>This is not allowed!</strong>' ),
 		);
-		$this->assertFalse( T::sprintf( $template_string, $replacements ) );
+		$this->assertFalse( T::from( $template_string )->bind( $replacements )->render() );
 	}
 
 	/**
@@ -155,13 +150,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_template( string $template_string, array $replacements, string $expected ) {
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -238,10 +231,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::sprintf
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
 	 */
 	public function test_real_world_examples( string $template_string, array $replacements, string $expected ) {
-		$result = WP_HTML_Template::sprintf( $template_string, $replacements );
+		$result = WP_HTML_Template::from( $template_string )->bind( $replacements )->render();
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -292,13 +287,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			array(
 				'url'    => 'https://example.com/hello-world/?foo=1&bar=2',
 				'target' => '_blank',
-				'title'  => WP_HTML_Template::from(
-					'\'<i></%italic></i>\' & <b>"</%bold>"</b>',
-					array(
-						'italic' => 'This',
-						'bold'   => 'That',
-					)
-				),
+				'title'  => WP_HTML_Template::from( '\'<i></%italic></i>\' & <b>"</%bold>"</b>' )
+					->bind(
+						array(
+							'italic' => 'This',
+							'bold'   => 'That',
+						)
+					),
 			),
 			<<<'HTML'
 			<a href="https://example.com/hello-world/?foo=1&amp;bar=2" target="_blank">
@@ -508,40 +503,37 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_nested_templates_in_definition_list() {
-		$row_template_string = "<dt></%term></dt>\n<dd></%definition></dd>";
+		$row_template = WP_HTML_Template::from( "<dt></%term></dt>\n<dd></%definition></dd>" );
 
-		// @todo It should be possible to produce templates from an original.
 		$row_replacements = array();
-		for ( $i = 0; $i <= 3; $i++ ) {
-			$row_replacements[ "row-{$i}" ] = WP_HTML_Template::from(
-				$row_template_string,
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$row_replacements[ "row-{$i}" ] = $row_template->bind(
 				array(
 					'term'       => "Term \"{$i}\"",
-					'definition' => WP_HTML_Template::from(
-						'<abbr title="</%expansion>">IYKYK</abbr>: </%i>',
-						array(
-							'i'         => (string) $i,
-							'expansion' => '"If You Know You Know"',
-						)
-					),
+					'definition' => WP_HTML_Template::from( '<abbr title="</%expansion>">IYKYK</abbr>: </%i>' )
+						->bind(
+							array(
+								'i'         => (string) $i,
+								'expansion' => '"If You Know You Know"',
+							)
+						),
 				)
 			);
 		}
 
-		$result = WP_HTML_Template::sprintf(
+		$result = WP_HTML_Template::from(
 			<<<'HTML'
 			<dl>
 			</%row-1>
 			</%row-2>
 			</%row-3>
 			</dl>
-			HTML,
-			$row_replacements
-		);
+			HTML
+		)->bind( $row_replacements )->render();
 
 		$expected =
 			<<<'HTML'
@@ -564,20 +556,20 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_table_templates_not_yet_supported() {
 		$this->markTestSkipped( 'IN TABLE templates are not supported yet.' );
-		$header_tpl = WP_HTML_Template::from(
-			'<tr><th></% ID ><th></% name ><th></% value ><th></% link >',
-			array(
-				'ID'    => 'ID',
-				'name'  => 'Name',
-				'value' => 'Value',
-				'link'  => 'Link',
-			)
-		);
+		$header_tpl = WP_HTML_Template::from( '<tr><th></% ID ><th></% name ><th></% value ><th></% link >' )
+			->bind(
+				array(
+					'ID'    => 'ID',
+					'name'  => 'Name',
+					'value' => 'Value',
+					'link'  => 'Link',
+				)
+			);
 		$row_tpl    = WP_HTML_Template::from( '<tr><td></% ID ><td></% name ><td></% value ><td></% link >' );
 
 		$row_gen = ( function () {
@@ -585,18 +577,18 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			yield array(
 				'ID'    => $i,
 				'name'  => 'Name {$i}',
-				'value' => WP_HTML_Template::from( 'Value <b>{$i}</b>', array( 'i' => $i ) ),
-				'link'  => WP_HTML_Template::from(
-					'<a href="</%url>"></%link-name></a>',
-					array(
-						'url'       => '/example/1',
-						'link-name' => 'Click here',
+				'value' => WP_HTML_Template::from( 'Value <b>{$i}</b>' )->bind( array( 'i' => $i ) ),
+				'link'  => WP_HTML_Template::from( '<a href="</%url>"></%link-name></a>' )
+					->bind(
+						array(
+							'url'       => '/example/1',
+							'link-name' => 'Click here',
+						)
 					),
-				),
 			);
 		} )();
 
-		$result = WP_HTML_Template::sprintf(
+		$result = WP_HTML_Template::from(
 			<<<'HTML'
 			<table>
 			<thead></%header>
@@ -604,14 +596,15 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			</%row-1>
 			</%row-2>
 			</%row-3>
-			HTML,
+			HTML
+		)->bind(
 			array(
 				'header' => $header_tpl,
-				'row-1'  => $row_tpl->render( $row_gen->next() ),
-				'row-2'  => $row_tpl->render( $row_gen->next() ),
-				'row-3'  => $row_tpl->render( $row_gen->next() ),
+				'row-1'  => $row_tpl->bind( $row_gen->next() ),
+				'row-2'  => $row_tpl->bind( $row_gen->next() ),
+				'row-3'  => $row_tpl->bind( $row_gen->next() ),
 			)
-		);
+		)->render();
 
 		$expected =
 			<<<'HTML'
@@ -630,13 +623,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @dataProvider data_atomic_element_attributes
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_atomic_element_attributes_are_replaced( string $template_string, array $replacements, string $expected ) {
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 		$this->assertSame( $expected, $result );
 	}
 
@@ -675,47 +666,43 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * - RCDATA elements (TITLE, TEXTAREA): Content is processed but placeholders are not
 	 *   recognized - they're treated as literal text and HTML-escaped.
 	 *
+	 * With strict validation, providing a replacement for a placeholder that won't be
+	 * processed (inside SCRIPT/STYLE/TITLE/TEXTAREA) is an unused key error.
+	 *
 	 * @ticket 60229
 	 *
 	 * @dataProvider data_atomic_element_content_placeholders
 	 *
 	 * @covers ::from
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
-	public function test_special_element_content_placeholder_behavior( string $template_string, array $replacements, string $expected ) {
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+	public function test_special_element_content_placeholder_behavior( string $template_string, string $expected ) {
+		$result = T::from( $template_string )->render();
 		$this->assertSame( $expected, $result );
 	}
 
 	public static function data_atomic_element_content_placeholders() {
 		return array(
 			// RAWTEXT elements (SCRIPT, STYLE): Content is truly skipped, placeholders preserved literally.
-			'SCRIPT content placeholder ignored'          => array(
+			'SCRIPT content placeholder preserved'        => array(
 				'<script>var x = "</%name>";</script>',
-				array( 'name' => 'SHOULD NOT APPEAR' ),
 				'<script>var x = "</%name>";</script>',
 			),
 
-			'STYLE content placeholder ignored'           => array(
+			'STYLE content placeholder preserved'         => array(
 				'<style>.foo { content: "</%content>"; }</style>',
-				array( 'content' => 'SHOULD NOT APPEAR' ),
 				'<style>.foo { content: "</%content>"; }</style>',
 			),
 
 			// RCDATA elements (TITLE, TEXTAREA): Content is processed but placeholder
 			// patterns are not recognized - they're treated as literal text and escaped.
-			'TITLE content placeholder not recognized'    => array(
+			'TITLE content placeholder escaped'           => array(
 				'<title>Hello </%name></title>',
-				array( 'name' => 'SHOULD NOT APPEAR' ),
 				'<title>Hello &lt;/%name&gt;</title>',
 			),
 
-			'TEXTAREA content placeholder not recognized' => array(
+			'TEXTAREA content placeholder escaped'        => array(
 				'<textarea></%placeholder></textarea>',
-				array( 'placeholder' => 'SHOULD NOT APPEAR' ),
 				'<textarea>&lt;/%placeholder&gt;</textarea>',
 			),
 		);
@@ -732,13 +719,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @dataProvider data_pre_element_leading_newline
 	 *
 	 * @covers ::from
+	 * @covers ::bind
 	 * @covers ::render
-	 * @covers ::sprintf
 	 */
 	public function test_pre_element_leading_newline_behavior( string $template_string, array $replacements, string $expected ) {
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
-		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
+		$result = T::from( $template_string )->bind( $replacements )->render();
 		$this->assertSame( $expected, $result );
 	}
 
