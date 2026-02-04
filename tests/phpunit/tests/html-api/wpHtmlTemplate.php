@@ -754,4 +754,22 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			),
 		);
 	}
+
+	/**
+	 * Verifies that get_placeholders returns placeholder metadata.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::get_placeholders
+	 */
+	public function test_get_placeholders_returns_metadata() {
+		$template = T::from( '<p class="</%class>"></%content></p>' );
+
+		$placeholders = $template->get_placeholders();
+
+		$this->assertArrayHasKey( 'class', $placeholders );
+		$this->assertArrayHasKey( 'content', $placeholders );
+		$this->assertSame( 'attribute', $placeholders['class']['context'] );
+		$this->assertSame( 'text', $placeholders['content']['context'] );
+	}
 }
