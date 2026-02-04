@@ -259,7 +259,7 @@ class WP_HTML_Template {
 										)
 									)
 								);
-								$last_offset                  = $match_at + $match_length;
+								$last_offset = $match_at + $match_length;
 							} elseif ( $replacement instanceof self ) {
 								_doing_it_wrong(
 									__METHOD__,

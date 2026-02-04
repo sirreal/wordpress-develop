@@ -167,37 +167,37 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public static function data_template() {
 		return array(
-			'basic template (no placeholders)'    => array(
+			'basic template (no placeholders)'   => array(
 				'<p>Hi!</p>',
 				array(),
 				'<p>Hi!</p>',
 			),
 
-			'basic text replacement'              => array(
+			'basic text replacement'             => array(
 				'<p>Hello, </%name>!</p>',
 				array( 'name' => 'World' ),
 				'<p>Hello, World!</p>',
 			),
 
-			'escapes special characters in text'  => array(
+			'escapes special characters in text' => array(
 				'<p>Hello, </%placeholder>!</p>',
 				array( 'placeholder' => 'Alice & Bob' ),
 				'<p>Hello, Alice &amp; Bob!</p>',
 			),
 
-			'escapes angle brackets in text'      => array(
+			'escapes angle brackets in text'     => array(
 				'<p>Hello, </%name>!</p>',
 				array( 'name' => '<little-bobby-tags>' ),
 				'<p>Hello, &lt;little-bobby-tags&gt;!</p>',
 			),
 
-			'numeric placeholders'                => array(
+			'numeric placeholders'               => array(
 				'<p>Hello, </%0> and </%1>!</p>',
 				array( 'Alice', 'Bob' ),
 				'<p>Hello, Alice and Bob!</p>',
 			),
 
-			'repeated placeholders'               => array(
+			'repeated placeholders'              => array(
 				'<p></%0>, </% 0 >, </%name>, & </%name>!</p>',
 				array(
 					'Alice',
@@ -206,13 +206,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<p>Alice, Alice, Bob, &amp; Bob!</p>',
 			),
 
-			'nested template replacement'         => array(
+			'nested template replacement'        => array(
 				'<p>Hello, </%html>',
 				array( 'html' => WP_HTML_Template::from( '<i>Alice</i> & <i>Bob</i>' ) ),
 				'<p>Hello, <i>Alice</i> &amp; <i>Bob</i></p>',
 			),
 
-			'replaces attribute values'           => array(
+			'replaces attribute values'          => array(
 				'<meta name="</%n>" content="</%c>">',
 				array(
 					'n' => 'the name',
@@ -221,7 +221,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<meta name="the name" content="the content">',
 			),
 
-			'escapes attribute values'            => array(
+			'escapes attribute values'           => array(
 				'<meta content="</%c>">',
 				array(
 					'c' => 'the "content" & whatever else',
