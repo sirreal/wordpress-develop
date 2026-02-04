@@ -183,13 +183,98 @@ class WP_HTML_Template {
 	/**
 	 * Returns a new immutable instance with replacements bound.
 	 *
+	 * Triggers compilation if not already done. Validates replacements:
+	 * - Warns if a placeholder has no corresponding replacement
+	 * - Warns if a replacement key has no corresponding placeholder
+	 * - Warns if a template is used in attribute context
+	 *
 	 * @since 7.0.0
 	 *
 	 * @param array $replacements The replacement values.
 	 * @return static A new template instance with the replacements bound.
 	 */
 	public function bind( array $replacements ): static {
-		return new static( $this->template_string, $replacements );
+		$this->compile();
+
+		// Build a lookup of placeholder keys from compiled data.
+		$placeholder_keys = array();
+		foreach ( $this->compiled as $placeholder => $info ) {
+			$placeholder = (string) $placeholder;
+			$placeholder_keys[ $placeholder ] = true;
+			if ( ctype_digit( $placeholder ) ) {
+				$placeholder_keys[ (int) $placeholder ] = true;
+			}
+		}
+
+		// Build a lookup of replacement keys.
+		$replacement_keys = array();
+		foreach ( $replacements as $key => $value ) {
+			$replacement_keys[ (string) $key ] = true;
+			if ( is_int( $key ) ) {
+				$replacement_keys[ $key ] = true;
+			}
+		}
+
+		// Check for missing keys (placeholder without replacement).
+		foreach ( $this->compiled as $placeholder => $info ) {
+			$placeholder = (string) $placeholder;
+			$found       = isset( $replacement_keys[ $placeholder ] );
+			if ( ! $found && ctype_digit( $placeholder ) ) {
+				$found = isset( $replacement_keys[ (int) $placeholder ] ) || array_key_exists( (int) $placeholder, $replacements );
+			}
+			if ( ! $found ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						'Missing replacement for placeholder: %s',
+						$placeholder
+					),
+					'7.0.0'
+				);
+			}
+		}
+
+		// Check for unused keys (replacement without placeholder).
+		foreach ( $replacements as $key => $value ) {
+			$str_key = (string) $key;
+			$found   = isset( $placeholder_keys[ $key ] ) || isset( $placeholder_keys[ $str_key ] );
+			if ( ! $found ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						'Unused replacement key: %s',
+						$key
+					),
+					'7.0.0'
+				);
+			}
+		}
+
+		// Check for templates in attribute context.
+		foreach ( $this->compiled as $placeholder => $info ) {
+			$placeholder = (string) $placeholder;
+			if ( 'attribute' !== $info['context'] ) {
+				continue;
+			}
+
+			$key   = ctype_digit( $placeholder ) ? (int) $placeholder : $placeholder;
+			$value = $replacements[ $key ] ?? $replacements[ $placeholder ] ?? null;
+
+			if ( $value instanceof self ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						'Template cannot be used in attribute context: %s',
+						$placeholder
+					),
+					'7.0.0'
+				);
+			}
+		}
+
+		$new = new static( $this->template_string, $replacements );
+		$new->compiled = $this->compiled;
+		return $new;
 	}
 
 	/**
