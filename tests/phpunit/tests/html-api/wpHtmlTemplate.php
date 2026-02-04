@@ -73,11 +73,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $result );
 	}
 
+
 	public function test_prevent_sneaky_tag_in_html() {
 		$template_string = 'a<</%tag-name>>s';
 		$replacements    = array( 'tag-name' => 'i' );
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
+		$t               = T::from( $template_string );
+		$result          = $t->render( $replacements );
 
 		$expected = 'a&lt;i&gt;s';
 		$this->assertEqualHTML( $expected, $result );
@@ -86,8 +87,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	public function test_attr_repeat() {
 		$template_string = '<meta a="</%replace></%replace-2>" a="</% no-replace >">';
 		$replacements    = array(
-			'replace' => 'O',
-			'replace-2' => 'K',
+			'replace'    => 'O',
+			'replace-2'  => 'K',
 			'no-replace' => 'FAIL',
 		);
 
@@ -152,8 +153,8 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	public function test_attr_no_produce_character_reference() {
 		$template_string = '<meta name="&</% placeholder >;">';
 		$replacements    = array( 'placeholder' => 'not' );
-		$t      = T::from( $template_string );
-		$result = $t->render( $replacements );
+		$t               = T::from( $template_string );
+		$result          = $t->render( $replacements );
 		$this->assertSame( $result, T::sprintf( $template_string, $replacements ) );
 
 		$expected =
