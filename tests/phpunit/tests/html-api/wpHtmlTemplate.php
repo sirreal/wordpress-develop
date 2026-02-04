@@ -809,4 +809,43 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertArrayHasKey( 'name', $placeholders );
 		$this->assertCount( 2, $placeholders['name']['offsets'] );
 	}
+
+	/**
+	 * Verifies attribute placeholders are extracted.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::get_placeholders
+	 */
+	public function test_extracts_attribute_placeholders() {
+		$template = T::from( '<meta name="</%n>" content="</%c>">' );
+
+		$placeholders = $template->get_placeholders();
+
+		$this->assertArrayHasKey( 'n', $placeholders );
+		$this->assertArrayHasKey( 'c', $placeholders );
+		$this->assertSame( 'attribute', $placeholders['n']['context'] );
+		$this->assertSame( 'attribute', $placeholders['c']['context'] );
+	}
+
+	/**
+	 * Verifies context promotion from text to attribute.
+	 *
+	 * When a placeholder appears in both text and attribute contexts,
+	 * the attribute context takes precedence (more restrictive escaping).
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::get_placeholders
+	 */
+	public function test_context_promotion_text_to_attribute() {
+		$template = T::from( '<a href="</%url>"></%url></a>' );
+
+		$placeholders = $template->get_placeholders();
+
+		$this->assertArrayHasKey( 'url', $placeholders );
+		// Both occurrences should use attribute context
+		$this->assertSame( 'attribute', $placeholders['url']['context'] );
+		$this->assertCount( 2, $placeholders['url']['offsets'] );
+	}
 }
