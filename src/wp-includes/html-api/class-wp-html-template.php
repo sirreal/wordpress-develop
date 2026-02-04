@@ -19,6 +19,44 @@ class WP_HTML_Template {
 
 	private array $replacements = array();
 
+	/**
+	 * Compiled placeholder metadata.
+	 *
+	 * Array of placeholder_name => array with keys:
+	 * - 'offsets': array of [start, length] pairs for each occurrence
+	 * - 'context': 'text' or 'attribute' (attribute takes precedence)
+	 *
+	 * @since 7.0.0
+	 * @var array|null
+	 */
+	private ?array $compiled = null;
+
+	/**
+	 * Returns the compiled placeholder metadata.
+	 *
+	 * Triggers compilation if not already done.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return array Associative array of placeholder_name => metadata.
+	 */
+	public function get_placeholders(): array {
+		$this->compile();
+		return $this->compiled;
+	}
+
+	/**
+	 * Compiles the template to extract placeholder metadata.
+	 *
+	 * @since 7.0.0
+	 */
+	private function compile(): void {
+		if ( null !== $this->compiled ) {
+			return;
+		}
+		$this->compiled = array();
+	}
+
 	private function __construct( string $template_string, array $replacements ) {
 		$this->template_string = $template_string;
 		$this->replacements    = $replacements;
