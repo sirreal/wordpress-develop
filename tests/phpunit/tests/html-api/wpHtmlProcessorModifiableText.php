@@ -50,6 +50,7 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 			{$set_text}<!--x--></pre>
 			HTML,
 			$processor->get_updated_html(),
+			'<body>',
 			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}
@@ -77,6 +78,7 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 			{$set_text}<!--x--></listing>
 			HTML,
 			$processor->get_updated_html(),
+			'<body>',
 			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}

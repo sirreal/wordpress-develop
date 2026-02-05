@@ -676,6 +676,7 @@ HTML;
 			{$set_text}<!--x--></pre>
 			HTML,
 			$processor->get_updated_html(),
+			'<body>',
 			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}
@@ -701,6 +702,7 @@ HTML;
 			{$set_text}<!--x--></listing>
 			HTML,
 			$processor->get_updated_html(),
+			'<body>',
 			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}
