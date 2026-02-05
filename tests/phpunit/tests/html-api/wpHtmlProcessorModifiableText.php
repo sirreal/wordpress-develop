@@ -28,15 +28,19 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	}
 
 	/**
-	 * PRE elements ignore the first newline in their content.
+	 * PRE and LISTING elements ignore the first newline in their content.
 	 * Setting the modifiable text with a leading newline should ensure that the leading newline
-	 * is present in the resulting TEXTAREA.
+	 * is present in the resulting element.
 	 *
 	 * @ticket 64607
+	 *
+	 * @dataProvider data_modifiable_text_special_pre_tags
+	 *
+	 * @param string $tag_name The tag name to test (e.g. 'pre', 'listing').
 	 */
-	public function test_modifiable_text_special_pre() {
+	public function test_modifiable_text_special_pre_tags( string $tag_name ) {
 		$set_text  = "\nAFTER NEWLINE";
-		$processor = WP_HTML_Processor::create_fragment( '<pre>REPLACEME<!--x--></pre>' );
+		$processor = WP_HTML_Processor::create_fragment( "<{$tag_name}>REPLACEME<!--x--></{$tag_name}>" );
 		$processor->next_tag();
 		$processor->next_token();
 		$this->assertSame( '#text', $processor->get_token_type() );
@@ -44,12 +48,24 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 		$this->assertSame( $set_text, $processor->get_modifiable_text() );
 		$this->assertEqualHTML(
 			<<<HTML
-			<pre>
-			{$set_text}<!--x--></pre>
+			<{$tag_name}>
+			{$set_text}<!--x--></{$tag_name}>
 			HTML,
 			$processor->get_updated_html(),
 			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
+			"Should have preserved the leading newline in the {$tag_name} content."
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_modifiable_text_special_pre_tags() {
+		return array(
+			'PRE'     => array( 'pre' ),
+			'LISTING' => array( 'listing' ),
 		);
 	}
 
@@ -134,31 +150,4 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 		);
 	}
 
-	/**
-	 * LISTING elements ignore the first newline in their content.
-	 * Setting the modifiable text with a leading newline should ensure that the leading newline
-	 * is present in the resulting TEXTAREA.
-	 *
-	 * @todo Leading whitespace mage split into multiple text nodes. Add appropriate tests.
-	 *
-	 * @ticket 64607
-	 */
-	public function test_modifiable_text_special_listing() {
-		$set_text  = "\nAFTER NEWLINE";
-		$processor = WP_HTML_Processor::create_fragment( '<listing>REPLACEME<!--x--></listing>' );
-		$processor->next_tag();
-		$processor->next_token();
-		$this->assertSame( '#text', $processor->get_token_type() );
-		$processor->set_modifiable_text( $set_text );
-		$this->assertSame( $set_text, $processor->get_modifiable_text() );
-		$this->assertEqualHTML(
-			<<<HTML
-			<listing>
-			{$set_text}<!--x--></listing>
-			HTML,
-			$processor->get_updated_html(),
-			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
-		);
-	}
 }

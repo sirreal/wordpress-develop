@@ -656,41 +656,54 @@ HTML;
 	}
 
 	/**
-	 * PRE and LISTING elements ignore the first newline in their content.
+	 * PRE elements ignore the first newline in their content.
 	 * Setting the modifiable text with a leading newline should ensure that the leading newline
-	 * is present in the resulting element.
+	 * is present in the resulting TEXTAREA.
 	 *
 	 * @ticket 64607
-	 *
-	 * @dataProvider data_modifiable_text_special_pre_tags
-	 *
-	 * @param string $tag_name The tag name to test (e.g. 'pre', 'listing').
 	 */
-	public function test_modifiable_text_special_pre_tags( string $tag_name ) {
+	public function test_modifiable_text_special_pre() {
 		$set_text  = "\nAFTER NEWLINE";
-		$processor = new WP_HTML_Tag_Processor( "<{$tag_name}>REPLACEME<!--x--></{$tag_name}>" );
+		$processor = new WP_HTML_Tag_Processor( '<pre>REPLACEME<!--x--></pre>' );
 		$processor->next_tag();
 		$processor->next_token();
 		$this->assertSame( '#text', $processor->get_token_type() );
 		$processor->set_modifiable_text( $set_text );
 		$this->assertSame( $set_text, $processor->get_modifiable_text() );
 		$this->assertEqualHTML(
-			"<{$tag_name}>\n{$set_text}<!--x--></{$tag_name}>",
+			<<<HTML
+			<pre>
+			{$set_text}<!--x--></pre>
+			HTML,
 			$processor->get_updated_html(),
 			'<body>',
-			"Should have preserved the leading newline in the {$tag_name} content."
+			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}
 
 	/**
-	 * Data provider.
+	 * LISTING elements ignore the first newline in their content.
+	 * Setting the modifiable text with a leading newline should ensure that the leading newline
+	 * is present in the resulting TEXTAREA.
 	 *
-	 * @return array[]
+	 * @ticket 64607
 	 */
-	public static function data_modifiable_text_special_pre_tags() {
-		return array(
-			'PRE'     => array( 'pre' ),
-			'LISTING' => array( 'listing' ),
+	public function test_modifiable_text_special_listing() {
+		$set_text  = "\nAFTER NEWLINE";
+		$processor = new WP_HTML_Tag_Processor( '<listing>REPLACEME<!--x--></listing>' );
+		$processor->next_tag();
+		$processor->next_token();
+		$this->assertSame( '#text', $processor->get_token_type() );
+		$processor->set_modifiable_text( $set_text );
+		$this->assertSame( $set_text, $processor->get_modifiable_text() );
+		$this->assertEqualHTML(
+			<<<HTML
+			<listing>
+			{$set_text}<!--x--></listing>
+			HTML,
+			$processor->get_updated_html(),
+			'<body>',
+			'Should have preserved the leading newline in the TEXTAREA content.'
 		);
 	}
 }
