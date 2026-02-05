@@ -1312,6 +1312,132 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Serializes the currently-matched token.
+	 *
+	 * This method produces a fully-normative HTML string for the currently-matched token,
+	 * if able. If not matched at any token or if the token doesn't correspond to any HTML
+	 * it will return an empty string (for example, presumptuous end tags are ignored).
+	 *
+	 * @see static::serialize()
+	 *
+	 * @since 6.7.0
+	 * @since 6.9.0 Converted from protected to public method.
+	 *
+	 * @return string Serialization of token, or empty string if no serialization exists.
+	 */
+	public function serialize_token(): string {
+		$html       = '';
+		$token_type = $this->get_token_type();
+
+		switch ( $token_type ) {
+			case '#doctype':
+				$doctype = $this->get_doctype_info();
+				if ( null === $doctype ) {
+					break;
+				}
+
+				$html .= '<!DOCTYPE';
+
+				if ( $doctype->name ) {
+					$html .= " {$doctype->name}";
+				}
+
+				if ( null !== $doctype->public_identifier ) {
+					$quote = str_contains( $doctype->public_identifier, '"' ) ? "'" : '"';
+					$html .= " PUBLIC {$quote}{$doctype->public_identifier}{$quote}";
+				}
+				if ( null !== $doctype->system_identifier ) {
+					if ( null === $doctype->public_identifier ) {
+						$html .= ' SYSTEM';
+					}
+					$quote = str_contains( $doctype->system_identifier, '"' ) ? "'" : '"';
+					$html .= " {$quote}{$doctype->system_identifier}{$quote}";
+				}
+
+				$html .= '>';
+				break;
+
+			case '#text':
+				$html .= htmlspecialchars( $this->get_modifiable_text(), ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
+				break;
+
+			// Unlike the `<>` which is interpreted as plaintext, this is ignored entirely.
+			case '#presumptuous-tag':
+				break;
+
+			case '#funky-comment':
+			case '#comment':
+				$html .= "<!--{$this->get_full_comment_text()}-->";
+				break;
+
+			case '#cdata-section':
+				$html .= "<![CDATA[{$this->get_modifiable_text()}]]>";
+				break;
+		}
+
+		if ( '#tag' !== $token_type ) {
+			return $html;
+		}
+
+		$tag_name       = str_replace( "\x00", "\u{FFFD}", $this->get_tag() );
+		$in_html        = 'html' === $this->get_namespace();
+		$qualified_name = $in_html ? strtolower( $tag_name ) : $this->get_qualified_tag_name();
+
+		if ( $this->is_tag_closer() ) {
+			$html .= "</{$qualified_name}>";
+			return $html;
+		}
+
+		$attribute_names = $this->get_attribute_names_with_prefix( '' );
+		if ( ! isset( $attribute_names ) ) {
+			$html .= "<{$qualified_name}>";
+			return $html;
+		}
+
+		$html .= "<{$qualified_name}";
+		foreach ( $attribute_names as $attribute_name ) {
+			$html .= " {$this->get_qualified_attribute_name( $attribute_name )}";
+			$value = $this->get_attribute( $attribute_name );
+
+			if ( is_string( $value ) ) {
+				$html .= '="' . htmlspecialchars( $value, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5 ) . '"';
+			}
+
+			$html = str_replace( "\x00", "\u{FFFD}", $html );
+		}
+
+		if ( ! $in_html && $this->has_self_closing_flag() ) {
+			$html .= ' /';
+		}
+
+		$html .= '>';
+
+		// Flush out self-contained elements.
+		if ( $in_html && in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) {
+			$text = $this->get_modifiable_text();
+
+			switch ( $tag_name ) {
+				case 'IFRAME':
+				case 'NOEMBED':
+				case 'NOFRAMES':
+					$text = '';
+					break;
+
+				case 'SCRIPT':
+				case 'STYLE':
+					break;
+
+				default:
+					$text = htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
+			}
+
+			$html .= "{$text}</{$qualified_name}>";
+		}
+
+		return $html;
+	}
+
+	/**
 	 * Parses next element in the 'initial' insertion mode.
 	 *
 	 * This internal function performs the 'initial' insertion mode
