@@ -70,84 +70,80 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	}
 
 	/**
+	 * PRE and LISTING elements ignore the first newline in their content.
+	 * Leading whitespace may split into multiple text nodes in the HTML Processor.
+	 * Setting the modifiable text with a leading newline should ensure that the
+	 * leading newline is present in the resulting element.
 	 *
 	 * @ticket 64607
+	 *
+	 * @dataProvider data_modifiable_text_special_leading_whitespace
+	 *
+	 * @param string $html          HTML containing the element to test.
+	 * @param int    $advance_n_tokens Count of times to run `next_token()` after `next_tag()`.
+	 * @param string $initial_text  Expected modifiable text before the update.
+	 * @param string $expected_html Expected HTML output after setting modifiable text.
 	 */
-	public function test_modifiable_text_special_pre_leading_whitespace() {
+	public function test_modifiable_text_special_leading_whitespace( string $html, int $advance_n_tokens, string $initial_text, string $expected_html ) {
 		$set_text  = "\nAFTER NEWLINE.";
-		$processor = WP_HTML_Processor::create_fragment( "<pre>\nREPLACEME<!--x--></pre>" );
+		$processor = WP_HTML_Processor::create_fragment( $html );
 		$processor->next_tag();
-		$processor->next_token();
+		while ( --$advance_n_tokens >= 0 ) {
+			$processor->next_token();
+		}
 		$this->assertSame( '#text', $processor->get_token_type() );
-		// This is an empty text node because of how the HTML Processor works.
-		$this->assertSame( '', $processor->get_modifiable_text() );
+		$this->assertSame( $initial_text, $processor->get_modifiable_text() );
 		$processor->set_modifiable_text( $set_text );
 		$this->assertSame( $set_text, $processor->get_modifiable_text() );
 		$this->assertEqualHTML(
-			<<<HTML
-			<pre>
-			{$set_text}REPLACEME<!--x--></pre>
-			HTML,
+			$expected_html,
 			$processor->get_updated_html(),
 			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
-		);
-
-		$processor = WP_HTML_Processor::create_fragment( "<pre>\nREPLACEME<!--x--></pre>" );
-		$processor->next_tag();
-		$processor->next_token();
-		$processor->next_token();
-		$this->assertSame( '#text', $processor->get_token_type() );
-		// This is an empty text node because of how the HTML Processor works.
-		$this->assertSame( 'REPLACEME', $processor->get_modifiable_text() );
-		$processor->set_modifiable_text( $set_text );
-		$this->assertSame( $set_text, $processor->get_modifiable_text() );
-		$this->assertEqualHTML(
-			<<<HTML
-			<pre>
-			{$set_text}<!--x--></pre>
-			HTML,
-			$processor->get_updated_html(),
-			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
-		);
-
-		$processor = WP_HTML_Processor::create_fragment( '<pre> REPLACEME<!--x--></pre>' );
-		$processor->next_tag();
-		$processor->next_token();
-		$this->assertSame( '#text', $processor->get_token_type() );
-		// This is an empty text node because of how the HTML Processor works.
-		$this->assertSame( ' ', $processor->get_modifiable_text() );
-		$processor->set_modifiable_text( $set_text );
-		$this->assertSame( $set_text, $processor->get_modifiable_text() );
-		$this->assertEqualHTML(
-			<<<HTML
-			<pre>
-			{$set_text}REPLACEME<!--x--></pre>
-			HTML,
-			$processor->get_updated_html(),
-			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
-		);
-
-		$processor = WP_HTML_Processor::create_fragment( '<pre> REPLACEME<!--x--></pre>' );
-		$processor->next_tag();
-		$processor->next_token();
-		$processor->next_token();
-		$this->assertSame( '#text', $processor->get_token_type() );
-		// This is an empty text node because of how the HTML Processor works.
-		$this->assertSame( 'REPLACEME', $processor->get_modifiable_text() );
-		$processor->set_modifiable_text( $set_text );
-		$this->assertSame( $set_text, $processor->get_modifiable_text() );
-		$this->assertEqualHTML(
-			<<<HTML
-			<pre>
-			 {$set_text}<!--x--></pre>
-			HTML,
-			$processor->get_updated_html(),
-			'<body>',
-			'Should have preserved the leading newline in the TEXTAREA content.'
+			'Should have preserved the leading newline in the element content.'
 		);
 	}
 
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_modifiable_text_special_leading_whitespace() {
+		$set_text = "\nAFTER NEWLINE.";
+		$cases    = array();
+
+		foreach ( array( 'pre', 'listing' ) as $tag_name ) {
+			$TAG = strtoupper( $tag_name );
+
+			$cases[ "{$TAG} with leading newline, first text node" ] = array(
+				"<{$tag_name}>\nREPLACEME<!--x--></{$tag_name}>",
+				1,
+				'',
+				"<{$tag_name}>\n{$set_text}REPLACEME<!--x--></{$tag_name}>",
+			);
+
+			$cases[ "{$TAG} with leading newline, second text node" ] = array(
+				"<{$tag_name}>\nREPLACEME<!--x--></{$tag_name}>",
+				2,
+				'REPLACEME',
+				"<{$tag_name}>\n{$set_text}<!--x--></{$tag_name}>",
+			);
+
+			$cases[ "{$TAG} with leading space, first text node" ] = array(
+				"<{$tag_name}> REPLACEME<!--x--></{$tag_name}>",
+				1,
+				' ',
+				"<{$tag_name}>\n{$set_text}REPLACEME<!--x--></{$tag_name}>",
+			);
+
+			$cases[ "{$TAG} with leading space, second text node" ] = array(
+				"<{$tag_name}> REPLACEME<!--x--></{$tag_name}>",
+				2,
+				'REPLACEME',
+				"<{$tag_name}>\n {$set_text}<!--x--></{$tag_name}>",
+			);
+		}
+
+		return $cases;
+	}
 }
