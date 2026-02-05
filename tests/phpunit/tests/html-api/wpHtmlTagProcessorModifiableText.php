@@ -638,47 +638,35 @@ HTML;
 	}
 
 	/**
-	 * TEXTAREA elements ignore the first newline in their content.
-	 * Setting the modifiable text with a leading newline should ensure that the leading newline
-	 * is present in the resulting TEXTAREA.
-	 *
-	 * @ticket 64607
-	 */
-	public function test_modifiable_text_special_textarea() {
-		$processor = new WP_HTML_Tag_Processor( '<textarea></textarea>' );
-		$processor->next_token();
-		$processor->set_modifiable_text( "\nAFTER NEWLINE" );
-		$this->assertSame(
-			"\nAFTER NEWLINE",
-			$processor->get_modifiable_text(),
-			'Should have preserved the leading newline in the TEXTAREA content.'
-		);
-	}
-
-	/**
-	 * PRE and LISTING elements ignore the first newline in their content.
+	 * TEXTAREA, PRE, and LISTING elements ignore the first newline in their content.
 	 * Setting the modifiable text with a leading newline should ensure that the leading newline
 	 * is present in the resulting element.
 	 *
 	 * @ticket 64607
 	 *
-	 * @dataProvider data_modifiable_text_special_pre_tags
+	 * @dataProvider data_modifiable_text_special_leading_newline_elements
 	 *
-	 * @param string $tag_name The tag name to test (e.g. 'pre', 'listing').
+	 * @param string $html             HTML containing the element to test.
+	 * @param int    $advance_n_tokens Count of times to run `next_token()` before reaching target node.
+	 * @param string $expected_html    Expected HTML output after setting modifiable text.
 	 */
-	public function test_modifiable_text_special_pre_tags( string $tag_name ) {
+	public function test_modifiable_text_special_leading_newline_elements( string $html, int $advance_n_tokens, string $expected_html ) {
 		$set_text  = "\nAFTER NEWLINE";
-		$processor = new WP_HTML_Tag_Processor( "<{$tag_name}>REPLACEME<!--x--></{$tag_name}>" );
-		$processor->next_tag();
-		$processor->next_token();
-		$this->assertSame( '#text', $processor->get_token_type() );
+		$processor = new WP_HTML_Tag_Processor( $html );
+		while ( --$advance_n_tokens >= 0 ) {
+			$processor->next_token();
+		}
 		$processor->set_modifiable_text( $set_text );
-		$this->assertSame( $set_text, $processor->get_modifiable_text() );
+		$this->assertSame(
+			$set_text,
+			$processor->get_modifiable_text(),
+			'Should have preserved the leading newline.'
+		);
 		$this->assertEqualHTML(
-			"<{$tag_name}>\n{$set_text}<!--x--></{$tag_name}>",
+			$expected_html,
 			$processor->get_updated_html(),
 			'<body>',
-			"Should have preserved the leading newline in the {$tag_name} content."
+			'Should have preserved the leading newline in the element content.'
 		);
 	}
 
@@ -687,10 +675,13 @@ HTML;
 	 *
 	 * @return array[]
 	 */
-	public static function data_modifiable_text_special_pre_tags() {
+	public static function data_modifiable_text_special_leading_newline_elements() {
+		$set_text = "\nAFTER NEWLINE";
+
 		return array(
-			'PRE'     => array( 'pre' ),
-			'LISTING' => array( 'listing' ),
+			'TEXTAREA' => array( '<textarea></textarea>', 1, "<textarea>\n{$set_text}</textarea>" ),
+			'PRE'      => array( '<pre>REPLACEME<!--x--></pre>', 2, "<pre>\n{$set_text}<!--x--></pre>" ),
+			'LISTING'  => array( '<listing>REPLACEME<!--x--></listing>', 2, "<listing>\n{$set_text}<!--x--></listing>" ),
 		);
 	}
 }
