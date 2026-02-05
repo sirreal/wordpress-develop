@@ -110,40 +110,16 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	 */
 	public static function data_modifiable_text_special_leading_whitespace() {
 		$set_text = "\nAFTER NEWLINE.";
-		$cases    = array();
 
-		foreach ( array( 'pre', 'listing' ) as $tag_name ) {
-			$TAG = strtoupper( $tag_name );
-
-			$cases[ "{$TAG} with leading newline, first text node" ] = array(
-				"<{$tag_name}>\nREPLACEME<!--x--></{$tag_name}>",
-				1,
-				'',
-				"<{$tag_name}>\n{$set_text}REPLACEME<!--x--></{$tag_name}>",
-			);
-
-			$cases[ "{$TAG} with leading newline, second text node" ] = array(
-				"<{$tag_name}>\nREPLACEME<!--x--></{$tag_name}>",
-				2,
-				'REPLACEME',
-				"<{$tag_name}>\n{$set_text}<!--x--></{$tag_name}>",
-			);
-
-			$cases[ "{$TAG} with leading space, first text node" ] = array(
-				"<{$tag_name}> REPLACEME<!--x--></{$tag_name}>",
-				1,
-				' ',
-				"<{$tag_name}>\n{$set_text}REPLACEME<!--x--></{$tag_name}>",
-			);
-
-			$cases[ "{$TAG} with leading space, second text node" ] = array(
-				"<{$tag_name}> REPLACEME<!--x--></{$tag_name}>",
-				2,
-				'REPLACEME',
-				"<{$tag_name}>\n {$set_text}<!--x--></{$tag_name}>",
-			);
-		}
-
-		return $cases;
+		return array(
+			'PRE with leading newline, first text node'     => array( "<pre>\nREPLACEME<!--x--></pre>", 1, '', "<pre>\n{$set_text}REPLACEME<!--x--></pre>" ),
+			'PRE with leading newline, second text node'    => array( "<pre>\nREPLACEME<!--x--></pre>", 2, 'REPLACEME', "<pre>\n{$set_text}<!--x--></pre>" ),
+			'PRE with leading space, first text node'       => array( '<pre> REPLACEME<!--x--></pre>', 1, ' ', "<pre>\n{$set_text}REPLACEME<!--x--></pre>" ),
+			'PRE with leading space, second text node'      => array( '<pre> REPLACEME<!--x--></pre>', 2, 'REPLACEME', "<pre>\n {$set_text}<!--x--></pre>" ),
+			'LISTING with leading newline, first text node'  => array( "<listing>\nREPLACEME<!--x--></listing>", 1, '', "<listing>\n{$set_text}REPLACEME<!--x--></listing>" ),
+			'LISTING with leading newline, second text node' => array( "<listing>\nREPLACEME<!--x--></listing>", 2, 'REPLACEME', "<listing>\n{$set_text}<!--x--></listing>" ),
+			'LISTING with leading space, first text node'    => array( '<listing> REPLACEME<!--x--></listing>', 1, ' ', "<listing>\n{$set_text}REPLACEME<!--x--></listing>" ),
+			'LISTING with leading space, second text node'   => array( '<listing> REPLACEME<!--x--></listing>', 2, 'REPLACEME', "<listing>\n {$set_text}<!--x--></listing>" ),
+		);
 	}
 }
