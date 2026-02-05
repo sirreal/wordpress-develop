@@ -85,19 +85,23 @@ class WP_HTML_Template {
 		$this->text_normalizations = array();
 		$this->attr_escapes        = array();
 
-		$processor = new class( $this->template_string ) extends WP_HTML_Tag_Processor {
+		$processor = ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
 			public function get_html(): string {
 				return $this->html;
 			}
 
 			public function get_bookmark( string $name ) {
-				return $this->bookmarks[ $name ] ?? null;
+				return $this->bookmarks[ "_{$name}" ] ?? null;
 			}
 
 			public function get_tag_attributes(): array {
 				return $this->attributes;
 			}
-		};
+		} )::create_fragment( $this->template_string );
+
+		if ( null === $processor ) {
+			return;
+		}
 
 		while ( $processor->next_token() ) {
 			switch ( $processor->get_token_type() ) {
