@@ -40,7 +40,7 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Data provider.
+	 * Data provider for test_modifiable_text_special_textarea().
 	 *
 	 * @return array[]
 	 */
