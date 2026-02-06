@@ -185,6 +185,15 @@ class WP_HTML_Template {
 					}
 
 					$this->compiled[ $placeholder ]['offsets'][] = array( $start, $length );
+
+					// New: append placeholder edit and register name.
+					$this->edits[] = array(
+						'start'       => $start,
+						'length'      => $length,
+						'placeholder' => $placeholder,
+						'context'     => 'text',
+					);
+					$this->placeholder_names[ $placeholder ] = true;
 					break;
 
 				case '#tag':
