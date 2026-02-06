@@ -70,14 +70,14 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @covers ::render
 	 */
 	public function test_attribute_replacement_is_not_recursive() {
-		$template_string = '<meta a="</%replace>">';
+		$template_string = '<div a="<%/replace>"><%/replace></div>';
 		$replacements    = array(
 			'replace' => '<%/replace>',
 		);
 
 		$result = T::from( $template_string )->bind( $replacements )->render();
 
-		$expected = '<meta a="&lt;%/replace&gt;">';
+		$expected = '<div a="&lt;/%replace&gt;">&lt;/%replace&gt;</div>';
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -753,6 +753,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				"<pre>\n</%code></pre>",
 				array( 'code' => "\nline1\nline2" ),
 				"<pre>\n\nline1\nline2</pre>",
+			),
+
+			'PRE with newline, newline replacement, and additional contents' => array(
+				"<pre>\n</%code><!--c--></pre>",
+				array( 'code' => "\nline1" ),
+				"<pre>\n\nline1<!--c--></pre>",
 			),
 		);
 	}
