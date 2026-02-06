@@ -54,6 +54,30 @@ class WP_HTML_Template {
 	private array $attr_escapes = array();
 
 	/**
+	 * Unified edit operations list.
+	 *
+	 * Flat array in document order (ascending offsets). Each entry is one of:
+	 *
+	 * Pre-computed replacement (normalizations, escapes):
+	 *   ['start' => int, 'length' => int, 'replacement' => string]
+	 *
+	 * Placeholder reference (render-time lookup):
+	 *   ['start' => int, 'length' => int, 'placeholder' => string, 'context' => 'text'|'attribute']
+	 *
+	 * @since 7.0.0
+	 * @var array
+	 */
+	private array $edits = array();
+
+	/**
+	 * Placeholder names for O(1) validation.
+	 *
+	 * @since 7.0.0
+	 * @var array<string, true>
+	 */
+	private array $placeholder_names = array();
+
+	/**
 	 * Returns the compiled placeholder metadata.
 	 *
 	 * Triggers compilation if not already done.
