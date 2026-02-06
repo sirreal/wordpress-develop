@@ -89,7 +89,7 @@ class WP_HTML_Template {
 
 		$this->compiled          = array();
 		$this->edits             = array();
-		$this->placeholder_names   = array();
+		$this->placeholder_names = array();
 
 		$processor = ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
 			public function get_html(): string {
@@ -164,7 +164,7 @@ class WP_HTML_Template {
 					$this->compiled[ $placeholder ]['offsets'][] = array( $start, $length );
 
 					// New: append placeholder edit and register name.
-					$this->edits[] = array(
+					$this->edits[]                           = array(
 						'start'       => $start,
 						'length'      => $length,
 						'placeholder' => $placeholder,
@@ -212,13 +212,16 @@ class WP_HTML_Template {
 								$seg_length = $match_start - $last_offset;
 								$original   = substr( $html, $last_offset, $seg_length );
 								$decoded    = WP_HTML_Decoder::decode_attribute( $original );
-								$escaped    = strtr( $decoded, array(
-									'&' => '&amp;',
-									'<' => '&lt;',
-									'>' => '&gt;',
-									"'" => '&apos;',
-									'"' => '&quot;',
-								) );
+								$escaped    = strtr(
+									$decoded,
+									array(
+										'&' => '&amp;',
+										'<' => '&lt;',
+										'>' => '&gt;',
+										"'" => '&apos;',
+										'"' => '&quot;',
+									)
+								);
 								// Only add edit if escaping actually changes the text.
 								if ( $escaped !== $original ) {
 									$this->edits[] = array(
@@ -242,7 +245,7 @@ class WP_HTML_Template {
 							$this->compiled[ $placeholder ]['offsets'][] = array( $match_start, $match_length );
 
 							// New: append placeholder edit and register name.
-							$this->edits[] = array(
+							$this->edits[]                           = array(
 								'start'       => $match_start,
 								'length'      => $match_length,
 								'placeholder' => $placeholder,
@@ -259,13 +262,16 @@ class WP_HTML_Template {
 							$seg_length = $end - $last_offset;
 							$original   = substr( $html, $last_offset, $seg_length );
 							$decoded    = WP_HTML_Decoder::decode_attribute( $original );
-							$escaped    = strtr( $decoded, array(
-								'&' => '&amp;',
-								'<' => '&lt;',
-								'>' => '&gt;',
-								"'" => '&apos;',
-								'"' => '&quot;',
-							) );
+							$escaped    = strtr(
+								$decoded,
+								array(
+									'&' => '&amp;',
+									'<' => '&lt;',
+									'>' => '&gt;',
+									"'" => '&apos;',
+									'"' => '&quot;',
+								)
+							);
 							// Only add edit if escaping actually changes the text.
 							if ( $escaped !== $original ) {
 								$this->edits[] = array(
@@ -372,7 +378,7 @@ class WP_HTML_Template {
 			}
 		}
 
-		$new = new static( $this->template_string, $replacements );
+		$new                    = new static( $this->template_string, $replacements );
 		$new->compiled          = $this->compiled;
 		$new->edits             = $this->edits;
 		$new->placeholder_names = $this->placeholder_names;
