@@ -266,6 +266,15 @@ class WP_HTML_Template {
 
 							$this->compiled[ $placeholder ]['offsets'][] = array( $match_start, $match_length );
 
+							// New: append placeholder edit and register name.
+							$this->edits[] = array(
+								'start'       => $match_start,
+								'length'      => $match_length,
+								'placeholder' => $placeholder,
+								'context'     => 'attribute',
+							);
+							$this->placeholder_names[ $placeholder ] = true;
+
 							$last_offset = $match_start + $match_length;
 							$offset      = $last_offset;
 						}
