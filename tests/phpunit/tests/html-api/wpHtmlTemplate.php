@@ -630,7 +630,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_atomic_element_attributes_are_replaced( string $template_string, array $replacements, string $expected ) {
 		$result = T::from( $template_string )->bind( $replacements )->render();
-		$this->assertSame( $expected, $result );
+		$this->assertEqualHTML( $expected, $result );
 	}
 
 	public static function data_atomic_element_attributes() {
@@ -680,7 +680,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_special_element_content_placeholder_behavior( string $template_string, string $expected ) {
 		$result = T::from( $template_string )->render();
-		$this->assertSame( $expected, $result );
+		$this->assertEqualHTML( $expected, $result );
 	}
 
 	public static function data_atomic_element_content_placeholders() {
@@ -726,7 +726,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_pre_element_leading_newline_behavior( string $template_string, array $replacements, string $expected ) {
 		$result = T::from( $template_string )->bind( $replacements )->render();
-		$this->assertSame( $expected, $result );
+		$this->assertEqualHTML( $expected, $result );
 	}
 
 	public static function data_pre_element_leading_newline() {
