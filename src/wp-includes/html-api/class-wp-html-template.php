@@ -32,28 +32,6 @@ class WP_HTML_Template {
 	private ?array $compiled = null;
 
 	/**
-	 * Text normalizations discovered during compilation.
-	 *
-	 * Array of [start, length, normalized_text] tuples for #text tokens
-	 * whose serialized form differs from the original HTML.
-	 *
-	 * @since 7.0.0
-	 * @var array
-	 */
-	private array $text_normalizations = array();
-
-	/**
-	 * Attribute text segments needing escaping.
-	 *
-	 * Array of [start, length] pairs for text between/before placeholders
-	 * within attribute values.
-	 *
-	 * @since 7.0.0
-	 * @var array
-	 */
-	private array $attr_escapes = array();
-
-	/**
 	 * Unified edit operations list.
 	 *
 	 * Flat array in document order (ascending offsets). Each entry is one of:
@@ -105,10 +83,8 @@ class WP_HTML_Template {
 			return;
 		}
 
-		$this->compiled            = array();
-		$this->text_normalizations = array();
-		$this->attr_escapes        = array();
-		$this->edits               = array();
+		$this->compiled          = array();
+		$this->edits             = array();
 		$this->placeholder_names   = array();
 
 		$processor = ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
@@ -143,9 +119,6 @@ class WP_HTML_Template {
 					}
 					$normalized = $processor->serialize_token();
 					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length ) ) {
-						// Legacy: keep text_normalizations for now (parallel arrays during migration).
-						$this->text_normalizations[] = array( $mark->start, $mark->length, $normalized );
-						// New: append pre-computed replacement to edits.
 						$this->edits[] = array(
 							'start'       => $mark->start,
 							'length'      => $mark->length,
@@ -250,8 +223,6 @@ class WP_HTML_Template {
 										'replacement' => $escaped,
 									);
 								}
-								// Legacy: keep attr_escapes for now.
-								$this->attr_escapes[] = array( $last_offset, $seg_length );
 							}
 
 							if ( ! isset( $this->compiled[ $placeholder ] ) ) {
@@ -299,8 +270,6 @@ class WP_HTML_Template {
 									'replacement' => $escaped,
 								);
 							}
-							// Legacy: keep attr_escapes for now.
-							$this->attr_escapes[] = array( $last_offset, $seg_length );
 						}
 					}
 					break;
@@ -400,11 +369,9 @@ class WP_HTML_Template {
 		}
 
 		$new = new static( $this->template_string, $replacements );
-		$new->compiled            = $this->compiled;
-		$new->text_normalizations = $this->text_normalizations;
-		$new->attr_escapes        = $this->attr_escapes;
-		$new->edits               = $this->edits;
-		$new->placeholder_names   = $this->placeholder_names;
+		$new->compiled          = $this->compiled;
+		$new->edits             = $this->edits;
+		$new->placeholder_names = $this->placeholder_names;
 		return $new;
 	}
 
