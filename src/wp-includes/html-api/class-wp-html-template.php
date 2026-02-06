@@ -116,14 +116,8 @@ class WP_HTML_Template {
 						break;
 					}
 					$normalized = $processor->serialize_token();
-					/*
-					 * Compare using substr_compare with min length to match
-					 * the original behavior: when serialize_token() returns
-					 * empty (e.g. leading newline after <pre>), the comparison
-					 * length is 0, which always matches. This leaves the text
-					 * unchanged for normalize() to handle at the end.
-					 */
-					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, min( $mark->length, strlen( $normalized ) ) ) ) {
+					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length )
+						) {
 						$this->text_normalizations[] = array( $mark->start, $mark->length, $normalized );
 					}
 					break;
