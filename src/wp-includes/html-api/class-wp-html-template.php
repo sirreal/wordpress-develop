@@ -108,6 +108,8 @@ class WP_HTML_Template {
 		$this->compiled            = array();
 		$this->text_normalizations = array();
 		$this->attr_escapes        = array();
+		$this->edits               = array();
+		$this->placeholder_names   = array();
 
 		$processor = ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
 			public function get_html(): string {
@@ -140,9 +142,15 @@ class WP_HTML_Template {
 						break;
 					}
 					$normalized = $processor->serialize_token();
-					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length )
-						) {
+					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length ) ) {
+						// Legacy: keep text_normalizations for now (parallel arrays during migration).
 						$this->text_normalizations[] = array( $mark->start, $mark->length, $normalized );
+						// New: append pre-computed replacement to edits.
+						$this->edits[] = array(
+							'start'       => $mark->start,
+							'length'      => $mark->length,
+							'replacement' => $normalized,
+						);
 					}
 					break;
 
