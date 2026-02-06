@@ -20,20 +20,12 @@ class WP_HTML_Template {
 	private array $replacements = array();
 
 	/**
-	 * Compiled placeholder metadata.
-	 *
-	 * @todo Consider deriving this from $edits on-demand in get_placeholders()
-	 *       to eliminate redundant storage. Would require building the grouped
-	 *       structure at call time instead of compile time.
-	 *
-	 * Array of placeholder_name => array with keys:
-	 * - 'offsets': array of [start, length] pairs for each occurrence
-	 * - 'context': 'text' or 'attribute' (attribute takes precedence)
+	 * Whether the template has been compiled.
 	 *
 	 * @since 7.0.0
-	 * @var array|null
+	 * @var bool
 	 */
-	private ?array $compiled = null;
+	private bool $is_compiled = false;
 
 	/**
 	 * Unified edit operations list.
@@ -62,7 +54,9 @@ class WP_HTML_Template {
 	/**
 	 * Returns the compiled placeholder metadata.
 	 *
-	 * Triggers compilation if not already done.
+	 * Derives the grouped structure from $edits on-demand.
+	 * If a placeholder appears in both text and attribute contexts,
+	 * the attribute context takes precedence (more restrictive).
 	 *
 	 * @since 7.0.0
 	 *
@@ -70,7 +64,33 @@ class WP_HTML_Template {
 	 */
 	public function get_placeholders(): array {
 		$this->compile();
-		return $this->compiled;
+
+		$result = array();
+
+		foreach ( $this->edits as $edit ) {
+			if ( ! isset( $edit['placeholder'] ) ) {
+				continue;
+			}
+
+			$placeholder = $edit['placeholder'];
+			$context     = $edit['context'];
+
+			if ( ! isset( $result[ $placeholder ] ) ) {
+				$result[ $placeholder ] = array(
+					'offsets' => array(),
+					'context' => $context,
+				);
+			} else {
+				// Promote text context to attribute context.
+				if ( 'attribute' === $context ) {
+					$result[ $placeholder ]['context'] = 'attribute';
+				}
+			}
+
+			$result[ $placeholder ]['offsets'][] = array( $edit['start'], $edit['length'] );
+		}
+
+		return $result;
 	}
 
 	/**
@@ -83,11 +103,11 @@ class WP_HTML_Template {
 	 * @since 7.0.0
 	 */
 	private function compile(): void {
-		if ( null !== $this->compiled ) {
+		if ( $this->is_compiled ) {
 			return;
 		}
 
-		$this->compiled          = array();
+		$this->is_compiled       = true;
 		$this->edits             = array();
 		$this->placeholder_names = array();
 
@@ -153,15 +173,6 @@ class WP_HTML_Template {
 					if ( strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
 						break;
 					}
-
-					if ( ! isset( $this->compiled[ $placeholder ] ) ) {
-						$this->compiled[ $placeholder ] = array(
-							'offsets' => array(),
-							'context' => 'text',
-						);
-					}
-
-					$this->compiled[ $placeholder ]['offsets'][] = array( $start, $length );
 
 					// New: append placeholder edit and register name.
 					$this->edits[]                           = array(
@@ -231,18 +242,6 @@ class WP_HTML_Template {
 									);
 								}
 							}
-
-							if ( ! isset( $this->compiled[ $placeholder ] ) ) {
-								$this->compiled[ $placeholder ] = array(
-									'offsets' => array(),
-									'context' => 'attribute',
-								);
-							} else {
-								// Promote text context to attribute context.
-								$this->compiled[ $placeholder ]['context'] = 'attribute';
-							}
-
-							$this->compiled[ $placeholder ]['offsets'][] = array( $match_start, $match_length );
 
 							// New: append placeholder edit and register name.
 							$this->edits[]                           = array(
@@ -379,7 +378,7 @@ class WP_HTML_Template {
 		}
 
 		$new                    = new static( $this->template_string, $replacements );
-		$new->compiled          = $this->compiled;
+		$new->is_compiled       = $this->is_compiled;
 		$new->edits             = $this->edits;
 		$new->placeholder_names = $this->placeholder_names;
 		return $new;
