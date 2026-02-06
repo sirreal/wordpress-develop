@@ -190,5 +190,22 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 				"<{$tag_name}><!--x--></{$tag_name}>",
 			);
 		}
+
+		// TEXTAREA tests - similar to PRE and LISTING elements.
+		yield 'TEXTAREA insert with leading carriage return' => array(
+			'<textarea>REPLACEME</textarea>',
+			1,
+			'REPLACEME',
+			"\rCR",
+			"<textarea>\n\nCR</textarea>",
+		);
+
+		yield 'TEXTAREA insert with leading carriage return + newline' => array(
+			'<textarea>REPLACEME</textarea>',
+			1,
+			'REPLACEME',
+			"\r\nCR-N",
+			"<textarea>\n\nCR-N</textarea>",
+		);
 	}
 }
