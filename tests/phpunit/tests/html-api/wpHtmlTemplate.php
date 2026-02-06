@@ -70,9 +70,9 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @covers ::render
 	 */
 	public function test_attribute_replacement_is_not_recursive() {
-		$template_string = '<div a="<%/replace>"><%/replace></div>';
+		$template_string = '<div a="</%replace>"></%replace></div>';
 		$replacements    = array(
-			'replace' => '<%/replace>',
+			'replace' => '</%replace>',
 		);
 
 		$result = T::from( $template_string )->bind( $replacements )->render();
