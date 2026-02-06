@@ -230,9 +230,28 @@ class WP_HTML_Template {
 							$match_start  = $matches[0][1];
 							$match_length = strlen( $matches[0][0] );
 
-							// Track text segment before this placeholder for escaping.
+							// Pre-compute escape for text segment before this placeholder.
 							if ( $match_start > $last_offset ) {
-								$this->attr_escapes[] = array( $last_offset, $match_start - $last_offset );
+								$seg_length = $match_start - $last_offset;
+								$original   = substr( $html, $last_offset, $seg_length );
+								$decoded    = WP_HTML_Decoder::decode_attribute( $original );
+								$escaped    = strtr( $decoded, array(
+									'&' => '&amp;',
+									'<' => '&lt;',
+									'>' => '&gt;',
+									"'" => '&apos;',
+									'"' => '&quot;',
+								) );
+								// Only add edit if escaping actually changes the text.
+								if ( $escaped !== $original ) {
+									$this->edits[] = array(
+										'start'       => $last_offset,
+										'length'      => $seg_length,
+										'replacement' => $escaped,
+									);
+								}
+								// Legacy: keep attr_escapes for now.
+								$this->attr_escapes[] = array( $last_offset, $seg_length );
 							}
 
 							if ( ! isset( $this->compiled[ $placeholder ] ) ) {
@@ -251,9 +270,28 @@ class WP_HTML_Template {
 							$offset      = $last_offset;
 						}
 
-						// Track trailing text segment after last placeholder.
+						// Pre-compute escape for trailing text segment after last placeholder.
 						if ( $last_offset < $end ) {
-							$this->attr_escapes[] = array( $last_offset, $end - $last_offset );
+							$seg_length = $end - $last_offset;
+							$original   = substr( $html, $last_offset, $seg_length );
+							$decoded    = WP_HTML_Decoder::decode_attribute( $original );
+							$escaped    = strtr( $decoded, array(
+								'&' => '&amp;',
+								'<' => '&lt;',
+								'>' => '&gt;',
+								"'" => '&apos;',
+								'"' => '&quot;',
+							) );
+							// Only add edit if escaping actually changes the text.
+							if ( $escaped !== $original ) {
+								$this->edits[] = array(
+									'start'       => $last_offset,
+									'length'      => $seg_length,
+									'replacement' => $escaped,
+								);
+							}
+							// Legacy: keep attr_escapes for now.
+							$this->attr_escapes[] = array( $last_offset, $seg_length );
 						}
 					}
 					break;
