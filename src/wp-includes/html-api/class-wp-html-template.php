@@ -341,31 +341,12 @@ class WP_HTML_Template {
 	public function bind( array $replacements ): static {
 		$this->compile();
 
-		// Build a lookup of placeholder keys from compiled data.
-		$placeholder_keys = array();
-		foreach ( $this->compiled as $placeholder => $info ) {
-			$placeholder = (string) $placeholder;
-			$placeholder_keys[ $placeholder ] = true;
-			if ( ctype_digit( $placeholder ) ) {
-				$placeholder_keys[ (int) $placeholder ] = true;
-			}
-		}
-
-		// Build a lookup of replacement keys.
-		$replacement_keys = array();
-		foreach ( $replacements as $key => $value ) {
-			$replacement_keys[ (string) $key ] = true;
-			if ( is_int( $key ) ) {
-				$replacement_keys[ $key ] = true;
-			}
-		}
-
 		// Check for missing keys (placeholder without replacement).
-		foreach ( $this->compiled as $placeholder => $info ) {
+		foreach ( $this->placeholder_names as $placeholder => $_ ) {
 			$placeholder = (string) $placeholder;
-			$found       = isset( $replacement_keys[ $placeholder ] );
+			$found       = array_key_exists( $placeholder, $replacements );
 			if ( ! $found && ctype_digit( $placeholder ) ) {
-				$found = isset( $replacement_keys[ (int) $placeholder ] ) || array_key_exists( (int) $placeholder, $replacements );
+				$found = array_key_exists( (int) $placeholder, $replacements );
 			}
 			if ( ! $found ) {
 				_doing_it_wrong(
@@ -382,7 +363,7 @@ class WP_HTML_Template {
 		// Check for unused keys (replacement without placeholder).
 		foreach ( $replacements as $key => $value ) {
 			$str_key = (string) $key;
-			$found   = isset( $placeholder_keys[ $key ] ) || isset( $placeholder_keys[ $str_key ] );
+			$found   = isset( $this->placeholder_names[ $key ] ) || isset( $this->placeholder_names[ $str_key ] );
 			if ( ! $found ) {
 				_doing_it_wrong(
 					__METHOD__,
@@ -396,14 +377,14 @@ class WP_HTML_Template {
 		}
 
 		// Check for templates in attribute context.
-		foreach ( $this->compiled as $placeholder => $info ) {
-			$placeholder = (string) $placeholder;
-			if ( 'attribute' !== $info['context'] ) {
+		foreach ( $this->edits as $edit ) {
+			if ( ! isset( $edit['placeholder'] ) || 'attribute' !== $edit['context'] ) {
 				continue;
 			}
 
-			$key   = ctype_digit( $placeholder ) ? (int) $placeholder : $placeholder;
-			$value = $replacements[ $key ] ?? $replacements[ $placeholder ] ?? null;
+			$placeholder = $edit['placeholder'];
+			$key         = ctype_digit( $placeholder ) ? (int) $placeholder : $placeholder;
+			$value       = $replacements[ $key ] ?? $replacements[ $placeholder ] ?? null;
 
 			if ( $value instanceof self ) {
 				_doing_it_wrong(
@@ -414,6 +395,7 @@ class WP_HTML_Template {
 					),
 					'7.0.0'
 				);
+				break; // Only warn once per placeholder name.
 			}
 		}
 
