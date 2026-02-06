@@ -28,6 +28,44 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	}
 
 	/**
+	 * TEXTAREA elements ignore the first newline in their content.
+	 * Setting the modifiable text with a leading carriage return should be normalized
+	 * and ensure the leading newline is present in the resulting TEXTAREA.
+	 *
+	 * @ticket 64607
+	 */
+	public function test_modifiable_text_special_textarea_carriage_return() {
+		$processor = WP_HTML_Processor::create_fragment( '<textarea></textarea>' );
+		$processor->next_token();
+		$processor->set_modifiable_text( "\rCR" );
+		// Newline normalization transforms \r into \n, and special handling should preserve it.
+		$this->assertSame(
+			"\nCR",
+			$processor->get_modifiable_text(),
+			'Should have normalized carriage return and preserved the leading newline in the TEXTAREA content.'
+		);
+	}
+
+	/**
+	 * TEXTAREA elements ignore the first newline in their content.
+	 * Setting the modifiable text with a leading carriage return + newline should be normalized
+	 * and ensure the leading newline is present in the resulting TEXTAREA.
+	 *
+	 * @ticket 64607
+	 */
+	public function test_modifiable_text_special_textarea_carriage_return_newline() {
+		$processor = WP_HTML_Processor::create_fragment( '<textarea></textarea>' );
+		$processor->next_token();
+		$processor->set_modifiable_text( "\r\nCR-N" );
+		// Newline normalization transforms \r\n into \n, and special handling should preserve it.
+		$this->assertSame(
+			"\nCR-N",
+			$processor->get_modifiable_text(),
+			'Should have normalized carriage return + newline and preserved the leading newline in the TEXTAREA content.'
+		);
+	}
+
+	/**
 	 * PRE and LISTING elements ignore the first newline in their content.
 	 * Setting the modifiable text with a leading newline should ensure that the leading newline
 	 * is present in the resulting element.
@@ -190,22 +228,5 @@ class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 				"<{$tag_name}><!--x--></{$tag_name}>",
 			);
 		}
-
-		// TEXTAREA tests - similar to PRE and LISTING elements.
-		yield 'TEXTAREA insert with leading carriage return' => array(
-			'<textarea>REPLACEME</textarea>',
-			1,
-			'REPLACEME',
-			"\rCR",
-			"<textarea>\n\nCR</textarea>",
-		);
-
-		yield 'TEXTAREA insert with leading carriage return + newline' => array(
-			'<textarea>REPLACEME</textarea>',
-			1,
-			'REPLACEME',
-			"\r\nCR-N",
-			"<textarea>\n\nCR-N</textarea>",
-		);
 	}
 }
