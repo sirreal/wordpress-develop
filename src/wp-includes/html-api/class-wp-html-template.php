@@ -22,6 +22,10 @@ class WP_HTML_Template {
 	/**
 	 * Compiled placeholder metadata.
 	 *
+	 * @todo Consider deriving this from $edits on-demand in get_placeholders()
+	 *       to eliminate redundant storage. Would require building the grouped
+	 *       structure at call time instead of compile time.
+	 *
 	 * Array of placeholder_name => array with keys:
 	 * - 'offsets': array of [start, length] pairs for each occurrence
 	 * - 'context': 'text' or 'attribute' (attribute takes precedence)
