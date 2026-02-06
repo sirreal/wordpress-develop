@@ -749,24 +749,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				"<pre>line1\nline2</pre>",
 			),
 
-			/*
-			 * This may seem wrong, but the template is processed like HTML. The leading newline
-			 * is removed.
-			 * The newline inside the replacement is rendered as HTML and is also removed.
-			 *
-			 * The correct way to do this for a PRE tag is:
-			 * - Leading newline in template is irrelevant.
-			 * - Replacement must include an extra newline to lead with a newline in the output.
-			 *
-			 * See the next case.
-			 */
 			'PRE with newline and newline in replacement' => array(
-				"<pre>\n</%code></pre>",
-				array( 'code' => "\nline1\nline2" ),
-				"<pre>\n\nline1\nline2</pre>",
-			),
-
-			'PRE with newline and double-newline in replacement' => array(
 				"<pre>\n</%code></pre>",
 				array( 'code' => "\nline1\nline2" ),
 				"<pre>\n\nline1\nline2</pre>",
