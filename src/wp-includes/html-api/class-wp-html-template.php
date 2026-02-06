@@ -421,6 +421,8 @@ class WP_HTML_Template {
 		$new->compiled            = $this->compiled;
 		$new->text_normalizations = $this->text_normalizations;
 		$new->attr_escapes        = $this->attr_escapes;
+		$new->edits               = $this->edits;
+		$new->placeholder_names   = $this->placeholder_names;
 		return $new;
 	}
 
@@ -460,81 +462,49 @@ class WP_HTML_Template {
 		$html      = $this->template_string;
 		$used_keys = array();
 
-		/*
-		 * Collect all updates as [start, length, replacement_text] tuples.
-		 */
-		$updates = array();
+		// Process edits in reverse order (end to start) to preserve positions.
+		foreach ( array_reverse( $this->edits ) as $edit ) {
+			if ( isset( $edit['placeholder'] ) ) {
+				// Placeholder: look up replacement value.
+				$placeholder = $edit['placeholder'];
 
-		// 1. Placeholder replacements.
-		foreach ( $this->compiled as $placeholder => $info ) {
-			$placeholder = (string) $placeholder;
-
-			// Look up the replacement value.
-			if ( array_key_exists( $placeholder, $this->replacements ) ) {
-				$key = $placeholder;
-			} elseif ( ctype_digit( $placeholder ) && array_key_exists( (int) $placeholder, $this->replacements ) ) {
-				$key = (int) $placeholder;
-			} else {
-				return false;
-			}
-
-			$used_keys[ $key ] = true;
-			$value             = $this->replacements[ $key ];
-
-			if ( $value instanceof self ) {
-				// Templates in attribute context are an error.
-				if ( 'attribute' === $info['context'] ) {
+				if ( array_key_exists( $placeholder, $this->replacements ) ) {
+					$key = $placeholder;
+				} elseif ( ctype_digit( $placeholder ) && array_key_exists( (int) $placeholder, $this->replacements ) ) {
+					$key = (int) $placeholder;
+				} else {
 					return false;
 				}
 
-				$rendered = $value->render();
-				if ( false === $rendered ) {
+				$used_keys[ $key ] = true;
+				$value             = $this->replacements[ $key ];
+
+				if ( $value instanceof self ) {
+					if ( 'attribute' === $edit['context'] ) {
+						return false;
+					}
+
+					$rendered = $value->render();
+					if ( false === $rendered ) {
+						return false;
+					}
+
+					$html = substr_replace( $html, $rendered, $edit['start'], $edit['length'] );
+				} elseif ( is_string( $value ) ) {
+					$escaped = strtr( $value, $escape_map );
+					$html    = substr_replace( $html, $escaped, $edit['start'], $edit['length'] );
+				} else {
 					return false;
 				}
-
-				foreach ( $info['offsets'] as list( $start, $length ) ) {
-					$updates[] = array( $start, $length, $rendered );
-				}
-			} elseif ( is_string( $value ) ) {
-				$escaped = strtr( $value, $escape_map );
-
-				foreach ( $info['offsets'] as list( $start, $length ) ) {
-					$updates[] = array( $start, $length, $escaped );
-				}
 			} else {
-				return false;
+				// Pre-computed replacement: apply directly.
+				$html = substr_replace( $html, $edit['replacement'], $edit['start'], $edit['length'] );
 			}
 		}
 
 		// Return false if any replacement key was not used.
 		if ( count( $used_keys ) !== count( $this->replacements ) ) {
 			return false;
-		}
-
-		// 2. Text normalizations.
-		foreach ( $this->text_normalizations as list( $start, $length, $normalized ) ) {
-			$updates[] = array( $start, $length, $normalized );
-		}
-
-		// 3. Attribute text escaping.
-		// Static text in attribute values needs escaping to prevent character
-		// reference injection (e.g. "&" + "not" = "&not;" = "¬"). Decode
-		// existing character references first, then re-encode to avoid
-		// double-escaping (e.g. "&amp;" should stay "&amp;", not become "&amp;amp;").
-		foreach ( $this->attr_escapes as list( $start, $length ) ) {
-			$original = substr( $html, $start, $length );
-			$decoded  = WP_HTML_Decoder::decode_attribute( $original );
-			$updates[] = array( $start, $length, strtr( $decoded, $escape_map ) );
-		}
-
-		// Sort by start position descending so replacements don't shift positions.
-		usort( $updates, static function ( $a, $b ) {
-			return $b[0] <=> $a[0];
-		} );
-
-		// Apply all replacements from end to start.
-		foreach ( $updates as list( $start, $length, $replacement ) ) {
-			$html = substr_replace( $html, $replacement, $start, $length );
 		}
 
 		return WP_HTML_Processor::normalize( $html ) ?? $html;
