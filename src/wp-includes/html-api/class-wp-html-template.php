@@ -51,48 +51,6 @@ class WP_HTML_Template {
 	private array $placeholder_names = array();
 
 	/**
-	 * Returns the compiled placeholder metadata.
-	 *
-	 * Derives the grouped structure from $edits on-demand.
-	 * If a placeholder appears in both text and attribute contexts,
-	 * the attribute context takes precedence (more restrictive).
-	 *
-	 * @since 7.0.0
-	 *
-	 * @return array Associative array of placeholder_name => metadata.
-	 */
-	public function get_placeholders(): array {
-		$this->compile();
-
-		$result = array();
-
-		foreach ( $this->edits as $edit ) {
-			if ( ! isset( $edit['placeholder'] ) ) {
-				continue;
-			}
-
-			$placeholder = $edit['placeholder'];
-			$context     = $edit['context'];
-
-			if ( ! isset( $result[ $placeholder ] ) ) {
-				$result[ $placeholder ] = array(
-					'offsets' => array(),
-					'context' => $context,
-				);
-			} else {
-				// Promote text context to attribute context.
-				if ( 'attribute' === $context ) {
-					$result[ $placeholder ]['context'] = 'attribute';
-				}
-			}
-
-			$result[ $placeholder ]['offsets'][] = array( $edit['start'], $edit['length'] );
-		}
-
-		return $result;
-	}
-
-	/**
 	 * Compiles the template to extract placeholder metadata.
 	 *
 	 * Parses the template once and caches placeholder positions, lengths,

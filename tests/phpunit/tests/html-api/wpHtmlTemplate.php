@@ -815,79 +815,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies that get_placeholders returns placeholder metadata.
-	 *
-	 * @ticket 60229
-	 *
-	 * @covers ::get_placeholders
-	 */
-	public function test_get_placeholders_returns_metadata() {
-		$template = T::from( '<p class="</%class>"></%content></p>' );
-
-		$placeholders = $template->get_placeholders();
-
-		$this->assertArrayHasKey( 'class', $placeholders );
-		$this->assertArrayHasKey( 'content', $placeholders );
-		$this->assertSame( 'attribute', $placeholders['class']['context'] );
-		$this->assertSame( 'text', $placeholders['content']['context'] );
-	}
-
-	/**
-	 * Verifies text placeholders are extracted with correct offsets.
-	 *
-	 * @ticket 60229
-	 *
-	 * @covers ::get_placeholders
-	 */
-	public function test_extracts_text_placeholders_with_offsets() {
-		$template = T::from( '<p></%name></p>' );
-
-		$placeholders = $template->get_placeholders();
-
-		$this->assertArrayHasKey( 'name', $placeholders );
-		$this->assertSame( 'text', $placeholders['name']['context'] );
-		$this->assertCount( 1, $placeholders['name']['offsets'] );
-		// <p> is 3 chars, so </%name> starts at offset 3
-		$this->assertSame( 3, $placeholders['name']['offsets'][0][0] );
-		// </%name> is 8 chars
-		$this->assertSame( 8, $placeholders['name']['offsets'][0][1] );
-	}
-
-	/**
-	 * Verifies repeated text placeholders are captured.
-	 *
-	 * @ticket 60229
-	 *
-	 * @covers ::get_placeholders
-	 */
-	public function test_extracts_repeated_text_placeholders() {
-		$template = T::from( '<p></%name> and </%name></p>' );
-
-		$placeholders = $template->get_placeholders();
-
-		$this->assertArrayHasKey( 'name', $placeholders );
-		$this->assertCount( 2, $placeholders['name']['offsets'] );
-	}
-
-	/**
-	 * Verifies attribute placeholders are extracted.
-	 *
-	 * @ticket 60229
-	 *
-	 * @covers ::get_placeholders
-	 */
-	public function test_extracts_attribute_placeholders() {
-		$template = T::from( '<meta name="</%n>" content="</%c>">' );
-
-		$placeholders = $template->get_placeholders();
-
-		$this->assertArrayHasKey( 'n', $placeholders );
-		$this->assertArrayHasKey( 'c', $placeholders );
-		$this->assertSame( 'attribute', $placeholders['n']['context'] );
-		$this->assertSame( 'attribute', $placeholders['c']['context'] );
-	}
-
-	/**
 	 * Verifies that static text around placeholders in attributes is escaped.
 	 *
 	 * @ticket 60229
@@ -935,17 +862,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<meta name="¬">',
 			),
 		);
-	}
-
-	public function test_context_promotion_text_to_attribute() {
-		$template = T::from( '<a href="</%url>"></%url></a>' );
-
-		$placeholders = $template->get_placeholders();
-
-		$this->assertArrayHasKey( 'url', $placeholders );
-		// Both occurrences should use attribute context
-		$this->assertSame( 'attribute', $placeholders['url']['context'] );
-		$this->assertCount( 2, $placeholders['url']['offsets'] );
 	}
 
 	/**
