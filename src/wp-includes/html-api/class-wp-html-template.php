@@ -46,7 +46,7 @@ class WP_HTML_Template {
 	 *   ['start' => int, 'length' => int, 'placeholder' => string, 'context' => 'text'|'attribute']
 	 *
 	 * @since 7.0.0
-	 * @var array
+	 * @var (array{'start': int, 'length': int, 'placeholder': string, 'context': 'text'|'attribute'}|WP_HTML_Text_Replacement)[]
 	 */
 	private array $edits = array();
 
@@ -150,10 +150,10 @@ class WP_HTML_Template {
 					}
 					$normalized = $processor->serialize_token();
 					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length ) ) {
-						$this->edits[] = array(
-							'start'       => $mark->start,
-							'length'      => $mark->length,
-							'replacement' => $normalized,
+						$this->edits[] = new WP_HTML_Text_Replacement(
+							$mark->start,
+							$mark->length,
+							$normalized,
 						);
 					}
 					break;
@@ -242,10 +242,10 @@ class WP_HTML_Template {
 								);
 								// Only add edit if escaping actually changes the text.
 								if ( $escaped !== $original ) {
-									$this->edits[] = array(
-										'start'       => $last_offset,
-										'length'      => $seg_length,
-										'replacement' => $escaped,
+									$this->edits[] = new WP_HTML_Text_Replacement(
+										$last_offset,
+										$seg_length,
+										$escaped,
 									);
 								}
 							}
@@ -280,10 +280,10 @@ class WP_HTML_Template {
 							);
 							// Only add edit if escaping actually changes the text.
 							if ( $escaped !== $original ) {
-								$this->edits[] = array(
-									'start'       => $last_offset,
-									'length'      => $seg_length,
-									'replacement' => $escaped,
+								$this->edits[] = new WP_HTML_Text_Replacement(
+									$last_offset,
+									$seg_length,
+									$escaped,
 								);
 							}
 						}
@@ -293,7 +293,7 @@ class WP_HTML_Template {
 		}
 	}
 
-	private function __construct( string $template_string, array $replacements ) {
+	private function __construct( string $template_string, ?array $replacements ) {
 		$this->template_string = $template_string;
 		$this->replacements    = $replacements;
 	}
@@ -306,8 +306,8 @@ class WP_HTML_Template {
 	 * @param string $template The template string with placeholders.
 	 * @return static The template instance.
 	 */
-	public static function from( string $template ): static {
-		return new static( $template, array() );
+	public static function from( string $template, ?array $replacements = null ): static {
+		return new static( $template, $replacements );
 	}
 
 	/**
@@ -363,7 +363,7 @@ class WP_HTML_Template {
 
 		// Check for templates in attribute context.
 		foreach ( $this->edits as $edit ) {
-			if ( ! isset( $edit['placeholder'] ) || 'attribute' !== $edit['context'] ) {
+			if ( $edit instanceof WP_HTML_Text_Replacement || 'attribute' !== $edit['context'] ) {
 				continue;
 			}
 
@@ -429,7 +429,10 @@ class WP_HTML_Template {
 
 		// Process edits in reverse order (end to start) to preserve positions.
 		foreach ( array_reverse( $this->edits ) as $edit ) {
-			if ( isset( $edit['placeholder'] ) ) {
+			if ( $edit instanceof WP_HTML_Text_Replacement ) {
+				// Pre-computed replacement: apply directly.
+				$html = substr_replace( $html, $edit->text, $edit->start, $edit->length );
+			} else {
 				// Placeholder: look up replacement value.
 				$placeholder = $edit['placeholder'];
 
@@ -461,9 +464,6 @@ class WP_HTML_Template {
 				} else {
 					return false;
 				}
-			} else {
-				// Pre-computed replacement: apply directly.
-				$html = substr_replace( $html, $edit['replacement'], $edit['start'], $edit['length'] );
 			}
 		}
 
