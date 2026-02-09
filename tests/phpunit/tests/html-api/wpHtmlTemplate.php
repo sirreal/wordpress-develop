@@ -888,16 +888,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies context promotion from text to attribute.
-	 *
-	 * When a placeholder appears in both text and attribute contexts,
-	 * the attribute context takes precedence (more restrictive escaping).
-	 *
-	 * @ticket 60229
-	 *
-	 * @covers ::get_placeholders
-	 */
-	/**
 	 * Verifies that static text around placeholders in attributes is escaped.
 	 *
 	 * @ticket 60229
