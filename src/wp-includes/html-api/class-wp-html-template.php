@@ -17,7 +17,14 @@ class WP_HTML_Template {
 	 */
 	private string $template_string;
 
-	private array $replacements = array();
+	/**
+	 * The replacement values for placeholders.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @var array<string, string|self>|null
+	 */
+	private ?array $replacements = null;
 
 	/**
 	 * Whether the template has been compiled.
