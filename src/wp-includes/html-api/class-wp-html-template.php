@@ -413,6 +413,7 @@ class WP_HTML_Template {
 		$this->compile();
 
 		if ( empty( $this->replacements ) ) {
+			// @todo check for missing names.
 			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
 		}
 
@@ -424,31 +425,24 @@ class WP_HTML_Template {
 			'"' => '&quot;',
 		);
 
-		$html      = $this->template_string;
-		$used_keys = array();
+		$processor = ( new class( $this->template_string ) extends WP_HTML_Tag_Processor {
+			public function push_update( WP_HTML_Text_Replacement $update ) {
+				$this->lexical_updates[] = $update;
+			}
+		} );
 
-		// Process edits in reverse order (end to start) to preserve positions.
-		foreach ( array_reverse( $this->edits ) as $edit ) {
+		$used_keys = array();
+		foreach ( $this->edits as $edit ) {
 			if ( $edit instanceof WP_HTML_Text_Replacement ) {
-				// Pre-computed replacement: apply directly.
-				$html = substr_replace( $html, $edit->text, $edit->start, $edit->length );
+				$processor->push_update( $edit );
 			} else {
 				// Placeholder: look up replacement value.
 				$placeholder = $edit['placeholder'];
-
-				if ( array_key_exists( $placeholder, $this->replacements ) ) {
-					$key = $placeholder;
-				} elseif ( ctype_digit( $placeholder ) && array_key_exists( (int) $placeholder, $this->replacements ) ) {
-					$key = (int) $placeholder;
-				} else {
-					return false;
-				}
-
-				$used_keys[ $key ] = true;
-				$value             = $this->replacements[ $key ];
+				$value       = $this->replacements[ $placeholder ] ?? null;
 
 				if ( $value instanceof self ) {
 					if ( 'attribute' === $edit['context'] ) {
+						// @todo doing it wrong.
 						return false;
 					}
 
@@ -457,13 +451,19 @@ class WP_HTML_Template {
 						return false;
 					}
 
-					$html = substr_replace( $html, $rendered, $edit['start'], $edit['length'] );
+					$processor->push_update(
+						new WP_HTML_Text_Replacement( $edit['start'], $edit['length'], $rendered ),
+					);
 				} elseif ( is_string( $value ) ) {
 					$escaped = strtr( $value, $escape_map );
-					$html    = substr_replace( $html, $escaped, $edit['start'], $edit['length'] );
+					$processor->push_update(
+						new WP_HTML_Text_Replacement( $edit['start'], $edit['length'], $escaped ),
+					);
 				} else {
+					// @todo doing it wrong.
 					return false;
 				}
+				$used_keys[ $placeholder ] = true;
 			}
 		}
 
@@ -472,6 +472,10 @@ class WP_HTML_Template {
 			return false;
 		}
 
-		return WP_HTML_Processor::normalize( $html ) ?? $html;
+		/*
+		 * @todo ideally, just call `$processor->serialize()`.
+		 * @todo doing it wrong?
+		 */
+		return WP_HTML_Processor::normalize( $processor->get_updated_html() ) ?? false;
 	}
 }
