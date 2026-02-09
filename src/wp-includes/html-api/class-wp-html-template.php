@@ -27,14 +27,6 @@ class WP_HTML_Template {
 	private ?array $replacements = null;
 
 	/**
-	 * Whether the template has been compiled.
-	 *
-	 * @since 7.0.0
-	 * @var bool
-	 */
-	private bool $is_compiled = false;
-
-	/**
 	 * Unified edit operations list.
 	 *
 	 * Flat array in document order (ascending offsets). Each entry is one of:
@@ -46,9 +38,9 @@ class WP_HTML_Template {
 	 *   ['start' => int, 'length' => int, 'placeholder' => string, 'context' => 'text'|'attribute']
 	 *
 	 * @since 7.0.0
-	 * @var (array{'start': int, 'length': int, 'placeholder': string, 'context': 'text'|'attribute'}|WP_HTML_Text_Replacement)[]
+	 * @var null|array<array{'start': int, 'length': int, 'placeholder': string, 'context': 'text'|'attribute'}|WP_HTML_Text_Replacement>
 	 */
-	private array $edits = array();
+	private ?array $edits = null;
 
 	/**
 	 * Placeholder names for O(1) validation.
@@ -110,11 +102,10 @@ class WP_HTML_Template {
 	 * @since 7.0.0
 	 */
 	private function compile(): void {
-		if ( $this->is_compiled ) {
+		if ( null !== $this->edits ) {
 			return;
 		}
 
-		$this->is_compiled       = true;
 		$this->edits             = array();
 		$this->placeholder_names = array();
 
@@ -385,7 +376,6 @@ class WP_HTML_Template {
 		}
 
 		$new                    = new static( $this->template_string, $replacements );
-		$new->is_compiled       = $this->is_compiled;
 		$new->edits             = $this->edits;
 		$new->placeholder_names = $this->placeholder_names;
 		return $new;
