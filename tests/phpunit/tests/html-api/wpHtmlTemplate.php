@@ -688,24 +688,24 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	public static function data_atomic_element_content_placeholders() {
 		return array(
 			// RAWTEXT elements (SCRIPT, STYLE): Content is truly skipped, placeholders preserved literally.
-			'SCRIPT content placeholder preserved'        => array(
+			'SCRIPT content placeholder preserved' => array(
 				'<script>var x = "</%name>";</script>',
 				'<script>var x = "</%name>";</script>',
 			),
 
-			'STYLE content placeholder preserved'         => array(
+			'STYLE content placeholder preserved'  => array(
 				'<style>.foo { content: "</%content>"; }</style>',
 				'<style>.foo { content: "</%content>"; }</style>',
 			),
 
 			// RCDATA elements (TITLE, TEXTAREA): Content is processed but placeholder
 			// patterns are not recognized - they're treated as literal text and escaped.
-			'TITLE content placeholder escaped'           => array(
+			'TITLE content placeholder escaped'    => array(
 				'<title>Hello </%name></title>',
 				'<title>Hello &lt;/%name&gt;</title>',
 			),
 
-			'TEXTAREA content placeholder escaped'        => array(
+			'TEXTAREA content placeholder escaped' => array(
 				'<textarea></%placeholder></textarea>',
 				'<textarea>&lt;/%placeholder&gt;</textarea>',
 			),
@@ -735,21 +735,21 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public static function data_pre_element_leading_newline() {
 		return array(
-			'PRE without newline'        => array(
-				"<pre></%code></pre>",
-				array( 'code' => "line1\nline2"),
+			'PRE without newline'                         => array(
+				'<pre></%code></pre>',
+				array( 'code' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
-			'PRE with newline' => array(
+			'PRE with newline'                            => array(
 				"<pre>\n</%code></pre>",
-				array( 'code' =>  "line1\nline2"),
+				array( 'code' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
-			'PRE with newline in replacement' => array(
+			'PRE with newline in replacement'             => array(
 				"<pre>\n</%code></pre>",
-				array( 'code' =>   "line1\nline2"),
+				array( 'code' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
@@ -792,7 +792,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_bind_warns_on_unused_key() {
 		$template = T::from( '<p></%name></p>' );
-		$template->bind( array( 'name' => 'Alice', 'extra' => 'ignored' ) );
+		$template->bind(
+			array(
+				'name'  => 'Alice',
+				'extra' => 'ignored',
+			)
+		);
 	}
 
 	/**
