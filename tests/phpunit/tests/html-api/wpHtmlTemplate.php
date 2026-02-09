@@ -947,4 +947,22 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$this->assertSame( 'attribute', $placeholders['url']['context'] );
 		$this->assertCount( 2, $placeholders['url']['offsets'] );
 	}
+
+	/**
+	 * @ticket 60229
+	 */
+	public function test_warns_on_unrecognized_replacements() {
+		$this->setExpectedIncorrectUsage( 'WP_HTML_Template::bind' );
+		$template = T::from( '<meta>' );
+		$template->bind( array( 'extra' => 'oops' ) );
+	}
+
+	/**
+	 * @ticket 60229
+	 */
+	public function test_warns_on_omit_replacement() {
+		$this->setExpectedIncorrectUsage( 'WP_HTML_Template::bind' );
+		$template = T::from( '</% omitted >' );
+		$template->bind( array() );
+	}
 }
