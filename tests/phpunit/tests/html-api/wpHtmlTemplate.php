@@ -902,40 +902,49 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
+	 * @dataProvider data_escapes_static_text_around_placeholder_in_attribute
+	 *
 	 * @covers ::from
 	 * @covers ::bind
 	 * @covers ::render
 	 */
-	public function test_escapes_static_text_around_placeholder_in_attribute() {
-		// Leading static text (prefix before placeholder)
-		$result = T::from( '<a href="/path/</%slug>">Link</a>' )
-			->bind( array( 'slug' => 'hello' ) )
-			->render();
-		$this->assertEqualHTML( '<a href="/path/hello">Link</a>', $result );
+	public function test_escapes_static_text_around_placeholder_in_attribute( string $template_string, array $replacements, string $expected ) {
+		$result = T::from( $template_string )->bind( $replacements )->render();
+		$this->assertEqualHTML( $expected, $result );
+	}
 
-		// Trailing static text (suffix after placeholder)
-		$result = T::from( '<a href="</%slug>/page">Link</a>' )
-			->bind( array( 'slug' => 'hello' ) )
-			->render();
-		$this->assertEqualHTML( '<a href="hello/page">Link</a>', $result );
+	public static function data_escapes_static_text_around_placeholder_in_attribute() {
+		return array(
+			'leading static text (prefix before placeholder)'              => array(
+				'<a href="/path/</%slug>">Link</a>',
+				array( 'slug' => 'hello' ),
+				'<a href="/path/hello">Link</a>',
+			),
 
-		// Ampersand in trailing static text must be escaped
-		$result = T::from( '<a href="</%base>&amp;extra=1">Link</a>' )
-			->bind( array( 'base' => '/search?q=test' ) )
-			->render();
-		$this->assertEqualHTML( '<a href="/search?q=test&amp;extra=1">Link</a>', $result );
+			'trailing static text (suffix after placeholder)'              => array(
+				'<a href="</%slug>/page">Link</a>',
+				array( 'slug' => 'hello' ),
+				'<a href="hello/page">Link</a>',
+			),
 
-		// Ampersand entity in leading static text must not be double-escaped
-		$result = T::from( '<a href="/search?a=1&amp;b=</%val>">Link</a>' )
-			->bind( array( 'val' => '2' ) )
-			->render();
-		$this->assertEqualHTML( '<a href="/search?a=1&amp;b=2">Link</a>', $result );
+			'ampersand in trailing static text must be escaped'            => array(
+				'<a href="</%base>&amp;extra=1">Link</a>',
+				array( 'base' => '/search?q=test' ),
+				'<a href="/search?q=test&amp;extra=1">Link</a>',
+			),
 
-		// Character reference in trailing static text is preserved (not double-escaped)
-		$result = T::from( '<meta name="</%placeholder>&not;">' )
-			->bind( array( 'placeholder' => '' ) )
-			->render();
-		$this->assertEqualHTML( '<meta name="¬">', $result );
+			'ampersand entity in leading static text not double-escaped'   => array(
+				'<a href="/search?a=1&amp;b=</%val>">Link</a>',
+				array( 'val' => '2' ),
+				'<a href="/search?a=1&amp;b=2">Link</a>',
+			),
+
+			'character reference in trailing static text preserved'        => array(
+				'<meta name="</%placeholder>&not;">',
+				array( 'placeholder' => '' ),
+				'<meta name="¬">',
+			),
+		);
 	}
 
 	public function test_context_promotion_text_to_attribute() {
