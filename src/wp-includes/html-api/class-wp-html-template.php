@@ -51,6 +51,61 @@ class WP_HTML_Template {
 	private array $placeholder_names = array();
 
 	/**
+	 * Determines if the template requires table context for parsing.
+	 *
+	 * Templates starting with <tr>, <td>, <th>, <thead>, <tbody>, <tfoot>
+	 * need to be parsed in table context, not body context.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return string|null The context element needed, or null for default body context.
+	 */
+	private function detect_context(): ?string {
+		// Quick check: skip expensive parsing if no table elements present.
+		if ( ! preg_match( '/<t(?:r|d|h|head|body|foot)\b/i', $this->template_string ) ) {
+			return null;
+		}
+
+		// Find first non-whitespace, non-comment token.
+		$scanner = WP_HTML_Processor::create_fragment( $this->template_string );
+		if ( null === $scanner ) {
+			return null;
+		}
+
+		while ( $scanner->next_token() ) {
+			$type = $scanner->get_token_type();
+
+			// Skip whitespace and comments.
+			if ( '#text' === $type ) {
+				$text = $scanner->get_modifiable_text();
+				if ( '' === trim( $text ) ) {
+					continue;
+				}
+				// Non-whitespace text found first - use body context.
+				return null;
+			}
+
+			if ( '#comment' === $type || '#funky-comment' === $type ) {
+				continue;
+			}
+
+			// First real element found.
+			if ( '#tag' === $type && ! $scanner->is_tag_closer() ) {
+				$tag = strtoupper( $scanner->get_tag() );
+				// These tags require table context.
+				if ( in_array( $tag, array( 'TR', 'TD', 'TH', 'THEAD', 'TBODY', 'TFOOT', 'CAPTION', 'COLGROUP', 'COL' ), true ) ) {
+					return '<tbody>';
+				}
+			}
+
+			// Any other token means body context is fine.
+			return null;
+		}
+
+		return null;
+	}
+
+	/**
 	 * Compiles the template to extract placeholder metadata.
 	 *
 	 * Parses the template once and caches placeholder positions, lengths,
