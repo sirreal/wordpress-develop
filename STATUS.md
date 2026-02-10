@@ -44,8 +44,45 @@ The ticket wants replacement embedded in the Tag Processor. Current implementati
 **1. RAWTEXT/RCDATA Element Handling Is Half-Baked**
 Tests show placeholders inside `<script>`, `<style>` are preserved literally, while `<title>`, `<textarea>` escape them as text. Neither allows actual replacement. The ticket doesn't acknowledge this limitation clearly. If I write a template for a script tag's content, I'd expect placeholders to work.
 
-**2. Table Context Parsing**
-Test explicitly skipped: "IN TABLE templates are not supported yet." HTML parsing rules for tables are complex—implicit elements, foster parenting. The ticket doesn't address this at all. Tables are everywhere in WordPress admin.
+**2. Table Context Parsing (Solvable with Private API)**
+Test explicitly skipped: "IN TABLE templates are not supported yet." However, investigation reveals this **is solvable** using existing private APIs.
+
+**Key finding:** Funky comment placeholders (`</%name>`) are explicitly handled in table contexts! From `class-wp-html-processor.php` line 3279-3283:
+```php
+case '#comment':
+case '#funky-comment':
+case '#presumptuous-tag':
+    $this->insert_html_element( $this->state->current_token );
+    return true;
+```
+
+The "foster parenting bail" only happens for:
+1. Non-whitespace text directly inside table/tbody/thead/tfoot/tr
+2. Non-table elements like `<div>` inside table structure
+
+**The real blocker:** The public `create_fragment()` API artificially rejects non-body contexts (line 296):
+```php
+if ( '<body>' !== $context || 'UTF-8' !== $encoding ) {
+    return null;
+}
+```
+
+**Private API path:** `create_fragment_at_current_node()` (line 477) does the right thing:
+1. Takes current element as context
+2. Calls `reset_insertion_mode_appropriately()` which correctly sets table insertion modes
+3. Returns a fragment processor in the proper context
+
+**How to enable table support:**
+1. `WP_HTML_Template` already uses an anonymous class extending `WP_HTML_Processor` to access private members
+2. The same pattern can expose `create_fragment_at_current_node()`
+3. Create full parser: `<!DOCTYPE html><table><tbody>`, navigate to `<tbody>`, call exposed method
+4. Fragment processor will be in IN_TABLE_BODY mode where `<tr>` and placeholders are valid
+
+**Limitations that would remain:**
+- Cannot put arbitrary content (like `<div>`) inside table cells via placeholders (would trigger foster parenting)
+- Must structure templates so placeholders appear where table elements are expected
+
+**Why this matters:** WordPress admin uses tables extensively. This approach would enable table template support without waiting for full foster parenting implementation.
 
 **3. No i18n Integration**
 The ticket mentions "translation" as a sigil use case, and gziolo's comment asks about `createInterpolateElement` parity. Zero implementation of translation awareness. For WordPress core, this is a big miss.
