@@ -859,6 +859,89 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Verifies multiple placeholders work in a single attribute value.
+	 *
+	 * @ticket 60229
+	 *
+	 * @dataProvider data_multiple_placeholders_in_single_attribute
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_multiple_placeholders_in_single_attribute( string $template_string, array $replacements, string $expected ) {
+		$result = T::from( $template_string )->bind( $replacements )->render();
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public static function data_multiple_placeholders_in_single_attribute() {
+		return array(
+			'two placeholders in href'                       => array(
+				'<a href="</%base>/</%slug>">link</a>',
+				array(
+					'base' => '/posts',
+					'slug' => 'hello-world',
+				),
+				'<a href="/posts/hello-world">link</a>',
+			),
+
+			'three placeholders building URL'                => array(
+				'<a href="</%scheme>://</%host>/</%path>">link</a>',
+				array(
+					'scheme' => 'https',
+					'host'   => 'example.com',
+					'path'   => 'page',
+				),
+				'<a href="https://example.com/page">link</a>',
+			),
+
+			'adjacent placeholders (no separator)'           => array(
+				'<meta content="</%a></%b>">',
+				array(
+					'a' => 'Hello',
+					'b' => 'World',
+				),
+				'<meta content="HelloWorld">',
+			),
+
+			'placeholders with static text between'          => array(
+				'<a href="</%base>?page=</%page>&sort=</%sort>">link</a>',
+				array(
+					'base' => '/search',
+					'page' => '2',
+					'sort' => 'date',
+				),
+				'<a href="/search?page=2&amp;sort=date">link</a>',
+			),
+
+			'same placeholder repeated in attribute'         => array(
+				'<meta content="</%val>-</%val>">',
+				array( 'val' => 'test' ),
+				'<meta content="test-test">',
+			),
+
+			'escaping in multiple placeholders'              => array(
+				'<a href="</%base>?q=</%query>">link</a>',
+				array(
+					'base'  => '/search',
+					'query' => 'a&b<c>"d',
+				),
+				'<a href="/search?q=a&amp;b&lt;c&gt;&quot;d">link</a>',
+			),
+
+			'multiple placeholders across multiple attributes' => array(
+				'<a href="</%url>" title="</%a> &amp; </%b>">link</a>',
+				array(
+					'url' => '/page',
+					'a'   => 'Alice',
+					'b'   => 'Bob',
+				),
+				'<a href="/page" title="Alice &amp; Bob">link</a>',
+			),
+		);
+	}
+
+	/**
 	 * @ticket 60229
 	 */
 	public function test_warns_on_unrecognized_replacements() {
