@@ -875,4 +875,64 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$template = T::from( '</% omitted >' );
 		$template->bind( array() );
 	}
+
+	/**
+	 * Verifies render() returns false for integer replacement value.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_render_returns_false_for_integer_replacement() {
+		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => 123 ) )->render();
+		$this->assertFalse( $result );
+	}
+
+	/**
+	 * Verifies render() returns false for array replacement value.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_render_returns_false_for_array_replacement() {
+		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => array( 'a', 'b' ) ) )->render();
+		$this->assertFalse( $result );
+	}
+
+	/**
+	 * Verifies render() returns false for object replacement value without __toString.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_render_returns_false_for_object_replacement() {
+		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => new stdClass() ) )->render();
+		$this->assertFalse( $result );
+	}
+
+	/**
+	 * Verifies render() returns false for null replacement value.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_render_returns_false_for_null_replacement() {
+		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => null ) )->render();
+		$this->assertFalse( $result );
+	}
+
+	/**
+	 * Verifies render() returns false for boolean replacement value.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_render_returns_false_for_boolean_replacement() {
+		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => true ) )->render();
+		$this->assertFalse( $result );
+	}
 }
