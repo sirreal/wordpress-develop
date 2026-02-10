@@ -79,6 +79,14 @@ class WP_HTML_Template {
 			public function get_tag_attributes(): array {
 				return $this->attributes;
 			}
+
+			/**
+			 * Creates a fragment processor at the current node position.
+			 * Exposes the private parent method for table context support.
+			 */
+			public function create_fragment_at_node( string $html ): ?static {
+				return $this->create_fragment_at_current_node( $html );
+			}
 		} )::create_fragment( $this->template_string );
 
 		if ( null === $processor ) {
