@@ -940,6 +940,136 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Verifies that boolean true creates a boolean attribute.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_boolean_true_creates_boolean_attribute() {
+		$result = T::from( '<input disabled="</%disabled>">' )
+			->bind( array( 'disabled' => true ) )
+			->render();
+		$this->assertEqualHTML( '<input disabled>', $result );
+	}
+
+	/**
+	 * Verifies that boolean false removes the attribute.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_boolean_false_removes_attribute() {
+		$result = T::from( '<input disabled="</%disabled>" type="text">' )
+			->bind( array( 'disabled' => false ) )
+			->render();
+		$this->assertEqualHTML( '<input type="text">', $result );
+	}
+
+	/**
+	 * Verifies that null removes the attribute (same as false).
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_null_removes_attribute() {
+		$result = T::from( '<input class="</%class>" type="text">' )
+			->bind( array( 'class' => null ) )
+			->render();
+		$this->assertEqualHTML( '<input type="text">', $result );
+	}
+
+	/**
+	 * Verifies that boolean with partial placeholder returns false.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_partial_placeholder_rejects_boolean() {
+		$result = T::from( '<input class="prefix-</%suffix>">' )
+			->bind( array( 'suffix' => true ) )
+			->render();
+		$this->assertFalse( $result );
+	}
+
+	/**
+	 * @ticket 60229
+	 *
+	 * @dataProvider data_boolean_attribute_handling
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_boolean_attribute_handling( string $template, array $replacements, string $expected ) {
+		$result = T::from( $template )->bind( $replacements )->render();
+		$this->assertEqualHTML( $expected, $result );
+	}
+
+	public static function data_boolean_attribute_handling() {
+		return array(
+			'true creates boolean attribute'            => array(
+				'<input disabled="</%disabled>">',
+				array( 'disabled' => true ),
+				'<input disabled>',
+			),
+
+			'false removes attribute'                   => array(
+				'<input disabled="</%disabled>" type="text">',
+				array( 'disabled' => false ),
+				'<input type="text">',
+			),
+
+			'null removes attribute'                    => array(
+				'<input class="</%class>" type="text">',
+				array( 'class' => null ),
+				'<input type="text">',
+			),
+
+			'empty string keeps attribute with empty value' => array(
+				'<input value="</%value>">',
+				array( 'value' => '' ),
+				'<input value="">',
+			),
+
+			'mixed boolean and string replacements'     => array(
+				'<input disabled="</%d>" value="</%v>">',
+				array(
+					'd' => true,
+					'v' => 'test',
+				),
+				'<input disabled value="test">',
+			),
+
+			'multiple attributes, one removed'          => array(
+				'<input class="</%c>" id="</%i>" name="field">',
+				array(
+					'c' => false,
+					'i' => 'my-id',
+				),
+				'<input id="my-id" name="field">',
+			),
+
+			'single-quoted attribute with boolean'      => array(
+				"<input disabled='</%disabled>'>",
+				array( 'disabled' => true ),
+				'<input disabled>',
+			),
+		);
+	}
+
+	/**
 	 * Verifies render() returns false for integer replacement value.
 	 *
 	 * @ticket 60229

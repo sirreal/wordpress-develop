@@ -203,12 +203,22 @@ class WP_HTML_Template {
 								}
 							}
 
-							// New: append placeholder edit and register name.
+							// Detect if placeholder is the entire attribute value.
+							$is_whole_attribute = (
+								$match_start === $attribute->value_starts_at &&
+								$match_start + $match_length === $end
+							);
+
+							// Append placeholder edit with attribute metadata.
 							$this->edits[]                           = array(
-								'start'       => $match_start,
-								'length'      => $match_length,
-								'placeholder' => $placeholder,
-								'context'     => 'attribute',
+								'start'              => $match_start,
+								'length'             => $match_length,
+								'placeholder'        => $placeholder,
+								'context'            => 'attribute',
+								'is_whole_attribute' => $is_whole_attribute,
+								'attr_name'          => $is_whole_attribute ? $attribute->name : null,
+								'attr_start'         => $is_whole_attribute ? $attribute->start : null,
+								'attr_length'        => $is_whole_attribute ? $attribute->length : null,
 							);
 							$this->placeholder_names[ $placeholder ] = true;
 
@@ -402,6 +412,22 @@ class WP_HTML_Template {
 					$escaped = strtr( $value, $escape_map );
 					$processor->push_update(
 						new WP_HTML_Text_Replacement( $edit['start'], $edit['length'], $escaped ),
+					);
+				} elseif ( true === $value ) {
+					// Boolean true: convert to boolean attribute (remove value, keep name).
+					if ( empty( $edit['is_whole_attribute'] ) ) {
+						return false;
+					}
+					$processor->push_update(
+						new WP_HTML_Text_Replacement( $edit['attr_start'], $edit['attr_length'], $edit['attr_name'] ),
+					);
+				} elseif ( false === $value || null === $value ) {
+					// Boolean false or null: remove entire attribute.
+					if ( empty( $edit['is_whole_attribute'] ) ) {
+						return false;
+					}
+					$processor->push_update(
+						new WP_HTML_Text_Replacement( $edit['attr_start'], $edit['attr_length'], '' ),
 					);
 				} else {
 					// @todo doing it wrong.
