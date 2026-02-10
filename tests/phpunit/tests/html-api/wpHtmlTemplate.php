@@ -547,6 +547,28 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Verifies that table row templates work with proper context.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_table_row_template_with_placeholders() {
+		$result = WP_HTML_Template::from( '<tr><td></%cell1></td><td></%cell2></td></tr>' )
+			->bind( array( 'cell1' => 'Hello', 'cell2' => 'World' ) )
+			->render();
+
+		// Use assertStringContainsString to verify table elements aren't discarded.
+		// assertEqualHTML would pass incorrectly because both expected and actual
+		// get parsed in BODY context where <tr>/<td> are discarded.
+		$this->assertStringContainsString( '<tr>', $result, 'Table row element should be preserved.' );
+		$this->assertStringContainsString( '<td>Hello</td>', $result );
+		$this->assertStringContainsString( '<td>World</td>', $result );
+	}
+
+	/**
 	 * Verifies table templates are not yet supported.
 	 *
 	 * @ticket 60229
