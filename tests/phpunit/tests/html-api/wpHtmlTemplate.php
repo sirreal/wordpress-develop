@@ -826,57 +826,37 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public static function data_escapes_static_text_around_placeholder_in_attribute() {
 		return array(
-			'leading static text (prefix before placeholder)'              => array(
+			'leading static text (prefix before placeholder)' => array(
 				'<a href="/path/</%slug>">Link</a>',
 				array( 'slug' => 'hello' ),
 				'<a href="/path/hello">Link</a>',
 			),
 
-			'trailing static text (suffix after placeholder)'              => array(
+			'trailing static text (suffix after placeholder)' => array(
 				'<a href="</%slug>/page">Link</a>',
 				array( 'slug' => 'hello' ),
 				'<a href="hello/page">Link</a>',
 			),
 
-			'ampersand in trailing static text must be escaped'            => array(
+			'ampersand in trailing static text must be escaped' => array(
 				'<a href="</%base>&amp;extra=1">Link</a>',
 				array( 'base' => '/search?q=test' ),
 				'<a href="/search?q=test&amp;extra=1">Link</a>',
 			),
 
-			'ampersand entity in leading static text not double-escaped'   => array(
+			'ampersand entity in leading static text not double-escaped' => array(
 				'<a href="/search?a=1&amp;b=</%val>">Link</a>',
 				array( 'val' => '2' ),
 				'<a href="/search?a=1&amp;b=2">Link</a>',
 			),
 
-			'character reference in trailing static text preserved'        => array(
+			'character reference in trailing static text preserved' => array(
 				'<meta name="</%placeholder>&not;">',
 				array( 'placeholder' => '' ),
 				'<meta name="¬">',
 			),
-		);
-	}
 
-	/**
-	 * Verifies multiple placeholders work in a single attribute value.
-	 *
-	 * @ticket 60229
-	 *
-	 * @dataProvider data_multiple_placeholders_in_single_attribute
-	 *
-	 * @covers ::from
-	 * @covers ::bind
-	 * @covers ::render
-	 */
-	public function test_multiple_placeholders_in_single_attribute( string $template_string, array $replacements, string $expected ) {
-		$result = T::from( $template_string )->bind( $replacements )->render();
-		$this->assertEqualHTML( $expected, $result );
-	}
-
-	public static function data_multiple_placeholders_in_single_attribute() {
-		return array(
-			'two placeholders in href'                       => array(
+			'two placeholders in href'               => array(
 				'<a href="</%base>/</%slug>">link</a>',
 				array(
 					'base' => '/posts',
@@ -885,7 +865,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<a href="/posts/hello-world">link</a>',
 			),
 
-			'three placeholders building URL'                => array(
+			'three placeholders building URL'        => array(
 				'<a href="</%scheme>://</%host>/</%path>">link</a>',
 				array(
 					'scheme' => 'https',
@@ -895,7 +875,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<a href="https://example.com/page">link</a>',
 			),
 
-			'adjacent placeholders (no separator)'           => array(
+			'adjacent placeholders (no separator)'   => array(
 				'<meta content="</%a></%b>">',
 				array(
 					'a' => 'Hello',
@@ -904,7 +884,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<meta content="HelloWorld">',
 			),
 
-			'placeholders with static text between'          => array(
+			'placeholders with static text between'  => array(
 				'<a href="</%base>?page=</%page>&sort=</%sort>">link</a>',
 				array(
 					'base' => '/search',
@@ -914,13 +894,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<a href="/search?page=2&amp;sort=date">link</a>',
 			),
 
-			'same placeholder repeated in attribute'         => array(
+			'same placeholder repeated in attribute' => array(
 				'<meta content="</%val>-</%val>">',
 				array( 'val' => 'test' ),
 				'<meta content="test-test">',
 			),
 
-			'escaping in multiple placeholders'              => array(
+			'escaping in multiple placeholders'      => array(
 				'<a href="</%base>?q=</%query>">link</a>',
 				array(
 					'base'  => '/search',
