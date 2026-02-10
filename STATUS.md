@@ -18,6 +18,9 @@ Template composition (`WP_HTML_Template` as replacement value) works for text co
 **4. Compile-once Design**
 Lazy compilation with cached edits (`$edits` array) is efficient for template reuse.
 
+**5. Boolean Attribute Support**
+Supply `true` to create a boolean attribute (`disabled="</%d>"` + `true` → `disabled`), or `false`/`null` to remove an attribute entirely. Only works for whole-attribute placeholders—partial placeholders reject boolean values.
+
 ---
 
 ### What's Missing from the Ticket Requirements
@@ -25,16 +28,13 @@ Lazy compilation with cached edits (`$edits` array) is efficient for template re
 **1. No URL Escaping (Ticket TODO)**
 The ticket explicitly says "does not escape URLs differently than other attributes." The XSS test shows `javascript:alert("xss")` only escapes quotes—no `esc_url()` equivalent. This is a security gap for `href`/`src` attributes.
 
-**2. Boolean Attributes Not Implemented**
-Ticket promises: "supply true to create a boolean attribute or false/null remove an attribute." The current implementation only handles string and Template replacement values. No boolean support visible.
-
-**3. No Attribute Spread**
+**2. No Attribute Spread**
 Ticket comment 9 discusses "spread" attributes for making tags placeholders. Not implemented.
 
-**4. Missing Output Format Methods**
+**3. Missing Output Format Methods**
 Ticket TODO lists `->final_output_to_browser()`, `->final_output_to_plaintext()`, `->final_output_to_markdown()`, etc. None exist.
 
-**5. Embed Replacement in Tag Processor (Ticket TODO)**
+**4. Embed Replacement in Tag Processor (Ticket TODO)**
 The ticket wants replacement embedded in the Tag Processor. Current implementation uses a separate class with its own parsing pass.
 
 ---
@@ -102,17 +102,17 @@ The ticket's philosophy is "prefer trust and safety over features"—valid, but 
 
 ### Summary Table
 
-| Requirement                | Status | Notes                          |
-| -------------------------- | ------ | ------------------------------ |
-| Context-aware escaping     | ✅     | Works for text and attributes  |
-| Funky comment placeholders | ✅     | Clean implementation           |
-| Nested HTML via Templates  | ✅     | Text context only              |
-| Boolean attributes         | ❌     | Not implemented                |
-| URL escaping               | ❌     | Only generic escaping          |
-| Attribute spread           | ❌     | Not implemented                |
-| Output format methods      | ❌     | Not implemented                |
-| Tag Processor integration  | ❌     | Separate class                 |
-| Table context support      | ❌     | Explicitly unsupported         |
-| i18n integration           | ❌     | Not addressed                  |
-| RAWTEXT/RCDATA replacement | ❌     | Placeholders don't work inside |
+| Requirement                | Status | Notes                              |
+| -------------------------- | ------ | ---------------------------------- |
+| Context-aware escaping     | ✅     | Works for text and attributes      |
+| Funky comment placeholders | ✅     | Clean implementation               |
+| Nested HTML via Templates  | ✅     | Text context only                  |
+| Boolean attributes         | ✅     | true/false/null for whole-attr     |
+| URL escaping               | ❌     | Only generic escaping              |
+| Attribute spread           | ❌     | Not implemented                    |
+| Output format methods      | ❌     | Not implemented                    |
+| Tag Processor integration  | ❌     | Separate class                     |
+| Table context support      | ❌     | Explicitly unsupported             |
+| i18n integration           | ❌     | Not addressed                      |
+| RAWTEXT/RCDATA replacement | ❌     | Placeholders don't work inside     |
 
