@@ -62,8 +62,8 @@ Normalization runs twice: once in `compile()` for text detection, once in `rende
 
 **High Priority Missing:**
 
--   Non-string replacement values (integers, arrays, nulls) → should fail gracefully
--   Multiple placeholders in single attribute (e.g., `href="</%scheme>://</%host>"`)
+-   ~~Non-string replacement values (integers, arrays, nulls) → should fail gracefully~~ ✅ Tests exist
+-   ~~Multiple placeholders in single attribute (e.g., `href="</%scheme>://</%host>"`)~~ ✅ Works, tests added
 -   Template immutability verification (`bind()` returns new instance)
 
 **The PRE newline test is skipped** but the behavior matters—WordPress often outputs preformatted code.
