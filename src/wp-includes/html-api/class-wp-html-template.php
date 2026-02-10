@@ -125,8 +125,12 @@ class WP_HTML_Template {
 
 					$placeholder = trim( substr( $html, $start + 3, $length - 4 ), " \t\n\r\f" );
 
-					// Valid placeholders match `/[a-z0-9_-]+/i`
-					if ( strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' ) ) {
+					// Valid placeholders match `/[a-z][a-z0-9_-]*/i` (must start with letter).
+					if (
+						'' === $placeholder ||
+						! ctype_alpha( $placeholder[0] ) ||
+						strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' )
+					) {
 						break;
 					}
 
@@ -162,7 +166,7 @@ class WP_HTML_Template {
 
 						while (
 							1 === preg_match(
-								'#</%[ \\t\\r\\f\\n]*([a-z0-9_-]+)[ \\t\\r\\f\\n]*>#i',
+								'#</%[ \\t\\r\\f\\n]*([a-z][a-z0-9_-]*)[ \\t\\r\\f\\n]*>#i',
 								$html,
 								$matches,
 								PREG_OFFSET_CAPTURE,
@@ -277,12 +281,7 @@ class WP_HTML_Template {
 
 		// Check for missing keys (placeholder without replacement).
 		foreach ( $this->placeholder_names as $placeholder => $_ ) {
-			$placeholder = (string) $placeholder;
-			$found       = array_key_exists( $placeholder, $replacements );
-			if ( ! $found && ctype_digit( $placeholder ) ) {
-				$found = array_key_exists( (int) $placeholder, $replacements );
-			}
-			if ( ! $found ) {
+			if ( ! array_key_exists( $placeholder, $replacements ) ) {
 				_doing_it_wrong(
 					__METHOD__,
 					sprintf(
@@ -296,9 +295,7 @@ class WP_HTML_Template {
 
 		// Check for unused keys (replacement without placeholder).
 		foreach ( $replacements as $key => $value ) {
-			$str_key = (string) $key;
-			$found   = isset( $this->placeholder_names[ $key ] ) || isset( $this->placeholder_names[ $str_key ] );
-			if ( ! $found ) {
+			if ( ! isset( $this->placeholder_names[ $key ] ) ) {
 				_doing_it_wrong(
 					__METHOD__,
 					sprintf(
@@ -317,8 +314,7 @@ class WP_HTML_Template {
 			}
 
 			$placeholder = $edit['placeholder'];
-			$key         = ctype_digit( $placeholder ) ? (int) $placeholder : $placeholder;
-			$value       = $replacements[ $key ] ?? $replacements[ $placeholder ] ?? null;
+			$value       = $replacements[ $placeholder ] ?? null;
 
 			if ( $value instanceof self ) {
 				_doing_it_wrong(

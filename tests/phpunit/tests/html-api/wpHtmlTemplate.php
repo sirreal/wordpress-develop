@@ -186,16 +186,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<p>Hello, &lt;little-bobby-tags&gt;!</p>',
 			),
 
-			'numeric placeholders'               => array(
-				'<p>Hello, </%0> and </%1>!</p>',
-				array( 'Alice', 'Bob' ),
-				'<p>Hello, Alice and Bob!</p>',
-			),
-
 			'repeated placeholders'              => array(
-				'<p></%0>, </% 0 >, </%name>, & </%name>!</p>',
+				'<p></%a>, </% a >, </%name>, & </%name>!</p>',
 				array(
-					'Alice',
+					'a'    => 'Alice',
 					'name' => 'Bob',
 				),
 				'<p>Alice, Alice, Bob, &amp; Bob!</p>',
@@ -402,14 +396,14 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'<label for="user_name">Name:</label> <input id="user_name" name="user_name" type="text" />',
 		);
 
-		// Numeric placeholders like sprintf
-		yield 'numeric placeholders' => array(
-			'<a href="</%0>"></%1></a> by <a href="</%2>"></%3></a>',
+		// Named placeholders
+		yield 'named placeholders' => array(
+			'<a href="</%postUrl>"></%postTitle></a> by <a href="</%authorUrl>"></%authorName></a>',
 			array(
-				'https://example.com/post/',
-				'Post Title',
-				'https://example.com/author/',
-				'Author Name',
+				'postUrl'    => 'https://example.com/post/',
+				'postTitle'  => 'Post Title',
+				'authorUrl'  => 'https://example.com/author/',
+				'authorName' => 'Author Name',
 			),
 			'<a href="https://example.com/post/">Post Title</a> by <a href="https://example.com/author/">Author Name</a>',
 		);
