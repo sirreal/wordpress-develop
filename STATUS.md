@@ -93,8 +93,8 @@ Normalization runs twice: once in `compile()` for text detection, once in `rende
 **5. Error Handling Philosophy Unclear**
 `render()` returns `false` on errors, but `bind()` uses `_doing_it_wrong()` warnings and still returns a template. Mixed signals—should errors be fatal or recoverable? The test gaps document lists many untested failure cases.
 
-**6. Duplicate Attributes Bug with false/null Removal**
-When using `false` or `null` to remove an attribute, only the first occurrence is removed. If the HTML contains duplicate attributes (e.g., `<input disabled="</%d>" disabled>`), the first `disabled` will be removed but the second will remain in the output. Duplicate attributes should likely be stripped during the normalization pass to prevent this inconsistency.
+**6. ~~Duplicate Attributes Bug with false/null Removal~~ FIXED**
+~~When using `false` or `null` to remove an attribute, only the first occurrence is removed. If the HTML contains duplicate attributes (e.g., `<input disabled="</%d>" disabled>`), the first `disabled` will be removed but the second will remain in the output.~~ Fixed by emitting removal edits for duplicate attributes during `compile()`. All duplicate attributes are now stripped as part of template compilation.
 
 ---
 
@@ -148,6 +148,7 @@ The ticket's philosophy is "prefer trust and safety over features"—valid, but 
 | Funky comment placeholders | ✅     | Clean implementation               |
 | Nested HTML via Templates  | ✅     | Text context only                  |
 | Boolean attributes         | ✅     | true/false/null for whole-attr     |
+| Duplicate attribute removal| ✅     | Stripped during compile()          |
 | URL escaping               | ❌     | Only generic escaping              |
 | Attribute spread           | ❌     | Not implemented                    |
 | Output format methods      | ❌     | Not implemented                    |
