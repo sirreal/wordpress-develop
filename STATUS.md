@@ -93,6 +93,9 @@ Normalization runs twice: once in `compile()` for text detection, once in `rende
 **5. Error Handling Philosophy Unclear**
 `render()` returns `false` on errors, but `bind()` uses `_doing_it_wrong()` warnings and still returns a template. Mixed signals—should errors be fatal or recoverable? The test gaps document lists many untested failure cases.
 
+**6. Duplicate Attributes Bug with false/null Removal**
+When using `false` or `null` to remove an attribute, only the first occurrence is removed. If the HTML contains duplicate attributes (e.g., `<input disabled="</%d>" disabled>`), the first `disabled` will be removed but the second will remain in the output. Duplicate attributes should likely be stripped during the normalization pass to prevent this inconsistency.
+
 ---
 
 ### Gaps in Test Coverage (From Test-Gaps.md + My Observations)
