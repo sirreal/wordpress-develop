@@ -1150,4 +1150,60 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => true ) )->render();
 		$this->assertFalse( $result );
 	}
+
+	/**
+	 * Verifies that duplicate attributes after the placeholder are removed with false.
+	 *
+	 * HTML may contain duplicate attributes (e.g., from user error or generated HTML).
+	 * When false removes the placeholder attribute, duplicates should also be removed.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_duplicate_attribute_removed_with_false() {
+		// The "disabled" attribute appears twice: once with placeholder, once as boolean.
+		$result = T::from( '<input disabled="</%d>" disabled type="text">' )
+			->bind( array( 'd' => false ) )
+			->render();
+		// Both occurrences of "disabled" should be removed.
+		$this->assertEqualHTML( '<input type="text">', $result );
+	}
+
+	/**
+	 * Verifies that duplicate attributes after the placeholder are removed with null.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_duplicate_attribute_removed_with_null() {
+		$result = T::from( '<input class="</%c>" class="extra" type="text">' )
+			->bind( array( 'c' => null ) )
+			->render();
+		$this->assertEqualHTML( '<input type="text">', $result );
+	}
+
+	/**
+	 * Verifies that multiple duplicate attributes are all removed with false.
+	 *
+	 * When an attribute appears more than twice, all occurrences should be removed.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::from
+	 * @covers ::bind
+	 * @covers ::render
+	 */
+	public function test_multiple_duplicate_attributes_removed() {
+		// Three occurrences of "disabled": placeholder + two duplicates.
+		$result = T::from( '<input disabled="</%d>" disabled disabled type="text">' )
+			->bind( array( 'd' => false ) )
+			->render();
+		$this->assertEqualHTML( '<input type="text">', $result );
+	}
 }
