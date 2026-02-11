@@ -73,10 +73,9 @@ if ( '<body>' !== $context || 'UTF-8' !== $encoding ) {
 3. Returns a fragment processor in the proper context
 
 **How to enable table support:**
-1. `WP_HTML_Template` already uses an anonymous class extending `WP_HTML_Processor` to access private members
-2. The same pattern can expose `create_fragment_at_current_node()`
-3. Create full parser: `<!DOCTYPE html><table><tbody>`, navigate to `<tbody>`, call exposed method
-4. Fragment processor will be in IN_TABLE_BODY mode where `<tr>` and placeholders are valid
+1. Use `Closure::bind` to access `create_fragment_at_current_node()` without modifying `WP_HTML_Processor`
+2. Create full parser: `<!DOCTYPE html><table><tbody>`, navigate to `<tbody>`, call the private method via bound closure
+3. Fragment processor will be in IN_TABLE_BODY mode where `<tr>` and placeholders are valid
 
 **Limitations that would remain:**
 - Cannot put arbitrary content (like `<div>`) inside table cells via placeholders (would trigger foster parenting)
@@ -95,6 +94,8 @@ Normalization runs twice: once in `compile()` for text detection, once in `rende
 
 **6. ~~Duplicate Attributes Bug with false/null Removal~~ FIXED**
 ~~When using `false` or `null` to remove an attribute, only the first occurrence is removed. If the HTML contains duplicate attributes (e.g., `<input disabled="</%d>" disabled>`), the first `disabled` will be removed but the second will remain in the output.~~ Fixed by emitting removal edits for duplicate attributes during `compile()`. All duplicate attributes are now stripped as part of template compilation.
+
+**Implementation note:** The fix currently accesses `$attributes` and `$duplicate_attributes` on `WP_HTML_Tag_Processor` via `protected` visibility. This should be refactored to use `Closure::bind` instead, allowing the Tag Processor changes to be reverted.
 
 ---
 
@@ -156,4 +157,10 @@ The ticket's philosophy is "prefer trust and safety over features"—valid, but 
 | Table context support      | ❌     | Explicitly unsupported             |
 | i18n integration           | ❌     | Not addressed                      |
 | RAWTEXT/RCDATA replacement | ❌     | Placeholders don't work inside     |
+
+---
+
+### Pending Work
+
+1. **Revert Tag Processor visibility changes** — `class-wp-html-tag-processor.php` has `$attributes` and `$duplicate_attributes` changed from `private` to `protected`. Revert these and use `Closure::bind` in `WP_HTML_Template` instead.
 
