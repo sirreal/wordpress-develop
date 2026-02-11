@@ -142,6 +142,10 @@ class WP_HTML_Template {
 			public function create_fragment_at_node( string $html ): ?static {
 				return $this->create_fragment_at_current_node( $html );
 			}
+
+			public function get_duplicate_attributes(): ?array {
+				return $this->duplicate_attributes;
+			}
 		} )::create_fragment( $this->template_string );
 
 		if ( null === $processor ) {
@@ -310,6 +314,20 @@ class WP_HTML_Template {
 									$last_offset,
 									$seg_length,
 									$escaped,
+								);
+							}
+						}
+					}
+
+					// Remove duplicate attributes (invalid HTML, stripped during normalization).
+					$duplicates = $processor->get_duplicate_attributes();
+					if ( null !== $duplicates ) {
+						foreach ( $duplicates as $spans ) {
+							foreach ( $spans as $span ) {
+								$this->edits[] = new WP_HTML_Text_Replacement(
+									$span->start,
+									$span->length,
+									'',
 								);
 							}
 						}

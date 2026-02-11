@@ -718,7 +718,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var (WP_HTML_Span[])[]|null
 	 */
-	private $duplicate_attributes = null;
+	protected $duplicate_attributes = null;
 
 	/**
 	 * Which class names to add or remove from a tag.
