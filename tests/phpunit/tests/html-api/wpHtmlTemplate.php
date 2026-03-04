@@ -557,7 +557,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 */
 	public function test_table_row_template_with_placeholders() {
 		$result = WP_HTML_Template::from( '<tr><td></%cell1></td><td></%cell2></td></tr>' )
-			->bind( array( 'cell1' => 'Hello', 'cell2' => 'World' ) )
+			->bind(
+				array(
+					'cell1' => 'Hello',
+					'cell2' => 'World',
+				)
+			)
 			->render();
 
 		// Use assertStringContainsString to verify table elements aren't discarded.
@@ -1041,19 +1046,19 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	public static function data_boolean_attribute_handling() {
 		return array(
-			'true creates boolean attribute'            => array(
+			'true creates boolean attribute'        => array(
 				'<input disabled="</%disabled>">',
 				array( 'disabled' => true ),
 				'<input disabled>',
 			),
 
-			'false removes attribute'                   => array(
+			'false removes attribute'               => array(
 				'<input disabled="</%disabled>" type="text">',
 				array( 'disabled' => false ),
 				'<input type="text">',
 			),
 
-			'null removes attribute'                    => array(
+			'null removes attribute'                => array(
 				'<input class="</%class>" type="text">',
 				array( 'class' => null ),
 				'<input type="text">',
@@ -1065,7 +1070,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<input value="">',
 			),
 
-			'mixed boolean and string replacements'     => array(
+			'mixed boolean and string replacements' => array(
 				'<input disabled="</%d>" value="</%v>">',
 				array(
 					'd' => true,
@@ -1074,7 +1079,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<input disabled value="test">',
 			),
 
-			'multiple attributes, one removed'          => array(
+			'multiple attributes, one removed'      => array(
 				'<input class="</%c>" id="</%i>" name="field">',
 				array(
 					'c' => false,
@@ -1083,7 +1088,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'<input id="my-id" name="field">',
 			),
 
-			'single-quoted attribute with boolean'      => array(
+			'single-quoted attribute with boolean'  => array(
 				"<input disabled='</%disabled>'>",
 				array( 'disabled' => true ),
 				'<input disabled>',
