@@ -149,7 +149,7 @@ class WP_HTML_Template {
 				}
 
 				// Parse wrapper to position at the target context element.
-				$wrapper = static::create_fragment( $wrapper_html . "<span>x</span>" );
+				$wrapper = static::create_fragment( $wrapper_html . '<span>x</span>' );
 				if ( null === $wrapper ) {
 					return null;
 				}
@@ -293,7 +293,7 @@ class WP_HTML_Template {
 			return false;
 		}
 
-		$value                    = $template->replacements[ $placeholder ];
+		$value                     = $template->replacements[ $placeholder ];
 		$used_keys[ $placeholder ] = true;
 
 		if ( is_string( $value ) ) {
@@ -523,7 +523,7 @@ class WP_HTML_Template {
 				return false;
 			}
 
-			$value = $template->replacements[ $placeholder ];
+			$value                     = $template->replacements[ $placeholder ];
 			$used_keys[ $placeholder ] = true;
 
 			// Template in attribute context is invalid.
@@ -573,8 +573,8 @@ class WP_HTML_Template {
 
 			// Static text before placeholder.
 			if ( $match_start > $offset ) {
-				$segment = substr( $raw_value, $offset, $match_start - $offset );
-				$decoded = WP_HTML_Decoder::decode_attribute( $segment );
+				$segment     = substr( $raw_value, $offset, $match_start - $offset );
+				$decoded     = WP_HTML_Decoder::decode_attribute( $segment );
 				$value_html .= strtr( $decoded, self::ESCAPE_MAP );
 			}
 
@@ -586,8 +586,8 @@ class WP_HTML_Template {
 
 		// Trailing static text after last placeholder.
 		if ( $offset < $end ) {
-			$segment = substr( $raw_value, $offset );
-			$decoded = WP_HTML_Decoder::decode_attribute( $segment );
+			$segment     = substr( $raw_value, $offset );
+			$decoded     = WP_HTML_Decoder::decode_attribute( $segment );
 			$value_html .= strtr( $decoded, self::ESCAPE_MAP );
 		}
 
