@@ -1176,4 +1176,22 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		);
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
+
+	/**
+	 * Test that a template replacement cannot template structure HTML.
+	 *
+	 * @ticket 60229
+	 *
+	 * @covers ::render
+	 */
+	public function test_replacements_cannot_modify_template_structure() {
+		$this->markTestSkipped( 'Template HTML structure protection is not implemented.' );
+
+		// Three occurrences of "disabled": placeholder + two duplicates.
+		$result = T::render(
+			'<a></%link-text></a>',
+			array( 'link-text' => WP_HTML_Template::template( '<a>A elements cannot nest in HTML</a>' ) )
+		);
+		$this->assertFalse( $result, 'Should have rejected the template with an invalid replacement.' );
+	}
 }
