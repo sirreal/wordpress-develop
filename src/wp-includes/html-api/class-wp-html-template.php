@@ -226,7 +226,8 @@ class WP_HTML_Template {
 					_doing_it_wrong(
 						__CLASS__ . '::render',
 						sprintf(
-							'Unused replacement key: %s',
+							/* translators: %s: The unused replacement key name. */
+							__( 'Unused replacement key: %s.' ),
 							$key
 						),
 						'7.1.0'
@@ -278,7 +279,8 @@ class WP_HTML_Template {
 			_doing_it_wrong(
 				__CLASS__ . '::render',
 				sprintf(
-					'Missing replacement for placeholder: %s',
+					/* translators: %s: The placeholder name. */
+					__( 'Missing replacement for placeholder: %s.' ),
 					$placeholder
 				),
 				'7.1.0'
@@ -321,7 +323,8 @@ class WP_HTML_Template {
 		_doing_it_wrong(
 			__CLASS__ . '::render',
 			sprintf(
-				'Invalid replacement type for text placeholder: %s',
+				/* translators: %s: The placeholder name. */
+				__( 'Invalid replacement type for text placeholder: %s.' ),
 				$placeholder
 			),
 			'7.1.0'
@@ -511,7 +514,8 @@ class WP_HTML_Template {
 				_doing_it_wrong(
 					__CLASS__ . '::render',
 					sprintf(
-						'Missing replacement for placeholder: %s',
+						/* translators: %s: The placeholder name. */
+						__( 'Missing replacement for placeholder: %s.' ),
 						$placeholder
 					),
 					'7.1.0'
@@ -527,7 +531,8 @@ class WP_HTML_Template {
 				_doing_it_wrong(
 					__CLASS__ . '::render',
 					sprintf(
-						'Template cannot be used in attribute context: %s',
+						/* translators: %s: The placeholder name. */
+						__( 'Template cannot be used in attribute context: %s.' ),
 						$placeholder
 					),
 					'7.1.0'
@@ -557,7 +562,8 @@ class WP_HTML_Template {
 				_doing_it_wrong(
 					__CLASS__ . '::render',
 					sprintf(
-						'Invalid replacement type for attribute placeholder: %s',
+						/* translators: %s: The placeholder name. */
+						__( 'Invalid replacement type for attribute placeholder: %s.' ),
 						$placeholder
 					),
 					'7.1.0'
