@@ -748,7 +748,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @covers ::render
 	 */
 	public function test_pre_element_leading_newline_behavior( string $template_string, array $replacements, string $expected ) {
-		$this->markTestSkipped( 'PRE newline handling is not yet correct.' );
+		if (
+			"\n" === $replacements['replacement'][0] ||
+			"\r" === $replacements['replacement'][0]
+		) {
+			$this->markTestSkipped( 'PRE leading newline handling is not yet correct.' );
+		}
 
 		$result = T::from( $template_string )->bind( $replacements )->render();
 		$this->assertEqualHTML( $expected, $result );
@@ -757,32 +762,32 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	public static function data_pre_element_leading_newline() {
 		return array(
 			'PRE without newline'                         => array(
-				'<pre></%code></pre>',
-				array( 'code' => "line1\nline2" ),
+				'<pre></%replacement></pre>',
+				array( 'replacement' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
 			'PRE with newline'                            => array(
-				"<pre>\n</%code></pre>",
-				array( 'code' => "line1\nline2" ),
+				"<pre>\n</%replacement></pre>",
+				array( 'replacement' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
 			'PRE with newline in replacement'             => array(
-				"<pre>\n</%code></pre>",
-				array( 'code' => "line1\nline2" ),
+				"<pre>\n</%replacement></pre>",
+				array( 'replacement' => "line1\nline2" ),
 				"<pre>line1\nline2</pre>",
 			),
 
 			'PRE with newline and newline in replacement' => array(
-				"<pre>\n</%code></pre>",
-				array( 'code' => "\nline1\nline2" ),
+				"<pre>\n</%replacement></pre>",
+				array( 'replacement' => "\nline1\nline2" ),
 				"<pre>\n\nline1\nline2</pre>",
 			),
 
 			'PRE with newline, newline replacement, and additional contents' => array(
-				"<pre>\n</%code><!--c--></pre>",
-				array( 'code' => "\nline1" ),
+				"<pre>\n</%replacement><!--c--></pre>",
+				array( 'replacement' => "\nline1" ),
 				"<pre>\n\nline1<!--c--></pre>",
 			),
 		);
