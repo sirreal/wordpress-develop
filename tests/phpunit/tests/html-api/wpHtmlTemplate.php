@@ -21,14 +21,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_escapes_text_adjacent_to_angle_brackets() {
 		$template_string = 'a<</%tag-name>>s';
 		$replacements    = array( 'tag-name' => 'i' );
-		$result          = T::from( $template_string )->bind( $replacements )->render();
+		$result          = T::render( $template_string, $replacements );
 
 		$expected = 'a&lt;i&gt;s';
 		$this->assertEqualHTML( $expected, $result );
@@ -43,8 +41,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_replaces_only_in_first_duplicate_attribute() {
@@ -54,7 +50,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'replace-2' => 'K',
 		);
 
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 
 		$expected = '<meta a="OK">';
 		$this->assertEqualHTML( $expected, $result );
@@ -65,8 +61,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_attribute_replacement_is_not_recursive() {
@@ -75,7 +69,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'replace' => '</%replace>',
 		);
 
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 
 		$expected = '<div a="&lt;/%replace&gt;">&lt;/%replace&gt;</div>';
 		$this->assertEqualHTML( $expected, $result );
@@ -86,8 +80,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_placeholder_names_allow_surrounding_whitespace() {
@@ -97,7 +89,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			'c' => 'the "content" & whatever else',
 		);
 
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 
 		$expected =
 			<<<'HTML'
@@ -111,14 +103,12 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_escapes_ampersand_to_prevent_character_reference_injection() {
 		$template_string = '<meta name="&</% placeholder >;">';
 		$replacements    = array( 'placeholder' => 'not' );
-		$result          = T::from( $template_string )->bind( $replacements )->render();
+		$result          = T::render( $template_string, $replacements );
 
 		$expected =
 			<<<'HTML'
@@ -132,18 +122,17 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 *
-	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_rejects_nested_template_in_attribute_value() {
 		$template_string = '<meta name="not-allowed" description="</%html>">';
 		$replacements    = array(
-			'html' => T::from( '<strong>This is not allowed!</strong>' ),
+			'html' => T::template( '<strong>This is not allowed!</strong>' ),
 		);
-		$this->assertFalse( T::from( $template_string )->bind( $replacements )->render() );
+		$this->assertFalse( T::render( $template_string, $replacements ) );
 	}
 
 	/**
@@ -151,12 +140,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 */
 	public function test_template( string $template_string, array $replacements, string $expected ) {
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -197,7 +185,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 			'nested template replacement'        => array(
 				'<p>Hello, </%html>',
-				array( 'html' => WP_HTML_Template::from( '<i>Alice</i> & <i>Bob</i>' ) ),
+				array( 'html' => WP_HTML_Template::template( '<i>Alice</i> & <i>Bob</i>' ) ),
 				'<p>Hello, <i>Alice</i> &amp; <i>Bob</i></p>',
 			),
 
@@ -227,12 +215,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 */
 	public function test_real_world_examples( string $template_string, array $replacements, string $expected ) {
-		$result = WP_HTML_Template::from( $template_string )->bind( $replacements )->render();
+		$result = WP_HTML_Template::render( $template_string, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -283,13 +270,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			array(
 				'url'    => 'https://example.com/hello-world/?foo=1&bar=2',
 				'target' => '_blank',
-				'title'  => WP_HTML_Template::from( '\'<i></%italic></i>\' & <b>"</%bold>"</b>' )
-					->bind(
-						array(
-							'italic' => 'This',
-							'bold'   => 'That',
-						)
-					),
+				'title'  => WP_HTML_Template::template(
+					'\'<i></%italic></i>\' & <b>"</%bold>"</b>',
+					array(
+						'italic' => 'This',
+						'bold'   => 'That',
+					)
+				),
 			),
 			<<<'HTML'
 			<a href="https://example.com/hello-world/?foo=1&amp;bar=2" target="_blank">
@@ -412,7 +399,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 		yield 'nested template for complex structure' => array(
 			'<div class="error"></%icon> </%message></div>',
 			array(
-				'icon'    => WP_HTML_Template::from( '<span class="dashicons dashicons-warning"></span>' ),
+				'icon'    => WP_HTML_Template::template( '<span class="dashicons dashicons-warning"></span>' ),
 				'message' => 'Something went wrong.',
 			),
 			'<div class="error"><span class="dashicons dashicons-warning"></span> Something went wrong.</div>',
@@ -485,7 +472,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 				'url'        => 'https://example.com/author/johndoe/',
 				'target'     => '_blank',
 				'aria_label' => '(John Doe author archive, opens in a new tab)',
-				'inner'      => WP_HTML_Template::from( '<img src="https://example.com/avatar.jpg" alt="John Doe" />' ),
+				'inner'      => WP_HTML_Template::template( '<img src="https://example.com/avatar.jpg" alt="John Doe" />' ),
 			),
 			<<<'HTML'
 			<a href="https://example.com/author/johndoe/" target="_blank" aria-label="(John Doe author archive, opens in a new tab)" class="wp-block-avatar__link"><img src="https://example.com/avatar.jpg" alt="John Doe" /></a>
@@ -498,38 +485,37 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 */
 	public function test_nested_templates_in_definition_list() {
-		$row_template = WP_HTML_Template::from( "<dt></%term></dt>\n<dd></%definition></dd>" );
-
 		$row_replacements = array();
 		for ( $i = 1; $i <= 3; $i++ ) {
-			$row_replacements[ "row-{$i}" ] = $row_template->bind(
+			$row_replacements[ "row-{$i}" ] = WP_HTML_Template::template(
+				"<dt></%term></dt>\n<dd></%definition></dd>",
 				array(
 					'term'       => "Term \"{$i}\"",
-					'definition' => WP_HTML_Template::from( '<abbr title="</%expansion>">IYKYK</abbr>: </%i>' )
-						->bind(
-							array(
-								'i'         => (string) $i,
-								'expansion' => '"If You Know You Know"',
-							)
-						),
+					'definition' => WP_HTML_Template::template(
+						'<abbr title="</%expansion>">IYKYK</abbr>: </%i>',
+						array(
+							'i'         => (string) $i,
+							'expansion' => '"If You Know You Know"',
+						)
+					),
 				)
 			);
 		}
 
-		$result = WP_HTML_Template::from(
+		$result = WP_HTML_Template::render(
 			<<<'HTML'
 			<dl>
 			</%row-1>
 			</%row-2>
 			</%row-3>
 			</dl>
-			HTML
-		)->bind( $row_replacements )->render();
+			HTML,
+			$row_replacements
+		);
 
 		$expected =
 			<<<'HTML'
@@ -547,23 +533,26 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies that table row templates work with proper context.
+	 * Verifies that table row templates work when nested in table context.
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 */
 	public function test_table_row_template_with_placeholders() {
-		$result = WP_HTML_Template::from( '<tr><td></%cell1></td><td></%cell2></td></tr>' )
-			->bind(
-				array(
-					'cell1' => 'Hello',
-					'cell2' => 'World',
-				)
+		$row = WP_HTML_Template::template(
+			'<tr><td></%cell1></td><td></%cell2></td></tr>',
+			array(
+				'cell1' => 'Hello',
+				'cell2' => 'World',
 			)
-			->render();
+		);
+
+		$result = WP_HTML_Template::render(
+			'<table><tbody></%row></tbody></table>',
+			array( 'row' => $row )
+		);
 
 		// Use assertStringContainsString to verify table elements aren't discarded.
 		// assertEqualHTML would pass incorrectly because both expected and actual
@@ -574,65 +563,40 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies table templates are not yet supported.
+	 * Verifies table templates work with thead and tbody.
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
+	 * @covers ::template
 	 */
-	public function test_table_templates_not_yet_supported() {
-		$this->markTestSkipped( 'IN TABLE templates are not supported yet.' );
-		$header_tpl = WP_HTML_Template::from( '<tr><th></% ID ><th></% name ><th></% value ><th></% link >' )
-			->bind(
-				array(
-					'ID'    => 'ID',
-					'name'  => 'Name',
-					'value' => 'Value',
-					'link'  => 'Link',
-				)
-			);
-		$row_tpl    = WP_HTML_Template::from( '<tr><td></% ID ><td></% name ><td></% value ><td></% link >' );
-
-		$row_gen = ( function () {
-			static $i = 1;
-			yield array(
-				'ID'    => $i,
-				'name'  => 'Name {$i}',
-				'value' => WP_HTML_Template::from( 'Value <b>{$i}</b>' )->bind( array( 'i' => $i ) ),
-				'link'  => WP_HTML_Template::from( '<a href="</%url>"></%link-name></a>' )
-					->bind(
-						array(
-							'url'       => '/example/1',
-							'link-name' => 'Click here',
-						)
-					),
-			);
-		} )();
-
-		$result = WP_HTML_Template::from(
-			<<<'HTML'
-			<table>
-			<thead></%header>
-			<tbody>
-			</%row-1>
-			</%row-2>
-			</%row-3>
-			HTML
-		)->bind(
+	public function test_table_templates_with_thead_and_tbody() {
+		$header = WP_HTML_Template::template(
+			'<tr><th></%col1></th><th></%col2></th></tr>',
 			array(
-				'header' => $header_tpl,
-				'row-1'  => $row_tpl->bind( $row_gen->next() ),
-				'row-2'  => $row_tpl->bind( $row_gen->next() ),
-				'row-3'  => $row_tpl->bind( $row_gen->next() ),
+				'col1' => 'Name',
+				'col2' => 'Value',
 			)
-		)->render();
+		);
 
-		$expected =
-			<<<'HTML'
-			HTML;
-		$this->assertEqualHTML( $expected, $result );
+		$row = WP_HTML_Template::template(
+			'<tr><td></%name></td><td></%value></td></tr>',
+			array(
+				'name'  => 'Alice',
+				'value' => '42',
+			)
+		);
+
+		$result = WP_HTML_Template::render(
+			'<table><thead></%header></thead><tbody></%row></tbody></table>',
+			array(
+				'header' => $header,
+				'row'    => $row,
+			)
+		);
+
+		$this->assertStringContainsString( '<thead><tr><th>Name</th><th>Value</th></tr></thead>', $result );
+		$this->assertStringContainsString( '<tbody><tr><td>Alice</td><td>42</td></tr></tbody>', $result );
 	}
 
 	/**
@@ -645,12 +609,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_atomic_element_attributes
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_atomic_element_attributes_are_replaced( string $template_string, array $replacements, string $expected ) {
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -698,11 +660,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @todo Implement correct handling of atomic elements.
 	 *
-	 * @covers ::from
 	 * @covers ::render
 	 */
 	public function test_special_element_content_placeholder_behavior( string $template_string, string $expected ) {
-		$result = T::from( $template_string )->render();
+		$result = T::render( $template_string );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -743,8 +704,6 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_pre_element_leading_newline
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_pre_element_leading_newline_behavior( string $template_string, array $replacements, string $expected ) {
@@ -755,7 +714,7 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 			$this->markTestSkipped( 'PRE leading newline handling is not yet correct.' );
 		}
 
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -794,31 +753,30 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies bind() warns on missing replacement key.
+	 * Verifies render() warns on missing replacement key.
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::bind
+	 * @covers ::render
 	 *
-	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
-	public function test_bind_warns_on_missing_key() {
-		$template = T::from( '<p></%name> </%age></p>' );
-		$template->bind( array( 'name' => 'Alice' ) );
+	public function test_render_warns_on_missing_key() {
+		T::render( '<p></%name> </%age></p>', array( 'name' => 'Alice' ) );
 	}
 
 	/**
-	 * Verifies bind() warns on unused replacement key.
+	 * Verifies render() warns on unused replacement key.
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::bind
+	 * @covers ::render
 	 *
-	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
-	public function test_bind_warns_on_unused_key() {
-		$template = T::from( '<p></%name></p>' );
-		$template->bind(
+	public function test_render_warns_on_unused_key() {
+		T::render(
+			'<p></%name></p>',
 			array(
 				'name'  => 'Alice',
 				'extra' => 'ignored',
@@ -827,17 +785,20 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Verifies bind() warns when template used in attribute context.
+	 * Verifies render() warns when template used in attribute context.
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::bind
+	 * @covers ::render
+	 * @covers ::template
 	 *
-	 * @expectedIncorrectUsage WP_HTML_Template::bind
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
-	public function test_bind_warns_on_template_in_attribute_context() {
-		$template = T::from( '<meta content="</%html>">' );
-		$template->bind( array( 'html' => T::from( '<b>nested</b>' ) ) );
+	public function test_render_warns_on_template_in_attribute_context() {
+		T::render(
+			'<meta content="</%html>">',
+			array( 'html' => T::template( '<b>nested</b>' ) )
+		);
 	}
 
 	/**
@@ -847,12 +808,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_escapes_static_text_around_placeholder_in_attribute
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_escapes_static_text_around_placeholder_in_attribute( string $template_string, array $replacements, string $expected ) {
-		$result = T::from( $template_string )->bind( $replacements )->render();
+		$result = T::render( $template_string, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -955,20 +914,20 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 
 	/**
 	 * @ticket 60229
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_warns_on_unrecognized_replacements() {
-		$this->setExpectedIncorrectUsage( 'WP_HTML_Template::bind' );
-		$template = T::from( '<meta>' );
-		$template->bind( array( 'extra' => 'oops' ) );
+		T::render( '<meta>', array( 'extra' => 'oops' ) );
 	}
 
 	/**
 	 * @ticket 60229
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_warns_on_omit_replacement() {
-		$this->setExpectedIncorrectUsage( 'WP_HTML_Template::bind' );
-		$template = T::from( '</% omitted >' );
-		$template->bind( array() );
+		T::render( '<p></% omitted ></p>', array( 'other' => 'value' ) );
 	}
 
 	/**
@@ -976,14 +935,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_boolean_true_creates_boolean_attribute() {
-		$result = T::from( '<input disabled="</%disabled>">' )
-			->bind( array( 'disabled' => true ) )
-			->render();
+		$result = T::render(
+			'<input disabled="</%disabled>">',
+			array( 'disabled' => true )
+		);
 		$this->assertEqualHTML( '<input disabled>', $result );
 	}
 
@@ -992,14 +950,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_boolean_false_removes_attribute() {
-		$result = T::from( '<input disabled="</%disabled>" type="text">' )
-			->bind( array( 'disabled' => false ) )
-			->render();
+		$result = T::render(
+			'<input disabled="</%disabled>" type="text">',
+			array( 'disabled' => false )
+		);
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
 
@@ -1008,14 +965,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_null_removes_attribute() {
-		$result = T::from( '<input class="</%class>" type="text">' )
-			->bind( array( 'class' => null ) )
-			->render();
+		$result = T::render(
+			'<input class="</%class>" type="text">',
+			array( 'class' => null )
+		);
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
 
@@ -1024,14 +980,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_partial_placeholder_rejects_boolean() {
-		$result = T::from( '<input class="prefix-</%suffix>">' )
-			->bind( array( 'suffix' => true ) )
-			->render();
+		$result = T::render(
+			'<input class="prefix-</%suffix>">',
+			array( 'suffix' => true )
+		);
 		$this->assertFalse( $result );
 	}
 
@@ -1040,12 +995,10 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_boolean_attribute_handling
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_boolean_attribute_handling( string $template, array $replacements, string $expected ) {
-		$result = T::from( $template )->bind( $replacements )->render();
+		$result = T::render( $template, $replacements );
 		$this->assertEqualHTML( $expected, $result );
 	}
 
@@ -1107,9 +1060,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_render_returns_false_for_integer_replacement() {
-		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => 123 ) )->render();
+		$result = T::render( '<p></%val></p>', array( 'val' => 123 ) );
 		$this->assertFalse( $result );
 	}
 
@@ -1119,9 +1074,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_render_returns_false_for_array_replacement() {
-		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => array( 'a', 'b' ) ) )->render();
+		$result = T::render( '<p></%val></p>', array( 'val' => array( 'a', 'b' ) ) );
 		$this->assertFalse( $result );
 	}
 
@@ -1131,9 +1088,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_render_returns_false_for_object_replacement() {
-		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => new stdClass() ) )->render();
+		$result = T::render( '<p></%val></p>', array( 'val' => new stdClass() ) );
 		$this->assertFalse( $result );
 	}
 
@@ -1143,9 +1102,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_render_returns_false_for_null_replacement() {
-		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => null ) )->render();
+		$result = T::render( '<p></%val></p>', array( 'val' => null ) );
 		$this->assertFalse( $result );
 	}
 
@@ -1155,9 +1116,11 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 * @ticket 60229
 	 *
 	 * @covers ::render
+	 *
+	 * @expectedIncorrectUsage WP_HTML_Template::render
 	 */
 	public function test_render_returns_false_for_boolean_replacement() {
-		$result = T::from( '<p></%val></p>' )->bind( array( 'val' => true ) )->render();
+		$result = T::render( '<p></%val></p>', array( 'val' => true ) );
 		$this->assertFalse( $result );
 	}
 
@@ -1169,15 +1132,14 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_duplicate_attribute_removed_with_false() {
 		// The "disabled" attribute appears twice: once with placeholder, once as boolean.
-		$result = T::from( '<input disabled="</%d>" disabled type="text">' )
-			->bind( array( 'd' => false ) )
-			->render();
+		$result = T::render(
+			'<input disabled="</%d>" disabled type="text">',
+			array( 'd' => false )
+		);
 		// Both occurrences of "disabled" should be removed.
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
@@ -1187,14 +1149,13 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_duplicate_attribute_removed_with_null() {
-		$result = T::from( '<input class="</%c>" class="extra" type="text">' )
-			->bind( array( 'c' => null ) )
-			->render();
+		$result = T::render(
+			'<input class="</%c>" class="extra" type="text">',
+			array( 'c' => null )
+		);
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
 
@@ -1205,15 +1166,14 @@ class Tests_HtmlApi_WpHtmlTemplate extends WP_UnitTestCase {
 	 *
 	 * @ticket 60229
 	 *
-	 * @covers ::from
-	 * @covers ::bind
 	 * @covers ::render
 	 */
 	public function test_multiple_duplicate_attributes_removed() {
 		// Three occurrences of "disabled": placeholder + two duplicates.
-		$result = T::from( '<input disabled="</%d>" disabled disabled type="text">' )
-			->bind( array( 'd' => false ) )
-			->render();
+		$result = T::render(
+			'<input disabled="</%d>" disabled disabled type="text">',
+			array( 'd' => false )
+		);
 		$this->assertEqualHTML( '<input type="text">', $result );
 	}
 }

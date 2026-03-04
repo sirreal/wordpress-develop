@@ -22,113 +22,75 @@ class WP_HTML_Template {
 	 *
 	 * @since 7.0.0
 	 *
-	 * @var array<string, string|self>|null
+	 * @var array<string, string|self|true|false|null>
 	 */
-	private ?array $replacements = null;
+	private array $replacements;
 
-	/**
-	 * Unified edit operations list.
-	 *
-	 * Flat array in document order (ascending offsets). Each entry is one of:
-	 *
-	 * Pre-computed replacement (normalizations, escapes):
-	 *   ['start' => int, 'length' => int, 'replacement' => string]
-	 *
-	 * Placeholder reference (render-time lookup):
-	 *   ['start' => int, 'length' => int, 'placeholder' => string, 'context' => 'text'|'attribute']
-	 *
-	 * @since 7.0.0
-	 * @var null|array<array{'start': int, 'length': int, 'placeholder': string, 'context': 'text'|'attribute'}|WP_HTML_Text_Replacement>
-	 */
-	private ?array $edits = null;
-
-	/**
-	 * Placeholder names for O(1) validation.
-	 *
-	 * @since 7.0.0
-	 * @var array<string, true>
-	 */
-	private array $placeholder_names = array();
-
-	/**
-	 * Determines if the template requires table context for parsing.
-	 *
-	 * Templates starting with <tr>, <td>, <th>, <thead>, <tbody>, <tfoot>
-	 * need to be parsed in table context, not body context.
-	 *
-	 * @since 7.0.0
-	 *
-	 * @return string|null The context element needed, or null for default body context.
-	 */
-	private function detect_context(): ?string {
-		// Quick check: skip expensive parsing if no table elements present.
-		if ( ! preg_match( '/<t(?:r|d|h|head|body|foot)\b/i', $this->template_string ) ) {
-			return null;
-		}
-
-		// Find first non-whitespace, non-comment token.
-		$scanner = WP_HTML_Processor::create_fragment( $this->template_string );
-		if ( null === $scanner ) {
-			return null;
-		}
-
-		while ( $scanner->next_token() ) {
-			$type = $scanner->get_token_type();
-
-			// Skip whitespace and comments.
-			if ( '#text' === $type ) {
-				$text = $scanner->get_modifiable_text();
-				if ( '' === trim( $text ) ) {
-					continue;
-				}
-				// Non-whitespace text found first - use body context.
-				return null;
-			}
-
-			if ( '#comment' === $type || '#funky-comment' === $type ) {
-				continue;
-			}
-
-			// First real element found.
-			if ( '#tag' === $type && ! $scanner->is_tag_closer() ) {
-				$tag = strtoupper( $scanner->get_tag() );
-				// These tags require table context.
-				if ( in_array( $tag, array( 'TR', 'TD', 'TH', 'THEAD', 'TBODY', 'TFOOT', 'CAPTION', 'COLGROUP', 'COL' ), true ) ) {
-					return '<tbody>';
-				}
-			}
-
-			// Any other token means body context is fine.
-			return null;
-		}
-
-		return null;
+	private function __construct( string $template_string, array $replacements ) {
+		$this->template_string = $template_string;
+		$this->replacements    = $replacements;
 	}
 
 	/**
-	 * Compiles the template to extract placeholder metadata.
+	 * Creates a bound template for use as a replacement value in another template.
 	 *
-	 * Parses the template once and caches placeholder positions, lengths,
-	 * and contexts. If a placeholder appears in both text and attribute
-	 * contexts, the attribute context takes precedence (more restrictive).
+	 * This is a data container — it stores the template string and replacements
+	 * without parsing or processing. Processing happens when the parent template
+	 * is rendered, which provides the correct parsing context.
 	 *
 	 * @since 7.0.0
+	 *
+	 * @param string $template     The template string with placeholders.
+	 * @param array  $replacements The replacement values for placeholders.
+	 * @return static The bound template instance.
 	 */
-	private function compile(): void {
-		if ( null !== $this->edits ) {
-			return;
+	public static function template( string $template, array $replacements = array() ): static {
+		return new static( $template, $replacements );
+	}
+
+	/**
+	 * Renders a template to an HTML string.
+	 *
+	 * Processes the template in a single pass using WP_HTML_Processor. Placeholders
+	 * (`</%name>`) in text context are replaced with escaped values. Placeholders in
+	 * attribute values are found via regex scanning and replaced with escaped values.
+	 *
+	 * Nested templates (WP_HTML_Template values) are parsed at render time in the
+	 * parent's parsing context, enabling correct handling of table elements and
+	 * other context-dependent HTML.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $template     The template string with placeholders.
+	 * @param array  $replacements The replacement values for placeholders.
+	 * @return string|false The rendered HTML, or false on error.
+	 */
+	public static function render( string $template, array $replacements = array() ): string|false {
+		if ( empty( $replacements ) ) {
+			return WP_HTML_Processor::normalize( $template ) ?? false;
 		}
 
-		$this->edits             = array();
-		$this->placeholder_names = array();
+		$instance  = new static( $template, $replacements );
+		$processor = static::create_processor( $template );
+		if ( null === $processor ) {
+			return false;
+		}
 
-		$processor = ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
+		return static::process( $instance, $processor );
+	}
+
+	/**
+	 * Creates an extended WP_HTML_Processor that exposes internals needed for template processing.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $html The HTML fragment to parse.
+	 * @return WP_HTML_Processor|null The processor, or null on failure.
+	 */
+	private static function create_processor( string $html ) {
+		return ( new class( '', WP_HTML_Processor::CONSTRUCTOR_UNLOCK_CODE ) extends WP_HTML_Processor {
 			public function get_html(): string {
 				return $this->html;
-			}
-
-			public function get_bookmark( string $name ) {
-				return $this->bookmarks[ "_{$name}" ] ?? null;
 			}
 
 			public function get_tag_attributes(): array {
@@ -136,321 +98,83 @@ class WP_HTML_Template {
 			}
 
 			/**
-			 * Creates a fragment processor at the current node position.
-			 * Exposes the private parent method for table context support.
+			 * Creates a fragment processor using the given element as context.
+			 *
+			 * For most elements, uses standard body context parsing. For table-related
+			 * elements, creates a properly-nested wrapper to establish the correct
+			 * insertion mode (e.g., IN_TABLE_BODY for content inside `<tbody>`).
+			 *
+			 * @param string $html            The HTML fragment to parse.
+			 * @param string $context_element The context element tag name (e.g., 'TBODY').
+			 * @return static|null The fragment processor, or null on failure.
 			 */
-			public function create_fragment_at_node( string $html ): ?static {
-				return $this->create_fragment_at_current_node( $html );
-			}
-
-			public function get_duplicate_attributes(): ?array {
-				return $this->duplicate_attributes;
-			}
-		} )::create_fragment( $this->template_string );
-
-		if ( null === $processor ) {
-			return;
-		}
-
-		while ( $processor->next_token() ) {
-			switch ( $processor->get_token_type() ) {
+			public function create_fragment_for_context( string $html, string $context_element ): ?static {
 				/*
-				 * Track text normalizations to prevent something like
-				 * `a<</%tag-name>u` from becoming `a<i>u` after replacement.
+				 * Table-related elements need special context to parse correctly.
+				 * Build a wrapper that creates the right insertion mode, then use
+				 * create_fragment_at_current_node() to parse the child HTML.
 				 */
-				case '#text':
-					$processor->set_bookmark( 'text' );
-					$mark = $processor->get_bookmark( 'text' );
-					if ( null === $mark ) {
-						break;
-					}
-					$normalized = $processor->serialize_token();
-					if ( 0 !== substr_compare( $processor->get_html(), $normalized, $mark->start, $mark->length ) ) {
-						$this->edits[] = new WP_HTML_Text_Replacement(
-							$mark->start,
-							$mark->length,
-							$normalized,
-						);
-					}
-					break;
+				$table_contexts = array(
+					'TABLE'    => '<table>',
+					'THEAD'    => '<table><thead>',
+					'TBODY'    => '<table><tbody>',
+					'TFOOT'    => '<table><tfoot>',
+					'TR'       => '<table><tbody><tr>',
+					'TD'       => '<table><tbody><tr><td>',
+					'TH'       => '<table><tbody><tr><th>',
+					'CAPTION'  => '<table><caption>',
+					'COLGROUP' => '<table><colgroup>',
+				);
 
-				case '#funky-comment':
-					$processor->set_bookmark( 'placeholder' );
-					$mark = $processor->get_bookmark( 'placeholder' );
-					if ( null === $mark ) {
-						break;
-					}
+				$wrapper_html = $table_contexts[ $context_element ] ?? null;
 
-					$start  = $mark->start;
-					$length = $mark->length;
-					$html   = $processor->get_html();
+				if ( null === $wrapper_html ) {
+					// Non-table context: body context is correct.
+					return static::create_fragment( $html );
+				}
 
-					// Must be at least `</%x>` (5 chars) and start with `</%`
-					if ( $length < 5 || '%' !== $html[ $start + 2 ] ) {
-						break;
-					}
+				// Parse wrapper to position at the target context element.
+				$wrapper = static::create_fragment( $wrapper_html . "<span>x</span>" );
+				if ( null === $wrapper ) {
+					return null;
+				}
 
-					$placeholder = trim( substr( $html, $start + 3, $length - 4 ), " \t\n\r\f" );
-
-					// Valid placeholders match `/[a-z][a-z0-9_-]*/i` (must start with letter).
-					if (
-						'' === $placeholder ||
-						! ctype_alpha( $placeholder[0] ) ||
-						strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' )
+				// Walk to the target context element.
+				while ( $wrapper->next_token() ) {
+					if ( '#tag' === $wrapper->get_token_type()
+						&& ! $wrapper->is_tag_closer()
+						&& $context_element === $wrapper->get_tag()
 					) {
-						break;
+						$create_fn = Closure::bind(
+							function () use ( $html ) {
+								return $this->create_fragment_at_current_node( $html );
+							},
+							$wrapper,
+							WP_HTML_Processor::class
+						);
+						return $create_fn();
 					}
-
-					// New: append placeholder edit and register name.
-					$this->edits[]                           = array(
-						'start'       => $start,
-						'length'      => $length,
-						'placeholder' => $placeholder,
-						'context'     => 'text',
-					);
-					$this->placeholder_names[ $placeholder ] = true;
-					break;
-
-				case '#tag':
-					if ( $processor->is_tag_closer() ) {
-						break;
-					}
-
-					$html = $processor->get_html();
-					foreach ( $processor->get_tag_attributes() as $attribute ) {
-						// Boolean attributes cannot contain placeholders.
-						if ( $attribute->is_true ) {
-							continue;
-						}
-						// At least `</%x>` to contain a placeholder.
-						if ( $attribute->value_length < 5 ) {
-							continue;
-						}
-
-						$last_offset = $attribute->value_starts_at;
-						$offset      = $attribute->value_starts_at;
-						$end         = $offset + $attribute->value_length;
-
-						while (
-							1 === preg_match(
-								'#</%[ \\t\\r\\f\\n]*([a-z][a-z0-9_-]*)[ \\t\\r\\f\\n]*>#i',
-								$html,
-								$matches,
-								PREG_OFFSET_CAPTURE,
-								$offset
-							)
-							&& $matches[0][1] < $end
-						) {
-							$placeholder  = $matches[1][0];
-							$match_start  = $matches[0][1];
-							$match_length = strlen( $matches[0][0] );
-
-							// Pre-compute escape for text segment before this placeholder.
-							if ( $match_start > $last_offset ) {
-								$seg_length = $match_start - $last_offset;
-								$original   = substr( $html, $last_offset, $seg_length );
-								$decoded    = WP_HTML_Decoder::decode_attribute( $original );
-								$escaped    = strtr(
-									$decoded,
-									array(
-										'&' => '&amp;',
-										'<' => '&lt;',
-										'>' => '&gt;',
-										"'" => '&apos;',
-										'"' => '&quot;',
-									)
-								);
-								// Only add edit if escaping actually changes the text.
-								if ( $escaped !== $original ) {
-									$this->edits[] = new WP_HTML_Text_Replacement(
-										$last_offset,
-										$seg_length,
-										$escaped,
-									);
-								}
-							}
-
-							// Detect if placeholder is the entire attribute value.
-							$is_whole_attribute = (
-								$match_start === $attribute->value_starts_at &&
-								$match_start + $match_length === $end
-							);
-
-							// Append placeholder edit with attribute metadata.
-							$this->edits[]                           = array(
-								'start'              => $match_start,
-								'length'             => $match_length,
-								'placeholder'        => $placeholder,
-								'context'            => 'attribute',
-								'is_whole_attribute' => $is_whole_attribute,
-								'attr_name'          => $is_whole_attribute ? $attribute->name : null,
-								'attr_start'         => $is_whole_attribute ? $attribute->start : null,
-								'attr_length'        => $is_whole_attribute ? $attribute->length : null,
-							);
-							$this->placeholder_names[ $placeholder ] = true;
-
-							$last_offset = $match_start + $match_length;
-							$offset      = $last_offset;
-						}
-
-						// Pre-compute escape for trailing text segment after last placeholder.
-						if ( $last_offset < $end ) {
-							$seg_length = $end - $last_offset;
-							$original   = substr( $html, $last_offset, $seg_length );
-							$decoded    = WP_HTML_Decoder::decode_attribute( $original );
-							$escaped    = strtr(
-								$decoded,
-								array(
-									'&' => '&amp;',
-									'<' => '&lt;',
-									'>' => '&gt;',
-									"'" => '&apos;',
-									'"' => '&quot;',
-								)
-							);
-							// Only add edit if escaping actually changes the text.
-							if ( $escaped !== $original ) {
-								$this->edits[] = new WP_HTML_Text_Replacement(
-									$last_offset,
-									$seg_length,
-									$escaped,
-								);
-							}
-						}
-					}
-
-					// Remove duplicate attributes (invalid HTML, stripped during normalization).
-					$duplicates = $processor->get_duplicate_attributes();
-					if ( null !== $duplicates ) {
-						foreach ( $duplicates as $spans ) {
-							foreach ( $spans as $span ) {
-								$this->edits[] = new WP_HTML_Text_Replacement(
-									$span->start,
-									$span->length,
-									'',
-								);
-							}
-						}
-					}
-					break;
+				}
+				return null;
 			}
-		}
-	}
-
-	private function __construct( string $template_string, ?array $replacements ) {
-		$this->template_string = $template_string;
-		$this->replacements    = $replacements;
+		} )::create_fragment( $html );
 	}
 
 	/**
-	 * Creates a template from a string.
+	 * Processes a template with a given processor, building the output string.
+	 *
+	 * Walks all tokens in the processor, serializing each one. Placeholders in
+	 * text context (funky comments) and attribute values are detected and replaced.
 	 *
 	 * @since 7.0.0
 	 *
-	 * @param string $template The template string with placeholders.
-	 * @return static The template instance.
-	 */
-	public static function from( string $template, ?array $replacements = null ): static {
-		return new static( $template, $replacements );
-	}
-
-	/**
-	 * Returns a new immutable instance with replacements bound.
-	 *
-	 * Triggers compilation if not already done. Validates replacements:
-	 * - Warns if a placeholder has no corresponding replacement
-	 * - Warns if a replacement key has no corresponding placeholder
-	 * - Warns if a template is used in attribute context
-	 *
-	 * @since 7.0.0
-	 *
-	 * @param array $replacements The replacement values.
-	 * @return static A new template instance with the replacements bound.
-	 */
-	public function bind( array $replacements ): static {
-		$this->compile();
-
-		// Check for missing keys (placeholder without replacement).
-		foreach ( $this->placeholder_names as $placeholder => $_ ) {
-			if ( ! array_key_exists( $placeholder, $replacements ) ) {
-				_doing_it_wrong(
-					__METHOD__,
-					sprintf(
-						'Missing replacement for placeholder: %s',
-						$placeholder
-					),
-					'7.0.0'
-				);
-			}
-		}
-
-		// Check for unused keys (replacement without placeholder).
-		foreach ( $replacements as $key => $value ) {
-			if ( ! isset( $this->placeholder_names[ $key ] ) ) {
-				_doing_it_wrong(
-					__METHOD__,
-					sprintf(
-						'Unused replacement key: %s',
-						$key
-					),
-					'7.0.0'
-				);
-			}
-		}
-
-		// Check for templates in attribute context.
-		foreach ( $this->edits as $edit ) {
-			if ( $edit instanceof WP_HTML_Text_Replacement || 'attribute' !== $edit['context'] ) {
-				continue;
-			}
-
-			$placeholder = $edit['placeholder'];
-			$value       = $replacements[ $placeholder ] ?? null;
-
-			if ( $value instanceof self ) {
-				_doing_it_wrong(
-					__METHOD__,
-					sprintf(
-						'Template cannot be used in attribute context: %s',
-						$placeholder
-					),
-					'7.0.0'
-				);
-				break; // Only warn once per placeholder name.
-			}
-		}
-
-		$new                    = new static( $this->template_string, $replacements );
-		$new->edits             = $this->edits;
-		$new->placeholder_names = $this->placeholder_names;
-		return $new;
-	}
-
-	/**
-	 * Renders the template to an HTML string.
-	 *
-	 * Uses pre-compiled placeholder metadata to perform replacements
-	 * without re-parsing. Collects all updates (placeholder replacements,
-	 * text normalizations, attribute text escaping) and applies them
-	 * from end to start using substr_replace() to preserve positions.
-	 *
-	 * Returns false on any error:
-	 * - Missing replacement key (placeholder without corresponding replacement)
-	 * - Unused replacement key (replacement without corresponding placeholder)
-	 * - Template in attribute context
-	 * - HTML processing/normalization failure
-	 *
-	 * @since 7.0.0
-	 *
+	 * @param self              $template  The template with replacements.
+	 * @param WP_HTML_Processor $processor The processor to walk.
 	 * @return string|false The rendered HTML, or false on error.
 	 */
-	public function render(): string|false {
-		$this->compile();
-
-		if ( empty( $this->replacements ) ) {
-			// @todo check for missing names.
-			return WP_HTML_Processor::normalize( $this->template_string ) ?? $this->template_string;
-		}
+	private static function process( self $template, WP_HTML_Processor $processor ): string|false {
+		$output    = '';
+		$used_keys = array();
 
 		$escape_map = array(
 			'&' => '&amp;',
@@ -460,73 +184,423 @@ class WP_HTML_Template {
 			'"' => '&quot;',
 		);
 
-		$processor = ( new class( $this->template_string ) extends WP_HTML_Tag_Processor {
-			public function push_update( WP_HTML_Text_Replacement $update ) {
-				$this->lexical_updates[] = $update;
-			}
-		} );
+		while ( $processor->next_token() ) {
+			$token_type = $processor->get_token_type();
 
-		$used_keys = array();
-		foreach ( $this->edits as $edit ) {
-			if ( $edit instanceof WP_HTML_Text_Replacement ) {
-				$processor->push_update( $edit );
-			} else {
-				// Placeholder: look up replacement value.
-				$placeholder = $edit['placeholder'];
-				$value       = $this->replacements[ $placeholder ] ?? null;
-
-				if ( $value instanceof self ) {
-					if ( 'attribute' === $edit['context'] ) {
-						// @todo doing it wrong.
+			switch ( $token_type ) {
+				case '#funky-comment':
+					$result = static::process_placeholder( $processor, $template, $escape_map, $used_keys );
+					if ( false === $result ) {
 						return false;
 					}
+					if ( null !== $result ) {
+						$output .= $result;
+					} else {
+						// Not a placeholder — serialize normally.
+						$output .= $processor->serialize_token();
+					}
+					break;
 
-					$rendered = $value->render();
-					if ( false === $rendered ) {
+				case '#tag':
+					if ( $processor->is_tag_closer() ) {
+						$output .= $processor->serialize_token();
+						break;
+					}
+					$result = static::process_tag( $processor, $template, $escape_map, $used_keys );
+					if ( false === $result ) {
 						return false;
 					}
+					$output .= $result;
+					break;
 
-					$processor->push_update(
-						new WP_HTML_Text_Replacement( $edit['start'], $edit['length'], $rendered ),
-					);
-				} elseif ( is_string( $value ) ) {
-					$escaped = strtr( $value, $escape_map );
-					$processor->push_update(
-						new WP_HTML_Text_Replacement( $edit['start'], $edit['length'], $escaped ),
-					);
-				} elseif ( true === $value ) {
-					// Boolean true: convert to boolean attribute (remove value, keep name).
-					if ( empty( $edit['is_whole_attribute'] ) ) {
-						return false;
-					}
-					$processor->push_update(
-						new WP_HTML_Text_Replacement( $edit['attr_start'], $edit['attr_length'], $edit['attr_name'] ),
-					);
-				} elseif ( false === $value || null === $value ) {
-					// Boolean false or null: remove entire attribute.
-					if ( empty( $edit['is_whole_attribute'] ) ) {
-						return false;
-					}
-					$processor->push_update(
-						new WP_HTML_Text_Replacement( $edit['attr_start'], $edit['attr_length'], '' ),
-					);
-				} else {
-					// @todo doing it wrong.
-					return false;
-				}
-				$used_keys[ $placeholder ] = true;
+				default:
+					$output .= $processor->serialize_token();
+					break;
 			}
 		}
 
-		// Return false if any replacement key was not used.
-		if ( count( $used_keys ) !== count( $this->replacements ) ) {
+		// Validate: all replacement keys were used.
+		if ( count( $used_keys ) !== count( $template->replacements ) ) {
+			foreach ( $template->replacements as $key => $_ ) {
+				if ( ! isset( $used_keys[ $key ] ) ) {
+					_doing_it_wrong(
+						__CLASS__ . '::render',
+						sprintf(
+							'Unused replacement key: %s',
+							$key
+						),
+						'7.0.0'
+					);
+				}
+			}
 			return false;
 		}
 
-		/*
-		 * @todo ideally, just call `$processor->serialize()`.
-		 * @todo doing it wrong?
-		 */
-		return WP_HTML_Processor::normalize( $processor->get_updated_html() ) ?? false;
+		return $output;
+	}
+
+	/**
+	 * Attempts to process a funky comment as a placeholder.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Processor $processor  The processor positioned at a funky comment.
+	 * @param self              $template   The template with replacements.
+	 * @param array             $escape_map The character escape map.
+	 * @param array             &$used_keys Tracks which replacement keys have been used.
+	 * @return string|false|null The replacement string, false on error, or null if not a placeholder.
+	 */
+	private static function process_placeholder(
+		WP_HTML_Processor $processor,
+		self $template,
+		array $escape_map,
+		array &$used_keys
+	): string|false|null {
+		$text = $processor->get_modifiable_text();
+
+		// Must start with `%`.
+		if ( '' === $text || '%' !== $text[0] ) {
+			return null;
+		}
+
+		$placeholder = trim( substr( $text, 1 ), " \t\n\r\f" );
+
+		// Valid placeholders match `/[a-z][a-z0-9_-]*/i`.
+		if (
+			'' === $placeholder ||
+			! ctype_alpha( $placeholder[0] ) ||
+			strlen( $placeholder ) !== strspn( $placeholder, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' )
+		) {
+			return null;
+		}
+
+		if ( ! array_key_exists( $placeholder, $template->replacements ) ) {
+			_doing_it_wrong(
+				__CLASS__ . '::render',
+				sprintf(
+					'Missing replacement for placeholder: %s',
+					$placeholder
+				),
+				'7.0.0'
+			);
+			return false;
+		}
+
+		$value                    = $template->replacements[ $placeholder ];
+		$used_keys[ $placeholder ] = true;
+
+		if ( is_string( $value ) ) {
+			return strtr( $value, $escape_map );
+		}
+
+		if ( $value instanceof self ) {
+			// Get the parent context element from breadcrumbs.
+			// The last breadcrumb is the current token (the funky comment);
+			// the parent element is the second-to-last entry.
+			$breadcrumbs     = $processor->get_breadcrumbs();
+			$context_element = $breadcrumbs[ count( $breadcrumbs ) - 2 ] ?? 'BODY';
+
+			// Create a child processor in the correct context.
+			$child_processor = $processor->create_fragment_for_context(
+				$value->template_string,
+				$context_element
+			);
+
+			if ( null === $child_processor ) {
+				return false;
+			}
+
+			if ( empty( $value->replacements ) ) {
+				return static::serialize_all( $child_processor );
+			}
+
+			return static::process( $value, $child_processor );
+		}
+
+		// Boolean and null are invalid in text context.
+		_doing_it_wrong(
+			__CLASS__ . '::render',
+			sprintf(
+				'Invalid replacement type for text placeholder: %s',
+				$placeholder
+			),
+			'7.0.0'
+		);
+		return false;
+	}
+
+	/**
+	 * Processes an opening tag, handling attribute placeholders.
+	 *
+	 * If no attribute contains a placeholder, delegates to serialize_token().
+	 * Otherwise, builds the tag manually with placeholder replacements.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Processor $processor  The processor positioned at an opening tag.
+	 * @param self              $template   The template with replacements.
+	 * @param array             $escape_map The character escape map.
+	 * @param array             &$used_keys Tracks which replacement keys have been used.
+	 * @return string|false The serialized tag HTML, or false on error.
+	 */
+	private static function process_tag(
+		WP_HTML_Processor $processor,
+		self $template,
+		array $escape_map,
+		array &$used_keys
+	): string|false {
+		$attributes = $processor->get_tag_attributes();
+		$raw_html   = $processor->get_html();
+
+		// Quick check: does any attribute value contain a placeholder pattern?
+		$has_placeholder = false;
+		foreach ( $attributes as $attribute ) {
+			if ( $attribute->is_true ) {
+				continue;
+			}
+			if ( $attribute->value_length >= 5 ) {
+				$raw_value = substr( $raw_html, $attribute->value_starts_at, $attribute->value_length );
+				if ( str_contains( $raw_value, '</%' ) ) {
+					$has_placeholder = true;
+					break;
+				}
+			}
+		}
+
+		if ( ! $has_placeholder ) {
+			return $processor->serialize_token();
+		}
+
+		// Build the tag manually to handle attribute placeholders.
+		$tag_name       = str_replace( "\x00", "\u{FFFD}", $processor->get_tag() );
+		$in_html        = 'html' === $processor->get_namespace();
+		$qualified_name = $in_html ? strtolower( $tag_name ) : $processor->get_qualified_tag_name();
+
+		$html = "<{$qualified_name}";
+
+		// Track attributes to skip (removed by false/null).
+		$skip_attributes = array();
+
+		foreach ( $attributes as $attribute ) {
+			if ( isset( $skip_attributes[ $attribute->name ] ) ) {
+				continue;
+			}
+
+			if ( $attribute->is_true ) {
+				$html .= " {$attribute->name}";
+				continue;
+			}
+
+			// Check for placeholders in the raw attribute value.
+			$raw_value = substr( $raw_html, $attribute->value_starts_at, $attribute->value_length );
+			if ( ! str_contains( $raw_value, '</%' ) ) {
+				// No placeholder — use standard serialization.
+				$decoded = $processor->get_attribute( $attribute->name );
+				if ( is_string( $decoded ) ) {
+					$html .= ' ' . $attribute->name . '="' . htmlspecialchars( $decoded, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' ) . '"';
+				} else {
+					$html .= " {$attribute->name}";
+				}
+				continue;
+			}
+
+			// Scan for placeholders in the attribute value.
+			$result = static::process_attribute_value(
+				$raw_value,
+				$attribute,
+				$template,
+				$escape_map,
+				$used_keys,
+				$skip_attributes
+			);
+
+			if ( false === $result ) {
+				return false;
+			}
+
+			if ( null === $result ) {
+				// Attribute was removed (false/null replacement).
+				continue;
+			}
+
+			$html .= $result;
+		}
+
+		if ( ! $in_html && $processor->has_self_closing_flag() ) {
+			$html .= ' /';
+		}
+
+		$html .= '>';
+
+		// Handle PRE/TEXTAREA/LISTING leading newline.
+		if ( 'TEXTAREA' === $tag_name || 'PRE' === $tag_name || 'LISTING' === $tag_name ) {
+			$html .= "\n";
+		}
+
+		// Handle self-contained elements (their content + closing tag is part of this token).
+		if ( $in_html && in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) {
+			$text = $processor->get_modifiable_text();
+
+			switch ( $tag_name ) {
+				case 'IFRAME':
+				case 'NOEMBED':
+				case 'NOFRAMES':
+					$text = '';
+					break;
+
+				case 'SCRIPT':
+				case 'STYLE':
+					break;
+
+				default:
+					$text = htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
+			}
+
+			$html .= "{$text}</{$qualified_name}>";
+		}
+
+		return $html;
+	}
+
+	/**
+	 * Processes an attribute value that contains placeholder(s).
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $raw_value       The raw attribute value from the HTML.
+	 * @param object $attribute       The attribute token object.
+	 * @param self   $template        The template with replacements.
+	 * @param array  $escape_map      The character escape map.
+	 * @param array  &$used_keys      Tracks which replacement keys have been used.
+	 * @param array  &$skip_attributes Attributes to skip in serialization.
+	 * @return string|false|null The serialized attribute, false on error, or null if removed.
+	 */
+	private static function process_attribute_value(
+		string $raw_value,
+		$attribute,
+		self $template,
+		array $escape_map,
+		array &$used_keys,
+		array &$skip_attributes
+	): string|false|null {
+		$offset     = 0;
+		$end        = strlen( $raw_value );
+		$value_html = '';
+
+		// Is this a single placeholder that covers the entire attribute value?
+		$is_whole_attribute = (bool) preg_match(
+			'#^</%[ \\t\\r\\f\\n]*[a-z][a-z0-9_-]*[ \\t\\r\\f\\n]*>$#i',
+			$raw_value
+		);
+
+		while (
+			1 === preg_match(
+				'#</%[ \\t\\r\\f\\n]*([a-z][a-z0-9_-]*)[ \\t\\r\\f\\n]*>#i',
+				$raw_value,
+				$matches,
+				PREG_OFFSET_CAPTURE,
+				$offset
+			)
+			&& $matches[0][1] < $end
+		) {
+			$placeholder  = $matches[1][0];
+			$match_start  = $matches[0][1];
+			$match_length = strlen( $matches[0][0] );
+
+			if ( ! array_key_exists( $placeholder, $template->replacements ) ) {
+				_doing_it_wrong(
+					__CLASS__ . '::render',
+					sprintf(
+						'Missing replacement for placeholder: %s',
+						$placeholder
+					),
+					'7.0.0'
+				);
+				return false;
+			}
+
+			$value = $template->replacements[ $placeholder ];
+			$used_keys[ $placeholder ] = true;
+
+			// Template in attribute context is invalid.
+			if ( $value instanceof self ) {
+				_doing_it_wrong(
+					__CLASS__ . '::render',
+					sprintf(
+						'Template cannot be used in attribute context: %s',
+						$placeholder
+					),
+					'7.0.0'
+				);
+				return false;
+			}
+
+			// Boolean handling — only valid for whole-attribute placeholders.
+			if ( true === $value ) {
+				if ( ! $is_whole_attribute ) {
+					return false;
+				}
+				// Convert to boolean attribute (just the name, no value).
+				return " {$attribute->name}";
+			}
+
+			if ( false === $value || null === $value ) {
+				if ( ! $is_whole_attribute ) {
+					return false;
+				}
+				// Remove the attribute entirely.
+				$skip_attributes[ $attribute->name ] = true;
+				return null;
+			}
+
+			if ( ! is_string( $value ) ) {
+				_doing_it_wrong(
+					__CLASS__ . '::render',
+					sprintf(
+						'Invalid replacement type for attribute placeholder: %s',
+						$placeholder
+					),
+					'7.0.0'
+				);
+				return false;
+			}
+
+			// Static text before placeholder.
+			if ( $match_start > $offset ) {
+				$segment = substr( $raw_value, $offset, $match_start - $offset );
+				$decoded = WP_HTML_Decoder::decode_attribute( $segment );
+				$value_html .= strtr( $decoded, $escape_map );
+			}
+
+			// Escaped replacement value.
+			$value_html .= strtr( $value, $escape_map );
+
+			$offset = $match_start + $match_length;
+		}
+
+		// Trailing static text after last placeholder.
+		if ( $offset < $end ) {
+			$segment = substr( $raw_value, $offset );
+			$decoded = WP_HTML_Decoder::decode_attribute( $segment );
+			$value_html .= strtr( $decoded, $escape_map );
+		}
+
+		return ' ' . $attribute->name . '="' . $value_html . '"';
+	}
+
+	/**
+	 * Serializes all tokens from a processor into a string.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Processor $processor The processor to serialize.
+	 * @return string The serialized HTML.
+	 */
+	private static function serialize_all( WP_HTML_Processor $processor ): string {
+		$html = '';
+		while ( $processor->next_token() ) {
+			$html .= $processor->serialize_token();
+		}
+		return $html;
 	}
 }
