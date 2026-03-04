@@ -9,6 +9,21 @@
 
 class WP_HTML_Template {
 	/**
+	 * Map of characters to their HTML entity equivalents for escaping.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array<string, string>
+	 */
+	private const ESCAPE_MAP = array(
+		'&' => '&amp;',
+		'<' => '&lt;',
+		'>' => '&gt;',
+		"'" => '&apos;',
+		'"' => '&quot;',
+	);
+
+	/**
 	 * The template string.
 	 *
 	 * @since 7.1.0
@@ -176,20 +191,12 @@ class WP_HTML_Template {
 		$output    = '';
 		$used_keys = array();
 
-		$escape_map = array(
-			'&' => '&amp;',
-			'<' => '&lt;',
-			'>' => '&gt;',
-			"'" => '&apos;',
-			'"' => '&quot;',
-		);
-
 		while ( $processor->next_token() ) {
 			$token_type = $processor->get_token_type();
 
 			switch ( $token_type ) {
 				case '#funky-comment':
-					$result = static::process_placeholder( $processor, $template, $escape_map, $used_keys );
+					$result = static::process_placeholder( $processor, $template, $used_keys );
 					if ( false === $result ) {
 						return false;
 					}
@@ -206,7 +213,7 @@ class WP_HTML_Template {
 						$output .= $processor->serialize_token();
 						break;
 					}
-					$result = static::process_tag( $processor, $template, $escape_map, $used_keys );
+					$result = static::process_tag( $processor, $template, $used_keys );
 					if ( false === $result ) {
 						return false;
 					}
@@ -247,14 +254,12 @@ class WP_HTML_Template {
 	 *
 	 * @param WP_HTML_Processor $processor  The processor positioned at a funky comment.
 	 * @param self              $template   The template with replacements.
-	 * @param array             $escape_map The character escape map.
 	 * @param array             &$used_keys Tracks which replacement keys have been used.
 	 * @return string|false|null The replacement string, false on error, or null if not a placeholder.
 	 */
 	private static function process_placeholder(
 		WP_HTML_Processor $processor,
 		self $template,
-		array $escape_map,
 		array &$used_keys
 	): string|false|null {
 		$text = $processor->get_modifiable_text();
@@ -292,7 +297,7 @@ class WP_HTML_Template {
 		$used_keys[ $placeholder ] = true;
 
 		if ( is_string( $value ) ) {
-			return strtr( $value, $escape_map );
+			return strtr( $value, self::ESCAPE_MAP );
 		}
 
 		if ( $value instanceof self ) {
@@ -342,14 +347,12 @@ class WP_HTML_Template {
 	 *
 	 * @param WP_HTML_Processor $processor  The processor positioned at an opening tag.
 	 * @param self              $template   The template with replacements.
-	 * @param array             $escape_map The character escape map.
 	 * @param array             &$used_keys Tracks which replacement keys have been used.
 	 * @return string|false The serialized tag HTML, or false on error.
 	 */
 	private static function process_tag(
 		WP_HTML_Processor $processor,
 		self $template,
-		array $escape_map,
 		array &$used_keys
 	): string|false {
 		$attributes = $processor->get_tag_attributes();
@@ -412,7 +415,6 @@ class WP_HTML_Template {
 				$raw_value,
 				$attribute,
 				$template,
-				$escape_map,
 				$used_keys,
 				$skip_attributes
 			);
@@ -473,7 +475,6 @@ class WP_HTML_Template {
 	 * @param string $raw_value       The raw attribute value from the HTML.
 	 * @param object $attribute       The attribute token object.
 	 * @param self   $template        The template with replacements.
-	 * @param array  $escape_map      The character escape map.
 	 * @param array  &$used_keys      Tracks which replacement keys have been used.
 	 * @param array  &$skip_attributes Attributes to skip in serialization.
 	 * @return string|false|null The serialized attribute, false on error, or null if removed.
@@ -482,7 +483,6 @@ class WP_HTML_Template {
 		string $raw_value,
 		$attribute,
 		self $template,
-		array $escape_map,
 		array &$used_keys,
 		array &$skip_attributes
 	): string|false|null {
@@ -575,11 +575,11 @@ class WP_HTML_Template {
 			if ( $match_start > $offset ) {
 				$segment = substr( $raw_value, $offset, $match_start - $offset );
 				$decoded = WP_HTML_Decoder::decode_attribute( $segment );
-				$value_html .= strtr( $decoded, $escape_map );
+				$value_html .= strtr( $decoded, self::ESCAPE_MAP );
 			}
 
 			// Escaped replacement value.
-			$value_html .= strtr( $value, $escape_map );
+			$value_html .= strtr( $value, self::ESCAPE_MAP );
 
 			$offset = $match_start + $match_length;
 		}
@@ -588,7 +588,7 @@ class WP_HTML_Template {
 		if ( $offset < $end ) {
 			$segment = substr( $raw_value, $offset );
 			$decoded = WP_HTML_Decoder::decode_attribute( $segment );
-			$value_html .= strtr( $decoded, $escape_map );
+			$value_html .= strtr( $decoded, self::ESCAPE_MAP );
 		}
 
 		return ' ' . $attribute->name . '="' . $value_html . '"';
