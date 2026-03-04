@@ -109,7 +109,7 @@ class WP_HTML_Template {
 			}
 
 			public function get_tag_attributes(): array {
-				return $this->attributes;
+				return Closure::bind( fn () => $this->attributes, $this, WP_HTML_Tag_Processor::class )();
 			}
 
 			/**
