@@ -4,14 +4,14 @@
  *
  * @package WordPress
  * @subpackage HTML-API
- * @since 7.0.0
+ * @since 7.1.0
  */
 
 class WP_HTML_Template {
 	/**
 	 * The template string.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @var string
 	 */
@@ -20,7 +20,7 @@ class WP_HTML_Template {
 	/**
 	 * The replacement values for placeholders.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @var array<string, string|self|true|false|null>
 	 */
@@ -38,7 +38,7 @@ class WP_HTML_Template {
 	 * without parsing or processing. Processing happens when the parent template
 	 * is rendered, which provides the correct parsing context.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param string $template     The template string with placeholders.
 	 * @param array  $replacements The replacement values for placeholders.
@@ -59,7 +59,7 @@ class WP_HTML_Template {
 	 * parent's parsing context, enabling correct handling of table elements and
 	 * other context-dependent HTML.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param string $template     The template string with placeholders.
 	 * @param array  $replacements The replacement values for placeholders.
@@ -82,7 +82,7 @@ class WP_HTML_Template {
 	/**
 	 * Creates an extended WP_HTML_Processor that exposes internals needed for template processing.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param string $html The HTML fragment to parse.
 	 * @return WP_HTML_Processor|null The processor, or null on failure.
@@ -166,7 +166,7 @@ class WP_HTML_Template {
 	 * Walks all tokens in the processor, serializing each one. Placeholders in
 	 * text context (funky comments) and attribute values are detected and replaced.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param self              $template  The template with replacements.
 	 * @param WP_HTML_Processor $processor The processor to walk.
@@ -229,7 +229,7 @@ class WP_HTML_Template {
 							'Unused replacement key: %s',
 							$key
 						),
-						'7.0.0'
+						'7.1.0'
 					);
 				}
 			}
@@ -242,7 +242,7 @@ class WP_HTML_Template {
 	/**
 	 * Attempts to process a funky comment as a placeholder.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param WP_HTML_Processor $processor  The processor positioned at a funky comment.
 	 * @param self              $template   The template with replacements.
@@ -281,7 +281,7 @@ class WP_HTML_Template {
 					'Missing replacement for placeholder: %s',
 					$placeholder
 				),
-				'7.0.0'
+				'7.1.0'
 			);
 			return false;
 		}
@@ -324,7 +324,7 @@ class WP_HTML_Template {
 				'Invalid replacement type for text placeholder: %s',
 				$placeholder
 			),
-			'7.0.0'
+			'7.1.0'
 		);
 		return false;
 	}
@@ -335,7 +335,7 @@ class WP_HTML_Template {
 	 * If no attribute contains a placeholder, delegates to serialize_token().
 	 * Otherwise, builds the tag manually with placeholder replacements.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param WP_HTML_Processor $processor  The processor positioned at an opening tag.
 	 * @param self              $template   The template with replacements.
@@ -465,7 +465,7 @@ class WP_HTML_Template {
 	/**
 	 * Processes an attribute value that contains placeholder(s).
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param string $raw_value       The raw attribute value from the HTML.
 	 * @param object $attribute       The attribute token object.
@@ -514,7 +514,7 @@ class WP_HTML_Template {
 						'Missing replacement for placeholder: %s',
 						$placeholder
 					),
-					'7.0.0'
+					'7.1.0'
 				);
 				return false;
 			}
@@ -530,7 +530,7 @@ class WP_HTML_Template {
 						'Template cannot be used in attribute context: %s',
 						$placeholder
 					),
-					'7.0.0'
+					'7.1.0'
 				);
 				return false;
 			}
@@ -560,7 +560,7 @@ class WP_HTML_Template {
 						'Invalid replacement type for attribute placeholder: %s',
 						$placeholder
 					),
-					'7.0.0'
+					'7.1.0'
 				);
 				return false;
 			}
@@ -591,7 +591,7 @@ class WP_HTML_Template {
 	/**
 	 * Serializes all tokens from a processor into a string.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @param WP_HTML_Processor $processor The processor to serialize.
 	 * @return string The serialized HTML.
