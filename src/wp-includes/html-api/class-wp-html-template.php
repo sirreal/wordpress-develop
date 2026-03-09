@@ -59,7 +59,7 @@ class WP_HTML_Template {
 	 * @param array  $replacements The replacement values for placeholders.
 	 * @return static The bound template instance.
 	 */
-	public static function template( string $template, array $replacements = array() ): static {
+	public static function template( string $template, array $replacements = array() ) {
 		return new static( $template, $replacements );
 	}
 
@@ -80,7 +80,7 @@ class WP_HTML_Template {
 	 * @param array  $replacements The replacement values for placeholders.
 	 * @return string|false The rendered HTML, or false on error.
 	 */
-	public static function render( string $template, array $replacements = array() ): string|false {
+	public static function render( string $template, array $replacements = array() ) {
 		if ( empty( $replacements ) ) {
 			return WP_HTML_Processor::normalize( $template ) ?? false;
 		}
@@ -187,7 +187,7 @@ class WP_HTML_Template {
 	 * @param WP_HTML_Processor $processor The processor to walk.
 	 * @return string|false The rendered HTML, or false on error.
 	 */
-	private static function process( self $template, WP_HTML_Processor $processor ): string|false {
+	private static function process( self $template, WP_HTML_Processor $processor ) {
 		$output    = '';
 		$used_keys = array();
 
@@ -261,7 +261,7 @@ class WP_HTML_Template {
 		WP_HTML_Processor $processor,
 		self $template,
 		array &$used_keys
-	): string|false|null {
+	) {
 		$text = $processor->get_modifiable_text();
 
 		// Must start with `%`.
