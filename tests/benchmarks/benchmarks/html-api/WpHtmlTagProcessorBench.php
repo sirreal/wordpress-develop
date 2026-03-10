@@ -10,7 +10,10 @@ declare(strict_types=1);
 use PhpBench\Attributes as Bench;
 
 class WpHtmlTagProcessorBench {
-	private $processor = null;
+	/**
+	 * Processor instance for benchmarks.
+	 */
+	private WP_HTML_Tag_Processor|WP_HTML_Processor|null $processor = null;
 
 	public function clean_up_processor(): void {
 		$this->processor = null;
@@ -105,7 +108,6 @@ class WpHtmlTagProcessorBench {
 			JS,
 		);
 	}
-
 
 	/**
 	 * Benchmark HTML parsing.
