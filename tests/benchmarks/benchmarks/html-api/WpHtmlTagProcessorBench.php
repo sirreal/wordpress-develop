@@ -146,6 +146,6 @@ class WpHtmlTagProcessorBench {
 	public static function provide_html(): iterable {
 		yield 'Empty string' => array( '' );
 		yield 'Short doc' => array( '<h1>Hello, world!</h1>' );
-		yield 'HTML Standard' => array( file_get_contents( DIR_TESTDATA . '/html-api/html-standard.html' ) );
+		yield 'HTML Standard' => array( file_get_contents( DIR_BENCHMARKDATA . '/html-standard.html' ) );
 	}
 }
