@@ -299,7 +299,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		if ( ! is_string( $html ) ) {
+		if ( ! \is_string( $html ) ) {
 			_doing_it_wrong(
 				__METHOD__,
 				__( 'The HTML parameter must be a string.' ),
@@ -350,7 +350,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( 'UTF-8' !== $known_definite_encoding ) {
 			return null;
 		}
-		if ( ! is_string( $html ) ) {
+		if ( ! \is_string( $html ) ) {
 			_doing_it_wrong(
 				__METHOD__,
 				__( 'The HTML parameter must be a string.' ),
@@ -386,7 +386,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( self::CONSTRUCTOR_UNLOCK_CODE !== $use_the_static_create_methods_instead ) {
 			_doing_it_wrong(
 				__METHOD__,
-				sprintf(
+				\sprintf(
 					/* translators: %s: WP_HTML_Processor::create_fragment(). */
 					__( 'Call %s to create an HTML Processor instead of calling the constructor directly.' ),
 					'<code>WP_HTML_Processor::create_fragment()</code>'
@@ -492,7 +492,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( 'html' === $namespace && self::is_void( $tag_name ) ) {
 			_doing_it_wrong(
 				__METHOD__,
-				sprintf(
+				\sprintf(
 					// translators: %s: A tag name like INPUT or BR.
 					__( 'The context element cannot be a void element, found "%s".' ),
 					$tag_name
@@ -508,11 +508,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 */
 		if (
 			'html' === $namespace &&
-			in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP', 'PLAINTEXT' ), true )
+			\in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP', 'PLAINTEXT' ), true )
 		) {
 			_doing_it_wrong(
 				__METHOD__,
-				sprintf(
+				\sprintf(
 					// translators: %s: A tag name like IFRAME or TEXTAREA.
 					__( 'The context element "%s" is not supported.' ),
 					$tag_name
@@ -699,11 +699,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		if ( is_string( $query ) ) {
+		if ( \is_string( $query ) ) {
 			$query = array( 'breadcrumbs' => array( $query ) );
 		}
 
-		if ( ! is_array( $query ) ) {
+		if ( ! \is_array( $query ) ) {
 			_doing_it_wrong(
 				__METHOD__,
 				__( 'Please pass a query array to this function.' ),
@@ -716,11 +716,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$query['tag_name'] = strtoupper( $query['tag_name'] );
 		}
 
-		$needs_class = ( isset( $query['class_name'] ) && is_string( $query['class_name'] ) )
+		$needs_class = ( isset( $query['class_name'] ) && \is_string( $query['class_name'] ) )
 			? $query['class_name']
 			: null;
 
-		if ( ! ( array_key_exists( 'breadcrumbs', $query ) && is_array( $query['breadcrumbs'] ) ) ) {
+		if ( ! ( \array_key_exists( 'breadcrumbs', $query ) && \is_array( $query['breadcrumbs'] ) ) ) {
 			while ( $this->next_token() ) {
 				if ( '#tag' !== $this->get_token_type() ) {
 					continue;
@@ -919,7 +919,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	public function matches_breadcrumbs( $breadcrumbs ): bool {
 		// Everything matches when there are zero constraints.
-		if ( 0 === count( $breadcrumbs ) ) {
+		if ( 0 === \count( $breadcrumbs ) ) {
 			return true;
 		}
 
@@ -930,7 +930,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		for ( $i = count( $this->breadcrumbs ) - 1; $i >= 0; $i-- ) {
+		for ( $i = \count( $this->breadcrumbs ) - 1; $i >= 0; $i-- ) {
 			$node  = $this->breadcrumbs[ $i ];
 			$crumb = strtoupper( current( $breadcrumbs ) );
 
@@ -982,7 +982,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			// Void elements.
 			( 'html' === $token_namespace && self::is_void( $token_name ) ) ||
 			// Special atomic elements.
-			( 'html' === $token_namespace && in_array( $token_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) ||
+			( 'html' === $token_namespace && \in_array( $token_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) ||
 			// Self-closing elements in foreign content.
 			( 'html' !== $token_namespace && $token_has_self_closing )
 		);
@@ -1067,7 +1067,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			(
 				'math' === $adjusted_current_node->integration_node_type &&
 				(
-					( $is_start_tag && ! in_array( $token_name, array( 'MGLYPH', 'MALIGNMARK' ), true ) ) ||
+					( $is_start_tag && ! \in_array( $token_name, array( 'MGLYPH', 'MALIGNMARK' ), true ) ) ||
 					'#text' === $token_name
 				)
 			) ||
@@ -1219,7 +1219,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return int Nesting-depth of current location in the document.
 	 */
 	public function get_current_depth(): int {
-		return count( $this->breadcrumbs );
+		return \count( $this->breadcrumbs );
 	}
 
 	/**
@@ -1418,7 +1418,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$html .= " {$this->get_qualified_attribute_name( $attribute_name )}";
 			$value = $this->get_attribute( $attribute_name );
 
-			if ( is_string( $value ) ) {
+			if ( \is_string( $value ) ) {
 				$html .= '="' . htmlspecialchars( $value, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5 ) . '"';
 			}
 
@@ -1458,7 +1458,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		// Flush out self-contained elements.
-		if ( $in_html && in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) {
+		if ( $in_html && \in_array( $tag_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) {
 			$text = $this->get_modifiable_text();
 
 			switch ( $tag_name ) {
@@ -1839,7 +1839,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * >     tentative, then change the encoding to the resulting encoding.
 				 */
 				$charset = $this->get_attribute( 'charset' );
-				if ( is_string( $charset ) ) {
+				if ( \is_string( $charset ) ) {
 					$this->bail( 'Cannot yet process META tags with charset to determine encoding.' );
 				}
 
@@ -1854,8 +1854,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$http_equiv = $this->get_attribute( 'http-equiv' );
 				$content    = $this->get_attribute( 'content' );
 				if (
-					is_string( $http_equiv ) &&
-					is_string( $content ) &&
+					\is_string( $http_equiv ) &&
+					\is_string( $content ) &&
 					0 === strcasecmp( $http_equiv, 'Content-Type' )
 				) {
 					$this->bail( 'Cannot yet process META tags with http-equiv Content-Type to determine encoding.' );
@@ -2473,7 +2473,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				if (
-					in_array(
+					\in_array(
 						$this->state->stack_of_open_elements->current_node()->node_name,
 						array( 'H1', 'H2', 'H3', 'H4', 'H5', 'H6' ),
 						true
@@ -2965,7 +2965,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * > string "hidden", then: set the frameset-ok flag to "not ok".
 				 */
 				$type_attribute = $this->get_attribute( 'type' );
-				if ( ! is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
+				if ( ! \is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
 					$this->state->frameset_ok = false;
 				}
 
@@ -3467,7 +3467,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			case '+INPUT':
 				$type_attribute = $this->get_attribute( 'type' );
-				if ( ! is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
+				if ( ! \is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
 					goto anything_else;
 				}
 				// @todo Indicate a parse error once it's possible.
@@ -5678,7 +5678,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->reset_insertion_mode_appropriately();
-				$this->breadcrumbs = array_slice( $this->breadcrumbs, 0, 2 );
+				$this->breadcrumbs = \array_slice( $this->breadcrumbs, 0, 2 );
 				parent::seek( $this->context_node->bookmark_name );
 			}
 		}
@@ -5861,7 +5861,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		while (
 			( $no_exclusions || ! $this->state->stack_of_open_elements->current_node_is( $except_for_this_element ) ) &&
-			in_array( $this->state->stack_of_open_elements->current_node()->node_name, $elements_with_implied_end_tags, true )
+			\in_array( $this->state->stack_of_open_elements->current_node()->node_name, $elements_with_implied_end_tags, true )
 		) {
 			$this->state->stack_of_open_elements->pop();
 		}
@@ -5902,7 +5902,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			'TR',
 		);
 
-		while ( in_array( $this->state->stack_of_open_elements->current_node()->node_name, $elements_with_implied_end_tags, true ) ) {
+		while ( \in_array( $this->state->stack_of_open_elements->current_node()->node_name, $elements_with_implied_end_tags, true ) ) {
 			$this->state->stack_of_open_elements->pop();
 		}
 	}
@@ -6464,7 +6464,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$encoding = $this->get_attribute( 'encoding' );
 
 			return (
-				is_string( $encoding ) &&
+				\is_string( $encoding ) &&
 				(
 					0 === strcasecmp( $encoding, 'application/xhtml+xml' ) ||
 					0 === strcasecmp( $encoding, 'text/html' )
@@ -6488,7 +6488,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether the element of the given name is in the special category.
 	 */
 	public static function is_special( $tag_name ): bool {
-		if ( is_string( $tag_name ) ) {
+		if ( \is_string( $tag_name ) ) {
 			$tag_name = strtoupper( $tag_name );
 		} else {
 			$tag_name = 'html' === $tag_name->namespace
