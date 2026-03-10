@@ -9,44 +9,43 @@ declare(strict_types=1);
 
 use PhpBench\Attributes as Bench;
 
-#[Bench\Warmup( 3 )]
-#[Bench\Iterations( 10 )]
-#[Bench\Revs( 100 )]
 class WpHtmlTagProcessorBench {
+	private $processor = null;
+
+	public function clean_up_processor(): void {
+		$this->processor = null;
+	}
 
 	/**
 	 * Benchmark normalizing simple Unix paths.
-	 * @param array{0: WP_HTML_Tag_Processor, 1: string} $params
+	 * @param array{0: string} $params
 	 */
-	#[Bench\ParamProviders( 'provide_script_tag_processor' )]
+	#[Bench\Warmup( 2 )]
+	#[Bench\Iterations( 10 )]
+	#[Bench\Revs( 50 )]
+	#[Bench\BeforeMethods( 'set_up_script_tag_processor' )]
+	#[Bench\AfterMethods( 'clean_up_processor' )]
+	#[Bench\ParamProviders( 'provide_script_tag_contents' )]
 	public function bench_javascript_custom_escape( array $params ): void {
-		[$processor, $source_text] = $params;
-		assert( $processor->set_modifiable_text( $source_text ), 'Failed to set modifiable text.' );
+		[ $source_text] = $params;
+		assert( $this->processor->set_modifiable_text( $source_text ), 'Failed to set modifiable text.' );
+	}
+
+	public function set_up_script_tag_processor(): void {
+		$this->processor = new WP_HTML_Tag_Processor( '<script></script>' );
+		$this->processor->next_tag();
 	}
 
 	/**
-	 * @return iterable<array{0: WP_HTML_Tag_Processor, 1: string}>
+	 * @return iterable<array{0: string}>
 	 */
-	public static function provide_script_tag_processor(): iterable {
-		foreach ( self::provide_javascript() as $name => $source_text ) {
-			$processor = new WP_HTML_Tag_Processor( '<script></script>' );
-			$processor->next_tag();
-			yield $name => array( $processor, $source_text );
-		}
-	}
+	public static function provide_script_tag_contents(): iterable {
+		yield 'empty' => array( '' );
 
-	/**
-	 * Provide simple Unix-style paths.
-	 * @return iterable<string>
-	 */
-	public static function provide_javascript(): iterable {
-		yield 'empty' => '';
+		yield 'short' => array( 'console.log("Hello, World!");' );
 
-		yield 'short' => 'console.log("Hello, World!");';
-
-		// yield 'tinymce' => file_get_contents( dirname(__DIR__, 2) . 'src/js/_enqueues/vendor/tinymce/tinymce.js' );
-
-		yield 'many replacements' => <<<'JS'
+		yield 'many replacements' => array(
+			<<<'JS'
 			/* <!-- and <script> is bad news in JS land! */
 			const templateString = `
 				But can't we talk about <script> and </script> tags without breaking everything?
@@ -103,44 +102,69 @@ class WpHtmlTagProcessorBench {
 				<script></script>
 			`;
 			/* Good luck! */
-			JS;
+			JS,
+		);
 	}
 
 
 	/**
 	 * Benchmark HTML parsing.
-	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 * @param array{0: string} $params
 	 */
+	#[Bench\Warmup( 2 )]
+	#[Bench\Iterations( 10 )]
+	#[Bench\Revs( 10 )]
 	#[Bench\ParamProviders( 'provide_html' )]
+	#[Bench\BeforeMethods( 'set_up_html_tag_processor' )]
+	#[Bench\AfterMethods( 'clean_up_processor' )]
 	public function bench_tag_processor_html_parsing( array $params ): void {
-		$processor = new WP_HTML_Tag_Processor( $params[0] );
-		while ( $processor->next_token() ) {
+		while ( $this->processor->next_token() ) {
 			// No-op.
 		}
 	}
 
+	public function set_up_html_tag_processor( array $params ): void {
+		$this->processor = new WP_HTML_Tag_Processor( $params[0] );
+	}
+
 	/**
 	 * Benchmark HTML parsing.
-	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 * @param array{0: string} $params
 	 */
+	#[Bench\Warmup( 2 )]
+	#[Bench\Iterations( 10 )]
+	#[Bench\Revs( 5 )]
 	#[Bench\ParamProviders( 'provide_html' )]
+	#[Bench\BeforeMethods( 'set_up_html_fragment_processor' )]
+	#[Bench\AfterMethods( 'clean_up_processor' )]
 	public function bench_html_fragment_parsing( array $params ): void {
-		$processor = WP_HTML_Processor::create_fragment( $params[0] );
-		while ( $processor->next_token() ) {
+		while ( $this->processor->next_token() ) {
 			// No-op.
 		}
 	}
 
+	public function set_up_html_fragment_processor( array $params ): void {
+		$this->processor = WP_HTML_Processor::create_fragment( $params[0] );
+	}
+
 	/**
 	 * Benchmark HTML parsing.
-	 * @param array{0: WP_HTML_Tag_Processor} $params
+	 * @param array{0: string} $params
 	 */
+	#[Bench\Warmup( 2 )]
+	#[Bench\Iterations( 10 )]
+	#[Bench\Revs( 5 )]
 	#[Bench\ParamProviders( 'provide_html' )]
+	#[Bench\BeforeMethods( 'set_up_html_full_parser' )]
+	#[Bench\AfterMethods( 'clean_up_processor' )]
 	public function bench_html_full_parsing( array $params ): void {
-		$processor = WP_HTML_Processor::create_full_parser( $params[0] );
-		while ( $processor->next_token() ) {
+		while ( $this->processor->next_token() ) {
 			// No-op.
 		}
+	}
+
+	public function set_up_html_full_parser( array $params ): void {
+		$this->processor = WP_HTML_Processor::create_full_parser( $params[0] );
 	}
 
 	public static function provide_html(): iterable {
