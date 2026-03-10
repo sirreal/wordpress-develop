@@ -24,8 +24,8 @@ class WpHtmlTagProcessorBench {
 	 * @param array{0: string} $params
 	 */
 	#[Bench\Warmup( 2 )]
-	#[Bench\Iterations( 10 )]
-	#[Bench\Revs( 50 )]
+	#[Bench\Iterations( 50 )]
+	#[Bench\Revs( 10 )]
 	#[Bench\BeforeMethods( 'set_up_script_tag_processor' )]
 	#[Bench\AfterMethods( 'clean_up_processor' )]
 	#[Bench\ParamProviders( 'provide_script_tag_contents' )]
@@ -114,8 +114,8 @@ class WpHtmlTagProcessorBench {
 	 * @param array{0: string} $params
 	 */
 	#[Bench\Warmup( 2 )]
-	#[Bench\Iterations( 10 )]
-	#[Bench\Revs( 10 )]
+	#[Bench\Iterations( 20 )]
+	#[Bench\Revs( 5 )]
 	#[Bench\ParamProviders( 'provide_html' )]
 	#[Bench\BeforeMethods( 'set_up_html_tag_processor' )]
 	#[Bench\AfterMethods( 'clean_up_processor' )]
@@ -134,8 +134,8 @@ class WpHtmlTagProcessorBench {
 	 * @param array{0: string} $params
 	 */
 	#[Bench\Warmup( 2 )]
-	#[Bench\Iterations( 10 )]
-	#[Bench\Revs( 5 )]
+	#[Bench\Iterations( 20 )]
+	#[Bench\Revs( 3 )]
 	#[Bench\ParamProviders( 'provide_html' )]
 	#[Bench\BeforeMethods( 'set_up_html_fragment_processor' )]
 	#[Bench\AfterMethods( 'clean_up_processor' )]
@@ -154,8 +154,8 @@ class WpHtmlTagProcessorBench {
 	 * @param array{0: string} $params
 	 */
 	#[Bench\Warmup( 2 )]
-	#[Bench\Iterations( 10 )]
-	#[Bench\Revs( 5 )]
+	#[Bench\Iterations( 20 )]
+	#[Bench\Revs( 3 )]
 	#[Bench\ParamProviders( 'provide_html' )]
 	#[Bench\BeforeMethods( 'set_up_html_full_parser' )]
 	#[Bench\AfterMethods( 'clean_up_processor' )]
