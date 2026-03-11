@@ -170,8 +170,8 @@ class WpHtmlTagProcessorBench {
 	}
 
 	public static function provide_html(): iterable {
-		yield 'Empty string' => array( 'data://text/html,' );
-		yield 'Short doc' => array( 'data://text/html,<h1>Hello, world!</h1>' );
+		yield 'Empty string' => array( 'data:text/html,' );
+		yield 'Short doc' => array( 'data:text/html,' . rawurlencode( '<h1>Hello, world!</h1>' ) );
 		yield 'HTML Standard' => array( 'file://' . DIR_BENCHMARKDATA . '/html-standard.html' );
 	}
 }
