@@ -156,6 +156,47 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	const MAX_BOOKMARKS = 10_000;
 
 	/**
+	 * Lookup set of HTML elements that never expect a closing tag.
+	 *
+	 * Combines void elements and special atomic elements for fast
+	 * isset()-based lookup in expects_closer().
+	 *
+	 * @since 6.9.0
+	 *
+	 * @var array<string, true>
+	 */
+	const ELEMENTS_WITHOUT_A_CLOSER = array(
+		// Void elements.
+		'AREA'     => true,
+		'BASE'     => true,
+		'BASEFONT' => true,
+		'BGSOUND'  => true,
+		'BR'       => true,
+		'COL'      => true,
+		'EMBED'    => true,
+		'FRAME'    => true,
+		'HR'       => true,
+		'IMG'      => true,
+		'INPUT'    => true,
+		'KEYGEN'   => true,
+		'LINK'     => true,
+		'META'     => true,
+		'PARAM'    => true,
+		'SOURCE'   => true,
+		'TRACK'    => true,
+		'WBR'      => true,
+		// Special atomic elements.
+		'IFRAME'   => true,
+		'NOEMBED'  => true,
+		'NOFRAMES' => true,
+		'SCRIPT'   => true,
+		'STYLE'    => true,
+		'TEXTAREA' => true,
+		'TITLE'    => true,
+		'XMP'      => true,
+	);
+
+	/**
 	 * Holds the working state of the parser, including the stack of
 	 * open elements and the stack of active formatting elements.
 	 *
@@ -991,21 +1032,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return null;
 		}
 
+		// Comments, text nodes, and other atomic tokens.
+		if ( '#' === $token_name[0] ) {
+			return false;
+		}
+
+		// Doctype declarations.
+		if ( 'html' === $token_name ) {
+			return false;
+		}
+
 		$token_namespace        = $node->namespace ?? $this->get_namespace();
 		$token_has_self_closing = $node->has_self_closing_flag ?? $this->has_self_closing_flag();
 
-		return ! (
-			// Comments, text nodes, and other atomic tokens.
-			'#' === $token_name[0] ||
-			// Doctype declarations.
-			'html' === $token_name ||
-			// Void elements.
-			( 'html' === $token_namespace && self::is_void( $token_name ) ) ||
-			// Special atomic elements.
-			( 'html' === $token_namespace && in_array( $token_name, array( 'IFRAME', 'NOEMBED', 'NOFRAMES', 'SCRIPT', 'STYLE', 'TEXTAREA', 'TITLE', 'XMP' ), true ) ) ||
-			// Self-closing elements in foreign content.
-			( 'html' !== $token_namespace && $token_has_self_closing )
-		);
+		// Self-closing elements in foreign content.
+		if ( 'html' !== $token_namespace ) {
+			return ! $token_has_self_closing;
+		}
+
+		// Void elements and special atomic elements in HTML namespace.
+		return ! isset( self::ELEMENTS_WITHOUT_A_CLOSER[ $token_name ] );
 	}
 
 	/**
