@@ -1005,16 +1005,13 @@ class WP_HTML_Tag_Processor {
 			$at = $this->bytes_already_parsed;
 		}
 
-		// Don't proceed if there's nothing more to scan.
-		if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
-			return false;
-		}
-
 		$html       = $this->html;
 		$doc_length = $this->doc_length;
 
 		if ( $at >= $doc_length ) {
-			$this->parser_state = self::STATE_COMPLETE;
+			if ( self::STATE_INCOMPLETE_INPUT !== $this->parser_state ) {
+				$this->parser_state = self::STATE_COMPLETE;
+			}
 			return false;
 		}
 
@@ -1090,7 +1087,7 @@ class WP_HTML_Tag_Processor {
 				$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
 				if ( false === $tag_ends_at ) {
 					$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-					$this->bytes_already_parsed = $was_at;
+					$this->bytes_already_parsed = $doc_length;
 					return false;
 				}
 			}
@@ -1131,7 +1128,7 @@ class WP_HTML_Tag_Processor {
 
 		if ( false === $this->parse_next_tag() ) {
 			if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
-				$this->bytes_already_parsed = $was_at;
+				$this->bytes_already_parsed = $doc_length;
 			}
 
 			return false;
@@ -1145,7 +1142,7 @@ class WP_HTML_Tag_Processor {
 		$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
 		if ( false === $tag_ends_at ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $was_at;
+			$this->bytes_already_parsed = $doc_length;
 
 			return false;
 		}
@@ -1263,7 +1260,7 @@ class WP_HTML_Tag_Processor {
 
 		if ( ! $found_closer ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $was_at;
+			$this->bytes_already_parsed = $doc_length;
 			return false;
 		}
 
