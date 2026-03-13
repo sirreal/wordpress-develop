@@ -1103,6 +1103,16 @@ class WP_HTML_Tag_Processor {
 				return true;
 			}
 
+			/*
+			 * Quick length filter for special elements before goto.
+			 * Special element names have lengths 3, 5, 6, 7, or 8.
+			 * Common tags with other lengths (a, p, br, li, span, code, etc.)
+			 * can return immediately without the goto dispatch.
+			 */
+			if ( $tag_length < 3 || $tag_length > 8 || 4 === $tag_length ) {
+				return true;
+			}
+
 			goto after_tag_match;
 		}
 
