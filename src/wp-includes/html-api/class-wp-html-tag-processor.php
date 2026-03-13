@@ -1042,7 +1042,7 @@ class WP_HTML_Tag_Processor {
 			$next_byte = $html[ $at + 1 ] ?? '';
 			if (
 				'!' !== $next_byte && '/' !== $next_byte && '?' !== $next_byte &&
-				( $next_byte < 'A' || ( $next_byte > 'Z' && $next_byte < 'a' ) || $next_byte > 'z' )
+				! ctype_alpha( $next_byte )
 			) {
 				/*
 				 * The '<' doesn't start a valid token. Fall through to
@@ -1067,7 +1067,7 @@ class WP_HTML_Tag_Processor {
 			$first_char = $html[ $at + 2 ] ?? '';
 		}
 
-		if ( ( $first_char >= 'a' && $first_char <= 'z' ) || ( $first_char >= 'A' && $first_char <= 'Z' ) ) {
+		if ( ctype_alpha( $first_char ) ) {
 			$tag_at     = $at + 1 + ( $is_closer ? 1 : 0 );
 			$tag_length = strcspn( $html, " \t\f\r\n/>", $tag_at );
 			$after_name = $tag_at + $tag_length;
@@ -1872,7 +1872,7 @@ class WP_HTML_Tag_Processor {
 				$next_byte = $html[ $at + 1 ] ?? '';
 				if (
 					'!' !== $next_byte && '/' !== $next_byte && '?' !== $next_byte &&
-					( $next_byte < 'A' || ( $next_byte > 'Z' && $next_byte < 'a' ) || $next_byte > 'z' )
+					! ctype_alpha( $next_byte )
 				) {
 					++$at;
 					continue;
@@ -1910,7 +1910,7 @@ class WP_HTML_Tag_Processor {
 			 * * https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
 			 */
 			$first_char = $html[ $at + 1 ] ?? '';
-			if ( ( $first_char >= 'a' && $first_char <= 'z' ) || ( $first_char >= 'A' && $first_char <= 'Z' ) ) {
+			if ( ctype_alpha( $first_char ) ) {
 				++$at;
 				$this->parser_state         = self::STATE_MATCHED_TAG;
 				$this->tag_name_starts_at   = $at;
