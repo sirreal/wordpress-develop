@@ -2302,6 +2302,11 @@ class WP_HTML_Tag_Processor {
 	private function skip_attributes_and_find_closer( string $html, int $doc_length ) {
 		$at = $this->bytes_already_parsed;
 
+		// Fast path: '>' immediately after tag name (closing tags, void tags).
+		if ( $at < $doc_length && '>' === $html[ $at ] ) {
+			return $at;
+		}
+
 		while ( true ) {
 			// Skip whitespace and slashes.
 			$at += strspn( $html, " \t\f\r\n/", $at );
