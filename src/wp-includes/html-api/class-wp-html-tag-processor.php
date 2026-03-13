@@ -1033,8 +1033,6 @@ class WP_HTML_Tag_Processor {
 			$this->text_starts_at           = $was_at;
 			$this->token_length             = $doc_length - $was_at;
 			$this->text_length              = $doc_length - $was_at;
-			$this->tag_name_starts_at       = null;
-			$this->tag_name_length          = null;
 			$this->text_node_classification = self::TEXT_IS_GENERIC;
 			$this->bytes_already_parsed     = $doc_length;
 			return true;
@@ -1059,8 +1057,6 @@ class WP_HTML_Tag_Processor {
 			$this->text_starts_at           = $was_at;
 			$this->token_length             = $at - $was_at;
 			$this->text_length              = $at - $was_at;
-			$this->tag_name_starts_at       = null;
-			$this->tag_name_length          = null;
 			$this->text_node_classification = self::TEXT_IS_GENERIC;
 			$this->bytes_already_parsed     = $at;
 			return true;
@@ -3252,21 +3248,19 @@ class WP_HTML_Tag_Processor {
 	 * @return string|null Name of currently matched tag in input HTML, or `null` if none found.
 	 */
 	public function get_tag(): ?string {
-		if ( null === $this->tag_name_starts_at ) {
-			return null;
+		if ( self::STATE_MATCHED_TAG === $this->parser_state ) {
+			return strtoupper( substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
 		}
 
-		$tag_name = substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
-
-		if ( self::STATE_MATCHED_TAG === $this->parser_state ) {
-			return strtoupper( $tag_name );
+		if ( null === $this->tag_name_starts_at ) {
+			return null;
 		}
 
 		if (
 			self::STATE_COMMENT === $this->parser_state &&
 			self::COMMENT_AS_PI_NODE_LOOKALIKE === $this->get_comment_type()
 		) {
-			return $tag_name;
+			return substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
 		}
 
 		return null;
