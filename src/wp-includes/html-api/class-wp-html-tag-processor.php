@@ -3592,6 +3592,15 @@ class WP_HTML_Tag_Processor {
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
 
 		/*
+		 * Fast path: if the first byte is a regular character (not null,
+		 * whitespace, or '&'), the text cannot be a null sequence or
+		 * whitespace-only text.
+		 */
+		if ( 0 === strspn( $this->html, "\x00 \t\f\r\n&", $this->text_starts_at, 1 ) ) {
+			return false;
+		}
+
+		/*
 		 * NULL bytes are treated categorically different than numeric character
 		 * references whose number is zero. `&#x00;` is not the same as `"\x00"`.
 		 */
