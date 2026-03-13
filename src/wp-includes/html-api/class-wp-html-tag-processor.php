@@ -666,6 +666,15 @@ class WP_HTML_Tag_Processor {
 	private $tag_name_length;
 
 	/**
+	 * Cached uppercase tag name, computed on first access per token.
+	 *
+	 * @since 6.9.0
+	 *
+	 * @var string|null
+	 */
+	private $tag_name_cache;
+
+	/**
 	 * Byte offset into input document where current modifiable text starts.
 	 *
 	 * @since 6.5.0
@@ -2339,6 +2348,7 @@ class WP_HTML_Tag_Processor {
 		$this->token_length             = null;
 		$this->tag_name_starts_at       = null;
 		$this->tag_name_length          = null;
+		$this->tag_name_cache           = null;
 		$this->text_starts_at           = 0;
 		$this->text_length              = 0;
 		$this->is_closing_tag           = null;
@@ -2917,17 +2927,15 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		$tag_name = substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
-
 		if ( self::STATE_MATCHED_TAG === $this->parser_state ) {
-			return strtoupper( $tag_name );
+			return $this->tag_name_cache ??= strtoupper( substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
 		}
 
 		if (
 			self::STATE_COMMENT === $this->parser_state &&
 			self::COMMENT_AS_PI_NODE_LOOKALIKE === $this->get_comment_type()
 		) {
-			return $tag_name;
+			return substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
 		}
 
 		return null;
