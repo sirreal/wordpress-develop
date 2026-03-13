@@ -2130,10 +2130,11 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether an attribute was found before the end of the document.
 	 */
 	private function parse_next_attribute(): bool {
-		$doc_length = strlen( $this->html );
+		$html       = $this->html;
+		$doc_length = strlen( $html );
 
 		// Skip whitespace and slashes.
-		$this->bytes_already_parsed += strspn( $this->html, " \t\f\r\n/", $this->bytes_already_parsed );
+		$this->bytes_already_parsed += strspn( $html, " \t\f\r\n/", $this->bytes_already_parsed );
 		if ( $this->bytes_already_parsed >= $doc_length ) {
 			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
@@ -2146,9 +2147,9 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/parsing.html#before-attribute-name-state
 		 */
-		$name_length = '=' === $this->html[ $this->bytes_already_parsed ]
-			? 1 + strcspn( $this->html, "=/> \t\f\r\n", $this->bytes_already_parsed + 1 )
-			: strcspn( $this->html, "=/> \t\f\r\n", $this->bytes_already_parsed );
+		$name_length = '=' === $html[ $this->bytes_already_parsed ]
+			? 1 + strcspn( $html, "=/> \t\f\r\n", $this->bytes_already_parsed + 1 )
+			: strcspn( $html, "=/> \t\f\r\n", $this->bytes_already_parsed );
 
 		// No attribute, just tag closer.
 		if ( 0 === $name_length || $this->bytes_already_parsed + $name_length >= $doc_length ) {
@@ -2156,7 +2157,7 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$attribute_start             = $this->bytes_already_parsed;
-		$attribute_name              = substr( $this->html, $attribute_start, $name_length );
+		$attribute_name              = substr( $html, $attribute_start, $name_length );
 		$this->bytes_already_parsed += $name_length;
 		if ( $this->bytes_already_parsed >= $doc_length ) {
 			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
@@ -2171,7 +2172,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$has_value = '=' === $this->html[ $this->bytes_already_parsed ];
+		$has_value = '=' === $html[ $this->bytes_already_parsed ];
 		if ( $has_value ) {
 			++$this->bytes_already_parsed;
 			$this->skip_whitespace();
@@ -2181,12 +2182,12 @@ class WP_HTML_Tag_Processor {
 				return false;
 			}
 
-			switch ( $this->html[ $this->bytes_already_parsed ] ) {
+			switch ( $html[ $this->bytes_already_parsed ] ) {
 				case "'":
 				case '"':
-					$quote                      = $this->html[ $this->bytes_already_parsed ];
+					$quote                      = $html[ $this->bytes_already_parsed ];
 					$value_start                = $this->bytes_already_parsed + 1;
-					$end_quote_at               = strpos( $this->html, $quote, $value_start );
+					$end_quote_at               = strpos( $html, $quote, $value_start );
 					$end_quote_at               = false === $end_quote_at ? $doc_length : $end_quote_at;
 					$value_length               = $end_quote_at - $value_start;
 					$attribute_end              = $end_quote_at + 1;
@@ -2195,7 +2196,7 @@ class WP_HTML_Tag_Processor {
 
 				default:
 					$value_start                = $this->bytes_already_parsed;
-					$value_length               = strcspn( $this->html, "> \t\f\r\n", $value_start );
+					$value_length               = strcspn( $html, "> \t\f\r\n", $value_start );
 					$attribute_end              = $value_start + $value_length;
 					$this->bytes_already_parsed = $attribute_end;
 			}
