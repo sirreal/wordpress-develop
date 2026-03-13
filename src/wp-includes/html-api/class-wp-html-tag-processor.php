@@ -1710,8 +1710,6 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether a tag was found before the end of the document.
 	 */
 	private function parse_next_tag(): bool {
-		$this->after_tag();
-
 		$html       = $this->html;
 		$doc_length = strlen( $html );
 		$was_at     = $this->bytes_already_parsed;
