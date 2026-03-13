@@ -1090,8 +1090,7 @@ class WP_HTML_Tag_Processor {
 			$this->is_closing_tag      = $is_closer;
 			$this->tag_name_starts_at  = $tag_at;
 			$this->tag_name_length     = $tag_length;
-			$this->text_starts_at      = 0;
-			$this->text_length         = 0;
+			$this->text_starts_at      = null;
 			$this->attribute_scan_from = $after_name;
 			$this->attributes_parsed   = false;
 
