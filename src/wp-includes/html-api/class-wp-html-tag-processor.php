@@ -1007,10 +1007,7 @@ class WP_HTML_Tag_Processor {
 		}
 
 		// Don't proceed if there's nothing more to scan.
-		if (
-			self::STATE_COMPLETE === $this->parser_state ||
-			self::STATE_INCOMPLETE_INPUT === $this->parser_state
-		) {
+		if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
 			return false;
 		}
 
@@ -1089,15 +1086,14 @@ class WP_HTML_Tag_Processor {
 			$tag_length = strcspn( $html, " \t\f\r\n/>", $tag_at );
 			$after_name = $tag_at + $tag_length;
 
-			$this->token_starts_at          = $at;
-			$this->is_closing_tag           = $is_closer;
-			$this->tag_name_starts_at       = $tag_at;
-			$this->tag_name_length          = $tag_length;
-			$this->text_starts_at           = 0;
-			$this->text_length              = 0;
-			$this->text_node_classification = self::TEXT_IS_GENERIC;
-			$this->attribute_scan_from      = $after_name;
-			$this->attributes_parsed        = false;
+			$this->token_starts_at     = $at;
+			$this->is_closing_tag      = $is_closer;
+			$this->tag_name_starts_at  = $tag_at;
+			$this->tag_name_length     = $tag_length;
+			$this->text_starts_at      = 0;
+			$this->text_length         = 0;
+			$this->attribute_scan_from = $after_name;
+			$this->attributes_parsed   = false;
 
 			// Fast path: '>' immediately after tag name.
 			if ( $after_name < $doc_length && '>' === $html[ $after_name ] ) {
