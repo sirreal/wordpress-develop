@@ -1018,28 +1018,28 @@ class WP_HTML_Tag_Processor {
 		/*
 		 * Fast path: handle the two most common token types inline.
 		 *
-		 *  1. Text nodes: text between tags (strpos finds next '<').
-		 *  2. Regular tags: '<' followed by alpha or '/'+alpha.
+		 *  1. At '<': try to match a regular tag directly (skip strpos).
+		 *  2. Text nodes: text between tags (strpos finds next '<').
 		 *
 		 * Complex tokens (comments, DOCTYPE, CDATA, etc.) fall through
 		 * to the full parse_next_tag() method.
 		 */
-		$at = strpos( $html, '<', $at );
+		if ( '<' !== $html[ $at ] ) {
+			$at = strpos( $html, '<', $at );
 
-		// No '<' found: the rest of the document is a text node.
-		if ( false === $at ) {
-			$this->parser_state             = self::STATE_TEXT_NODE;
-			$this->token_starts_at          = $was_at;
-			$this->text_starts_at           = $was_at;
-			$this->token_length             = $doc_length - $was_at;
-			$this->text_length              = $doc_length - $was_at;
-			$this->text_node_classification = self::TEXT_IS_GENERIC;
-			$this->bytes_already_parsed     = $doc_length;
-			return true;
-		}
+			// No '<' found: the rest of the document is a text node.
+			if ( false === $at ) {
+				$this->parser_state             = self::STATE_TEXT_NODE;
+				$this->token_starts_at          = $was_at;
+				$this->text_starts_at           = $was_at;
+				$this->token_length             = $doc_length - $was_at;
+				$this->text_length              = $doc_length - $was_at;
+				$this->text_node_classification = self::TEXT_IS_GENERIC;
+				$this->bytes_already_parsed     = $doc_length;
+				return true;
+			}
 
-		// Text before the '<': return it as a text node.
-		if ( $at > $was_at ) {
+			// Validate the '<' starts a valid token before returning text.
 			$next_byte = $html[ $at + 1 ] ?? '';
 			if (
 				'!' !== $next_byte && '/' !== $next_byte && '?' !== $next_byte &&
