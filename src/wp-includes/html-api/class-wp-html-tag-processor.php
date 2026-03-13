@@ -2277,42 +2277,48 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function after_tag(): void {
 		/*
-		 * There could be lexical updates enqueued for an attribute that
-		 * also exists on the next tag. In order to avoid conflating the
-		 * attributes across the two tags, lexical updates with names
-		 * need to be flushed to raw lexical updates.
+		 * Skip update processing when no modifications are queued.
+		 * This is the common case for read-only tokenization.
 		 */
-		$this->class_name_updates_to_attributes_updates();
-
-		/*
-		 * Purge updates if there are too many. The actual count isn't
-		 * scientific, but a few values from 100 to a few thousand were
-		 * tests to find a practically-useful limit.
-		 *
-		 * If the update queue grows too big, then the Tag Processor
-		 * will spend more time iterating through them and lose the
-		 * efficiency gains of deferring applying them.
-		 */
-		if ( 1000 < count( $this->lexical_updates ) ) {
-			$this->get_updated_html();
-		}
-
-		foreach ( $this->lexical_updates as $name => $update ) {
+		if ( count( $this->classname_updates ) > 0 || count( $this->lexical_updates ) > 0 ) {
 			/*
-			 * Any updates appearing after the cursor should be applied
-			 * before proceeding, otherwise they may be overlooked.
+			 * There could be lexical updates enqueued for an attribute that
+			 * also exists on the next tag. In order to avoid conflating the
+			 * attributes across the two tags, lexical updates with names
+			 * need to be flushed to raw lexical updates.
 			 */
-			if ( $update->start >= $this->bytes_already_parsed ) {
+			$this->class_name_updates_to_attributes_updates();
+
+			/*
+			 * Purge updates if there are too many. The actual count isn't
+			 * scientific, but a few values from 100 to a few thousand were
+			 * tests to find a practically-useful limit.
+			 *
+			 * If the update queue grows too big, then the Tag Processor
+			 * will spend more time iterating through them and lose the
+			 * efficiency gains of deferring applying them.
+			 */
+			if ( 1000 < count( $this->lexical_updates ) ) {
 				$this->get_updated_html();
-				break;
 			}
 
-			if ( is_int( $name ) ) {
-				continue;
-			}
+			foreach ( $this->lexical_updates as $name => $update ) {
+				/*
+				 * Any updates appearing after the cursor should be applied
+				 * before proceeding, otherwise they may be overlooked.
+				 */
+				if ( $update->start >= $this->bytes_already_parsed ) {
+					$this->get_updated_html();
+					break;
+				}
 
-			$this->lexical_updates[] = $update;
-			unset( $this->lexical_updates[ $name ] );
+				if ( is_int( $name ) ) {
+					continue;
+				}
+
+				$this->lexical_updates[] = $update;
+				unset( $this->lexical_updates[ $name ] );
+			}
 		}
 
 		$this->token_starts_at          = null;
