@@ -440,6 +440,16 @@ class WP_HTML_Tag_Processor {
 	protected $html;
 
 	/**
+	 * Cached byte length of the HTML string.
+	 *
+	 * Updated whenever $this->html is set to avoid repeated strlen() calls.
+	 *
+	 * @since 6.9.0
+	 * @var int
+	 */
+	private $doc_length = 0;
+
+	/**
 	 * The last query passed to next_tag().
 	 *
 	 * @since 6.2.0
@@ -856,7 +866,8 @@ class WP_HTML_Tag_Processor {
 			);
 			$html = '';
 		}
-		$this->html = $html;
+		$this->html       = $html;
+		$this->doc_length = strlen( $html );
 	}
 
 	/**
@@ -984,7 +995,7 @@ class WP_HTML_Tag_Processor {
 		$this->parser_state = self::STATE_READY;
 
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->doc_length;
 
 		if ( $this->bytes_already_parsed >= $doc_length ) {
 			$this->parser_state = self::STATE_COMPLETE;
@@ -1416,7 +1427,7 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function skip_rcdata( string $tag_name ): bool {
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->doc_length;
 		$tag_length = strlen( $tag_name );
 
 		$at = $this->bytes_already_parsed;
@@ -1453,7 +1464,7 @@ class WP_HTML_Tag_Processor {
 			$at                        += $tag_length;
 			$this->bytes_already_parsed = $at;
 
-			if ( $at >= strlen( $html ) ) {
+			if ( $at >= $doc_length ) {
 				return false;
 			}
 
@@ -1506,7 +1517,7 @@ class WP_HTML_Tag_Processor {
 	private function skip_script_data(): bool {
 		$state      = 'unescaped';
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->doc_length;
 		$at         = $this->bytes_already_parsed;
 
 		while ( false !== $at && $at < $doc_length ) {
@@ -1715,7 +1726,7 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function parse_next_tag(): bool {
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->doc_length;
 		$was_at     = $this->bytes_already_parsed;
 		$at         = $was_at;
 
@@ -1912,7 +1923,7 @@ class WP_HTML_Tag_Processor {
 
 				if (
 					'html' !== $this->parsing_namespace &&
-					strlen( $html ) > $at + 8 &&
+					$doc_length > $at + 8 &&
 					'[' === $html[ $at + 2 ] &&
 					'C' === $html[ $at + 3 ] &&
 					'D' === $html[ $at + 4 ] &&
@@ -2135,7 +2146,7 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function parse_next_attribute( bool $store = true ): bool {
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->doc_length;
 		$at         = $this->bytes_already_parsed;
 
 		// Skip whitespace and slashes.
@@ -2687,7 +2698,8 @@ class WP_HTML_Tag_Processor {
 			$bytes_already_copied = $diff->start + $diff->length;
 		}
 
-		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
+		$this->html       = $output_buffer . substr( $this->html, $bytes_already_copied );
+		$this->doc_length = strlen( $this->html );
 
 		/*
 		 * Adjust bookmark locations to account for how the text
