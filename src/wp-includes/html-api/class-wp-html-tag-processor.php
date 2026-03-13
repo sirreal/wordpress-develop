@@ -1032,7 +1032,6 @@ class WP_HTML_Tag_Processor {
 				$this->parser_state             = self::STATE_TEXT_NODE;
 				$this->token_starts_at          = $was_at;
 				$this->text_starts_at           = $was_at;
-				$this->token_length             = $doc_length - $was_at;
 				$this->text_length              = $doc_length - $was_at;
 				$this->text_node_classification = self::TEXT_IS_GENERIC;
 				$this->bytes_already_parsed     = $doc_length;
@@ -1055,7 +1054,6 @@ class WP_HTML_Tag_Processor {
 			$this->parser_state             = self::STATE_TEXT_NODE;
 			$this->token_starts_at          = $was_at;
 			$this->text_starts_at           = $was_at;
-			$this->token_length             = $at - $was_at;
 			$this->text_length              = $at - $was_at;
 			$this->text_node_classification = self::TEXT_IS_GENERIC;
 			$this->bytes_already_parsed     = $at;
@@ -1094,7 +1092,6 @@ class WP_HTML_Tag_Processor {
 
 			$this->parser_state         = self::STATE_MATCHED_TAG;
 			$this->bytes_already_parsed = $tag_ends_at + 1;
-			$this->token_length         = $tag_ends_at + 1 - $at;
 
 			if ( $is_closer ) {
 				return true;
@@ -1148,7 +1145,6 @@ class WP_HTML_Tag_Processor {
 		}
 		$this->parser_state         = self::STATE_MATCHED_TAG;
 		$this->bytes_already_parsed = $tag_ends_at + 1;
-		$this->token_length         = $this->bytes_already_parsed - $this->token_starts_at;
 
 		if ( $this->is_closing_tag ) {
 			return true;
@@ -1218,7 +1214,7 @@ class WP_HTML_Tag_Processor {
 		 */
 		$tag_name_starts_at   = $this->tag_name_starts_at;
 		$tag_name_length      = $this->tag_name_length;
-		$tag_ends_at          = $this->token_starts_at + $this->token_length;
+		$tag_ends_at          = $this->bytes_already_parsed;
 		$this->ensure_attributes_parsed();
 		$attributes           = $this->attributes;
 		$duplicate_attributes = $this->duplicate_attributes;
@@ -1272,7 +1268,6 @@ class WP_HTML_Tag_Processor {
 		 * the inner content of the tag.
 		 */
 		$this->token_starts_at      = $was_at;
-		$this->token_length         = $this->bytes_already_parsed - $this->token_starts_at;
 		$this->text_starts_at       = $tag_ends_at;
 		$this->text_length          = $this->tag_name_starts_at - $this->text_starts_at;
 		$this->tag_name_starts_at   = $tag_name_starts_at;
@@ -1495,7 +1490,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->bookmarks[ $name ] = new WP_HTML_Span( $this->token_starts_at, $this->token_length );
+		$this->bookmarks[ $name ] = new WP_HTML_Span( $this->token_starts_at, $this->bytes_already_parsed - $this->token_starts_at );
 
 		return true;
 	}
@@ -1887,7 +1882,6 @@ class WP_HTML_Tag_Processor {
 				$this->parser_state         = self::STATE_TEXT_NODE;
 				$this->token_starts_at      = $was_at;
 				$this->text_starts_at       = $was_at;
-				$this->token_length         = $at - $was_at;
 				$this->text_length          = $at - $was_at;
 				$this->bytes_already_parsed = $at;
 				return true;
@@ -1967,7 +1961,6 @@ class WP_HTML_Tag_Processor {
 						 */
 						$this->parser_state = self::STATE_COMMENT;
 						$this->comment_type = self::COMMENT_AS_ABRUPTLY_CLOSED_COMMENT;
-						$this->token_length = $closer_at + $span_of_dashes + 1 - $this->token_starts_at;
 
 						// Only provide modifiable text if the token is long enough to contain it.
 						if ( $span_of_dashes >= 2 ) {
@@ -1998,7 +1991,6 @@ class WP_HTML_Tag_Processor {
 						if ( $closer_at + 2 < $doc_length && '>' === $html[ $closer_at + 2 ] ) {
 							$this->parser_state         = self::STATE_COMMENT;
 							$this->comment_type         = self::COMMENT_AS_HTML_COMMENT;
-							$this->token_length         = $closer_at + 3 - $this->token_starts_at;
 							$this->text_starts_at       = $this->token_starts_at + 4;
 							$this->text_length          = $closer_at - $this->text_starts_at;
 							$this->bytes_already_parsed = $closer_at + 3;
@@ -2012,7 +2004,6 @@ class WP_HTML_Tag_Processor {
 						) {
 							$this->parser_state         = self::STATE_COMMENT;
 							$this->comment_type         = self::COMMENT_AS_HTML_COMMENT;
-							$this->token_length         = $closer_at + 4 - $this->token_starts_at;
 							$this->text_starts_at       = $this->token_starts_at + 4;
 							$this->text_length          = $closer_at - $this->text_starts_at;
 							$this->bytes_already_parsed = $closer_at + 4;
@@ -2044,7 +2035,6 @@ class WP_HTML_Tag_Processor {
 					}
 
 					$this->parser_state         = self::STATE_DOCTYPE;
-					$this->token_length         = $closer_at + 1 - $this->token_starts_at;
 					$this->text_starts_at       = $this->token_starts_at + 9;
 					$this->text_length          = $closer_at - $this->text_starts_at;
 					$this->bytes_already_parsed = $closer_at + 1;
@@ -2072,7 +2062,6 @@ class WP_HTML_Tag_Processor {
 					$this->parser_state         = self::STATE_CDATA_NODE;
 					$this->text_starts_at       = $at + 9;
 					$this->text_length          = $closer_at - $this->text_starts_at;
-					$this->token_length         = $closer_at + 3 - $this->token_starts_at;
 					$this->bytes_already_parsed = $closer_at + 3;
 					return true;
 				}
@@ -2091,7 +2080,6 @@ class WP_HTML_Tag_Processor {
 
 				$this->parser_state         = self::STATE_COMMENT;
 				$this->comment_type         = self::COMMENT_AS_INVALID_HTML;
-				$this->token_length         = $closer_at + 1 - $this->token_starts_at;
 				$this->text_starts_at       = $this->token_starts_at + 2;
 				$this->text_length          = $closer_at - $this->text_starts_at;
 				$this->bytes_already_parsed = $closer_at + 1;
@@ -2112,7 +2100,7 @@ class WP_HTML_Tag_Processor {
 				 *       and require the proper closing `]]>` in those cases.
 				 */
 				if (
-					$this->token_length >= 10 &&
+					$this->bytes_already_parsed - $this->token_starts_at >= 10 &&
 					'[' === $html[ $this->token_starts_at + 2 ] &&
 					'C' === $html[ $this->token_starts_at + 3 ] &&
 					'D' === $html[ $this->token_starts_at + 4 ] &&
@@ -2149,7 +2137,6 @@ class WP_HTML_Tag_Processor {
 				}
 
 				$this->parser_state         = self::STATE_PRESUMPTUOUS_TAG;
-				$this->token_length         = $at + 2 - $this->token_starts_at;
 				$this->bytes_already_parsed = $at + 2;
 				return true;
 			}
@@ -2168,7 +2155,6 @@ class WP_HTML_Tag_Processor {
 
 				$this->parser_state         = self::STATE_COMMENT;
 				$this->comment_type         = self::COMMENT_AS_INVALID_HTML;
-				$this->token_length         = $closer_at + 1 - $this->token_starts_at;
 				$this->text_starts_at       = $this->token_starts_at + 2;
 				$this->text_length          = $closer_at - $this->text_starts_at;
 				$this->bytes_already_parsed = $closer_at + 1;
@@ -2200,8 +2186,8 @@ class WP_HTML_Tag_Processor {
 				 *
 				 * @see https://www.w3.org/TR/2006/REC-xml11-20060816/#NT-PITarget
 				 */
-				if ( $this->token_length >= 5 && '?' === $html[ $closer_at - 1 ] ) {
-					$comment_text     = substr( $html, $this->token_starts_at + 2, $this->token_length - 4 );
+				if ( $closer_at + 1 - $this->token_starts_at >= 5 && '?' === $html[ $closer_at - 1 ] ) {
+					$comment_text     = substr( $html, $this->token_starts_at + 2, $closer_at + 1 - $this->token_starts_at - 4 );
 					$pi_target_length = strspn( $comment_text, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:_' );
 
 					if ( 0 < $pi_target_length ) {
@@ -2243,7 +2229,6 @@ class WP_HTML_Tag_Processor {
 				}
 
 				$this->parser_state         = self::STATE_FUNKY_COMMENT;
-				$this->token_length         = $closer_at + 1 - $this->token_starts_at;
 				$this->text_starts_at       = $this->token_starts_at + 2;
 				$this->text_length          = $closer_at - $this->text_starts_at;
 				$this->bytes_already_parsed = $closer_at + 1;
@@ -2259,9 +2244,8 @@ class WP_HTML_Tag_Processor {
 		 */
 		$this->parser_state         = self::STATE_TEXT_NODE;
 		$this->token_starts_at      = $was_at;
-		$this->token_length         = $doc_length - $was_at;
 		$this->text_starts_at       = $was_at;
-		$this->text_length          = $this->token_length;
+		$this->text_length          = $doc_length - $was_at;
 		$this->bytes_already_parsed = $doc_length;
 		return true;
 	}
@@ -2680,7 +2664,6 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$this->token_starts_at          = null;
-		$this->token_length             = null;
 		$this->tag_name_starts_at       = null;
 		$this->tag_name_length          = null;
 		$this->text_starts_at           = 0;
@@ -2993,7 +2976,7 @@ class WP_HTML_Tag_Processor {
 
 		if (
 			$this->token_starts_at === $existing_bookmark->start &&
-			$this->token_length === $existing_bookmark->length
+			$this->bytes_already_parsed - $this->token_starts_at === $existing_bookmark->length
 		) {
 			return true;
 		}
@@ -3692,7 +3675,7 @@ class WP_HTML_Tag_Processor {
 		 *     <figure />
 		 *             ^ this appears one character before the end of the closing ">".
 		 */
-		return '/' === $this->html[ $this->token_starts_at + $this->token_length - 2 ];
+		return '/' === $this->html[ $this->bytes_already_parsed - 2 ];
 	}
 
 	/**
@@ -3933,7 +3916,6 @@ class WP_HTML_Tag_Processor {
 		 */
 		$leading_nulls = strspn( $this->html, "\x00", $this->text_starts_at, $this->text_length );
 		if ( $leading_nulls > 0 ) {
-			$this->token_length             = $leading_nulls;
 			$this->text_length              = $leading_nulls;
 			$this->bytes_already_parsed     = $this->token_starts_at + $leading_nulls;
 			$this->text_node_classification = self::TEXT_IS_NULL_SEQUENCE;
@@ -3966,7 +3948,6 @@ class WP_HTML_Tag_Processor {
 		if ( $at > $this->text_starts_at ) {
 			$new_length                     = $at - $this->text_starts_at;
 			$this->text_length              = $new_length;
-			$this->token_length             = $new_length;
 			$this->bytes_already_parsed     = $at;
 			$this->text_node_classification = self::TEXT_IS_WHITESPACE;
 			return true;
@@ -5164,7 +5145,7 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		return WP_HTML_Doctype_Info::from_doctype_token( substr( $this->html, $this->token_starts_at, $this->token_length ) );
+		return WP_HTML_Doctype_Info::from_doctype_token( substr( $this->html, $this->token_starts_at, $this->bytes_already_parsed - $this->token_starts_at ) );
 	}
 
 	/**
