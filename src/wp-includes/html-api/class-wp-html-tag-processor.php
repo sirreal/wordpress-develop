@@ -969,10 +969,7 @@ class WP_HTML_Tag_Processor {
 		 */
 		$this->parser_state = self::STATE_READY;
 
-		$html       = $this->html;
-		$doc_length = strlen( $html );
-
-		if ( $this->bytes_already_parsed >= $doc_length ) {
+		if ( $this->bytes_already_parsed >= strlen( $this->html ) ) {
 			$this->parser_state = self::STATE_COMPLETE;
 			return false;
 		}
@@ -1008,7 +1005,7 @@ class WP_HTML_Tag_Processor {
 		// Ensure that the tag closes before the end of the document.
 		if (
 			self::STATE_INCOMPLETE_INPUT === $this->parser_state ||
-			$this->bytes_already_parsed >= $doc_length
+			$this->bytes_already_parsed >= strlen( $this->html )
 		) {
 			// Does this appropriately clear state (parsed attributes)?
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
@@ -1017,7 +1014,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$tag_ends_at = strpos( $html, '>', $this->bytes_already_parsed );
+		$tag_ends_at = strpos( $this->html, '>', $this->bytes_already_parsed );
 		if ( false === $tag_ends_at ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
 			$this->bytes_already_parsed = $was_at;
@@ -1713,6 +1710,8 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether a tag was found before the end of the document.
 	 */
 	private function parse_next_tag(): bool {
+		$this->after_tag();
+
 		$html       = $this->html;
 		$doc_length = strlen( $html );
 		$was_at     = $this->bytes_already_parsed;
@@ -2133,15 +2132,12 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether an attribute was found before the end of the document.
 	 */
 	private function parse_next_attribute(): bool {
-		$html       = $this->html;
-		$doc_length = strlen( $html );
-		$at         = $this->bytes_already_parsed;
+		$doc_length = strlen( $this->html );
 
 		// Skip whitespace and slashes.
-		$at += strspn( $html, " \t\f\r\n/", $at );
-		if ( $at >= $doc_length ) {
-			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $at;
+		$this->bytes_already_parsed += strspn( $this->html, " \t\f\r\n/", $this->bytes_already_parsed );
+		if ( $this->bytes_already_parsed >= $doc_length ) {
+			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
 			return false;
 		}
@@ -2152,70 +2148,64 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/parsing.html#before-attribute-name-state
 		 */
-		$name_length = '=' === $html[ $at ]
-			? 1 + strcspn( $html, "=/> \t\f\r\n", $at + 1 )
-			: strcspn( $html, "=/> \t\f\r\n", $at );
+		$name_length = '=' === $this->html[ $this->bytes_already_parsed ]
+			? 1 + strcspn( $this->html, "=/> \t\f\r\n", $this->bytes_already_parsed + 1 )
+			: strcspn( $this->html, "=/> \t\f\r\n", $this->bytes_already_parsed );
 
 		// No attribute, just tag closer.
-		if ( 0 === $name_length || $at + $name_length >= $doc_length ) {
-			$this->bytes_already_parsed = $at;
+		if ( 0 === $name_length || $this->bytes_already_parsed + $name_length >= $doc_length ) {
 			return false;
 		}
 
-		$attribute_start = $at;
-		$attribute_name  = substr( $html, $attribute_start, $name_length );
-		$at             += $name_length;
-		if ( $at >= $doc_length ) {
-			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $at;
-
-			return false;
-		}
-
-		$at += strspn( $html, " \t\f\r\n", $at );
-		if ( $at >= $doc_length ) {
-			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $at;
+		$attribute_start             = $this->bytes_already_parsed;
+		$attribute_name              = substr( $this->html, $attribute_start, $name_length );
+		$this->bytes_already_parsed += $name_length;
+		if ( $this->bytes_already_parsed >= $doc_length ) {
+			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
 			return false;
 		}
 
-		$has_value = '=' === $html[ $at ];
+		$this->skip_whitespace();
+		if ( $this->bytes_already_parsed >= $doc_length ) {
+			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+
+			return false;
+		}
+
+		$has_value = '=' === $this->html[ $this->bytes_already_parsed ];
 		if ( $has_value ) {
-			++$at;
-			$at += strspn( $html, " \t\f\r\n", $at );
-			if ( $at >= $doc_length ) {
-				$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-				$this->bytes_already_parsed = $at;
+			++$this->bytes_already_parsed;
+			$this->skip_whitespace();
+			if ( $this->bytes_already_parsed >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
 				return false;
 			}
 
-			switch ( $html[ $at ] ) {
+			switch ( $this->html[ $this->bytes_already_parsed ] ) {
 				case "'":
 				case '"':
-					$quote         = $html[ $at ];
-					$value_start   = $at + 1;
-					$end_quote_at  = strpos( $html, $quote, $value_start );
-					$end_quote_at  = false === $end_quote_at ? $doc_length : $end_quote_at;
-					$value_length  = $end_quote_at - $value_start;
-					$attribute_end = $end_quote_at + 1;
-					$at            = $attribute_end;
+					$quote                      = $this->html[ $this->bytes_already_parsed ];
+					$value_start                = $this->bytes_already_parsed + 1;
+					$end_quote_at               = strpos( $this->html, $quote, $value_start );
+					$end_quote_at               = false === $end_quote_at ? $doc_length : $end_quote_at;
+					$value_length               = $end_quote_at - $value_start;
+					$attribute_end              = $end_quote_at + 1;
+					$this->bytes_already_parsed = $attribute_end;
 					break;
 
 				default:
-					$value_start   = $at;
-					$value_length  = strcspn( $html, "> \t\f\r\n", $value_start );
-					$attribute_end = $value_start + $value_length;
-					$at            = $attribute_end;
+					$value_start                = $this->bytes_already_parsed;
+					$value_length               = strcspn( $this->html, "> \t\f\r\n", $value_start );
+					$attribute_end              = $value_start + $value_length;
+					$this->bytes_already_parsed = $attribute_end;
 			}
 		} else {
-			$value_start   = $at;
+			$value_start   = $this->bytes_already_parsed;
 			$value_length  = 0;
 			$attribute_end = $attribute_start + $name_length;
 		}
-
-		$this->bytes_already_parsed = $at;
 
 		if ( $attribute_end >= $doc_length ) {
 			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
@@ -2294,41 +2284,37 @@ class WP_HTML_Tag_Processor {
 		 * attributes across the two tags, lexical updates with names
 		 * need to be flushed to raw lexical updates.
 		 */
-		if ( ! empty( $this->classname_updates ) ) {
-			$this->class_name_updates_to_attributes_updates();
+		$this->class_name_updates_to_attributes_updates();
+
+		/*
+		 * Purge updates if there are too many. The actual count isn't
+		 * scientific, but a few values from 100 to a few thousand were
+		 * tests to find a practically-useful limit.
+		 *
+		 * If the update queue grows too big, then the Tag Processor
+		 * will spend more time iterating through them and lose the
+		 * efficiency gains of deferring applying them.
+		 */
+		if ( 1000 < count( $this->lexical_updates ) ) {
+			$this->get_updated_html();
 		}
 
-		if ( ! empty( $this->lexical_updates ) ) {
+		foreach ( $this->lexical_updates as $name => $update ) {
 			/*
-			 * Purge updates if there are too many. The actual count isn't
-			 * scientific, but a few values from 100 to a few thousand were
-			 * tests to find a practically-useful limit.
-			 *
-			 * If the update queue grows too big, then the Tag Processor
-			 * will spend more time iterating through them and lose the
-			 * efficiency gains of deferring applying them.
+			 * Any updates appearing after the cursor should be applied
+			 * before proceeding, otherwise they may be overlooked.
 			 */
-			if ( 1000 < count( $this->lexical_updates ) ) {
+			if ( $update->start >= $this->bytes_already_parsed ) {
 				$this->get_updated_html();
+				break;
 			}
 
-			foreach ( $this->lexical_updates as $name => $update ) {
-				/*
-				 * Any updates appearing after the cursor should be applied
-				 * before proceeding, otherwise they may be overlooked.
-				 */
-				if ( $update->start >= $this->bytes_already_parsed ) {
-					$this->get_updated_html();
-					break;
-				}
-
-				if ( is_int( $name ) ) {
-					continue;
-				}
-
-				$this->lexical_updates[] = $update;
-				unset( $this->lexical_updates[ $name ] );
+			if ( is_int( $name ) ) {
+				continue;
 			}
+
+			$this->lexical_updates[] = $update;
+			unset( $this->lexical_updates[ $name ] );
 		}
 
 		$this->token_starts_at          = null;
