@@ -683,6 +683,20 @@ class WP_HTML_Tag_Processor {
 	private $is_closing_tag;
 
 	/**
+	 * Byte offset where attribute scanning should start for lazy parsing.
+	 *
+	 * @var int|null
+	 */
+	private $attribute_scan_from = null;
+
+	/**
+	 * Whether attributes have been parsed and stored for the current tag.
+	 *
+	 * @var bool
+	 */
+	private $attributes_parsed = true;
+
+	/**
 	 * Lazily-built index of attributes found within an HTML tag, keyed by the attribute name.
 	 *
 	 * Example:
@@ -1000,24 +1014,10 @@ class WP_HTML_Tag_Processor {
 			return true;
 		}
 
-		// Parse all of its attributes.
-		while ( $this->parse_next_attribute() ) {
-			continue;
-		}
-
-		// Ensure that the tag closes before the end of the document.
-		if (
-			self::STATE_INCOMPLETE_INPUT === $this->parser_state ||
-			$this->bytes_already_parsed >= $doc_length
-		) {
-			// Does this appropriately clear state (parsed attributes)?
-			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
-			$this->bytes_already_parsed = $was_at;
-
-			return false;
-		}
-
-		$tag_ends_at = strpos( $html, '>', $this->bytes_already_parsed );
+		// Fast-scan past all attributes and find the tag-closing '>'.
+		$this->attribute_scan_from = $this->bytes_already_parsed;
+		$this->attributes_parsed   = false;
+		$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
 		if ( false === $tag_ends_at ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
 			$this->bytes_already_parsed = $was_at;
@@ -1082,6 +1082,7 @@ class WP_HTML_Tag_Processor {
 		$tag_name_starts_at   = $this->tag_name_starts_at;
 		$tag_name_length      = $this->tag_name_length;
 		$tag_ends_at          = $this->token_starts_at + $this->token_length;
+		$this->ensure_attributes_parsed();
 		$attributes           = $this->attributes;
 		$duplicate_attributes = $this->duplicate_attributes;
 
@@ -2132,7 +2133,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @return bool Whether an attribute was found before the end of the document.
 	 */
-	private function parse_next_attribute(): bool {
+	private function parse_next_attribute( bool $store = true ): bool {
 		$html       = $this->html;
 		$doc_length = strlen( $html );
 		$at         = $this->bytes_already_parsed;
@@ -2224,7 +2225,7 @@ class WP_HTML_Tag_Processor {
 
 		$this->bytes_already_parsed = $at;
 
-		if ( $this->is_closing_tag ) {
+		if ( ! $store || $this->is_closing_tag ) {
 			return true;
 		}
 
@@ -2271,6 +2272,128 @@ class WP_HTML_Tag_Processor {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Skips past all attributes and finds the tag-closing '>'.
+	 *
+	 * This replaces the parse_next_attribute(false) loop + strpos('>')
+	 * with a single method call, eliminating per-attribute function call
+	 * overhead during read-only tokenization.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 *
+	 * @param string $html       The HTML being parsed.
+	 * @param int    $doc_length Length of the HTML string.
+	 * @return int|false Position of the closing '>' or false if incomplete.
+	 */
+	private function skip_attributes_and_find_closer( string $html, int $doc_length ) {
+		$at = $this->bytes_already_parsed;
+
+		while ( true ) {
+			// Skip whitespace and slashes.
+			$at += strspn( $html, " \t\f\r\n/", $at );
+			if ( $at >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+
+			/*
+			 * Treat the equal sign as a part of the attribute
+			 * name if it is the first encountered byte.
+			 */
+			$name_length = '=' === $html[ $at ]
+				? 1 + strcspn( $html, "=/> \t\f\r\n", $at + 1 )
+				: strcspn( $html, "=/> \t\f\r\n", $at );
+
+			// No attribute name means we've reached the tag closer.
+			if ( 0 === $name_length ) {
+				return $at;
+			}
+
+			if ( $at + $name_length >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+
+			$at += $name_length;
+			if ( $at >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+
+			// Skip whitespace after attribute name.
+			$at += strspn( $html, " \t\f\r\n", $at );
+			if ( $at >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+
+			// No value, boolean attribute.
+			if ( '=' !== $html[ $at ] ) {
+				continue;
+			}
+
+			++$at;
+			// Skip whitespace after '='.
+			$at += strspn( $html, " \t\f\r\n", $at );
+			if ( $at >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+
+			switch ( $html[ $at ] ) {
+				case "'":
+				case '"':
+					$end_quote_at = strpos( $html, $html[ $at ], $at + 1 );
+					if ( false === $end_quote_at ) {
+						$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+						return false;
+					}
+					$at = $end_quote_at + 1;
+					break;
+
+				default:
+					$at += strcspn( $html, "> \t\f\r\n", $at );
+					break;
+			}
+
+			if ( $at >= $doc_length ) {
+				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * Ensures attributes have been parsed and stored for the current tag.
+	 *
+	 * Attributes are lazily parsed on first access to avoid the overhead
+	 * of creating WP_HTML_Attribute_Token objects when they aren't needed.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 */
+	private function ensure_attributes_parsed(): void {
+		if ( $this->attributes_parsed ) {
+			return;
+		}
+
+		$this->attributes_parsed = true;
+
+		if ( null === $this->attribute_scan_from || $this->is_closing_tag ) {
+			return;
+		}
+
+		$saved_at                   = $this->bytes_already_parsed;
+		$this->bytes_already_parsed = $this->attribute_scan_from;
+
+		while ( $this->parse_next_attribute() ) {
+			continue;
+		}
+
+		$this->bytes_already_parsed = $saved_at;
 	}
 
 	/**
@@ -2346,6 +2469,8 @@ class WP_HTML_Tag_Processor {
 		$this->comment_type             = null;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
 		$this->duplicate_attributes     = null;
+		$this->attribute_scan_from      = null;
+		$this->attributes_parsed        = true;
 	}
 
 	/**
@@ -2363,6 +2488,7 @@ class WP_HTML_Tag_Processor {
 			return;
 		}
 
+		$this->ensure_attributes_parsed();
 		$existing_class = $this->get_enqueued_attribute_value( 'class' );
 		if ( null === $existing_class || true === $existing_class ) {
 			$existing_class = '';
@@ -2790,6 +2916,7 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
+		$this->ensure_attributes_parsed();
 		$comparable = strtolower( $name );
 
 		/*
@@ -2873,6 +3000,7 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
+		$this->ensure_attributes_parsed();
 		$comparable = strtolower( $prefix );
 
 		$matches = array();
@@ -4331,6 +4459,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
+		$this->ensure_attributes_parsed();
 		$name_length = strlen( $name );
 
 		/**
@@ -4481,6 +4610,8 @@ class WP_HTML_Tag_Processor {
 		) {
 			return false;
 		}
+
+		$this->ensure_attributes_parsed();
 
 		/*
 		 * > There must never be two or more attributes on
