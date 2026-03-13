@@ -1073,7 +1073,6 @@ class WP_HTML_Tag_Processor {
 			$after_name = $tag_at + $tag_length;
 
 			$this->token_starts_at     = $at;
-			$this->is_closing_tag      = $is_closer;
 			$this->tag_name_starts_at  = $tag_at;
 			$this->tag_name_length     = $tag_length;
 
@@ -1146,7 +1145,7 @@ class WP_HTML_Tag_Processor {
 		$this->parser_state         = self::STATE_MATCHED_TAG;
 		$this->bytes_already_parsed = $tag_ends_at + 1;
 
-		if ( $this->is_closing_tag ) {
+		if ( '/' === $html[ $this->token_starts_at + 1 ] ) {
 			return true;
 		}
 
@@ -1890,10 +1889,10 @@ class WP_HTML_Tag_Processor {
 			$this->token_starts_at = $at;
 
 			if ( $at + 1 < $doc_length && '/' === $html[ $at + 1 ] ) {
-				$this->is_closing_tag = true;
+				$is_closer = true;
 				++$at;
 			} else {
-				$this->is_closing_tag = false;
+				$is_closer = false;
 			}
 
 			/*
@@ -1934,7 +1933,7 @@ class WP_HTML_Tag_Processor {
 			 * `<!` transitions to markup declaration open state
 			 * https://html.spec.whatwg.org/multipage/parsing.html#markup-declaration-open-state
 			 */
-			if ( ! $this->is_closing_tag && '!' === $html[ $at + 1 ] ) {
+			if ( ! $is_closer && '!' === $html[ $at + 1 ] ) {
 				/*
 				 * `<!--` transitions to a comment state – apply further comment rules.
 				 * https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
@@ -2131,7 +2130,7 @@ class WP_HTML_Tag_Processor {
 			 */
 			if ( '>' === $html[ $at + 1 ] ) {
 				// `<>` is interpreted as plaintext.
-				if ( ! $this->is_closing_tag ) {
+				if ( ! $is_closer ) {
 					++$at;
 					continue;
 				}
@@ -2145,7 +2144,7 @@ class WP_HTML_Tag_Processor {
 			 * `<?` transitions to a bogus comment state – skip to the nearest >
 			 * See https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
 			 */
-			if ( ! $this->is_closing_tag && '?' === $html[ $at + 1 ] ) {
+			if ( ! $is_closer && '?' === $html[ $at + 1 ] ) {
 				$closer_at = strpos( $html, '>', $at + 2 );
 				if ( false === $closer_at ) {
 					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
@@ -2213,7 +2212,7 @@ class WP_HTML_Tag_Processor {
 			 *
 			 * See https://html.spec.whatwg.org/#parse-error-invalid-first-character-of-tag-name
 			 */
-			if ( $this->is_closing_tag ) {
+			if ( $is_closer ) {
 				// No chance of finding a closer.
 				if ( $at + 3 > $doc_length ) {
 					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
@@ -2350,7 +2349,7 @@ class WP_HTML_Tag_Processor {
 
 		$this->bytes_already_parsed = $at;
 
-		if ( ! $store || $this->is_closing_tag ) {
+		if ( ! $store || '/' === $this->html[ $this->token_starts_at + 1 ] ) {
 			return true;
 		}
 
@@ -2587,7 +2586,7 @@ class WP_HTML_Tag_Processor {
 		$this->attributes           = array();
 		$this->duplicate_attributes = null;
 
-		if ( null === $this->tag_name_starts_at || $this->is_closing_tag ) {
+		if ( null === $this->tag_name_starts_at || '/' === $this->html[ $this->token_starts_at + 1 ] ) {
 			return;
 		}
 
@@ -2668,7 +2667,6 @@ class WP_HTML_Tag_Processor {
 		$this->tag_name_length          = null;
 		$this->text_starts_at           = 0;
 		$this->text_length              = 0;
-		$this->is_closing_tag           = null;
 		$this->comment_type             = null;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
 		$this->attributes_parsed_at     = -1;
@@ -3197,7 +3195,7 @@ class WP_HTML_Tag_Processor {
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			'/' === $this->html[ $this->token_starts_at + 1 ]
 		) {
 			return null;
 		}
@@ -3698,7 +3696,7 @@ class WP_HTML_Tag_Processor {
 	public function is_tag_closer(): bool {
 		return (
 			self::STATE_MATCHED_TAG === $this->parser_state &&
-			$this->is_closing_tag &&
+			'/' === $this->html[ $this->token_starts_at + 1 ] &&
 
 			/*
 			 * The BR tag can only exist as an opening tag. If something like `</br>`
@@ -4652,7 +4650,7 @@ class WP_HTML_Tag_Processor {
 	public function set_attribute( $name, $value ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			'/' === $this->html[ $this->token_starts_at + 1 ]
 		) {
 			return false;
 		}
@@ -4804,7 +4802,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_attribute( $name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			'/' === $this->html[ $this->token_starts_at + 1 ]
 		) {
 			return false;
 		}
@@ -4884,7 +4882,7 @@ class WP_HTML_Tag_Processor {
 	public function add_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			'/' === $this->html[ $this->token_starts_at + 1 ]
 		) {
 			return false;
 		}
@@ -4926,7 +4924,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			'/' === $this->html[ $this->token_starts_at + 1 ]
 		) {
 			return false;
 		}
@@ -5105,7 +5103,7 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether the given tag and its attribute match the search criteria.
 	 */
 	private function matches(): bool {
-		if ( $this->is_closing_tag && ! $this->stop_on_tag_closers ) {
+		if ( '/' === $this->html[ $this->token_starts_at + 1 ] && ! $this->stop_on_tag_closers ) {
 			return false;
 		}
 
