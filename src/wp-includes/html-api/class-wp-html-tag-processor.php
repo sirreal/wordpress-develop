@@ -1745,16 +1745,16 @@ class WP_HTML_Tag_Processor {
 
 				$this->parser_state         = self::STATE_TEXT_NODE;
 				$this->token_starts_at      = $was_at;
-				$this->token_length         = $at - $was_at;
 				$this->text_starts_at       = $was_at;
-				$this->text_length          = $this->token_length;
+				$this->token_length         = $at - $was_at;
+				$this->text_length          = $at - $was_at;
 				$this->bytes_already_parsed = $at;
 				return true;
 			}
 
 			$this->token_starts_at = $at;
 
-			if ( $at + 1 < $doc_length && '/' === $this->html[ $at + 1 ] ) {
+			if ( $at + 1 < $doc_length && '/' === $html[ $at + 1 ] ) {
 				$this->is_closing_tag = true;
 				++$at;
 			} else {
@@ -2380,7 +2380,9 @@ class WP_HTML_Tag_Processor {
 			return;
 		}
 
-		$this->attributes_parsed = true;
+		$this->attributes_parsed    = true;
+		$this->attributes           = array();
+		$this->duplicate_attributes = null;
 
 		if ( null === $this->attribute_scan_from || $this->is_closing_tag ) {
 			return;
@@ -2417,7 +2419,7 @@ class WP_HTML_Tag_Processor {
 		 * Skip update processing when no modifications are queued.
 		 * This is the common case for read-only tokenization.
 		 */
-		if ( count( $this->classname_updates ) > 0 || count( $this->lexical_updates ) > 0 ) {
+		if ( $this->classname_updates || $this->lexical_updates ) {
 			/*
 			 * There could be lexical updates enqueued for an attribute that
 			 * also exists on the next tag. In order to avoid conflating the
@@ -2465,10 +2467,8 @@ class WP_HTML_Tag_Processor {
 		$this->text_starts_at           = 0;
 		$this->text_length              = 0;
 		$this->is_closing_tag           = null;
-		$this->attributes               = array();
 		$this->comment_type             = null;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->duplicate_attributes     = null;
 		$this->attribute_scan_from      = null;
 		$this->attributes_parsed        = true;
 	}
