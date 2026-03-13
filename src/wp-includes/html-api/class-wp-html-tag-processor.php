@@ -978,7 +978,41 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function base_class_next_token(): bool {
 		$was_at = $this->bytes_already_parsed;
-		$this->after_tag();
+
+		/*
+		 * Apply attribute updates and clean up the previous tag.
+		 * Inlined from after_tag() to avoid method call overhead
+		 * in the hot tokenization loop.
+		 */
+		if ( $this->classname_updates || $this->lexical_updates ) {
+			$this->class_name_updates_to_attributes_updates();
+
+			if ( 1000 < count( $this->lexical_updates ) ) {
+				$this->get_updated_html();
+			}
+
+			foreach ( $this->lexical_updates as $name => $update ) {
+				if ( $update->start >= $this->bytes_already_parsed ) {
+					$this->get_updated_html();
+					break;
+				}
+
+				if ( is_int( $name ) ) {
+					continue;
+				}
+
+				$this->lexical_updates[] = $update;
+				unset( $this->lexical_updates[ $name ] );
+			}
+		}
+
+		$this->tag_name_starts_at       = null;
+		$this->tag_name_length          = null;
+		$this->text_starts_at           = 0;
+		$this->text_length              = 0;
+		$this->text_node_classification = self::TEXT_IS_GENERIC;
+		$this->attribute_scan_from      = null;
+		$this->attributes_parsed        = true;
 
 		// Don't proceed if there's nothing more to scan.
 		if (
