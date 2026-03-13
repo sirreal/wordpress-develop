@@ -2478,41 +2478,100 @@ class WP_HTML_Tag_Processor {
 				return false;
 			}
 
-			// Skip whitespace after attribute name.
-			$at += strspn( $html, " \t\f\r\n", $at );
-			if ( $at >= $doc_length ) {
-				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
-				return false;
-			}
+			/*
+			 * Fast path for the most common pattern: name="value"
+			 * where '=' immediately follows the name and a quote
+			 * immediately follows '='. Avoids two strspn calls
+			 * that typically return 0.
+			 */
+			if ( '=' === $html[ $at ] ) {
+				++$at;
+				if ( $at >= $doc_length ) {
+					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+					return false;
+				}
 
-			// No value, boolean attribute.
-			if ( '=' !== $html[ $at ] ) {
-				continue;
-			}
-
-			++$at;
-			// Skip whitespace after '='.
-			$at += strspn( $html, " \t\f\r\n", $at );
-			if ( $at >= $doc_length ) {
-				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
-				return false;
-			}
-
-			switch ( $html[ $at ] ) {
-				case "'":
-				case '"':
-					$end_quote_at = strpos( $html, $html[ $at ], $at + 1 );
+				$quote_char = $html[ $at ];
+				if ( '"' === $quote_char || "'" === $quote_char ) {
+					$end_quote_at = strpos( $html, $quote_char, $at + 1 );
 					if ( false === $end_quote_at ) {
 						$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 						return false;
 					}
 					$at = $end_quote_at + 1;
-					break;
+					if ( $at >= $doc_length ) {
+						$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+						return false;
+					}
+					continue;
+				}
 
-				default:
-					$at += strcspn( $html, "> \t\f\r\n", $at );
-					break;
+				// Whitespace after '=': skip and read value.
+				if ( ' ' === $quote_char || "\t" === $quote_char || "\f" === $quote_char || "\r" === $quote_char || "\n" === $quote_char ) {
+					$at += strspn( $html, " \t\f\r\n", $at );
+					if ( $at >= $doc_length ) {
+						$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+						return false;
+					}
+
+					if ( '"' === $html[ $at ] || "'" === $html[ $at ] ) {
+						$end_quote_at = strpos( $html, $html[ $at ], $at + 1 );
+						if ( false === $end_quote_at ) {
+							$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+							return false;
+						}
+						$at = $end_quote_at + 1;
+						if ( $at >= $doc_length ) {
+							$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+							return false;
+						}
+						continue;
+					}
+				}
+
+				// Unquoted value.
+				$at += strcspn( $html, "> \t\f\r\n", $at );
+				continue;
 			}
+
+			// No '=' immediately: check for whitespace before '='.
+			if ( ' ' === $html[ $at ] || "\t" === $html[ $at ] || "\f" === $html[ $at ] || "\r" === $html[ $at ] || "\n" === $html[ $at ] ) {
+				$at += strspn( $html, " \t\f\r\n", $at );
+				if ( $at >= $doc_length ) {
+					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+					return false;
+				}
+
+				// After whitespace, check for '=' to distinguish value from next attribute.
+				if ( '=' === $html[ $at ] ) {
+					++$at;
+					$at += strspn( $html, " \t\f\r\n", $at );
+					if ( $at >= $doc_length ) {
+						$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+						return false;
+					}
+
+					if ( '"' === $html[ $at ] || "'" === $html[ $at ] ) {
+						$end_quote_at = strpos( $html, $html[ $at ], $at + 1 );
+						if ( false === $end_quote_at ) {
+							$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+							return false;
+						}
+						$at = $end_quote_at + 1;
+						if ( $at >= $doc_length ) {
+							$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+							return false;
+						}
+						continue;
+					}
+
+					// Unquoted value.
+					$at += strcspn( $html, "> \t\f\r\n", $at );
+					continue;
+				}
+			}
+
+			// Boolean attribute (no value).
 
 			if ( $at >= $doc_length ) {
 				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
