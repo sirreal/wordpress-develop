@@ -1031,12 +1031,103 @@ class WP_HTML_Tag_Processor {
 		$html       = $this->html;
 		$doc_length = $this->doc_length;
 
-		if ( $this->bytes_already_parsed >= $doc_length ) {
+		$at = $this->bytes_already_parsed;
+
+		if ( $at >= $doc_length ) {
 			$this->parser_state = self::STATE_COMPLETE;
 			return false;
 		}
 
-		// Find the next tag if it exists.
+		/*
+		 * Fast path: handle the two most common token types inline.
+		 *
+		 *  1. Text nodes: text between tags (strpos finds next '<').
+		 *  2. Regular tags: '<' followed by alpha or '/'+alpha.
+		 *
+		 * Complex tokens (comments, DOCTYPE, CDATA, etc.) fall through
+		 * to the full parse_next_tag() method.
+		 */
+		$at = strpos( $html, '<', $at );
+
+		// No '<' found: the rest of the document is a text node.
+		if ( false === $at ) {
+			$this->parser_state         = self::STATE_TEXT_NODE;
+			$this->token_starts_at      = $was_at;
+			$this->text_starts_at       = $was_at;
+			$this->token_length         = $doc_length - $was_at;
+			$this->text_length          = $doc_length - $was_at;
+			$this->bytes_already_parsed = $doc_length;
+			return true;
+		}
+
+		// Text before the '<': return it as a text node.
+		if ( $at > $was_at ) {
+			$next_byte = $html[ $at + 1 ] ?? '';
+			if (
+				'!' !== $next_byte && '/' !== $next_byte && '?' !== $next_byte &&
+				( $next_byte < 'A' || ( $next_byte > 'Z' && $next_byte < 'a' ) || $next_byte > 'z' )
+			) {
+				/*
+				 * The '<' doesn't start a valid token. Fall through to
+				 * the full parse_next_tag() which handles continuation.
+				 */
+				goto full_parse;
+			}
+
+			$this->parser_state         = self::STATE_TEXT_NODE;
+			$this->token_starts_at      = $was_at;
+			$this->text_starts_at       = $was_at;
+			$this->token_length         = $at - $was_at;
+			$this->text_length          = $at - $was_at;
+			$this->bytes_already_parsed = $at;
+			return true;
+		}
+
+		// At '<': try to match a regular tag.
+		$first_char = $html[ $at + 1 ] ?? '';
+		$is_closer  = '/' === $first_char;
+		if ( $is_closer ) {
+			$first_char = $html[ $at + 2 ] ?? '';
+		}
+
+		if ( ( $first_char >= 'a' && $first_char <= 'z' ) || ( $first_char >= 'A' && $first_char <= 'Z' ) ) {
+			$tag_at = $at + 1 + ( $is_closer ? 1 : 0 );
+
+			$this->token_starts_at    = $at;
+			$this->is_closing_tag     = $is_closer;
+			$this->parser_state       = self::STATE_MATCHED_TAG;
+			$this->tag_name_starts_at = $tag_at;
+			$this->tag_name_length    = strcspn( $html, " \t\f\r\n/>", $tag_at );
+
+			$after_name = $tag_at + $this->tag_name_length;
+
+			// Fast-scan past all attributes and find the tag-closing '>'.
+			$this->attribute_scan_from = $after_name;
+			$this->attributes_parsed   = false;
+
+			// Fast path: '>' immediately after tag name.
+			if ( $after_name < $doc_length && '>' === $html[ $after_name ] ) {
+				$tag_ends_at = $after_name;
+			} else {
+				$this->bytes_already_parsed = $after_name;
+				$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
+				if ( false === $tag_ends_at ) {
+					$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
+					$this->bytes_already_parsed = $was_at;
+					return false;
+				}
+			}
+
+			$this->parser_state         = self::STATE_MATCHED_TAG;
+			$this->bytes_already_parsed = $tag_ends_at + 1;
+			$this->token_length         = $this->bytes_already_parsed - $at;
+
+			goto after_tag_match;
+		}
+
+		// Complex token: fall through to full parse_next_tag().
+		full_parse:
+
 		if ( false === $this->parse_next_tag() ) {
 			if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
 				$this->bytes_already_parsed = $was_at;
@@ -1045,21 +1136,11 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		/*
-		 * For legacy reasons the rest of this function handles tags and their
-		 * attributes. If the processor has reached the end of the document
-		 * or if it matched any other token then it should return here to avoid
-		 * attempting to process tag-specific syntax.
-		 */
-		if (
-			self::STATE_INCOMPLETE_INPUT !== $this->parser_state &&
-			self::STATE_COMPLETE !== $this->parser_state &&
-			self::STATE_MATCHED_TAG !== $this->parser_state
-		) {
+		if ( self::STATE_MATCHED_TAG !== $this->parser_state ) {
 			return true;
 		}
 
-		// Fast-scan past all attributes and find the tag-closing '>'.
+		// Tag found by parse_next_tag — scan attributes.
 		$this->attribute_scan_from = $this->bytes_already_parsed;
 		$this->attributes_parsed   = false;
 		$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
@@ -1072,6 +1153,8 @@ class WP_HTML_Tag_Processor {
 		$this->parser_state         = self::STATE_MATCHED_TAG;
 		$this->bytes_already_parsed = $tag_ends_at + 1;
 		$this->token_length         = $this->bytes_already_parsed - $this->token_starts_at;
+
+		after_tag_match:
 
 		/*
 		 * Certain tags require additional processing. The first-letter pre-check
