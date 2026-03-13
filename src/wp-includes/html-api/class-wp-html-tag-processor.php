@@ -2165,7 +2165,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->skip_whitespace();
+		$this->bytes_already_parsed += strspn( $html, " \t\f\r\n", $this->bytes_already_parsed );
 		if ( $this->bytes_already_parsed >= $doc_length ) {
 			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
@@ -2175,7 +2175,7 @@ class WP_HTML_Tag_Processor {
 		$has_value = '=' === $html[ $this->bytes_already_parsed ];
 		if ( $has_value ) {
 			++$this->bytes_already_parsed;
-			$this->skip_whitespace();
+			$this->bytes_already_parsed += strspn( $html, " \t\f\r\n", $this->bytes_already_parsed );
 			if ( $this->bytes_already_parsed >= $doc_length ) {
 				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
 
