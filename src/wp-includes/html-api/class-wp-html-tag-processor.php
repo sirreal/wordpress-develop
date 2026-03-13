@@ -1144,6 +1144,10 @@ class WP_HTML_Tag_Processor {
 		$this->bytes_already_parsed = $tag_ends_at + 1;
 		$this->token_length         = $this->bytes_already_parsed - $this->token_starts_at;
 
+		if ( $this->is_closing_tag ) {
+			return true;
+		}
+
 		after_tag_match:
 
 		/*
@@ -1161,10 +1165,7 @@ class WP_HTML_Tag_Processor {
 		 *  - TITLE
 		 *  - XMP (deprecated)
 		 */
-		if (
-			$this->is_closing_tag ||
-			'html' !== $this->parsing_namespace
-		) {
+		if ( 'html' !== $this->parsing_namespace ) {
 			return true;
 		}
 
