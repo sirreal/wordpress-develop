@@ -1749,7 +1749,11 @@ class WP_HTML_Tag_Processor {
 				 *
 				 * @see https://html.spec.whatwg.org/#tag-open-state
 				 */
-				if ( 1 !== strspn( $html, '!/?abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', $at + 1, 1 ) ) {
+				$next_byte = $html[ $at + 1 ] ?? '';
+				if (
+					'!' !== $next_byte && '/' !== $next_byte && '?' !== $next_byte &&
+					( $next_byte < 'A' || ( $next_byte > 'Z' && $next_byte < 'a' ) || $next_byte > 'z' )
+				) {
 					++$at;
 					continue;
 				}
@@ -1786,12 +1790,12 @@ class WP_HTML_Tag_Processor {
 			 * * https://html.spec.whatwg.org/multipage/parsing.html#data-state
 			 * * https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
 			 */
-			$tag_name_prefix_length = strspn( $html, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', $at + 1 );
-			if ( $tag_name_prefix_length > 0 ) {
+			$first_char = $html[ $at + 1 ] ?? '';
+			if ( ( $first_char >= 'a' && $first_char <= 'z' ) || ( $first_char >= 'A' && $first_char <= 'Z' ) ) {
 				++$at;
 				$this->parser_state         = self::STATE_MATCHED_TAG;
 				$this->tag_name_starts_at   = $at;
-				$this->tag_name_length      = $tag_name_prefix_length + strcspn( $html, " \t\f\r\n/>", $at + $tag_name_prefix_length );
+				$this->tag_name_length      = strcspn( $html, " \t\f\r\n/>", $at );
 				$this->bytes_already_parsed = $at + $this->tag_name_length;
 				return true;
 			}
