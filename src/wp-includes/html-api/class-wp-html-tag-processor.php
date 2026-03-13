@@ -1036,7 +1036,6 @@ class WP_HTML_Tag_Processor {
 			$this->tag_name_starts_at       = null;
 			$this->tag_name_length          = null;
 			$this->text_node_classification = self::TEXT_IS_GENERIC;
-			$this->attributes_parsed        = true;
 			$this->bytes_already_parsed     = $doc_length;
 			return true;
 		}
@@ -1063,7 +1062,6 @@ class WP_HTML_Tag_Processor {
 			$this->tag_name_starts_at       = null;
 			$this->tag_name_length          = null;
 			$this->text_node_classification = self::TEXT_IS_GENERIC;
-			$this->attributes_parsed        = true;
 			$this->bytes_already_parsed     = $at;
 			return true;
 		}
