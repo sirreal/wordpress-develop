@@ -3609,8 +3609,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_caption(): bool {
 		$tag_name = $this->get_tag();
-		$op_sigil = $this->is_tag_closer() ? '-' : '+';
-		$op       = "{$op_sigil}{$tag_name}";
+		$op       = ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name;
 
 		switch ( $op ) {
 			/*
@@ -3802,8 +3801,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_table_body(): bool {
 		$tag_name = $this->get_tag();
-		$op_sigil = $this->is_tag_closer() ? '-' : '+';
-		$op       = "{$op_sigil}{$tag_name}";
+		$op       = ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name;
 
 		switch ( $op ) {
 			/*
@@ -3906,8 +3904,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_row(): bool {
 		$tag_name = $this->get_tag();
-		$op_sigil = $this->is_tag_closer() ? '-' : '+';
-		$op       = "{$op_sigil}{$tag_name}";
+		$op       = ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name;
 
 		switch ( $op ) {
 			/*
@@ -4017,8 +4014,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_cell(): bool {
 		$tag_name = $this->get_tag();
-		$op_sigil = $this->is_tag_closer() ? '-' : '+';
-		$op       = "{$op_sigil}{$tag_name}";
+		$op       = ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name;
 
 		switch ( $op ) {
 			/*
