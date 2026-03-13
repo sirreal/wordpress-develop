@@ -1006,14 +1006,6 @@ class WP_HTML_Tag_Processor {
 			}
 		}
 
-		$this->tag_name_starts_at       = null;
-		$this->tag_name_length          = null;
-		$this->text_starts_at           = 0;
-		$this->text_length              = 0;
-		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->attribute_scan_from      = null;
-		$this->attributes_parsed        = true;
-
 		// Don't proceed if there's nothing more to scan.
 		if (
 			self::STATE_COMPLETE === $this->parser_state ||
@@ -1021,12 +1013,6 @@ class WP_HTML_Tag_Processor {
 		) {
 			return false;
 		}
-
-		/*
-		 * The next step in the parsing loop determines the parsing state;
-		 * clear it so that state doesn't linger from the previous step.
-		 */
-		$this->parser_state = self::STATE_READY;
 
 		$html       = $this->html;
 		$doc_length = $this->doc_length;
@@ -1051,12 +1037,16 @@ class WP_HTML_Tag_Processor {
 
 		// No '<' found: the rest of the document is a text node.
 		if ( false === $at ) {
-			$this->parser_state         = self::STATE_TEXT_NODE;
-			$this->token_starts_at      = $was_at;
-			$this->text_starts_at       = $was_at;
-			$this->token_length         = $doc_length - $was_at;
-			$this->text_length          = $doc_length - $was_at;
-			$this->bytes_already_parsed = $doc_length;
+			$this->parser_state             = self::STATE_TEXT_NODE;
+			$this->token_starts_at          = $was_at;
+			$this->text_starts_at           = $was_at;
+			$this->token_length             = $doc_length - $was_at;
+			$this->text_length              = $doc_length - $was_at;
+			$this->tag_name_starts_at       = null;
+			$this->tag_name_length          = null;
+			$this->text_node_classification = self::TEXT_IS_GENERIC;
+			$this->attributes_parsed        = true;
+			$this->bytes_already_parsed     = $doc_length;
 			return true;
 		}
 
@@ -1074,12 +1064,16 @@ class WP_HTML_Tag_Processor {
 				goto full_parse;
 			}
 
-			$this->parser_state         = self::STATE_TEXT_NODE;
-			$this->token_starts_at      = $was_at;
-			$this->text_starts_at       = $was_at;
-			$this->token_length         = $at - $was_at;
-			$this->text_length          = $at - $was_at;
-			$this->bytes_already_parsed = $at;
+			$this->parser_state             = self::STATE_TEXT_NODE;
+			$this->token_starts_at          = $was_at;
+			$this->text_starts_at           = $was_at;
+			$this->token_length             = $at - $was_at;
+			$this->text_length              = $at - $was_at;
+			$this->tag_name_starts_at       = null;
+			$this->tag_name_length          = null;
+			$this->text_node_classification = self::TEXT_IS_GENERIC;
+			$this->attributes_parsed        = true;
+			$this->bytes_already_parsed     = $at;
 			return true;
 		}
 
@@ -1091,19 +1085,19 @@ class WP_HTML_Tag_Processor {
 		}
 
 		if ( ( $first_char >= 'a' && $first_char <= 'z' ) || ( $first_char >= 'A' && $first_char <= 'Z' ) ) {
-			$tag_at = $at + 1 + ( $is_closer ? 1 : 0 );
+			$tag_at     = $at + 1 + ( $is_closer ? 1 : 0 );
+			$tag_length = strcspn( $html, " \t\f\r\n/>", $tag_at );
+			$after_name = $tag_at + $tag_length;
 
-			$this->token_starts_at    = $at;
-			$this->is_closing_tag     = $is_closer;
-			$this->parser_state       = self::STATE_MATCHED_TAG;
-			$this->tag_name_starts_at = $tag_at;
-			$this->tag_name_length    = strcspn( $html, " \t\f\r\n/>", $tag_at );
-
-			$after_name = $tag_at + $this->tag_name_length;
-
-			// Fast-scan past all attributes and find the tag-closing '>'.
-			$this->attribute_scan_from = $after_name;
-			$this->attributes_parsed   = false;
+			$this->token_starts_at          = $at;
+			$this->is_closing_tag           = $is_closer;
+			$this->tag_name_starts_at       = $tag_at;
+			$this->tag_name_length          = $tag_length;
+			$this->text_starts_at           = 0;
+			$this->text_length              = 0;
+			$this->text_node_classification = self::TEXT_IS_GENERIC;
+			$this->attribute_scan_from      = $after_name;
+			$this->attributes_parsed        = false;
 
 			// Fast path: '>' immediately after tag name.
 			if ( $after_name < $doc_length && '>' === $html[ $after_name ] ) {
@@ -1127,6 +1121,18 @@ class WP_HTML_Tag_Processor {
 
 		// Complex token: fall through to full parse_next_tag().
 		full_parse:
+
+		/*
+		 * Reset state for the full parse path.
+		 */
+		$this->parser_state             = self::STATE_READY;
+		$this->tag_name_starts_at       = null;
+		$this->tag_name_length          = null;
+		$this->text_starts_at           = 0;
+		$this->text_length              = 0;
+		$this->text_node_classification = self::TEXT_IS_GENERIC;
+		$this->attribute_scan_from      = null;
+		$this->attributes_parsed        = true;
 
 		if ( false === $this->parse_next_tag() ) {
 			if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
