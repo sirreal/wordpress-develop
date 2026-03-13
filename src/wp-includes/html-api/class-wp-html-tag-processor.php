@@ -2447,25 +2447,39 @@ class WP_HTML_Tag_Processor {
 		}
 
 		while ( true ) {
-			// Skip whitespace and slashes.
-			$at += strspn( $html, " \t\f\r\n/", $at );
-			if ( $at >= $doc_length ) {
-				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
-				return false;
+			/*
+			 * Skip whitespace and slashes between attributes.
+			 * Fast path: single space (most common) or '>' (tag closer).
+			 */
+			$c = $html[ $at ] ?? '';
+			if ( '>' === $c ) {
+				return $at;
+			}
+			if ( ' ' === $c ) {
+				++$at;
+				if ( $at >= $doc_length ) {
+					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+					return false;
+				}
+			} elseif ( "\t" === $c || "\r" === $c || "\n" === $c || "\f" === $c || '/' === $c ) {
+				$at += strspn( $html, " \t\f\r\n/", $at );
+				if ( $at >= $doc_length ) {
+					$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+					return false;
+				}
 			}
 
 			/*
 			 * Treat the equal sign as a part of the attribute
 			 * name if it is the first encountered byte.
 			 */
-			$name_length = '=' === $html[ $at ]
-				? 1 + strcspn( $html, "=/> \t\f\r\n", $at + 1 )
-				: strcspn( $html, "=/> \t\f\r\n", $at );
-
-			// No attribute name means we've reached the tag closer.
-			if ( 0 === $name_length ) {
+			$c = $html[ $at ];
+			if ( '>' === $c ) {
 				return $at;
 			}
+			$name_length = '=' === $c
+				? 1 + strcspn( $html, "=/> \t\f\r\n", $at + 1 )
+				: strcspn( $html, "=/> \t\f\r\n", $at );
 
 			if ( $at + $name_length >= $doc_length ) {
 				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
