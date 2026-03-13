@@ -440,6 +440,14 @@ class WP_HTML_Tag_Processor {
 	protected $html;
 
 	/**
+	 * Cached byte length of the HTML document.
+	 *
+	 * @since 6.9.0
+	 * @var int
+	 */
+	protected $html_length;
+
+	/**
 	 * The last query passed to next_tag().
 	 *
 	 * @since 6.2.0
@@ -842,7 +850,8 @@ class WP_HTML_Tag_Processor {
 			);
 			$html = '';
 		}
-		$this->html = $html;
+		$this->html        = $html;
+		$this->html_length = strlen( $html );
 	}
 
 	/**
@@ -969,7 +978,7 @@ class WP_HTML_Tag_Processor {
 		 */
 		$this->parser_state = self::STATE_READY;
 
-		if ( $this->bytes_already_parsed >= strlen( $this->html ) ) {
+		if ( $this->bytes_already_parsed >= $this->html_length ) {
 			$this->parser_state = self::STATE_COMPLETE;
 			return false;
 		}
@@ -1005,7 +1014,7 @@ class WP_HTML_Tag_Processor {
 		// Ensure that the tag closes before the end of the document.
 		if (
 			self::STATE_INCOMPLETE_INPUT === $this->parser_state ||
-			$this->bytes_already_parsed >= strlen( $this->html )
+			$this->bytes_already_parsed >= $this->html_length
 		) {
 			// Does this appropriately clear state (parsed attributes)?
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
@@ -1412,7 +1421,7 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function skip_rcdata( string $tag_name ): bool {
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->html_length;
 		$tag_length = strlen( $tag_name );
 
 		$at = $this->bytes_already_parsed;
@@ -1449,7 +1458,7 @@ class WP_HTML_Tag_Processor {
 			$at                        += $tag_length;
 			$this->bytes_already_parsed = $at;
 
-			if ( $at >= strlen( $html ) ) {
+			if ( $at >= $doc_length ) {
 				return false;
 			}
 
@@ -1469,7 +1478,7 @@ class WP_HTML_Tag_Processor {
 			}
 
 			$at = $this->bytes_already_parsed;
-			if ( $at >= strlen( $this->html ) ) {
+			if ( $at >= $doc_length ) {
 				return false;
 			}
 
@@ -1478,7 +1487,7 @@ class WP_HTML_Tag_Processor {
 				return true;
 			}
 
-			if ( $at + 1 >= strlen( $this->html ) ) {
+			if ( $at + 1 >= $doc_length ) {
 				return false;
 			}
 
@@ -1502,7 +1511,7 @@ class WP_HTML_Tag_Processor {
 	private function skip_script_data(): bool {
 		$state      = 'unescaped';
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->html_length;
 		$at         = $this->bytes_already_parsed;
 
 		while ( false !== $at && $at < $doc_length ) {
@@ -1713,7 +1722,7 @@ class WP_HTML_Tag_Processor {
 		$this->after_tag();
 
 		$html       = $this->html;
-		$doc_length = strlen( $html );
+		$doc_length = $this->html_length;
 		$was_at     = $this->bytes_already_parsed;
 		$at         = $was_at;
 
@@ -1910,7 +1919,7 @@ class WP_HTML_Tag_Processor {
 
 				if (
 					'html' !== $this->parsing_namespace &&
-					strlen( $html ) > $at + 8 &&
+					$doc_length > $at + 8 &&
 					'[' === $html[ $at + 2 ] &&
 					'C' === $html[ $at + 3 ] &&
 					'D' === $html[ $at + 4 ] &&
@@ -2132,7 +2141,7 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether an attribute was found before the end of the document.
 	 */
 	private function parse_next_attribute(): bool {
-		$doc_length = strlen( $this->html );
+		$doc_length = $this->html_length;
 
 		// Skip whitespace and slashes.
 		$this->bytes_already_parsed += strspn( $this->html, " \t\f\r\n/", $this->bytes_already_parsed );
@@ -2543,7 +2552,8 @@ class WP_HTML_Tag_Processor {
 			$bytes_already_copied = $diff->start + $diff->length;
 		}
 
-		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
+		$this->html        = $output_buffer . substr( $this->html, $bytes_already_copied );
+		$this->html_length = strlen( $this->html );
 
 		/*
 		 * Adjust bookmark locations to account for how the text

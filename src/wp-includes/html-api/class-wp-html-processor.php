@@ -229,6 +229,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $element_queue = array();
 
 	/**
+	 * Index into the element queue for the next event to process.
+	 *
+	 * @since 6.9.0
+	 *
+	 * @var int
+	 */
+	private $element_queue_index = 0;
+
+	/**
 	 * Stores the current breadcrumbs.
 	 *
 	 * @since 6.7.0
@@ -797,61 +806,72 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool
 	 */
 	private function next_visitable_token(): bool {
-		$this->current_element = null;
-
 		if ( isset( $this->last_error ) ) {
 			return false;
 		}
 
-		/*
-		 * Prime the events if there are none.
-		 *
-		 * @todo In some cases, probably related to the adoption agency
-		 *       algorithm, this call to step() doesn't create any new
-		 *       events. Calling it again creates them. Figure out why
-		 *       this is and if it's inherent or if it's a bug. Looping
-		 *       until there are events or until there are no more
-		 *       tokens works in the meantime and isn't obviously wrong.
-		 */
-		if ( empty( $this->element_queue ) && $this->step() ) {
-			return $this->next_visitable_token();
-		}
+		while ( true ) {
+			$this->current_element = null;
 
-		// Process the next event on the queue.
-		$this->current_element = array_shift( $this->element_queue );
-		if ( ! isset( $this->current_element ) ) {
-			// There are no tokens left, so close all remaining open elements.
-			while ( $this->state->stack_of_open_elements->pop() ) {
+			/*
+			 * Prime the events if there are none.
+			 *
+			 * @todo In some cases, probably related to the adoption agency
+			 *       algorithm, this call to step() doesn't create any new
+			 *       events. Calling it again creates them. Figure out why
+			 *       this is and if it's inherent or if it's a bug. Looping
+			 *       until there are events or until there are no more
+			 *       tokens works in the meantime and isn't obviously wrong.
+			 */
+			if ( $this->element_queue_index >= count( $this->element_queue ) ) {
+				$this->element_queue       = array();
+				$this->element_queue_index = 0;
+				if ( ! $this->step() ) {
+					break;
+				}
 				continue;
 			}
 
-			return empty( $this->element_queue ) ? false : $this->next_visitable_token();
+			// Process the next event on the queue.
+			$this->current_element = $this->element_queue[ $this->element_queue_index++ ];
+
+			$is_pop = WP_HTML_Stack_Event::POP === $this->current_element->operation;
+
+			/*
+			 * The root node only exists in the fragment parser, and closing it
+			 * indicates that the parse is complete. Stop before popping it from
+			 * the breadcrumbs.
+			 */
+			if ( 'root-node' === $this->current_element->token->bookmark_name ) {
+				continue;
+			}
+
+			// Adjust the breadcrumbs for this event.
+			if ( $is_pop ) {
+				array_pop( $this->breadcrumbs );
+			} else {
+				$this->breadcrumbs[] = $this->current_element->token->node_name;
+			}
+
+			// Avoid sending close events for elements which don't expect a closing.
+			if ( $is_pop && ! $this->expects_closer( $this->current_element->token ) ) {
+				continue;
+			}
+
+			return true;
 		}
 
-		$is_pop = WP_HTML_Stack_Event::POP === $this->current_element->operation;
+		// There are no tokens left, so close all remaining open elements.
+		$this->current_element = null;
+		while ( $this->state->stack_of_open_elements->pop() ) {
+			continue;
+		}
 
-		/*
-		 * The root node only exists in the fragment parser, and closing it
-		 * indicates that the parse is complete. Stop before popping it from
-		 * the breadcrumbs.
-		 */
-		if ( 'root-node' === $this->current_element->token->bookmark_name ) {
+		if ( $this->element_queue_index < count( $this->element_queue ) ) {
 			return $this->next_visitable_token();
 		}
 
-		// Adjust the breadcrumbs for this event.
-		if ( $is_pop ) {
-			array_pop( $this->breadcrumbs );
-		} else {
-			$this->breadcrumbs[] = $this->current_element->token->node_name;
-		}
-
-		// Avoid sending close events for elements which don't expect a closing.
-		if ( $is_pop && ! $this->expects_closer( $this->current_element->token ) ) {
-			return $this->next_visitable_token();
-		}
-
-		return true;
+		return false;
 	}
 
 	/**
@@ -5638,6 +5658,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->state->current_token                     = null;
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
+			$this->element_queue_index                      = 0;
 
 			/*
 			 * The absence of a context node indicates a full parse.
