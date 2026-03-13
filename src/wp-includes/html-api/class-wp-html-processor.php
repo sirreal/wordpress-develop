@@ -1110,13 +1110,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$token_name            = $this->get_token_name();
 
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
-			try {
-				$bookmark_name = $this->bookmark_token();
-			} catch ( Exception $e ) {
-				if ( self::ERROR_EXCEEDED_MAX_BOOKMARKS === $this->last_error ) {
-					return false;
-				}
-				throw $e;
+			$bookmark_name = $this->bookmark_token();
+			if ( null === $bookmark_name ) {
+				return false;
 			}
 
 			$this->state->current_token = new WP_HTML_Token(
@@ -1133,7 +1129,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			(
 				'math' === $adjusted_current_node->integration_node_type &&
 				(
-					( $is_start_tag && ! in_array( $token_name, array( 'MGLYPH', 'MALIGNMARK' ), true ) ) ||
+					( $is_start_tag && 'MGLYPH' !== $token_name && 'MALIGNMARK' !== $token_name ) ||
 					'#text' === $token_name
 				)
 			) ||
@@ -5235,10 +5231,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @return string|false Name of created bookmark, or false if unable to create.
 	 */
-	private function bookmark_token() {
+	private function bookmark_token(): ?string {
 		if ( ! parent::set_bookmark( ++$this->bookmark_counter ) ) {
 			$this->last_error = self::ERROR_EXCEEDED_MAX_BOOKMARKS;
-			throw new Exception( 'could not allocate bookmark' );
+			return null;
 		}
 
 		return "{$this->bookmark_counter}";
@@ -6440,6 +6436,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function insert_virtual_node( $token_name, $bookmark_name = null ): WP_HTML_Token {
 		$here = $this->bookmarks[ $this->state->current_token->bookmark_name ];
 		$name = $bookmark_name ?? $this->bookmark_token();
+
+		if ( null === $name ) {
+			throw new Exception( 'could not allocate bookmark' );
+		}
 
 		$this->bookmarks[ $name ] = new WP_HTML_Span( $here->start, 0 );
 
