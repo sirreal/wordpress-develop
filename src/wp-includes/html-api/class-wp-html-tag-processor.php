@@ -969,7 +969,10 @@ class WP_HTML_Tag_Processor {
 		 */
 		$this->parser_state = self::STATE_READY;
 
-		if ( $this->bytes_already_parsed >= strlen( $this->html ) ) {
+		$html       = $this->html;
+		$doc_length = strlen( $html );
+
+		if ( $this->bytes_already_parsed >= $doc_length ) {
 			$this->parser_state = self::STATE_COMPLETE;
 			return false;
 		}
@@ -1005,7 +1008,7 @@ class WP_HTML_Tag_Processor {
 		// Ensure that the tag closes before the end of the document.
 		if (
 			self::STATE_INCOMPLETE_INPUT === $this->parser_state ||
-			$this->bytes_already_parsed >= strlen( $this->html )
+			$this->bytes_already_parsed >= $doc_length
 		) {
 			// Does this appropriately clear state (parsed attributes)?
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
@@ -1014,7 +1017,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$tag_ends_at = strpos( $this->html, '>', $this->bytes_already_parsed );
+		$tag_ends_at = strpos( $html, '>', $this->bytes_already_parsed );
 		if ( false === $tag_ends_at ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
 			$this->bytes_already_parsed = $was_at;
@@ -1043,7 +1046,7 @@ class WP_HTML_Tag_Processor {
 		if (
 			$this->is_closing_tag ||
 			'html' !== $this->parsing_namespace ||
-			1 !== strspn( $this->html, 'iIlLnNpPsStTxX', $this->tag_name_starts_at, 1 )
+			1 !== strspn( $html, 'iIlLnNpPsStTxX', $this->tag_name_starts_at, 1 )
 		) {
 			return true;
 		}
