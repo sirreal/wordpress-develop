@@ -978,6 +978,7 @@ class WP_HTML_Tag_Processor {
 	 */
 	private function base_class_next_token(): bool {
 		$was_at = $this->bytes_already_parsed;
+		$at     = $was_at;
 
 		/*
 		 * Apply attribute updates and clean up the previous tag.
@@ -1004,6 +1005,8 @@ class WP_HTML_Tag_Processor {
 				$this->lexical_updates[] = $update;
 				unset( $this->lexical_updates[ $name ] );
 			}
+
+			$at = $this->bytes_already_parsed;
 		}
 
 		// Don't proceed if there's nothing more to scan.
@@ -1013,8 +1016,6 @@ class WP_HTML_Tag_Processor {
 
 		$html       = $this->html;
 		$doc_length = $this->doc_length;
-
-		$at = $this->bytes_already_parsed;
 
 		if ( $at >= $doc_length ) {
 			$this->parser_state = self::STATE_COMPLETE;
