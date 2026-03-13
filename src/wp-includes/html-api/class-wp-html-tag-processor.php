@@ -1078,7 +1078,6 @@ class WP_HTML_Tag_Processor {
 			$this->is_closing_tag      = $is_closer;
 			$this->tag_name_starts_at  = $tag_at;
 			$this->tag_name_length     = $tag_length;
-			$this->text_starts_at      = null;
 			$this->attributes_parsed   = false;
 
 			// Fast path: '>' immediately after tag name.
@@ -4000,7 +3999,7 @@ class WP_HTML_Tag_Processor {
 	public function get_modifiable_text(): string {
 		$has_enqueued_update = isset( $this->lexical_updates['modifiable text'] );
 
-		if ( ! $has_enqueued_update && ( null === $this->text_starts_at || 0 === $this->text_length ) ) {
+		if ( ! $has_enqueued_update && ( null === $this->text_starts_at || 0 === $this->text_length || $this->text_starts_at < $this->token_starts_at ) ) {
 			return '';
 		}
 
