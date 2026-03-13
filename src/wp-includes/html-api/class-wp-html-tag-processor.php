@@ -2135,11 +2135,13 @@ class WP_HTML_Tag_Processor {
 	private function parse_next_attribute(): bool {
 		$html       = $this->html;
 		$doc_length = strlen( $html );
+		$at         = $this->bytes_already_parsed;
 
 		// Skip whitespace and slashes.
-		$this->bytes_already_parsed += strspn( $html, " \t\f\r\n/", $this->bytes_already_parsed );
-		if ( $this->bytes_already_parsed >= $doc_length ) {
-			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+		$at += strspn( $html, " \t\f\r\n/", $at );
+		if ( $at >= $doc_length ) {
+			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
+			$this->bytes_already_parsed = $at;
 
 			return false;
 		}
@@ -2150,64 +2152,70 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/parsing.html#before-attribute-name-state
 		 */
-		$name_length = '=' === $html[ $this->bytes_already_parsed ]
-			? 1 + strcspn( $html, "=/> \t\f\r\n", $this->bytes_already_parsed + 1 )
-			: strcspn( $html, "=/> \t\f\r\n", $this->bytes_already_parsed );
+		$name_length = '=' === $html[ $at ]
+			? 1 + strcspn( $html, "=/> \t\f\r\n", $at + 1 )
+			: strcspn( $html, "=/> \t\f\r\n", $at );
 
 		// No attribute, just tag closer.
-		if ( 0 === $name_length || $this->bytes_already_parsed + $name_length >= $doc_length ) {
+		if ( 0 === $name_length || $at + $name_length >= $doc_length ) {
+			$this->bytes_already_parsed = $at;
 			return false;
 		}
 
-		$attribute_start             = $this->bytes_already_parsed;
-		$attribute_name              = substr( $html, $attribute_start, $name_length );
-		$this->bytes_already_parsed += $name_length;
-		if ( $this->bytes_already_parsed >= $doc_length ) {
-			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
-
-			return false;
-		}
-
-		$this->bytes_already_parsed += strspn( $html, " \t\f\r\n", $this->bytes_already_parsed );
-		if ( $this->bytes_already_parsed >= $doc_length ) {
-			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+		$attribute_start = $at;
+		$attribute_name  = substr( $html, $attribute_start, $name_length );
+		$at             += $name_length;
+		if ( $at >= $doc_length ) {
+			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
+			$this->bytes_already_parsed = $at;
 
 			return false;
 		}
 
-		$has_value = '=' === $html[ $this->bytes_already_parsed ];
+		$at += strspn( $html, " \t\f\r\n", $at );
+		if ( $at >= $doc_length ) {
+			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
+			$this->bytes_already_parsed = $at;
+
+			return false;
+		}
+
+		$has_value = '=' === $html[ $at ];
 		if ( $has_value ) {
-			++$this->bytes_already_parsed;
-			$this->bytes_already_parsed += strspn( $html, " \t\f\r\n", $this->bytes_already_parsed );
-			if ( $this->bytes_already_parsed >= $doc_length ) {
-				$this->parser_state = self::STATE_INCOMPLETE_INPUT;
+			++$at;
+			$at += strspn( $html, " \t\f\r\n", $at );
+			if ( $at >= $doc_length ) {
+				$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
+				$this->bytes_already_parsed = $at;
 
 				return false;
 			}
 
-			switch ( $html[ $this->bytes_already_parsed ] ) {
+			switch ( $html[ $at ] ) {
 				case "'":
 				case '"':
-					$quote                      = $html[ $this->bytes_already_parsed ];
-					$value_start                = $this->bytes_already_parsed + 1;
-					$end_quote_at               = strpos( $html, $quote, $value_start );
-					$end_quote_at               = false === $end_quote_at ? $doc_length : $end_quote_at;
-					$value_length               = $end_quote_at - $value_start;
-					$attribute_end              = $end_quote_at + 1;
-					$this->bytes_already_parsed = $attribute_end;
+					$quote         = $html[ $at ];
+					$value_start   = $at + 1;
+					$end_quote_at  = strpos( $html, $quote, $value_start );
+					$end_quote_at  = false === $end_quote_at ? $doc_length : $end_quote_at;
+					$value_length  = $end_quote_at - $value_start;
+					$attribute_end = $end_quote_at + 1;
+					$at            = $attribute_end;
 					break;
 
 				default:
-					$value_start                = $this->bytes_already_parsed;
-					$value_length               = strcspn( $html, "> \t\f\r\n", $value_start );
-					$attribute_end              = $value_start + $value_length;
-					$this->bytes_already_parsed = $attribute_end;
+					$value_start   = $at;
+					$value_length  = strcspn( $html, "> \t\f\r\n", $value_start );
+					$attribute_end = $value_start + $value_length;
+					$at            = $attribute_end;
 			}
 		} else {
-			$value_start   = $this->bytes_already_parsed;
+			$value_start   = $at;
 			$value_length  = 0;
 			$attribute_end = $attribute_start + $name_length;
 		}
+
+		$this->bytes_already_parsed = $at;
 
 		if ( $attribute_end >= $doc_length ) {
 			$this->parser_state = self::STATE_INCOMPLETE_INPUT;
