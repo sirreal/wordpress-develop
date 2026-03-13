@@ -693,11 +693,14 @@ class WP_HTML_Tag_Processor {
 	private $is_closing_tag;
 
 	/**
-	 * Whether attributes have been parsed and stored for the current tag.
+	 * The token_starts_at value when attributes were last parsed.
 	 *
-	 * @var bool
+	 * Used to detect whether cached attributes are stale. When this
+	 * doesn't match token_starts_at, attributes need re-parsing.
+	 *
+	 * @var int
 	 */
-	private $attributes_parsed = true;
+	private $attributes_parsed_at = -1;
 
 	/**
 	 * Lazily-built index of attributes found within an HTML tag, keyed by the attribute name.
@@ -1078,7 +1081,6 @@ class WP_HTML_Tag_Processor {
 			$this->is_closing_tag      = $is_closer;
 			$this->tag_name_starts_at  = $tag_at;
 			$this->tag_name_length     = $tag_length;
-			$this->attributes_parsed   = false;
 
 			// Fast path: '>' immediately after tag name.
 			if ( $after_name < $doc_length && '>' === $html[ $after_name ] ) {
@@ -1116,7 +1118,6 @@ class WP_HTML_Tag_Processor {
 		$this->text_starts_at           = 0;
 		$this->text_length              = 0;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->attributes_parsed        = true;
 
 		if ( false === $this->parse_next_tag() ) {
 			if ( self::STATE_INCOMPLETE_INPUT === $this->parser_state ) {
@@ -1131,7 +1132,6 @@ class WP_HTML_Tag_Processor {
 		}
 
 		// Tag found by parse_next_tag — scan attributes.
-		$this->attributes_parsed   = false;
 		$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
 		if ( false === $tag_ends_at ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
@@ -2588,11 +2588,11 @@ class WP_HTML_Tag_Processor {
 	 * @ignore
 	 */
 	private function ensure_attributes_parsed(): void {
-		if ( $this->attributes_parsed ) {
+		if ( $this->attributes_parsed_at === $this->token_starts_at ) {
 			return;
 		}
 
-		$this->attributes_parsed    = true;
+		$this->attributes_parsed_at = $this->token_starts_at;
 		$this->attributes           = array();
 		$this->duplicate_attributes = null;
 
@@ -2681,7 +2681,7 @@ class WP_HTML_Tag_Processor {
 		$this->is_closing_tag           = null;
 		$this->comment_type             = null;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->attributes_parsed        = true;
+		$this->attributes_parsed_at     = -1;
 	}
 
 	/**
@@ -5035,6 +5035,7 @@ class WP_HTML_Tag_Processor {
 		 *                 └←─┘ back up by strlen("em") + 1 ==> 3
 		 */
 		$this->bytes_already_parsed = $before_current_tag;
+		$this->attributes_parsed_at = -1;
 		$this->base_class_next_token();
 
 		return $this->html;
