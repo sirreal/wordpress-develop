@@ -2162,7 +2162,6 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$attribute_start = $at;
-		$attribute_name  = substr( $html, $attribute_start, $name_length );
 		$at             += $name_length;
 		if ( $at >= $doc_length ) {
 			$this->parser_state         = self::STATE_INCOMPLETE_INPUT;
@@ -2237,6 +2236,7 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
 		 */
+		$attribute_name  = substr( $html, $attribute_start, $name_length );
 		$comparable_name = strtolower( $attribute_name );
 
 		// If an attribute is listed many times, only use the first declaration and ignore the rest.
