@@ -693,13 +693,6 @@ class WP_HTML_Tag_Processor {
 	private $is_closing_tag;
 
 	/**
-	 * Byte offset where attribute scanning should start for lazy parsing.
-	 *
-	 * @var int|null
-	 */
-	private $attribute_scan_from = null;
-
-	/**
 	 * Whether attributes have been parsed and stored for the current tag.
 	 *
 	 * @var bool
@@ -1092,7 +1085,6 @@ class WP_HTML_Tag_Processor {
 			$this->tag_name_starts_at  = $tag_at;
 			$this->tag_name_length     = $tag_length;
 			$this->text_starts_at      = null;
-			$this->attribute_scan_from = $after_name;
 			$this->attributes_parsed   = false;
 
 			// Fast path: '>' immediately after tag name.
@@ -1127,7 +1119,6 @@ class WP_HTML_Tag_Processor {
 		$this->text_starts_at           = 0;
 		$this->text_length              = 0;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->attribute_scan_from      = null;
 		$this->attributes_parsed        = true;
 
 		if ( false === $this->parse_next_tag() ) {
@@ -1143,7 +1134,6 @@ class WP_HTML_Tag_Processor {
 		}
 
 		// Tag found by parse_next_tag — scan attributes.
-		$this->attribute_scan_from = $this->bytes_already_parsed;
 		$this->attributes_parsed   = false;
 		$tag_ends_at = $this->skip_attributes_and_find_closer( $html, $doc_length );
 		if ( false === $tag_ends_at ) {
@@ -2608,12 +2598,12 @@ class WP_HTML_Tag_Processor {
 		$this->attributes           = array();
 		$this->duplicate_attributes = null;
 
-		if ( null === $this->attribute_scan_from || $this->is_closing_tag ) {
+		if ( null === $this->tag_name_starts_at || $this->is_closing_tag ) {
 			return;
 		}
 
 		$saved_at                   = $this->bytes_already_parsed;
-		$this->bytes_already_parsed = $this->attribute_scan_from;
+		$this->bytes_already_parsed = $this->tag_name_starts_at + $this->tag_name_length;
 
 		while ( $this->parse_next_attribute() ) {
 			continue;
@@ -2693,7 +2683,6 @@ class WP_HTML_Tag_Processor {
 		$this->is_closing_tag           = null;
 		$this->comment_type             = null;
 		$this->text_node_classification = self::TEXT_IS_GENERIC;
-		$this->attribute_scan_from      = null;
 		$this->attributes_parsed        = true;
 	}
 
