@@ -1,7 +1,5 @@
 <?php
 
-// require_once '/Users/jonsurrell/jon/plugin-sirreal-dev/_require_.php';
-
 require_once __DIR__ . '/src/wp-includes/compat.php';
 require_once __DIR__ . '/src/wp-includes/utf8.php';
 require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-doctype-info.php';
@@ -22,26 +20,6 @@ require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-open-elements.ph
 require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-token.php';
 require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-processor-state.php';
 require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-processor.php';
-
-
-// HTML Templating #60229
-if ( file_exists( __DIR__ . '/src/wp-includes/html-api/class-wp-html-template.php' ) ) {
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-html-template.php';
-}
-
-// CSS Processor
-if ( file_exists( __DIR__ . '/src/wp-includes/html-api/class-wp-css-complex-selector-list.php' ) ) {
-	require_once __DIR__ . '/src/wp-includes/html-api/interface-wp-css-html-tag-processor-matcher.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/interface-wp-css-html-processor-matcher.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-attribute-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-class-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-id-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-type-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-compound-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-complex-selector.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-compound-selector-list.php';
-	require_once __DIR__ . '/src/wp-includes/html-api/class-wp-css-complex-selector-list.php';
-}
 
 if ( ! function_exists( 'esc_attr' ) ) {
 	function esc_attr( $s ) {
