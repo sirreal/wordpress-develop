@@ -1096,7 +1096,11 @@ class WP_HTML_Tag_Processor {
 
 			$this->parser_state         = self::STATE_MATCHED_TAG;
 			$this->bytes_already_parsed = $tag_ends_at + 1;
-			$this->token_length         = $this->bytes_already_parsed - $at;
+			$this->token_length         = $tag_ends_at + 1 - $at;
+
+			if ( $is_closer ) {
+				return true;
+			}
 
 			goto after_tag_match;
 		}
