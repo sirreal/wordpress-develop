@@ -1185,6 +1185,15 @@ class WP_HTML_Tag_Processor {
 			return true;
 		}
 
+		/*
+		 * Quick length filter: special elements have name lengths 3, 5, 6, 7, or 8.
+		 * Tags with other lengths can be returned immediately.
+		 */
+		$special_tag_name_length = $this->tag_name_length;
+		if ( $special_tag_name_length < 3 || $special_tag_name_length > 8 || 4 === $special_tag_name_length ) {
+			return true;
+		}
+
 		$tag_name = $this->get_tag();
 
 		/*
