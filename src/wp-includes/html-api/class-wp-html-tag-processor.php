@@ -1179,18 +1179,21 @@ class WP_HTML_Tag_Processor {
 		 */
 		if (
 			$this->is_closing_tag ||
-			'html' !== $this->parsing_namespace ||
-			1 !== strspn( $html, 'iIlLnNpPsStTxX', $this->tag_name_starts_at, 1 )
+			'html' !== $this->parsing_namespace
 		) {
 			return true;
 		}
 
 		/*
 		 * Quick length filter: special elements have name lengths 3, 5, 6, 7, or 8.
-		 * Tags with other lengths can be returned immediately.
+		 * Checking length before the first-letter strspn avoids a function call for
+		 * the many common tags (a, p, li, div, span, etc.) with non-matching lengths.
 		 */
 		$special_tag_name_length = $this->tag_name_length;
-		if ( $special_tag_name_length < 3 || $special_tag_name_length > 8 || 4 === $special_tag_name_length ) {
+		if (
+			$special_tag_name_length < 3 || $special_tag_name_length > 8 || 4 === $special_tag_name_length ||
+			1 !== strspn( $html, 'iIlLnNpPsStTxX', $this->tag_name_starts_at, 1 )
+		) {
 			return true;
 		}
 
