@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1776ms mean (stddev 27ms) — 27.6% improvement
+### Current: 1511ms mean (stddev 4ms) — 38.4% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -86,6 +86,14 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 22. **Remove unused operation property assignment** — The string operation property is dead code since all checks use is_pop boolean. Marginal.
 
 23. **Pass boolean is_pop directly to stack event constructor** — Replace string comparison `self::POP === $operation` with a direct boolean parameter. ~30ms.
+
+24. **Skip stack operations for non-element tokens** — Non-element tokens (text, comments) are always immediately popped from the stack on the next step(). Skip the actual stack push/pop and create the event directly. Also skip adding them to breadcrumbs (they cancel out). ~110ms.
+
+25. **Fast-path text nodes in step() for IN_BODY mode** — Inline the text node handling from step_in_body() directly in step(). Avoids method call, variable assignments, and switch dispatch. ~40ms.
+
+26. **Inline event creation for fast-path text nodes** — Create the stack event directly in the fast path instead of going through insert_html_element(). ~20ms.
+
+27. **Skip bookmark creation for fast-path text tokens** — Text tokens don't need bookmarks for read-only tokenization. Skip bookmark_token(), set_bookmark(), and WP_HTML_Span allocation. Create lightweight WP_HTML_Token with no bookmark. ~65ms.
 
 ### Dead Ends
 
@@ -117,4 +125,8 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 - **Pre-scanned tag name table** — for known HTML elements, use a lookup instead of substr+strtoupper
 - **Avoid WP_HTML_Token allocation for reprocessed tokens** — skip constructor when reprocessing same token
 - **Eliminate WP_HTML_Stack_Event allocation** — use parallel arrays instead of objects for event queue
-- **Skip text node stack operations** — text nodes are always immediately popped; could avoid push/pop entirely
+- **Replace WP_HTML_Stack_Event with struct-of-arrays** — Use 3 parallel arrays (eq_tokens, eq_is_pop, eq_is_virtual) instead of WP_HTML_Stack_Event objects. No measurable improvement; PHP allocates small objects efficiently
+- **Skip bookmark creation for comment tokens** — same approach as text tokens
+- **Fast-path comments in step()** — similar to text fast-path; comments in IN_BODY are always simple insert+return
+- **Cache stack_of_open_elements reference** — avoid repeated property access chain
+- **Avoid WP_HTML_Token allocation for text tokens** — reuse a single text token object
