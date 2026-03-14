@@ -1112,7 +1112,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		$adjusted_current_node = $this->get_adjusted_current_node();
-		$is_closer             = $this->is_tag_closer();
+		$is_closer             = parent::is_tag_closer();
 		$is_matched_tag        = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state;
 		$is_start_tag          = $is_matched_tag && ! $is_closer;
 		$token_name            = $this->get_token_name();
