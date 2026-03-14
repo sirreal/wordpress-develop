@@ -267,6 +267,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $current_op = null;
 
 	/**
+	 * Cached is_tag_closer result from step(), used by push/pop handlers.
+	 *
+	 * @var bool
+	 */
+	private $step_is_closer = false;
+
+	/**
 	 * Stores stack events which arise during parsing of the
 	 * HTML document, which will then supply the "match" events.
 	 *
@@ -457,7 +464,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->state->stack_of_open_elements->set_push_handler(
 			function ( WP_HTML_Token $token ): void {
 				$current_token         = $this->state->current_token;
-				$is_virtual            = ! isset( $current_token ) || parent::is_tag_closer();
+				$is_virtual            = ! isset( $current_token ) || $this->step_is_closer;
 				$is_virtual_event      = $is_virtual || $token->node_name !== $current_token->node_name;
 				$this->element_queue[] = new WP_HTML_Stack_Event( $token, false, $is_virtual_event );
 
@@ -472,7 +479,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->state->stack_of_open_elements->set_pop_handler(
 			function ( WP_HTML_Token $token ): void {
 				$current_token         = $this->state->current_token;
-				$is_virtual            = ! isset( $current_token ) || ! parent::is_tag_closer();
+				$is_virtual            = ! isset( $current_token ) || ! $this->step_is_closer;
 				$is_virtual_event      = $is_virtual || $token->node_name !== $current_token->node_name;
 				$this->element_queue[] = new WP_HTML_Stack_Event( $token, true, $is_virtual_event );
 
@@ -1166,6 +1173,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( $is_matched_tag ) {
 			$token_name  = $this->tag_name_cache ??= strtoupper( substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
 			$is_closer   = $this->is_closing_tag && 'BR' !== $token_name;
+			$this->step_is_closer = $is_closer;
 		} else {
 			$token_name  = WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
 				? '#text'
