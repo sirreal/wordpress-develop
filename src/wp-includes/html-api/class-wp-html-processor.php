@@ -1561,7 +1561,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_initial(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -1633,7 +1633,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_before_html(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -1731,7 +1731,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_before_head(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -1829,7 +1829,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_head(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -2052,7 +2052,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_head_noscript(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -2156,7 +2156,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_after_head(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -2301,7 +2301,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_body(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -3327,7 +3327,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_table(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -3688,7 +3688,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_column_group(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -4113,7 +4113,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_select(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -4289,7 +4289,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_select_in_table(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
 			: $token_name;
@@ -4354,7 +4354,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_template(): bool {
-		$token_name = $this->get_token_name();
+		$token_name = $this->state->current_token->node_name;
 		$is_closer  = $this->is_tag_closer();
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $is_closer ? '-' : '+' ) . $token_name
@@ -4484,7 +4484,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_after_body(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
@@ -4574,7 +4574,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_frameset(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
@@ -4694,7 +4694,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_after_frameset(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
@@ -4780,7 +4780,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_after_after_body(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
@@ -4844,7 +4844,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_after_after_frameset(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
@@ -4913,7 +4913,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether an element was found.
 	 */
 	private function step_in_foreign_content(): bool {
-		$tag_name   = $this->get_token_name();
+		$tag_name   = $this->state->current_token->node_name;
 		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
 			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
 			: $tag_name;
