@@ -1146,14 +1146,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			: ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
 				? '#text'
 				: $this->get_token_name() );
-		$this->current_op      = $is_matched_tag
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
 
 		/*
 		 * Fast path for text nodes in the IN_BODY insertion mode.
-		 * Skips bookmark creation, WP_HTML_Span allocation, and
-		 * insertion mode dispatch for the most common token type.
+		 * Skips bookmark creation, WP_HTML_Span allocation, op string,
+		 * and insertion mode dispatch for the most common token type.
 		 */
 		if (
 			'#text' === $token_name &&
@@ -1173,6 +1170,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
 			return true;
 		}
+
+		$this->current_op = $is_matched_tag
+			? ( $is_closer ? '-' : '+' ) . $token_name
+			: $token_name;
 
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
 			$bookmark_name = $this->bookmark_token();
