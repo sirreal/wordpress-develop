@@ -1176,13 +1176,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			: $token_name;
 
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
-			$bookmark_name = $this->bookmark_token();
-			if ( null === $bookmark_name ) {
-				return false;
-			}
+			++$this->bookmark_counter;
+			$this->set_bookmark_fast( $this->bookmark_counter );
 
 			$this->state->current_token = new WP_HTML_Token(
-				$bookmark_name,
+				$this->bookmark_counter,
 				$token_name,
 				$this->has_self_closing_flag(),
 				$this->release_internal_bookmark_on_destruct
