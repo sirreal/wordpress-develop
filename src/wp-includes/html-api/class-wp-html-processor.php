@@ -5262,11 +5262,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function bookmark_token() {
 		++$this->bookmark_counter;
-		if ( ! parent::set_bookmark( $this->bookmark_counter ) ) {
-			$this->last_error = self::ERROR_EXCEEDED_MAX_BOOKMARKS;
-			return null;
-		}
-
+		$this->set_bookmark_fast( $this->bookmark_counter );
 		return $this->bookmark_counter;
 	}
 

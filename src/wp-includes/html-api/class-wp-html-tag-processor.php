@@ -1405,6 +1405,18 @@ class WP_HTML_Tag_Processor {
 
 
 	/**
+	 * Creates a bookmark without overflow or state checks.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 *
+	 * @param int|string $name Name of the bookmark.
+	 */
+	protected function set_bookmark_fast( $name ): void {
+		$this->bookmarks[ $name ] = new WP_HTML_Span( $this->token_starts_at, $this->token_length );
+	}
+
+	/**
 	 * Removes a bookmark that is no longer needed.
 	 *
 	 * Releasing a bookmark frees up the small
