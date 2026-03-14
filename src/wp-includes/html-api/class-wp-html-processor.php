@@ -1135,7 +1135,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$adjusted_current_node = $this->get_adjusted_current_node();
+		$adjusted_current_node = isset( $this->context_node ) && 1 === $this->state->stack_of_open_elements->count()
+			? $this->context_node
+			: $this->state->stack_of_open_elements->current_node();
 		$is_closer             = parent::is_tag_closer();
 		$is_matched_tag        = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state;
 		$is_start_tag          = $is_matched_tag && ! $is_closer;
