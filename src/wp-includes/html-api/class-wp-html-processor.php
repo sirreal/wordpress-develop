@@ -1204,7 +1204,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
 					$this->state->frameset_ok = false;
 				}
-				$this->insert_html_element( $this->state->current_token );
+				$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
 				return true;
 			}
 
