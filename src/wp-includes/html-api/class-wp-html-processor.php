@@ -1188,6 +1188,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				return $this->step_in_foreign_content();
 			}
 
+			/*
+			 * Fast path for text nodes in the IN_BODY insertion mode.
+			 * Avoids the method call and switch dispatch overhead for
+			 * the most common token type.
+			 */
+			if (
+				'#text' === $token_name &&
+				WP_HTML_Processor_State::INSERTION_MODE_IN_BODY === $this->state->insertion_mode
+			) {
+				if ( parent::TEXT_IS_NULL_SEQUENCE === $this->text_node_classification ) {
+					return $this->step();
+				}
+				$this->reconstruct_active_formatting_elements();
+				if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
+					$this->state->frameset_ok = false;
+				}
+				$this->insert_html_element( $this->state->current_token );
+				return true;
+			}
+
 			switch ( $this->state->insertion_mode ) {
 				case WP_HTML_Processor_State::INSERTION_MODE_INITIAL:
 					return $this->step_initial();
