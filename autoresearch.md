@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1462ms mean (stddev 34ms) — 40.4% improvement
+### Current: 1438ms mean (stddev 38ms) — 41.4% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -100,6 +100,10 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 29. **Inline is_tag_closer() in step()** — Make is_closing_tag protected and inline the check. For start tags, short-circuits on is_closing_tag=false. ~12ms.
 
 30. **Fast bookmark creation** — Skip state checks, array_key_exists, and count() overflow guard in set_bookmark. Since bookmarks use monotonically increasing integer names, overflow can't happen. ~14ms.
+
+31. **Defer current_op past text fast path** — Skip op string computation for fast-pathed text tokens. Marginal.
+
+32. **Move text fast path before tag-specific computations** — Place text node fast path right after token parsing, inside the subdivide_text_appropriately block. Skips adjusted_current_node, is_matched_tag, is_closer, is_start_tag, and token_name ternary chain for text tokens. ~24ms.
 
 ### Dead Ends
 
