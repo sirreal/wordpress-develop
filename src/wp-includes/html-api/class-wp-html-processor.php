@@ -886,7 +886,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 *       until there are events or until there are no more
 			 *       tokens works in the meantime and isn't obviously wrong.
 			 */
-			if ( $this->element_queue_index >= count( $this->element_queue ) ) {
+			if ( ! isset( $this->element_queue[ $this->element_queue_index ] ) ) {
 				$this->element_queue       = array();
 				$this->element_queue_index = 0;
 				if ( ! $this->step() ) {
@@ -939,7 +939,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			continue;
 		}
 
-		if ( $this->element_queue_index < count( $this->element_queue ) ) {
+		if ( isset( $this->element_queue[ $this->element_queue_index ] ) ) {
 			return $this->next_visitable_token();
 		}
 
