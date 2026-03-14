@@ -260,6 +260,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $release_internal_bookmark_on_destruct = null;
 
 	/**
+	 * Pre-computed operation string for the current token.
+	 *
+	 * @var string|null
+	 */
+	private $current_op = null;
+
+	/**
 	 * Stores stack events which arise during parsing of the
 	 * HTML document, which will then supply the "match" events.
 	 *
@@ -1106,8 +1113,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$adjusted_current_node = $this->get_adjusted_current_node();
 		$is_closer             = $this->is_tag_closer();
-		$is_start_tag          = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state && ! $is_closer;
+		$is_matched_tag        = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state;
+		$is_start_tag          = $is_matched_tag && ! $is_closer;
 		$token_name            = $this->get_token_name();
+		$this->current_op      = $is_matched_tag
+			? ( $is_closer ? '-' : '+' ) . $token_name
+			: $token_name;
 
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
 			$bookmark_name = $this->bookmark_token();
@@ -1562,9 +1573,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_initial(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -1635,9 +1644,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_before_html(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -1733,9 +1740,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_before_head(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -1831,9 +1836,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_in_head(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			case '#text':
@@ -2054,9 +2057,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_in_head_noscript(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -2158,9 +2159,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_after_head(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = parent::is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -2302,9 +2301,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_body(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			case '#text':
@@ -3328,9 +3325,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_table(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -3689,9 +3684,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_column_group(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4114,9 +4107,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_select(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4290,9 +4281,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_select_in_table(): bool {
 		$token_name = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( parent::is_tag_closer() ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4356,9 +4345,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private function step_in_template(): bool {
 		$token_name = $this->state->current_token->node_name;
 		$is_closer  = $this->is_tag_closer();
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $is_closer ? '-' : '+' ) . $token_name
-			: $token_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4485,9 +4472,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_after_body(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4575,9 +4560,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_frameset(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4695,9 +4678,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_after_frameset(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4781,9 +4762,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_after_after_body(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4845,9 +4824,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_after_after_frameset(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		switch ( $op ) {
 			/*
@@ -4914,9 +4891,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function step_in_foreign_content(): bool {
 		$tag_name   = $this->state->current_token->node_name;
-		$op         = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state
-			? ( $this->is_tag_closer() ? '-' : '+' ) . $tag_name
-			: $tag_name;
+		$op         = $this->current_op;
 
 		/*
 		 * > A start tag whose name is "font", if the token has any attributes named "color", "face", or "size"
