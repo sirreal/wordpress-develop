@@ -85,7 +85,6 @@ class WP_HTML_Stack_Event {
 	 */
 	public function __construct( WP_HTML_Token $token, string $operation, string $provenance ) {
 		$this->token      = $token;
-		$this->operation  = $operation;
 		$this->provenance = $provenance;
 		$this->is_pop     = self::POP === $operation;
 	}
