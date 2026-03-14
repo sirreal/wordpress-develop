@@ -1163,13 +1163,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			? $this->context_node
 			: $this->state->stack_of_open_elements->current_node();
 		$is_matched_tag        = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state;
-		$is_closer             = $is_matched_tag && $this->is_closing_tag && 'BR' !== $this->get_tag();
-		$is_start_tag          = $is_matched_tag && ! $is_closer;
-		$token_name            = $is_matched_tag
-			? $this->get_tag()
-			: ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
+		if ( $is_matched_tag ) {
+			$token_name  = $this->tag_name_cache ??= strtoupper( substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
+			$is_closer   = $this->is_closing_tag && 'BR' !== $token_name;
+		} else {
+			$token_name  = WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
 				? '#text'
-				: $this->get_token_name() );
+				: $this->get_token_name();
+			$is_closer   = false;
+		}
+		$is_start_tag          = $is_matched_tag && ! $is_closer;
 
 		$this->current_op = $is_matched_tag
 			? ( $is_closer ? '-' : '+' ) . $token_name

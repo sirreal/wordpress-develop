@@ -648,7 +648,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var int|null
 	 */
-	private $tag_name_starts_at;
+	protected $tag_name_starts_at;
 
 	/**
 	 * Byte length of current tag name.
@@ -663,7 +663,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var int|null
 	 */
-	private $tag_name_length;
+	protected $tag_name_length;
 
 	/**
 	 * Cached uppercase tag name, computed on first access per token.
@@ -672,7 +672,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var string|null
 	 */
-	private $tag_name_cache;
+	protected $tag_name_cache;
 
 	/**
 	 * Byte offset into input document where current modifiable text starts.
