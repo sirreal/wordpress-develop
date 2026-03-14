@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1372ms mean (stddev 26ms) — 44.1% improvement
+### Current: 1340ms mean (stddev 18ms) — 45.4% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -110,6 +110,8 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 34. **Inline has_self_closing_flag() in step()** — Make token_starts_at and token_length protected. For non-matched tags, short-circuits. For matched tags, avoids method call. ~35ms.
 
 35. **Inline get_tag() in step()** — Make tag_name_starts_at, tag_name_length, tag_name_cache protected. Inline the strtoupper(substr()) computation, compute token_name first, use cached value for BR check. ~25ms.
+
+36. **Cache is_closer result for push/pop handlers** — Store is_closer from step() in property, read in push/pop handlers instead of calling parent::is_tag_closer() per push and pop. ~30ms.
 
 ### Dead Ends
 
