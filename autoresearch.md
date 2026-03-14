@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1925ms mean (stddev 30ms) — 21.5% improvement
+### Current: 1830ms mean (stddev 40ms) — 25.4% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -74,6 +74,12 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 16. **Add is_pop boolean to stack events, merge pop handling** — Pre-computed boolean on WP_HTML_Stack_Event replaces string comparison per event. Merged two separate is_pop blocks into one. ~10ms.
 
 17. **Inline get_token_name() for tags and text in step()** — Fast-path matched tags (call get_tag() directly) and text nodes (return '#text' immediately), avoiding method call + switch dispatch. ~40ms.
+
+18. **Cache current_node on open elements stack** — Maintain a cached reference updated on push/pop/remove_node. Avoids calling `end()` on every `current_node()` access. ~40ms.
+
+19. **Optimize push/pop handlers with parent::is_tag_closer()** — Use `parent::is_tag_closer()` instead of `$this->is_tag_closer()` to skip is_virtual() dispatch chain. Cache current_token in local variable. ~50ms.
+
+20. **Skip change_parsing_namespace() for HTML-namespace tokens** — Avoid calling the method when the namespace is already 'html'. Marginal.
 
 ### Dead Ends
 
@@ -104,4 +110,5 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 - **Combined token+event object** — merge WP_HTML_Token and WP_HTML_Stack_Event to reduce allocations
 - **Pre-scanned tag name table** — for known HTML elements, use a lookup instead of substr+strtoupper
 - **Avoid WP_HTML_Token allocation for reprocessed tokens** — skip constructor when reprocessing same token
-- **Cache current_node() result** — avoid calling end($this->stack) multiple times per step
+- **Eliminate WP_HTML_Stack_Event allocation** — use parallel arrays instead of objects for event queue
+- **Skip text node stack operations** — text nodes are always immediately popped; could avoid push/pop entirely
