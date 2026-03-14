@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1399ms mean (stddev 17ms) — 43.0% improvement
+### Current: 1372ms mean (stddev 26ms) — 44.1% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -109,6 +109,8 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 34. **Inline has_self_closing_flag() in step()** — Make token_starts_at and token_length protected. For non-matched tags, short-circuits. For matched tags, avoids method call. ~35ms.
 
+35. **Inline get_tag() in step()** — Make tag_name_starts_at, tag_name_length, tag_name_cache protected. Inline the strtoupper(substr()) computation, compute token_name first, use cached value for BR check. ~25ms.
+
 ### Dead Ends
 
 - **Inline `skip_whitespace()`** — No improvement; PHP optimizes short function calls well.
@@ -143,6 +145,8 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 - **Fast-path comments in step()** — No comments in html-standard.html; adds branch overhead with no benefit
 - **Skip has_self_closing_flag() for HTML namespace** — Added namespace check costs same as the method call; no improvement
 - **Cache stack_of_open_elements reference** — PHP property chains already well-optimized; no improvement
+- **Cache op strings with ??=** — Hash table lookup costs more than short string concatenation
+- **Defer current_op past text fast path** — Text tokens don't concatenate (not matched tags); saving is just one pointer assignment
 - **Skip bookmark creation for comment tokens** — same approach as text tokens
 - **Fast-path comments in step()** — similar to text fast-path; comments in IN_BODY are always simple insert+return
 - **Cache stack_of_open_elements reference** — avoid repeated property access chain
