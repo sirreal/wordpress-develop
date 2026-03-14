@@ -1131,7 +1131,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$is_closer             = parent::is_tag_closer();
 		$is_matched_tag        = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state;
 		$is_start_tag          = $is_matched_tag && ! $is_closer;
-		$token_name            = $this->get_token_name();
+		$token_name            = $is_matched_tag
+			? $this->get_tag()
+			: ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
+				? '#text'
+				: $this->get_token_name() );
 		$this->current_op      = $is_matched_tag
 			? ( $is_closer ? '-' : '+' ) . $token_name
 			: $token_name;
