@@ -1148,6 +1148,30 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			? ( $is_closer ? '-' : '+' ) . $token_name
 			: $token_name;
 
+		/*
+		 * Fast path for text nodes in the IN_BODY insertion mode.
+		 * Skips bookmark creation, WP_HTML_Span allocation, and
+		 * insertion mode dispatch for the most common token type.
+		 */
+		if (
+			'#text' === $token_name &&
+			self::REPROCESS_CURRENT_NODE !== $node_to_process &&
+			WP_HTML_Processor_State::INSERTION_MODE_IN_BODY === $this->state->insertion_mode &&
+			( ! $adjusted_current_node || 'html' === $adjusted_current_node->namespace )
+		) {
+			if ( parent::TEXT_IS_NULL_SEQUENCE === $this->text_node_classification ) {
+				$this->state->current_token = new WP_HTML_Token( null, '#text', false );
+				return $this->step();
+			}
+			$this->reconstruct_active_formatting_elements();
+			if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
+				$this->state->frameset_ok = false;
+			}
+			$this->state->current_token = new WP_HTML_Token( null, '#text', false );
+			$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
+			return true;
+		}
+
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
 			$bookmark_name = $this->bookmark_token();
 			if ( null === $bookmark_name ) {
@@ -1186,26 +1210,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		try {
 			if ( ! $parse_in_current_insertion_mode ) {
 				return $this->step_in_foreign_content();
-			}
-
-			/*
-			 * Fast path for text nodes in the IN_BODY insertion mode.
-			 * Avoids the method call and switch dispatch overhead for
-			 * the most common token type.
-			 */
-			if (
-				'#text' === $token_name &&
-				WP_HTML_Processor_State::INSERTION_MODE_IN_BODY === $this->state->insertion_mode
-			) {
-				if ( parent::TEXT_IS_NULL_SEQUENCE === $this->text_node_classification ) {
-					return $this->step();
-				}
-				$this->reconstruct_active_formatting_elements();
-				if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
-					$this->state->frameset_ok = false;
-				}
-				$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
-				return true;
 			}
 
 			switch ( $this->state->insertion_mode ) {
