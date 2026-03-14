@@ -468,10 +468,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$is_virtual_event      = $is_virtual || $token->node_name !== $current_token->node_name;
 				$this->element_queue[] = new WP_HTML_Stack_Event( $token, false, $is_virtual_event );
 
-				if ( $token->integration_node_type ) {
-					$this->change_parsing_namespace( 'html' );
-				} elseif ( 'html' !== $token->namespace ) {
-					$this->change_parsing_namespace( $token->namespace );
+				if ( 'html' !== $token->namespace ) {
+					if ( $token->integration_node_type ) {
+						$this->change_parsing_namespace( 'html' );
+					} else {
+						$this->change_parsing_namespace( $token->namespace );
+					}
 				}
 			}
 		);
