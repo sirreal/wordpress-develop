@@ -883,7 +883,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			// Process the next event on the queue.
 			$this->current_element = $this->element_queue[ $this->element_queue_index++ ];
 
-			$is_pop = WP_HTML_Stack_Event::POP === $this->current_element->operation;
+			$is_pop = $this->current_element->is_pop;
 
 			/*
 			 * The root node only exists in the fragment parser, and closing it
@@ -894,15 +894,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				continue;
 			}
 
-			// Adjust the breadcrumbs for this event.
+			// Adjust the breadcrumbs and skip close events for void elements.
 			if ( $is_pop ) {
 				array_pop( $this->breadcrumbs );
-			} else {
-				$this->breadcrumbs[] = $this->current_element->token->node_name;
-			}
-
-			// Avoid sending close events for elements which don't expect a closing.
-			if ( $is_pop ) {
 				$_token_name = $this->current_element->token->node_name;
 				if (
 					'#' === $_token_name[0] ||
@@ -914,6 +908,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				) {
 					continue;
 				}
+			} else {
+				$this->breadcrumbs[] = $this->current_element->token->node_name;
 			}
 
 			return true;
@@ -950,7 +946,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	public function is_tag_closer(): bool {
 		return $this->is_virtual()
-			? ( WP_HTML_Stack_Event::POP === $this->current_element->operation && '#tag' === $this->get_token_type() )
+			? ( $this->current_element->is_pop && '#tag' === $this->get_token_type() )
 			: parent::is_tag_closer();
 	}
 

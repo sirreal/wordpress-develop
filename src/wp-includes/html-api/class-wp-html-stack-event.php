@@ -68,6 +68,13 @@ class WP_HTML_Stack_Event {
 	public $provenance;
 
 	/**
+	 * Whether this event is a pop operation.
+	 *
+	 * @var bool
+	 */
+	public $is_pop;
+
+	/**
 	 * Constructor function.
 	 *
 	 * @since 6.6.0
@@ -80,5 +87,6 @@ class WP_HTML_Stack_Event {
 		$this->token      = $token;
 		$this->operation  = $operation;
 		$this->provenance = $provenance;
+		$this->is_pop     = self::POP === $operation;
 	}
 }
