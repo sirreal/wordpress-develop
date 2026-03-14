@@ -83,9 +83,9 @@ class WP_HTML_Stack_Event {
 	 * @param string        $operation  One of self::PUSH or self::POP.
 	 * @param string        $provenance "virtual" or "real".
 	 */
-	public function __construct( WP_HTML_Token $token, string $operation, string $provenance ) {
+	public function __construct( WP_HTML_Token $token, bool $is_pop, string $provenance ) {
 		$this->token      = $token;
 		$this->provenance = $provenance;
-		$this->is_pop     = self::POP === $operation;
+		$this->is_pop     = $is_pop;
 	}
 }

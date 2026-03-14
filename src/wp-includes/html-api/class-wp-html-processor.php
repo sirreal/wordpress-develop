@@ -459,7 +459,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$current_token         = $this->state->current_token;
 				$is_virtual            = ! isset( $current_token ) || parent::is_tag_closer();
 				$provenance            = ( ! $is_virtual && $token->node_name === $current_token->node_name ) ? 'real' : 'virtual';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $provenance );
+				$this->element_queue[] = new WP_HTML_Stack_Event( $token, false, $provenance );
 
 				if ( $token->integration_node_type ) {
 					$this->change_parsing_namespace( 'html' );
@@ -474,7 +474,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$current_token         = $this->state->current_token;
 				$is_virtual            = ! isset( $current_token ) || ! parent::is_tag_closer();
 				$provenance            = ( ! $is_virtual && $token->node_name === $current_token->node_name ) ? 'real' : 'virtual';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $provenance );
+				$this->element_queue[] = new WP_HTML_Stack_Event( $token, true, $provenance );
 
 				$adjusted_current_node = $this->get_adjusted_current_node();
 
