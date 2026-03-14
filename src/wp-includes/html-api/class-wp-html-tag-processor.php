@@ -614,7 +614,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var int|null
 	 */
-	private $token_starts_at;
+	protected $token_starts_at;
 
 	/**
 	 * Byte length of current token.
@@ -633,7 +633,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @var int|null
 	 */
-	private $token_length;
+	protected $token_length;
 
 	/**
 	 * Byte offset in input document where current tag name starts.

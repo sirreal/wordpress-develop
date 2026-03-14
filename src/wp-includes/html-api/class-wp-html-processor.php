@@ -1182,7 +1182,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->state->current_token = new WP_HTML_Token(
 				$this->bookmark_counter,
 				$token_name,
-				$this->has_self_closing_flag(),
+				$is_matched_tag && '/' === $this->html[ $this->token_starts_at + $this->token_length - 2 ],
 				$this->release_internal_bookmark_on_destruct
 			);
 		}
