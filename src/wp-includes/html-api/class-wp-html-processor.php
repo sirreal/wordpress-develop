@@ -902,8 +902,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			// Avoid sending close events for elements which don't expect a closing.
-			if ( $is_pop && ! $this->expects_closer( $this->current_element->token ) ) {
-				continue;
+			if ( $is_pop ) {
+				$_token_name = $this->current_element->token->node_name;
+				if (
+					'#' === $_token_name[0] ||
+					'html' === $_token_name ||
+					( 'html' === $this->current_element->token->namespace
+						? isset( self::ELEMENTS_WITHOUT_A_CLOSER[ $_token_name ] )
+						: $this->current_element->token->has_self_closing_flag
+					)
+				) {
+					continue;
+				}
 			}
 
 			return true;
@@ -1091,8 +1101,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * on the stack is a void element, it must be closed.
 			 */
 			$top_node = $this->state->stack_of_open_elements->current_node();
-			if ( isset( $top_node ) && ! $this->expects_closer( $top_node ) ) {
-				$this->state->stack_of_open_elements->pop();
+			if ( isset( $top_node ) ) {
+				$_top_name = $top_node->node_name;
+				if (
+					'#' === $_top_name[0] ||
+					'html' === $_top_name ||
+					( 'html' === $top_node->namespace
+						? isset( self::ELEMENTS_WITHOUT_A_CLOSER[ $_top_name ] )
+						: $top_node->has_self_closing_flag
+					)
+				) {
+					$this->state->stack_of_open_elements->pop();
+				}
 			}
 		}
 
