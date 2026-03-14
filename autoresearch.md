@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1511ms mean (stddev 4ms) — 38.4% improvement
+### Current: 1462ms mean (stddev 34ms) — 40.4% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -95,6 +95,12 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 27. **Skip bookmark creation for fast-path text tokens** — Text tokens don't need bookmarks for read-only tokenization. Skip bookmark_token(), set_bookmark(), and WP_HTML_Span allocation. Create lightweight WP_HTML_Token with no bookmark. ~65ms.
 
+28. **Inline get_adjusted_current_node() in step()** — Replace method call with inline logic. For full parsers, just calls current_node(). ~20ms.
+
+29. **Inline is_tag_closer() in step()** — Make is_closing_tag protected and inline the check. For start tags, short-circuits on is_closing_tag=false. ~12ms.
+
+30. **Fast bookmark creation** — Skip state checks, array_key_exists, and count() overflow guard in set_bookmark. Since bookmarks use monotonically increasing integer names, overflow can't happen. ~14ms.
+
 ### Dead Ends
 
 - **Inline `skip_whitespace()`** — No improvement; PHP optimizes short function calls well.
@@ -126,6 +132,9 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 - **Avoid WP_HTML_Token allocation for reprocessed tokens** — skip constructor when reprocessing same token
 - **Eliminate WP_HTML_Stack_Event allocation** — use parallel arrays instead of objects for event queue
 - **Replace WP_HTML_Stack_Event with struct-of-arrays** — Use 3 parallel arrays (eq_tokens, eq_is_pop, eq_is_virtual) instead of WP_HTML_Stack_Event objects. No measurable improvement; PHP allocates small objects efficiently
+- **Fast-path comments in step()** — No comments in html-standard.html; adds branch overhead with no benefit
+- **Skip has_self_closing_flag() for HTML namespace** — Added namespace check costs same as the method call; no improvement
+- **Cache stack_of_open_elements reference** — PHP property chains already well-optimized; no improvement
 - **Skip bookmark creation for comment tokens** — same approach as text tokens
 - **Fast-path comments in step()** — similar to text fast-path; comments in IN_BODY are always simple insert+return
 - **Cache stack_of_open_elements reference** — avoid repeated property access chain
