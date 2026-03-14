@@ -59,7 +59,7 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 
 10. **Use int bookmark names** — Avoid int-to-string conversion per token by passing counter directly. ~14ms.
 
-### Current: 1830ms mean (stddev 40ms) — 25.4% improvement
+### Current: 1776ms mean (stddev 27ms) — 27.6% improvement
 
 11. **Optimize tag name parsing with direct char check + single strcspn** — Replace `strspn()` + `strcspn()` combo for tag name detection with direct character range comparison. Move bounds check before character access. ~50ms.
 
@@ -80,6 +80,12 @@ Optimize `WP_HTML_Processor::next_token()` tokenization throughput on html-stand
 19. **Optimize push/pop handlers with parent::is_tag_closer()** — Use `parent::is_tag_closer()` instead of `$this->is_tag_closer()` to skip is_virtual() dispatch chain. Cache current_token in local variable. ~50ms.
 
 20. **Skip change_parsing_namespace() for HTML-namespace tokens** — Avoid calling the method when the namespace is already 'html'. Marginal.
+
+21. **Remove redundant isset in provenance computation** — When is_virtual is false, current_token is guaranteed set. Marginal.
+
+22. **Remove unused operation property assignment** — The string operation property is dead code since all checks use is_pop boolean. Marginal.
+
+23. **Pass boolean is_pop directly to stack event constructor** — Replace string comparison `self::POP === $operation` with a direct boolean parameter. ~30ms.
 
 ### Dead Ends
 
