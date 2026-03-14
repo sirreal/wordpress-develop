@@ -905,7 +905,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * indicates that the parse is complete. Stop before popping it from
 			 * the breadcrumbs.
 			 */
-			if ( 'root-node' === $this->current_element->token->bookmark_name ) {
+			if ( isset( $this->context_node ) && 'root-node' === $this->current_element->token->bookmark_name ) {
 				continue;
 			}
 
