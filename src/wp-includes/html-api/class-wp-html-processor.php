@@ -1124,6 +1124,30 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			parent::next_token();
 			if ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state ) {
 				parent::subdivide_text_appropriately();
+
+				/*
+				 * Fast path for text nodes in the IN_BODY insertion mode.
+				 * Skips all tag-specific computation, bookmark creation,
+				 * and insertion mode dispatch.
+				 */
+				if (
+					WP_HTML_Processor_State::INSERTION_MODE_IN_BODY === $this->state->insertion_mode
+				) {
+					$_cn = $this->state->stack_of_open_elements->current_node();
+					if ( ! $_cn || 'html' === $_cn->namespace ) {
+						if ( parent::TEXT_IS_NULL_SEQUENCE === $this->text_node_classification ) {
+							$this->state->current_token = new WP_HTML_Token( null, '#text', false );
+							return $this->step();
+						}
+						$this->reconstruct_active_formatting_elements();
+						if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
+							$this->state->frameset_ok = false;
+						}
+						$this->state->current_token = new WP_HTML_Token( null, '#text', false );
+						$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
+						return true;
+					}
+				}
 			}
 		}
 
@@ -1146,30 +1170,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			: ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state
 				? '#text'
 				: $this->get_token_name() );
-
-		/*
-		 * Fast path for text nodes in the IN_BODY insertion mode.
-		 * Skips bookmark creation, WP_HTML_Span allocation, op string,
-		 * and insertion mode dispatch for the most common token type.
-		 */
-		if (
-			'#text' === $token_name &&
-			self::REPROCESS_CURRENT_NODE !== $node_to_process &&
-			WP_HTML_Processor_State::INSERTION_MODE_IN_BODY === $this->state->insertion_mode &&
-			( ! $adjusted_current_node || 'html' === $adjusted_current_node->namespace )
-		) {
-			if ( parent::TEXT_IS_NULL_SEQUENCE === $this->text_node_classification ) {
-				$this->state->current_token = new WP_HTML_Token( null, '#text', false );
-				return $this->step();
-			}
-			$this->reconstruct_active_formatting_elements();
-			if ( parent::TEXT_IS_GENERIC === $this->text_node_classification ) {
-				$this->state->frameset_ok = false;
-			}
-			$this->state->current_token = new WP_HTML_Token( null, '#text', false );
-			$this->element_queue[] = new WP_HTML_Stack_Event( $this->state->current_token, false, false );
-			return true;
-		}
 
 		$this->current_op = $is_matched_tag
 			? ( $is_closer ? '-' : '+' ) . $token_name
