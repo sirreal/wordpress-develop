@@ -917,7 +917,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					continue;
 				}
 			} else {
-				$this->breadcrumbs[] = $this->current_element->token->node_name;
+				$_node_name = $this->current_element->token->node_name;
+				if ( '#' !== $_node_name[0] ) {
+					$this->breadcrumbs[] = $_node_name;
+				}
 			}
 
 			return true;
@@ -6378,6 +6381,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @param WP_HTML_Token $token Name of bookmark pointing to element in original input HTML.
 	 */
 	private function insert_html_element( WP_HTML_Token $token ): void {
+		/*
+		 * Non-element tokens (text, comments, etc.) are always immediately
+		 * popped from the stack on the next step() call. Skip the actual
+		 * stack push/pop and create the event directly.
+		 */
+		if ( '#' === $token->node_name[0] ) {
+			$this->element_queue[] = new WP_HTML_Stack_Event( $token, false, false );
+			return;
+		}
+
 		$this->state->stack_of_open_elements->push( $token );
 	}
 
