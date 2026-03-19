@@ -154,7 +154,7 @@
 				{
 					"name": "Manrope",
 					"slug": "manrope",
-					"fontFamily": "Manrope, sans-serif",
+					"fontFamily": "'Manrope', sans-serif",
 					"fontFace": [
 						{
 							"src": [
@@ -162,14 +162,14 @@
 							],
 							"fontWeight": "200 800",
 							"fontStyle": "normal",
-							"fontFamily": "Manrope"
+							"fontFamily": "'Manrope'"
 						}
 					]
 				},
 				{
 					"name": "Fira Code",
 					"slug": "fira-code",
-					"fontFamily": "\"Fira Code\", monospace",
+					"fontFamily": "'Fira Code', monospace",
 					"fontFace": [
 						{
 							"src": [
@@ -177,7 +177,7 @@
 							],
 							"fontWeight": "300 700",
 							"fontStyle": "normal",
-							"fontFamily": "\"Fira Code\""
+							"fontFamily": "'Fira Code'"
 						}
 					]
 				}

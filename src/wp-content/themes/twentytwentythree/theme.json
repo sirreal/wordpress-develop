@@ -112,7 +112,7 @@
 				{
 					"fontFace": [
 						{
-							"fontFamily": "DM Sans",
+							"fontFamily": "'DM Sans'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "400",
@@ -121,7 +121,7 @@
 							]
 						},
 						{
-							"fontFamily": "DM Sans",
+							"fontFamily": "'DM Sans'",
 							"fontStretch": "normal",
 							"fontStyle": "italic",
 							"fontWeight": "400",
@@ -130,7 +130,7 @@
 							]
 						},
 						{
-							"fontFamily": "DM Sans",
+							"fontFamily": "'DM Sans'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "700",
@@ -139,7 +139,7 @@
 							]
 						},
 						{
-							"fontFamily": "DM Sans",
+							"fontFamily": "'DM Sans'",
 							"fontStretch": "normal",
 							"fontStyle": "italic",
 							"fontWeight": "700",
@@ -148,7 +148,7 @@
 							]
 						}
 					],
-					"fontFamily": "\"DM Sans\", sans-serif",
+					"fontFamily": "'DM Sans', sans-serif",
 					"name": "DM Sans",
 					"slug": "dm-sans"
 				},
@@ -156,7 +156,7 @@
 					"fontFace": [
 						{
 							"fontDisplay": "block",
-							"fontFamily": "IBM Plex Mono",
+							"fontFamily": "'IBM Plex Mono'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "300",
@@ -166,7 +166,7 @@
 						},
 						{
 							"fontDisplay": "block",
-							"fontFamily": "IBM Plex Mono",
+							"fontFamily": "'IBM Plex Mono'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "400",
@@ -176,7 +176,7 @@
 						},
 						{
 							"fontDisplay": "block",
-							"fontFamily": "IBM Plex Mono",
+							"fontFamily": "'IBM Plex Mono'",
 							"fontStretch": "normal",
 							"fontStyle": "italic",
 							"fontWeight": "400",
@@ -186,7 +186,7 @@
 						},
 						{
 							"fontDisplay": "block",
-							"fontFamily": "IBM Plex Mono",
+							"fontFamily": "'IBM Plex Mono'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "700",
@@ -202,7 +202,7 @@
 				{
 					"fontFace": [
 						{
-							"fontFamily": "Inter",
+							"fontFamily": "'Inter'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "200 900",
@@ -211,19 +211,19 @@
 							]
 						}
 					],
-					"fontFamily": "\"Inter\", sans-serif",
+					"fontFamily": "'Inter', sans-serif",
 					"name": "Inter",
 					"slug": "inter"
 				},
 				{
-					"fontFamily": "-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Oxygen-Sans,Ubuntu,Cantarell,\"Helvetica Neue\",sans-serif",
+					"fontFamily": "-apple-system,BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen-Sans', 'Ubuntu', 'Cantarell', 'Helvetica Neue', sans-serif",
 					"name": "System Font",
 					"slug": "system-font"
 				},
 				{
 					"fontFace": [
 						{
-							"fontFamily": "Source Serif Pro",
+							"fontFamily": "'Source Serif Pro'",
 							"fontStretch": "normal",
 							"fontStyle": "normal",
 							"fontWeight": "200 900",
@@ -232,7 +232,7 @@
 							]
 						},
 						{
-							"fontFamily": "Source Serif Pro",
+							"fontFamily": "'Source Serif Pro'",
 							"fontStretch": "normal",
 							"fontStyle": "italic",
 							"fontWeight": "200 900",
@@ -241,7 +241,7 @@
 							]
 						}
 					],
-					"fontFamily": "\"Source Serif Pro\", serif",
+					"fontFamily": "'Source Serif Pro', serif",
 					"name": "Source Serif Pro",
 					"slug": "source-serif-pro"
 				}
