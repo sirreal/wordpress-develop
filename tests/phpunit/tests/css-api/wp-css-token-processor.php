@@ -2,6 +2,8 @@
 
 /**
  * Comprehensive CSS processor tests based on the CSS Syntax Level 3 specification.
+ *
+ * @group css-api
  */
 class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
