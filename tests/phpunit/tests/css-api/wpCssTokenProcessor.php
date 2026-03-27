@@ -2351,7 +2351,7 @@ CSS;
 
 		$updated = $processor->get_updated_css();
 
-		$this->assertSame( 'background: url("path\\a with\\a newlines\\a test.jpg");', $updated );
+		$this->assertSame( 'background: url("path\\A with\\A newlines\\A test.jpg");', $updated );
 	}
 
 	/**
