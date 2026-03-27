@@ -24,7 +24,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	 * @return array
 	 */
 	public static function corpus_provider(): array {
-		return json_decode( file_get_contents( DIR_TESTDATA . 'css-api/css-test-cases.json' ), true );
+		return json_decode( file_get_contents( DIR_TESTDATA . '/css-api/css-test-cases.json' ), true );
 	}
 
 	/**
