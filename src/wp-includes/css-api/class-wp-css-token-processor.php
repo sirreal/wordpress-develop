@@ -856,6 +856,7 @@ class WP_CSS_Token_Processor {
 		$escaped = strtr(
 			$value,
 			array(
+				// Escape existing backslashes to prevent unintentional escapes in result.
 				'\\'   => '\\5C ',
 
 				// Pre-processing replaces NULLs and some newlines. Replace and escape as necessary.
@@ -868,6 +869,8 @@ class WP_CSS_Token_Processor {
 
 				// Newlines must be escaped in CSS strings.
 				"\n"   => '\\A ',
+
+				// Arbitrary characters for Unicode escaping:
 
 				// HTML syntax may be problematic.
 				'<'    => '\\3C ',
