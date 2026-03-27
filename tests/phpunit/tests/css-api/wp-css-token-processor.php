@@ -10,7 +10,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	 * @dataProvider corpus_provider
 	 */
 	public function test_processor_matches_spec( string $css, array $expected_tokens ): void {
-		$processor = WP_CSS_Token_Processor::create( $css );
+		$processor     = WP_CSS_Token_Processor::create( $css );
 		$actual_tokens = $this->collect_tokens( $processor );
 		$this->assertSame( $expected_tokens, $actual_tokens );
 	}
@@ -22,7 +22,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	 * @return array
 	 */
 	public static function corpus_provider(): array {
-		return json_decode(file_get_contents(DIR_TESTDATA . 'css-api/css-test-cases.json'), true);
+		return json_decode( file_get_contents( DIR_TESTDATA . 'css-api/css-test-cases.json' ), true );
 	}
 
 	/**
@@ -75,21 +75,21 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 		$expected = array(
 			// .class�name (0xF1 replaced with U+FFFD).
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
-				'raw'  => '.',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'        => '.',
 				'normalized' => '.',
-				'value' => '.',
+				'value'      => '.',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => "class\xF1name",
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => "class\xF1name",
 				'normalized' => 'class�name',
-				'value' => 'class�name',
+				'value'      => 'class�name',
 			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value', 'unit'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value', 'unit' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -99,21 +99,21 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 
 		$expected = array(
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
-				'raw'  => '.',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'        => '.',
 				'normalized' => '.',
-				'value' => '.',
+				'value'      => '.',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => "test\xE2\x80name",
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => "test\xE2\x80name",
 				'normalized' => 'test�name',
-				'value' => 'test�name',
+				'value'      => 'test�name',
 			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -124,21 +124,21 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 
 		$expected = array(
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
-				'raw'  => '.',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'        => '.',
 				'normalized' => '.',
-				'value' => '.',
+				'value'      => '.',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => "test\xE2\xE2name",
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => "test\xE2\xE2name",
 				'normalized' => 'test��name',
-				'value' => 'test��name',
+				'value'      => 'test��name',
 			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -153,34 +153,106 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 CSS;
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD, 'raw' => '@media' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT, 'raw' => 'screen' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT, 'raw' => 'and' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN, 'raw' => '(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT, 'raw' => 'min-width' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON, 'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION, 'raw' => '10px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN, 'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE, 'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => "\n\t" ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT, 'raw' => 'background' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON, 'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION, 'raw' => 'url(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_STRING, 'raw' => '"/images/a.png"' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN, 'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON, 'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE, 'raw' => "\n" ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE, 'raw' => '}' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,
+				'raw'  => '@media',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'screen',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'and',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN,
+				'raw'  => '(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'min-width',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '10px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => "\n\t",
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'background',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'url(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'  => '"/images/a.png"',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => "\n",
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -191,27 +263,78 @@ CSS;
 		$css = 'a:hover::before, div.class#id:not(.disabled)';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'a' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'hover' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'before' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'div' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '.' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'class' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_HASH,         'raw' => '#id' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'not(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '.' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'disabled' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'a',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'hover',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'before',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'div',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '.',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'class',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_HASH,
+				'raw'  => '#id',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'not(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '.',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'disabled',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -222,26 +345,74 @@ CSS;
 		$css = '/* This is a comment */ .class { color: red; /* Another comment */ }';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMENT,      'raw' => '/* This is a comment */' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '.' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'class' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,   'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'red' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMENT,      'raw' => '/* Another comment */' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,  'raw' => '}' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMENT,
+				'raw'  => '/* This is a comment */',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '.',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'class',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'red',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMENT,
+				'raw'  => '/* Another comment */',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -252,31 +423,94 @@ CSS;
 		$css = '@media screen and (min-width: 768px) and (max-width: 1024px)';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,   'raw' => '@media' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'screen' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'and' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN,   'raw' => '(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'min-width' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '768px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'and' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN,   'raw' => '(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'max-width' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '1024px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,
+				'raw'  => '@media',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'screen',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'and',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN,
+				'raw'  => '(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'min-width',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '768px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'and',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_PAREN,
+				'raw'  => '(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'max-width',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '1024px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -287,41 +521,134 @@ CSS;
 		$css = '@keyframes slide-in { 0% { opacity: 0; } 100% { opacity: 1; } }';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,   'raw' => '@keyframes' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'slide-in' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,   'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,   'raw' => '0%' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,   'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'opacity' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,  'raw' => '}' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,   'raw' => '100%' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,   'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'opacity' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '1' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,  'raw' => '}' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,  'raw' => '}' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,
+				'raw'  => '@keyframes',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'slide-in',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'  => '0%',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'opacity',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'  => '100%',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'opacity',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '1',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -332,23 +659,62 @@ CSS;
 		$css = '-webkit-transform: rotate(45deg); -moz-border-radius: 5px;';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => '-webkit-transform' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'rotate(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '45deg' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => '-moz-border-radius' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '5px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => '-webkit-transform',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'rotate(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '45deg',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => '-moz-border-radius',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '5px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -359,28 +725,82 @@ CSS;
 		$css = 'input[type="text"][required], a[href^="https://"]';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,         'raw' => 'input' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,  'raw' => '[' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,         'raw' => 'type' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,         'raw' => '=' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_STRING,        'raw' => '"text"' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET, 'raw' => ']' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,  'raw' => '[' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,         'raw' => 'required' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET, 'raw' => ']' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,         'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,    'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,         'raw' => 'a' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,  'raw' => '[' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,         'raw' => 'href' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,         'raw' => '^' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,         'raw' => '=' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_STRING,        'raw' => '"https://"' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET, 'raw' => ']' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'input',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,
+				'raw'  => '[',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'type',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '=',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'  => '"text"',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET,
+				'raw'  => ']',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,
+				'raw'  => '[',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'required',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET,
+				'raw'  => ']',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'a',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET,
+				'raw'  => '[',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'href',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '^',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '=',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'  => '"https://"',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET,
+				'raw'  => ']',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -391,29 +811,86 @@ CSS;
 		$css = 'width: calc(100% - 20px * 2 + 5em);';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'width' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'calc(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,   'raw' => '100%' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '-' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '20px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '*' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '2' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '+' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '5em' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'width',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'calc(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'  => '100%',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '-',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '20px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '*',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '2',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '+',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '5em',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -424,40 +901,130 @@ CSS;
 		$css = 'color: rgb(255, 128, 0); background: rgba(0, 0, 0, 0.5);';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'rgb(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '255' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '128' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'background' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'rgba(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '0.5' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'rgb(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '255',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '128',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'background',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'rgba(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '0.5',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -468,23 +1035,62 @@ CSS;
 		$css = '--main-color: #ff0000; color: var(--main-color);';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => '--main-color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_HASH,         'raw' => '#ff0000' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'var(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => '--main-color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => '--main-color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_HASH,
+				'raw'  => '#ff0000',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'var(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => '--main-color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -495,29 +1101,86 @@ CSS;
 		$css = 'background: linear-gradient(to right, red 0%, blue 100%);';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'background' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'linear-gradient(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'to' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'right' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'red' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,   'raw' => '0%' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'blue' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,   'raw' => '100%' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'background',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'linear-gradient(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'to',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'right',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'red',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'  => '0%',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'blue',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'  => '100%',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -528,28 +1191,82 @@ CSS;
 		$css = 'grid-template-columns: repeat(3, 1fr); gap: 10px 20px;';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'grid-template-columns' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'repeat(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,       'raw' => '3' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '1fr' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'gap' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '10px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '20px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'grid-template-columns',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'repeat(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_NUMBER,
+				'raw'  => '3',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '1fr',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'gap',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '10px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '20px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -560,25 +1277,70 @@ CSS;
 		$css = 'background: url("image.png"), url(\'font.woff\'), url(https://example.com/bg.jpg);';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'background' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'url(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_STRING,       'raw' => '"image.png"' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,     'raw' => 'url(' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_STRING,       'raw' => "'font.woff'" ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,  'raw' => ')' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_URL,          'raw' => 'url(https://example.com/bg.jpg)' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'background',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'url(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'  => '"image.png"',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'  => 'url(',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'  => "'font.woff'",
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'  => ')',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_URL,
+				'raw'  => 'url(https://example.com/bg.jpg)',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -589,27 +1351,78 @@ CSS;
 		$css = 'color: red !important; margin: 0px !important;';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'red' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '!' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'important' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'margin' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,    'raw' => '0px' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '!' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'important' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'red',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '!',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'important',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'margin',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'  => '0px',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '!',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'important',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -620,25 +1433,70 @@ CSS;
 		$css = 'div > p + span ~ a.link';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'div' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '>' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'p' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '+' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'span' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '~' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'a' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '.' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'link' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'div',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '>',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'p',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '+',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'span',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '~',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'a',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '.',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'link',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -649,25 +1507,70 @@ CSS;
 		$css = '.class\\:name, #id\\@special { color: blue; }';
 
 		$expected = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM,        'raw' => '.' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'class\\:name' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COMMA,        'raw' => ',' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_HASH,         'raw' => '#id\\@special' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,   'raw' => '{' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'color' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_COLON,        'raw' => ':' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_IDENT,        'raw' => 'blue' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,    'raw' => ';' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,   'raw' => ' ' ),
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,  'raw' => '}' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '.',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'class\\:name',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COMMA,
+				'raw'  => ',',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_HASH,
+				'raw'  => '#id\\@special',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'  => '{',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'color',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'  => ':',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'  => 'blue',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'  => ';',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'  => ' ',
+			),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'  => '}',
+			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$this->assertSame( $actual_tokens, $expected );
 	}
 
@@ -685,10 +1588,10 @@ CSS;
 	public function test_get_normalized_token_applies_normalization(): void {
 		// Comprehensive CSS with normalization requirements.
 		$css = "/* Comment\r\nwith\flines */\r\n" .
-		       ".c\\6c ass.n\\61 me\r#id\\@value\r\n{\r\n" .
-		       "\tbackground:\furl(path\\2f to\\2f image.png);\r\n" .
-		       "\tcontent:\r\"text\\A string\";\r\n" .
-		       "}";
+				".c\\6c ass.n\\61 me\r#id\\@value\r\n{\r\n" .
+				"\tbackground:\furl(path\\2f to\\2f image.png);\r\n" .
+				"\tcontent:\r\"text\\A string\";\r\n" .
+				'}';
 
 		$expected = array(
 			// Comment with \r\n and \f.
@@ -859,94 +1762,94 @@ CSS;
 			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
 	public function test_dimension_token_value(): void {
-		$css = '10px;15em;20%;30pt;40pc;50vw;';
-		$expected = array(
+		$css           = '10px;15em;20%;30pt;40pc;50vw;';
+		$expected      = array(
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw' => '10px',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '10px',
 				'normalized' => '10px',
-				'value' => '10',
-				'unit' => 'px',
+				'value'      => '10',
+				'unit'       => 'px',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw' => '15em',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '15em',
 				'normalized' => '15em',
-				'value' => '15',
-				'unit' => 'em',
+				'value'      => '15',
+				'unit'       => 'em',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
-				'raw' => '20%',
+				'type'       => WP_CSS_Token_Processor::TOKEN_PERCENTAGE,
+				'raw'        => '20%',
 				'normalized' => '20%',
-				'value' => '20',
+				'value'      => '20',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw' => '30pt',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '30pt',
 				'normalized' => '30pt',
-				'value' => '30',
-				'unit' => 'pt',
+				'value'      => '30',
+				'unit'       => 'pt',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw' => '40pc',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '40pc',
 				'normalized' => '40pc',
-				'value' => '40',
-				'unit' => 'pc',
+				'value'      => '40',
+				'unit'       => 'pc',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw' => '50vw',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '50vw',
 				'normalized' => '50vw',
-				'value' => '50',
-				'unit' => 'vw',
+				'value'      => '50',
+				'unit'       => 'vw',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw' => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 		);
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value', 'unit'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value', 'unit' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -985,342 +1888,342 @@ CSS;
 	 */
 	public function test_escape_sequences_in_unusual_places() {
 		// Complex CSS with escapes in many unusual but valid positions
-		$css = '@\\6D edia ' .                           // @media with \6D (m) and space consumed
-		       '\\73 creen ' .                           // screen with \73 (s) and space consumed
-		       '{' .
-		       ' .\\63 l\\61 ss\\5F name ' .             // .class_name with escapes and spaces consumed
-		       "#\\69 d\\5C 0test\x00 " .                // #id\0test with null byte escape (should be preserved)
-			                                             // AND an actual null byte (should be replaced with a U+FFFD REPLACEMENT CHARACTER)
-		       '{' .
-		       ' c\\6F lor: ' .                          // color: with \6F (o) and space consumed
-		       'r\\65 d ' .                              // red with escape
-		       '\\21 important;' .                       // !important with escaped !
-		       ' w\\69 dth: ' .                          // width:
-		       '10\\70 x;' .                             // 10px (dimension with escaped unit)
-		       ' background: ' .
-		       '\\75 rl(' .                              // url( with escaped u
-		       '"p\\61 th\\2F img\\2E png"' .            // "path/img.png" with escapes
-		       ');' .
-		       ' content: "\\5C \\5C ";' .               // "\\ \\" - escaped backslashes
-		       ' font-family: \\22 Arial\\22 ;' .       // "Arial" with escaped quotes
-		       ' }' .
-		       '}';
+		$css = '@\\6D edia ' . // @media with \6D (m) and space consumed
+				'\\73 creen ' . // screen with \73 (s) and space consumed
+				'{' .
+				' .\\63 l\\61 ss\\5F name ' . // .class_name with escapes and spaces consumed
+				"#\\69 d\\5C 0test\x00 " . // #id\0test with null byte escape (should be preserved)
+														// AND an actual null byte (should be replaced with a U+FFFD REPLACEMENT CHARACTER)
+				'{' .
+				' c\\6F lor: ' . // color: with \6F (o) and space consumed
+				'r\\65 d ' . // red with escape
+				'\\21 important;' . // !important with escaped !
+				' w\\69 dth: ' . // width:
+				'10\\70 x;' . // 10px (dimension with escaped unit)
+				' background: ' .
+				'\\75 rl(' . // url( with escaped u
+				'"p\\61 th\\2F img\\2E png"' . // "path/img.png" with escapes
+				');' .
+				' content: "\\5C \\5C ";' . // "\\ \\" - escaped backslashes
+				' font-family: \\22 Arial\\22 ;' . // "Arial" with escaped quotes
+				' }' .
+				'}';
 
 		$expected = array(
 			// @\6D edia -> @media
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,
-				'raw'  => '@\\6D edia',
+				'type'       => WP_CSS_Token_Processor::TOKEN_AT_KEYWORD,
+				'raw'        => '@\\6D edia',
 				'normalized' => '@media',
-				'value' => 'media',
+				'value'      => 'media',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// \73 creen -> screen
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => '\\73 creen',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => '\\73 creen',
 				'normalized' => 'screen',
-				'value' => 'screen',
+				'value'      => 'screen',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
-				'raw'  => '{',
+				'type'       => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'        => '{',
 				'normalized' => '{',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// Delimiter .
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
-				'raw'  => '.',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'        => '.',
 				'normalized' => '.',
-				'value' => '.',
+				'value'      => '.',
 			),
 			// \63 l\61 ss\5F name -> class_name
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => '\\63 l\\61 ss\\5F name',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => '\\63 l\\61 ss\\5F name',
 				'normalized' => 'class_name',
-				'value' => 'class_name',
+				'value'      => 'class_name',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// #\69 d\5C 0test -> #id\0test (with encoded null byte)
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_HASH,
-				'raw'  => "#\\69 d\\5C 0test\x00",
+				'type'       => WP_CSS_Token_Processor::TOKEN_HASH,
+				'raw'        => "#\\69 d\\5C 0test\x00",
 				'normalized' => "#id\\0test�",
 				// Ensure the value is normalized.
-				'value' => "id\\0test�",
+				'value'      => "id\\0test�",
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
-				'raw'  => '{',
+				'type'       => WP_CSS_Token_Processor::TOKEN_LEFT_BRACE,
+				'raw'        => '{',
 				'normalized' => '{',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// c\6F lor -> color
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'c\\6F lor',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'c\\6F lor',
 				'normalized' => 'color',
-				'value' => 'color',
+				'value'      => 'color',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
-				'raw'  => ':',
+				'type'       => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'        => ':',
 				'normalized' => ':',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// r\65 d -> red
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'r\\65 d',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'r\\65 d',
 				'normalized' => 'red',
-				'value' => 'red',
+				'value'      => 'red',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// \21 important -> !important (single identifier with escaped !)
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => '\\21 important',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => '\\21 important',
 				'normalized' => '!important',
-				'value' => '!important',
+				'value'      => '!important',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw'  => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// w\69 dth -> width
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'w\\69 dth',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'w\\69 dth',
 				'normalized' => 'width',
-				'value' => 'width',
+				'value'      => 'width',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
-				'raw'  => ':',
+				'type'       => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'        => ':',
 				'normalized' => ':',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// 10\70 x -> 10px (dimension with escaped unit)
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_DIMENSION,
-				'raw'  => '10\\70 x',
+				'type'       => WP_CSS_Token_Processor::TOKEN_DIMENSION,
+				'raw'        => '10\\70 x',
 				'normalized' => '10px',
-				'value' => '10',
+				'value'      => '10',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw'  => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'background',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'background',
 				'normalized' => 'background',
-				'value' => 'background',
+				'value'      => 'background',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
-				'raw'  => ':',
+				'type'       => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'        => ':',
 				'normalized' => ':',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// \75 rl( -> url( (escaped function name)
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_FUNCTION,
-				'raw'  => '\\75 rl(',
+				'type'       => WP_CSS_Token_Processor::TOKEN_FUNCTION,
+				'raw'        => '\\75 rl(',
 				'normalized' => 'url(',
-				'value' => 'url',
+				'value'      => 'url',
 			),
 			// String with escapes: "p\61 th\2F img\2E png"
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
-				'raw'  => '"p\\61 th\\2F img\\2E png"',
+				'type'       => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'        => '"p\\61 th\\2F img\\2E png"',
 				'normalized' => '"path/img.png"',
-				'value' => 'path/img.png',
+				'value'      => 'path/img.png',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
-				'raw'  => ')',
+				'type'       => WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN,
+				'raw'        => ')',
 				'normalized' => ')',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw'  => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'content',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'content',
 				'normalized' => 'content',
-				'value' => 'content',
+				'value'      => 'content',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
-				'raw'  => ':',
+				'type'       => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'        => ':',
 				'normalized' => ':',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// String with escaped backslashes: "\5C \5C " -> "\\"
 			// Each \5C sequence (with trailing space consumed) becomes one backslash
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_STRING,
-				'raw'  => '"\\5C \\5C "',
+				'type'       => WP_CSS_Token_Processor::TOKEN_STRING,
+				'raw'        => '"\\5C \\5C "',
 				'normalized' => '"\\\\"',
-				'value' => '\\\\',  // Two backslashes total
+				'value'      => '\\\\',  // Two backslashes total
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw'  => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => 'font-family',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => 'font-family',
 				'normalized' => 'font-family',
-				'value' => 'font-family',
+				'value'      => 'font-family',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_COLON,
-				'raw'  => ':',
+				'type'       => WP_CSS_Token_Processor::TOKEN_COLON,
+				'raw'        => ':',
 				'normalized' => ':',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			// \22 Arial\22 -> "Arial" (escaped quotes make it an ident)
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_IDENT,
-				'raw'  => '\\22 Arial\\22 ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'        => '\\22 Arial\\22 ',
 				'normalized' => '"Arial"',
-				'value' => '"Arial"',
+				'value'      => '"Arial"',
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
-				'raw'  => ';',
+				'type'       => WP_CSS_Token_Processor::TOKEN_SEMICOLON,
+				'raw'        => ';',
 				'normalized' => ';',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
-				'raw'  => ' ',
+				'type'       => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+				'raw'        => ' ',
 				'normalized' => ' ',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
-				'raw'  => '}',
+				'type'       => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'        => '}',
 				'normalized' => '}',
-				'value' => null,
+				'value'      => null,
 			),
 			array(
-				'type' => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
-				'raw'  => '}',
+				'type'       => WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE,
+				'raw'        => '}',
 				'normalized' => '}',
-				'value' => null,
+				'value'      => null,
 			),
 		);
 
-		$processor = WP_CSS_Token_Processor::create( $css );
-		$actual_tokens = $this->collect_tokens( $processor, ['type', 'raw', 'normalized', 'value'] );
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -1328,7 +2231,7 @@ CSS;
 	 * Tests that set_token_value() only works on URL tokens.
 	 */
 	public function test_set_token_value_only_works_on_url_tokens(): void {
-		$css = 'color: red; background: url(old.jpg);';
+		$css       = 'color: red; background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1352,7 +2255,7 @@ CSS;
 	 * Tests that set_token_value() properly escapes special characters in quoted URLs.
 	 */
 	public function test_set_token_value_escapes_special_characters(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1371,7 +2274,7 @@ CSS;
 	 * Tests that set_token_value() preserves Unicode characters in quoted URLs.
 	 */
 	public function test_set_token_value_encodes_unicode(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1390,7 +2293,7 @@ CSS;
 	 * Tests that set_token_value() preserves emoji in quoted URLs.
 	 */
 	public function test_set_token_value_handles_emoji(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1409,13 +2312,13 @@ CSS;
 	 * Tests that multiple URL values can be updated in the same CSS.
 	 */
 	public function test_set_token_value_multiple_urls(): void {
-		$css = 'background: url(old1.jpg); border-image: url(old2.png);';
+		$css       = 'background: url(old1.jpg); border-image: url(old2.png);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		$url_count = 0;
 		while ( $processor->next_token() ) {
 			if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
-				$url_count++;
+				++$url_count;
 				if ( 1 === $url_count ) {
 					$processor->set_token_value( 'new1.jpg' );
 				} elseif ( 2 === $url_count ) {
@@ -1434,7 +2337,7 @@ CSS;
 	 * Tests that newlines are properly escaped in quoted URLs.
 	 */
 	public function test_set_token_value_escapes_control_characters(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1453,7 +2356,7 @@ CSS;
 	 * Tests that backslashes are properly escaped in quoted URLs.
 	 */
 	public function test_set_token_value_escapes_backslashes(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1472,7 +2375,7 @@ CSS;
 	 * Tests that get_updated_css() returns original CSS when no changes are made.
 	 */
 	public function test_get_updated_css_returns_original_when_unchanged(): void {
-		$css = 'background: url(image.jpg); color: red;';
+		$css       = 'background: url(image.jpg); color: red;';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		// Iterate through tokens without making changes.
@@ -1490,7 +2393,7 @@ CSS;
 	 * Tests that safe ASCII characters are preserved in quoted URLs.
 	 */
 	public function test_set_token_value_preserves_safe_characters(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1510,7 +2413,7 @@ CSS;
 	 * Tests that safe ASCII characters are preserved in quoted URLs.
 	 */
 	public function test_set_token_with_invalid_utf8_sequence(): void {
-		$css = 'background: url(old.jpg);';
+		$css       = 'background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		while ( $processor->next_token() ) {
@@ -1530,10 +2433,13 @@ CSS;
 	 * Test bounds check when consuming and ident start token.
 	 */
 	public function test_ident_start_codepoint_bounds_check(): void {
-		$processor     = WP_CSS_Token_Processor::create( '-' );
-		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
+		$processor       = WP_CSS_Token_Processor::create( '-' );
+		$actual_tokens   = $this->collect_tokens( $processor, array( 'type', 'raw' ) );
 		$expected_tokens = array(
-			array( 'type' => WP_CSS_Token_Processor::TOKEN_DELIM, 'raw' => '-' ),
+			array(
+				'type' => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'  => '-',
+			),
 		);
 		$this->assertSame( $expected_tokens, $actual_tokens );
 	}
