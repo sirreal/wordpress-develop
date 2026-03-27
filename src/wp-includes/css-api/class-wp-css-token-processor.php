@@ -831,14 +831,14 @@ class WP_CSS_Token_Processor {
 				$this->lexical_updates[] = array(
 					'start'  => $this->token_value_starts_at,
 					'length' => $this->token_value_length,
-					'text'   => $this->escape_url_value( $new_value ),
+					'text'   => $this->create_css_string( $new_value ),
 				);
 				return true;
 			case self::TOKEN_STRING:
 				$this->lexical_updates[] = array(
 					'start'  => $this->token_starts_at,
 					'length' => $this->token_length,
-					'text'   => $this->escape_url_value( $new_value ),
+					'text'   => $this->create_css_string( $new_value ),
 				);
 				return true;
 			default:
@@ -848,66 +848,42 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Escapes a URL value for use in quoted url() syntax.
+	 * Create a quoted CSS string from a plain PHP string value.
 	 *
-	 * Always returns a quoted URL string since they're easier
-	 * to escape. Quoted URLs are consumed using the string token
-	 * rules, and the only values we need to escape in strings, are:
-	 *
-	 * * Trailing quote.
-	 * * Newlines. That amounts to \n, \r, \f, \r\n when preprocessing is considered.
-	 * * U+005C REVERSE SOLIDUS (\)
-	 *
-	 * @see https://www.w3.org/TR/css-syntax-3/#consume-url-token
+	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
 	 */
-	private function escape_url_value( string $unescaped ): string {
-		$escaped = '';
-		$at      = 0;
-		while ( $at < strlen( $unescaped ) ) {
-			$safe_len = strcspn( $unescaped, "\n\r\f\\\"", $at );
-			if ( $safe_len > 0 ) {
-				$escaped .= substr( $unescaped, $at, $safe_len );
-				$at      += $safe_len;
-				continue;
-			}
+	private function create_css_string( string $value ): string {
+		$escaped = strtr(
+			$value,
+			array(
+				'\\'   => '\\5C ',
 
-			$unsafe_char = $unescaped[ $at ];
-			switch ( $unsafe_char ) {
-				case "\r":
-					++$at;
-					/**
-					 * Add a trailing space to prevent accidentally creating a
-					 * wrong escape sequence. This is a valid CSS syntax and
-					 * CSS parsers will ignore that whitespace.
-					 *
-					 * Without the space, "carriage\return" would be encoded as "carriage\aeturn",
-					 * making `e` a part of the escape sequence `\ae` which is not
-					 * what the caller intended.
-					 */
-					$escaped .= '\\a ';
-					if ( strlen( $unescaped ) > $at + 1 && "\n" === $unescaped[ $at + 1 ] ) {
-						++$at;
-					}
-					break;
-				case "\f":
-				case "\n":
-					++$at;
-					$escaped .= '\\a ';
-					break;
-				case '\\':
-					++$at;
-					$escaped .= '\\5C ';
-					break;
-				case '"':
-					++$at;
-					$escaped .= '\\22 ';
-					break;
-				default:
-					_doing_it_wrong( __METHOD__, 'Unexpected character in URL value: ' . $unsafe_char, '1.0.0' );
-					break;
-			}
-		}
-		return '"' . $escaped . '"';
+				// Pre-processing replaces NULLs and some newlines. Replace and escape as necessary.
+				"\0"   => "\u{FFFD}",
+
+				// Normalize and replace newlines. https://www.w3.org/TR/css-syntax-3/#input-preprocessing
+				"\r\n" => '\\A ',
+				"\r"   => '\\A ',
+				"\f"   => '\\A ',
+
+				// Newlines must be escaped in CSS strings.
+				"\n"   => '\\A ',
+
+				// HTML syntax may be problematic.
+				'<'    => '\\3C ',
+				'>'    => '\\3E ',
+				'&'    => '\\26 ',
+
+				// CSS syntax may be problematic.
+				','    => '\\2C ',
+				';'    => '\\3B ',
+				'{'    => '\\7B ',
+				'}'    => '\\7D ',
+				'"'    => '\\22 ',
+				"'"    => '\\27 ',
+			)
+		);
+		return "\"{$escaped}\"";
 	}
 
 	/**
