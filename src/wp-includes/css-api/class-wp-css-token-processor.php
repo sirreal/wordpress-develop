@@ -1518,7 +1518,7 @@ class WP_CSS_Token_Processor {
 		}
 
 		$codepoint_byte_length = $new_at - $at;
-		$codepoint             = utf8_ord( substr( $this->css, $at, $codepoint_byte_length ) );
+		$codepoint             = self::utf8_ord( substr( $this->css, $at, $codepoint_byte_length ) );
 		if ( null !== $codepoint && $codepoint >= 0x80 ) {
 			return $codepoint_byte_length;
 		}
@@ -1661,7 +1661,7 @@ class WP_CSS_Token_Processor {
 
 			$bytes_consumed = $at - $offset;
 			// Convert the hex digits to a UTF-8 string.
-			return codepoint_to_utf8_bytes( hexdec( $hex ) );
+			return WP_HTML_Decoder::code_point_to_utf8_bytes( hexdec( $hex ) );
 		}
 
 		// Anything else.
@@ -1809,5 +1809,33 @@ class WP_CSS_Token_Processor {
 		}
 
 		return $this->consume_ident_start_codepoint( $offset ) > 0 || $this->is_valid_escape( $offset );
+	}
+
+	/**
+	 * Convert a UTF-8 byte sequence to its Unicode codepoint.
+	 *
+	 * @param  string $character  UTF-8 encoded byte sequence representing a single Unicode character.
+	 *
+	 * @return int Unicode codepoint.
+	 */
+	private static function utf8_ord( string $character ): int {
+		// Convert the byte sequence to its binary representation.
+		$bytes = unpack( 'C*', $character );
+
+		// Initialize the codepoint.
+		$codepoint = 0;
+
+		// Calculate the codepoint based on the number of bytes.
+		if ( 1 === count( $bytes ) ) {
+			$codepoint = $bytes[1];
+		} elseif ( 2 === count( $bytes ) ) {
+			$codepoint = ( ( $bytes[1] & 0x1F ) << 6 ) | ( $bytes[2] & 0x3F );
+		} elseif ( 3 === count( $bytes ) ) {
+			$codepoint = ( ( $bytes[1] & 0x0F ) << 12 ) | ( ( $bytes[2] & 0x3F ) << 6 ) | ( $bytes[3] & 0x3F );
+		} elseif ( 4 === count( $bytes ) ) {
+			$codepoint = ( ( $bytes[1] & 0x07 ) << 18 ) | ( ( $bytes[2] & 0x3F ) << 12 ) | ( ( $bytes[3] & 0x3F ) << 6 ) | ( $bytes[4] & 0x3F );
+		}
+
+		return $codepoint;
 	}
 }
