@@ -15,6 +15,29 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 	 */
 	public function test_string_escaping( string $input, string $expected ): void {
 		$this->assertSame( $expected, WP_CSS_Builder::string( $input ) );
+
+		/**
+		 * Ensure that a single, equivalent CSS string is produced.
+		 *
+		 * CSS pre-processing normalization is applied to the input to ensure
+		 * a match can be found.
+		 *
+		 * @see https://www.w3.org/TR/css-syntax-3/#input-preprocessing
+		 */
+		$processor = WP_CSS_Token_Processor::create( WP_CSS_Builder::string( $input ) );
+		$processor->next_token();
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$expected_decoded_value = strtr(
+			$input,
+			array(
+				"\r\n" => "\n",
+				"\r"   => "\n",
+				"\f"   => "\n",
+				"\0"   => '�',
+			)
+		);
+		$this->assertSame( $expected_decoded_value, $processor->get_token_value() );
+		$this->assertFalse( $processor->next_token() );
 	}
 
 	/**
