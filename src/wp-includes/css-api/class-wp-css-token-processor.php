@@ -120,8 +120,13 @@ class WP_CSS_Token_Processor {
 	/**
 	 * URL tokens represent unquoted URLs in url() notation.
 	 *
-	 * Valid: url(image.jpg), url(https://example.com)
-	 * Quoted URLs are parsed as url( + string-token + ), not url-token.
+	 * For example, `url(image.jpg)` is a URL token.
+	 *
+	 * Quoted URLs like `url( "https://example.com" )` are handled as a function
+	 * token, _not_ a URL token.
+	 *
+	 * Bad URL tokens are created when invalid characters are encountered in
+	 * a URL token.
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#typedef-url-token
 	 */
@@ -142,10 +147,10 @@ class WP_CSS_Token_Processor {
 
 	/**
 	 * Identifier tokens, such as `color`, `margin-top`, `red`,
-	 * `inherit`, `--my-var`, `\escaped`, `über` (Unicode), etc.
+	 * `inherit`, `--my-var`, `\x-escaped`, `über` (Unicode), etc.
 	 *
-	 * They can contain: letters, digits, hyphens, underscores, non-ASCII, escapes
-	 * and cannot start with a digit (unless preceded by a hyphen).
+	 * There are restrictions on the codepoints that start or are contained in
+	 * an identifier, and identifiers may contain escape sequences.
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#typedef-ident-token
 	 */
