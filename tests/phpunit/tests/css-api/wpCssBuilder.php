@@ -39,7 +39,7 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 			'backslash before quote'  => array( "a\\'b", '"a\5C \27 b"' ),
 
 			// NULL byte → U+FFFD replacement character.
-			'null byte'               => array( "a\0b", "\"a\u{FFFD}b\"" ),
+			'null byte'               => array( "a\0b", '"a�b"' ),
 
 			// Newline normalization — all variants become \A escape.
 			'LF'                      => array( "a\nb", '"a\A b"' ),
