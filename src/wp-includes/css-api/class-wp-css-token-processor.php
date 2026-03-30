@@ -838,62 +838,20 @@ class WP_CSS_Token_Processor {
 				$this->lexical_updates[] = array(
 					'start'  => $this->token_value_starts_at,
 					'length' => $this->token_value_length,
-					'text'   => $this->create_css_string( $new_value ),
+					'text'   => WP_CSS_Builder::string( $new_value ),
 				);
 				return true;
 			case self::TOKEN_STRING:
 				$this->lexical_updates[] = array(
 					'start'  => $this->token_starts_at,
 					'length' => $this->token_length,
-					'text'   => $this->create_css_string( $new_value ),
+					'text'   => WP_CSS_Builder::string( $new_value ),
 				);
 				return true;
 			default:
 				_doing_it_wrong( __METHOD__, 'set_token_value() only supports URL and string tokens. Got token type: ' . $this->token_type, '1.0.0' );
 				return false;
 		}
-	}
-
-	/**
-	 * Create a quoted CSS string from a plain PHP string value.
-	 *
-	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
-	 */
-	private function create_css_string( string $value ): string {
-		$escaped = strtr(
-			$value,
-			array(
-				// Escape existing backslashes to prevent unintentional escapes in result.
-				'\\'   => '\\5C ',
-
-				// Pre-processing replaces NULLs and some newlines. Replace and escape as necessary.
-				"\0"   => "\u{FFFD}",
-
-				// Normalize and replace newlines. https://www.w3.org/TR/css-syntax-3/#input-preprocessing
-				"\r\n" => '\\A ',
-				"\r"   => '\\A ',
-				"\f"   => '\\A ',
-
-				// Newlines must be escaped in CSS strings.
-				"\n"   => '\\A ',
-
-				// Arbitrary characters for Unicode escaping:
-
-				// HTML syntax may be problematic.
-				'<'    => '\\3C ',
-				'>'    => '\\3E ',
-				'&'    => '\\26 ',
-
-				// CSS syntax may be problematic.
-				','    => '\\2C ',
-				';'    => '\\3B ',
-				'{'    => '\\7B ',
-				'}'    => '\\7D ',
-				'"'    => '\\22 ',
-				"'"    => '\\27 ',
-			)
-		);
-		return "\"{$escaped}\"";
 	}
 
 	/**
