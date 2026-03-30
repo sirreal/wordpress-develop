@@ -204,6 +204,7 @@ class WP_CSS_Token_Processor {
 	 * The type of the current token. One of the self::TOKEN_* constants.
 	 *
 	 * @var string|null
+	 * @phpstan-var self::TOKEN_*|null
 	 */
 	private $token_type = null;
 
@@ -601,6 +602,7 @@ class WP_CSS_Token_Processor {
 	 * Gets the current token type.
 	 *
 	 * @return string|null
+	 * @phpstan-return self::TOKEN_*|null
 	 */
 	public function get_token_type(): ?string {
 		return $this->token_type;
