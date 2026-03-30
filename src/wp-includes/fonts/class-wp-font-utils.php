@@ -41,6 +41,85 @@ class WP_Font_Utils {
 	}
 
 	/**
+	 * Normalize @font-face font-family CSS text.
+	 *
+	 * This function attempts to be generous in the allowed values:
+	 * - Valid @font-face font-family values must return a semantically equivalent result.
+	 * - Normalization must be idempotent.
+	 * - Common mistakes such as providing multiple comma-separated font-family values return a
+	 *   normalization of the first item: `a, b` becomes `"a"`.
+	 * - Invalid trailing content is ignored:  `"string" garbage` becomes `"string"`.
+	 *
+	 * > Syntax of <family-name>
+	 * >     <family-name> = <string> | <custom-ident>+
+	 *
+	 * > To avoid mistakes in escaping, it is recommended to quote font family names that contain
+	 * > white space, digits, or punctuation characters other than hyphens
+	 *
+	 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
+	 *
+	 * @param string $font_family CSS text @font-face font-family value.
+	 * @return string Normalized value.
+	 */
+	public static function normalize_css_font_face_font_family( string $font_family ): ?string {
+		$processor = WP_CSS_Token_Processor::create( $font_family );
+		if ( null === $processor ) {
+			return null;
+		}
+
+		// Ignore leading whitespace tokens.
+		while ( $processor->next_token() && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $processor->get_token_type() ) {
+			continue;
+		}
+
+		$token_type = $processor->get_token_type();
+		if ( WP_CSS_Token_Processor::TOKEN_STRING === $token_type ) {
+			$plaintext_font_family = $processor->get_token_value();
+			return WP_CSS_Builder::string( $plaintext_font_family );
+		}
+
+		/**
+		 * Idents can be composed to form a <family-name>, otherwise consider the
+		 * font-family invalid.
+		 */
+		if ( WP_CSS_Token_Processor::TOKEN_IDENT !== $token_type ) {
+			return null;
+		}
+
+		/**
+		 * > If a sequence of identifiers is given as a <family-name>, the computed value is
+		 * > the name converted to a string by joining all the identifiers in the sequence
+		 * > by single spaces.
+		 *
+		 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
+		 */
+		$plaintext_font_ident_parts = array( $processor->get_token_value() );
+		while ( $processor->next_token() ) {
+			switch ( $processor->get_token_type() ) {
+				case WP_CSS_Token_Processor::TOKEN_IDENT:
+					$plaintext_font_family[] = $processor->get_token_value();
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_WHITESPACE:
+					continue;
+
+				/**
+				 * Comma tokens suggest this was a multi-value font-family (for qualified rules, not
+				 * @font-face rules). Stop processing to handle only the first value.
+				 */
+				case WP_CSS_Token_Processor::TOKEN_COMMA:
+					break 2;
+
+				// Anything else is an error.
+				default:
+					return null;
+			}
+		}
+
+		return WP_CSS_Builder::string( implode( ' ', $plaintext_font_ident_parts ) );
+	}
+
+	/**
 	 * Sanitizes and formats font family names.
 	 *
 	 * - Applies `sanitize_text_field`.
