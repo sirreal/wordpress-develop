@@ -41,40 +41,40 @@
  *
  * Basic iteration:
  *
- *      $css = 'width: 10px;';
- *      $processor = WP_CSS_Token_Processor::create( $css );
- *      while ( $processor->next_token() ) {
- *          echo $processor->get_normalized_token();
- *      }
- *      // Outputs:
- *      // width: 10px;
+ *     $css = 'width: 10px;';
+ *     $processor = WP_CSS_Token_Processor::create( $css );
+ *     while ( $processor->next_token() ) {
+ *         echo $processor->get_normalized_token();
+ *     }
+ *     // Outputs:
+ *     // width: 10px;
  *
  * Rewriting a URL while keeping the rest of the stylesheet intact:
  *
- *      $css = 'background: url(old.jpg) center / cover;';
- *      $processor = WP_CSS_Token_Processor::create( $css );
- *      while ( $processor->next_token() ) {
- *          if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
- *              $processor->set_value( 'uploads/new.jpg' );
- *          }
- *      }
- *      $result = $processor->get_updated_css();
- *      // background: url(uploads/new.jpg) center / cover;
+ *     $css = 'background: url(old.jpg) center / cover;';
+ *     $processor = WP_CSS_Token_Processor::create( $css );
+ *     while ( $processor->next_token() ) {
+ *         if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
+ *             $processor->set_value( 'uploads/new.jpg' );
+ *         }
+ *     }
+ *     $result = $processor->get_updated_css();
+ *     // background: url(uploads/new.jpg) center / cover;
  *
  * Gathering diagnostics with byte offsets:
  *
- *      $css = "color: red;\ncolor: re\nd;";
- *      $processor = WP_CSS_Token_Processor::create( $css );
- *      $bad_strings = array();
- *      while ( $processor->next_token() ) {
- *          if ( WP_CSS_Token_Processor::TOKEN_BAD_STRING === $processor->get_token_type() ) {
- *              $bad_strings[] = array(
- *                  'start'  => $processor->get_token_start(),
- *                  'length' => $processor->get_token_length(),
- *                  'value'  => $processor->get_unnormalized_token(),
- *              );
- *          }
- *      }
+ *     $css = "color: red;\ncolor: re\nd;";
+ *     $processor = WP_CSS_Token_Processor::create( $css );
+ *     $bad_strings = array();
+ *     while ( $processor->next_token() ) {
+ *         if ( WP_CSS_Token_Processor::TOKEN_BAD_STRING === $processor->get_token_type() ) {
+ *             $bad_strings[] = array(
+ *                 'start'  => $processor->get_token_start(),
+ *                 'length' => $processor->get_token_length(),
+ *                 'value'  => $processor->get_unnormalized_token(),
+ *             );
+ *         }
+ *     }
  *
  * @see https://www.w3.org/TR/css-syntax-3/#tokenization
  */
