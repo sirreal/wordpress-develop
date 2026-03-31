@@ -59,7 +59,7 @@ class WP_Font_Utils {
 	 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
 	 *
 	 * @param string $font_family CSS text @font-face font-family value.
-	 * @return string Normalized value.
+	 * @return string|null Normalized value or null if the value could not be normalized.
 	 */
 	public static function normalize_css_font_face_font_family( string $font_family ): ?string {
 		$processor = WP_CSS_Token_Processor::create( $font_family );
@@ -74,8 +74,7 @@ class WP_Font_Utils {
 
 		$token_type = $processor->get_token_type();
 		if ( WP_CSS_Token_Processor::TOKEN_STRING === $token_type ) {
-			$plaintext_font_family = $processor->get_token_value();
-			return WP_CSS_Builder::string( $plaintext_font_family );
+			return WP_CSS_Builder::string( $processor->get_token_value() );
 		}
 
 		/**
