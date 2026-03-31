@@ -97,7 +97,7 @@ class WP_Font_Utils {
 		while ( $processor->next_token() ) {
 			switch ( $processor->get_token_type() ) {
 				case WP_CSS_Token_Processor::TOKEN_IDENT:
-					$plaintext_font_family[] = $processor->get_token_value();
+					$plaintext_font_ident_parts[] = $processor->get_token_value();
 					break;
 
 				case WP_CSS_Token_Processor::TOKEN_WHITESPACE:
