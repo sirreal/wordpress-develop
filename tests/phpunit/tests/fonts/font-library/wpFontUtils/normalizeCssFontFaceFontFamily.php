@@ -33,7 +33,12 @@ class Tests_Fonts_WpFontUtils_normalizeCssFontFaceFontFamily extends WP_UnitTest
 		yield 'Already normalized' => array( '"Font"', '"Font"' );
 		yield 'Unquoted' => array( 'Font', '"Font"' );
 		yield 'Multiple idents' => array( 'Font Name', '"Font Name"' );
-		yield 'Unitless number?' => array( 'Libre Barcode 128 Text', null );
-		yield 'Unitful number?' => array( '10px Size', null );
+		yield 'Number' => array( 'Libre Barcode 128 Text', null );
+		yield 'PX unit number' => array( '10px rest', null );
+		yield '% unit number' => array( '10px rest', null );
+		yield 'Weird unit number' => array( '20xYz rest', null );
+		yield 'Negative number' => array( '-30deg rest', null );
+		yield 'Positive number' => array( '+40rad rest', null );
+		yield 'Multiple ident spaces normalized' => array( "A\nB\rC\r\nD\tE\fF", '"A B C D E F"' );
 	}
 }
