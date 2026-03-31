@@ -101,7 +101,7 @@ class WP_Font_Utils {
 					break;
 
 				case WP_CSS_Token_Processor::TOKEN_WHITESPACE:
-					continue;
+					continue 2;
 
 				/**
 				 * Comma tokens suggest this was a multi-value font-family (for qualified rules, not
