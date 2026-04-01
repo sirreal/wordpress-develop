@@ -16,6 +16,7 @@
 	<testsuites>
 		<testsuite name="css-api">
 
+<file>wpCssProcessor.php</file>
 <file>wpCssTokenProcessor.php</file>
 <file>wpCssBuilder.php</file>
 

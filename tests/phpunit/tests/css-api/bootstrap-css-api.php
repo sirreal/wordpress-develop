@@ -21,8 +21,9 @@ require_once __DIR__ . '/../../../../src/wp-includes/html-api/class-wp-html-proc
 require_once __DIR__ . '/../../../../src/wp-includes/html-api/class-wp-html-processor.php';
 
 require_once __DIR__ . '/../../../../src/wp-includes/compat-utf8.php';
-require_once __DIR__ . '/../../../../src/wp-includes/css-api/class-wp-css-token-processor.php';
 require_once __DIR__ . '/../../../../src/wp-includes/css-api/class-wp-css-builder.php';
+require_once __DIR__ . '/../../../../src/wp-includes/css-api/class-wp-css-token-processor.php';
+require_once __DIR__ . '/../../../../src/wp-includes/css-api/class-wp-css-processor.php';
 
 
 if ( ! function_exists( 'wp_kses_uri_attributes' ) ) {
