@@ -45,5 +45,6 @@ class Tests_Fonts_WpFontUtils_normalizeCssFontFaceFontFamily extends WP_UnitTest
 		yield 'Weird unit number' => array( '20xYz rest', '"20xYz rest"' );
 		yield 'Negative number' => array( '-30deg rest', '"-30deg rest"' );
 		yield 'Positive number' => array( '+40rad rest', '"+40rad rest"' );
+		yield 'Whitespace is trimmed' => array( " \t\n\r\f Oh no 42 \t\f\r\n", '"Oh no 42"' );
 	}
 }

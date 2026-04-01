@@ -66,7 +66,8 @@ class WP_Font_Utils {
 	 * @return string Normalized value or null if the value could not be normalized.
 	 */
 	public static function normalize_css_font_face_font_family( string $font_family ): string {
-		$font_family = wp_scrub_utf8( $font_family );
+		// Scrub and CSS trim whitespace.
+		$font_family = trim( wp_scrub_utf8( $font_family ), "\t\n\f\r " );
 		$processor   = WP_CSS_Token_Processor::create( $font_family );
 		assert( null !== $processor, 'A valid processor must be created' );
 
