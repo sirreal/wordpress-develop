@@ -35,6 +35,14 @@ class Tests_Fonts_WpFontUtils_normalizeCssFontFaceFontFamily extends WP_UnitTest
 		yield 'Unquoted' => array( 'Font', '"Font"' );
 		yield 'Multiple idents' => array( 'Font Name', '"Font Name"' );
 		yield 'Idents and whitespace normalized' => array( "A\nB\rC\r\nD\tE\fF", '"A B C D E F"' );
+		yield 'Ident escapes normalized' => array( 'F\\o\\n\\74  \\34 2\\21', '"Font 42!"' );
+		yield 'String escapes normalized' => array( '"F\\o\\n\\74  \\"\\34 2\\21\\""', '"Font \\22 42!\\22 "' );
+
+		// Discard excess
+		yield 'String + ident' => array( '"string"strip', '"string"' );
+		yield 'String + number' => array( '"string"0', '"string"' );
+		yield 'String + ,' => array( '"string",', '"string"' );
+		yield 'Ident + ,' => array( 'ident,', '"ident"' );
 
 		// Invalid CSS font-family is treated as a plain string.
 		yield 'Input with stray single quote' => array( "O'er the rainbow", '"O\27 er the rainbow"' );
