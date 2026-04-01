@@ -885,7 +885,7 @@ class Tests_REST_WpRestFontFacesController extends WP_Test_REST_Controller_Testc
 					'preview'               => "   https://example.com/</style><script>alert('XSS');</script>      ",
 				),
 				'expected' => array(
-					'fontFamily'            => '"Open Sans"',
+					'fontFamily'            => '"Open   Sans\\3C /style\\3E \\3C script\\3E alert(\\27 XSS\\27 )\\3B \\3C /script\\3E "',
 					'fontStyle'             => 'oblique 20deg 50deg',
 					'fontWeight'            => '200',
 					'src'                   => 'https://example.com//stylescriptalert(\'XSS\');/script%20%20%20%20%20%20',
