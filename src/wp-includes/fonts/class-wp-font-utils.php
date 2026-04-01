@@ -123,6 +123,135 @@ class WP_Font_Utils {
 	}
 
 	/**
+	 * Normalize a CSS qualified rule font-family value.
+	 *
+	 * Warning! This function is unsuitable for `@font-face` `font-family` values. {@see WP_Font_Utils::normalize_css_font_face_font_family()} should be used for @font-face.
+	 * > Value:
+	 * >     [ <family-name> | <generic-family> ]#
+	 * > Computed value:
+	 * >     list, each item a string and/or <generic-family> keywords
+	 *
+	 * @see https://drafts.csswg.org/css-fonts/#font-family-prop
+	 * @see https://www.w3.org/TR/css-syntax-3/#parse-comma-list
+	 */
+	public static function normalize_css_font_family( string $font_family ): string {
+		// Scrub and CSS trim whitespace.
+		$font_family = trim( wp_scrub_utf8( $font_family ), "\t\n\f\r " );
+		$processor   = WP_CSS_Token_Processor::create( $font_family );
+		assert( null !== $processor, 'A valid processor must be created' );
+
+		/*
+		 * States for the parser:
+		 *  0 = ITEM_START:    expecting start of a new comma-separated item
+		 *  1 = AFTER_STRING:  saw a string, expecting comma or EOF
+		 *  2 = IN_IDENTS:     collecting ident tokens
+		 *  3 = IN_GENERIC:    inside generic() function, collecting idents
+		 *  4 = AFTER_GENERIC: after closing ) of generic(), expecting comma or EOF
+		 */
+		$state       = 0;
+		$items       = array();
+		$ident_parts = array();
+
+		while ( $processor->next_token() ) {
+			$type = $processor->get_token_type();
+
+			// Whitespace and comments are skipped in all states.
+			if (
+				WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ||
+				WP_CSS_Token_Processor::TOKEN_COMMENT === $type
+			) {
+				continue;
+			}
+
+			switch ( $state ) {
+				case 0: // ITEM_START
+					if ( WP_CSS_Token_Processor::TOKEN_STRING === $type ) {
+						$items[] = WP_CSS_Builder::string( $processor->get_token_value() );
+						$state   = 1;
+					} elseif ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts = array( $processor->get_token_value() );
+						$state       = 2;
+					} elseif ( WP_CSS_Token_Processor::TOKEN_FUNCTION === $type && 'generic' === strtolower( $processor->get_token_value() ) ) {
+						$ident_parts = array();
+						$state       = 3;
+					} else {
+						return '';
+					}
+					break;
+
+				case 1: // AFTER_STRING
+					if ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$state = 0;
+					} else {
+						return '';
+					}
+					break;
+
+				case 2: // IN_IDENTS
+					if ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts[] = $processor->get_token_value();
+					} elseif ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$items[] = implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) );
+						$state   = 0;
+					} else {
+						return '';
+					}
+					break;
+
+				case 3: // IN_GENERIC
+					if ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts[] = $processor->get_token_value();
+					} elseif ( WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN === $type ) {
+						if ( empty( $ident_parts ) ) {
+							return '';
+						}
+						$items[] = 'generic(' . implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) ) . ')';
+						$state   = 4;
+					} else {
+						return '';
+					}
+					break;
+
+				case 4: // AFTER_GENERIC
+					if ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$state = 0;
+					} else {
+						return '';
+					}
+					break;
+			}
+		}
+
+		// Finalize last item based on state at EOF.
+		switch ( $state ) {
+			case 0:
+				// EOF at ITEM_START: either empty input or trailing comma.
+				if ( empty( $items ) ) {
+					return '';
+				}
+				// Trailing comma — last item was followed by comma but no next item.
+				return '';
+
+			case 1: // String at EOF — already added to items.
+			case 4: // After generic close at EOF — already added to items.
+				break;
+
+			case 2: // Ident sequence at EOF — finalize.
+				$items[] = implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) );
+				break;
+
+			case 3: // Inside unclosed generic() — invalid.
+				return '';
+		}
+
+		if ( empty( $items ) ) {
+			return '';
+		}
+
+		return implode( ', ', $items );
+	}
+
+	/**
 	 * Sanitizes and formats font family names.
 	 *
 	 * - Applies `sanitize_text_field`.

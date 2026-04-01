@@ -2,6 +2,79 @@
 
 abstract class WP_CSS_Builder {
 	/**
+	 * Create a CSS ident token from a plain PHP string value.
+	 *
+	 * Characters not valid in CSS identifiers are hex-escaped. This uses
+	 * the same safety escaping as {@see WP_CSS_Builder::string()} for HTML
+	 * and CSS-sensitive characters, plus escaping of whitespace and other
+	 * characters not permitted in idents.
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
+	 * @see https://www.w3.org/TR/css-syntax-3/#would-start-an-identifier
+	 *
+	 * @param string $value Decoded string value to encode as a CSS ident.
+	 * @return string CSS ident token text.
+	 */
+	public static function ident( string $value ): string {
+		$result = '';
+		$length = strlen( $value );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $value[ $i ] );
+
+			// NULL → U+FFFD REPLACEMENT CHARACTER.
+			if ( 0x00 === $byte ) {
+				$result .= "\u{FFFD}";
+				continue;
+			}
+
+			// Non-ASCII bytes (≥ 0x80): valid in idents, pass through.
+			if ( $byte >= 0x80 ) {
+				$result .= $value[ $i ];
+				continue;
+			}
+
+			// ASCII letters and underscore: always valid in idents.
+			if (
+				( $byte >= 0x41 && $byte <= 0x5A ) || // A-Z
+				( $byte >= 0x61 && $byte <= 0x7A ) || // a-z
+				0x5F === $byte                         // _
+			) {
+				$result .= $value[ $i ];
+				continue;
+			}
+
+			// Hyphen: valid in idents, but check for hyphen-digit at start.
+			if ( 0x2D === $byte ) {
+				// Hyphen at position 0 followed by a digit at position 1: escape the digit.
+				if ( 0 === $i && $i + 1 < $length && ord( $value[ $i + 1 ] ) >= 0x30 && ord( $value[ $i + 1 ] ) <= 0x39 ) {
+					$result .= '-';
+					++$i;
+					$result .= sprintf( '\\%X ', ord( $value[ $i ] ) );
+					continue;
+				}
+				$result .= '-';
+				continue;
+			}
+
+			// Digits: valid except at position 0.
+			if ( $byte >= 0x30 && $byte <= 0x39 ) {
+				if ( 0 === $i ) {
+					$result .= sprintf( '\\%X ', $byte );
+				} else {
+					$result .= $value[ $i ];
+				}
+				continue;
+			}
+
+			// Everything else: hex-escape.
+			$result .= sprintf( '\\%X ', $byte );
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Create a quoted CSS string from a plain PHP string value.
 	 *
 	 * Example:

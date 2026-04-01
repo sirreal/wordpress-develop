@@ -103,4 +103,48 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 
 		$this->assertSame( $expected, WP_CSS_Builder::string( $input ) );
 	}
+
+	/**
+	 * Tests WP_CSS_Builder::ident() produces valid CSS ident tokens.
+	 *
+	 * @ticket TBD
+	 *
+	 * @dataProvider data_ident
+	 *
+	 * @covers ::ident
+	 */
+	public function test_ident( string $input, string $expected ): void {
+		$this->assertSame( $expected, WP_CSS_Builder::ident( $input ) );
+	}
+
+	/**
+	 * Data provider for ident() tests.
+	 */
+	public static function data_ident(): Generator {
+		// Simple idents — no escaping needed.
+		yield 'Simple alpha ident' => array( 'serif', 'serif' );
+		yield 'Hyphenated ident' => array( 'sans-serif', 'sans-serif' );
+		yield 'Underscore prefix' => array( '_foo', '_foo' );
+		yield 'Single char' => array( 'a', 'a' );
+		yield 'Custom property prefix' => array( '--custom', '--custom' );
+
+		// Invalid ident starts — must be escaped.
+		yield 'Leading digits' => array( '123', '\\31 23' );
+		yield 'Leading digit with alpha' => array( '5foo', '\\35 foo' );
+		yield 'Hyphen then digit' => array( '-5px', '-\\35 px' );
+		yield 'Leading space' => array( ' leading-space', '\\20 leading-space' );
+		yield 'Leading tab' => array( "\tleading-tab", '\\9 leading-tab' );
+
+		// Whitespace within ident.
+		yield 'Space within' => array( 'My Font', 'My\\20 Font' );
+		yield 'Multiple spaces within' => array( 'a b c', 'a\\20 b\\20 c' );
+		yield 'Tab within' => array( "has\ttab", 'has\\9 tab' );
+		yield 'Newline within' => array( "has\nnewline", 'has\\A newline' );
+
+		// Special characters.
+		yield 'Apostrophe' => array( "Font's", 'Font\\27 s' );
+		yield 'Angle brackets' => array( '<html>', '\\3C html\\3E ' );
+		yield 'Comma' => array( 'a,b', 'a\\2C b' );
+		yield 'Semicolon' => array( 'a;b', 'a\\3B b' );
+	}
 }
