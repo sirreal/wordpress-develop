@@ -30,15 +30,20 @@ class Tests_Fonts_WpFontUtils_normalizeCssFontFaceFontFamily extends WP_UnitTest
 	 * Data provider.
 	 */
 	public static function data_provider(): Generator {
+		// Valid CSS font-family
 		yield 'Already normalized' => array( '"Font"', '"Font"' );
 		yield 'Unquoted' => array( 'Font', '"Font"' );
 		yield 'Multiple idents' => array( 'Font Name', '"Font Name"' );
-		yield 'Number' => array( 'Libre Barcode 128 Text', null );
-		yield 'PX unit number' => array( '10px rest', null );
-		yield '% unit number' => array( '10px rest', null );
-		yield 'Weird unit number' => array( '20xYz rest', null );
-		yield 'Negative number' => array( '-30deg rest', null );
-		yield 'Positive number' => array( '+40rad rest', null );
-		yield 'Multiple ident spaces normalized' => array( "A\nB\rC\r\nD\tE\fF", '"A B C D E F"' );
+		yield 'Idents and whitespace normalized' => array( "A\nB\rC\r\nD\tE\fF", '"A B C D E F"' );
+
+		// Invalid CSS font-family is treated as a plain string.
+		yield 'Input with stray single quote' => array( "O'er the rainbow", '"O\27 er the rainbow"' );
+		yield 'Input with stray double quote' => array( 'Oop"sie', '"Oop\22 sie"' );
+		yield 'Number' => array( 'Libre Barcode 128 Text', '"Libre Barcode 128 Text"' );
+		yield 'PX unit number' => array( '10px rest', '"10px rest"' );
+		yield '% unit number' => array( '10px rest', '"10px rest"' );
+		yield 'Weird unit number' => array( '20xYz rest', '"20xYz rest"' );
+		yield 'Negative number' => array( '-30deg rest', '"-30deg rest"' );
+		yield 'Positive number' => array( '+40rad rest', '"+40rad rest"' );
 	}
 }

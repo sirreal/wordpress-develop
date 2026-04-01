@@ -43,29 +43,32 @@ class WP_Font_Utils {
 	/**
 	 * Normalize @font-face font-family CSS text.
 	 *
-	 * This function attempts to be generous in the allowed values:
+	 * The return value is always normalized to a quoted CSS string.
+	 *
 	 * - Valid @font-face font-family values must return a semantically equivalent result.
 	 * - Normalization must be idempotent.
-	 * - Common mistakes such as providing multiple comma-separated font-family values return a
-	 *   normalization of the first item: `a, b` becomes `"a"`.
-	 * - Invalid trailing content is ignored:  `"string" garbage` becomes `"string"`.
+	 * - If a CSS string is the first value, it will be used discarding subsequent text.
+	 * - The first valid value in a CSS comma-separated list will be used discarding subsequent text.
+	 * - If the value does not appear to be valid CSS or start with a valid CSS
+	 *   @font-face font-family, treat the entire input as a plain string for normalization.
+	 *
+	 * Relevant notes from the CSS specification:
 	 *
 	 * > Syntax of <family-name>
 	 * >     <family-name> = <string> | <custom-ident>+
-	 *
+	 * > …
 	 * > To avoid mistakes in escaping, it is recommended to quote font family names that contain
 	 * > white space, digits, or punctuation characters other than hyphens
 	 *
 	 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
 	 *
 	 * @param string $font_family CSS text @font-face font-family value.
-	 * @return string|null Normalized value or null if the value could not be normalized.
+	 * @return string Normalized value or null if the value could not be normalized.
 	 */
-	public static function normalize_css_font_face_font_family( string $font_family ): ?string {
-		$processor = WP_CSS_Token_Processor::create( $font_family );
-		if ( null === $processor ) {
-			return null;
-		}
+	public static function normalize_css_font_face_font_family( string $font_family ): string {
+		$font_family = wp_scrub_utf8( $font_family );
+		$processor   = WP_CSS_Token_Processor::create( $font_family );
+		assert( null !== $processor, 'A valid processor must be created' );
 
 		// Ignore leading whitespace tokens.
 		while ( $processor->next_token() && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $processor->get_token_type() ) {
@@ -82,7 +85,7 @@ class WP_Font_Utils {
 		 * font-family invalid.
 		 */
 		if ( WP_CSS_Token_Processor::TOKEN_IDENT !== $token_type ) {
-			return null;
+			return WP_CSS_Builder::string( $font_family );
 		}
 
 		/**
@@ -111,7 +114,7 @@ class WP_Font_Utils {
 
 				// Anything else is an error.
 				default:
-					return null;
+					return WP_CSS_Builder::string( $font_family );
 			}
 		}
 
