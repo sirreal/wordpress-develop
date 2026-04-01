@@ -35,7 +35,7 @@ class WP_Font_Utils {
 		$item  = trim( $item );
 		if ( preg_match( $regex, $item ) ) {
 			$item = trim( $item, "\"'" );
-			return '"' . $item . '"';
+			return WP_CSS_Builder::string( $item );
 		}
 		return $item;
 	}
