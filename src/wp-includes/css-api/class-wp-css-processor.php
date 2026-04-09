@@ -7,6 +7,16 @@ class WP_CSS_Processor {
 	 * Returns true if the input contains exactly one CSS rule
 	 * (at-rule or qualified rule), false for syntax errors.
 	 *
+	 * > 5.3.5. Parse a rule
+	 * > To parse a rule from input:
+	 * > 1. Normalize input, and set input to the result.
+	 * > 2. While the next input token from input is a <whitespace-token>, consume the next input token from input.
+	 * > 3. If the next input token from input is an <EOF-token>, return a syntax error.
+	 * >    Otherwise, if the next input token from input is an <at-keyword-token>, consume an at-rule from input, and let rule be the return value.
+	 * >    Otherwise, consume a qualified rule from input and let rule be the return value. If nothing was returned, return a syntax error.
+	 * > 4. While the next input token from input is a <whitespace-token>, consume the next input token from input.
+	 * > 5. If the next input token from input is an <EOF-token>, return rule. Otherwise, return a syntax error.
+	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#parse-a-rule
 	 *
 	 * @param string $css The CSS input.
@@ -79,9 +89,13 @@ class WP_CSS_Processor {
 			}
 
 			if ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $type ) {
-				self::consume_simple_block( $processor );
+				self::consume_simple_block( $processor, WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE );
 				return;
 			}
+
+			// Consume component values so that `;` and `{` inside
+			// paired tokens ((), [], functions) are not misidentified.
+			self::consume_component_value( $processor );
 		}
 		// EOF: at-rule is still returned per spec.
 	}
@@ -96,47 +110,65 @@ class WP_CSS_Processor {
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
 	 */
 	private static function consume_qualified_rule( WP_CSS_Token_Processor $processor ): bool {
-		// The processor is already on the first token of the prelude.
-		// Check if it's already a left brace.
-		if ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $processor->get_token_type() ) {
-			self::consume_simple_block( $processor );
-			return true;
-		}
-
-		while ( $processor->next_token() ) {
+		/*
+		 * The processor is already positioned on the first token.
+		 * Loop starting from the current token, then continue with next_token().
+		 */
+		do {
 			if ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $processor->get_token_type() ) {
-				self::consume_simple_block( $processor );
+				self::consume_simple_block( $processor, WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE );
 				return true;
 			}
-		}
+
+			// Consume component values so that `{` inside
+			// paired tokens ((), [], functions) is not misidentified.
+			self::consume_component_value( $processor );
+		} while ( $processor->next_token() );
 
 		// EOF without finding a block → return nothing (syntax error).
 		return false;
 	}
 
 	/**
+	 * Consumes a component value from the token stream.
+	 *
+	 * The processor must be positioned on the current token. If the token
+	 * opens a paired block — `(`, `[`, or a function token — the entire
+	 * block is consumed up to the matching close token or EOF.
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
+	 */
+	private static function consume_component_value( WP_CSS_Token_Processor $processor ): void {
+		$type = $processor->get_token_type();
+
+		if ( WP_CSS_Token_Processor::TOKEN_LEFT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_FUNCTION === $type ) {
+			self::consume_simple_block( $processor, WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN );
+		} elseif ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET === $type ) {
+			self::consume_simple_block( $processor, WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET );
+		} elseif ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $type ) {
+			self::consume_simple_block( $processor, WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE );
+		}
+	}
+
+	/**
 	 * Consumes a simple block from the token stream.
 	 *
-	 * The processor must be positioned on a left brace token.
-	 * Consumes tokens until the matching right brace or EOF,
-	 * tracking nested brace pairs.
+	 * The processor must be positioned on the opening token.
+	 * Consumes tokens until the matching ending token or EOF.
+	 * Nested component values (paired tokens) are consumed recursively.
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
+	 *
+	 * @param WP_CSS_Token_Processor $processor    The token processor.
+	 * @param string                 $ending_token The token type that closes this block.
 	 */
-	private static function consume_simple_block( WP_CSS_Token_Processor $processor ): void {
-		$depth = 1;
-
+	private static function consume_simple_block( WP_CSS_Token_Processor $processor, string $ending_token ): void {
 		while ( $processor->next_token() ) {
-			$type = $processor->get_token_type();
-
-			if ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $type ) {
-				++$depth;
-			} elseif ( WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE === $type ) {
-				--$depth;
-				if ( 0 === $depth ) {
-					return;
-				}
+			if ( $ending_token === $processor->get_token_type() ) {
+				return;
 			}
+
+			self::consume_component_value( $processor );
 		}
 		// EOF: block is still returned per spec.
 	}

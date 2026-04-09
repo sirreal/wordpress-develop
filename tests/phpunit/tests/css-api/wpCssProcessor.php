@@ -117,6 +117,62 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 		yield 'Leading comment' => array( '/* comment */ .a { }' );
 		yield 'Trailing comment' => array( '.a { } /* comment */' );
 		yield 'Comments around at-rule' => array( '/* c1 */ @media screen { } /* c2 */' );
+
+		/*
+		 * Strings and URLs containing braces (tokenizer treats these as
+		 * single tokens, so braces inside must not affect block matching).
+		 */
+		yield 'String with closing brace in block' => array( '.a { content: "}" }' );
+		yield 'String with opening brace in block' => array( '.a { content: "{" }' );
+		yield 'String with braces in block' => array( '.a { content: "{ }" }' );
+		yield 'URL with closing brace in block' => array( ".a { background: url(a}) }" );
+
+		/*
+		 * Functional notation and paired tokens in preludes.
+		 */
+		yield 'Functional pseudo-class in prelude' => array( '.a:has(.b) { }' );
+		yield 'Nested parens and brackets in qualified prelude' => array( '.a:not([b]) { }' );
+		yield 'Parens with brace in at-rule prelude (string)' => array( '@supports (content: "{") { }' );
+		yield 'Brackets in at-rule prelude' => array( '@foo [screen] { }' );
+		yield 'Semicolon inside brackets in at-rule prelude' => array( '@foo [ ; ] { }' );
+		yield 'Brace inside brackets in at-rule prelude' => array( '@foo [{] { }' );
+		yield 'Brace inside function in at-rule prelude' => array( '@media func({) { }' );
+
+		/*
+		 * Escaped characters in preludes.
+		 */
+		yield 'Escaped open brace in prelude' => array( '.a\{ { }' );
+		yield 'Escaped close brace in prelude' => array( '.a\} { }' );
+
+		/*
+		 * Nested at-rules inside blocks.
+		 */
+		yield 'Nested at-rule inside media' => array( '@media screen { @font-face { } }' );
+		yield 'Multiple nested rules inside media' => array( '@media screen { .a { } .b { } }' );
+
+		/*
+		 * CDO/CDC tokens (<!-- -->) in prelude.
+		 */
+		yield 'CDO and CDC in qualified prelude' => array( '<!-- --> { }' );
+		yield 'CDO and CDC in at-rule prelude' => array( '@foo <!-- --> { }' );
+
+		/*
+		 * Unclosed blocks (spec returns rule on EOF inside block).
+		 */
+		yield 'Unclosed qualified rule block' => array( '.a { color: red' );
+		yield 'Unclosed at-rule block' => array( '@media screen { .a { color: red' );
+		yield 'Unclosed nested block' => array( '.a { .b {' );
+
+		/*
+		 * Additional edge cases from CSS parsing test suites.
+		 */
+		yield 'At-rule with prelude and trailing comment' => array( '@foo bar; 	/* comment */' );
+		yield 'At-rule with bracket and paren nesting' => array( ' /**/ @foo bar{[(4' );
+		yield 'At-rule unclosed block with content' => array( '@foo { bar' );
+		yield 'At-rule with unclosed bracket in prelude' => array( '@foo [ bar' );
+		yield 'Qualified rule with surrounding comments' => array( ' /**/ div > p { color: #aaa;  } /**/ ' );
+		yield 'Empty prelude unclosed block with comment' => array( ' /**/ { color: #aaa  ' );
+		yield 'CDO CDC not special in prelude' => array( ' /* CDO/CDC are not special */ <!-- --> {' );
 	}
 
 	public static function data_invalid_rules(): Generator {
@@ -162,5 +218,27 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 		yield 'Just a closing brace' => array( '}' );
 		yield 'Just a colon' => array( ':' );
 		yield 'Just a comma' => array( ',' );
+
+		/*
+		 * @ sign not followed by ident (tokenizer produces DELIM, not AT_KEYWORD).
+		 * Treated as qualified rule prelude — no block → syntax error.
+		 */
+		yield 'Bare @ sign' => array( '@' );
+		yield '@ then semicolon' => array( '@;' );
+
+		/*
+		 * Braces inside () or [] in qualified rule prelude are consumed as
+		 * component values, not as the rule's block. The qualified rule never
+		 * finds its block → EOF → nothing.
+		 */
+		yield 'Brace inside parens in qualified prelude' => array( '.a:has({) { }' );
+		yield 'Brace inside brackets in qualified prelude' => array( '[x={] { }' );
+
+		/*
+		 * Additional edge cases from CSS parsing test suites.
+		 */
+		yield 'Two qualified rules with declarations' => array( 'div { color: #aaa; } p{}' );
+		yield 'Qualified rule then CDC' => array( 'div {} -->' );
+		yield 'Empty block then ident' => array( '{}a' );
 	}
 }
