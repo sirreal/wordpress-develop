@@ -124,4 +124,116 @@ abstract class WP_CSS_Builder {
 		);
 		return "\"{$escaped}\"";
 	}
+
+	public static function normalize_and_escape_css( string $css ): string {
+		$css = wp_scrub_utf8( $css );
+		$processor = WP_CSS_Token_Processor::create( $css );
+		if ( null === $processor ) {
+			return '';
+		}
+
+		$normalized_css = '';
+
+		while ( $processor->next_token() ) {
+			switch ( $processor->get_token_type() ) {
+
+				// Basic punctuation:
+				case WP_CSS_Token_Processor::TOKEN_SEMICOLON: $normalized_css .= ';'; break;
+				case WP_CSS_Token_Processor::TOKEN_COMMA: $normalized_css .= ','; break;
+				case WP_CSS_Token_Processor::TOKEN_WHITESPACE: $normalized_css .= ' '; break;
+				case WP_CSS_Token_Processor::TOKEN_COLON: $normalized_css .= ':'; break;
+
+				// Paired punctuation:
+				case WP_CSS_Token_Processor::TOKEN_LEFT_BRACE: $normalized_css .= '{'; break;
+				case WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE: $normalized_css .= '}'; break;
+				case WP_CSS_Token_Processor::TOKEN_LEFT_PAREN: $normalized_css .= '('; break;
+				case WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN: $normalized_css .= ')'; break;
+				case WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET: $normalized_css .= '['; break;
+				case WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET: $normalized_css .= ']'; break;
+
+				// "@" + ident
+				case WP_CSS_Token_Processor::TOKEN_AT_KEYWORD:
+					$normalized_css .= '@' . self::ident( $processor->get_token_value() );
+					break;
+
+				// ident + "("
+				case WP_CSS_Token_Processor::TOKEN_FUNCTION:
+					$normalized_css .= self::ident( $processor->get_token_value() ) . '(';
+					break;
+
+				/*
+				 * Hash tokens are not idents but their value can be escaped as such.
+				 *
+				 *     ‖→ "#" →─┐   ┌──────────────────────────────┐   ┌─→‖
+				 *              ├─→─┤ a-z A-Z 0-9 _ - or non-ASCII ├─→─┤
+				 *              │   └──────────────────────────────┘   │
+				 *              │   ┌──────────────────────────────┐   │
+				 *              ├─→─┤            escape            ├─→─┤
+				 *              │   └──────────────────────────────┘   │
+				 *              └──────────────────←───────────────────┘
+				 */
+				case WP_CSS_Token_Processor::TOKEN_HASH:
+					$normalized_css .= '#' . self::ident( $processor->get_token_value() );
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_DIMENSION:
+					$normalized_css .= $processor->get_token_value() . $processor->get_token_unit();
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_PERCENTAGE:
+					$normalized_css .= "%{$processor->get_token_value()}";
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_NUMBER:
+					$normalized_css .= $processor->get_token_value();
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_DELIM:
+					$normalized_css .= $processor->get_token_value();
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_IDENT:
+					$normalized_css .= self::ident( $processor->get_token_value() );
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_STRING:
+					var_dump( $processor->get_token_value() );
+					$normalized_css .= self::string( $processor->get_token_value() );
+					break;
+
+				// Keep or strip comments?
+				case WP_CSS_Token_Processor::TOKEN_COMMENT:
+					$normalized_css .= substr( $css, $processor->get_token_start(), $processor->get_token_length() );
+					break;
+
+				/**
+				 * A <bad-string-token> is an open string that reaches a newline.
+				 *
+				 * @see https://www.w3.org/TR/css-syntax-3/#consume-string-token
+				 *
+				 * @see https://www.w3.org/TR/css-syntax-3/#preserved-tokens
+				 * > Note: The tokens <}-token>s, <)-token>s, <]-token>, <bad-string-token>, and <bad-url-token> are always parse errors, but they are preserved in the token stream by this specification to allow other specs, such as Media Queries, to define more fine-grained error-handling than just dropping an entire declaration or block.
+				 */
+				case WP_CSS_Token_Processor::TOKEN_BAD_STRING:
+					$normalized_css .= substr( $css, $processor->get_token_start(), $processor->get_token_length() ) . "\n";
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_URL:
+				case WP_CSS_Token_Processor::TOKEN_BAD_URL:
+				case WP_CSS_Token_Processor::TOKEN_CDC:
+				case WP_CSS_Token_Processor::TOKEN_CDO:
+				default:
+					throw new Error( 'unhandled token type ' . $processor->get_token_type() . ' with value ' . var_export( $processor->get_token_value(), true ) );
+			}
+		}
+
+		return strtr(
+			$normalized_css,
+			array(
+				' ' => '␠',
+				"\t" => "␉\t",
+				"\n" => "␊\n",
+			)
+		);
+	}
 }
