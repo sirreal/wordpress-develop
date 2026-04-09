@@ -241,4 +241,177 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 		yield 'Qualified rule then CDC' => array( 'div {} -->' );
 		yield 'Empty block then ident' => array( '{}a' );
 	}
+
+	/**
+	 * @ticket TBD
+	 * @dataProvider data_parse_a_list_of_declarations
+	 * @covers ::parse_a_list_of_declarations
+	 */
+	public function test_parse_a_list_of_declarations( string $css, array $expected ): void {
+		$actual = array();
+		foreach ( WP_CSS_Processor::parse_a_list_of_declarations( $css ) as $name => $value ) {
+			$actual[] = array( $name, $value );
+		}
+		$this->assertSame( $expected, $actual, "Declarations from: {$css}" );
+	}
+
+	public static function data_parse_a_list_of_declarations(): Generator {
+		// Basic declarations.
+		yield 'Single declaration' => array(
+			'color: red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Multiple declarations' => array(
+			'color: red; font-size: 16px',
+			array( array( 'color', 'red' ), array( 'font-size', '16px' ) ),
+		);
+		yield 'Declaration with semicolon terminator' => array(
+			'color: red;',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'No space after colon' => array(
+			'color:red',
+			array( array( 'color', 'red' ) ),
+		);
+
+		// Whitespace trimming.
+		yield 'Leading whitespace in value' => array(
+			'color:   red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Trailing whitespace in value' => array(
+			'color: red   ;',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Trailing whitespace at EOF' => array(
+			'color: red   ',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Whitespace around declaration' => array(
+			'  color: red  ;  font: bold  ',
+			array( array( 'color', 'red' ), array( 'font', 'bold' ) ),
+		);
+
+		// Empty and whitespace-only values.
+		yield 'Empty value with semicolon' => array(
+			'color: ;',
+			array( array( 'color', '' ) ),
+		);
+		yield 'Empty value at EOF' => array(
+			'color:',
+			array( array( 'color', '' ) ),
+		);
+		yield 'Whitespace-only value' => array(
+			'color:   ;',
+			array( array( 'color', '' ) ),
+		);
+
+		// Multi-token values.
+		yield 'Value with multiple tokens' => array(
+			'font: bold 14px/1.5 sans-serif',
+			array( array( 'font', 'bold 14px/1.5 sans-serif' ) ),
+		);
+		yield 'Value with !important' => array(
+			'color: red !important',
+			array( array( 'color', 'red !important' ) ),
+		);
+
+		// Values with blocks.
+		yield 'Function value' => array(
+			'color: var(--x)',
+			array( array( 'color', 'var(--x)' ) ),
+		);
+		yield 'Function with fallback' => array(
+			'color: var(--x, red)',
+			array( array( 'color', 'var(--x, red)' ) ),
+		);
+		yield 'Semicolon inside function' => array(
+			'--x: var(--y, a;b); color: red',
+			array( array( '--x', 'var(--y, a;b)' ), array( 'color', 'red' ) ),
+		);
+		yield 'Custom property with brace block' => array(
+			'--x: { a: b }',
+			array( array( '--x', '{ a: b }' ) ),
+		);
+		yield 'Nested functions' => array(
+			'background: linear-gradient(rgb(0, 0, 0), rgb(255, 255, 255))',
+			array( array( 'background', 'linear-gradient(rgb(0, 0, 0), rgb(255, 255, 255))' ) ),
+		);
+
+		// Comments.
+		yield 'Leading comment in value' => array(
+			'color: /* comment */ red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Comment between value tokens' => array(
+			'font: bold /* comment */ 14px',
+			array( array( 'font', 'bold /* comment */ 14px' ) ),
+		);
+		yield 'Trailing comment in value' => array(
+			'color: red /* comment */',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Comment between declarations' => array(
+			'color: red; /* comment */ font: bold',
+			array( array( 'color', 'red' ), array( 'font', 'bold' ) ),
+		);
+
+		// At-rules (consumed, not yielded).
+		yield 'At-rule before declaration' => array(
+			'@foo; color: red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'At-rule with block' => array(
+			'@media screen { body { color: red } } color: blue',
+			array( array( 'color', 'blue' ) ),
+		);
+		yield 'Only at-rules' => array(
+			'@foo; @bar {}',
+			array(),
+		);
+
+		// Error recovery.
+		yield 'No colon' => array(
+			'foo bar; color: red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Non-ident start' => array(
+			': red; color: blue',
+			array( array( 'color', 'blue' ) ),
+		);
+		yield 'Number start' => array(
+			'123 { }; color: red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Just semicolons' => array(
+			';;;',
+			array(),
+		);
+
+		// Empty and whitespace-only input.
+		yield 'Empty string' => array(
+			'',
+			array(),
+		);
+		yield 'Whitespace only' => array(
+			'   ',
+			array(),
+		);
+		yield 'Only comments' => array(
+			'/* comment */',
+			array(),
+		);
+
+		// Duplicate properties.
+		yield 'Duplicate properties' => array(
+			'color: red; color: blue',
+			array( array( 'color', 'red' ), array( 'color', 'blue' ) ),
+		);
+
+		// Escaped property names.
+		yield 'Escaped property name' => array(
+			'\63 olor: red',
+			array( array( 'color', 'red' ) ),
+		);
+	}
 }
