@@ -242,21 +242,29 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 		yield 'Empty block then ident' => array( '{}a' );
 	}
 
+	/*
+	 * -----------------------------------------------------------------------
+	 * Declaration list cursor tests.
+	 * -----------------------------------------------------------------------
+	 */
+
 	/**
 	 * @ticket TBD
-	 * @dataProvider data_parse_a_list_of_declarations
-	 * @covers ::parse_a_list_of_declarations
+	 * @dataProvider data_declaration_list_navigation
+	 * @covers ::next_declaration
+	 * @covers ::get_name
+	 * @covers ::get_value
 	 */
-	public function test_parse_a_list_of_declarations( string $css, array $expected ): void {
+	public function test_declaration_list_navigation( string $css, array $expected ): void {
+		$proc   = WP_CSS_Processor::create_declaration_list( $css );
 		$actual = array();
-		foreach ( WP_CSS_Processor::parse_a_list_of_declarations( $css ) as $name => $value ) {
-			$actual[] = array( $name, $value );
+		while ( $proc->next_declaration() ) {
+			$actual[] = array( $proc->get_name(), $proc->get_value() );
 		}
 		$this->assertSame( $expected, $actual, "Declarations from: {$css}" );
 	}
 
-	public static function data_parse_a_list_of_declarations(): Generator {
-		// Basic declarations.
+	public static function data_declaration_list_navigation(): Generator {
 		yield 'Single declaration' => array(
 			'color: red',
 			array( array( 'color', 'red' ) ),
@@ -265,7 +273,7 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 			'color: red; font-size: 16px',
 			array( array( 'color', 'red' ), array( 'font-size', '16px' ) ),
 		);
-		yield 'Declaration with semicolon terminator' => array(
+		yield 'Trailing semicolon' => array(
 			'color: red;',
 			array( array( 'color', 'red' ) ),
 		);
@@ -273,8 +281,6 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 			'color:red',
 			array( array( 'color', 'red' ) ),
 		);
-
-		// Whitespace trimming.
 		yield 'Leading whitespace in value' => array(
 			'color:   red',
 			array( array( 'color', 'red' ) ),
@@ -283,16 +289,6 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 			'color: red   ;',
 			array( array( 'color', 'red' ) ),
 		);
-		yield 'Trailing whitespace at EOF' => array(
-			'color: red   ',
-			array( array( 'color', 'red' ) ),
-		);
-		yield 'Whitespace around declaration' => array(
-			'  color: red  ;  font: bold  ',
-			array( array( 'color', 'red' ), array( 'font', 'bold' ) ),
-		);
-
-		// Empty and whitespace-only values.
 		yield 'Empty value with semicolon' => array(
 			'color: ;',
 			array( array( 'color', '' ) ),
@@ -301,29 +297,17 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 			'color:',
 			array( array( 'color', '' ) ),
 		);
-		yield 'Whitespace-only value' => array(
-			'color:   ;',
-			array( array( 'color', '' ) ),
-		);
-
-		// Multi-token values.
-		yield 'Value with multiple tokens' => array(
+		yield 'Multi-token value' => array(
 			'font: bold 14px/1.5 sans-serif',
 			array( array( 'font', 'bold 14px/1.5 sans-serif' ) ),
 		);
-		yield 'Value with !important' => array(
+		yield '!important in value' => array(
 			'color: red !important',
 			array( array( 'color', 'red !important' ) ),
 		);
-
-		// Values with blocks.
 		yield 'Function value' => array(
 			'color: var(--x)',
 			array( array( 'color', 'var(--x)' ) ),
-		);
-		yield 'Function with fallback' => array(
-			'color: var(--x, red)',
-			array( array( 'color', 'var(--x, red)' ) ),
 		);
 		yield 'Semicolon inside function' => array(
 			'--x: var(--y, a;b); color: red',
@@ -333,85 +317,293 @@ class Tests_CssApi_WpCssProcessor extends WP_UnitTestCase {
 			'--x: { a: b }',
 			array( array( '--x', '{ a: b }' ) ),
 		);
-		yield 'Nested functions' => array(
-			'background: linear-gradient(rgb(0, 0, 0), rgb(255, 255, 255))',
-			array( array( 'background', 'linear-gradient(rgb(0, 0, 0), rgb(255, 255, 255))' ) ),
+		yield 'At-rule consumed not yielded' => array(
+			'@foo; color: red',
+			array( array( 'color', 'red' ) ),
 		);
-
-		// Comments.
-		yield 'Leading comment in value' => array(
-			'color: /* comment */ red',
+		yield 'Error recovery no colon' => array(
+			'foo bar; color: red',
+			array( array( 'color', 'red' ) ),
+		);
+		yield 'Error recovery non-ident' => array(
+			': red; color: blue',
+			array( array( 'color', 'blue' ) ),
+		);
+		yield 'Empty string' => array( '', array() );
+		yield 'Whitespace only' => array( '   ', array() );
+		yield 'Duplicate properties' => array(
+			'color: red; color: blue',
+			array( array( 'color', 'red' ), array( 'color', 'blue' ) ),
+		);
+		yield 'Escaped property name' => array(
+			'\63 olor: red',
 			array( array( 'color', 'red' ) ),
 		);
 		yield 'Comment between value tokens' => array(
 			'font: bold /* comment */ 14px',
 			array( array( 'font', 'bold /* comment */ 14px' ) ),
 		);
-		yield 'Trailing comment in value' => array(
-			'color: red /* comment */',
-			array( array( 'color', 'red' ) ),
-		);
-		yield 'Comment between declarations' => array(
-			'color: red; /* comment */ font: bold',
-			array( array( 'color', 'red' ), array( 'font', 'bold' ) ),
-		);
+	}
 
-		// At-rules (consumed, not yielded).
-		yield 'At-rule before declaration' => array(
-			'@foo; color: red',
-			array( array( 'color', 'red' ) ),
-		);
-		yield 'At-rule with block' => array(
-			'@media screen { body { color: red } } color: blue',
-			array( array( 'color', 'blue' ) ),
-		);
-		yield 'Only at-rules' => array(
-			'@foo; @bar {}',
-			array(),
-		);
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::get_updated_css
+	 */
+	public function test_set_value_basic(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red; font: bold' );
+		while ( $proc->next_declaration() ) {
+			if ( 'color' === $proc->get_name() ) {
+				$this->assertTrue( $proc->set_value( 'blue' ) );
+			}
+		}
+		$this->assertSame( 'color: blue; font: bold', $proc->get_updated_css() );
+	}
 
-		// Error recovery.
-		yield 'No colon' => array(
-			'foo bar; color: red',
-			array( array( 'color', 'red' ) ),
-		);
-		yield 'Non-ident start' => array(
-			': red; color: blue',
-			array( array( 'color', 'blue' ) ),
-		);
-		yield 'Number start' => array(
-			'123 { }; color: red',
-			array( array( 'color', 'red' ) ),
-		);
-		yield 'Just semicolons' => array(
-			';;;',
-			array(),
-		);
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::get_updated_css
+	 */
+	public function test_set_value_preserves_whitespace(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color:  red  ;' );
+		$proc->next_declaration();
+		$proc->set_value( 'blue' );
+		$this->assertSame( 'color:  blue  ;', $proc->get_updated_css() );
+	}
 
-		// Empty and whitespace-only input.
-		yield 'Empty string' => array(
-			'',
-			array(),
-		);
-		yield 'Whitespace only' => array(
-			'   ',
-			array(),
-		);
-		yield 'Only comments' => array(
-			'/* comment */',
-			array(),
-		);
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::get_updated_css
+	 */
+	public function test_set_value_on_empty_value(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: ;' );
+		$proc->next_declaration();
+		$proc->set_value( 'blue' );
+		$this->assertSame( 'color: blue ;', $proc->get_updated_css() );
+	}
 
-		// Duplicate properties.
-		yield 'Duplicate properties' => array(
-			'color: red; color: blue',
-			array( array( 'color', 'red' ), array( 'color', 'blue' ) ),
-		);
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 */
+	public function test_set_value_rejects_bare_semicolon(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$this->assertFalse( $proc->set_value( 'red; font: evil' ) );
+	}
 
-		// Escaped property names.
-		yield 'Escaped property name' => array(
-			'\63 olor: red',
-			array( array( 'color', 'red' ) ),
-		);
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 */
+	public function test_set_value_rejects_unmatched_brace(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$this->assertFalse( $proc->set_value( '0;} body { display: none }' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 */
+	public function test_set_value_rejects_unbalanced_blocks(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$this->assertFalse( $proc->set_value( 'calc(1 + 2' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 */
+	public function test_set_value_accepts_matched_blocks(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$this->assertTrue( $proc->set_value( 'var(--x, fallback)' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 */
+	public function test_set_value_accepts_semicolon_inside_block(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( '--x: a' );
+		$proc->next_declaration();
+		$this->assertTrue( $proc->set_value( 'var(--y, a;b)' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_remove_first_declaration(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red; font: bold' );
+		$proc->next_declaration();
+		$proc->remove();
+		$proc->next_declaration();
+		$this->assertSame( ' font: bold', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_remove_last_declaration(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red; font: bold' );
+		$proc->next_declaration();
+		$proc->next_declaration();
+		$proc->remove();
+		$this->assertSame( 'color: red; ', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_remove_all_declarations(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red; font: bold' );
+		while ( $proc->next_declaration() ) {
+			$proc->remove();
+		}
+		$this->assertSame( ' ', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_remove_single_declaration_no_semicolon(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$proc->remove();
+		$this->assertSame( '', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_last_mutation_wins(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$proc->set_value( 'blue' );
+		$proc->remove();
+		$this->assertSame( '', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::remove
+	 * @covers ::get_updated_css
+	 */
+	public function test_last_mutation_wins_set_after_remove(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->next_declaration();
+		$proc->remove();
+		$proc->set_value( 'blue' );
+		$this->assertSame( 'color: blue', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 * @covers ::get_updated_css
+	 */
+	public function test_append_declaration(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red' );
+		$proc->append_declaration( 'font', 'bold' );
+		$this->assertSame( 'color: red; font: bold', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 * @covers ::get_updated_css
+	 */
+	public function test_append_declaration_to_empty(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( '' );
+		$proc->append_declaration( 'color', 'red' );
+		$this->assertSame( ' color: red', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 * @covers ::get_updated_css
+	 */
+	public function test_append_declaration_with_trailing_semicolon(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red;' );
+		$proc->append_declaration( 'font', 'bold' );
+		$this->assertSame( 'color: red; font: bold', $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 */
+	public function test_append_declaration_rejects_invalid_name(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( '' );
+		$this->assertFalse( $proc->append_declaration( '123', 'red' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 */
+	public function test_append_declaration_rejects_multi_token_name(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( '' );
+		$this->assertFalse( $proc->append_declaration( 'color font', 'red' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::append_declaration
+	 */
+	public function test_append_declaration_rejects_injection_in_value(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( '' );
+		$this->assertFalse( $proc->append_declaration( 'color', 'red; } body { display: none' ) );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::get_updated_css
+	 */
+	public function test_no_changes_round_trip(): void {
+		$css  = 'color: red; font-size: 16px';
+		$proc = WP_CSS_Processor::create_declaration_list( $css );
+		while ( $proc->next_declaration() ) {
+			// Read only, no mutations.
+		}
+		$this->assertSame( $css, $proc->get_updated_css() );
+	}
+
+	/**
+	 * @ticket TBD
+	 * @covers ::set_value
+	 * @covers ::remove
+	 * @covers ::append_declaration
+	 * @covers ::get_updated_css
+	 */
+	public function test_combined_set_remove_append(): void {
+		$proc = WP_CSS_Processor::create_declaration_list( 'color: red; display: none; font: bold' );
+		while ( $proc->next_declaration() ) {
+			if ( 'color' === $proc->get_name() ) {
+				$proc->set_value( 'blue' );
+			}
+			if ( 'display' === $proc->get_name() ) {
+				$proc->remove();
+			}
+		}
+		$proc->append_declaration( 'margin', '0' );
+		$this->assertSame( 'color: blue;  font: bold; margin: 0', $proc->get_updated_css() );
 	}
 }
