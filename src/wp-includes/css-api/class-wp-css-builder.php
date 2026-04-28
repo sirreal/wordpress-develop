@@ -16,6 +16,7 @@ abstract class WP_CSS_Builder {
 	 * @return string CSS ident token text.
 	 */
 	public static function ident( string $value ): string {
+		$value  = wp_scrub_utf8( $value );
 		$result = '';
 		$length = strlen( $value );
 
@@ -89,6 +90,7 @@ abstract class WP_CSS_Builder {
 	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
 	 */
 	public static function string( string $value ): string {
+		$value   = wp_scrub_utf8( $value );
 		$escaped = strtr(
 			$value,
 			array(
