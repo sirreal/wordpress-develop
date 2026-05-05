@@ -134,8 +134,9 @@ class WP_Script_Modules {
 	 *                                              When omitted or null, the module is public (top-level `imports`). When an array is
 	 *                                              provided, the module is emitted under the import map's `scopes` keyed by each entry,
 	 *                                              and is not present in top-level `imports`. An empty array means the module is
-	 *                                              registered but cannot be resolved via bare specifier from anywhere; static
-	 *                                              dependencies on such a module are treated like missing dependencies.
+	 *                                              registered but cannot be resolved via bare specifier from anywhere; declared
+	 *                                              dependencies on such a module (static or dynamic) are treated like missing
+	 *                                              dependencies and the dependent will not be emitted.
 	 *                                              Each entry is one of:
 	 *                                              - A non-empty string URL prefix, emitted as-authored. WordPress URL filters such as
 	 *                                                `script_module_loader_src` are NOT applied to string scopes; authors are
@@ -209,7 +210,12 @@ class WP_Script_Modules {
 				if ( ! is_array( $args['scopes'] ) ) {
 					_doing_it_wrong(
 						__METHOD__,
-						__( 'The "scopes" arg must be null or an array.' ),
+						sprintf(
+							/* translators: 1: Module identifier; 2: Received type. */
+							__( 'The "scopes" arg for module "%1$s" must be null or an array; received %2$s.' ),
+							$id,
+							gettype( $args['scopes'] )
+						),
 						'7.1.0'
 					);
 				} else {
@@ -219,7 +225,11 @@ class WP_Script_Modules {
 							if ( '' === $scope_entry ) {
 								_doing_it_wrong(
 									__METHOD__,
-									__( 'Empty string scope entry; entries must be non-empty.' ),
+									sprintf(
+										/* translators: %s: Module identifier. */
+										__( 'A scope entry for module "%s" must be a non-empty string.' ),
+										$id
+									),
 									'7.1.0'
 								);
 								continue;
@@ -236,7 +246,11 @@ class WP_Script_Modules {
 						} else {
 							_doing_it_wrong(
 								__METHOD__,
-								__( 'Each scope entry must be a non-empty string or [ "module_id" => non-empty string ].' ),
+								sprintf(
+									/* translators: %s: Module identifier. */
+									__( 'A scope entry for module "%s" must be a non-empty string or an array with a single "module_id" key whose value is a non-empty string.' ),
+									$id
+								),
 								'7.1.0'
 							);
 						}
@@ -730,7 +744,8 @@ class WP_Script_Modules {
 
 				$module_dependencies = $wp_scripts->get_data( $handle, 'module_dependencies' );
 				if ( is_array( $module_dependencies ) ) {
-					$missing_module_dependencies = array();
+					$missing_module_dependencies     = array();
+					$unreachable_module_dependencies = array();
 					foreach ( $module_dependencies as $module ) {
 						if ( is_string( $module ) ) {
 							$id = $module;
@@ -744,6 +759,11 @@ class WP_Script_Modules {
 
 						if ( ! isset( $this->registered[ $id ] ) ) {
 							$missing_module_dependencies[] = $id;
+						} elseif (
+							isset( $this->registered[ $id ]['scopes'] ) &&
+							array() === $this->registered[ $id ]['scopes']
+						) {
+							$unreachable_module_dependencies[] = $id;
 						} else {
 							$classic_script_module_dependencies[] = $id;
 						}
@@ -762,6 +782,20 @@ class WP_Script_Modules {
 							'7.0.0'
 						);
 					}
+
+					if ( count( $unreachable_module_dependencies ) > 0 ) {
+						_doing_it_wrong(
+							'WP_Scripts::add_data',
+							sprintf(
+								/* translators: 1: Script handle, 2: 'module_dependencies', 3: List of unreachable dependency IDs. */
+								__( 'The script with the handle "%1$s" was enqueued with script module dependencies ("%2$s") that are registered with empty scopes and cannot be resolved via bare specifier: %3$s.' ),
+								$handle,
+								'module_dependencies',
+								implode( wp_get_list_item_separator(), $unreachable_module_dependencies )
+							),
+							'7.1.0'
+						);
+					}
 				}
 
 				foreach ( $wp_scripts->registered[ $handle ]->deps as $dep ) {
@@ -772,11 +806,47 @@ class WP_Script_Modules {
 			}
 		}
 
-		// Note: the script modules in $this->queue are not included in the importmap because they get printed as scripts.
+		/*
+		 * Walk the dependency graph from queue items + classic-script module dependencies.
+		 * Queue items themselves are not added to `$ids` (they are printed as `<script>` tags),
+		 * but they appear via dep edges of other modules — matching prior behavior of
+		 * `get_dependencies()`.
+		 *
+		 * Modules registered with empty scopes (`scopes => array()`) are not traversed:
+		 * their transitive deps are unreachable via bare specifier from any importer, so
+		 * walking through them would leak otherwise-private deps into top-level `imports`.
+		 */
+		$collected_dependencies = array();
+		$id_queue               = array_merge( $this->queue, $classic_script_module_dependencies );
+		while ( ! empty( $id_queue ) ) {
+			$current_id = array_shift( $id_queue );
+			if ( ! isset( $this->registered[ $current_id ] ) ) {
+				continue;
+			}
+
+			// Stop at empty-scoped modules.
+			if (
+				isset( $this->registered[ $current_id ]['scopes'] ) &&
+				array() === $this->registered[ $current_id ]['scopes']
+			) {
+				continue;
+			}
+
+			foreach ( $this->registered[ $current_id ]['dependencies'] as $dependency ) {
+				if (
+					! isset( $collected_dependencies[ $dependency['id'] ] ) &&
+					isset( $this->registered[ $dependency['id'] ] )
+				) {
+					$collected_dependencies[ $dependency['id'] ] = true;
+					$id_queue[]                                  = $dependency['id'];
+				}
+			}
+		}
+
 		$ids = array_unique(
 			array_merge(
 				$classic_script_module_dependencies,
-				array_keys( $this->get_dependencies( array_merge( $this->queue, $classic_script_module_dependencies ) ) )
+				array_keys( $collected_dependencies )
 			)
 		);
 
@@ -1179,6 +1249,17 @@ class WP_Script_Modules {
 			$path       = preg_replace( '~[?#].*$~', '', $other_src );
 			$last_slash = strrpos( (string) $path, '/' );
 			if ( false === $last_slash ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						/* translators: 1: Scope module id; 2: Owning module id; 3: Resolved URL. */
+						__( 'Scope entry references module "%1$s" whose URL "%3$s" has no "/" path separator and cannot be reduced to a directory for module "%2$s".' ),
+						$other_id,
+						$id,
+						$other_src
+					),
+					'7.1.0'
+				);
 				continue;
 			}
 

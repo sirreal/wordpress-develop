@@ -71,8 +71,9 @@ function wp_script_modules(): WP_Script_Modules {
  *                                              When omitted or null, the module is public. When an array is provided, the module is
  *                                              emitted under the import map's `scopes` keyed by each entry, and is not present in
  *                                              top-level `imports`. An empty array means the module is registered but cannot be
- *                                              resolved via bare specifier from anywhere; static dependencies on such a module
- *                                              are treated like missing dependencies.
+ *                                              resolved via bare specifier from anywhere; declared dependencies on such a
+ *                                              module (static or dynamic) are treated like missing dependencies and the
+ *                                              dependent will not be emitted.
  *                                              Each entry is one of:
  *                                              - A non-empty string URL prefix, emitted as-authored. WordPress URL-rewriting
  *                                                hooks such as `script_module_loader_src` are NOT applied to string scopes;

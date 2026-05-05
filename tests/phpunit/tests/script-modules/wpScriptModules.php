@@ -2956,6 +2956,8 @@ HTML;
 
 		$map = $this->get_full_import_map();
 		$this->assertArrayHasKey( 'https://example.com/exact.js', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['https://example.com/exact.js'] );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] );
 	}
 
 	/**
@@ -3029,7 +3031,10 @@ HTML;
 
 		$map = $this->get_full_import_map();
 		$this->assertArrayHasKey( 'scopes', $map );
+		$this->assertCount( 1, $map['scopes'] );
 		$this->assertArrayHasKey( '/fallback/', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['/fallback/'] );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] );
 	}
 
 	/**
@@ -3282,16 +3287,18 @@ HTML;
 		);
 		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
 
-		add_filter(
-			'script_module_data_private',
-			static function () {
-				return array( 'token' => 'abc' );
-			}
-		);
+		$data_filter = static function () {
+			return array( 'token' => 'abc' );
+		};
+		add_filter( 'script_module_data_private', $data_filter );
 
-		$markup = get_echo( array( $this->script_modules, 'print_script_module_data' ) );
-		$this->assertStringContainsString( 'wp-script-module-data-private', $markup );
-		$this->assertStringContainsString( '"token":"abc"', $markup );
+		try {
+			$markup = get_echo( array( $this->script_modules, 'print_script_module_data' ) );
+			$this->assertStringContainsString( 'wp-script-module-data-private', $markup );
+			$this->assertStringContainsString( '"token":"abc"', $markup );
+		} finally {
+			remove_filter( 'script_module_data_private', $data_filter );
+		}
 	}
 
 	/**
@@ -3332,5 +3339,107 @@ HTML;
 
 		$preloads = $this->get_preloaded_script_modules();
 		$this->assertArrayHasKey( 'private', $preloads );
+	}
+
+	/**
+	 * Empty-scoped modules do not leak their public transitive deps into top-level imports.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_does_not_leak_transitive_deps_to_imports() {
+		// Public leaf reachable only through the empty-scoped module.
+		$this->script_modules->register( 'leaf', '/leaf.js' );
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array( 'leaf' ),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'unreachable' ) );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'leaf', $map['imports'] ?? array(), 'leaf must not appear in imports — only reachable via empty-scoped module.' );
+		$this->assertArrayNotHasKey( 'unreachable', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( 'scopes', $map );
+	}
+
+	/**
+	 * A leaf reachable both via empty-scoped and via a public path is still emitted.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_does_not_hide_dep_reachable_via_public_path() {
+		$this->script_modules->register( 'leaf', '/leaf.js' );
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array( 'leaf' ),
+			null,
+			array( 'scopes' => array() )
+		);
+		// Public path also reaches leaf.
+		$this->script_modules->register( 'public-mid', '/public-mid.js', array( 'leaf' ) );
+		$this->script_modules->enqueue( 'consumer-a', '/consumer-a.js', array( 'unreachable' ) );
+		$this->script_modules->enqueue( 'consumer-b', '/consumer-b.js', array( 'public-mid' ) );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'leaf', $map['imports'] );
+		$this->assertArrayHasKey( 'public-mid', $map['imports'] );
+	}
+
+	/**
+	 * Classic-script `module_dependencies` referencing an empty-scoped module triggers a warning.
+	 *
+	 * @expectedIncorrectUsage WP_Scripts::add_data
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_classic_script_module_dep_on_empty_scoped_warns() {
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array(),
+			null,
+			array( 'scopes' => array() )
+		);
+
+		wp_enqueue_script(
+			'classic',
+			'/classic.js',
+			array(),
+			null,
+			array( 'module_dependencies' => array( 'unreachable' ) )
+		);
+
+		// Trigger import-map computation.
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'unreachable', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( 'scopes', $map );
+	}
+
+	/**
+	 * `module_id` resolution to a URL with no slash drops with a warning.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::get_scope_keys
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_module_id_no_slash_drops_with_warning() {
+		// A module whose src has no slash (after version stripping). `null` version avoids ?ver.
+		$this->script_modules->register( 'oddurl', 'oddurl', array(), null );
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( array( 'module_id' => 'oddurl' ) ) )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
+
+		$map = $this->get_full_import_map();
+		// No scope key derivable; private appears nowhere; map is not emitted.
+		$this->assertArrayNotHasKey( 'scopes', $map );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] ?? array() );
 	}
 }
