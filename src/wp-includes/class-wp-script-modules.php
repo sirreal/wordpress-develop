@@ -812,20 +812,28 @@ class WP_Script_Modules {
 		 * but they appear via dep edges of other modules — matching prior behavior of
 		 * `get_dependencies()`.
 		 *
-		 * Modules registered with empty scopes (`scopes => array()`) are not traversed:
-		 * their transitive deps are unreachable via bare specifier from any importer, so
-		 * walking through them would leak otherwise-private deps into top-level `imports`.
+		 * Modules registered with empty scopes (`scopes => array()`) reached as a *transitive*
+		 * dep are not traversed: their deps are unreachable via bare specifier from any importer,
+		 * so walking through them would leak otherwise-private deps into top-level `imports`.
+		 *
+		 * The starting nodes (queue items + classic-script module dependencies) are exempt
+		 * from this stop rule: queued empty-scoped modules are still entry points whose deps
+		 * must resolve when their `<script>` tag executes in the browser.
 		 */
 		$collected_dependencies = array();
-		$id_queue               = array_merge( $this->queue, $classic_script_module_dependencies );
+		$id_queue               = array();
+		foreach ( array_merge( $this->queue, $classic_script_module_dependencies ) as $start_id ) {
+			$id_queue[] = array( $start_id, true );
+		}
 		while ( ! empty( $id_queue ) ) {
-			$current_id = array_shift( $id_queue );
+			list( $current_id, $is_starting_node ) = array_shift( $id_queue );
 			if ( ! isset( $this->registered[ $current_id ] ) ) {
 				continue;
 			}
 
-			// Stop at empty-scoped modules.
+			// Stop traversal at transitive empty-scoped modules; entry points are exempt.
 			if (
+				! $is_starting_node &&
 				isset( $this->registered[ $current_id ]['scopes'] ) &&
 				array() === $this->registered[ $current_id ]['scopes']
 			) {
@@ -838,7 +846,7 @@ class WP_Script_Modules {
 					isset( $this->registered[ $dependency['id'] ] )
 				) {
 					$collected_dependencies[ $dependency['id'] ] = true;
-					$id_queue[]                                  = $dependency['id'];
+					$id_queue[]                                  = array( $dependency['id'], false );
 				}
 			}
 		}

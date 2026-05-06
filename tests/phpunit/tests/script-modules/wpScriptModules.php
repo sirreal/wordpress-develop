@@ -3419,6 +3419,66 @@ HTML;
 	}
 
 	/**
+	 * A queued module with `scopes => array()` is treated as an entry point: its transitive
+	 * deps are still walked and emitted in the import map so the entry's imports resolve.
+	 *
+	 * Regression: previously the walk stopped at *every* empty-scoped node, including the
+	 * starting node, leaving the entry's deps absent from the import map.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_queued_entry_still_emits_dep_imports() {
+		$this->script_modules->register(
+			'@plugin/utils',
+			'/wp-content/plugins/x/utils.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+		);
+		$this->script_modules->register(
+			'@plugin/lib',
+			'/wp-content/plugins/x/lib.js',
+			array(
+				array(
+					'id'     => '@plugin/utils',
+					'import' => 'dynamic',
+				),
+			),
+			null,
+			array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+		);
+		// Public dep simulating @wordpress/* etc.
+		$this->script_modules->register( '@public/dep', '/wp-content/plugins/x/dep.js' );
+		$this->script_modules->register(
+			'@plugin/main',
+			'/wp-content/plugins/x/main.js',
+			array(
+				'@public/dep',
+				'@plugin/lib',
+				array(
+					'id'     => '@plugin/utils',
+					'import' => 'dynamic',
+				),
+			),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( '@plugin/main' );
+
+		$map = $this->get_full_import_map();
+
+		// The queued entry's static and dynamic deps must resolve.
+		$this->assertArrayHasKey( '@public/dep', $map['imports'] ?? array() );
+		$this->assertArrayHasKey( 'scopes', $map );
+		$this->assertArrayHasKey( '/wp-content/plugins/x/', $map['scopes'] );
+		$this->assertArrayHasKey( '@plugin/lib', $map['scopes']['/wp-content/plugins/x/'] );
+		$this->assertArrayHasKey( '@plugin/utils', $map['scopes']['/wp-content/plugins/x/'] );
+		// The empty-scoped entry itself is not advertised in either map.
+		$this->assertArrayNotHasKey( '@plugin/main', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( '@plugin/main', $map['scopes']['/wp-content/plugins/x/'] );
+	}
+
+	/**
 	 * `module_id` resolution to a URL with no slash drops with a warning.
 	 *
 	 * @expectedIncorrectUsage WP_Script_Modules::get_scope_keys
