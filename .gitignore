@@ -28,6 +28,7 @@ wp-tests-config.php
 /jsdoc
 /composer.lock
 /vendor
+/.envlite/
 /src/wp-admin/css/*.min.css
 /src/wp-admin/css/*-rtl.css
 /src/wp-admin/css/colors/*/*.css
