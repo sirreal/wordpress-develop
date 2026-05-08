@@ -47,24 +47,5 @@ module.exports = ( env = { buildTarget: 'src/' } ) => {
 		],
 	};
 
-	const espreeConfig = {
-		target: 'browserslist',
-		mode: 'production',
-		entry: {
-			'espree.min': 'espree',
-		},
-		output: {
-			path: outputPath,
-			filename: '[name].js',
-			library: {
-				type: 'module',
-			},
-		},
-		experiments: {
-			outputModule: true,
-		},
-		optimization,
-	};
-
-	return [ codemirrorConfig, espreeConfig ];
+	return codemirrorConfig;
 };

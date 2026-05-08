@@ -4016,7 +4016,7 @@ HTML;
 		);
 
 		// Exclude packages that are not registered in WordPress.
-		$exclude                   = array( 'react-is', 'json2php', 'espree' );
+		$exclude                   = array( 'react-is', 'json2php' );
 		$package_json_dependencies = array_diff( $package_json_dependencies, $exclude );
 
 		/*

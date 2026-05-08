@@ -5,6 +5,7 @@
  */
 
 import CodeMirror from 'codemirror';
+import * as espree from 'espree';
 
 /**
  * CodeMirror Lint Error.
@@ -44,7 +45,6 @@ import CodeMirror from 'codemirror';
 async function validator( text, options ) {
 	const errors = /** @type {CodeMirrorLintError[]} */ [];
 	try {
-		const espree = await import( /* webpackIgnore: true */ 'espree' );
 		espree.parse( text, {
 			...getEspreeOptions( options ),
 			loc: true,
