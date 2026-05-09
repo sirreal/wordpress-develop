@@ -49,7 +49,6 @@ wp-tests-config.php
 /artifacts
 /setup.log
 /coverage
-/.envlite/
 
 # Files and folders that get created in wp-content
 /src/wp-content/blogs.dir
