@@ -65,7 +65,19 @@ class WP_HTML_Stack_Event {
 	 *
 	 * @var string
 	 */
-	public $provenance;
+	/**
+	 * Whether this event is a pop operation.
+	 *
+	 * @var bool
+	 */
+	public $is_pop;
+
+	/**
+	 * Whether this event is for a virtual (implied) node.
+	 *
+	 * @var bool
+	 */
+	public $is_virtual;
 
 	/**
 	 * Constructor function.
@@ -73,12 +85,12 @@ class WP_HTML_Stack_Event {
 	 * @since 6.6.0
 	 *
 	 * @param WP_HTML_Token $token      Token associated with stack event, always an opening token.
-	 * @param string        $operation  One of self::PUSH or self::POP.
-	 * @param string        $provenance "virtual" or "real".
+	 * @param bool          $is_pop     Whether this is a pop event.
+	 * @param bool          $is_virtual Whether this is a virtual event.
 	 */
-	public function __construct( WP_HTML_Token $token, string $operation, string $provenance ) {
+	public function __construct( WP_HTML_Token $token, bool $is_pop, bool $is_virtual ) {
 		$this->token      = $token;
-		$this->operation  = $operation;
-		$this->provenance = $provenance;
+		$this->is_pop     = $is_pop;
+		$this->is_virtual = $is_virtual;
 	}
 }

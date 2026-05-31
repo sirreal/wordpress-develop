@@ -39,6 +39,13 @@ class WP_HTML_Open_Elements {
 	public $stack = array();
 
 	/**
+	 * Cached reference to the current (last) node on the stack.
+	 *
+	 * @var WP_HTML_Token|null
+	 */
+	private $current_node_cache = null;
+
+	/**
 	 * Whether a P element is in button scope currently.
 	 *
 	 * This class optimizes scope lookup by pre-calculating
@@ -183,9 +190,7 @@ class WP_HTML_Open_Elements {
 	 * @return WP_HTML_Token|null Last node in the stack of open elements, if one exists, otherwise null.
 	 */
 	public function current_node(): ?WP_HTML_Token {
-		$current_node = end( $this->stack );
-
-		return $current_node ? $current_node : null;
+		return $this->current_node_cache;
 	}
 
 	/**
@@ -216,8 +221,8 @@ class WP_HTML_Open_Elements {
 	 * @return bool Whether there is a current element that matches the given identity, whether a token name or type.
 	 */
 	public function current_node_is( string $identity ): bool {
-		$current_node = end( $this->stack );
-		if ( false === $current_node ) {
+		$current_node = $this->current_node_cache;
+		if ( null === $current_node ) {
 			return false;
 		}
 
@@ -521,6 +526,8 @@ class WP_HTML_Open_Elements {
 			return false;
 		}
 
+		$end = end( $this->stack );
+		$this->current_node_cache = false === $end ? null : $end;
 		$this->after_element_pop( $item );
 		return true;
 	}
@@ -569,6 +576,7 @@ class WP_HTML_Open_Elements {
 	 */
 	public function push( WP_HTML_Token $stack_item ): void {
 		$this->stack[] = $stack_item;
+		$this->current_node_cache = $stack_item;
 		$this->after_element_push( $stack_item );
 	}
 
@@ -588,6 +596,8 @@ class WP_HTML_Open_Elements {
 
 			$position_from_start = $this->count() - $position_from_end - 1;
 			array_splice( $this->stack, $position_from_start, 1 );
+			$end = end( $this->stack );
+			$this->current_node_cache = false === $end ? null : $end;
 			$this->after_element_pop( $item );
 			return true;
 		}
