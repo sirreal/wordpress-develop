@@ -5474,8 +5474,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
-	 * A `$class_name` value that contains ASCII whitespace separated strings
-	 * will be added as is, resulting in multiple additional class names.
+	 * If `$class_name` contains ASCII whitespace, each whitespace-separated
+	 * substring is added as its own class name.
 	 *
 	 * Examples:
 	 *
@@ -5483,7 +5483,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     // Adds one class: "wp-block".
 	 *
 	 *     $p->add_class( 'wp-block alignwide' );
-	 *     // Adds two classes: "wp-block" and "alignwide".
+	 *     // Adds two classes: "wp-block" and "alignwide"
+	 *     // (not one class "wp-block alignwide").
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
