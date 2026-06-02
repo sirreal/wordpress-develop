@@ -5474,9 +5474,24 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
+	 * HTML class attributes are whitespace-separated token lists; a class
+	 * name cannot contain whitespace. Whitespace in the value therefore
+	 * splits it into multiple classes. HTML "ASCII whitespace" is U+0009
+	 * TAB, U+000A LF, U+000C FF, U+000D CR, and U+0020 SPACE.
+	 *
+	 * Examples:
+	 *
+	 *     $p->add_class( 'wp-block' );
+	 *     // Adds one class: "wp-block".
+	 *
+	 *     $p->add_class( 'wp-block alignwide' );
+	 *     // Adds two classes: "wp-block" and "alignwide", not a single
+	 *     // class named "wp-block alignwide".
+	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
-	 * @param string $class_name The class name to add.
+	 * @param string $class_name The class name to add. Whitespace splits
+	 *                           the value into multiple class names.
 	 * @return bool Whether the class was set to be added.
 	 */
 	public function add_class( $class_name ): bool {
