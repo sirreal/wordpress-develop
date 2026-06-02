@@ -5497,9 +5497,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Removes a class name from the currently matched tag.
 	 *
-	 * Whitespace in `$class_name` never matches: an HTML class name
-	 * cannot contain whitespace, so the removal is short-circuited.
-	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 * @since 7.1.0 Returns false when `$class_name` contains ASCII whitespace.
 	 *
@@ -5512,9 +5509,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 	/**
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
-	 *
-	 * Whitespace in `$wanted_class` never matches: an HTML class name
-	 * cannot contain whitespace, so the lookup is short-circuited.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
