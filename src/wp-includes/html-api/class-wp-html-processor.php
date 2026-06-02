@@ -5476,8 +5476,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * Note that a value containing whitespace is added as *multiple*
 	 * class names: a single class name cannot contain whitespace.
-	 * HTML ASCII whitespace is tab, line feed, form feed, carriage
-	 * return, and space.
+	 *
+	 * > ASCII whitespace is U+0009 TAB, U+000A LF, U+000C FF, U+000D CR,
+	 * > or U+0020 SPACE.
 	 *
 	 * Examples:
 	 *
@@ -5489,6 +5490,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     // class named "wp-block alignwide".
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 *
+	 * @see https://infra.spec.whatwg.org/#ascii-whitespace
 	 *
 	 * @param string $class_name The class name to add. Whitespace splits
 	 *                           the value into multiple class names.
