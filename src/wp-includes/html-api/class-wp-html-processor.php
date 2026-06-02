@@ -5474,10 +5474,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
-	 * HTML class attributes are whitespace-separated token lists; a class
-	 * name cannot contain whitespace. Whitespace in the value therefore
-	 * splits it into multiple classes. HTML "ASCII whitespace" is U+0009
-	 * TAB, U+000A LF, U+000C FF, U+000D CR, and U+0020 SPACE.
+	 * Note that a value containing whitespace is added as *multiple*
+	 * class names: a single class name cannot contain whitespace.
 	 *
 	 * Examples:
 	 *
