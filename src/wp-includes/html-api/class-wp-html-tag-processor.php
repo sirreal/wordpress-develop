@@ -4537,8 +4537,9 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
-	 * If `$class_name` contains ASCII whitespace, each whitespace-separated
-	 * substring is added as its own class name.
+	 * A `$class_name` containing ASCII whitespace is added verbatim. This
+	 * may result in multiple class names being added to the element's
+	 * class list.
 	 *
 	 * Examples:
 	 *
