@@ -1246,6 +1246,11 @@ class WP_HTML_Tag_Processor {
 		}
 
 		if ( false !== strpbrk( $wanted_class, " \t\f\r\n" ) ) {
+			_doing_it_wrong(
+				__METHOD__,
+				__( 'A class name cannot contain ASCII whitespace.' ),
+				'7.1.0'
+			);
 			return false;
 		}
 
@@ -4615,6 +4620,11 @@ class WP_HTML_Tag_Processor {
 		}
 
 		if ( false !== strpbrk( $class_name, " \t\f\r\n" ) ) {
+			_doing_it_wrong(
+				__METHOD__,
+				__( 'A class name cannot contain ASCII whitespace.' ),
+				'7.1.0'
+			);
 			return false;
 		}
 
