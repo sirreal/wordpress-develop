@@ -5484,8 +5484,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     // Adds one class: "wp-block".
 	 *
 	 *     $p->add_class( 'wp-block alignwide' );
-	 *     // Adds two classes: "wp-block" and "alignwide"
-	 *     // (not one class "wp-block alignwide").
+	 *     // Adds two classes: "wp-block" and "alignwide".
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
