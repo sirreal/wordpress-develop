@@ -5497,7 +5497,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Removes a class name from the currently matched tag.
 	 *
+	 * Whitespace in `$class_name` never matches: an HTML class name
+	 * cannot contain whitespace, so the removal is short-circuited.
+	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 * @since 7.1.0 Returns false when `$class_name` contains ASCII whitespace.
 	 *
 	 * @param string $class_name The class name to remove.
 	 * @return bool Whether the class was set to be removed.
@@ -5509,7 +5513,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
 	 *
+	 * Whitespace in `$wanted_class` never matches: an HTML class name
+	 * cannot contain whitespace, so the lookup is short-circuited.
+	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 * @since 7.1.0 Returns false when `$wanted_class` contains ASCII whitespace.
 	 *
 	 * @todo When reconstructing active formatting elements with attributes, find a way
 	 *       to indicate if the virtually-reconstructed formatting elements contain the

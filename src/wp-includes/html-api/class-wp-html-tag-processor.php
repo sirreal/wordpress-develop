@@ -1232,7 +1232,11 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
 	 *
+	 * Whitespace in `$wanted_class` never matches: an HTML class name
+	 * cannot contain whitespace, so the lookup is short-circuited.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Returns false when `$wanted_class` contains ASCII whitespace.
 	 *
 	 * @param string $wanted_class Look for this CSS class name, ASCII case-insensitive.
 	 * @return bool|null Whether the matched tag contains the given class name, or null if not matched.
@@ -1240,6 +1244,10 @@ class WP_HTML_Tag_Processor {
 	public function has_class( $wanted_class ): ?bool {
 		if ( self::STATE_MATCHED_TAG !== $this->parser_state ) {
 			return null;
+		}
+
+		if ( false !== strpbrk( $wanted_class, " \t\f\r\n" ) ) {
+			return false;
 		}
 
 		$case_insensitive = self::QUIRKS_MODE === $this->compat_mode;
@@ -4590,7 +4598,11 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Removes a class name from the currently matched tag.
 	 *
+	 * Whitespace in `$class_name` never matches: an HTML class name
+	 * cannot contain whitespace, so the removal is short-circuited.
+	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 Returns false when `$class_name` contains ASCII whitespace.
 	 *
 	 * @param string $class_name The class name to remove.
 	 * @return bool Whether the class was set to be removed.
@@ -4600,6 +4612,10 @@ class WP_HTML_Tag_Processor {
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
 			$this->is_closing_tag
 		) {
+			return false;
+		}
+
+		if ( false !== strpbrk( $class_name, " \t\f\r\n" ) ) {
 			return false;
 		}
 
