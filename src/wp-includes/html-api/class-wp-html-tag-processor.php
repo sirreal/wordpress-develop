@@ -4539,6 +4539,8 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * Note that a value containing whitespace is added as *multiple*
 	 * class names: a single class name cannot contain whitespace.
+	 * HTML ASCII whitespace is tab, line feed, form feed, carriage
+	 * return, and space.
 	 *
 	 * Examples:
 	 *
