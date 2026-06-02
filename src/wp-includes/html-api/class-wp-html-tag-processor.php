@@ -4552,10 +4552,7 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @since 6.2.0
 	 *
-	 * @see https://infra.spec.whatwg.org/#ascii-whitespace
-	 *
-	 * @param string $class_name The class name to add. Whitespace splits
-	 *                           the value into multiple class names.
+	 * @param string $class_name The class name to add.
 	 * @return bool Whether the class was set to be added.
 	 */
 	public function add_class( $class_name ): bool {
