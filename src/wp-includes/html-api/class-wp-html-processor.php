@@ -5517,7 +5517,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * cannot contain whitespace, so the lookup is short-circuited.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
-	 * @since 7.1.0 Returns false when `$wanted_class` contains ASCII whitespace.
 	 *
 	 * @todo When reconstructing active formatting elements with attributes, find a way
 	 *       to indicate if the virtually-reconstructed formatting elements contain the

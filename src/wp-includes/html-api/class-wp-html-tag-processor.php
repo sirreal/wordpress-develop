@@ -1236,7 +1236,6 @@ class WP_HTML_Tag_Processor {
 	 * cannot contain whitespace, so the lookup is short-circuited.
 	 *
 	 * @since 6.4.0
-	 * @since 7.1.0 Returns false when `$wanted_class` contains ASCII whitespace.
 	 *
 	 * @param string $wanted_class Look for this CSS class name, ASCII case-insensitive.
 	 * @return bool|null Whether the matched tag contains the given class name, or null if not matched.
