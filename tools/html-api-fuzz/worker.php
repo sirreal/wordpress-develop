@@ -22,6 +22,8 @@ try {
 		'seed'           => \HtmlApiFuzz\option_int( $options, 'seed', 1 ),
 		'profile'        => \HtmlApiFuzz\option_string( $options, 'profile', 'auto' ),
 		'mode'           => \HtmlApiFuzz\option_string( $options, 'mode', 'auto' ),
+		'payloadPolicy'  => \HtmlApiFuzz\option_string( $options, 'payload-policy', null ),
+		'inputSource'    => \HtmlApiFuzz\option_string( $options, 'input-file', null ) ? 'input-file' : ( \HtmlApiFuzz\option_string( $options, 'input-base64', null ) ? 'input-base64' : 'generated' ),
 	);
 
 	if ( null !== $output_dir ) {

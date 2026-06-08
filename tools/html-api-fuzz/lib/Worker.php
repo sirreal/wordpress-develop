@@ -9,6 +9,12 @@ class Worker {
 		$seed    = option_int( $options, 'seed', 1 );
 		$profile = option_string( $options, 'profile', 'auto' );
 		$mode    = option_string( $options, 'mode', 'auto' );
+		$payload_policy_option = option_string( $options, 'payload-policy', null );
+		$payload_policy        = $payload_policy_option ?? 'auto';
+		$max_input_bytes_value = option_int( $options, 'max-input-bytes', 0 );
+		$max_input_bytes       = $max_input_bytes_value > 0 ? $max_input_bytes_value : null;
+		$generator_parameters  = null;
+		$input_source          = 'generated';
 
 		if ( null !== option_string( $options, 'input-base64', null ) ) {
 			$input = base64_decode( option_string( $options, 'input-base64' ), true );
@@ -17,6 +23,11 @@ class Worker {
 			}
 			$profile = option_string( $options, 'profile', 'replay' );
 			$mode    = option_string( $options, 'mode', Generator::MODE_FRAGMENT_BODY );
+			$payload_policy = $payload_policy_option;
+			$input_source   = 'input-base64';
+			self::validate_profile_metadata( $profile );
+			self::validate_mode_metadata( $mode );
+			self::validate_payload_policy_metadata( $payload_policy );
 		} elseif ( null !== option_string( $options, 'input-file', null ) ) {
 			$input = file_get_contents( option_string( $options, 'input-file' ) );
 			if ( false === $input ) {
@@ -24,11 +35,18 @@ class Worker {
 			}
 			$profile = option_string( $options, 'profile', 'replay' );
 			$mode    = option_string( $options, 'mode', Generator::MODE_FRAGMENT_BODY );
+			$payload_policy = $payload_policy_option;
+			$input_source   = 'input-file';
+			self::validate_profile_metadata( $profile );
+			self::validate_mode_metadata( $mode );
+			self::validate_payload_policy_metadata( $payload_policy );
 		} else {
-			$generated = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto' );
-			$input     = $generated['input'];
-			$profile   = $generated['profile'];
-			$mode      = $generated['mode'];
+			$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes );
+			$input                = $generated['input'];
+			$profile              = $generated['profile'];
+			$mode                 = $generated['mode'];
+			$payload_policy       = $generated['payloadPolicy'];
+			$generator_parameters = $generated['parameters'];
 		}
 
 		$limits = array(
@@ -42,7 +60,7 @@ class Worker {
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $input, $output_dir, $limits, $fail_unsupported );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported );
 		write_json_file( $replay_path, $replay );
 
 		$tag_result = TagInvariants::check( $input, $limits );
@@ -58,6 +76,9 @@ class Worker {
 			'seed'          => $seed,
 			'profile'       => $profile,
 			'mode'          => $mode,
+			'payloadPolicy' => $payload_policy,
+			'generator'     => $generator_parameters,
+			'inputSource'   => $input_source,
 			'inputSha1'     => sha1( $input ),
 			'inputLength'   => strlen( $input ),
 			'inputPreview'  => preview_bytes( $input ),
@@ -76,7 +97,7 @@ class Worker {
 		if ( ! $tag_result['ok'] ) {
 			$result['ok']           = false;
 			$result['status']       = 'failed';
-			$result['failureClass'] = 'tag-invariant-failed';
+			$result['failureClass'] = self::tag_invariant_failure_class( $tag_result );
 		} elseif ( TreeRenderer::STATUS_UNSUPPORTED === $wp_result['status'] ) {
 			$result['status']       = 'unsupported';
 			$result['failureClass'] = 'unsupported';
@@ -138,7 +159,25 @@ class Worker {
 		return $result;
 	}
 
-	private static function base_replay( int $seed, string $profile, string $mode, string $input, string $output_dir, array $limits, bool $fail_unsupported ): array {
+	private static function validate_payload_policy_metadata( ?string $payload_policy ): void {
+		if ( null !== $payload_policy && ! in_array( $payload_policy, Generator::payload_policies(), true ) ) {
+			throw new \InvalidArgumentException( 'Unknown generator payload policy: ' . $payload_policy );
+		}
+	}
+
+	private static function validate_profile_metadata( string $profile ): void {
+		if ( 'replay' !== $profile && ! in_array( $profile, Generator::profiles(), true ) ) {
+			throw new \InvalidArgumentException( 'Unknown generator profile: ' . $profile );
+		}
+	}
+
+	private static function validate_mode_metadata( string $mode ): void {
+		if ( ! in_array( $mode, Generator::modes(), true ) ) {
+			throw new \InvalidArgumentException( 'Unknown generator mode: ' . $mode );
+		}
+	}
+
+	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported ): array {
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
@@ -149,6 +188,9 @@ class Worker {
 			'seed'          => $seed,
 			'profile'       => $profile,
 			'mode'          => $mode,
+			'payloadPolicy' => $payload_policy,
+			'generator'     => $generator_parameters,
+			'inputSource'   => $input_source,
 			'inputBase64'   => base64_encode( $input ),
 			'inputSha1'     => sha1( $input ),
 			'inputLength'   => strlen( $input ),
@@ -174,6 +216,17 @@ class Worker {
 			return false;
 		}
 
+		$wordpress_line = $diff['wordpressLine'] ?? null;
+		$dom_line       = $diff['domLine'] ?? null;
+		if ( is_string( $wordpress_line ) && is_string( $dom_line ) && $wordpress_line !== $dom_line ) {
+			if ( function_exists( 'wp_scrub_utf8' ) && wp_scrub_utf8( $wordpress_line ) === $dom_line ) {
+				return true;
+			}
+			if ( ( $diff['wordpressNorm'] ?? null ) === ( $diff['domNorm'] ?? null ) ) {
+				return true;
+			}
+		}
+
 		if ( empty( $diff['wordpressHex'] ) || empty( $diff['domHex'] ) || $diff['wordpressHex'] === $diff['domHex'] ) {
 			return false;
 		}
@@ -182,13 +235,17 @@ class Worker {
 			return true;
 		}
 
-		$wordpress_line = $diff['wordpressLine'] ?? null;
-		$dom_line       = $diff['domLine'] ?? null;
-		if ( is_string( $wordpress_line ) && is_string( $dom_line ) && function_exists( 'wp_scrub_utf8' ) ) {
-			return wp_scrub_utf8( $wordpress_line ) === $dom_line;
+		return false;
+	}
+
+	private static function tag_invariant_failure_class( array $tag_result ): string {
+		foreach ( $tag_result['failures'] ?? array() as $failure ) {
+			if ( in_array( $failure['name'] ?? null, array( 'tag-token-limit-exceeded', 'mutation-token-limit-exceeded' ), true ) ) {
+				return 'resource-limit';
+			}
 		}
 
-		return false;
+		return 'tag-invariant-failed';
 	}
 
 	private static function compact_parse_result( array $parse_result, string $output_dir, string $tree_filename ): array {

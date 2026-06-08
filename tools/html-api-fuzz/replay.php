@@ -24,6 +24,8 @@ if ( false === $input ) {
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $input_path = $output_dir . '/input.bin';
 file_put_contents( $input_path, $input );
+$payload_policy = \HtmlApiFuzz\option_string( $options, 'payload-policy', $replay['payloadPolicy'] ?? $replay['generator']['payloadPolicy'] ?? null );
+$original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 
 $args = array(
 	__DIR__ . '/worker.php',
@@ -42,12 +44,21 @@ $args = array(
 	'--max-nodes',
 	(string) \HtmlApiFuzz\option_int( $options, 'max-nodes', (int) ( $replay['limits']['maxNodes'] ?? 3000 ) ),
 );
+if ( null !== $payload_policy ) {
+	$args[] = '--payload-policy';
+	$args[] = $payload_policy;
+}
 if ( \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', (bool) ( $replay['options']['failUnsupported'] ?? false ) ) ) {
 	$args[] = '--fail-unsupported';
 }
 
 $proc = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 ), $output_dir . '/worker.log' );
 $result = \HtmlApiFuzz\read_json_file( $output_dir . '/result.json' );
+$output_replay = \HtmlApiFuzz\read_json_file( $output_dir . '/replay.json' );
+if ( is_array( $output_replay ) && is_array( $original_generator ) ) {
+	$output_replay['originalGenerator'] = $original_generator;
+	\HtmlApiFuzz\write_json_file( $output_dir . '/replay.json', $output_replay );
+}
 echo \HtmlApiFuzz\json_encode_safe(
 	array(
 		'ok'       => $result['ok'] ?? false,

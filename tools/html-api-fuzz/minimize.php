@@ -27,6 +27,10 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 	if ( $base['failUnsupported'] ) {
 		$args[] = '--fail-unsupported';
 	}
+	if ( null !== $base['payloadPolicy'] ) {
+		$args[] = '--payload-policy';
+		$args[] = $base['payloadPolicy'];
+	}
 	$proc   = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $dir . '/worker.log' );
 	$result = \HtmlApiFuzz\read_json_file( $dir . '/result.json' );
 	if ( null === $result ) {
@@ -66,9 +70,12 @@ if ( false === $input ) {
 	fwrite( STDERR, "Invalid base64 input in replay file: {$replay_path}\n" );
 	exit( 1 );
 }
+$original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 $base  = array(
 	'mode'            => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 	'profile'         => $replay['profile'] ?? 'replay',
+	'payloadPolicy'   => $replay['payloadPolicy'] ?? $replay['generator']['payloadPolicy'] ?? null,
+	'originalGenerator'=> $original_generator,
 	'seed'            => (int) ( $replay['seed'] ?? 1 ),
 	'targetHash'      => $target_hash,
 	'failUnsupported' => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
@@ -151,8 +158,17 @@ $args = array(
 if ( $base['failUnsupported'] ) {
 	$args[] = '--fail-unsupported';
 }
+if ( null !== $base['payloadPolicy'] ) {
+	$args[] = '--payload-policy';
+	$args[] = $base['payloadPolicy'];
+}
 \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $final_dir . '/worker.log' );
 $final_result = \HtmlApiFuzz\read_json_file( $final_dir . '/result.json' );
+$final_replay = \HtmlApiFuzz\read_json_file( $final_dir . '/replay.json' );
+if ( is_array( $final_replay ) && is_array( $base['originalGenerator'] ) ) {
+	$final_replay['originalGenerator'] = $base['originalGenerator'];
+	\HtmlApiFuzz\write_json_file( $final_dir . '/replay.json', $final_replay );
+}
 
 $summary = array(
 	'schemaVersion'     => 1,
@@ -161,6 +177,12 @@ $summary = array(
 	'ok'                => null !== $final_result && ( $any_failure ? ! ( $final_result['ok'] ?? true ) : ( ( $final_result['signature']['hash'] ?? null ) === $target_hash ) ),
 	'targetHash'        => $target_hash,
 	'finalHash'         => $final_result['signature']['hash'] ?? null,
+	'profile'           => $base['profile'],
+	'mode'              => $base['mode'],
+	'payloadPolicy'     => $base['payloadPolicy'],
+	'originalGenerator' => $base['originalGenerator'],
+	'finalFailureClass' => $final_result['failureClass'] ?? null,
+	'finalStatus'       => $final_result['status'] ?? null,
 	'originalLength'    => strlen( $input ),
 	'minimizedLength'   => strlen( $current ),
 	'attempts'          => $attempt_count,

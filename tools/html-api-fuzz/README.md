@@ -20,6 +20,12 @@ Run one generated seed:
 php tools/html-api-fuzz/worker.php --seed 1 --output-dir artifacts/html-api-fuzz/seed-1
 ```
 
+Run one generated seed with a specific terminal payload policy:
+
+```sh
+php tools/html-api-fuzz/worker.php --seed 1 --payload-policy valid-utf8 --output-dir artifacts/html-api-fuzz/seed-1
+```
+
 Run a batch in isolated worker subprocesses:
 
 ```sh
@@ -101,11 +107,29 @@ The generator uses a structural HTML grammar with weighted profiles:
 - `attributes-entities`
 - `comments-doctype-bogus`
 - `deep-nesting`
+- `resource-stress`
 - `incomplete-malformed`
 
-Terminal payloads intentionally mix ASCII, valid UTF-8, invalid byte sequences,
-encoding-like byte sequences, null bytes, controls, repeated characters, and
-entity references.
+Terminal payloads are selected by a separate policy:
+
+- `valid-utf8`: structural cases with ASCII, Unicode, whitespace controls, and
+  entity references, but no raw invalid bytes or NUL bytes.
+- `mostly-valid`: default-biased structural cases with occasional invalid bytes.
+- `ascii-structural`: ASCII-only terminal text and attributes for tokenizer and
+  tree-construction coverage.
+- `invalid-byte-heavy`: raw invalid byte sequences, NUL bytes, controls, and
+  valid text mixed deliberately for encoding-normalization coverage.
+- `stress-long`: long terminal payloads for deliberate resource-stress runs.
+- `auto`: weighted choice. Normal structural profiles favor valid UTF-8 and
+  mostly-valid payloads; `resource-stress` favors `stress-long`.
+
+Use `--payload-policy POLICY` on `worker.php`, `runner.php`, or `launcher.php`.
+Use `--max-input-bytes N` to apply a soft generated-input byte cap before the
+worker records replay metadata. Replay and minimization preserve the original
+payload policy when it was recorded; old or hand-supplied inputs leave
+`payloadPolicy` null unless an explicit policy label is provided. Replayed and
+minimized artifacts keep immediate `inputSource` metadata separate from
+`originalGenerator` metadata.
 
 ## Tree Comparison
 

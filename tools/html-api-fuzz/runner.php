@@ -3,8 +3,20 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_runner_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N]\n";
+	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
+}
+
+function html_api_fuzz_runner_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
+	if ( 'auto' !== $profile && ! in_array( $profile, \HtmlApiFuzz\Generator::profiles(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator profile: ' . $profile );
+	}
+	if ( 'auto' !== $mode && ! in_array( $mode, \HtmlApiFuzz\Generator::modes(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator mode: ' . $mode );
+	}
+	if ( 'auto' !== $payload_policy && ! in_array( $payload_policy, \HtmlApiFuzz\Generator::payload_policies(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator payload policy: ' . $payload_policy );
+	}
 }
 
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
@@ -23,7 +35,10 @@ $timeout_ms       = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
 $stop_on_failure  = \HtmlApiFuzz\option_bool( $options, 'stop-on-failure', false );
 $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
+$payload_policy   = \HtmlApiFuzz\option_string( $options, 'payload-policy', 'auto' );
+$max_input_bytes  = \HtmlApiFuzz\option_int( $options, 'max-input-bytes', 0 );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
+html_api_fuzz_runner_validate_generator_options( $profile, $mode, $payload_policy );
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $summary_path = $output_dir . '/summary.ndjson';
@@ -40,6 +55,10 @@ $state = array(
 	'startSeed'     => $start_seed,
 	'seedStride'    => $seed_stride,
 	'nextSeed'      => $start_seed,
+	'profile'       => $profile,
+	'mode'          => $mode,
+	'payloadPolicy' => $payload_policy,
+	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'successes'     => 0,
 	'failures'      => 0,
 	'unsupported'   => 0,
@@ -68,6 +87,8 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		$profile,
 		'--mode',
 		$mode,
+		'--payload-policy',
+		$payload_policy,
 		'--output-dir',
 		$attempt_dir,
 		'--max-tokens',
@@ -78,20 +99,30 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 	if ( $fail_unsupported ) {
 		$args[] = '--fail-unsupported';
 	}
+	if ( $max_input_bytes > 0 ) {
+		$args[] = '--max-input-bytes';
+		$args[] = (string) $max_input_bytes;
+	}
 
 	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-start', 'seed' => $seed, 'attemptDir' => $attempt_dir ) );
 	$proc   = \HtmlApiFuzz\run_php_process( $args, $repo_root, $timeout_ms, $log_path );
 	$result = \HtmlApiFuzz\read_json_file( $attempt_dir . '/result.json' );
 
 	if ( null === $result ) {
+		$replay = \HtmlApiFuzz\read_json_file( $attempt_dir . '/replay.json' );
 		$result = array(
 			'ok'             => false,
 			'status'         => $proc['timedOut'] ? 'timeout' : 'worker-failed',
 			'failureClass'   => $proc['timedOut'] ? 'timeout' : 'worker-failed',
 			'failureSnippet' => substr( $proc['output'], -2000 ),
 			'seed'           => $seed,
-			'profile'        => $profile,
-			'mode'           => $mode,
+			'profile'        => is_array( $replay ) ? ( $replay['profile'] ?? $profile ) : $profile,
+			'mode'           => is_array( $replay ) ? ( $replay['mode'] ?? $mode ) : $mode,
+			'payloadPolicy'  => is_array( $replay ) ? ( $replay['payloadPolicy'] ?? $payload_policy ) : $payload_policy,
+			'generator'      => is_array( $replay ) ? ( $replay['generator'] ?? null ) : null,
+			'inputSource'    => is_array( $replay ) ? ( $replay['inputSource'] ?? null ) : null,
+			'inputSha1'      => is_array( $replay ) ? ( $replay['inputSha1'] ?? null ) : null,
+			'inputLength'    => is_array( $replay ) ? ( $replay['inputLength'] ?? null ) : null,
 			'paths'          => array(
 				'outputDir'  => $attempt_dir,
 				'resultPath' => $attempt_dir . '/result.json',
@@ -108,6 +139,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 	$result['seed']    = $result['seed'] ?? $seed;
 	$result['profile'] = $result['profile'] ?? $profile;
 	$result['mode']    = $result['mode'] ?? $mode;
+	$result['payloadPolicy'] = $result['payloadPolicy'] ?? $payload_policy;
 	$result['paths']   = $result['paths'] ?? array(
 		'outputDir'  => $attempt_dir,
 		'resultPath' => $attempt_dir . '/result.json',
@@ -145,6 +177,9 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'seed'          => $seed,
 		'profile'       => $result['profile'] ?? $profile,
 		'mode'          => $result['mode'] ?? $mode,
+		'payloadPolicy' => $result['payloadPolicy'] ?? $payload_policy,
+		'generator'     => $result['generator'] ?? null,
+		'inputSource'   => $result['inputSource'] ?? null,
 		'inputSha1'     => $result['inputSha1'] ?? null,
 		'inputLength'   => $result['inputLength'] ?? null,
 		'signature'     => $result['signature'] ?? null,
