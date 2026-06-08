@@ -86,7 +86,7 @@ class TreeRenderer {
 							++$indent_level;
 						}
 
-						$output .= str_repeat( '  ', $tag_indent ) . "<{$tag_name}>\n";
+						$output .= str_repeat( '  ', $tag_indent ) . '<' . self::escape_tree_scalar( $tag_name ) . ">\n";
 						$output .= self::render_wp_attributes( $processor, $tag_indent + 1 );
 
 						$modifiable_text = $processor->get_modifiable_text();
@@ -186,17 +186,21 @@ class TreeRenderer {
 
 		$sorted = array();
 		foreach ( $attribute_names as $attribute_name ) {
-			$sorted[ $attribute_name ] = $processor->get_qualified_attribute_name( $attribute_name );
+			$display_name = (string) $processor->get_qualified_attribute_name( $attribute_name );
+			$sorted[ $attribute_name ] = array(
+				'displayName' => $display_name,
+				'renderName'  => self::escape_tree_scalar( $display_name ),
+			);
 		}
-		uasort( $sorted, array( __CLASS__, 'compare_attribute_display_names' ) );
+		uasort( $sorted, array( __CLASS__, 'compare_attribute_records' ) );
 
 		$output = '';
-		foreach ( $sorted as $attribute_name => $display_name ) {
+		foreach ( $sorted as $attribute_name => $display ) {
 			$value = $processor->get_attribute( $attribute_name );
 			if ( true === $value ) {
 				$value = '';
 			}
-			$output .= str_repeat( '  ', $indent_level ) . "{$display_name}=\"" . self::escape_tree_scalar( (string) $value ) . "\"\n";
+			$output .= str_repeat( '  ', $indent_level ) . $display['renderName'] . '="' . self::escape_tree_scalar( (string) $value ) . "\"\n";
 		}
 		return $output;
 	}
@@ -305,7 +309,7 @@ class TreeRenderer {
 
 	private static function render_dom_element( $node, int $indent_level, int &$node_count, int $max_nodes ): string {
 		$tag_name = self::dom_element_display_name( $node );
-		$output   = str_repeat( '  ', $indent_level ) . "<{$tag_name}>\n";
+		$output   = str_repeat( '  ', $indent_level ) . '<' . self::escape_tree_scalar( $tag_name ) . ">\n";
 		$output  .= self::render_dom_attributes( $node, $indent_level + 1 );
 
 		$is_html_template = 'http://www.w3.org/1999/xhtml' === ( $node->namespaceURI ?? '' ) && 'template' === strtolower( (string) $node->localName );
@@ -380,22 +384,19 @@ class TreeRenderer {
 
 		$attrs = array();
 		foreach ( $node->attributes as $attr ) {
+			$display_name = self::dom_attribute_display_name( $attr );
 			$attrs[] = array(
-				'name'  => self::dom_attribute_display_name( $attr ),
-				'value' => $attr->nodeValue,
+				'displayName' => $display_name,
+				'renderName'  => self::escape_tree_scalar( $display_name ),
+				'value'       => $attr->nodeValue,
 			);
 		}
 
-		usort(
-			$attrs,
-			static function ( $a, $b ) {
-				return TreeRenderer::compare_attribute_display_names( $a['name'], $b['name'] );
-			}
-		);
+		usort( $attrs, array( __CLASS__, 'compare_attribute_records' ) );
 
 		$output = '';
 		foreach ( $attrs as $attr ) {
-			$output .= str_repeat( '  ', $indent_level ) . $attr['name'] . '="' . self::escape_tree_scalar( (string) $attr['value'] ) . "\"\n";
+			$output .= str_repeat( '  ', $indent_level ) . $attr['renderName'] . '="' . self::escape_tree_scalar( (string) $attr['value'] ) . "\"\n";
 		}
 		return $output;
 	}
@@ -429,6 +430,15 @@ class TreeRenderer {
 		}
 
 		return $a <=> $b;
+	}
+
+	private static function compare_attribute_records( array $a, array $b ): int {
+		$rendered = self::compare_attribute_display_names( $a['renderName'], $b['renderName'] );
+		if ( 0 !== $rendered ) {
+			return $rendered;
+		}
+
+		return self::compare_attribute_display_names( $a['displayName'], $b['displayName'] );
 	}
 
 	public static function compare_trees( string $wordpress_tree, string $dom_tree ): array {
@@ -519,6 +529,7 @@ class TreeRenderer {
 	}
 
 	private static function escape_tree_scalar( string $value ): string {
+		$value = self::normalize_tree_scalar( $value );
 		$output = '';
 		$length = strlen( $value );
 		for ( $i = 0; $i < $length; ++$i ) {
@@ -552,6 +563,11 @@ class TreeRenderer {
 		}
 
 		return $output;
+	}
+
+	private static function normalize_tree_scalar( string $value ): string {
+		$value = str_replace( "\0", "\xEF\xBF\xBD", $value );
+		return str_replace( array( "\r\n", "\r" ), "\n", $value );
 	}
 
 	private static function line_preview( ?string $line ): ?string {
