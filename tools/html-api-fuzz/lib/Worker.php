@@ -96,8 +96,8 @@ class Worker {
 
 		if ( ! $tag_result['ok'] ) {
 			$result['ok']           = false;
-			$result['status']       = 'failed';
 			$result['failureClass'] = self::tag_invariant_failure_class( $tag_result );
+			$result['status']       = 'resource-limit' === $result['failureClass'] ? 'resource-limit' : 'failed';
 		} elseif ( TreeRenderer::STATUS_UNSUPPORTED === $wp_result['status'] ) {
 			$result['status']       = 'unsupported';
 			$result['failureClass'] = 'unsupported';
@@ -222,30 +222,29 @@ class Worker {
 			if ( function_exists( 'wp_scrub_utf8' ) && wp_scrub_utf8( $wordpress_line ) === $dom_line ) {
 				return true;
 			}
-			if ( ( $diff['wordpressNorm'] ?? null ) === ( $diff['domNorm'] ?? null ) ) {
-				return true;
-			}
 		}
 
 		if ( empty( $diff['wordpressHex'] ) || empty( $diff['domHex'] ) || $diff['wordpressHex'] === $diff['domHex'] ) {
 			return false;
 		}
 
-		if ( ( $diff['wordpressNorm'] ?? null ) === ( $diff['domNorm'] ?? null ) ) {
-			return true;
-		}
-
 		return false;
 	}
 
 	private static function tag_invariant_failure_class( array $tag_result ): string {
-		foreach ( $tag_result['failures'] ?? array() as $failure ) {
-			if ( in_array( $failure['name'] ?? null, array( 'tag-token-limit-exceeded', 'mutation-token-limit-exceeded' ), true ) ) {
-				return 'resource-limit';
+		$failures = $tag_result['failures'] ?? array();
+		if ( empty( $failures ) ) {
+			return 'tag-invariant-failed';
+		}
+
+		$resource_limit_names = array( 'tag-token-limit-exceeded', 'mutation-token-limit-exceeded' );
+		foreach ( $failures as $failure ) {
+			if ( ! in_array( $failure['name'] ?? null, $resource_limit_names, true ) ) {
+				return 'tag-invariant-failed';
 			}
 		}
 
-		return 'tag-invariant-failed';
+		return 'resource-limit';
 	}
 
 	private static function compact_parse_result( array $parse_result, string $output_dir, string $tree_filename ): array {
