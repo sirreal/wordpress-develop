@@ -117,6 +117,7 @@
 		"build:dev": "grunt build --dev",
 		"build:gutenberg": "grunt build:gutenberg",
 		"benchmark:html-api": "php tests/benchmarks/html-api/benchmark.php",
+		"benchmark:html-api:compare": "php tests/benchmarks/html-api/compare.php",
 		"dev": "grunt watch --dev",
 		"test": "grunt test",
 		"watch": "grunt watch",

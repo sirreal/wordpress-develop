@@ -17,6 +17,8 @@ function wp_html_api_benchmark_print_usage() {
 	echo "Usage: {$script} [options]\n\n";
 	echo "Options:\n";
 	echo "  --processor=<all|tag-processor|html-processor>  Processor to benchmark. Default: all.\n";
+	echo "  --operation=<all|parse|attribute-names|attribute-values|modifiable-text|token-getters>\n";
+	echo "                                                   Operation to benchmark. Default: all.\n";
 	echo "  --document=<all|block-post|full-page>            Document fixture to benchmark. Default: all.\n";
 	echo "  --case=<case-id>                                 Exact case ID to run. May be repeated.\n";
 	echo "  --iterations=<n>                                 Measured samples per case. Default: 15.\n";
@@ -65,10 +67,17 @@ function wp_html_api_benchmark_select_cases( $options ) {
 		'document'
 	);
 
+	$operations = wp_html_api_benchmark_expand_filter(
+		$options['operation'],
+		array( 'parse', 'attribute-names', 'attribute-values', 'modifiable-text', 'token-getters' ),
+		'operation'
+	);
+
 	foreach ( $cases as $case_id => $case ) {
 		if (
 			in_array( $case['processor'], $processors, true ) &&
-			in_array( $case['document'], $documents, true )
+			in_array( $case['document'], $documents, true ) &&
+			in_array( $case['operation'], $operations, true )
 		) {
 			$selected[ $case_id ] = $case;
 		}
@@ -215,14 +224,18 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 	$samples_ms          = array();
 	$raw_samples         = array();
 	$tokens_per_run      = array();
+	$work_per_run        = array();
+	$checksums_per_run   = array();
 	$first_environment   = null;
 	$calibration_warning = null;
 
 	for ( $i = 0; $i < $iterations; $i++ ) {
-		$result          = wp_html_api_benchmark_run_worker( $case_id, $revolutions, $warmup_runs, $options );
-		$duration_ms     = ( $result['elapsed_ns'] / 1000000 ) / $revolutions;
-		$samples_ms[]    = $duration_ms;
-		$tokens_per_run[] = $result['tokens'] / $revolutions;
+		$result              = wp_html_api_benchmark_run_worker( $case_id, $revolutions, $warmup_runs, $options );
+		$duration_ms         = ( $result['elapsed_ns'] / 1000000 ) / $revolutions;
+		$samples_ms[]        = $duration_ms;
+		$tokens_per_run[]    = $result['tokens'] / $revolutions;
+		$work_per_run[]      = $result['work'] / $revolutions;
+		$checksums_per_run[] = $result['checksum'] / $revolutions;
 
 		if ( null === $first_environment && isset( $result['environment'] ) ) {
 			$first_environment = $result['environment'];
@@ -232,11 +245,15 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 			'durationMs' => $duration_ms,
 			'elapsedNs'  => $result['elapsed_ns'],
 			'tokens'     => $result['tokens'],
+			'work'       => $result['work'],
+			'checksum'   => $result['checksum'],
 		);
 	}
 
 	$stats        = wp_html_api_benchmark_statistics( $samples_ms );
 	$tokens       = (int) round( wp_html_api_benchmark_median( $tokens_per_run ) );
+	$work         = (int) round( wp_html_api_benchmark_median( $work_per_run ) );
+	$checksum     = (int) round( wp_html_api_benchmark_median( $checksums_per_run ) );
 	$warnings     = array();
 	$relative_mad = $stats['median'] > 0 ? $stats['mad'] / $stats['median'] : 0;
 
@@ -250,6 +267,14 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 
 	if ( 1 < count( array_unique( array_map( 'intval', $tokens_per_run ) ) ) ) {
 		$warnings[] = 'Token count varied across samples.';
+	}
+
+	if ( 1 < count( array_unique( array_map( 'intval', $work_per_run ) ) ) ) {
+		$warnings[] = 'Operation count varied across samples.';
+	}
+
+	if ( 1 < count( array_unique( array_map( 'intval', $checksums_per_run ) ) ) ) {
+		$warnings[] = 'Checksum varied across samples.';
 	}
 
 	if ( ( $stats['median'] * $revolutions ) < (float) $options['min-sample-ms'] && $revolutions >= (int) $options['max-revs'] ) {
@@ -269,9 +294,12 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 			'schema'             => 'wordpress-html-api-benchmark/v1',
 			'case'               => $case_id,
 			'processor'          => $case['processor'],
+			'operation'          => $case['operation'],
 			'document'           => $case['document'],
 			'bytes'              => strlen( $document ),
 			'tokensPerRun'       => $tokens,
+			'operationsPerRun'   => $work,
+			'checksumPerRun'     => $checksum,
 			'revolutions'        => $revolutions,
 			'iterations'         => $iterations,
 			'warmupRuns'         => $warmup_runs,
@@ -295,18 +323,20 @@ function wp_html_api_benchmark_print_result( $entry ) {
 	$stats       = $meta['statistics'];
 	$median      = $stats['median'];
 	$tokens      = $meta['tokensPerRun'];
+	$operations  = $meta['operationsPerRun'];
 	$tokens_sec  = $median > 0 ? ( $tokens / ( $median / 1000 ) ) : 0;
 	$warnings    = $meta['warnings'];
 	$warning_msg = $warnings ? ' warnings: ' . implode( ' ', $warnings ) : '';
 
 	printf(
-		"%s\n  %d revs, %d samples, %.4f ms median, %.4f ms MAD, %d tokens/run, %.0f tokens/s%s\n",
+		"%s\n  %d revs, %d samples, %.4f ms median, %.4f ms MAD, %d tokens/run, %d operations/run, %.0f tokens/s%s\n",
 		$entry['title'],
 		$meta['revolutions'],
 		$meta['iterations'],
 		$median,
 		$stats['mad'],
 		$tokens,
+		$operations,
 		$tokens_sec,
 		$warning_msg
 	);
@@ -314,6 +344,7 @@ function wp_html_api_benchmark_print_result( $entry ) {
 
 $defaults = array(
 	'processor'          => 'all',
+	'operation'          => 'all',
 	'document'           => 'all',
 	'iterations'         => getenv( 'HTML_API_BENCHMARK_ITERATIONS' ) ?: 15,
 	'warmup-runs'        => getenv( 'HTML_API_BENCHMARK_WARMUP_RUNS' ) ?: 1,

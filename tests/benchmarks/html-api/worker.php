@@ -44,11 +44,16 @@ try {
 		}
 	}
 
-	$tokens = 0;
-	$start  = hrtime( true );
+	$tokens   = 0;
+	$work     = 0;
+	$checksum = 0;
+	$start    = hrtime( true );
 
 	for ( $i = 0; $i < $revs; $i++ ) {
-		$tokens += wp_html_api_benchmark_run_revolution( $case, $html );
+		$result    = wp_html_api_benchmark_run_revolution( $case, $html );
+		$tokens   += $result['tokens'];
+		$work     += $result['work'];
+		$checksum += $result['checksum'];
 	}
 
 	$elapsed_ns = hrtime( true ) - $start;
@@ -59,6 +64,8 @@ try {
 			'elapsed_ns'  => $elapsed_ns,
 			'revolutions' => $revs,
 			'tokens'      => $tokens,
+			'work'        => $work,
+			'checksum'    => $checksum,
 			'environment' => wp_html_api_benchmark_environment(),
 		),
 		JSON_UNESCAPED_SLASHES

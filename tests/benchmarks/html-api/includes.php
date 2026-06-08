@@ -103,32 +103,57 @@ function wp_html_api_benchmark_assert_positive_number( $value, $name ) {
  * @return array<string,array<string,mixed>> Benchmark cases.
  */
 function wp_html_api_benchmark_cases() {
-	return array(
-		'tag-processor:block-post'      => array(
-			'title'     => 'HTML API > Tag Processor > block-post',
-			'processor' => 'tag-processor',
-			'document'  => 'block-post',
-			'mode'      => 'tag',
+	$processors = array(
+		'tag-processor'  => array(
+			'title' => 'Tag Processor',
+			'modes' => array(
+				'block-post' => 'tag',
+				'full-page'  => 'tag',
+			),
 		),
-		'html-processor:block-post'     => array(
-			'title'     => 'HTML API > HTML Processor > block-post',
-			'processor' => 'html-processor',
-			'document'  => 'block-post',
-			'mode'      => 'html-fragment',
-		),
-		'tag-processor:full-page'       => array(
-			'title'     => 'HTML API > Tag Processor > full-page',
-			'processor' => 'tag-processor',
-			'document'  => 'full-page',
-			'mode'      => 'tag',
-		),
-		'html-processor:full-page'      => array(
-			'title'     => 'HTML API > HTML Processor > full-page',
-			'processor' => 'html-processor',
-			'document'  => 'full-page',
-			'mode'      => 'html-full',
+		'html-processor' => array(
+			'title' => 'HTML Processor',
+			'modes' => array(
+				'block-post' => 'html-fragment',
+				'full-page'  => 'html-full',
+			),
 		),
 	);
+
+	$operations = array(
+		'parse'            => 'Parse',
+		'attribute-names'  => 'Attribute Names',
+		'attribute-values' => 'Attribute Values',
+		'modifiable-text'  => 'Modifiable Text',
+		'token-getters'    => 'Token Getters',
+	);
+
+	$documents = array(
+		'block-post' => 'block-post',
+		'full-page'  => 'full-page',
+	);
+
+	$cases = array();
+
+	foreach ( $processors as $processor_id => $processor ) {
+		foreach ( $documents as $document_id => $document_title ) {
+			foreach ( $operations as $operation_id => $operation_title ) {
+				$case_id = 'parse' === $operation_id
+					? "{$processor_id}:{$document_id}"
+					: "{$processor_id}:{$operation_id}:{$document_id}";
+
+				$cases[ $case_id ] = array(
+					'title'     => "HTML API > {$processor['title']} > {$operation_title} > {$document_title}",
+					'processor' => $processor_id,
+					'document'  => $document_id,
+					'operation' => $operation_id,
+					'mode'      => $processor['modes'][ $document_id ],
+				);
+			}
+		}
+	}
+
+	return $cases;
 }
 
 /**
@@ -199,7 +224,16 @@ function wp_html_api_benchmark_load_html_api( $target ) {
 		wp_html_api_benchmark_fail( "Could not find wp-includes/html-api below target: {$target}" );
 	}
 
+	if ( ! defined( 'ABSPATH' ) ) {
+		define( 'ABSPATH', dirname( $wp_includes ) . '/' );
+	}
+
+	if ( ! defined( 'WPINC' ) ) {
+		define( 'WPINC', basename( $wp_includes ) );
+	}
+
 	$files = array(
+		'compat.php',
 		'class-wp-token-map.php',
 		'html-api/html5-named-character-references.php',
 		'html-api/class-wp-html-attribute-token.php',
@@ -267,12 +301,98 @@ function wp_html_api_benchmark_create_processor( $case, $html ) {
 function wp_html_api_benchmark_run_revolution( $case, $html ) {
 	$processor = wp_html_api_benchmark_create_processor( $case, $html );
 	$tokens    = 0;
+	$work      = 0;
+	$checksum  = 0;
 
 	while ( $processor->next_token() ) {
 		++$tokens;
+
+		switch ( $case['operation'] ) {
+			case 'parse':
+				++$work;
+				$checksum += $tokens;
+				break;
+
+			case 'attribute-names':
+				if ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {
+					break;
+				}
+
+				foreach ( array( 'data-', 'aria-' ) as $prefix ) {
+					$names = $processor->get_attribute_names_with_prefix( $prefix );
+					++$work;
+
+					if ( is_array( $names ) ) {
+						$checksum += count( $names );
+						foreach ( $names as $name ) {
+							$checksum += strlen( $name );
+						}
+					}
+				}
+				break;
+
+			case 'attribute-values':
+				if ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {
+					break;
+				}
+
+				foreach ( array( 'class', 'data-wp-interactive', 'data-wp-context', 'href', 'src', 'alt', 'aria-labelledby', 'loading', 'missing' ) as $name ) {
+					$value = $processor->get_attribute( $name );
+					++$work;
+					$checksum += wp_html_api_benchmark_value_score( $value );
+				}
+				break;
+
+			case 'modifiable-text':
+				$text = $processor->get_modifiable_text();
+				++$work;
+				$checksum += strlen( $text );
+				break;
+
+			case 'token-getters':
+				++$work;
+				$checksum += strlen( (string) $processor->get_token_type() );
+				$checksum += strlen( (string) $processor->get_token_name() );
+				$checksum += strlen( (string) $processor->get_tag() );
+				$checksum += $processor->is_tag_closer() ? 1 : 0;
+				break;
+
+			default:
+				wp_html_api_benchmark_fail( 'Unknown benchmark operation: ' . $case['operation'] );
+		}
 	}
 
-	return $tokens;
+	return array(
+		'tokens'   => $tokens,
+		'work'     => $work,
+		'checksum' => $checksum,
+	);
+}
+
+/**
+ * Converts a getter return value into a deterministic checksum contribution.
+ *
+ * @param mixed $value Getter return value.
+ * @return int Checksum contribution.
+ */
+function wp_html_api_benchmark_value_score( $value ) {
+	if ( true === $value ) {
+		return 1;
+	}
+
+	if ( null === $value || false === $value ) {
+		return 0;
+	}
+
+	if ( is_array( $value ) ) {
+		$score = 0;
+		foreach ( $value as $item ) {
+			$score += wp_html_api_benchmark_value_score( $item );
+		}
+		return $score;
+	}
+
+	return strlen( (string) $value );
 }
 
 /**

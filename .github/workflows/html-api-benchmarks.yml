@@ -1,0 +1,112 @@
+name: HTML API Benchmarks
+
+on:
+  push:
+    branches:
+      - trunk
+      - '6.[2-9]'
+      - '[7-9].[0-9]'
+    paths:
+      - 'src/wp-includes/html-api/**'
+      - 'src/wp-includes/class-wp-token-map.php'
+      - 'tests/benchmarks/html-api/**'
+      - 'tests/performance/compare-results.js'
+      - 'tests/performance/utils.js'
+      - 'package*.json'
+      - '.github/workflows/html-api-benchmarks.yml'
+  pull_request:
+    branches:
+      - trunk
+      - '6.[2-9]'
+      - '[7-9].[0-9]'
+    paths:
+      - 'src/wp-includes/html-api/**'
+      - 'src/wp-includes/class-wp-token-map.php'
+      - 'tests/benchmarks/html-api/**'
+      - 'tests/performance/compare-results.js'
+      - 'tests/performance/utils.js'
+      - 'package*.json'
+      - '.github/workflows/html-api-benchmarks.yml'
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Git ref to use as the benchmark baseline.'
+        required: false
+        type: string
+        default: trunk
+
+permissions: {}
+
+jobs:
+  html-api-benchmarks:
+    name: HTML API Benchmarks
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout current source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: current
+          show-progress: ${{ runner.debug == '1' && 'true' || 'false' }}
+          persist-credentials: false
+
+      - name: Determine baseline ref
+        id: baseline
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PUSH_BEFORE: ${{ github.event.before || '' }}
+          DISPATCH_BASELINE_REF: ${{ inputs.baseline_ref || 'trunk' }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASELINE_REF="$PR_BASE_SHA"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            BASELINE_REF="$PUSH_BEFORE"
+          else
+            BASELINE_REF="$DISPATCH_BASELINE_REF"
+          fi
+
+          echo "ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout baseline source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.baseline.outputs.ref }}
+          path: baseline
+          show-progress: ${{ runner.debug == '1' && 'true' || 'false' }}
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # 2.37.1
+        with:
+          php-version: latest
+          coverage: none
+
+      - name: Run HTML API benchmarks
+        working-directory: current
+        env:
+          TARGET_SHA: ${{ steps.baseline.outputs.ref }}
+        run: |
+          php --version
+          php tests/benchmarks/html-api/compare.php \
+            --baseline-target="${GITHUB_WORKSPACE}/baseline/src" \
+            --target="${GITHUB_WORKSPACE}/current/src" \
+            --output="${GITHUB_WORKSPACE}/current/artifacts" \
+            --summary="${RUNNER_TEMP}/html-api-benchmark-summary.md"
+
+      - name: Add workflow summary
+        run: cat "${RUNNER_TEMP}/html-api-benchmark-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: html-api-benchmark-results
+          path: current/artifacts
+          if-no-files-found: error
+
+      - name: Ensure version-controlled files are not modified or deleted
+        working-directory: current
+        run: git diff --exit-code
