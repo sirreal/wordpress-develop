@@ -12,14 +12,16 @@ require __DIR__ . '/includes.php';
  * Prints benchmark usage details.
  */
 function wp_html_api_benchmark_print_usage() {
-	$script = 'php tests/benchmarks/html-api/benchmark.php';
+	$script    = 'php tests/benchmarks/html-api/benchmark.php';
+	$documents = implode( '|', wp_html_api_benchmark_document_ids() );
 
 	echo "Usage: {$script} [options]\n\n";
 	echo "Options:\n";
 	echo "  --processor=<all|tag-processor|html-processor>  Processor to benchmark. Default: all.\n";
 	echo "  --operation=<all|parse|attribute-names|attribute-values|modifiable-text|token-getters>\n";
 	echo "                                                   Operation to benchmark. Default: all.\n";
-	echo "  --document=<all|block-post|full-page>            Document fixture to benchmark. Default: all.\n";
+	echo "  --document=<all|document-id[,document-id]>       Document fixture to benchmark. Default: all.\n";
+	echo "                                                   Documents: {$documents}\n";
 	echo "  --case=<case-id>                                 Exact case ID to run. May be repeated.\n";
 	echo "  --iterations=<n>                                 Measured samples per case. Default: 15.\n";
 	echo "  --warmup-runs=<n>                                Warmup runs per measured sample. Default: 1.\n";
@@ -63,7 +65,7 @@ function wp_html_api_benchmark_select_cases( $options ) {
 
 	$documents = wp_html_api_benchmark_expand_filter(
 		$options['document'],
-		array( 'block-post', 'full-page' ),
+		wp_html_api_benchmark_document_ids(),
 		'document'
 	);
 
@@ -211,15 +213,15 @@ function wp_html_api_benchmark_calibrate_revolutions( $case_id, $options ) {
  * Runs a benchmark case and returns a performance result entry.
  *
  * @param string $case_id Benchmark case ID.
- * @param array  $case    Benchmark case.
- * @param array  $options Runner options.
+ * @param array  $benchmark_case Benchmark case.
+ * @param array  $options        Runner options.
  * @return array<string,mixed> Performance result entry.
  */
-function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
+function wp_html_api_benchmark_run_case( $case_id, $benchmark_case, $options ) {
 	$iterations          = (int) $options['iterations'];
 	$warmup_runs         = (int) $options['warmup-runs'];
 	$variance_threshold  = (float) $options['variance-threshold'];
-	$document            = wp_html_api_benchmark_document( $case['document'] );
+	$document            = wp_html_api_benchmark_document( $benchmark_case['document'] );
 	$revolutions         = wp_html_api_benchmark_calibrate_revolutions( $case_id, $options );
 	$samples_ms          = array();
 	$raw_samples         = array();
@@ -284,7 +286,7 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 
 	return array(
 		'file'     => 'tests/benchmarks/html-api/benchmark.php',
-		'title'    => $case['title'],
+		'title'    => $benchmark_case['title'],
 		'results'  => array(
 			array(
 				'durationMs' => $samples_ms,
@@ -293,9 +295,9 @@ function wp_html_api_benchmark_run_case( $case_id, $case, $options ) {
 		'metadata' => array(
 			'schema'             => 'wordpress-html-api-benchmark/v1',
 			'case'               => $case_id,
-			'processor'          => $case['processor'],
-			'operation'          => $case['operation'],
-			'document'           => $case['document'],
+			'processor'          => $benchmark_case['processor'],
+			'operation'          => $benchmark_case['operation'],
+			'document'           => $benchmark_case['document'],
 			'bytes'              => strlen( $document ),
 			'tokensPerRun'       => $tokens,
 			'operationsPerRun'   => $work,
@@ -346,13 +348,13 @@ $defaults = array(
 	'processor'          => 'all',
 	'operation'          => 'all',
 	'document'           => 'all',
-	'iterations'         => getenv( 'HTML_API_BENCHMARK_ITERATIONS' ) ?: 15,
-	'warmup-runs'        => getenv( 'HTML_API_BENCHMARK_WARMUP_RUNS' ) ?: 1,
-	'min-sample-ms'      => getenv( 'HTML_API_BENCHMARK_MIN_SAMPLE_MS' ) ?: 50,
-	'max-revs'           => getenv( 'HTML_API_BENCHMARK_MAX_REVS' ) ?: 10000,
-	'variance-threshold' => getenv( 'HTML_API_BENCHMARK_VARIANCE_THRESHOLD' ) ?: 0.10,
-	'target'             => getenv( 'HTML_API_BENCHMARK_TARGET' ) ?: getcwd() . '/src',
-	'output'             => getenv( 'WP_ARTIFACTS_PATH' ) ?: getcwd() . '/artifacts',
+	'iterations'         => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_ITERATIONS', 15 ),
+	'warmup-runs'        => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_WARMUP_RUNS', 1 ),
+	'min-sample-ms'      => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_MIN_SAMPLE_MS', 50 ),
+	'max-revs'           => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_MAX_REVS', 10000 ),
+	'variance-threshold' => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_VARIANCE_THRESHOLD', 0.10 ),
+	'target'             => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_TARGET', getcwd() . '/src' ),
+	'output'             => wp_html_api_benchmark_getenv_or_default( 'WP_ARTIFACTS_PATH', getcwd() . '/artifacts' ),
 	'php-binary'         => PHP_BINARY,
 	'quiet'              => false,
 );

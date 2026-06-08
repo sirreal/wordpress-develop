@@ -12,7 +12,8 @@ require __DIR__ . '/includes.php';
  * Prints benchmark comparison usage details.
  */
 function wp_html_api_benchmark_compare_print_usage() {
-	$script = 'php tests/benchmarks/html-api/compare.php';
+	$script    = 'php tests/benchmarks/html-api/compare.php';
+	$documents = implode( '|', wp_html_api_benchmark_document_ids() );
 
 	echo "Usage: {$script} --baseline-target=<path> [options]\n\n";
 	echo "Runs the benchmark harness from this checkout against a baseline WordPress\n";
@@ -26,7 +27,8 @@ function wp_html_api_benchmark_compare_print_usage() {
 	echo "  --processor=<all|tag-processor|html-processor>  Processor to benchmark. Default: all.\n";
 	echo "  --operation=<all|parse|attribute-names|attribute-values|modifiable-text|token-getters>\n";
 	echo "                                                   Operation to benchmark. Default: all.\n";
-	echo "  --document=<all|block-post|full-page>            Document fixture to benchmark. Default: all.\n";
+	echo "  --document=<all|document-id[,document-id]>       Document fixture to benchmark. Default: all.\n";
+	echo "                                                   Documents: {$documents}\n";
 	echo "  --case=<case-id>                                 Exact case ID to run. May be repeated.\n";
 	echo "  --iterations=<n>                                 Measured samples per case. Default: 15.\n";
 	echo "  --warmup-runs=<n>                                Warmup runs per measured sample. Default: 1.\n";
@@ -162,14 +164,14 @@ $defaults = array(
 	'processor'          => 'all',
 	'operation'          => 'all',
 	'document'           => 'all',
-	'iterations'         => getenv( 'HTML_API_BENCHMARK_ITERATIONS' ) ?: 15,
-	'warmup-runs'        => getenv( 'HTML_API_BENCHMARK_WARMUP_RUNS' ) ?: 1,
-	'min-sample-ms'      => getenv( 'HTML_API_BENCHMARK_MIN_SAMPLE_MS' ) ?: 50,
-	'max-revs'           => getenv( 'HTML_API_BENCHMARK_MAX_REVS' ) ?: 10000,
-	'variance-threshold' => getenv( 'HTML_API_BENCHMARK_VARIANCE_THRESHOLD' ) ?: 0.10,
-	'target'             => getenv( 'HTML_API_BENCHMARK_TARGET' ) ?: getcwd() . '/src',
-	'baseline-target'    => getenv( 'HTML_API_BENCHMARK_BASELINE_TARGET' ) ?: '',
-	'output'             => getenv( 'WP_ARTIFACTS_PATH' ) ?: getcwd() . '/artifacts',
+	'iterations'         => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_ITERATIONS', 15 ),
+	'warmup-runs'        => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_WARMUP_RUNS', 1 ),
+	'min-sample-ms'      => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_MIN_SAMPLE_MS', 50 ),
+	'max-revs'           => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_MAX_REVS', 10000 ),
+	'variance-threshold' => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_VARIANCE_THRESHOLD', 0.10 ),
+	'target'             => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_TARGET', getcwd() . '/src' ),
+	'baseline-target'    => wp_html_api_benchmark_getenv_or_default( 'HTML_API_BENCHMARK_BASELINE_TARGET', '' ),
+	'output'             => wp_html_api_benchmark_getenv_or_default( 'WP_ARTIFACTS_PATH', getcwd() . '/artifacts' ),
 	'php-binary'         => PHP_BINARY,
 	'summary'            => '',
 	'quiet'              => false,
