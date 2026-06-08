@@ -140,7 +140,7 @@ function wp_html_api_benchmark_compare_run_benchmark( $target, $prefix, $options
  * @param bool  $quiet   Whether to suppress command output.
  */
 function wp_html_api_benchmark_compare_run_report( $options, $quiet ) {
-	$script = dirname( dirname( __DIR__ ) ) . '/performance/compare-results.js';
+	$script = dirname( __DIR__, 2 ) . '/performance/compare-results.js';
 
 	if ( ! file_exists( $script ) ) {
 		wp_html_api_benchmark_fail( "Comparison script not found: {$script}" );
@@ -151,8 +151,8 @@ function wp_html_api_benchmark_compare_run_report( $options, $quiet ) {
 		$command .= ' ' . escapeshellarg( $options['summary'] );
 	}
 
-	$environment = getenv();
-	$environment = is_array( $environment ) ? $environment : $_ENV;
+	$environment                      = getenv();
+	$environment                      = is_array( $environment ) ? $environment : $_ENV;
 	$environment['WP_ARTIFACTS_PATH'] = $options['output'];
 
 	wp_html_api_benchmark_compare_run_command( $command, $environment, $quiet );
