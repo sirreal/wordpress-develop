@@ -161,6 +161,31 @@ html_api_fuzz_smoke_assert( null === ( $replay_cli_replay['generator'] ?? null )
 html_api_fuzz_smoke_assert( 'input-file' === ( $replay_cli_replay['inputSource'] ?? null ), 'replay CLI output should record immediate input source.' );
 html_api_fuzz_smoke_assert( ( $worker_replay['generator'] ?? null ) === ( $replay_cli_replay['originalGenerator'] ?? null ), 'replay CLI output should preserve original generator metadata.' );
 
+$legacy_replay = $worker_replay;
+$legacy_replay['payloadPolicy'] = 'replay';
+if ( isset( $legacy_replay['generator']['payloadPolicy'] ) ) {
+	$legacy_replay['generator']['payloadPolicy'] = 'replay';
+}
+$legacy_replay_path = $tmp . '/legacy-payload-policy-replay.json';
+\HtmlApiFuzz\write_json_file( $legacy_replay_path, $legacy_replay );
+$legacy_replay_dir = $tmp . '/legacy-replay-cli';
+$legacy_replay_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/replay.php',
+		'--replay',
+		$legacy_replay_path,
+		'--output-dir',
+		$legacy_replay_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000,
+	$tmp . '/legacy-replay-cli.log'
+);
+html_api_fuzz_smoke_assert( ! $legacy_replay_proc['timedOut'] && in_array( $legacy_replay_proc['code'], array( 0, 2 ), true ), 'legacy replay payload policy labels should not make replay fatal.' );
+$legacy_replay_cli_replay = \HtmlApiFuzz\read_json_file( $legacy_replay_dir . '/replay.json' );
+html_api_fuzz_smoke_assert( null === ( $legacy_replay_cli_replay['payloadPolicy'] ?? null ), 'legacy replay payload policy labels should be treated as unlabeled direct input.' );
+html_api_fuzz_smoke_assert( 'replay' === ( $legacy_replay_cli_replay['originalGenerator']['payloadPolicy'] ?? null ), 'legacy replay should preserve original generator metadata.' );
+
 $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	array(
 		dirname( __DIR__ ) . '/runner.php',
@@ -176,6 +201,22 @@ $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	$tmp . '/bad-runner.log'
 );
 html_api_fuzz_smoke_assert( 0 !== $bad_runner_proc['code'], 'runner CLI should reject invalid payload policy before starting workers.' );
+
+$bad_stride_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/runner.php',
+		'--seed-stride',
+		'0',
+		'--max-seeds',
+		'1',
+		'--output-dir',
+		$tmp . '/bad-stride-runner',
+	),
+	\HtmlApiFuzz\repo_root(),
+	5000,
+	$tmp . '/bad-stride-runner.log'
+);
+html_api_fuzz_smoke_assert( 0 !== $bad_stride_proc['code'], 'runner CLI should reject non-positive seed strides before starting workers.' );
 
 $unlabeled_dir = $tmp . '/unlabeled-direct';
 $unlabeled_result = \HtmlApiFuzz\Worker::run(
@@ -210,6 +251,101 @@ html_api_fuzz_smoke_assert( in_array( 'tag-token-limit-exceeded', $resource_resu
 html_api_fuzz_smoke_assert( 'input-base64' === ( $resource_result['inputSource'] ?? null ), 'provided base64 input should record inputSource.' );
 html_api_fuzz_smoke_assert( null === ( $resource_result['generator'] ?? null ), 'provided input should not invent generator metadata.' );
 
+$dom_resource_dir = $tmp . '/dom-resource-limit';
+$dom_resource_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<p>x</p>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $dom_resource_dir,
+		'max-tokens'      => '100',
+		'max-nodes'       => '1',
+	)
+);
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_resource_result['failureClass'] ?? null ), 'DOM node ceilings should be bucketed as resource-limit.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_resource_result['status'] ?? null ), 'DOM node ceilings should use resource-limit status.' );
+html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_resource_result['dom']['failureClass'] ?? null ), 'DOM result should preserve the concrete node limit failure.' );
+html_api_fuzz_smoke_assert( in_array( 'dom-node-limit-exceeded', $dom_resource_result['signature']['facts']['limitFailures'] ?? array(), true ), 'resource-limit signature should include DOM node limit failures.' );
+
+$wp_resource_dir = $tmp . '/wordpress-resource-limit';
+$wp_resource_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<p>x</p>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $wp_resource_dir,
+		'max-tokens'      => '3',
+		'max-nodes'       => '100',
+	)
+);
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $wp_resource_result['failureClass'] ?? null ), 'WordPress tree token ceilings should be bucketed as resource-limit.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $wp_resource_result['status'] ?? null ), 'WordPress tree token ceilings should use resource-limit status.' );
+html_api_fuzz_smoke_assert( 'token-limit-exceeded' === ( $wp_resource_result['wordpress']['failureClass'] ?? null ), 'WordPress result should preserve the concrete token limit failure.' );
+html_api_fuzz_smoke_assert( in_array( 'wordpress-token-limit-exceeded', $wp_resource_result['signature']['facts']['limitFailures'] ?? array(), true ), 'resource-limit signature should include WordPress token limit failures.' );
+
+$resource_watcher_run_dir = $tmp . '/resource-watcher-run';
+\HtmlApiFuzz\ensure_dir( $resource_watcher_run_dir );
+\HtmlApiFuzz\append_ndjson(
+	$resource_watcher_run_dir . '/summary.ndjson',
+	array(
+		'ok'            => false,
+		'status'        => $resource_result['status'] ?? null,
+		'failureClass'  => $resource_result['failureClass'] ?? null,
+		'profile'       => $resource_result['profile'] ?? null,
+		'mode'          => $resource_result['mode'] ?? null,
+		'payloadPolicy' => $resource_result['payloadPolicy'] ?? null,
+		'generator'     => $resource_result['generator'] ?? null,
+		'inputSource'   => $resource_result['inputSource'] ?? null,
+		'inputSha1'     => $resource_result['inputSha1'] ?? null,
+		'inputLength'   => $resource_result['inputLength'] ?? null,
+		'signature'     => $resource_result['signature'] ?? null,
+		'resultPath'    => $resource_dir . '/result.json',
+		'replayPath'    => $resource_dir . '/replay.json',
+	)
+);
+$resource_watcher_state_dir = $tmp . '/resource-watcher-state';
+$resource_watcher_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/watcher.php',
+		'--run-dir',
+		$resource_watcher_run_dir,
+		'--state-dir',
+		$resource_watcher_state_dir,
+		'--once',
+		'--no-minimize',
+		'--max-minimize',
+		'1',
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000,
+	$tmp . '/resource-watcher.log'
+);
+html_api_fuzz_smoke_assert( ! $resource_watcher_proc['timedOut'] && 0 === $resource_watcher_proc['code'], 'watcher should process resource-limit summaries.' );
+$resource_watcher_state = \HtmlApiFuzz\read_json_file( $resource_watcher_state_dir . '/state.json' );
+$resource_watcher_hash = $resource_result['signature']['hash'] ?? null;
+$resource_watcher_record = is_string( $resource_watcher_hash ) ? ( $resource_watcher_state['signatures'][ $resource_watcher_hash ] ?? array() ) : array();
+html_api_fuzz_smoke_assert( 'queued' === ( $resource_watcher_record['status'] ?? null ), 'watcher should queue resource-limit signatures for minimization.' );
+html_api_fuzz_smoke_assert( ! isset( $resource_watcher_record['minimizeResult'] ), 'watcher --no-minimize should not start resource-limit minimization.' );
+$resource_watcher_second_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/watcher.php',
+		'--run-dir',
+		$resource_watcher_run_dir,
+		'--state-dir',
+		$resource_watcher_state_dir,
+		'--once',
+		'--no-minimize',
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000,
+	$tmp . '/resource-watcher-second.log'
+);
+$resource_watcher_second = json_decode( $resource_watcher_second_proc['stdout'], true );
+html_api_fuzz_smoke_assert( ! $resource_watcher_second_proc['timedOut'] && 0 === $resource_watcher_second_proc['code'], 'watcher should process a second scan.' );
+html_api_fuzz_smoke_assert( 0 === ( $resource_watcher_second['failuresSeen'] ?? null ), 'watcher should not reread already-scanned summary records.' );
+
 $encoding_dir = $tmp . '/encoding-mismatch';
 $encoding_input = '<p>' . str_repeat( 'a', 220 ) . "\xC0" . '</p>';
 $encoding_result = \HtmlApiFuzz\Worker::run(
@@ -225,6 +361,11 @@ $encoding_result = \HtmlApiFuzz\Worker::run(
 );
 html_api_fuzz_smoke_assert( 'encoding-mismatch' === ( $encoding_result['failureClass'] ?? null ), 'invalid byte beyond hex preview should be classified as encoding-mismatch.' );
 html_api_fuzz_smoke_assert( null === ( $encoding_result['generator'] ?? null ), 'replayed invalid input should not invent generator metadata.' );
+$encoding_diff = $encoding_result['comparison']['firstDifference'] ?? array();
+html_api_fuzz_smoke_assert( ( $encoding_diff['firstByteOffset'] ?? 0 ) > 160, 'long encoding mismatch should exercise an offset beyond the leading hex preview.' );
+html_api_fuzz_smoke_assert( ( $encoding_diff['wordpressHex'] ?? null ) === ( $encoding_diff['domHex'] ?? null ), 'long encoding mismatch should show why leading hex previews alone are insufficient.' );
+html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['wordpressDiffHex'] ?? '', 'c0' ), 'long encoding mismatch should include the differing WordPress byte in the diff window.' );
+html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['domDiffHex'] ?? '', 'efbfbd' ), 'long encoding mismatch should include the differing DOM replacement bytes in the diff window.' );
 
 $structural_with_invalid_dir = $tmp . '/structural-with-invalid';
 $structural = \HtmlApiFuzz\Generator::generate( 61, 'balanced', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096 );
@@ -240,5 +381,77 @@ $structural_with_invalid_result = \HtmlApiFuzz\Worker::run(
 	)
 );
 html_api_fuzz_smoke_assert( 'tree-mismatch' === ( $structural_with_invalid_result['failureClass'] ?? null ), 'invalid bytes elsewhere should not relabel structural tree mismatches as encoding-mismatch.' );
+
+$newline_scalar_cases = array(
+	'text'    => array(
+		'input' => '<p>a' . "\n" . 'b' . "\xC0" . '</p>',
+		'path'  => '/p/#text',
+	),
+	'attr'    => array(
+		'input' => '<p title="a' . "\n" . 'b' . "\xC0" . '"></p>',
+		'path'  => '/p/@title',
+	),
+	'comment' => array(
+		'input' => '<p><!-- a' . "\n" . 'b' . "\xC0" . ' --></p>',
+		'path'  => '/p/#text',
+	),
+);
+foreach ( $newline_scalar_cases as $name => $case ) {
+	$newline_scalar_dir = $tmp . '/newline-scalar-' . $name;
+	$newline_scalar_result = \HtmlApiFuzz\Worker::run(
+		array(
+			'input-base64'    => base64_encode( $case['input'] ),
+			'profile'         => 'replay',
+			'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+			'payload-policy'  => 'invalid-byte-heavy',
+			'output-dir'      => $newline_scalar_dir,
+			'max-tokens'      => '2000',
+			'max-nodes'       => '3000',
+		)
+	);
+	$newline_scalar_diff = $newline_scalar_result['comparison']['firstDifference'] ?? array();
+	html_api_fuzz_smoke_assert( 'encoding-mismatch' === ( $newline_scalar_result['failureClass'] ?? null ), $name . ' newline scalar invalid byte should be classified as encoding-mismatch.' );
+	html_api_fuzz_smoke_assert( $case['path'] === ( $newline_scalar_diff['path'] ?? null ), $name . ' newline scalar diff should preserve the logical tree path.' );
+	html_api_fuzz_smoke_assert( ! array_key_exists( 'wordpressLine', $newline_scalar_diff ), $name . ' newline scalar diff should not persist the full WordPress line.' );
+	html_api_fuzz_smoke_assert( ! array_key_exists( 'domLine', $newline_scalar_diff ), $name . ' newline scalar diff should not persist the full DOM line.' );
+	html_api_fuzz_smoke_assert( isset( $newline_scalar_diff['wordpressLinePreview'], $newline_scalar_diff['domLinePreview'] ), $name . ' newline scalar diff should persist bounded previews.' );
+	html_api_fuzz_smoke_assert( isset( $newline_scalar_diff['wordpressLineBytes'], $newline_scalar_diff['domLineBytes'] ), $name . ' newline scalar diff should persist line byte lengths.' );
+	html_api_fuzz_smoke_assert( isset( $newline_scalar_diff['wordpressLineSha1'], $newline_scalar_diff['domLineSha1'] ), $name . ' newline scalar diff should persist line hashes.' );
+	html_api_fuzz_smoke_assert( isset( $newline_scalar_diff['firstByteOffset'] ), $name . ' newline scalar diff should persist first differing byte offset.' );
+}
+
+$template_content_dir = $tmp . '/template-content-path';
+$template_content_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<template><p>a' . "\xC0" . '</p></template>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'invalid-byte-heavy',
+		'output-dir'      => $template_content_dir,
+		'max-tokens'      => '2000',
+		'max-nodes'       => '3000',
+	)
+);
+$template_content_diff = $template_content_result['comparison']['firstDifference'] ?? array();
+html_api_fuzz_smoke_assert( 'encoding-mismatch' === ( $template_content_result['failureClass'] ?? null ), 'template content invalid byte should be classified as encoding-mismatch.' );
+html_api_fuzz_smoke_assert( '/template/content/p/#text' === ( $template_content_diff['path'] ?? null ), 'template content descendants should include the content pseudo-node in diff paths.' );
+
+$quoted_attribute_dir = $tmp . '/quoted-attribute-name';
+$quoted_attribute_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<p a"b="x' . "\xC0" . '"></p>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'invalid-byte-heavy',
+		'output-dir'      => $quoted_attribute_dir,
+		'max-tokens'      => '2000',
+		'max-nodes'       => '3000',
+	)
+);
+$quoted_attribute_diff = $quoted_attribute_result['comparison']['firstDifference'] ?? array();
+html_api_fuzz_smoke_assert( 'encoding-mismatch' === ( $quoted_attribute_result['failureClass'] ?? null ), 'quoted attribute-name invalid byte should be classified as encoding-mismatch.' );
+html_api_fuzz_smoke_assert( '/p/@a"b' === ( $quoted_attribute_diff['path'] ?? null ), 'quoted attribute-name diff should preserve the attribute path.' );
+html_api_fuzz_smoke_assert( 'a"b="<value>"' === ( $quoted_attribute_diff['wordpressNorm'] ?? null ), 'quoted attribute-name normalization should preserve the WordPress attribute name.' );
+html_api_fuzz_smoke_assert( 'a"b="<value>"' === ( $quoted_attribute_diff['domNorm'] ?? null ), 'quoted attribute-name normalization should preserve the DOM attribute name.' );
 
 echo "OK\n";

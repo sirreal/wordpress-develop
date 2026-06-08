@@ -71,6 +71,13 @@ Watch an existing run directory and minimize new distinct signatures:
 php tools/html-api-fuzz/watcher.php --run-dir artifacts/html-api-fuzz/run-... --once
 ```
 
+Configured ceilings are reported as `failureClass: "resource-limit"` and remain
+in the watcher/minimizer triage path. This bucket includes tag/tree token
+ceilings (`tag-token-limit-exceeded`, `mutation-token-limit-exceeded`,
+`wordpress-token-limit-exceeded`) and DOM oracle node ceilings
+(`dom-node-limit-exceeded`). Process timeouts, PHP fatal errors, and memory
+failures are separate failures and are also in scope for triage.
+
 ## Artifact Layout
 
 The runner writes:
@@ -151,6 +158,9 @@ The tree renderer follows the html5lib test style used by
 - only the narrow auto-generated `html/head/body` wrapper tolerance
 
 Invalid bytes are not normalized away. If WordPress and `Dom\HTMLDocument`
-surface different byte sequences, the first-difference record includes hex
-previews so the mismatch remains inspectable even when JSON display substitutes
-replacement characters.
+surface different byte sequences, the first-difference record includes bounded
+line previews, byte lengths, line hashes, the first differing byte offset, and
+hex previews, including a diff-window hex preview around the differing byte, so
+the mismatch remains inspectable even when JSON display substitutes replacement
+characters. Full comparison lines are kept out of `result.json` to avoid large
+artifacts from stress inputs.

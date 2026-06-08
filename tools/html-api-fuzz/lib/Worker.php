@@ -105,9 +105,10 @@ class Worker {
 				$result['ok'] = false;
 			}
 		} elseif ( TreeRenderer::STATUS_ERROR === $wp_result['status'] ) {
+			$wp_failure_class       = $wp_result['failureClass'] ?? 'wordpress-parse-error';
 			$result['ok']           = false;
-			$result['status']       = 'failed';
-			$result['failureClass'] = $wp_result['failureClass'] ?? 'wordpress-parse-error';
+			$result['status']       = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : 'failed';
+			$result['failureClass'] = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : $wp_failure_class;
 		} else {
 			try {
 				$dom_result = TreeRenderer::render_dom( $input, $mode, $limits );
@@ -122,8 +123,11 @@ class Worker {
 			$result['dom'] = self::compact_parse_result( $dom_result, $output_dir, 'dom-tree.txt' );
 
 			if ( TreeRenderer::STATUS_ERROR === $dom_result['status'] ) {
-				$result['failureClass'] = $dom_result['failureClass'] ?? 'oracle-renderer-error';
-				$result['status']       = 'oracle-parse-error' === $result['failureClass'] ? 'oracle-parse-error' : 'failed';
+				$dom_failure_class      = $dom_result['failureClass'] ?? 'oracle-renderer-error';
+				$result['failureClass'] = self::is_resource_limit_failure( $dom_failure_class ) ? 'resource-limit' : $dom_failure_class;
+				$result['status']       = self::is_resource_limit_failure( $dom_failure_class )
+					? 'resource-limit'
+					: ( 'oracle-parse-error' === $result['failureClass'] ? 'oracle-parse-error' : 'failed' );
 				if ( 'oracle-parse-error' !== $result['failureClass'] ) {
 					$result['ok'] = false;
 				}
@@ -224,6 +228,10 @@ class Worker {
 			}
 		}
 
+		if ( true === ( $diff['linesMatchAfterWordPressUtf8Scrub'] ?? null ) ) {
+			return true;
+		}
+
 		if ( empty( $diff['wordpressHex'] ) || empty( $diff['domHex'] ) || $diff['wordpressHex'] === $diff['domHex'] ) {
 			return false;
 		}
@@ -245,6 +253,10 @@ class Worker {
 		}
 
 		return 'resource-limit';
+	}
+
+	private static function is_resource_limit_failure( ?string $failure_class ): bool {
+		return in_array( $failure_class, array( 'token-limit-exceeded', 'node-limit-exceeded' ), true );
 	}
 
 	private static function compact_parse_result( array $parse_result, string $output_dir, string $tree_filename ): array {

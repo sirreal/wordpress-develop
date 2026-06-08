@@ -19,6 +19,7 @@ function html_api_fuzz_watcher_load_state( string $path ): array {
 		'updatedAt'     => gmdate( 'c' ),
 		'signatures'    => array(),
 		'seenAttempts'  => array(),
+		'summaryOffsets'=> array(),
 	);
 }
 
@@ -123,15 +124,56 @@ function html_api_fuzz_watcher_record_failure( array $summary, string $state_dir
 	return $new;
 }
 
-function html_api_fuzz_watcher_read_summary_records( string $summary_path ): array {
-	$text = @file_get_contents( $summary_path );
-	if ( false === $text ) {
-		return array();
+function html_api_fuzz_watcher_summary_paths( string $run_dir ): array {
+	$paths = array();
+	$direct_summary = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . '/summary.ndjson';
+	if ( is_file( $direct_summary ) ) {
+		$paths[] = $direct_summary;
 	}
 
+	$items = @scandir( $run_dir );
+	if ( false === $items ) {
+		return $paths;
+	}
+
+	foreach ( $items as $item ) {
+		if ( '.' === $item || '..' === $item || in_array( $item, array( '.git', '.triage-watcher', 'triage' ), true ) ) {
+			continue;
+		}
+
+		$summary_path = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $item . '/summary.ndjson';
+		if ( is_file( $summary_path ) ) {
+			$paths[] = $summary_path;
+		}
+	}
+
+	sort( $paths );
+	return array_values( array_unique( $paths ) );
+}
+
+function html_api_fuzz_watcher_read_summary_records( string $summary_path, int $offset ): array {
 	$records = array();
 	$line_no = 0;
-	foreach ( explode( "\n", $text ) as $line ) {
+	$handle = @fopen( $summary_path, 'rb' );
+	if ( false === $handle ) {
+		return array(
+			'records' => $records,
+			'offset'  => $offset,
+		);
+	}
+
+	$size = filesize( $summary_path );
+	if ( false === $size ) {
+		$size = 0;
+	}
+	if ( $offset < 0 || $offset > $size ) {
+		$offset = 0;
+	}
+	if ( $offset > 0 ) {
+		fseek( $handle, $offset );
+	}
+
+	while ( false !== ( $line = fgets( $handle ) ) ) {
 		++$line_no;
 		$line = trim( $line );
 		if ( '' === $line ) {
@@ -147,7 +189,13 @@ function html_api_fuzz_watcher_read_summary_records( string $summary_path ): arr
 		}
 	}
 
-	return $records;
+	$offset = ftell( $handle );
+	fclose( $handle );
+
+	return array(
+		'records' => $records,
+		'offset'  => false === $offset ? 0 : $offset,
+	);
 }
 
 function html_api_fuzz_watcher_attempt_key( string $summary_path, int $line_no, array $record ): string {
@@ -205,13 +253,17 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 }
 
 function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, string $state_path, array &$state, array $options ): array {
-	$summary_paths = \HtmlApiFuzz\find_files_named( $run_dir, 'summary.ndjson', array( '.git', '.triage-watcher', 'triage' ) );
-	sort( $summary_paths );
+	$summary_paths = html_api_fuzz_watcher_summary_paths( $run_dir );
+	if ( ! is_array( $state['summaryOffsets'] ?? null ) ) {
+		$state['summaryOffsets'] = array();
+	}
 
 	$new_hashes = array();
 	$failures_seen = 0;
 	foreach ( $summary_paths as $summary_path ) {
-		foreach ( html_api_fuzz_watcher_read_summary_records( $summary_path ) as $entry ) {
+		$read = html_api_fuzz_watcher_read_summary_records( $summary_path, (int) ( $state['summaryOffsets'][ $summary_path ] ?? 0 ) );
+		$state['summaryOffsets'][ $summary_path ] = $read['offset'];
+		foreach ( $read['records'] as $entry ) {
 			$record = $entry['record'];
 			if ( $record['ok'] ?? true ) {
 				continue;

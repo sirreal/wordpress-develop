@@ -19,6 +19,30 @@ function html_api_fuzz_runner_validate_generator_options( string $profile, strin
 	}
 }
 
+function html_api_fuzz_runner_validate_runtime_options( int $seed_stride, int $max_seeds, float $duration_seconds, int $timeout_ms, int $max_input_bytes, int $max_tokens, int $max_nodes ): void {
+	if ( $seed_stride < 1 ) {
+		throw new InvalidArgumentException( 'Expected --seed-stride to be at least 1.' );
+	}
+	if ( $max_seeds < 0 ) {
+		throw new InvalidArgumentException( 'Expected --max-seeds to be at least 0.' );
+	}
+	if ( $duration_seconds < 0 ) {
+		throw new InvalidArgumentException( 'Expected --duration-seconds to be at least 0.' );
+	}
+	if ( $timeout_ms < 1 ) {
+		throw new InvalidArgumentException( 'Expected --timeout-ms to be at least 1.' );
+	}
+	if ( $max_input_bytes < 0 ) {
+		throw new InvalidArgumentException( 'Expected --max-input-bytes to be at least 0.' );
+	}
+	if ( $max_tokens < 1 ) {
+		throw new InvalidArgumentException( 'Expected --max-tokens to be at least 1.' );
+	}
+	if ( $max_nodes < 1 ) {
+		throw new InvalidArgumentException( 'Expected --max-nodes to be at least 1.' );
+	}
+}
+
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 if ( \HtmlApiFuzz\option_bool( $options, 'help', false ) || \HtmlApiFuzz\option_bool( $options, 'h', false ) ) {
 	html_api_fuzz_runner_usage();
@@ -37,8 +61,11 @@ $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
 $payload_policy   = \HtmlApiFuzz\option_string( $options, 'payload-policy', 'auto' );
 $max_input_bytes  = \HtmlApiFuzz\option_int( $options, 'max-input-bytes', 0 );
+$max_tokens       = \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 );
+$max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
 html_api_fuzz_runner_validate_generator_options( $profile, $mode, $payload_policy );
+html_api_fuzz_runner_validate_runtime_options( $seed_stride, $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes );
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $summary_path = $output_dir . '/summary.ndjson';
@@ -92,9 +119,9 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'--output-dir',
 		$attempt_dir,
 		'--max-tokens',
-		(string) \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 ),
+		(string) $max_tokens,
 		'--max-nodes',
-		(string) \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 ),
+		(string) $max_nodes,
 	);
 	if ( $fail_unsupported ) {
 		$args[] = '--fail-unsupported';

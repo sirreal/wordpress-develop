@@ -18,6 +18,27 @@ function html_api_fuzz_launcher_validate_generator_options( string $profile, str
 	}
 }
 
+function html_api_fuzz_launcher_validate_runtime_options( int $max_seeds, float $duration_seconds, int $timeout_ms, int $max_input_bytes, int $max_tokens, int $max_nodes ): void {
+	if ( $max_seeds < 0 ) {
+		throw new InvalidArgumentException( 'Expected --max-seeds to be at least 0.' );
+	}
+	if ( $duration_seconds < 0 ) {
+		throw new InvalidArgumentException( 'Expected --duration-seconds to be at least 0.' );
+	}
+	if ( $timeout_ms < 1 ) {
+		throw new InvalidArgumentException( 'Expected --timeout-ms to be at least 1.' );
+	}
+	if ( $max_input_bytes < 0 ) {
+		throw new InvalidArgumentException( 'Expected --max-input-bytes to be at least 0.' );
+	}
+	if ( $max_tokens < 1 ) {
+		throw new InvalidArgumentException( 'Expected --max-tokens to be at least 1.' );
+	}
+	if ( $max_nodes < 1 ) {
+		throw new InvalidArgumentException( 'Expected --max-nodes to be at least 1.' );
+	}
+}
+
 function html_api_fuzz_launcher_start_lane( array $command, string $cwd, string $log_path ) {
 	$spec = array(
 		0 => array( 'pipe', 'r' ),
@@ -90,10 +111,13 @@ $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
 $payload_policy   = \HtmlApiFuzz\option_string( $options, 'payload-policy', 'auto' );
 $max_input_bytes  = \HtmlApiFuzz\option_int( $options, 'max-input-bytes', 0 );
+$max_tokens       = \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 );
+$max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $stop_on_failure  = \HtmlApiFuzz\option_bool( $options, 'stop-on-failure', false );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
 $run_watcher      = \HtmlApiFuzz\option_bool( $options, 'watcher', false );
 html_api_fuzz_launcher_validate_generator_options( $profile, $mode, $payload_policy );
+html_api_fuzz_launcher_validate_runtime_options( $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes );
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $events_path = $output_dir . '/events.ndjson';
@@ -156,9 +180,9 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		'--payload-policy',
 		$payload_policy,
 		'--max-tokens',
-		(string) \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 ),
+		(string) $max_tokens,
 		'--max-nodes',
-		(string) \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 ),
+		(string) $max_nodes,
 	);
 
 	if ( 0 !== $max_seeds ) {
@@ -254,6 +278,8 @@ if ( $run_watcher ) {
 			'--once',
 			'--minimize-timeout-ms',
 			(string) $minimize_timeout_ms,
+			'--timeout-ms',
+			(string) $timeout_ms,
 			array_key_exists( 'max-attempts', $options ) ? '--max-attempts' : null,
 			array_key_exists( 'max-attempts', $options ) ? (string) \HtmlApiFuzz\option_int( $options, 'max-attempts', 250 ) : null,
 			array_key_exists( 'max-minimize', $options ) ? '--max-minimize' : null,
