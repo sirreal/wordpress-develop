@@ -169,27 +169,32 @@ function wp_html_api_benchmark_cases() {
  */
 function wp_html_api_benchmark_document_definitions() {
 	return array(
-		'block-post'    => array(
+		'block-post'                  => array(
 			'title'               => 'block-post',
 			'html_processor_mode' => 'html-fragment',
 			'generator'           => 'wp_html_api_benchmark_block_post_document',
 		),
-		'full-page'     => array(
+		'full-page'                   => array(
 			'title'               => 'full-page',
 			'html_processor_mode' => 'html-full',
 			'generator'           => 'wp_html_api_benchmark_full_page_document',
 		),
-		'wiki-article'  => array(
+		'wiki-article'                => array(
 			'title'               => 'wiki-article',
 			'html_processor_mode' => 'html-full',
 			'generator'           => 'wp_html_api_benchmark_wiki_article_document',
 		),
-		'commerce-page' => array(
+		'wikipedia-quantum-mechanics' => array(
+			'title'               => 'wikipedia-quantum-mechanics',
+			'html_processor_mode' => 'html-full',
+			'generator'           => 'wp_html_api_benchmark_wikipedia_quantum_mechanics_document',
+		),
+		'commerce-page'               => array(
 			'title'               => 'commerce-page',
 			'html_processor_mode' => 'html-full',
 			'generator'           => 'wp_html_api_benchmark_commerce_page_document',
 		),
-		'form-heavy'    => array(
+		'form-heavy'                  => array(
 			'title'               => 'form-heavy',
 			'html_processor_mode' => 'html-fragment',
 			'generator'           => 'wp_html_api_benchmark_form_heavy_document',
@@ -308,6 +313,22 @@ function wp_html_api_benchmark_wiki_article_document() {
 		'<div class="mw-page-container"><aside class="vector-sidebar" aria-label="Main menu"><nav><ul><li><a href="/wiki/Main_Page">Main page</a></li><li><a href="/wiki/Contents">Contents</a></li><li><a href="/wiki/Current_events">Current events</a></li></ul></nav><section aria-label="Languages"><h2>Languages</h2><ul>' . implode( '', $language_links ) . '</ul></section></aside>' .
 		'<main id="content" class="mw-body" data-mw-ve-target-container><article class="mw-parser-output"><h1 id="firstHeading">Quantum mechanics</h1><p class="hatnote">This generated benchmark page imitates the shape of a large encyclopedia article.</p><nav id="toc" class="toc" aria-labelledby="contents-heading"><h2 id="contents-heading">Contents</h2><ol>' . implode( '', $toc ) . '</ol></nav><aside class="infobox" aria-label="Article facts"><h2>Quantum mechanics</h2><img src="/static/infobox.jpg" alt="Generated orbital diagram" width="260" height="180"><dl><dt>Type</dt><dd>Physical theory</dd><dt>Scale</dt><dd>Atomic and subatomic</dd></dl></aside>' . implode( '', $article_sections ) . '<section id="references"><h2>References</h2><ol class="references">' . implode( '', $references ) . '</ol></section></article></main></div>' .
 		'<footer class="mw-footer"><ul><li><a href="/privacy">Privacy policy</a></li><li><a href="/about">About</a></li><li><a href="/disclaimer">Disclaimers</a></li></ul></footer><script type="application/json" id="mw-page-config">{"page":"Quantum mechanics","generated":true}</script></body></html>';
+}
+
+/**
+ * Returns the frozen Wikipedia Quantum mechanics article HTML fixture.
+ *
+ * @return string Full HTML document.
+ */
+function wp_html_api_benchmark_wikipedia_quantum_mechanics_document() {
+	$file = __DIR__ . '/fixtures/wikipedia-quantum-mechanics.html';
+	$html = file_get_contents( $file );
+
+	if ( false === $html ) {
+		wp_html_api_benchmark_fail( "Failed to read benchmark fixture: {$file}" );
+	}
+
+	return $html;
 }
 
 /**

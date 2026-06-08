@@ -67,6 +67,11 @@ fetch remote pages during a run.
   markers, an infobox-style aside, references, footer links, and page config
   script data. The text and markup are generated and are not copied from
   Wikipedia.
+- `wikipedia-quantum-mechanics`: a frozen real-world HTML snapshot of
+  <https://en.wikipedia.org/wiki/Quantum_mechanics>. The checked-in fixture is
+  used so benchmark runs do not fetch remote pages and are not affected by
+  later article or site chrome changes. See `fixtures/README.md` for source,
+  revision, capture date, and license metadata.
 - `commerce-page`: a synthetic catalog page with product cards, search,
   filters, repeated media, buttons, template content, and state script data.
 - `form-heavy`: a fragment with repeated fieldsets, labels, inputs, selects,
