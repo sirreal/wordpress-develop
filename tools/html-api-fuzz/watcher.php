@@ -26,6 +26,14 @@ function html_api_fuzz_watcher_signature_dir( string $state_dir, string $hash ):
 	return $state_dir . '/signatures/' . preg_replace( '/[^a-zA-Z0-9._-]+/', '_', $hash );
 }
 
+function html_api_fuzz_watcher_increment_count( array &$counts, ?string $key ): void {
+	if ( null === $key || '' === $key ) {
+		return;
+	}
+
+	$counts[ $key ] = (int) ( $counts[ $key ] ?? 0 ) + 1;
+}
+
 function html_api_fuzz_watcher_status_markdown( array $state ): string {
 	$lines = array(
 		'# HTML API Fuzz Triage',
@@ -73,6 +81,9 @@ function html_api_fuzz_watcher_record_failure( array $summary, string $state_dir
 			'seenCount'    => 0,
 			'replayPath'   => $summary['replayPath'] ?? null,
 			'resultPath'   => $summary['resultPath'] ?? null,
+			'profileCounts'       => array(),
+			'payloadPolicyCounts' => array(),
+			'featureCounts'       => array(),
 			'examples'     => array(),
 		);
 	}
@@ -80,19 +91,27 @@ function html_api_fuzz_watcher_record_failure( array $summary, string $state_dir
 	$record = &$state['signatures'][ $hash ];
 	++$record['seenCount'];
 	$record['lastSeenAt'] = $now;
+	html_api_fuzz_watcher_increment_count( $record['profileCounts'], $summary['profile'] ?? null );
+	html_api_fuzz_watcher_increment_count( $record['payloadPolicyCounts'], $summary['payloadPolicy'] ?? null );
+	foreach ( $summary['generator']['features'] ?? array() as $feature ) {
+		html_api_fuzz_watcher_increment_count( $record['featureCounts'], is_string( $feature ) ? $feature : null );
+	}
 	if ( empty( $record['replayPath'] ) && ! empty( $summary['replayPath'] ) ) {
 		$record['replayPath'] = $summary['replayPath'];
 	}
 	if ( count( $record['examples'] ) < 8 ) {
 		$record['examples'][] = array(
-			'seed'       => $summary['seed'] ?? null,
-			'profile'    => $summary['profile'] ?? null,
-			'mode'       => $summary['mode'] ?? null,
-			'inputSha1'  => $summary['inputSha1'] ?? null,
-			'resultPath' => $summary['resultPath'] ?? null,
-			'replayPath' => $summary['replayPath'] ?? null,
-			'logPath'    => $summary['logPath'] ?? null,
-			'seenAt'     => $now,
+			'seed'          => $summary['seed'] ?? null,
+			'profile'       => $summary['profile'] ?? null,
+			'mode'          => $summary['mode'] ?? null,
+			'payloadPolicy' => $summary['payloadPolicy'] ?? null,
+			'inputSource'   => $summary['inputSource'] ?? null,
+			'features'      => $summary['generator']['features'] ?? array(),
+			'inputSha1'     => $summary['inputSha1'] ?? null,
+			'resultPath'    => $summary['resultPath'] ?? null,
+			'replayPath'    => $summary['replayPath'] ?? null,
+			'logPath'       => $summary['logPath'] ?? null,
+			'seenAt'        => $now,
 		);
 	}
 	unset( $record );

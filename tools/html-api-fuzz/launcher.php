@@ -3,7 +3,19 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--watcher]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--watcher]\n";
+}
+
+function html_api_fuzz_launcher_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
+	if ( 'auto' !== $profile && ! in_array( $profile, \HtmlApiFuzz\Generator::profiles(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator profile: ' . $profile );
+	}
+	if ( 'auto' !== $mode && ! in_array( $mode, \HtmlApiFuzz\Generator::modes(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator mode: ' . $mode );
+	}
+	if ( 'auto' !== $payload_policy && ! in_array( $payload_policy, \HtmlApiFuzz\Generator::payload_policies(), true ) ) {
+		throw new InvalidArgumentException( 'Unknown generator payload policy: ' . $payload_policy );
+	}
 }
 
 function html_api_fuzz_launcher_start_lane( array $command, string $cwd, string $log_path ) {
@@ -76,9 +88,12 @@ $duration_seconds = \HtmlApiFuzz\option_float( $options, 'duration-seconds', 60.
 $timeout_ms       = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
 $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
+$payload_policy   = \HtmlApiFuzz\option_string( $options, 'payload-policy', 'auto' );
+$max_input_bytes  = \HtmlApiFuzz\option_int( $options, 'max-input-bytes', 0 );
 $stop_on_failure  = \HtmlApiFuzz\option_bool( $options, 'stop-on-failure', false );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
 $run_watcher      = \HtmlApiFuzz\option_bool( $options, 'watcher', false );
+html_api_fuzz_launcher_validate_generator_options( $profile, $mode, $payload_policy );
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $events_path = $output_dir . '/events.ndjson';
@@ -95,6 +110,8 @@ $state = array(
 	'seedStride'    => $lanes,
 	'profile'       => $profile,
 	'mode'          => $mode,
+	'payloadPolicy' => $payload_policy,
+	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'finished'      => false,
 	'laneResults'   => array(),
 );
@@ -136,6 +153,8 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		$profile,
 		'--mode',
 		$mode,
+		'--payload-policy',
+		$payload_policy,
 		'--max-tokens',
 		(string) \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 ),
 		'--max-nodes',
@@ -151,6 +170,10 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 	}
 	if ( $fail_unsupported ) {
 		$command[] = '--fail-unsupported';
+	}
+	if ( $max_input_bytes > 0 ) {
+		$command[] = '--max-input-bytes';
+		$command[] = (string) $max_input_bytes;
 	}
 
 	$running[ $i ] = html_api_fuzz_launcher_start_lane( $command, $repo_root, $lane_dir . '/runner.stdout.log' );
