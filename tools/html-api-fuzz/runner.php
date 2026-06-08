@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_runner_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY]\n";
+	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
 }
 

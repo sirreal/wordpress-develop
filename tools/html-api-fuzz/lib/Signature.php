@@ -22,6 +22,19 @@ class Signature {
 			$failure = $result['tagProcessor']['failures'][0] ?? array();
 			$facts['invariant'] = $failure['name'] ?? 'unknown';
 			$facts['throwable'] = $failure['throwable'] ?? null;
+		} elseif ( 'resource-limit' === $failure_class ) {
+			$limit_failures = array();
+			foreach ( $result['tagProcessor']['failures'] ?? array() as $failure ) {
+				$name = $failure['name'] ?? null;
+				if ( is_string( $name ) ) {
+					$limit_failures[] = $name;
+				}
+			}
+			$limit_failures = array_values( array_unique( $limit_failures ) );
+			sort( $limit_failures );
+			$facts['invariant']     = $limit_failures[0] ?? 'resource-limit';
+			$facts['limitFailures'] = $limit_failures;
+			$facts['tokenCount']    = $result['tagProcessor']['tokenCount'] ?? null;
 		} elseif ( 'unsupported' === $failure_class ) {
 			$unsupported = $result['wordpress']['unsupported'] ?? array();
 			$facts['unsupportedMessage'] = $unsupported['message'] ?? null;

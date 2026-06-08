@@ -32,6 +32,12 @@ Run a batch in isolated worker subprocesses:
 php tools/html-api-fuzz/runner.php --max-seeds 100 --duration-seconds 60
 ```
 
+Run a structural UTF-8-biased batch with a post-generation byte cap:
+
+```sh
+php tools/html-api-fuzz/runner.php --max-seeds 100 --payload-policy valid-utf8 --max-input-bytes 4096
+```
+
 Run indefinitely:
 
 ```sh
@@ -124,12 +130,14 @@ Terminal payloads are selected by a separate policy:
   mostly-valid payloads; `resource-stress` favors `stress-long`.
 
 Use `--payload-policy POLICY` on `worker.php`, `runner.php`, or `launcher.php`.
-Use `--max-input-bytes N` to apply a soft generated-input byte cap before the
-worker records replay metadata. Replay and minimization preserve the original
-payload policy when it was recorded; old or hand-supplied inputs leave
-`payloadPolicy` null unless an explicit policy label is provided. Replayed and
-minimized artifacts keep immediate `inputSource` metadata separate from
-`originalGenerator` metadata.
+Use `--max-input-bytes N` to apply a post-generation byte cap before the worker
+records replay metadata. The cap preserves UTF-8 byte boundaries for
+`valid-utf8` and `ascii-structural` policies, but it is not grammar-aware and
+may cut through HTML tokens. Replay manifests and minimization summaries
+preserve the original payload policy when it was recorded; old or hand-supplied
+inputs leave `payloadPolicy` null unless an explicit policy label is provided.
+Replayed and minimized manifests keep immediate `inputSource` metadata separate
+from `originalGenerator` metadata.
 
 ## Tree Comparison
 
