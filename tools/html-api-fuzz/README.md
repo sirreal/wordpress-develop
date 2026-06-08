@@ -125,24 +125,25 @@ The generator uses a structural HTML grammar with weighted profiles:
 
 Terminal payloads are selected by a separate policy:
 
-- `valid-utf8`: structural cases with ASCII, Unicode, whitespace controls, and
-  entity references, but no raw invalid bytes or NUL bytes.
-- `mostly-valid`: default-biased structural cases with occasional invalid bytes.
+- `valid-utf8`: structural cases with ASCII, Unicode, controls, and
+  entity references, including NUL byte coverage, but no raw invalid bytes.
+- `mostly-valid`: default-biased structural cases with valid UTF-8 Unicode,
+  controls, NUL bytes, and entity references.
 - `ascii-structural`: ASCII-only terminal text and attributes for tokenizer and
-  tree-construction coverage.
-- `invalid-byte-heavy`: raw invalid byte sequences, NUL bytes, controls, and
-  valid text mixed deliberately for encoding-normalization coverage.
-- `stress-long`: long terminal payloads for deliberate resource-stress runs.
+  tree-construction coverage, including NUL byte coverage.
+- `stress-long`: long valid UTF-8 terminal payloads for deliberate
+  resource-stress runs.
 - `auto`: weighted choice. Normal structural profiles favor valid UTF-8 and
   mostly-valid payloads; `resource-stress` favors `stress-long`.
 
 Use `--payload-policy POLICY` on `worker.php`, `runner.php`, or `launcher.php`.
 Use `--max-input-bytes N` to apply a post-generation byte cap before the worker
-records replay metadata. The cap preserves UTF-8 byte boundaries for
-`valid-utf8` and `ascii-structural` policies, but it is not grammar-aware and
-may cut through HTML tokens. Replay manifests and minimization summaries
-preserve the original payload policy when it was recorded; old or hand-supplied
-inputs leave `payloadPolicy` null unless an explicit policy label is provided.
+records replay metadata. The cap preserves UTF-8 byte boundaries, but it is not
+grammar-aware and may cut through HTML tokens. Replay manifests and minimization
+summaries preserve the original payload policy when it was recorded; old or
+hand-supplied inputs leave `payloadPolicy` null unless an explicit policy label
+is provided. Historical `invalid-byte-heavy` labels are accepted only as replay
+metadata for direct inputs and are not selectable for generated runs.
 Replayed and minimized manifests keep immediate `inputSource` metadata separate
 from `originalGenerator` metadata.
 

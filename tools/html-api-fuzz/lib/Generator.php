@@ -37,9 +37,17 @@ class Generator {
 		return array(
 			'valid-utf8',
 			'mostly-valid',
-			'invalid-byte-heavy',
 			'ascii-structural',
 			'stress-long',
+		);
+	}
+
+	public static function payload_policy_labels(): array {
+		return array_merge(
+			self::payload_policies(),
+			array(
+				'invalid-byte-heavy',
+			)
 		);
 	}
 
@@ -88,10 +96,9 @@ class Generator {
 				)
 				: $rng->weighted(
 					array(
-						'valid-utf8'         => 48,
-						'mostly-valid'       => 30,
-						'ascii-structural'   => 15,
-						'invalid-byte-heavy' => 7,
+						'valid-utf8'       => 52,
+						'mostly-valid'     => 33,
+						'ascii-structural' => 15,
 					)
 				);
 		} elseif ( ! in_array( $payload_policy, self::payload_policies(), true ) ) {
@@ -115,7 +122,7 @@ class Generator {
 		}
 		$truncated = false;
 		if ( null !== $max_input_bytes && $max_input_bytes > 0 && strlen( $html ) > $max_input_bytes ) {
-			$html      = self::trim_to_max_bytes( $html, $max_input_bytes, $payload_policy );
+			$html      = self::trim_to_max_bytes( $html, $max_input_bytes );
 			$truncated = true;
 			$generator->mark_feature( 'generator:truncated' );
 		}
@@ -148,12 +155,10 @@ class Generator {
 		$this->payload_policy = $payload_policy;
 	}
 
-	private static function trim_to_max_bytes( string $html, int $max_input_bytes, string $payload_policy ): string {
+	private static function trim_to_max_bytes( string $html, int $max_input_bytes ): string {
 		$trimmed = substr( $html, 0, $max_input_bytes );
-		if ( in_array( $payload_policy, array( 'valid-utf8', 'ascii-structural' ), true ) ) {
-			while ( '' !== $trimmed && 1 !== preg_match( '//u', $trimmed ) ) {
-				$trimmed = substr( $trimmed, 0, -1 );
-			}
+		while ( '' !== $trimmed && 1 !== preg_match( '//u', $trimmed ) ) {
+			$trimmed = substr( $trimmed, 0, -1 );
 		}
 
 		return $trimmed;
@@ -225,7 +230,7 @@ class Generator {
 			$out .= $this->node( $depth, $context );
 			if ( strlen( $out ) > 131072 ) {
 				$this->mark_feature( 'generator:hard-truncated' );
-				return self::trim_to_max_bytes( $out, 131072, $this->payload_policy );
+				return self::trim_to_max_bytes( $out, 131072 );
 			}
 		}
 		return $out;
@@ -462,9 +467,6 @@ class Generator {
 			case 'utf8':
 				$this->mark_feature( 'payload:utf8' );
 				return $this->rng->choice( array( 'é', '雪', '🙂', 'β', 'עברית', 'مرحبا', 'नमस्ते' ) );
-			case 'other-bytes':
-				$this->mark_feature( 'payload:invalid-byte' );
-				return $this->rng->choice( array( "\x80", "\x81\x40", "\xC0\xAF", "\xE9", "\xFE\xFF", "\xF5\x80\x80\x80" ) );
 			case 'nulls':
 				$this->mark_feature( 'payload:nul' );
 				return $this->terminal_ascii( 3 ) . "\0" . $this->terminal_ascii( 3 );
@@ -487,38 +489,24 @@ class Generator {
 	private function payload_weights(): array {
 		switch ( $this->payload_policy ) {
 			case 'valid-utf8':
-				return array( 'ascii' => 58, 'utf8' => 32, 'controls' => 4, 'repeat' => 6 );
+				return array( 'ascii' => 54, 'utf8' => 32, 'nulls' => 4, 'controls' => 4, 'repeat' => 6 );
 			case 'ascii-structural':
-				return array( 'ascii' => 78, 'controls' => 6, 'repeat' => 16 );
-			case 'invalid-byte-heavy':
-				return array( 'ascii' => 25, 'utf8' => 15, 'other-bytes' => 35, 'nulls' => 10, 'controls' => 7, 'repeat' => 8 );
+				return array( 'ascii' => 74, 'nulls' => 4, 'controls' => 6, 'repeat' => 16 );
 			case 'stress-long':
-				return array( 'ascii' => 20, 'utf8' => 8, 'other-bytes' => 5, 'nulls' => 5, 'controls' => 5, 'repeat' => 37, 'long-ascii' => 20 );
+				return array( 'ascii' => 20, 'utf8' => 8, 'nulls' => 5, 'controls' => 5, 'repeat' => 42, 'long-ascii' => 20 );
 			case 'mostly-valid':
 			default:
-				return array( 'ascii' => 50, 'utf8' => 25, 'other-bytes' => 5, 'nulls' => 2, 'controls' => 8, 'repeat' => 10 );
+				return array( 'ascii' => 50, 'utf8' => 25, 'nulls' => 7, 'controls' => 8, 'repeat' => 10 );
 		}
 	}
 
 	private function entity_or_markup_text(): string {
-		if ( in_array( $this->payload_policy, array( 'valid-utf8', 'ascii-structural' ), true ) ) {
-			$value = $this->rng->choice( array( '&amp;', '&notin;', '&#xfffd;', '&bogus', '<', '>' ) );
-			$this->mark_entity_feature( $value );
-			return $value;
-		}
-
 		$value = $this->rng->choice( array( '&amp;', '&notin;', '&#x00;', '&#xfffd;', '&bogus', '<', '>' ) );
 		$this->mark_entity_feature( $value );
 		return $value;
 	}
 
 	private function entity_or_markup_attr(): string {
-		if ( in_array( $this->payload_policy, array( 'valid-utf8', 'ascii-structural' ), true ) ) {
-			$value = $this->rng->choice( array( '&amp;', '&quot;', '&notin;', '<tag>' ) );
-			$this->mark_entity_feature( $value );
-			return $value;
-		}
-
 		$value = $this->rng->choice( array( '&amp;', '&quot;', '&#0;', '&notin;', '<tag>' ) );
 		$this->mark_entity_feature( $value );
 		return $value;
@@ -537,27 +525,16 @@ class Generator {
 	}
 
 	private function terminal_control(): string {
-		$controls = in_array( $this->payload_policy, array( 'valid-utf8', 'ascii-structural' ), true )
-			? array( "\r", "\n", "\t", "\f" )
-			: array( "\r", "\n", "\t", "\f", "\x01", "\x1f" );
-
-		return $this->rng->choice( $controls ) . $this->terminal_ascii( 4 );
+		return $this->rng->choice( array( "\r", "\n", "\r\n", "\t", "\f", "\x01", "\x1f" ) ) . $this->terminal_ascii( 4 );
 	}
 
 	private function terminal_repeat(): string {
-		$chars  = in_array( $this->payload_policy, array( 'valid-utf8', 'ascii-structural' ), true )
-			? array( 'a', '<', '&', ' ' )
-			: array( 'a', '<', '&', "\0", ' ' );
+		$chars  = array( 'a', '<', '&', ' ' );
 		$length = 'stress-long' === $this->payload_policy ? $this->rng->int( 64, 1024 ) : $this->rng->int( 4, 64 );
 		if ( $length > 64 ) {
 			$this->mark_feature( 'payload:long-repeat' );
 		}
-		$char = $this->rng->choice( $chars );
-		if ( "\0" === $char ) {
-			$this->mark_feature( 'payload:nul' );
-		}
-
-		return str_repeat( $char, $length );
+		return str_repeat( $this->rng->choice( $chars ), $length );
 	}
 
 	private function terminal_ascii( int $length ): string {

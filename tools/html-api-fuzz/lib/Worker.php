@@ -164,7 +164,7 @@ class Worker {
 	}
 
 	private static function validate_payload_policy_metadata( ?string $payload_policy ): void {
-		if ( null !== $payload_policy && ! in_array( $payload_policy, Generator::payload_policies(), true ) ) {
+		if ( null !== $payload_policy && ! in_array( $payload_policy, Generator::payload_policy_labels(), true ) ) {
 			throw new \InvalidArgumentException( 'Unknown generator payload policy: ' . $payload_policy );
 		}
 	}
