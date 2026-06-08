@@ -141,7 +141,7 @@ function normalize_payload_policy_label( ?string $payload_policy ): ?string {
 		return null;
 	}
 
-	return in_array( $payload_policy, Generator::payload_policies(), true ) ? $payload_policy : null;
+	return in_array( $payload_policy, Generator::payload_policy_labels(), true ) ? $payload_policy : null;
 }
 
 function command_string( array $command ): string {

@@ -17,6 +17,10 @@ function html_api_fuzz_smoke_valid_utf8( string $bytes ): bool {
 	return 1 === preg_match( '//u', $bytes );
 }
 
+function html_api_fuzz_smoke_has_non_whitespace_c0_control( string $bytes ): bool {
+	return 1 === preg_match( '/[\x01-\x08\x0b\x0e-\x1f]/', $bytes );
+}
+
 function html_api_fuzz_smoke_expect_invalid_argument( callable $callback, string $message ): void {
 	try {
 		$callback();
@@ -63,30 +67,43 @@ html_api_fuzz_smoke_expect_invalid_argument(
 	},
 	'invalid generator mode should throw.'
 );
+html_api_fuzz_smoke_assert( ! in_array( 'invalid-byte-heavy', \HtmlApiFuzz\Generator::payload_policies(), true ), 'invalid-byte-heavy should not be selectable for generated inputs.' );
+html_api_fuzz_smoke_assert( in_array( 'invalid-byte-heavy', \HtmlApiFuzz\Generator::payload_policy_labels(), true ), 'invalid-byte-heavy should remain a recognized replay metadata label.' );
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function (): void {
+		\HtmlApiFuzz\Generator::generate( 1, 'attributes-entities', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'invalid-byte-heavy' );
+	},
+	'invalid-byte-heavy policy should be rejected for generated inputs.'
+);
 
-$found_invalid = false;
-for ( $seed = 1; $seed <= 200; ++$seed ) {
-	$invalid = \HtmlApiFuzz\Generator::generate(
-		$seed,
-		'attributes-entities',
-		\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-		'invalid-byte-heavy'
-	);
-	if ( ! html_api_fuzz_smoke_valid_utf8( $invalid['input'] ) ) {
-		$found_invalid = true;
-		html_api_fuzz_smoke_assert(
-			in_array( 'payload:invalid-byte', $invalid['parameters']['features'], true ) || in_array( 'payload:nul', $invalid['parameters']['features'], true ),
-			'invalid-byte-heavy invalid sample should record payload-level feature metadata.'
-		);
+foreach ( \HtmlApiFuzz\Generator::payload_policies() as $payload_policy ) {
+	foreach ( \HtmlApiFuzz\Generator::profiles() as $profile ) {
+		foreach ( \HtmlApiFuzz\Generator::modes() as $mode ) {
+			for ( $seed = 1; $seed <= 8; ++$seed ) {
+				$generated = \HtmlApiFuzz\Generator::generate( $seed, $profile, $mode, $payload_policy, 4096 );
+				html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "{$payload_policy}/{$profile}/{$mode}/{$seed} should produce valid UTF-8 bytes." );
+				html_api_fuzz_smoke_assert( ! in_array( 'payload:invalid-byte', $generated['parameters']['features'], true ), "{$payload_policy}/{$profile}/{$mode}/{$seed} should not record invalid-byte generation." );
+			}
+		}
+	}
+}
+$found_non_whitespace_c0_control = false;
+for ( $seed = 1; $seed <= 512; ++$seed ) {
+	$generated = \HtmlApiFuzz\Generator::generate( $seed, 'balanced', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', 4096 );
+	if ( html_api_fuzz_smoke_has_non_whitespace_c0_control( $generated['input'] ) ) {
+		$found_non_whitespace_c0_control = true;
+		html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), 'non-whitespace C0 control sample should still be valid UTF-8.' );
 		break;
 	}
 }
-html_api_fuzz_smoke_assert( $found_invalid, 'invalid-byte-heavy policy should generate invalid UTF-8 across a small deterministic seed sample.' );
+html_api_fuzz_smoke_assert( $found_non_whitespace_c0_control, 'generated valid UTF-8 payloads should retain non-whitespace C0 control coverage.' );
 
 $found_resource_stress = false;
 $found_resource_stress_long = false;
 for ( $seed = 1; $seed <= 512; ++$seed ) {
 	$generated = \HtmlApiFuzz\Generator::generate( $seed, 'auto', 'auto', 'auto', 4096 );
+	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), 'auto generation should produce valid UTF-8 bytes.' );
+	html_api_fuzz_smoke_assert( ! in_array( 'payload:invalid-byte', $generated['parameters']['features'], true ), 'auto generation should not record invalid-byte payload features.' );
 	if ( 'resource-stress' === $generated['profile'] ) {
 		$found_resource_stress = true;
 	}
@@ -120,6 +137,20 @@ html_api_fuzz_smoke_expect_invalid_argument(
 		);
 	},
 	'invalid direct-input payload policy should throw.'
+);
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function () use ( $tmp ): void {
+		\HtmlApiFuzz\Worker::run(
+			array(
+				'seed'           => '1',
+				'profile'        => 'balanced',
+				'mode'           => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+				'payload-policy' => 'invalid-byte-heavy',
+				'output-dir'     => $tmp . '/generated-invalid-heavy',
+			)
+		);
+	},
+	'generated worker inputs should reject legacy invalid-byte-heavy policy.'
 );
 
 $worker_dir = $tmp . '/worker';
@@ -186,6 +217,86 @@ $legacy_replay_cli_replay = \HtmlApiFuzz\read_json_file( $legacy_replay_dir . '/
 html_api_fuzz_smoke_assert( null === ( $legacy_replay_cli_replay['payloadPolicy'] ?? null ), 'legacy replay payload policy labels should be treated as unlabeled direct input.' );
 html_api_fuzz_smoke_assert( 'replay' === ( $legacy_replay_cli_replay['originalGenerator']['payloadPolicy'] ?? null ), 'legacy replay should preserve original generator metadata.' );
 
+$legacy_invalid_replay = $worker_replay;
+$legacy_invalid_replay['payloadPolicy'] = 'invalid-byte-heavy';
+if ( isset( $legacy_invalid_replay['generator']['payloadPolicy'] ) ) {
+	$legacy_invalid_replay['generator']['payloadPolicy'] = 'invalid-byte-heavy';
+}
+$legacy_invalid_replay_path = $tmp . '/legacy-invalid-payload-policy-replay.json';
+\HtmlApiFuzz\write_json_file( $legacy_invalid_replay_path, $legacy_invalid_replay );
+$legacy_invalid_replay_dir = $tmp . '/legacy-invalid-replay-cli';
+$legacy_invalid_replay_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/replay.php',
+		'--replay',
+		$legacy_invalid_replay_path,
+		'--output-dir',
+		$legacy_invalid_replay_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000,
+	$tmp . '/legacy-invalid-replay-cli.log'
+);
+html_api_fuzz_smoke_assert( ! $legacy_invalid_replay_proc['timedOut'] && in_array( $legacy_invalid_replay_proc['code'], array( 0, 2 ), true ), 'legacy invalid-byte-heavy replay payload policy label should not make replay fatal.' );
+$legacy_invalid_replay_cli_replay = \HtmlApiFuzz\read_json_file( $legacy_invalid_replay_dir . '/replay.json' );
+html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $legacy_invalid_replay_cli_replay['payloadPolicy'] ?? null ), 'legacy invalid-byte-heavy replay payload policy label should be preserved as direct-input metadata.' );
+html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $legacy_invalid_replay_cli_replay['originalGenerator']['payloadPolicy'] ?? null ), 'legacy invalid-byte-heavy replay should preserve original generator metadata.' );
+
+$invalid_byte_replay_source_dir = $tmp . '/invalid-byte-replay-source';
+$invalid_byte_replay_source = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<p>' . str_repeat( 'a', 220 ) . "\xC0" . '</p>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'invalid-byte-heavy',
+		'output-dir'      => $invalid_byte_replay_source_dir,
+		'max-tokens'      => '2000',
+		'max-nodes'       => '3000',
+	)
+);
+html_api_fuzz_smoke_assert( 'encoding-mismatch' === ( $invalid_byte_replay_source['failureClass'] ?? null ), 'invalid-byte replay fixture should be a real invalid-byte failure.' );
+
+$invalid_byte_replay_cli_dir = $tmp . '/invalid-byte-replay-cli';
+$invalid_byte_replay_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/replay.php',
+		'--replay',
+		$invalid_byte_replay_source_dir . '/replay.json',
+		'--output-dir',
+		$invalid_byte_replay_cli_dir,
+		'--timeout-ms',
+		'10000',
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000,
+	$tmp . '/invalid-byte-replay-cli.log'
+);
+html_api_fuzz_smoke_assert( ! $invalid_byte_replay_proc['timedOut'] && 2 === $invalid_byte_replay_proc['code'], 'real invalid-byte replay should complete as a replayed failure.' );
+$invalid_byte_replay_cli_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_replay_cli_dir . '/replay.json' );
+html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $invalid_byte_replay_cli_replay['payloadPolicy'] ?? null ), 'real invalid-byte replay should preserve legacy payload policy metadata.' );
+
+$invalid_byte_minimize_dir = $tmp . '/invalid-byte-minimize';
+$invalid_byte_minimize_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/minimize.php',
+		'--replay',
+		$invalid_byte_replay_source_dir . '/replay.json',
+		'--output-dir',
+		$invalid_byte_minimize_dir,
+		'--any-failure',
+		'--max-attempts',
+		'1',
+		'--timeout-ms',
+		'10000',
+	),
+	\HtmlApiFuzz\repo_root(),
+	20000,
+	$tmp . '/invalid-byte-minimize.log'
+);
+html_api_fuzz_smoke_assert( ! $invalid_byte_minimize_proc['timedOut'] && 0 === $invalid_byte_minimize_proc['code'], 'real invalid-byte replay should remain minimizable.' );
+$invalid_byte_minimize_result = \HtmlApiFuzz\read_json_file( $invalid_byte_minimize_dir . '/minimize-result.json' );
+html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $invalid_byte_minimize_result['payloadPolicy'] ?? null ), 'invalid-byte minimization should preserve legacy payload policy metadata.' );
+
 $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	array(
 		dirname( __DIR__ ) . '/runner.php',
@@ -201,6 +312,40 @@ $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	$tmp . '/bad-runner.log'
 );
 html_api_fuzz_smoke_assert( 0 !== $bad_runner_proc['code'], 'runner CLI should reject invalid payload policy before starting workers.' );
+
+$legacy_invalid_runner_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/runner.php',
+		'--payload-policy',
+		'invalid-byte-heavy',
+		'--max-seeds',
+		'1',
+		'--output-dir',
+		$tmp . '/legacy-invalid-runner',
+	),
+	\HtmlApiFuzz\repo_root(),
+	5000,
+	$tmp . '/legacy-invalid-runner.log'
+);
+html_api_fuzz_smoke_assert( 0 !== $legacy_invalid_runner_proc['code'], 'runner CLI should reject legacy invalid-byte-heavy generation policy.' );
+
+$legacy_invalid_launcher_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/launcher.php',
+		'--payload-policy',
+		'invalid-byte-heavy',
+		'--max-seeds',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--output-dir',
+		$tmp . '/legacy-invalid-launcher',
+	),
+	\HtmlApiFuzz\repo_root(),
+	5000,
+	$tmp . '/legacy-invalid-launcher.log'
+);
+html_api_fuzz_smoke_assert( 0 !== $legacy_invalid_launcher_proc['code'], 'launcher CLI should reject legacy invalid-byte-heavy generation policy.' );
 
 $bad_stride_proc = \HtmlApiFuzz\run_php_process(
 	array(
@@ -368,7 +513,7 @@ html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['wordpressDiffHex']
 html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['domDiffHex'] ?? '', 'efbfbd' ), 'long encoding mismatch should include the differing DOM replacement bytes in the diff window.' );
 
 $structural_with_invalid_dir = $tmp . '/structural-with-invalid';
-$structural = \HtmlApiFuzz\Generator::generate( 61, 'balanced', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096 );
+$structural = \HtmlApiFuzz\Generator::generate( 27, 'balanced', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096 );
 $structural_with_invalid_result = \HtmlApiFuzz\Worker::run(
 	array(
 		'input-base64'    => base64_encode( $structural['input'] . "\xC0" ),
