@@ -60,9 +60,9 @@ class TreeRenderer {
 						if ( null === $doctype ) {
 							break;
 						}
-						$output .= "<!DOCTYPE {$doctype->name}";
+						$output .= '<!DOCTYPE ' . self::escape_tree_scalar( (string) $doctype->name );
 						if ( null !== $doctype->public_identifier || null !== $doctype->system_identifier ) {
-							$output .= " \"{$doctype->public_identifier}\" \"{$doctype->system_identifier}\"";
+							$output .= ' "' . self::escape_tree_scalar( (string) $doctype->public_identifier ) . '" "' . self::escape_tree_scalar( (string) $doctype->system_identifier ) . '"';
 						}
 						$output .= ">\n";
 						break;
@@ -91,7 +91,7 @@ class TreeRenderer {
 
 						$modifiable_text = $processor->get_modifiable_text();
 						if ( '' !== $modifiable_text ) {
-							$output .= str_repeat( '  ', $tag_indent + 1 ) . "\"{$modifiable_text}\"\n";
+							$output .= str_repeat( '  ', $tag_indent + 1 ) . '"' . self::escape_tree_scalar( $modifiable_text ) . "\"\n";
 						}
 
 						if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
@@ -110,15 +110,15 @@ class TreeRenderer {
 						if ( '' === $text_node ) {
 							$text_node .= str_repeat( '  ', $indent_level ) . '"';
 						}
-						$text_node .= $text_content;
+						$text_node .= self::escape_tree_scalar( $text_content );
 						break;
 
 					case '#funky-comment':
-						$output .= str_repeat( '  ', $indent_level ) . "<!-- {$processor->get_modifiable_text()} -->\n";
+						$output .= str_repeat( '  ', $indent_level ) . '<!-- ' . self::escape_tree_scalar( $processor->get_modifiable_text() ) . " -->\n";
 						break;
 
 					case '#comment':
-						$output .= str_repeat( '  ', $indent_level ) . "<!-- {$processor->get_full_comment_text()} -->\n";
+						$output .= str_repeat( '  ', $indent_level ) . '<!-- ' . self::escape_tree_scalar( $processor->get_full_comment_text() ) . " -->\n";
 						break;
 
 					default:
@@ -196,7 +196,7 @@ class TreeRenderer {
 			if ( true === $value ) {
 				$value = '';
 			}
-			$output .= str_repeat( '  ', $indent_level ) . "{$display_name}=\"{$value}\"\n";
+			$output .= str_repeat( '  ', $indent_level ) . "{$display_name}=\"" . self::escape_tree_scalar( (string) $value ) . "\"\n";
 		}
 		return $output;
 	}
@@ -280,11 +280,11 @@ class TreeRenderer {
 		switch ( $node->nodeType ) {
 			case XML_DOCUMENT_TYPE_NODE:
 				$name   = $node->name ?? $node->nodeName;
-				$output = "<!DOCTYPE {$name}";
+				$output = '<!DOCTYPE ' . self::escape_tree_scalar( (string) $name );
 				$public = $node->publicId ?? '';
 				$system = $node->systemId ?? '';
 				if ( '' !== $public || '' !== $system ) {
-					$output .= " \"{$public}\" \"{$system}\"";
+					$output .= ' "' . self::escape_tree_scalar( (string) $public ) . '" "' . self::escape_tree_scalar( (string) $system ) . '"';
 				}
 				return $output . ">\n";
 
@@ -293,10 +293,10 @@ class TreeRenderer {
 
 			case XML_TEXT_NODE:
 			case XML_CDATA_SECTION_NODE:
-				return '' === $node->nodeValue ? '' : str_repeat( '  ', $indent_level ) . '"' . $node->nodeValue . "\"\n";
+				return '' === $node->nodeValue ? '' : str_repeat( '  ', $indent_level ) . '"' . self::escape_tree_scalar( (string) $node->nodeValue ) . "\"\n";
 
 			case XML_COMMENT_NODE:
-				return str_repeat( '  ', $indent_level ) . '<!-- ' . $node->nodeValue . " -->\n";
+				return str_repeat( '  ', $indent_level ) . '<!-- ' . self::escape_tree_scalar( (string) $node->nodeValue ) . " -->\n";
 
 			default:
 				return '';
@@ -395,7 +395,7 @@ class TreeRenderer {
 
 		$output = '';
 		foreach ( $attrs as $attr ) {
-			$output .= str_repeat( '  ', $indent_level ) . $attr['name'] . '="' . $attr['value'] . "\"\n";
+			$output .= str_repeat( '  ', $indent_level ) . $attr['name'] . '="' . self::escape_tree_scalar( (string) $attr['value'] ) . "\"\n";
 		}
 		return $output;
 	}
@@ -490,22 +490,111 @@ class TreeRenderer {
 			$l = $left_lines[ $i ] ?? null;
 			$r = $right_lines[ $i ] ?? null;
 			if ( $l !== $r ) {
+				$first_byte_offset = self::first_different_byte_offset( $l, $r );
 				return array(
-					'line'          => $i + 1,
-					'wordpressLine' => $l,
-					'domLine'       => $r,
-					'wordpressHex'  => null === $l ? null : self::hex_preview( $l ),
-					'domHex'        => null === $r ? null : self::hex_preview( $r ),
-					'wordpressPath' => $left_paths[ $i ] ?? null,
-					'domPath'       => $right_paths[ $i ] ?? null,
-					'path'          => $left_paths[ $i ] ?? $right_paths[ $i ] ?? null,
-					'wordpressNorm' => self::normalize_tree_line( $l ),
-					'domNorm'       => self::normalize_tree_line( $r ),
+					'line'                                  => $i + 1,
+					'wordpressLinePreview'                  => self::line_preview( $l ),
+					'domLinePreview'                        => self::line_preview( $r ),
+					'wordpressLineBytes'                    => null === $l ? null : strlen( $l ),
+					'domLineBytes'                          => null === $r ? null : strlen( $r ),
+					'wordpressLineSha1'                     => null === $l ? null : sha1( $l ),
+					'domLineSha1'                           => null === $r ? null : sha1( $r ),
+					'firstByteOffset'                       => $first_byte_offset,
+					'diffWindowStart'                       => self::diff_window_start( $first_byte_offset ),
+					'wordpressHex'                          => null === $l ? null : self::hex_preview( $l ),
+					'domHex'                                => null === $r ? null : self::hex_preview( $r ),
+					'wordpressDiffHex'                      => self::hex_window( $l, $first_byte_offset ),
+					'domDiffHex'                            => self::hex_window( $r, $first_byte_offset ),
+					'wordpressPath'                         => $left_paths[ $i ] ?? null,
+					'domPath'                               => $right_paths[ $i ] ?? null,
+					'path'                                  => $left_paths[ $i ] ?? $right_paths[ $i ] ?? null,
+					'wordpressNorm'                         => self::normalize_tree_line( $l ),
+					'domNorm'                               => self::normalize_tree_line( $r ),
+					'linesMatchAfterWordPressUtf8Scrub'     => self::lines_match_after_wordpress_utf8_scrub( $l, $r ),
 				);
 			}
 		}
 
 		return array();
+	}
+
+	private static function escape_tree_scalar( string $value ): string {
+		$output = '';
+		$length = strlen( $value );
+		for ( $i = 0; $i < $length; ++$i ) {
+			$byte = $value[ $i ];
+			switch ( $byte ) {
+				case "\n":
+					$output .= '\\n';
+					break;
+				case "\r":
+					$output .= '\\r';
+					break;
+				case "\t":
+					$output .= '\\t';
+					break;
+				case "\0":
+					$output .= '\\0';
+					break;
+				case '\\':
+					$output .= '\\\\';
+					break;
+				case '"':
+					$output .= '\\"';
+					break;
+				default:
+					$ord = ord( $byte );
+					$output .= ( $ord < 0x20 || 0x7f === $ord )
+						? sprintf( '\\x%02X', $ord )
+						: $byte;
+					break;
+			}
+		}
+
+		return $output;
+	}
+
+	private static function line_preview( ?string $line ): ?string {
+		return null === $line ? null : preview_bytes( $line, 240 );
+	}
+
+	private static function first_different_byte_offset( ?string $left, ?string $right ): ?int {
+		if ( $left === $right ) {
+			return null;
+		}
+		if ( null === $left || null === $right ) {
+			return 0;
+		}
+
+		$limit = min( strlen( $left ), strlen( $right ) );
+		for ( $i = 0; $i < $limit; ++$i ) {
+			if ( $left[ $i ] !== $right[ $i ] ) {
+				return $i;
+			}
+		}
+
+		return $limit;
+	}
+
+	private static function diff_window_start( ?int $offset ): ?int {
+		return null === $offset ? null : max( 0, $offset - 32 );
+	}
+
+	private static function hex_window( ?string $line, ?int $offset ): ?string {
+		if ( null === $line || null === $offset ) {
+			return null;
+		}
+
+		$bytes = unpack( 'H*', substr( $line, self::diff_window_start( $offset ) ?? 0, 96 ) );
+		return $bytes[1] ?? '';
+	}
+
+	private static function lines_match_after_wordpress_utf8_scrub( ?string $left, ?string $right ): ?bool {
+		if ( null === $left || null === $right || ! function_exists( 'wp_scrub_utf8' ) ) {
+			return null;
+		}
+
+		return wp_scrub_utf8( $left ) === $right;
 	}
 
 	private static function hex_preview( string $line ): string {
@@ -524,9 +613,11 @@ class TreeRenderer {
 				$stack[ $level ] = $m[1];
 				$paths[ $i ] = '/' . implode( '/', $stack );
 			} elseif ( 'content' === $trim ) {
-				$paths[ $i ] = '/' . implode( '/', array_slice( $stack, 0, $level ) ) . '/content';
+				$stack = array_slice( $stack, 0, $level );
+				$stack[ $level ] = 'content';
+				$paths[ $i ] = '/' . implode( '/', $stack );
 			} elseif ( preg_match( '/^([^=]+)=/', $trim, $m ) ) {
-				$paths[ $i ] = '/' . implode( '/', array_slice( $stack, 0, max( 0, $level - 1 ) ) ) . '/@' . $m[1];
+				$paths[ $i ] = '/' . implode( '/', array_slice( $stack, 0, $level ) ) . '/@' . $m[1];
 			} elseif ( '' !== $trim ) {
 				$paths[ $i ] = '/' . implode( '/', array_slice( $stack, 0, $level ) ) . '/#text';
 			}
@@ -538,7 +629,11 @@ class TreeRenderer {
 		if ( null === $line ) {
 			return null;
 		}
-		$line = preg_replace( '/"[^"]*"/s', '"<value>"', $line );
+		$trimmed = trim( $line );
+		if ( preg_match( '/^([^=]+)="(?:\\\\.|[^"\\\\])*"$/s', $trimmed, $m ) ) {
+			return $m[1] . '="<value>"';
+		}
+		$line = preg_replace( '/"(?:\\\\.|[^"\\\\])*"/s', '"<value>"', $line );
 		$line = preg_replace( '/<!--.*-->/s', '<!-- <comment> -->', $line );
 		return trim( (string) $line );
 	}

@@ -24,7 +24,11 @@ if ( false === $input ) {
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $input_path = $output_dir . '/input.bin';
 file_put_contents( $input_path, $input );
-$payload_policy = \HtmlApiFuzz\option_string( $options, 'payload-policy', $replay['payloadPolicy'] ?? $replay['generator']['payloadPolicy'] ?? null );
+$payload_policy = \HtmlApiFuzz\option_string( $options, 'payload-policy', null );
+if ( null === $payload_policy ) {
+	$payload_policy = \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
+		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null );
+}
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 
 $args = array(

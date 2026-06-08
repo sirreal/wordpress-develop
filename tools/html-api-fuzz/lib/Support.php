@@ -136,6 +136,14 @@ function preview_bytes( string $bytes, int $limit = 240 ): string {
 	return strlen( $bytes ) > $limit ? $shown . '...' : $shown;
 }
 
+function normalize_payload_policy_label( ?string $payload_policy ): ?string {
+	if ( null === $payload_policy ) {
+		return null;
+	}
+
+	return in_array( $payload_policy, Generator::payload_policies(), true ) ? $payload_policy : null;
+}
+
 function command_string( array $command ): string {
 	return implode( ' ', array_map( 'escapeshellarg', $command ) );
 }

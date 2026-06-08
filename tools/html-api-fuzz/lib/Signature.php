@@ -23,18 +23,16 @@ class Signature {
 			$facts['invariant'] = $failure['name'] ?? 'unknown';
 			$facts['throwable'] = $failure['throwable'] ?? null;
 		} elseif ( 'resource-limit' === $failure_class ) {
-			$limit_failures = array();
-			foreach ( $result['tagProcessor']['failures'] ?? array() as $failure ) {
-				$name = $failure['name'] ?? null;
-				if ( is_string( $name ) ) {
-					$limit_failures[] = $name;
-				}
-			}
+			$limit_failures = self::resource_limit_failures( $result );
 			$limit_failures = array_values( array_unique( $limit_failures ) );
 			sort( $limit_failures );
 			$facts['invariant']     = $limit_failures[0] ?? 'resource-limit';
 			$facts['limitFailures'] = $limit_failures;
-			$facts['tokenCount']    = $result['tagProcessor']['tokenCount'] ?? null;
+			$facts['tokenCount']    = $result['tagProcessor']['tokenCount'] ?? $result['wordpress']['tokenCount'] ?? null;
+			$facts['nodeCount']     = $result['dom']['nodeCount'] ?? null;
+			$facts['tagTokenCount'] = $result['tagProcessor']['tokenCount'] ?? null;
+			$facts['wordpressTokenCount'] = $result['wordpress']['tokenCount'] ?? null;
+			$facts['domNodeCount']        = $result['dom']['nodeCount'] ?? null;
 		} elseif ( 'unsupported' === $failure_class ) {
 			$unsupported = $result['wordpress']['unsupported'] ?? array();
 			$facts['unsupportedMessage'] = $unsupported['message'] ?? null;
@@ -64,6 +62,25 @@ class Signature {
 		$message = preg_replace( '/\/[^ \n]+/', '<path>', $message );
 		$message = preg_replace( '/\d+/', '<n>', (string) $message );
 		return trim( $message );
+	}
+
+	private static function resource_limit_failures( array $result ): array {
+		$limit_failures = array();
+		foreach ( $result['tagProcessor']['failures'] ?? array() as $failure ) {
+			$name = $failure['name'] ?? null;
+			if ( is_string( $name ) ) {
+				$limit_failures[] = $name;
+			}
+		}
+
+		foreach ( array( 'wordpress', 'dom' ) as $source ) {
+			$failure_class = $result[ $source ]['failureClass'] ?? null;
+			if ( in_array( $failure_class, array( 'token-limit-exceeded', 'node-limit-exceeded' ), true ) ) {
+				$limit_failures[] = $source . '-' . $failure_class;
+			}
+		}
+
+		return $limit_failures;
 	}
 
 	private static function normalized_text( array $facts ): string {

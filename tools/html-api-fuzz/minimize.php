@@ -74,7 +74,8 @@ $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['genera
 $base  = array(
 	'mode'            => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 	'profile'         => $replay['profile'] ?? 'replay',
-	'payloadPolicy'   => $replay['payloadPolicy'] ?? $replay['generator']['payloadPolicy'] ?? null,
+	'payloadPolicy'   => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
+		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null ),
 	'originalGenerator'=> $original_generator,
 	'seed'            => (int) ( $replay['seed'] ?? 1 ),
 	'targetHash'      => $target_hash,
