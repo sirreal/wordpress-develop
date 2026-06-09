@@ -147,6 +147,12 @@ metadata for direct inputs and are not selectable for generated runs.
 Replayed and minimized manifests keep immediate `inputSource` metadata separate
 from `originalGenerator` metadata.
 
+The `attributes-entities` profile biases toward tokenizer boundary coverage:
+valid and invalid decimal and hexadecimal character references, variable leading
+zeros, mixed casing, known named character references with and without trailing
+semicolons, unusual attribute spacing, malformed attribute names, and unusual or
+invalid tag-name syntax.
+
 ## Tree Comparison
 
 The tree renderer follows the html5lib test style used by
