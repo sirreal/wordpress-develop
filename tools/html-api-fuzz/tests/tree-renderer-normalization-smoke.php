@@ -59,6 +59,38 @@ if ( false === $tmp ) {
 \HtmlApiFuzz\ensure_dir( $tmp );
 register_shutdown_function( 'html_api_fuzz_tree_normalization_rm_tree', $tmp );
 
+$presumptuous_tag = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	'</>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array(
+		'maxTokens' => 100,
+		'maxNodes'  => 100,
+	)
+);
+html_api_fuzz_tree_normalization_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $presumptuous_tag['status'] ?? null ), 'Presumptuous tag closers should be ignored by the WordPress renderer.' );
+html_api_fuzz_tree_normalization_assert( "\n" === ( $presumptuous_tag['tree'] ?? null ), 'Ignored presumptuous tag closers should not render tree nodes.' );
+
+$presumptuous_tag_text = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	'a</>b',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array(
+		'maxTokens' => 100,
+		'maxNodes'  => 100,
+	)
+);
+html_api_fuzz_tree_normalization_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $presumptuous_tag_text['status'] ?? null ), 'Presumptuous tag closers between text should not fail the WordPress renderer.' );
+html_api_fuzz_tree_normalization_assert( "\"ab\"\n\n" === ( $presumptuous_tag_text['tree'] ?? null ), 'Ignored presumptuous tag closers should not split adjacent text nodes.' );
+
+$presumptuous_tag_full_document = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'presumptuous-tag-full-document',
+	base64_encode( '<html><head></head><body></body></html></>' ),
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert( true === ( $presumptuous_tag_full_document['ok'] ?? null ), 'Full-document presumptuous tag closers after HTML should be ignored by the worker.' );
+html_api_fuzz_tree_normalization_assert( 'passed' === ( $presumptuous_tag_full_document['status'] ?? null ), 'Ignored full-document presumptuous tag closers should still reach DOM comparison.' );
+html_api_fuzz_tree_normalization_assert( true === ( $presumptuous_tag_full_document['comparison']['ok'] ?? null ), 'Full-document presumptuous tag closer comparison should pass.' );
+
 $nul_attribute_value = html_api_fuzz_tree_normalization_run(
 	$tmp,
 	'nul-attribute-value',

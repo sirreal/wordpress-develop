@@ -73,6 +73,10 @@ class TreeRenderer {
 				$token_type = $processor->get_token_type();
 				$is_closer  = $processor->is_tag_closer();
 
+				if ( '#presumptuous-tag' === $token_type ) {
+					continue;
+				}
+
 				if ( $was_text && '#text' !== $token_name ) {
 					if ( '' !== $text_node ) {
 						$output .= "{$text_node}\"\n";
@@ -171,12 +175,27 @@ class TreeRenderer {
 			);
 		}
 
-		if ( null !== $processor->get_unsupported_exception() ) {
+		$unsupported_exception = $processor->get_unsupported_exception();
+		if ( null !== $unsupported_exception && self::is_ignored_presumptuous_tag_exception( $unsupported_exception ) ) {
+			if ( '' !== $text_node ) {
+				$output .= "{$text_node}\"\n";
+				++$line_count;
+			}
+
+			return array(
+				'status'                   => self::STATUS_OK,
+				'tree'                     => $output . "\n",
+				'tokenCount'               => $tokens,
+				'domOracleLineTolerances'  => $dom_oracle_line_tolerances,
+			);
+		}
+
+		if ( null !== $unsupported_exception ) {
 			return array(
 				'status'      => self::STATUS_UNSUPPORTED,
 				'tree'        => $output,
 				'tokenCount'  => $tokens,
-				'unsupported' => self::unsupported_details( $processor->get_unsupported_exception() ),
+				'unsupported' => self::unsupported_details( $unsupported_exception ),
 			);
 		}
 
@@ -212,6 +231,12 @@ class TreeRenderer {
 			'tokenCount'               => $tokens,
 			'domOracleLineTolerances'  => $dom_oracle_line_tolerances,
 		);
+	}
+
+	private static function is_ignored_presumptuous_tag_exception( \WP_HTML_Unsupported_Exception $e ): bool {
+		return '#presumptuous-tag' === $e->token_name
+			&& '</>' === $e->token
+			&& 'Content outside of HTML is unsupported.' === $e->getMessage();
 	}
 
 	private static function render_wp_attributes( \WP_HTML_Processor $processor, int $indent_level, int &$line_count, array &$dom_oracle_line_tolerances ): string {
