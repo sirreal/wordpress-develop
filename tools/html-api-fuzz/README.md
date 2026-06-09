@@ -3,7 +3,8 @@
 Pure PHP fuzzer for the WordPress HTML API under `src/wp-includes/html-api`.
 It compares `WP_HTML_Processor` against PHP's `Dom\HTMLDocument` oracle using an
 html5lib-style textual tree, and separately checks `WP_HTML_Tag_Processor`
-invariants and simple mutation behavior.
+invariants, simple mutation behavior, and `WP_HTML_Processor::normalize()`
+idempotence.
 
 No browser, Playwright, Node, or `wp-env` is involved.
 

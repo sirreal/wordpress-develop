@@ -16,6 +16,11 @@ if ( ! function_exists( '_deprecated_argument' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_trigger_error' ) ) {
+	function wp_trigger_error( $function_name, $message, $error_level = E_USER_NOTICE ) {
+	}
+}
+
 if ( ! function_exists( 'wp_kses_uri_attributes' ) ) {
 	function wp_kses_uri_attributes() {
 		return array(

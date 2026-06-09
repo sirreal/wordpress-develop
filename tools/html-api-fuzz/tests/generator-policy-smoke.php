@@ -455,6 +455,24 @@ html_api_fuzz_smoke_assert( null === ( $unlabeled_result['payloadPolicy'] ?? nul
 html_api_fuzz_smoke_assert( null === ( $unlabeled_replay['payloadPolicy'] ?? null ), 'unlabeled direct input replay should leave payloadPolicy null.' );
 html_api_fuzz_smoke_assert( null === ( $unlabeled_result['generator'] ?? null ), 'unlabeled direct input should not invent generator metadata.' );
 html_api_fuzz_smoke_assert( 'input-base64' === ( $unlabeled_replay['inputSource'] ?? null ), 'unlabeled direct input replay should record inputSource.' );
+html_api_fuzz_smoke_assert( 'idempotent' === ( $unlabeled_result['tagProcessor']['normalize']['status'] ?? null ), 'worker result should persist normalize() idempotence metadata.' );
+
+$normalize_idempotent = \HtmlApiFuzz\TagInvariants::check( '<p a=1 a=2>One&nbsp</p>', array( 'maxTokens' => 2000 ) );
+html_api_fuzz_smoke_assert( true === ( $normalize_idempotent['ok'] ?? null ), 'normalizable input should pass tag invariants.' );
+html_api_fuzz_smoke_assert( 'idempotent' === ( $normalize_idempotent['normalize']['status'] ?? null ), 'normalizable input should record an idempotent normalize() status.' );
+html_api_fuzz_smoke_assert( is_string( $normalize_idempotent['normalize']['normalizedSha1'] ?? null ), 'idempotent normalize() metadata should include the normalized hash.' );
+
+$normalize_unsupported = \HtmlApiFuzz\TagInvariants::check( '<A><I><A>', array( 'maxTokens' => 2000 ) );
+html_api_fuzz_smoke_assert( true === ( $normalize_unsupported['ok'] ?? null ), 'unsupported normalize() input should not fail unrelated tag invariants.' );
+html_api_fuzz_smoke_assert( 'unsupported' === ( $normalize_unsupported['normalize']['status'] ?? null ), 'unsupported normalize() input should be recorded without an idempotence failure.' );
+
+$normalize_not_idempotent = \HtmlApiFuzz\TagInvariants::check( '<svg xlink:href href></svg>', array( 'maxTokens' => 2000 ) );
+html_api_fuzz_smoke_assert( true === ( $normalize_not_idempotent['ok'] ?? null ), 'normalize() metadata should not fail unrelated tag invariants directly.' );
+if ( false === ( $normalize_not_idempotent['normalize']['ok'] ?? true ) ) {
+	html_api_fuzz_smoke_assert( 'normalize-not-idempotent' === ( $normalize_not_idempotent['normalize']['failure']['name'] ?? null ), 'non-idempotent normalize() input should report the normalize-not-idempotent invariant.' );
+	html_api_fuzz_smoke_assert( 'failed' === ( $normalize_not_idempotent['normalize']['status'] ?? null ), 'non-idempotent normalize() input should record failed normalize() metadata.' );
+	html_api_fuzz_smoke_assert( is_int( $normalize_not_idempotent['normalize']['firstDifference']['firstByteOffset'] ?? null ), 'non-idempotent normalize() metadata should include a first byte difference.' );
+}
 
 $resource_dir = $tmp . '/resource-limit';
 $resource_result = \HtmlApiFuzz\Worker::run(
@@ -473,6 +491,23 @@ html_api_fuzz_smoke_assert( 'resource-limit' === ( $resource_result['status'] ??
 html_api_fuzz_smoke_assert( in_array( 'tag-token-limit-exceeded', $resource_result['signature']['facts']['limitFailures'] ?? array(), true ), 'resource-limit signature should include concrete limit failure names.' );
 html_api_fuzz_smoke_assert( 'input-base64' === ( $resource_result['inputSource'] ?? null ), 'provided base64 input should record inputSource.' );
 html_api_fuzz_smoke_assert( null === ( $resource_result['generator'] ?? null ), 'provided input should not invent generator metadata.' );
+
+$normalize_resource_dir = $tmp . '/normalize-resource-limit';
+$normalize_resource_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<svg xlink:href href></svg>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $normalize_resource_dir,
+		'max-tokens'      => '1',
+		'max-nodes'       => '100',
+	)
+);
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $normalize_resource_result['failureClass'] ?? null ), 'tag token ceilings should not be masked by normalize() failures.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $normalize_resource_result['status'] ?? null ), 'tag token ceilings should retain resource-limit status when normalize() would otherwise fail.' );
+html_api_fuzz_smoke_assert( 'skipped-resource-limit' === ( $normalize_resource_result['tagProcessor']['normalize']['status'] ?? null ), 'normalize() idempotence should be skipped after tag resource limits.' );
+html_api_fuzz_smoke_assert( in_array( 'tag-token-limit-exceeded', $normalize_resource_result['signature']['facts']['limitFailures'] ?? array(), true ), 'resource-limit signature should still include tag token limit failures when normalize() is skipped.' );
 
 $dom_resource_dir = $tmp . '/dom-resource-limit';
 $dom_resource_result = \HtmlApiFuzz\Worker::run(
@@ -558,10 +593,15 @@ $dom_template_table_context_result = \HtmlApiFuzz\Worker::run(
 		'max-nodes'       => '200',
 	)
 );
-html_api_fuzz_smoke_assert( true === ( $dom_template_table_context_result['ok'] ?? null ), 'DOM template fallback should compare table-contained content.' );
-html_api_fuzz_smoke_assert( 'passed' === ( $dom_template_table_context_result['status'] ?? null ), 'DOM template fallback should not quarantine table-contained content.' );
 html_api_fuzz_smoke_assert( true === ( $dom_template_table_context_result['comparison']['ok'] ?? null ), 'DOM template table-contained content should compare cleanly.' );
-html_api_fuzz_smoke_assert( null === ( $dom_template_table_context_result['signature'] ?? null ), 'DOM template table-contained content should not produce a fuzz signature.' );
+if ( false === ( $dom_template_table_context_result['tagProcessor']['normalize']['ok'] ?? true ) ) {
+	html_api_fuzz_smoke_assert( false === ( $dom_template_table_context_result['ok'] ?? null ), 'DOM template table-contained content should surface normalize() failures after comparison.' );
+	html_api_fuzz_smoke_assert( 'normalize-invariant-failed' === ( $dom_template_table_context_result['failureClass'] ?? null ), 'DOM template table-contained normalize() failures should be classified separately.' );
+} else {
+	html_api_fuzz_smoke_assert( true === ( $dom_template_table_context_result['ok'] ?? null ), 'DOM template fallback should compare table-contained content.' );
+	html_api_fuzz_smoke_assert( 'passed' === ( $dom_template_table_context_result['status'] ?? null ), 'DOM template fallback should not quarantine table-contained content.' );
+	html_api_fuzz_smoke_assert( null === ( $dom_template_table_context_result['signature'] ?? null ), 'DOM template table-contained content should not produce a fuzz signature.' );
+}
 
 $dom_template_foreign_context_dir = $tmp . '/dom-template-foreign-context';
 $dom_template_foreign_context_result = \HtmlApiFuzz\Worker::run(
@@ -575,108 +615,135 @@ $dom_template_foreign_context_result = \HtmlApiFuzz\Worker::run(
 		'max-nodes'       => '200',
 	)
 );
-html_api_fuzz_smoke_assert( true === ( $dom_template_foreign_context_result['ok'] ?? null ), 'DOM template fallback should compare foreign-content tag names that overlap table names.' );
-html_api_fuzz_smoke_assert( 'passed' === ( $dom_template_foreign_context_result['status'] ?? null ), 'DOM template fallback should not quarantine foreign-content tag names that overlap table names.' );
 html_api_fuzz_smoke_assert( true === ( $dom_template_foreign_context_result['comparison']['ok'] ?? null ), 'DOM template foreign-content overlap should compare cleanly.' );
-html_api_fuzz_smoke_assert( null === ( $dom_template_foreign_context_result['signature'] ?? null ), 'DOM template foreign-content overlap should not produce a fuzz signature.' );
+if ( false === ( $dom_template_foreign_context_result['tagProcessor']['normalize']['ok'] ?? true ) ) {
+	html_api_fuzz_smoke_assert( false === ( $dom_template_foreign_context_result['ok'] ?? null ), 'DOM template foreign-content overlap should surface normalize() failures after comparison.' );
+	html_api_fuzz_smoke_assert( 'normalize-invariant-failed' === ( $dom_template_foreign_context_result['failureClass'] ?? null ), 'DOM template foreign-content normalize() failures should be classified separately.' );
+} else {
+	html_api_fuzz_smoke_assert( true === ( $dom_template_foreign_context_result['ok'] ?? null ), 'DOM template fallback should compare foreign-content tag names that overlap table names.' );
+	html_api_fuzz_smoke_assert( 'passed' === ( $dom_template_foreign_context_result['status'] ?? null ), 'DOM template fallback should not quarantine foreign-content tag names that overlap table names.' );
+	html_api_fuzz_smoke_assert( null === ( $dom_template_foreign_context_result['signature'] ?? null ), 'DOM template foreign-content overlap should not produce a fuzz signature.' );
+}
 
 $dom_oracle_needs_xlink_tolerance = html_api_fuzz_smoke_dom_drops_bare_xlink_local_name_after_xlink();
-$dom_oracle_xlink_tolerated_status = $dom_oracle_needs_xlink_tolerance ? 'oracle-tolerated' : 'passed';
-$dom_oracle_xlink_fragment_dir = $tmp . '/dom-oracle-xlink-local-name-fragment';
-$dom_oracle_xlink_fragment_result = \HtmlApiFuzz\Worker::run(
+$dom_oracle_xlink_fragment_wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	'<svg xlink:href href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
+);
+$dom_oracle_xlink_fragment_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+	'<svg xlink:href href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
+);
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_fragment_wp['status'] ?? null ), 'DOM XLink fragment fixture should render with WordPress.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_fragment_dom['status'] ?? null ), 'DOM XLink fragment fixture should render with the DOM oracle.' );
+$dom_oracle_xlink_fragment_comparison = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	$dom_oracle_xlink_fragment_wp['tree'],
+	$dom_oracle_xlink_fragment_dom['tree'],
+	$dom_oracle_xlink_fragment_wp['domOracleLineTolerances'] ?? array()
+);
+html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_fragment_comparison['ok'] ?? null ), 'DOM XLink oracle limitation should compare after fragment tolerance.' );
+if ( $dom_oracle_needs_xlink_tolerance ) {
+	html_api_fuzz_smoke_assert( array( 1 ) === ( $dom_oracle_xlink_fragment_wp['domOracleLineTolerances'] ?? null ), 'DOM XLink fragment tolerance should identify only the dropped WordPress attribute line.' );
+} else {
+	html_api_fuzz_smoke_assert( array() === ( $dom_oracle_xlink_fragment_wp['domOracleLineTolerances'] ?? null ), 'Fixed DOM runtimes should not record XLink oracle tolerance lines.' );
+}
+
+$dom_oracle_xlink_worker_dir = $tmp . '/dom-oracle-xlink-worker';
+$dom_oracle_xlink_worker_result = \HtmlApiFuzz\Worker::run(
 	array(
 		'input-base64'    => base64_encode( '<svg xlink:href href></svg>' ),
 		'profile'         => 'replay',
 		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 		'payload-policy'  => 'ascii-structural',
-		'output-dir'      => $dom_oracle_xlink_fragment_dir,
+		'output-dir'      => $dom_oracle_xlink_worker_dir,
 		'max-tokens'      => '100',
 		'max-nodes'       => '100',
 	)
 );
-html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_fragment_result['ok'] ?? null ), 'DOM XLink oracle limitation should not be a failing fragment tree mismatch.' );
-html_api_fuzz_smoke_assert( $dom_oracle_xlink_tolerated_status === ( $dom_oracle_xlink_fragment_result['status'] ?? null ), 'DOM XLink oracle limitation should be counted separately only while comparison needs tolerance.' );
-if ( $dom_oracle_needs_xlink_tolerance ) {
-	html_api_fuzz_smoke_assert( 'oracle-tolerated' === ( $dom_oracle_xlink_fragment_result['failureClass'] ?? null ), 'DOM XLink fragment tolerance should preserve oracle-tolerated failure class.' );
-	html_api_fuzz_smoke_assert( array( 1 ) === ( $dom_oracle_xlink_fragment_result['wordpress']['domOracleLineTolerances'] ?? null ), 'DOM XLink fragment tolerance should identify only the dropped WordPress attribute line.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_worker_result['dom']['status'] ?? null ), 'Worker should still render the DOM oracle when normalize() fails independently.' );
+html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_worker_result['comparison']['ok'] ?? null ), 'Worker should still compare DOM trees when normalize() fails independently.' );
+if ( false === ( $normalize_not_idempotent['normalize']['ok'] ?? true ) ) {
+	html_api_fuzz_smoke_assert( false === ( $dom_oracle_xlink_worker_result['ok'] ?? null ), 'Worker should fail when normalize() is non-idempotent.' );
+	html_api_fuzz_smoke_assert( 'normalize-invariant-failed' === ( $dom_oracle_xlink_worker_result['failureClass'] ?? null ), 'Worker should classify normalize() idempotence failures separately.' );
+	html_api_fuzz_smoke_assert( 'normalize-not-idempotent' === ( $dom_oracle_xlink_worker_result['signature']['facts']['invariant'] ?? null ), 'Normalize failure signature should record the concrete invariant.' );
+	html_api_fuzz_smoke_assert( ( $normalize_not_idempotent['normalize']['normalizedSha1'] ?? null ) === ( $dom_oracle_xlink_worker_result['signature']['facts']['normalizedSha1'] ?? null ), 'Normalize failure signature should include the normalized hash.' );
+	html_api_fuzz_smoke_assert( is_int( $dom_oracle_xlink_worker_result['signature']['facts']['firstByteOffset'] ?? null ), 'Normalize failure signature should include first-difference metadata.' );
 } else {
-	html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_fragment_result['failureClass'] ?? null ), 'Fixed DOM runtimes should not record an XLink oracle tolerance failure class.' );
-	html_api_fuzz_smoke_assert( array() === ( $dom_oracle_xlink_fragment_result['wordpress']['domOracleLineTolerances'] ?? null ), 'Fixed DOM runtimes should not record XLink oracle tolerance lines.' );
+	html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_worker_result['ok'] ?? null ), 'Worker should pass the XLink fixture once normalize() is idempotent.' );
+	html_api_fuzz_smoke_assert( ( $dom_oracle_needs_xlink_tolerance ? 'oracle-tolerated' : 'passed' ) === ( $dom_oracle_xlink_worker_result['status'] ?? null ), 'Worker should keep normal DOM oracle status once normalize() is idempotent.' );
 }
 
-$dom_oracle_xlink_full_document_dir = $tmp . '/dom-oracle-xlink-local-name-full-document';
-$dom_oracle_xlink_full_document_result = \HtmlApiFuzz\Worker::run(
-	array(
-		'input-base64'    => base64_encode( '<svg xlink:href href></svg>' ),
-		'profile'         => 'replay',
-		'mode'            => \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
-		'payload-policy'  => 'ascii-structural',
-		'output-dir'      => $dom_oracle_xlink_full_document_dir,
-		'max-tokens'      => '100',
-		'max-nodes'       => '100',
-	)
+$dom_oracle_xlink_full_document_wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	'<svg xlink:href href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
 );
-html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_full_document_result['ok'] ?? null ), 'DOM XLink oracle limitation should not be a failing full-document tree mismatch.' );
-html_api_fuzz_smoke_assert( $dom_oracle_xlink_tolerated_status === ( $dom_oracle_xlink_full_document_result['status'] ?? null ), 'DOM XLink oracle limitation should be counted separately during full-document comparison only while comparison needs tolerance.' );
+$dom_oracle_xlink_full_document_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+	'<svg xlink:href href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
+);
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_full_document_wp['status'] ?? null ), 'DOM XLink full-document fixture should render with WordPress.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_full_document_dom['status'] ?? null ), 'DOM XLink full-document fixture should render with the DOM oracle.' );
+$dom_oracle_xlink_full_document_comparison = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	$dom_oracle_xlink_full_document_wp['tree'],
+	$dom_oracle_xlink_full_document_dom['tree'],
+	$dom_oracle_xlink_full_document_wp['domOracleLineTolerances'] ?? array()
+);
+html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_full_document_comparison['ok'] ?? null ), 'DOM XLink oracle limitation should compare after full-document tolerance.' );
+html_api_fuzz_smoke_assert( $dom_oracle_needs_xlink_tolerance ? array( 4 ) === ( $dom_oracle_xlink_full_document_wp['domOracleLineTolerances'] ?? null ) : array() === ( $dom_oracle_xlink_full_document_wp['domOracleLineTolerances'] ?? null ), 'DOM XLink full-document fixture should record tolerance lines only while the runtime needs them.' );
 
 $dom_oracle_xlink_minimized_input = base64_decode( 'Pjx3cC14PjxiIHNyYz0i16oiPjxzdHJvbmcgZDw8PDw8PCI+YWFhYWFhYc6yPHN2ZyBwWDgxRzY4QndxPSJudWtyUSBhbXA7IiB4bGluazpocmVmIGhyZWYgdml0bGU+Ri1qOA==', true );
 html_api_fuzz_smoke_assert( false !== $dom_oracle_xlink_minimized_input, 'DOM XLink minimized fixture should decode.' );
-$dom_oracle_xlink_minimized_dir = $tmp . '/dom-oracle-xlink-local-name-minimized';
-$dom_oracle_xlink_minimized_result = \HtmlApiFuzz\Worker::run(
-	array(
-		'input-base64'    => base64_encode( $dom_oracle_xlink_minimized_input ),
-		'profile'         => 'replay',
-		'mode'            => \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
-		'payload-policy'  => 'valid-utf8',
-		'output-dir'      => $dom_oracle_xlink_minimized_dir,
-		'max-tokens'      => '2000',
-		'max-nodes'       => '3000',
-	)
+$dom_oracle_xlink_minimized_wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	$dom_oracle_xlink_minimized_input,
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+	array( 'maxTokens' => 2000, 'maxNodes' => 3000 )
 );
-html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_minimized_result['ok'] ?? null ), 'DOM XLink minimized fixture should pass after comparison tolerance.' );
-html_api_fuzz_smoke_assert( $dom_oracle_needs_xlink_tolerance ? 'oracle-tolerated' === ( $dom_oracle_xlink_minimized_result['status'] ?? null ) : 'passed' === ( $dom_oracle_xlink_minimized_result['status'] ?? null ), 'DOM XLink minimized fixture should no longer be a tree mismatch.' );
-html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_minimized_result['comparison']['ok'] ?? null ), 'DOM XLink minimized fixture comparison should pass.' );
-html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_minimized_result['signature'] ?? null ), 'DOM XLink minimized fixture should not have a failure signature.' );
-html_api_fuzz_smoke_assert(
-	$dom_oracle_needs_xlink_tolerance ? 1 === count( $dom_oracle_xlink_minimized_result['wordpress']['domOracleLineTolerances'] ?? array() ) : array() === ( $dom_oracle_xlink_minimized_result['wordpress']['domOracleLineTolerances'] ?? null ),
-	'DOM XLink minimized fixture should record tolerance lines only while the runtime needs them.'
+$dom_oracle_xlink_minimized_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+	$dom_oracle_xlink_minimized_input,
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+	array( 'maxTokens' => 2000, 'maxNodes' => 3000 )
 );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_minimized_wp['status'] ?? null ), 'DOM XLink minimized fixture should render with WordPress.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_minimized_dom['status'] ?? null ), 'DOM XLink minimized fixture should render with the DOM oracle.' );
+$dom_oracle_xlink_minimized_comparison = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	$dom_oracle_xlink_minimized_wp['tree'],
+	$dom_oracle_xlink_minimized_dom['tree'],
+	$dom_oracle_xlink_minimized_wp['domOracleLineTolerances'] ?? array()
+);
+html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_minimized_comparison['ok'] ?? null ), 'DOM XLink minimized fixture comparison should pass.' );
+html_api_fuzz_smoke_assert( $dom_oracle_needs_xlink_tolerance ? 1 === count( $dom_oracle_xlink_minimized_wp['domOracleLineTolerances'] ?? array() ) : array() === ( $dom_oracle_xlink_minimized_wp['domOracleLineTolerances'] ?? null ), 'DOM XLink minimized fixture should record tolerance lines only while the runtime needs them.' );
 
-$dom_oracle_xlink_inverse_dir = $tmp . '/dom-oracle-xlink-local-name-inverse';
-$dom_oracle_xlink_inverse_result = \HtmlApiFuzz\Worker::run(
-	array(
-		'input-base64'    => base64_encode( '<svg href xlink:href></svg>' ),
-		'profile'         => 'replay',
-		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-		'payload-policy'  => 'ascii-structural',
-		'output-dir'      => $dom_oracle_xlink_inverse_dir,
-		'max-tokens'      => '100',
-		'max-nodes'       => '100',
-	)
+$dom_oracle_xlink_inverse_wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+	'<svg href xlink:href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
 );
-html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_inverse_result['ok'] ?? null ), 'Bare attribute before XLink should remain comparable.' );
-html_api_fuzz_smoke_assert( 'passed' === ( $dom_oracle_xlink_inverse_result['status'] ?? null ), 'Bare attribute before XLink should not require a comparison tolerance.' );
-html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_inverse_result['failureClass'] ?? null ), 'Bare attribute before XLink should not record an oracle tolerance failure class.' );
-html_api_fuzz_smoke_assert( array() === ( $dom_oracle_xlink_inverse_result['wordpress']['domOracleLineTolerances'] ?? null ), 'Bare attribute before XLink should not record DOM oracle tolerance lines.' );
+$dom_oracle_xlink_inverse_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+	'<svg href xlink:href></svg>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array( 'maxTokens' => 100, 'maxNodes' => 100 )
+);
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_inverse_wp['status'] ?? null ), 'Bare attribute before XLink should render with WordPress.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_inverse_dom['status'] ?? null ), 'Bare attribute before XLink should render with the DOM oracle.' );
+$dom_oracle_xlink_inverse_comparison = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	$dom_oracle_xlink_inverse_wp['tree'],
+	$dom_oracle_xlink_inverse_dom['tree'],
+	$dom_oracle_xlink_inverse_wp['domOracleLineTolerances'] ?? array()
+);
+html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_inverse_comparison['ok'] ?? null ), 'Bare attribute before XLink should remain comparable.' );
+html_api_fuzz_smoke_assert( array() === ( $dom_oracle_xlink_inverse_wp['domOracleLineTolerances'] ?? null ), 'Bare attribute before XLink should not record DOM oracle tolerance lines.' );
 
-$dom_oracle_xlink_resource_dir = $tmp . '/dom-oracle-xlink-resource-limit';
-$dom_oracle_xlink_resource_result = \HtmlApiFuzz\Worker::run(
-	array(
-		'input-base64'    => base64_encode( '<svg xlink:href href><pass>x</pass></svg>' ),
-		'profile'         => 'replay',
-		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-		'payload-policy'  => 'ascii-structural',
-		'output-dir'      => $dom_oracle_xlink_resource_dir,
-		'max-tokens'      => '100',
-		'max-nodes'       => '1',
-	)
+$dom_oracle_xlink_resource_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+	'<svg xlink:href href><pass>x</pass></svg>',
+	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	array( 'maxTokens' => 100, 'maxNodes' => 1 )
 );
-html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_oracle_xlink_resource_result['failureClass'] ?? null ), 'DOM XLink oracle tolerance should not mask DOM node ceilings.' );
-html_api_fuzz_smoke_assert( false === ( $dom_oracle_xlink_resource_result['ok'] ?? null ), 'DOM XLink node ceiling should fail the worker result.' );
-html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_oracle_xlink_resource_result['status'] ?? null ), 'DOM XLink node ceiling should use resource-limit status.' );
-html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_resource_result['comparison'] ?? null ), 'DOM XLink node ceiling should not compare partial DOM output.' );
-html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_oracle_xlink_resource_result['dom']['failureClass'] ?? null ), 'DOM XLink oracle tolerance should preserve the concrete DOM node limit failure.' );
-html_api_fuzz_smoke_assert( in_array( 'dom-node-limit-exceeded', $dom_oracle_xlink_resource_result['signature']['facts']['limitFailures'] ?? array(), true ), 'DOM XLink node ceiling signature should include DOM node limit failure.' );
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_ERROR === ( $dom_oracle_xlink_resource_dom['status'] ?? null ), 'DOM XLink node ceiling should fail the DOM renderer.' );
+html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_oracle_xlink_resource_dom['failureClass'] ?? null ), 'DOM XLink oracle tolerance should preserve the concrete DOM node limit failure.' );
 
 $wp_resource_dir = $tmp . '/wordpress-resource-limit';
 $wp_resource_result = \HtmlApiFuzz\Worker::run(

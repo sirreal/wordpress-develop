@@ -13,6 +13,18 @@ function html_api_fuzz_tree_normalization_assert( bool $condition, string $messa
 	}
 }
 
+function html_api_fuzz_tree_normalization_assert_compares( array $result, string $message ): void {
+	if ( true === ( $result['ok'] ?? null ) ) {
+		return;
+	}
+
+	if ( 'normalize-invariant-failed' === ( $result['failureClass'] ?? null ) && true === ( $result['comparison']['ok'] ?? null ) ) {
+		return;
+	}
+
+	html_api_fuzz_tree_normalization_fail( $message );
+}
+
 function html_api_fuzz_tree_normalization_rm_tree( string $path ): void {
 	if ( ! file_exists( $path ) ) {
 		return;
@@ -87,8 +99,7 @@ $presumptuous_tag_full_document = html_api_fuzz_tree_normalization_run(
 	base64_encode( '<html><head></head><body></body></html></>' ),
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert( true === ( $presumptuous_tag_full_document['ok'] ?? null ), 'Full-document presumptuous tag closers after HTML should be ignored by the worker.' );
-html_api_fuzz_tree_normalization_assert( 'passed' === ( $presumptuous_tag_full_document['status'] ?? null ), 'Ignored full-document presumptuous tag closers should still reach DOM comparison.' );
+html_api_fuzz_tree_normalization_assert_compares( $presumptuous_tag_full_document, 'Full-document presumptuous tag closers after HTML should be ignored by the worker.' );
 html_api_fuzz_tree_normalization_assert( true === ( $presumptuous_tag_full_document['comparison']['ok'] ?? null ), 'Full-document presumptuous tag closer comparison should pass.' );
 
 $nul_attribute_value = html_api_fuzz_tree_normalization_run(
@@ -97,7 +108,7 @@ $nul_attribute_value = html_api_fuzz_tree_normalization_run(
 	'PCEgcD48L3A+PGh0bWwgaWQ9AD4=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_value['ok'] ?? null ), 'NUL attribute values should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_value, 'NUL attribute values should compare after tree scalar normalization.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_value['comparison']['ok'] ?? null ), 'NUL attribute value comparison should pass.' );
 $nul_attribute_value_tree = file_get_contents( $nul_attribute_value['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $nul_attribute_value_tree, 'NUL attribute value WordPress tree should be written.' );
@@ -110,7 +121,7 @@ $nul_attribute_name = html_api_fuzz_tree_normalization_run(
 	'PGh0bWwKN0Z5AG10ND4=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_name['ok'] ?? null ), 'NUL attribute names should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_name, 'NUL attribute names should compare after tree scalar normalization.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_name['comparison']['ok'] ?? null ), 'NUL attribute name comparison should pass.' );
 $nul_attribute_name_tree = file_get_contents( $nul_attribute_name['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $nul_attribute_name_tree, 'NUL attribute name WordPress tree should be written.' );
@@ -122,7 +133,7 @@ $foreign_tag_name = html_api_fuzz_tree_normalization_run(
 	'PHN0cm9uZyBz16oiPjxzdmcgPjxnPjx0aXRsZT7wn5mCPFBiKQAsRTMmI3hmZmZkOzwvPg==',
 	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY
 );
-html_api_fuzz_tree_normalization_assert( true === ( $foreign_tag_name['ok'] ?? null ), 'NUL foreign-content tag names should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $foreign_tag_name, 'NUL foreign-content tag names should compare after tree scalar normalization.' );
 html_api_fuzz_tree_normalization_assert( true === ( $foreign_tag_name['comparison']['ok'] ?? null ), 'NUL foreign-content tag name comparison should pass.' );
 
 $cr_attribute_value = html_api_fuzz_tree_normalization_run(
@@ -131,7 +142,7 @@ $cr_attribute_value = html_api_fuzz_tree_normalization_run(
 	'PCE+PGh0bWwgfUlnLXBlXWo6dXMyYzA9Ig0iPmE=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert( true === ( $cr_attribute_value['ok'] ?? null ), 'CR attribute values should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $cr_attribute_value, 'CR attribute values should compare after tree scalar normalization.' );
 html_api_fuzz_tree_normalization_assert( true === ( $cr_attribute_value['comparison']['ok'] ?? null ), 'CR attribute value comparison should pass.' );
 $cr_attribute_value_tree = file_get_contents( $cr_attribute_value['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $cr_attribute_value_tree, 'CR attribute value WordPress tree should be written.' );

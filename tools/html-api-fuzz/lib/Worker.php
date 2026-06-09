@@ -63,7 +63,7 @@ class Worker {
 		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported );
 		write_json_file( $replay_path, $replay );
 
-		$tag_result = TagInvariants::check( $input, $limits );
+		$tag_result = TagInvariants::check( $input, $limits, $mode );
 		$wp_result  = TreeRenderer::render_wordpress( $input, $mode, $limits );
 		$dom_result = array( 'status' => TreeRenderer::STATUS_ERROR, 'error' => 'Not run.' );
 
@@ -149,6 +149,17 @@ class Worker {
 					$result['failureClass'] = 'oracle-tolerated';
 				}
 			}
+		}
+
+		$normalize_result = $tag_result['normalize'] ?? array( 'ok' => true );
+		if (
+			false === ( $normalize_result['ok'] ?? true ) &&
+			true === ( $result['ok'] ?? false ) &&
+			in_array( $result['status'] ?? null, array( 'passed', 'oracle-tolerated' ), true )
+		) {
+			$result['ok']           = false;
+			$result['status']       = 'failed';
+			$result['failureClass'] = 'normalize-invariant-failed';
 		}
 
 		$signature = Signature::from_result( $result );
