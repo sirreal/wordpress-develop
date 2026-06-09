@@ -852,6 +852,51 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that CDATA sections remain available inside SVG HTML integration points.
+	 *
+	 * @ticket 61576
+	 */
+	public function test_cdata_sections_in_svg_html_integration_points() {
+		$processor = WP_HTML_Processor::create_fragment(
+			'<svg><foreignObject><![CDATA[foo]]></foreignObject></svg>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( 'foreignObject' ),
+			'Failed to find "foreignObject" under test: check test setup.'
+		);
+
+		$this->assertSame(
+			'svg',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the "foreignObject" element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_token(),
+			'Failed to find expected CDATA section.'
+		);
+
+		$this->assertSame(
+			'#cdata-section',
+			$processor->get_token_name(),
+			"Should have found a CDATA section but found {$processor->get_token_name()} instead."
+		);
+
+		$this->assertSame(
+			'svg',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the CDATA section.'
+		);
+
+		$this->assertSame(
+			'foo',
+			$processor->get_modifiable_text(),
+			'Found incorrect CDATA content.'
+		);
+	}
+
+	/**
 	 * Ensures that the processor correctly adjusts the namespace
 	 * for elements inside MathML integration points.
 	 *
@@ -908,6 +953,51 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 			'html',
 			$processor->get_namespace(),
 			'Found the wrong namespace for the transformed "IMAGE"/"IMG" element.'
+		);
+	}
+
+	/**
+	 * Ensures that CDATA sections remain available inside MathML HTML integration points.
+	 *
+	 * @ticket 61576
+	 */
+	public function test_cdata_sections_in_mathml_html_integration_points() {
+		$processor = WP_HTML_Processor::create_fragment(
+			'<math><annotation-xml encoding="text/html"><![CDATA[x]]></annotation-xml></math>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( 'ANNOTATION-XML' ),
+			'Failed to find "annotation-xml" under test: check test setup.'
+		);
+
+		$this->assertSame(
+			'math',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the "annotation-xml" element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_token(),
+			'Failed to find expected CDATA section.'
+		);
+
+		$this->assertSame(
+			'#cdata-section',
+			$processor->get_token_name(),
+			"Should have found a CDATA section but found {$processor->get_token_name()} instead."
+		);
+
+		$this->assertSame(
+			'math',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the CDATA section.'
+		);
+
+		$this->assertSame(
+			'x',
+			$processor->get_modifiable_text(),
+			'Found incorrect CDATA content.'
 		);
 	}
 
