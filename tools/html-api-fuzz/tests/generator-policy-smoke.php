@@ -250,6 +250,82 @@ html_api_fuzz_smoke_assert( 'generated' === ( $worker_replay['inputSource'] ?? n
 html_api_fuzz_smoke_assert( 'valid-utf8' === ( $worker_result['payloadPolicy'] ?? null ), 'result should persist payload policy.' );
 html_api_fuzz_smoke_assert( ! empty( $worker_result['generator']['features'] ?? array() ), 'result should persist non-empty generator features.' );
 html_api_fuzz_smoke_assert( ( $worker_replay['generator']['features'] ?? null ) === ( $worker_result['generator']['features'] ?? null ), 'result and replay should persist the same generator features.' );
+$git_metadata = \HtmlApiFuzz\git_metadata();
+html_api_fuzz_smoke_assert( array_key_exists( 'available', $git_metadata ), 'git metadata should report availability.' );
+html_api_fuzz_smoke_assert( array_key_exists( 'dirty', $git_metadata ), 'git metadata should report dirty state.' );
+if ( $git_metadata['available'] ?? false ) {
+	html_api_fuzz_smoke_assert( 1 === preg_match( '/^[0-9a-f]{7,}$/', $git_metadata['commit'] ?? '' ), 'git metadata should include a full hex commit hash.' );
+	html_api_fuzz_smoke_assert( ( $git_metadata['commit'] ?? null ) === ( $worker_replay['repoCommit'] ?? null ), 'replay should persist the current commit hash.' );
+	html_api_fuzz_smoke_assert( ( $git_metadata['dirty'] ?? null ) === ( $worker_replay['repoDirty'] ?? null ), 'replay should persist the tracked-file dirty flag.' );
+}
+$ancestor_repo = $tmp . '/ancestor-repo';
+$ancestor_child = $ancestor_repo . '/child';
+\HtmlApiFuzz\ensure_dir( $ancestor_child );
+$ancestor_init = \HtmlApiFuzz\run_git_command( array( 'init' ), 1000, $ancestor_repo );
+if ( 0 === $ancestor_init['code'] ) {
+	$ancestor_child_metadata = \HtmlApiFuzz\git_metadata( 1000, $ancestor_child );
+	html_api_fuzz_smoke_assert( false === ( $ancestor_child_metadata['available'] ?? null ), 'git metadata should not report an ancestor repository as the current repo.' );
+}
+$dirty_repo = $tmp . '/dirty-repo';
+\HtmlApiFuzz\ensure_dir( $dirty_repo );
+$dirty_init = \HtmlApiFuzz\run_git_command( array( 'init' ), 1000, $dirty_repo );
+if ( 0 === $dirty_init['code'] ) {
+	file_put_contents( $dirty_repo . '/tracked.txt', "clean\n" );
+	$dirty_add = \HtmlApiFuzz\run_git_command( array( 'add', 'tracked.txt' ), 1000, $dirty_repo );
+	$dirty_commit = \HtmlApiFuzz\run_git_command(
+		array(
+			'-c',
+			'user.email=html-api-fuzz@example.invalid',
+			'-c',
+			'user.name=HTML API Fuzz',
+			'-c',
+			'commit.gpgsign=false',
+			'commit',
+			'--no-gpg-sign',
+			'--no-verify',
+			'-m',
+			'initial',
+		),
+		1000,
+		$dirty_repo
+	);
+	html_api_fuzz_smoke_assert( 0 === $dirty_add['code'], 'temp git repo should stage the tracked dirty fixture.' );
+	html_api_fuzz_smoke_assert( 0 === $dirty_commit['code'], 'temp git repo should commit the tracked dirty fixture.' );
+	$clean_repo_metadata = \HtmlApiFuzz\git_metadata( 1000, $dirty_repo, false );
+	html_api_fuzz_smoke_assert( true === ( $clean_repo_metadata['available'] ?? null ), 'temp git repo metadata should be available.' );
+	html_api_fuzz_smoke_assert( false === ( $clean_repo_metadata['dirty'] ?? null ), 'clean tracked temp git repo should report dirty false.' );
+	file_put_contents( $dirty_repo . '/tracked.txt', "dirty\n" );
+	$dirty_repo_metadata = \HtmlApiFuzz\git_metadata( 1000, $dirty_repo, false );
+	html_api_fuzz_smoke_assert( true === ( $dirty_repo_metadata['dirty'] ?? null ), 'modified tracked temp git repo should report dirty true.' );
+}
+$fake_git_root = $tmp . '/fake-git-root';
+$fake_git_bin = $tmp . '/fake-git-bin';
+\HtmlApiFuzz\ensure_dir( $fake_git_root );
+\HtmlApiFuzz\ensure_dir( $fake_git_bin );
+$fake_git = $fake_git_bin . '/git';
+file_put_contents(
+	$fake_git,
+	"#!/bin/sh\n" .
+	"if [ \"\$1\" = \"-C\" ]; then root=\"\$2\"; shift 2; else root=\"\$PWD\"; fi\n" .
+	"if [ \"\$1\" = \"rev-parse\" ] && [ \"\$2\" = \"--show-toplevel\" ]; then printf '%s\\n' \"\$root\"; exit 0; fi\n" .
+	"if [ \"\$1\" = \"rev-parse\" ] && [ \"\$2\" = \"HEAD\" ]; then printf '%s\\n' abcdef1234567890abcdef1234567890abcdef12; exit 0; fi\n" .
+	"if [ \"\$1\" = \"rev-parse\" ] && [ \"\$2\" = \"--short=12\" ]; then printf '%s\\n' abcdef123456; exit 0; fi\n" .
+	"if [ \"\$1\" = \"branch\" ] && [ \"\$2\" = \"--show-current\" ]; then printf '%s\\n' main; exit 0; fi\n" .
+	"if [ \"\$1\" = \"show\" ]; then printf '%s\\n' 2026-01-01T00:00:00+00:00; exit 0; fi\n" .
+	"if [ \"\$1\" = \"diff\" ]; then exit 2; fi\n" .
+	"exit 1\n"
+);
+chmod( $fake_git, 0755 );
+$old_path = getenv( 'PATH' );
+putenv( 'PATH=' . $fake_git_bin . PATH_SEPARATOR . ( false === $old_path ? '' : $old_path ) );
+$unknown_dirty_metadata = \HtmlApiFuzz\git_metadata( 1000, $fake_git_root, false );
+if ( false === $old_path ) {
+	putenv( 'PATH' );
+} else {
+	putenv( 'PATH=' . $old_path );
+}
+html_api_fuzz_smoke_assert( true === ( $unknown_dirty_metadata['available'] ?? null ), 'git metadata should remain available when only dirty detection fails.' );
+html_api_fuzz_smoke_assert( array_key_exists( 'dirty', $unknown_dirty_metadata ) && null === $unknown_dirty_metadata['dirty'], 'dirty detection failures should report dirty null.' );
 
 $replay_cli_dir = $tmp . '/replay-cli';
 $replay_proc = \HtmlApiFuzz\run_php_process(
@@ -269,6 +345,8 @@ $replay_cli_replay = \HtmlApiFuzz\read_json_file( $replay_cli_dir . '/replay.jso
 html_api_fuzz_smoke_assert( null === ( $replay_cli_replay['generator'] ?? null ), 'replay CLI output should not invent immediate generator metadata.' );
 html_api_fuzz_smoke_assert( 'input-file' === ( $replay_cli_replay['inputSource'] ?? null ), 'replay CLI output should record immediate input source.' );
 html_api_fuzz_smoke_assert( ( $worker_replay['generator'] ?? null ) === ( $replay_cli_replay['originalGenerator'] ?? null ), 'replay CLI output should preserve original generator metadata.' );
+html_api_fuzz_smoke_assert( ( $worker_replay['repoCommit'] ?? null ) === ( $replay_cli_replay['sourceReplay']['repoCommit'] ?? null ), 'replay CLI output should preserve source replay commit metadata.' );
+html_api_fuzz_smoke_assert( ( $worker_replay['repoDirty'] ?? null ) === ( $replay_cli_replay['sourceReplay']['repoDirty'] ?? null ), 'replay CLI output should preserve source replay dirty metadata.' );
 
 $legacy_replay = $worker_replay;
 $legacy_replay['payloadPolicy'] = 'replay';
@@ -373,7 +451,13 @@ $invalid_byte_minimize_proc = \HtmlApiFuzz\run_php_process(
 );
 html_api_fuzz_smoke_assert( ! $invalid_byte_minimize_proc['timedOut'] && 0 === $invalid_byte_minimize_proc['code'], 'real invalid-byte replay should remain minimizable.' );
 $invalid_byte_minimize_result = \HtmlApiFuzz\read_json_file( $invalid_byte_minimize_dir . '/minimize-result.json' );
+$invalid_byte_minimize_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_minimize_result['minimizedReplay'] ?? '' );
+$invalid_byte_source_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_replay_source_dir . '/replay.json' );
 html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $invalid_byte_minimize_result['payloadPolicy'] ?? null ), 'invalid-byte minimization should preserve legacy payload policy metadata.' );
+html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoCommit'] ?? null ) === ( $invalid_byte_minimize_result['sourceReplay']['repoCommit'] ?? null ), 'minimize result should preserve source replay commit metadata.' );
+html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoDirty'] ?? null ) === ( $invalid_byte_minimize_result['sourceReplay']['repoDirty'] ?? null ), 'minimize result should preserve source replay dirty metadata.' );
+html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoCommit'] ?? null ) === ( $invalid_byte_minimize_replay['sourceReplay']['repoCommit'] ?? null ), 'minimized replay should preserve source replay commit metadata.' );
+html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoDirty'] ?? null ) === ( $invalid_byte_minimize_replay['sourceReplay']['repoDirty'] ?? null ), 'minimized replay should preserve source replay dirty metadata.' );
 
 $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	array(
@@ -424,6 +508,66 @@ $legacy_invalid_launcher_proc = \HtmlApiFuzz\run_php_process(
 	$tmp . '/legacy-invalid-launcher.log'
 );
 html_api_fuzz_smoke_assert( 0 !== $legacy_invalid_launcher_proc['code'], 'launcher CLI should reject legacy invalid-byte-heavy generation policy.' );
+
+$metadata_runner_dir = $tmp . '/metadata-runner';
+$metadata_runner_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/runner.php',
+		'--max-seeds',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--output-dir',
+		$metadata_runner_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	15000,
+	$tmp . '/metadata-runner.log'
+);
+html_api_fuzz_smoke_assert( ! $metadata_runner_proc['timedOut'] && 0 === $metadata_runner_proc['code'], 'runner metadata smoke run should complete.' );
+$metadata_runner_state = \HtmlApiFuzz\read_json_file( $metadata_runner_dir . '/state.json' );
+html_api_fuzz_smoke_assert( 'html-api-fuzz-runner-state' === ( $metadata_runner_state['kind'] ?? null ), 'runner state should be written.' );
+html_api_fuzz_smoke_assert( is_array( $metadata_runner_state['git'] ?? null ), 'runner state should include compact git metadata.' );
+$metadata_runner_events = \HtmlApiFuzz\read_ndjson_records( $metadata_runner_dir . '/events.ndjson' );
+html_api_fuzz_smoke_assert( is_array( $metadata_runner_events[0]['git'] ?? null ), 'runner start event should include compact git metadata.' );
+$metadata_runner_replay = \HtmlApiFuzz\read_json_file( $metadata_runner_dir . '/seed-1/primary/replay.json' );
+if ( $git_metadata['available'] ?? false ) {
+	html_api_fuzz_smoke_assert( $git_metadata['commit'] === ( $metadata_runner_state['git']['commit'] ?? null ), 'runner state git metadata should match the current commit.' );
+	html_api_fuzz_smoke_assert( $git_metadata['commit'] === ( $metadata_runner_events[0]['git']['commit'] ?? null ), 'runner start event git metadata should match the current commit.' );
+	html_api_fuzz_smoke_assert( $metadata_runner_state['git']['commit'] === ( $metadata_runner_replay['repoCommit'] ?? null ), 'runner worker replay should use runner-provided git metadata.' );
+	html_api_fuzz_smoke_assert( $metadata_runner_state['git']['dirty'] === ( $metadata_runner_replay['repoDirty'] ?? null ), 'runner worker replay should use runner-provided dirty metadata.' );
+}
+
+$metadata_launcher_dir = $tmp . '/metadata-launcher';
+$metadata_launcher_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/launcher.php',
+		'--lanes',
+		'1',
+		'--max-seeds',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--output-dir',
+		$metadata_launcher_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	20000,
+	$tmp . '/metadata-launcher.log'
+);
+html_api_fuzz_smoke_assert( ! $metadata_launcher_proc['timedOut'] && 0 === $metadata_launcher_proc['code'], 'launcher metadata smoke run should complete.' );
+$metadata_launcher_state = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/launcher-state.json' );
+html_api_fuzz_smoke_assert( 'html-api-fuzz-launcher-state' === ( $metadata_launcher_state['kind'] ?? null ), 'launcher state should be written.' );
+html_api_fuzz_smoke_assert( is_array( $metadata_launcher_state['git'] ?? null ), 'launcher state should include compact git metadata.' );
+$metadata_launcher_events = \HtmlApiFuzz\read_ndjson_records( $metadata_launcher_dir . '/events.ndjson' );
+html_api_fuzz_smoke_assert( is_array( $metadata_launcher_events[0]['git'] ?? null ), 'launcher start event should include compact git metadata.' );
+$metadata_launcher_replay = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/lane-00/seed-1/primary/replay.json' );
+if ( $git_metadata['available'] ?? false ) {
+	html_api_fuzz_smoke_assert( $git_metadata['commit'] === ( $metadata_launcher_state['git']['commit'] ?? null ), 'launcher state git metadata should match the current commit.' );
+	html_api_fuzz_smoke_assert( $git_metadata['commit'] === ( $metadata_launcher_events[0]['git']['commit'] ?? null ), 'launcher start event git metadata should match the current commit.' );
+	html_api_fuzz_smoke_assert( $metadata_launcher_state['git']['commit'] === ( $metadata_launcher_replay['repoCommit'] ?? null ), 'launcher worker replay should use launcher-provided git metadata.' );
+	html_api_fuzz_smoke_assert( $metadata_launcher_state['git']['dirty'] === ( $metadata_launcher_replay['repoDirty'] ?? null ), 'launcher worker replay should use launcher-provided dirty metadata.' );
+}
 
 $bad_stride_proc = \HtmlApiFuzz\run_php_process(
 	array(

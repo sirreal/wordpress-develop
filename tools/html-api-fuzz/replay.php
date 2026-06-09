@@ -30,6 +30,8 @@ if ( null === $payload_policy ) {
 		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null );
 }
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
+$source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
+$git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() );
 
 $args = array(
 	__DIR__ . '/worker.php',
@@ -47,6 +49,8 @@ $args = array(
 	(string) \HtmlApiFuzz\option_int( $options, 'max-tokens', (int) ( $replay['limits']['maxTokens'] ?? 2000 ) ),
 	'--max-nodes',
 	(string) \HtmlApiFuzz\option_int( $options, 'max-nodes', (int) ( $replay['limits']['maxNodes'] ?? 3000 ) ),
+	'--git-metadata-base64',
+	$git_metadata_base64,
 );
 if ( null !== $payload_policy ) {
 	$args[] = '--payload-policy';
@@ -61,6 +65,9 @@ $result = \HtmlApiFuzz\read_json_file( $output_dir . '/result.json' );
 $output_replay = \HtmlApiFuzz\read_json_file( $output_dir . '/replay.json' );
 if ( is_array( $output_replay ) && is_array( $original_generator ) ) {
 	$output_replay['originalGenerator'] = $original_generator;
+}
+if ( is_array( $output_replay ) ) {
+	$output_replay['sourceReplay'] = $source_replay;
 	\HtmlApiFuzz\write_json_file( $output_dir . '/replay.json', $output_replay );
 }
 echo \HtmlApiFuzz\json_encode_safe(

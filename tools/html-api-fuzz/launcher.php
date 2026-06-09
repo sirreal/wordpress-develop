@@ -122,6 +122,10 @@ html_api_fuzz_launcher_validate_runtime_options( $max_seeds, $duration_seconds, 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $events_path = $output_dir . '/events.ndjson';
 $state_path  = $output_dir . '/launcher-state.json';
+$git_metadata = null === \HtmlApiFuzz\option_string( $options, 'git-metadata-base64', null )
+	? \HtmlApiFuzz\git_metadata()
+	: \HtmlApiFuzz\git_metadata_from_base64( \HtmlApiFuzz\option_string( $options, 'git-metadata-base64' ) );
+$git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( $git_metadata );
 
 $state = array(
 	'schemaVersion' => 1,
@@ -136,11 +140,12 @@ $state = array(
 	'mode'          => $mode,
 	'payloadPolicy' => $payload_policy,
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
+	'git'           => $git_metadata,
 	'finished'      => false,
 	'laneResults'   => array(),
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
-\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'launcher-start', 'outputDir' => $output_dir, 'lanes' => $lanes ) );
+\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'launcher-start', 'outputDir' => $output_dir, 'lanes' => $lanes, 'git' => $git_metadata ) );
 
 $running = array();
 for ( $i = 0; $i < $lanes; ++$i ) {
@@ -183,6 +188,8 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		(string) $max_tokens,
 		'--max-nodes',
 		(string) $max_nodes,
+		'--git-metadata-base64',
+		$git_metadata_base64,
 	);
 
 	if ( 0 !== $max_seeds ) {
