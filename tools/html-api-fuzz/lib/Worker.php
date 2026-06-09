@@ -15,6 +15,9 @@ class Worker {
 		$max_input_bytes       = $max_input_bytes_value > 0 ? $max_input_bytes_value : null;
 		$generator_parameters  = null;
 		$input_source          = 'generated';
+		$git_metadata          = null === option_string( $options, 'git-metadata-base64', null )
+			? git_metadata( 100 )
+			: git_metadata_from_base64( option_string( $options, 'git-metadata-base64' ) );
 
 		if ( null !== option_string( $options, 'input-base64', null ) ) {
 			$input = base64_decode( option_string( $options, 'input-base64' ), true );
@@ -60,7 +63,7 @@ class Worker {
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata );
 		write_json_file( $replay_path, $replay );
 
 		$tag_result = TagInvariants::check( $input, $limits, $mode );
@@ -199,13 +202,14 @@ class Worker {
 		}
 	}
 
-	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported ): array {
+	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata ): array {
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
 			'createdAt'     => gmdate( 'c' ),
 			'repoRoot'      => repo_root(),
-			'repoCommit'    => trim( (string) @shell_exec( 'git -C ' . escapeshellarg( repo_root() ) . ' rev-parse HEAD 2>/dev/null' ) ),
+			'repoCommit'    => $git_metadata['commit'] ?? '',
+			'repoDirty'     => $git_metadata['dirty'] ?? null,
 			'phpVersion'    => PHP_VERSION,
 			'seed'          => $seed,
 			'profile'       => $profile,

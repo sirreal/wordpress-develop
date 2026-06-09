@@ -148,6 +148,203 @@ function command_string( array $command ): string {
 	return implode( ' ', array_map( 'escapeshellarg', $command ) );
 }
 
+function run_git_command( array $args, int $timeout_ms = 1000, ?string $root = null ): array {
+	$root    = $root ?? repo_root();
+	$command = array_merge( array( 'git', '-C', $root ), $args );
+	$spec    = array(
+		0 => array( 'pipe', 'r' ),
+		1 => array( 'pipe', 'w' ),
+		2 => array( 'pipe', 'w' ),
+	);
+
+	$process = @proc_open( $command, $spec, $pipes, $root );
+	if ( ! is_resource( $process ) ) {
+		return array(
+			'code'     => null,
+			'timedOut' => false,
+			'stdout'   => '',
+			'stderr'   => '',
+		);
+	}
+
+	fclose( $pipes[0] );
+	stream_set_blocking( $pipes[1], false );
+	stream_set_blocking( $pipes[2], false );
+
+	$stdout    = '';
+	$stderr    = '';
+	$start     = microtime( true );
+	$timed_out = false;
+
+	while ( true ) {
+		$stdout .= stream_get_contents( $pipes[1] );
+		$stderr .= stream_get_contents( $pipes[2] );
+
+		$status = proc_get_status( $process );
+		if ( ! $status['running'] ) {
+			break;
+		}
+
+		if ( ( microtime( true ) - $start ) * 1000 > $timeout_ms ) {
+			$timed_out = true;
+			proc_terminate( $process );
+			usleep( 200000 );
+			$status = proc_get_status( $process );
+			if ( $status['running'] ) {
+				proc_terminate( $process, 9 );
+			}
+			break;
+		}
+
+		usleep( 10000 );
+	}
+
+	$stdout .= stream_get_contents( $pipes[1] );
+	$stderr .= stream_get_contents( $pipes[2] );
+	fclose( $pipes[1] );
+	fclose( $pipes[2] );
+
+	$exit_code = proc_close( $process );
+	if ( $timed_out ) {
+		$exit_code = null;
+	}
+
+	return array(
+		'code'     => $exit_code,
+		'timedOut' => $timed_out,
+		'stdout'   => $stdout,
+		'stderr'   => $stderr,
+	);
+}
+
+function git_command_output( array $args, int $timeout_ms = 1000, ?string $root = null ): ?string {
+	$result = run_git_command( $args, $timeout_ms, $root );
+	if ( 0 !== $result['code'] ) {
+		return null;
+	}
+
+	return trim( $result['stdout'] );
+}
+
+function unavailable_git_metadata(): array {
+	return array(
+		'available'  => false,
+		'commit'     => null,
+		'short'      => null,
+		'branch'     => null,
+		'commitDate' => null,
+		'dirty'      => null,
+	);
+}
+
+function normalize_git_metadata( $metadata ): array {
+	if ( ! is_array( $metadata ) || ! ( $metadata['available'] ?? false ) || ! is_string( $metadata['commit'] ?? null ) ) {
+		return unavailable_git_metadata();
+	}
+
+	return array(
+		'available'  => true,
+		'commit'     => is_string( $metadata['commit'] ?? null ) ? $metadata['commit'] : null,
+		'short'      => is_string( $metadata['short'] ?? null ) ? $metadata['short'] : null,
+		'branch'     => is_string( $metadata['branch'] ?? null ) ? $metadata['branch'] : null,
+		'commitDate' => is_string( $metadata['commitDate'] ?? null ) ? $metadata['commitDate'] : null,
+		'dirty'      => is_bool( $metadata['dirty'] ?? null ) ? $metadata['dirty'] : null,
+	);
+}
+
+function git_metadata_base64( array $metadata ): string {
+	$json = json_encode( normalize_git_metadata( $metadata ), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+	if ( false === $json ) {
+		throw new \RuntimeException( 'JSON encode failed: ' . json_last_error_msg() );
+	}
+
+	return base64_encode( $json );
+}
+
+function git_metadata_from_base64( string $encoded ): array {
+	$json = base64_decode( $encoded, true );
+	if ( false === $json ) {
+		throw new \InvalidArgumentException( 'Invalid --git-metadata-base64.' );
+	}
+
+	$metadata = json_decode( $json, true );
+	if ( JSON_ERROR_NONE !== json_last_error() ) {
+		throw new \InvalidArgumentException( 'Invalid --git-metadata-base64 JSON: ' . json_last_error_msg() );
+	}
+
+	return normalize_git_metadata( $metadata );
+}
+
+function replay_source_metadata( string $replay_path, array $replay ): array {
+	$source = array(
+		'path'          => $replay_path,
+		'createdAt'     => $replay['createdAt'] ?? null,
+		'repoRoot'      => $replay['repoRoot'] ?? null,
+		'repoCommit'    => $replay['repoCommit'] ?? null,
+		'repoDirty'     => $replay['repoDirty'] ?? null,
+		'signatureHash' => $replay['signature']['hash'] ?? $replay['result']['signature']['hash'] ?? null,
+	);
+
+	if ( is_array( $replay['sourceReplay'] ?? null ) ) {
+		$source['sourceReplay'] = $replay['sourceReplay'];
+	}
+
+	return $source;
+}
+
+function git_metadata( int $timeout_ms = 1000, ?string $root = null, bool $use_cache = true ): array {
+	static $cache = array();
+
+	$root      = $root ?? repo_root();
+	$real_root = realpath( $root );
+	$cache_key = ( false === $real_root ? $root : $real_root ) . ':' . $timeout_ms;
+
+	if ( $use_cache && array_key_exists( $cache_key, $cache ) ) {
+		return $cache[ $cache_key ];
+	}
+
+	$top_level = git_command_output( array( 'rev-parse', '--show-toplevel' ), $timeout_ms, $root );
+	if ( null === $top_level || '' === $top_level || false === $real_root || realpath( $top_level ) !== $real_root ) {
+		$metadata = unavailable_git_metadata();
+		if ( $use_cache ) {
+			$cache[ $cache_key ] = $metadata;
+		}
+		return $metadata;
+	}
+
+	$commit = git_command_output( array( 'rev-parse', 'HEAD' ), $timeout_ms, $root );
+	if ( null === $commit || '' === $commit ) {
+		$metadata = unavailable_git_metadata();
+		if ( $use_cache ) {
+			$cache[ $cache_key ] = $metadata;
+		}
+		return $metadata;
+	}
+
+	$branch = git_command_output( array( 'branch', '--show-current' ), $timeout_ms, $root );
+	if ( '' === $branch ) {
+		$branch = null;
+	}
+
+	$dirty_result = run_git_command( array( 'diff', '--quiet', 'HEAD', '--' ), $timeout_ms, $root );
+	$dirty        = in_array( $dirty_result['code'], array( 0, 1 ), true ) ? 1 === $dirty_result['code'] : null;
+
+	$metadata = array(
+		'available'  => true,
+		'commit'     => $commit,
+		'short'      => git_command_output( array( 'rev-parse', '--short=12', 'HEAD' ), $timeout_ms, $root ),
+		'branch'     => $branch,
+		'commitDate' => git_command_output( array( 'show', '-s', '--format=%cI', 'HEAD' ), $timeout_ms, $root ),
+		'dirty'      => $dirty,
+	);
+
+	if ( $use_cache ) {
+		$cache[ $cache_key ] = $metadata;
+	}
+
+	return $metadata;
+}
+
 function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?string $log_path = null ): array {
 	$command = array_merge( array( PHP_BINARY ), $script_args );
 	$spec    = array(

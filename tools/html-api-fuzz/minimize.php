@@ -24,6 +24,10 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 		'--max-nodes',
 		(string) $base['maxNodes'],
 	);
+	if ( null !== $base['gitMetadataBase64'] ) {
+		$args[] = '--git-metadata-base64';
+		$args[] = $base['gitMetadataBase64'];
+	}
 	if ( $base['failUnsupported'] ) {
 		$args[] = '--fail-unsupported';
 	}
@@ -71,17 +75,20 @@ if ( false === $input ) {
 	exit( 1 );
 }
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
-$base  = array(
-	'mode'            => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-	'profile'         => $replay['profile'] ?? 'replay',
-	'payloadPolicy'   => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
+$source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
+$base = array(
+	'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+	'profile'           => $replay['profile'] ?? 'replay',
+	'payloadPolicy'     => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
 		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null ),
-	'originalGenerator'=> $original_generator,
-	'seed'            => (int) ( $replay['seed'] ?? 1 ),
-	'targetHash'      => $target_hash,
-	'failUnsupported' => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
-	'maxTokens'       => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
-	'maxNodes'        => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
+	'originalGenerator' => $original_generator,
+	'seed'              => (int) ( $replay['seed'] ?? 1 ),
+	'targetHash'        => $target_hash,
+	'sourceReplay'      => $source_replay,
+	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
+	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
+	'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
+	'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
 );
 $timeout_ms    = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
 $max_attempts  = \HtmlApiFuzz\option_int( $options, 'max-attempts', 250 );
@@ -156,6 +163,10 @@ $args = array(
 	'--max-nodes',
 	(string) $base['maxNodes'],
 );
+if ( null !== $base['gitMetadataBase64'] ) {
+	$args[] = '--git-metadata-base64';
+	$args[] = $base['gitMetadataBase64'];
+}
 if ( $base['failUnsupported'] ) {
 	$args[] = '--fail-unsupported';
 }
@@ -168,6 +179,9 @@ $final_result = \HtmlApiFuzz\read_json_file( $final_dir . '/result.json' );
 $final_replay = \HtmlApiFuzz\read_json_file( $final_dir . '/replay.json' );
 if ( is_array( $final_replay ) && is_array( $base['originalGenerator'] ) ) {
 	$final_replay['originalGenerator'] = $base['originalGenerator'];
+}
+if ( is_array( $final_replay ) ) {
+	$final_replay['sourceReplay'] = $base['sourceReplay'];
 	\HtmlApiFuzz\write_json_file( $final_dir . '/replay.json', $final_replay );
 }
 
@@ -182,6 +196,7 @@ $summary = array(
 	'mode'              => $base['mode'],
 	'payloadPolicy'     => $base['payloadPolicy'],
 	'originalGenerator' => $base['originalGenerator'],
+	'sourceReplay'      => $base['sourceReplay'],
 	'finalFailureClass' => $final_result['failureClass'] ?? null,
 	'finalStatus'       => $final_result['status'] ?? null,
 	'originalLength'    => strlen( $input ),
