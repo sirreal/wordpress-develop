@@ -47,6 +47,8 @@ try {
 	$tokens   = 0;
 	$work     = 0;
 	$checksum = 0;
+	$usage    = getrusage();
+	$cpu      = wp_html_api_benchmark_resource_cpu_time_ns( $usage );
 	$start    = hrtime( true );
 
 	for ( $i = 0; $i < $revs; $i++ ) {
@@ -57,16 +59,22 @@ try {
 	}
 
 	$elapsed_ns = hrtime( true ) - $start;
+	$end_usage  = getrusage();
+	$cpu_ns     = wp_html_api_benchmark_resource_cpu_time_ns( $end_usage ) - $cpu;
 
 	echo json_encode(
 		array(
-			'ok'          => true,
-			'elapsed_ns'  => $elapsed_ns,
-			'revolutions' => $revs,
-			'tokens'      => $tokens,
-			'work'        => $work,
-			'checksum'    => $checksum,
-			'environment' => wp_html_api_benchmark_environment(),
+			'ok'                           => true,
+			'elapsed_ns'                   => $elapsed_ns,
+			'cpu_ns'                       => $cpu_ns,
+			'revolutions'                  => $revs,
+			'tokens'                       => $tokens,
+			'work'                         => $work,
+			'checksum'                     => $checksum,
+			'voluntary_context_switches'   => wp_html_api_benchmark_resource_delta( $usage, $end_usage, 'ru_nvcsw' ),
+			'involuntary_context_switches' => wp_html_api_benchmark_resource_delta( $usage, $end_usage, 'ru_nivcsw' ),
+			'major_page_faults'            => wp_html_api_benchmark_resource_delta( $usage, $end_usage, 'ru_majflt' ),
+			'environment'                  => wp_html_api_benchmark_environment(),
 		),
 		JSON_UNESCAPED_SLASHES
 	);

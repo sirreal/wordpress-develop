@@ -44,6 +44,24 @@ To run one document fixture:
 php tests/benchmarks/html-api/benchmark.php --document=wiki-article
 ```
 
+For a more stable local run, use strict host stability checks:
+
+```sh
+npm run benchmark:html-api:stable
+```
+
+This runs the benchmark with `--stability-check=strict`,
+`--stability-wait-seconds=300`, `--iterations=25`, `--min-sample-ms=100`, and
+the default retry limit of three rejected sample attempts per requested sample.
+Expect it to run longer than the default command.
+
+On macOS, wrapping the run with `caffeinate` helps prevent sleep or power-state
+changes while the benchmark is running:
+
+```sh
+caffeinate -dims npm run benchmark:html-api:stable
+```
+
 By default results are written to `artifacts/performance-results.json`. This
 matches the current performance artifact shape used by
 `tests/performance/compare-results.js`. Set `TEST_RESULTS_PREFIX=before` or
@@ -87,6 +105,18 @@ This avoids requiring the baseline checkout to contain the benchmark files.
 php tests/benchmarks/html-api/compare.php --baseline-target=/path/to/trunk/src
 ```
 
+For local comparisons where host noise matters, use the stable comparison
+script:
+
+```sh
+npm run benchmark:html-api:compare:stable -- --baseline-target=/path/to/trunk/src
+```
+
+When stability checks are enabled, the comparison wrapper runs baseline and
+current one case at a time and alternates which target runs first. This reduces
+phase-order bias from thermal drift or background work that starts during the
+run.
+
 It writes:
 
 - `artifacts/before-performance-results.json`
@@ -112,6 +142,29 @@ structure used by tools such as PHPBench:
 - raw sample durations are stored in the JSON artifact;
 - median, MAD, standard deviation, min, max, and environment metadata are
   recorded.
+
+Strict stability mode adds local noise checks:
+
+- before each case, the runner waits for host CPU idle/load thresholds to pass;
+- calibration attempts whose process CPU time is too low relative to wall time
+  are rejected;
+- measured samples whose process CPU time is too low relative to wall time are
+  discarded and retried before they can enter `durationMs`.
+
+The host checks are best-effort on macOS and Linux. Restricted environments may
+block the current-idle probe; in that case the artifact records
+`cpuIdleRatio: null`, and strict mode still relies on load average and
+per-sample CPU/wall-time checks. CPU/wall-time checks detect descheduling, but
+they do not detect every frequency, thermal, or power-limit effect.
+
+Use these options to tune the checks:
+
+- `--stability-check=off|warn|strict` (default: `off`)
+- `--stability-wait-seconds=<n>` (default: `0`)
+- `--min-host-idle=<ratio>` (default: `0.75`)
+- `--max-load-ratio=<ratio>` (default: `0.50`)
+- `--min-cpu-ratio=<ratio>` (default: `0.95`)
+- `--max-sample-retries=<n>` (default: `3`)
 
 One measured revolution is:
 

@@ -98,6 +98,43 @@ function wp_html_api_benchmark_assert_positive_number( $value, $name ) {
 }
 
 /**
+ * Validates a non-negative number option.
+ *
+ * @param mixed  $value Option value.
+ * @param string $name  Option name.
+ */
+function wp_html_api_benchmark_assert_non_negative_number( $value, $name ) {
+	if ( ! is_numeric( $value ) || (float) $value < 0 ) {
+		wp_html_api_benchmark_fail( "Option --{$name} must be a non-negative number." );
+	}
+}
+
+/**
+ * Validates a ratio option.
+ *
+ * @param mixed  $value Option value.
+ * @param string $name  Option name.
+ */
+function wp_html_api_benchmark_assert_ratio( $value, $name ) {
+	if ( ! is_numeric( $value ) || (float) $value < 0 || (float) $value > 1 ) {
+		wp_html_api_benchmark_fail( "Option --{$name} must be a number between 0 and 1." );
+	}
+}
+
+/**
+ * Validates that an option is one of the allowed values.
+ *
+ * @param mixed  $value   Option value.
+ * @param array  $allowed Allowed values.
+ * @param string $name    Option name.
+ */
+function wp_html_api_benchmark_assert_allowed_value( $value, $allowed, $name ) {
+	if ( ! in_array( $value, $allowed, true ) ) {
+		wp_html_api_benchmark_fail( "Option --{$name} must be one of: " . implode( ', ', $allowed ) . '.' );
+	}
+}
+
+/**
  * Returns an environment variable value or a default.
  *
  * @param string $name    Environment variable name.
@@ -160,6 +197,83 @@ function wp_html_api_benchmark_cases() {
 	}
 
 	return $cases;
+}
+
+/**
+ * Returns selected benchmark cases.
+ *
+ * @param array $options Runner options.
+ * @return array<string,array<string,mixed>> Selected cases.
+ */
+function wp_html_api_benchmark_select_cases( $options ) {
+	$cases    = wp_html_api_benchmark_cases();
+	$selected = array();
+
+	if ( isset( $options['case'] ) ) {
+		$case_ids = is_array( $options['case'] ) ? $options['case'] : array( $options['case'] );
+		foreach ( $case_ids as $case_id ) {
+			if ( ! isset( $cases[ $case_id ] ) ) {
+				wp_html_api_benchmark_fail( "Unknown benchmark case: {$case_id}" );
+			}
+			$selected[ $case_id ] = $cases[ $case_id ];
+		}
+
+		return $selected;
+	}
+
+	$processors = wp_html_api_benchmark_expand_filter(
+		$options['processor'],
+		array( 'tag-processor', 'html-processor' ),
+		'processor'
+	);
+
+	$documents = wp_html_api_benchmark_expand_filter(
+		$options['document'],
+		wp_html_api_benchmark_document_ids(),
+		'document'
+	);
+
+	$operations = wp_html_api_benchmark_expand_filter(
+		$options['operation'],
+		array( 'parse', 'attribute-names', 'attribute-values', 'modifiable-text', 'token-getters' ),
+		'operation'
+	);
+
+	foreach ( $cases as $case_id => $case ) {
+		if (
+			in_array( $case['processor'], $processors, true ) &&
+			in_array( $case['document'], $documents, true ) &&
+			in_array( $case['operation'], $operations, true )
+		) {
+			$selected[ $case_id ] = $case;
+		}
+	}
+
+	return $selected;
+}
+
+/**
+ * Expands an option filter into selected values.
+ *
+ * @param string $value   Raw filter value.
+ * @param array  $allowed Allowed values.
+ * @param string $label   Filter label for errors.
+ * @return array Selected values.
+ */
+function wp_html_api_benchmark_expand_filter( $value, $allowed, $label ) {
+	if ( 'all' === $value ) {
+		return $allowed;
+	}
+
+	$selected = array_filter( array_map( 'trim', explode( ',', $value ) ) );
+
+	foreach ( $selected as $item ) {
+		if ( ! in_array( $item, $allowed, true ) ) {
+			wp_html_api_benchmark_fail( "Unknown {$label}: {$item}" );
+		}
+	}
+
+	return $selected;
 }
 
 /**
@@ -631,6 +745,418 @@ function wp_html_api_benchmark_statistics( $samples ) {
 }
 
 /**
+ * Returns the delta for a getrusage() counter.
+ *
+ * @param array  $start Starting resource usage.
+ * @param array  $end   Ending resource usage.
+ * @param string $key   Resource usage key.
+ * @return int Counter delta.
+ */
+function wp_html_api_benchmark_resource_delta( $start, $end, $key ) {
+	$start_value = isset( $start[ $key ] ) ? (int) $start[ $key ] : 0;
+	$end_value   = isset( $end[ $key ] ) ? (int) $end[ $key ] : 0;
+
+	return $end_value - $start_value;
+}
+
+/**
+ * Returns CPU time in nanoseconds from a getrusage() array.
+ *
+ * @param array $usage Resource usage.
+ * @return int CPU time in nanoseconds.
+ */
+function wp_html_api_benchmark_resource_cpu_time_ns( $usage ) {
+	$user_seconds   = isset( $usage['ru_utime.tv_sec'] ) ? (int) $usage['ru_utime.tv_sec'] : 0;
+	$user_useconds  = isset( $usage['ru_utime.tv_usec'] ) ? (int) $usage['ru_utime.tv_usec'] : 0;
+	$system_seconds = isset( $usage['ru_stime.tv_sec'] ) ? (int) $usage['ru_stime.tv_sec'] : 0;
+	$system_usecs   = isset( $usage['ru_stime.tv_usec'] ) ? (int) $usage['ru_stime.tv_usec'] : 0;
+
+	return ( ( $user_seconds + $system_seconds ) * 1000000000 ) + ( ( $user_useconds + $system_usecs ) * 1000 );
+}
+
+/**
+ * Returns command output, or null when the command cannot be run.
+ *
+ * @param string $command    Command to run.
+ * @param int    $timeout_ms Timeout in milliseconds.
+ * @return string|null Command output.
+ */
+function wp_html_api_benchmark_read_command_output( $command, $timeout_ms = 1000 ) {
+	$descriptors = array(
+		0 => array( 'pipe', 'r' ),
+		1 => array( 'pipe', 'w' ),
+		2 => array( 'pipe', 'w' ),
+	);
+
+	$process = proc_open( $command, $descriptors, $pipes );
+
+	if ( ! is_resource( $process ) ) {
+		return null;
+	}
+
+	fclose( $pipes[0] );
+	stream_set_blocking( $pipes[1], false );
+	stream_set_blocking( $pipes[2], false );
+
+	$stdout   = '';
+	$deadline = microtime( true ) + ( $timeout_ms / 1000 );
+
+	do {
+		$stdout .= stream_get_contents( $pipes[1] );
+		stream_get_contents( $pipes[2] );
+
+		$status = proc_get_status( $process );
+		if ( empty( $status['running'] ) ) {
+			break;
+		}
+
+		if ( microtime( true ) >= $deadline ) {
+			proc_terminate( $process );
+			break;
+		}
+
+		usleep( 10000 );
+	} while ( true );
+
+	$stdout .= stream_get_contents( $pipes[1] );
+	fclose( $pipes[1] );
+	fclose( $pipes[2] );
+
+	$status = proc_close( $process );
+
+	if ( 0 !== $status ) {
+		return null;
+	}
+
+	return trim( $stdout );
+}
+
+/**
+ * Counts CPUs from a Linux cpuset list such as "0-3,8".
+ *
+ * @param string $cpuset CPU set.
+ * @return int|null CPU count, or null when unavailable.
+ */
+function wp_html_api_benchmark_count_cpuset_cpus( $cpuset ) {
+	$count = 0;
+	$parts = array_filter( array_map( 'trim', explode( ',', $cpuset ) ) );
+
+	foreach ( $parts as $part ) {
+		if ( preg_match( '/^(\d+)-(\d+)$/', $part, $matches ) ) {
+			$start = (int) $matches[1];
+			$end   = (int) $matches[2];
+			if ( $end >= $start ) {
+				$count += $end - $start + 1;
+			}
+		} elseif ( false !== filter_var( $part, FILTER_VALIDATE_INT ) ) {
+			++$count;
+		}
+	}
+
+	return $count > 0 ? $count : null;
+}
+
+/**
+ * Returns the Linux cgroup CPU count, when constrained.
+ *
+ * @return int|null CPU count, or null when unavailable.
+ */
+function wp_html_api_benchmark_cgroup_cpu_count() {
+	if ( 'Linux' !== PHP_OS_FAMILY ) {
+		return null;
+	}
+
+	$counts = array();
+
+	if ( is_readable( '/sys/fs/cgroup/cpu.max' ) ) {
+		$cpu_max = trim( (string) file_get_contents( '/sys/fs/cgroup/cpu.max' ) );
+		$parts   = preg_split( '/\s+/', $cpu_max );
+		if ( is_array( $parts ) && count( $parts ) >= 2 && 'max' !== $parts[0] && is_numeric( $parts[0] ) && is_numeric( $parts[1] ) && (int) $parts[1] > 0 ) {
+			$counts[] = max( 1, (int) ceil( (int) $parts[0] / (int) $parts[1] ) );
+		}
+	}
+
+	if ( is_readable( '/sys/fs/cgroup/cpu/cpu.cfs_quota_us' ) && is_readable( '/sys/fs/cgroup/cpu/cpu.cfs_period_us' ) ) {
+		$quota  = (int) trim( (string) file_get_contents( '/sys/fs/cgroup/cpu/cpu.cfs_quota_us' ) );
+		$period = (int) trim( (string) file_get_contents( '/sys/fs/cgroup/cpu/cpu.cfs_period_us' ) );
+		if ( $quota > 0 && $period > 0 ) {
+			$counts[] = max( 1, (int) ceil( $quota / $period ) );
+		}
+	}
+
+	foreach ( array( '/sys/fs/cgroup/cpuset.cpus.effective', '/sys/fs/cgroup/cpuset/cpuset.cpus' ) as $file ) {
+		if ( is_readable( $file ) ) {
+			$count = wp_html_api_benchmark_count_cpuset_cpus( trim( (string) file_get_contents( $file ) ) );
+			if ( null !== $count ) {
+				$counts[] = $count;
+			}
+		}
+	}
+
+	return count( $counts ) ? min( $counts ) : null;
+}
+
+/**
+ * Returns the logical CPU count, when available.
+ *
+ * @return int|null Logical CPU count.
+ */
+function wp_html_api_benchmark_logical_cpu_count() {
+	static $cpu_count = null;
+	static $probed    = false;
+
+	if ( $probed ) {
+		return $cpu_count;
+	}
+
+	$probed = true;
+
+	$environment_value = getenv( 'HTML_API_BENCHMARK_CPU_COUNT' );
+	if ( false !== $environment_value && false !== filter_var( $environment_value, FILTER_VALIDATE_INT ) && (int) $environment_value > 0 ) {
+		$cpu_count = (int) $environment_value;
+		return $cpu_count;
+	}
+
+	$commands         = array();
+	$cgroup_cpu_count = wp_html_api_benchmark_cgroup_cpu_count();
+	if ( null !== $cgroup_cpu_count ) {
+		$cpu_count = $cgroup_cpu_count;
+		return $cpu_count;
+	}
+
+	if ( 'Darwin' === PHP_OS_FAMILY ) {
+		$commands[] = 'sysctl -n hw.logicalcpu';
+	}
+	$commands[] = 'getconf _NPROCESSORS_ONLN';
+
+	foreach ( $commands as $command ) {
+		$output = wp_html_api_benchmark_read_command_output( $command );
+		if ( null !== $output && false !== filter_var( $output, FILTER_VALIDATE_INT ) && (int) $output > 0 ) {
+			$cpu_count = (int) $output;
+			return $cpu_count;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Parses Linux /proc/stat CPU counters.
+ *
+ * @return array<string,int>|null CPU counters, or null when unavailable.
+ */
+function wp_html_api_benchmark_linux_cpu_counters() {
+	$line = false;
+	if ( is_readable( '/proc/stat' ) ) {
+		$handle = fopen( '/proc/stat', 'r' );
+		if ( false !== $handle ) {
+			$line = fgets( $handle );
+			fclose( $handle );
+		}
+	}
+
+	if ( false === $line || 0 !== strpos( $line, 'cpu ' ) ) {
+		return null;
+	}
+
+	$parts  = array_values( array_filter( explode( ' ', trim( $line ) ), 'strlen' ) );
+	$values = array_map( 'intval', array_slice( $parts, 1 ) );
+
+	if ( count( $values ) < 4 ) {
+		return null;
+	}
+
+	$idle  = $values[3] + ( isset( $values[4] ) ? $values[4] : 0 );
+	$total = array_sum( $values );
+
+	return array(
+		'idle'  => $idle,
+		'total' => $total,
+	);
+}
+
+/**
+ * Returns the host CPU idle ratio, when available.
+ *
+ * @return float|null CPU idle ratio.
+ */
+function wp_html_api_benchmark_host_cpu_idle_ratio() {
+	if ( 'Linux' === PHP_OS_FAMILY ) {
+		$before = wp_html_api_benchmark_linux_cpu_counters();
+		if ( null === $before ) {
+			return null;
+		}
+
+		usleep( 100000 );
+		$after = wp_html_api_benchmark_linux_cpu_counters();
+		if ( null === $after ) {
+			return null;
+		}
+
+		$total_delta = $after['total'] - $before['total'];
+		$idle_delta  = $after['idle'] - $before['idle'];
+
+		return $total_delta > 0 ? max( 0.0, min( 1.0, $idle_delta / $total_delta ) ) : null;
+	}
+
+	if ( 'Darwin' === PHP_OS_FAMILY ) {
+		/*
+		 * macOS does not expose an unprivileged procfs CPU counter. top is used
+		 * only as a best-effort current-idle probe; strict mode still records a
+		 * null value when the command is unavailable in restricted environments.
+		 */
+		$output = wp_html_api_benchmark_read_command_output( 'top -l 1 -n 0 -s 0' );
+		if ( null === $output ) {
+			return null;
+		}
+
+		if ( preg_match( '/CPU usage:\s+[\d.]+%\s+user,\s+[\d.]+%\s+sys,\s+([\d.]+)%\s+idle/', $output, $matches ) ) {
+			return max( 0.0, min( 1.0, (float) $matches[1] / 100 ) );
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Returns a host load snapshot.
+ *
+ * @param bool $include_cpu_idle Whether to include the current CPU idle ratio.
+ * @return array<string,mixed> Host snapshot.
+ */
+function wp_html_api_benchmark_host_snapshot( $include_cpu_idle = false ) {
+	$load_average      = sys_getloadavg();
+	$logical_cpu_count = wp_html_api_benchmark_logical_cpu_count();
+
+	$snapshot = array(
+		'loadAverage'       => false === $load_average ? null : $load_average,
+		'logicalCpuCount'   => $logical_cpu_count,
+		'loadAveragePerCpu' => false !== $load_average && $logical_cpu_count ? $load_average[0] / $logical_cpu_count : null,
+	);
+
+	if ( $include_cpu_idle ) {
+		$snapshot['cpuIdleRatio'] = wp_html_api_benchmark_host_cpu_idle_ratio();
+	}
+
+	return $snapshot;
+}
+
+/**
+ * Returns host stability warnings for a snapshot.
+ *
+ * @param array $snapshot Host snapshot.
+ * @param array $options  Runner options.
+ * @return string[] Stability warnings.
+ */
+function wp_html_api_benchmark_host_stability_warnings( $snapshot, $options ) {
+	$warnings = array();
+
+	if ( null === $snapshot['logicalCpuCount'] ) {
+		$warnings[] = 'Logical CPU count is unavailable; load average could not be normalized.';
+	} elseif ( null !== $snapshot['loadAveragePerCpu'] && $snapshot['loadAveragePerCpu'] > (float) $options['max-load-ratio'] ) {
+		$warnings[] = sprintf(
+			'1-minute load average is %.2f per logical CPU, above the configured %.2f limit.',
+			$snapshot['loadAveragePerCpu'],
+			(float) $options['max-load-ratio']
+		);
+	}
+
+	if ( array_key_exists( 'cpuIdleRatio', $snapshot ) ) {
+		if ( null !== $snapshot['cpuIdleRatio'] && $snapshot['cpuIdleRatio'] < (float) $options['min-host-idle'] ) {
+			$warnings[] = sprintf(
+				'Host CPU idle ratio is %.2f, below the configured %.2f minimum.',
+				$snapshot['cpuIdleRatio'],
+				(float) $options['min-host-idle']
+			);
+		}
+	}
+
+	return $warnings;
+}
+
+/**
+ * Formats a host stability snapshot for console output.
+ *
+ * @param array $snapshot Host snapshot.
+ * @return string Formatted snapshot.
+ */
+function wp_html_api_benchmark_format_host_snapshot( $snapshot ) {
+	$parts = array();
+
+	if ( null !== $snapshot['loadAveragePerCpu'] ) {
+		$parts[] = sprintf( 'load/cpu %.2f', $snapshot['loadAveragePerCpu'] );
+	}
+
+	if ( array_key_exists( 'cpuIdleRatio', $snapshot ) && null !== $snapshot['cpuIdleRatio'] ) {
+		$parts[] = sprintf( 'idle %.2f', $snapshot['cpuIdleRatio'] );
+	}
+
+	if ( null !== $snapshot['logicalCpuCount'] ) {
+		$parts[] = sprintf( '%d CPUs', $snapshot['logicalCpuCount'] );
+	}
+
+	return implode( ', ', $parts );
+}
+
+/**
+ * Waits for a stable host according to runner options.
+ *
+ * @param array $options Runner options.
+ * @return array<string,mixed> Stability snapshot and warnings.
+ */
+function wp_html_api_benchmark_wait_for_stable_host( $options ) {
+	$mode = $options['stability-check'];
+
+	if ( 'off' === $mode ) {
+		return array(
+			'snapshot' => wp_html_api_benchmark_host_snapshot( false ),
+			'warnings' => array(),
+		);
+	}
+
+	$deadline = time() + (int) $options['stability-wait-seconds'];
+
+	do {
+		$snapshot = wp_html_api_benchmark_host_snapshot( true );
+		$warnings = wp_html_api_benchmark_host_stability_warnings( $snapshot, $options );
+
+		if ( empty( $warnings ) ) {
+			return array(
+				'snapshot' => $snapshot,
+				'warnings' => array(),
+			);
+		}
+
+		if ( time() >= $deadline ) {
+			break;
+		}
+
+		if ( empty( $options['quiet'] ) ) {
+			fwrite(
+				STDERR,
+				sprintf(
+					"Waiting for stable benchmark host (%s; %ds remaining): %s\n",
+					wp_html_api_benchmark_format_host_snapshot( $snapshot ),
+					max( 0, $deadline - time() ),
+					implode( ' ', $warnings )
+				)
+			);
+		}
+
+		sleep( min( 5, max( 1, $deadline - time() ) ) );
+	} while ( true );
+
+	if ( 'strict' === $mode ) {
+		wp_html_api_benchmark_fail( 'Host is not stable enough for benchmarking. ' . implode( ' ', $warnings ) );
+	}
+
+	return array(
+		'snapshot' => $snapshot,
+		'warnings' => $warnings,
+	);
+}
+
+/**
  * Writes pretty JSON to a file, creating the parent directory if needed.
  *
  * @param string $file File path.
@@ -665,6 +1191,7 @@ function wp_html_api_benchmark_environment() {
 		'opcacheJit'       => ini_get( 'opcache.jit' ),
 		'xdebugMode'       => getenv( 'XDEBUG_MODE' ),
 		'xdebugLoaded'     => extension_loaded( 'xdebug' ),
+		'host'             => wp_html_api_benchmark_host_snapshot( false ),
 		'loadedExtensions' => get_loaded_extensions(),
 	);
 }
