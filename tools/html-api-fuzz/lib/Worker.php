@@ -131,8 +131,12 @@ class Worker {
 				if ( 'oracle-parse-error' !== $result['failureClass'] ) {
 					$result['ok'] = false;
 				}
+			} elseif ( TreeRenderer::STATUS_UNSUPPORTED === $dom_result['status'] ) {
+				$result['status']       = 'oracle-unsupported';
+				$result['failureClass'] = $dom_result['failureClass'] ?? 'oracle-unsupported';
 			} else {
-				$comparison = TreeRenderer::compare_trees( $wp_result['tree'], $dom_result['tree'] );
+				$dom_oracle_line_tolerances = $wp_result['domOracleLineTolerances'] ?? array();
+				$comparison = TreeRenderer::compare_trees( $wp_result['tree'], $dom_result['tree'], $dom_oracle_line_tolerances );
 				$result['comparison'] = $comparison;
 				if ( ! $comparison['ok'] ) {
 					$result['ok']           = false;
@@ -140,6 +144,9 @@ class Worker {
 					$result['failureClass'] = self::is_encoding_mismatch( $input, $comparison['firstDifference'] ?? array() )
 						? 'encoding-mismatch'
 						: 'tree-mismatch';
+				} elseif ( ! empty( $dom_oracle_line_tolerances ) ) {
+					$result['status']       = 'oracle-tolerated';
+					$result['failureClass'] = 'oracle-tolerated';
 				}
 			}
 		}

@@ -5,6 +5,31 @@ class TreeRenderer {
 	const STATUS_OK          = 'ok';
 	const STATUS_UNSUPPORTED = 'unsupported';
 	const STATUS_ERROR       = 'error';
+	private const DOM_TEMPLATE_CONTEXT_UNSUPPORTED = 'DOM template innerHTML fallback requires template insertion mode for table-sensitive content.';
+	private const DOM_TEMPLATE_CONTEXT_TAGS = array(
+		'CAPTION'  => true,
+		'COL'      => true,
+		'COLGROUP' => true,
+		'TBODY'    => true,
+		'TD'       => true,
+		'TFOOT'    => true,
+		'TH'       => true,
+		'THEAD'    => true,
+		'TR'       => true,
+	);
+	private const DOM_TEMPLATE_FOREIGN_CONTEXT_TAGS = array(
+		'MATH' => true,
+		'SVG'  => true,
+	);
+	private const XLINK_LOCAL_NAMES = array(
+		'actuate' => true,
+		'arcrole' => true,
+		'href'    => true,
+		'role'    => true,
+		'show'    => true,
+		'title'   => true,
+		'type'    => true,
+	);
 
 	public static function render_wordpress( string $html, string $mode, array $limits = array() ): array {
 		HtmlApiBootstrap::load();
@@ -25,6 +50,8 @@ class TreeRenderer {
 		$was_text     = false;
 		$text_node    = '';
 		$tokens       = 0;
+		$line_count   = 0;
+		$dom_oracle_line_tolerances = array();
 
 		try {
 			while ( $processor->next_token() ) {
@@ -49,6 +76,7 @@ class TreeRenderer {
 				if ( $was_text && '#text' !== $token_name ) {
 					if ( '' !== $text_node ) {
 						$output .= "{$text_node}\"\n";
+						++$line_count;
 					}
 					$was_text  = false;
 					$text_node = '';
@@ -65,6 +93,7 @@ class TreeRenderer {
 							$output .= ' "' . self::escape_tree_scalar( (string) $doctype->public_identifier ) . '" "' . self::escape_tree_scalar( (string) $doctype->system_identifier ) . '"';
 						}
 						$output .= ">\n";
+						++$line_count;
 						break;
 
 					case '#tag':
@@ -87,15 +116,18 @@ class TreeRenderer {
 						}
 
 						$output .= str_repeat( '  ', $tag_indent ) . '<' . self::escape_tree_scalar( $tag_name ) . ">\n";
-						$output .= self::render_wp_attributes( $processor, $tag_indent + 1 );
+						++$line_count;
+						$output .= self::render_wp_attributes( $processor, $tag_indent + 1, $line_count, $dom_oracle_line_tolerances );
 
 						$modifiable_text = $processor->get_modifiable_text();
 						if ( '' !== $modifiable_text ) {
 							$output .= str_repeat( '  ', $tag_indent + 1 ) . '"' . self::escape_tree_scalar( $modifiable_text ) . "\"\n";
+							++$line_count;
 						}
 
 						if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
 							$output .= str_repeat( '  ', $indent_level ) . "content\n";
+							++$line_count;
 							++$indent_level;
 						}
 						break;
@@ -115,10 +147,12 @@ class TreeRenderer {
 
 					case '#funky-comment':
 						$output .= str_repeat( '  ', $indent_level ) . '<!-- ' . self::escape_tree_scalar( $processor->get_modifiable_text() ) . " -->\n";
+						++$line_count;
 						break;
 
 					case '#comment':
 						$output .= str_repeat( '  ', $indent_level ) . '<!-- ' . self::escape_tree_scalar( $processor->get_full_comment_text() ) . " -->\n";
+						++$line_count;
 						break;
 
 					default:
@@ -169,20 +203,24 @@ class TreeRenderer {
 
 		if ( '' !== $text_node ) {
 			$output .= "{$text_node}\"\n";
+			++$line_count;
 		}
 
 		return array(
-			'status'     => self::STATUS_OK,
-			'tree'       => $output . "\n",
-			'tokenCount' => $tokens,
+			'status'                   => self::STATUS_OK,
+			'tree'                     => $output . "\n",
+			'tokenCount'               => $tokens,
+			'domOracleLineTolerances'  => $dom_oracle_line_tolerances,
 		);
 	}
 
-	private static function render_wp_attributes( \WP_HTML_Processor $processor, int $indent_level ): string {
+	private static function render_wp_attributes( \WP_HTML_Processor $processor, int $indent_level, int &$line_count, array &$dom_oracle_line_tolerances ): string {
 		$attribute_names = $processor->get_attribute_names_with_prefix( '' );
 		if ( ! $attribute_names ) {
 			return '';
 		}
+
+		$dom_oracle_dropped_attributes = self::dom_oracle_xlink_dropped_attribute_names( $processor, $attribute_names );
 
 		$sorted = array();
 		foreach ( $attribute_names as $attribute_name ) {
@@ -196,13 +234,67 @@ class TreeRenderer {
 
 		$output = '';
 		foreach ( $sorted as $attribute_name => $display ) {
+			if ( isset( $dom_oracle_dropped_attributes[ $attribute_name ] ) ) {
+				$dom_oracle_line_tolerances[] = $line_count;
+			}
 			$value = $processor->get_attribute( $attribute_name );
 			if ( true === $value ) {
 				$value = '';
 			}
 			$output .= str_repeat( '  ', $indent_level ) . $display['renderName'] . '="' . self::escape_tree_scalar( (string) $value ) . "\"\n";
+			++$line_count;
 		}
 		return $output;
+	}
+
+	private static function dom_oracle_xlink_dropped_attribute_names( \WP_HTML_Processor $processor, array $attribute_names ): array {
+		if ( 'html' === $processor->get_namespace() || ! self::dom_oracle_drops_bare_xlink_local_name_after_xlink() ) {
+			return array();
+		}
+
+		$dropped_attribute_names = array();
+		$seen_xlink_local_names  = array();
+		foreach ( $attribute_names as $attribute_name ) {
+			$lower_name = strtolower( $attribute_name );
+			if ( str_starts_with( $lower_name, 'xlink:' ) ) {
+				$local_name = substr( $lower_name, strlen( 'xlink:' ) );
+				if ( isset( self::XLINK_LOCAL_NAMES[ $local_name ] ) ) {
+					$seen_xlink_local_names[ $local_name ] = true;
+				}
+				continue;
+			}
+
+			if ( isset( $seen_xlink_local_names[ $lower_name ] ) ) {
+				$dropped_attribute_names[ $attribute_name ] = true;
+			}
+		}
+
+		return $dropped_attribute_names;
+	}
+
+	private static function dom_oracle_drops_bare_xlink_local_name_after_xlink(): bool {
+		static $drops = null;
+		if ( null !== $drops ) {
+			return $drops;
+		}
+
+		if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
+			$drops = false;
+			return $drops;
+		}
+
+		$previous = libxml_use_internal_errors( true );
+		try {
+			$document = \Dom\HTMLDocument::createFromString( '<svg xlink:href href></svg>', LIBXML_NOERROR );
+			$svg      = $document->getElementsByTagName( 'svg' )->item( 0 );
+			$drops    = null !== $svg && $svg->hasAttributeNS( 'http://www.w3.org/1999/xlink', 'href' ) && ! $svg->hasAttribute( 'href' );
+		} catch ( \Throwable $e ) {
+			$drops = false;
+		}
+		libxml_clear_errors();
+		libxml_use_internal_errors( $previous );
+
+		return $drops;
 	}
 
 	public static function render_dom( string $html, string $mode, array $limits = array() ): array {
@@ -262,6 +354,17 @@ class TreeRenderer {
 					'status'       => self::STATUS_ERROR,
 					'error'        => $e->getMessage(),
 					'failureClass' => 'node-limit-exceeded',
+					'nodeCount'    => $node_count,
+				);
+			}
+			if ( self::DOM_TEMPLATE_CONTEXT_UNSUPPORTED === $e->getMessage() ) {
+				return array(
+					'status'       => self::STATUS_UNSUPPORTED,
+					'error'        => $e->getMessage(),
+					'failureClass' => 'oracle-unsupported',
+					'unsupported'  => array(
+						'message' => $e->getMessage(),
+					),
 					'nodeCount'    => $node_count,
 				);
 			}
@@ -339,6 +442,11 @@ class TreeRenderer {
 			return '';
 		}
 
+		if ( self::dom_template_fallback_requires_template_context( (string) $inner_html ) ) {
+			self::count_dom_template_fallback_source_nodes( (string) $inner_html, $node_count, $max_nodes );
+			throw new \RuntimeException( self::DOM_TEMPLATE_CONTEXT_UNSUPPORTED );
+		}
+
 		$previous = libxml_use_internal_errors( true );
 		try {
 			$template_document = \Dom\HTMLDocument::createFromString( '<!DOCTYPE html><html><head></head><body>' . $inner_html . '</body></html>', LIBXML_NOERROR );
@@ -360,6 +468,58 @@ class TreeRenderer {
 			$output .= self::render_dom_node( $child, $indent_level, $node_count, $max_nodes );
 		}
 		return $output;
+	}
+
+	private static function dom_template_fallback_requires_template_context( string $inner_html ): bool {
+		HtmlApiBootstrap::load();
+
+		$processor = new \WP_HTML_Tag_Processor( $inner_html );
+		$table_depth = 0;
+		$foreign_depth = 0;
+		while ( $processor->next_tag( array( 'tag_closers' => 'visit' ) ) ) {
+			$tag_name = $processor->get_tag();
+			if ( isset( self::DOM_TEMPLATE_FOREIGN_CONTEXT_TAGS[ $tag_name ?? '' ] ) ) {
+				$foreign_depth += $processor->is_tag_closer() ? -1 : 1;
+				$foreign_depth = max( 0, $foreign_depth );
+				continue;
+			}
+
+			if ( $foreign_depth > 0 ) {
+				continue;
+			}
+
+			if ( 'TABLE' === $tag_name ) {
+				$table_depth += $processor->is_tag_closer() ? -1 : 1;
+				$table_depth = max( 0, $table_depth );
+				continue;
+			}
+
+			if ( 0 === $table_depth && ! $processor->is_tag_closer() && isset( self::DOM_TEMPLATE_CONTEXT_TAGS[ $tag_name ?? '' ] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function count_dom_template_fallback_source_nodes( string $inner_html, int &$node_count, int $max_nodes ): void {
+		HtmlApiBootstrap::load();
+
+		$processor = new \WP_HTML_Tag_Processor( $inner_html );
+		while ( $processor->next_token() ) {
+			$token_type = $processor->get_token_type();
+			if ( '#tag' === $token_type && $processor->is_tag_closer() ) {
+				continue;
+			}
+			if ( '#text' === $token_type && '' === $processor->get_modifiable_text() ) {
+				continue;
+			}
+
+			++$node_count;
+			if ( $node_count > $max_nodes ) {
+				throw new \RuntimeException( 'DOM node limit exceeded.' );
+			}
+		}
 	}
 
 	private static function dom_element_display_name( $node ): string {
@@ -441,8 +601,9 @@ class TreeRenderer {
 		return self::compare_attribute_display_names( $a['displayName'], $b['displayName'] );
 	}
 
-	public static function compare_trees( string $wordpress_tree, string $dom_tree ): array {
-		$adjusted_wordpress = self::apply_wrapper_tolerance( $wordpress_tree, $dom_tree );
+	public static function compare_trees( string $wordpress_tree, string $dom_tree, array $wordpress_line_tolerances = array() ): array {
+		$adjusted = self::remove_tolerated_wordpress_lines( $wordpress_tree, $wordpress_line_tolerances );
+		$adjusted_wordpress = self::apply_wrapper_tolerance( $adjusted['tree'], $dom_tree );
 		if ( $adjusted_wordpress === $dom_tree ) {
 			return array(
 				'ok' => true,
@@ -451,7 +612,45 @@ class TreeRenderer {
 
 		return array(
 			'ok'              => false,
-			'firstDifference' => self::first_difference( $adjusted_wordpress, $dom_tree ),
+			'firstDifference' => self::first_difference( $adjusted_wordpress, $dom_tree, $adjusted['lineMap'] ),
+		);
+	}
+
+	private static function remove_tolerated_wordpress_lines( string $wordpress_tree, array $line_tolerances ): array {
+		if ( empty( $line_tolerances ) ) {
+			return array(
+				'tree'    => $wordpress_tree,
+				'lineMap' => array(),
+			);
+		}
+
+		$tolerated_lines = array();
+		foreach ( $line_tolerances as $line ) {
+			if ( is_int( $line ) || ctype_digit( (string) $line ) ) {
+				$tolerated_lines[ (int) $line ] = true;
+			}
+		}
+
+		if ( empty( $tolerated_lines ) ) {
+			return array(
+				'tree'    => $wordpress_tree,
+				'lineMap' => array(),
+			);
+		}
+
+		$lines = explode( "\n", $wordpress_tree );
+		$line_map = array();
+		foreach ( array_keys( $lines ) as $line_number ) {
+			if ( isset( $tolerated_lines[ $line_number ] ) ) {
+				unset( $lines[ $line_number ] );
+			} else {
+				$line_map[] = $line_number;
+			}
+		}
+
+		return array(
+			'tree'    => implode( "\n", $lines ),
+			'lineMap' => $line_map,
 		);
 	}
 
@@ -489,7 +688,7 @@ class TreeRenderer {
 		return substr( $haystack, -strlen( $needle ) ) === $needle;
 	}
 
-	private static function first_difference( string $left, string $right ): array {
+	private static function first_difference( string $left, string $right, array $left_line_map = array() ): array {
 		$left_lines  = explode( "\n", $left );
 		$right_lines = explode( "\n", $right );
 		$max         = max( count( $left_lines ), count( $right_lines ) );
@@ -501,8 +700,11 @@ class TreeRenderer {
 			$r = $right_lines[ $i ] ?? null;
 			if ( $l !== $r ) {
 				$first_byte_offset = self::first_different_byte_offset( $l, $r );
+				$left_line         = $left_line_map[ $i ] ?? $i;
 				return array(
-					'line'                                  => $i + 1,
+					'line'                                  => $left_line + 1,
+					'comparisonLine'                        => $i + 1,
+					'domLineNumber'                         => $i + 1,
 					'wordpressLinePreview'                  => self::line_preview( $l ),
 					'domLinePreview'                        => self::line_preview( $r ),
 					'wordpressLineBytes'                    => null === $l ? null : strlen( $l ),

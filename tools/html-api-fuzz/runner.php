@@ -223,7 +223,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 	if ( $summary['ok'] ) {
 		if ( 'unsupported' === $summary['status'] ) {
 			++$state['unsupported'];
-		} elseif ( 'oracle-parse-error' === $summary['status'] ) {
+		} elseif ( in_array( $summary['status'], array( 'oracle-parse-error', 'oracle-unsupported', 'oracle-tolerated' ), true ) ) {
 			++$state['oracleErrors'];
 		} else {
 			++$state['successes'];
