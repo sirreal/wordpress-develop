@@ -68,7 +68,7 @@ function html_api_fuzz_smoke_rm_tree( string $path ): void {
 }
 
 $valid = \HtmlApiFuzz\Generator::generate(
-	123,
+	1,
 	'balanced',
 	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 	'valid-utf8',
@@ -117,12 +117,71 @@ for ( $seed = 1; $seed <= 512; ++$seed ) {
 }
 html_api_fuzz_smoke_assert( $found_non_whitespace_c0_control, 'generated valid UTF-8 payloads should retain non-whitespace C0 control coverage.' );
 
+$required_generator_features = array(
+	'charref:text',
+	'charref:attr',
+	'charref:rcdata',
+	'charref:text:named-semicolon',
+	'charref:text:named-missing-semicolon-legacy',
+	'charref:text:named-missing-semicolon-invalid',
+	'charref:text:numeric-valid',
+	'charref:text:numeric-invalid',
+	'charref:attr:named-semicolon',
+	'charref:attr:named-missing-semicolon-legacy',
+	'charref:attr:named-missing-semicolon-invalid',
+	'charref:attr:numeric-valid',
+	'charref:attr:numeric-invalid',
+	'charref:rcdata:named-semicolon',
+	'charref:rcdata:invalid',
+	'charref:rcdata:numeric-valid',
+	'charref:rcdata:numeric-invalid',
+	'charref:leading-zero',
+	'attr:weird-name',
+	'attr:weird-spacing',
+	'attr:malformed',
+	'tag:unusual-name',
+	'tag:invalid-name',
+	'tag:alpha-invalid-name',
+	'tag:alpha-weird-name',
+	'tag:bogus-open-name',
+	'tag:weird-spacing',
+);
+$found_generator_features = array_fill_keys( $required_generator_features, false );
+$all_generator_features_found = false;
+foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'incomplete-malformed', 'balanced' ) as $feature_profile ) {
+	for ( $seed = 1; $seed <= 128; ++$seed ) {
+		$generated = \HtmlApiFuzz\Generator::generate( $seed, $feature_profile, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
+		html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "{$feature_profile}/{$seed} feature-coverage sample should produce valid UTF-8 bytes." );
+		$features = $generated['parameters']['features'];
+		if ( in_array( 'generator:truncated', $features, true ) || in_array( 'generator:hard-truncated', $features, true ) ) {
+			continue;
+		}
+		foreach ( $features as $feature ) {
+			if ( array_key_exists( $feature, $found_generator_features ) ) {
+				$found_generator_features[ $feature ] = true;
+			}
+		}
+		if ( ! in_array( false, $found_generator_features, true ) ) {
+			$all_generator_features_found = true;
+			break 2;
+		}
+	}
+}
+html_api_fuzz_smoke_assert( $all_generator_features_found, 'generated samples should cover all required generator features before exhausting the smoke seed budget.' );
+foreach ( $found_generator_features as $feature => $found ) {
+	html_api_fuzz_smoke_assert( $found, "generated samples should cover {$feature}." );
+}
+
 $found_resource_stress = false;
 $found_resource_stress_long = false;
 for ( $seed = 1; $seed <= 512; ++$seed ) {
 	$generated = \HtmlApiFuzz\Generator::generate( $seed, 'auto', 'auto', 'auto', 4096 );
 	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), 'auto generation should produce valid UTF-8 bytes.' );
 	html_api_fuzz_smoke_assert( ! in_array( 'payload:invalid-byte', $generated['parameters']['features'], true ), 'auto generation should not record invalid-byte payload features.' );
+	if ( ! in_array( $generated['profile'], array( 'attributes-entities', 'incomplete-malformed' ), true ) ) {
+		html_api_fuzz_smoke_assert( ! in_array( 'attr:malformed', $generated['parameters']['features'], true ), 'auto generation should keep malformed attributes in targeted profiles.' );
+		html_api_fuzz_smoke_assert( ! in_array( 'tag:weird-syntax', $generated['parameters']['features'], true ), 'auto generation should keep weird tag syntax in targeted profiles.' );
+	}
 	if ( 'resource-stress' === $generated['profile'] ) {
 		$found_resource_stress = true;
 	}
@@ -719,10 +778,9 @@ html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['wordpressDiffHex']
 html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['domDiffHex'] ?? '', 'efbfbd' ), 'long encoding mismatch should include the differing DOM replacement bytes in the diff window.' );
 
 $structural_with_invalid_dir = $tmp . '/structural-with-invalid';
-$structural = \HtmlApiFuzz\Generator::generate( 27, 'balanced', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096 );
 $structural_with_invalid_result = \HtmlApiFuzz\Worker::run(
 	array(
-		'input-base64'    => base64_encode( $structural['input'] . "\xC0" ),
+		'input-base64'    => base64_encode( '<select><track e><!-->' . "\xC0" ),
 		'profile'         => 'replay',
 		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 		'payload-policy'  => 'invalid-byte-heavy',
