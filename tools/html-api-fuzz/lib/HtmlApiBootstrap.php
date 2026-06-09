@@ -17,6 +17,10 @@ class HtmlApiBootstrap {
 			require_once __DIR__ . '/wp-stubs.php';
 		}
 
+		if ( ! function_exists( 'wp_trigger_error' ) ) {
+			require_once __DIR__ . '/wp-stubs.php';
+		}
+
 		$root  = repo_root();
 		$files = array(
 			'src/wp-includes/compat.php',

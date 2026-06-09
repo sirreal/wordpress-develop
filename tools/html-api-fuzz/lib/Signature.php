@@ -22,6 +22,19 @@ class Signature {
 			$failure = $result['tagProcessor']['failures'][0] ?? array();
 			$facts['invariant'] = $failure['name'] ?? 'unknown';
 			$facts['throwable'] = $failure['throwable'] ?? null;
+		} elseif ( 'normalize-invariant-failed' === $failure_class ) {
+			$normalize = $result['tagProcessor']['normalize'] ?? array();
+			$failure   = $normalize['failure'] ?? array();
+			$diff      = $normalize['firstDifference'] ?? $failure['firstDifference'] ?? array();
+			$facts['invariant']             = $failure['name'] ?? 'normalize-unknown';
+			$facts['normalizeStatus']       = $normalize['status'] ?? null;
+			$facts['normalizeApi']          = $normalize['api'] ?? null;
+			$facts['normalizedSha1']        = $normalize['normalizedSha1'] ?? $failure['normalizedSha1'] ?? null;
+			$facts['normalizedTwiceSha1']   = $normalize['normalizedTwiceSha1'] ?? $failure['normalizedTwiceSha1'] ?? null;
+			$facts['firstByteOffset']       = $diff['firstByteOffset'] ?? null;
+			$facts['normalizedDiffHex']     = $diff['normalizedDiffHex'] ?? null;
+			$facts['normalizedTwiceDiffHex'] = $diff['normalizedTwiceDiffHex'] ?? null;
+			$facts['throwable']             = $normalize['throwable'] ?? $failure['throwable'] ?? null;
 		} elseif ( 'resource-limit' === $failure_class ) {
 			$limit_failures = self::resource_limit_failures( $result );
 			$limit_failures = array_values( array_unique( $limit_failures ) );

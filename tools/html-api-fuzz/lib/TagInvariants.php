@@ -2,11 +2,15 @@
 namespace HtmlApiFuzz;
 
 class TagInvariants {
-	public static function check( string $html, array $limits = array() ): array {
+	public static function check( string $html, array $limits = array(), string $mode = Generator::MODE_FRAGMENT_BODY ): array {
 		HtmlApiBootstrap::load();
 		$max_tokens = $limits['maxTokens'] ?? 2000;
 		$failures   = array();
 		$tokens     = 0;
+		$normalize  = array(
+			'status' => 'not-run',
+			'ok'     => true,
+		);
 
 		try {
 			$processor = new \WP_HTML_Tag_Processor( $html );
@@ -82,10 +86,174 @@ class TagInvariants {
 			);
 		}
 
+		if ( self::has_resource_limit_failure( $failures ) ) {
+			$normalize = array(
+				'status' => 'skipped-resource-limit',
+				'ok'     => true,
+			);
+		} else {
+			$normalize = self::check_normalize_idempotence( $html, $mode );
+		}
+
 		return array(
 			'ok'         => empty( $failures ),
 			'failures'   => $failures,
 			'tokenCount' => $tokens,
+			'normalize'  => $normalize,
+		);
+	}
+
+	private static function has_resource_limit_failure( array $failures ): bool {
+		foreach ( $failures as $failure ) {
+			if ( in_array( $failure['name'] ?? null, array( 'tag-token-limit-exceeded', 'mutation-token-limit-exceeded' ), true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static function check_normalize_idempotence( string $html, string $mode ): array {
+		$errors = array();
+		$normalized = null;
+		$normalized_twice = null;
+		$throwable = null;
+
+		set_error_handler(
+			static function ( int $errno, string $errstr ) use ( &$errors ): bool {
+				$errors[] = "{$errno}: {$errstr}";
+				return true;
+			}
+		);
+
+		try {
+			$normalized = self::normalize_html( $html, $mode );
+			$normalized_twice = is_string( $normalized ) ? self::normalize_html( $normalized, $mode ) : null;
+		} catch ( \Throwable $e ) {
+			$throwable = $e;
+		} finally {
+			restore_error_handler();
+		}
+
+		if ( null !== $throwable ) {
+			return array(
+				'ok'        => false,
+				'status'    => 'failed',
+				'mode'      => $mode,
+				'api'       => self::normalize_api_for_mode( $mode ),
+				'failure' => array(
+					'name'      => 'normalize-throwable',
+					'message'   => $throwable->getMessage(),
+					'throwable' => get_class( $throwable ),
+				),
+				'throwable' => get_class( $throwable ),
+			);
+		}
+
+		if ( ! empty( $errors ) ) {
+			return array(
+				'ok'     => false,
+				'status' => 'failed',
+				'mode'   => $mode,
+				'api'    => self::normalize_api_for_mode( $mode ),
+				'failure' => array(
+					'name'    => 'normalize-native-error',
+					'message' => 'WP_HTML_Processor::normalize() emitted native PHP errors.',
+					'errors'  => $errors,
+				),
+				'errors' => $errors,
+			);
+		}
+
+		if ( null === $normalized ) {
+			return array(
+				'ok'          => true,
+				'status'      => 'unsupported',
+				'mode'        => $mode,
+				'api'         => self::normalize_api_for_mode( $mode ),
+				'inputLength' => strlen( $html ),
+			);
+		}
+
+		if ( null === $normalized_twice ) {
+			return array(
+				'ok'               => false,
+				'status'           => 'failed',
+				'mode'             => $mode,
+				'api'              => self::normalize_api_for_mode( $mode ),
+				'normalizedLength' => strlen( $normalized ),
+				'normalizedSha1'   => sha1( $normalized ),
+				'failure' => array(
+					'name'              => 'normalize-output-unsupported',
+					'message'           => 'WP_HTML_Processor::normalize() returned HTML that normalize() could not normalize again.',
+					'normalizedLength'  => strlen( $normalized ),
+					'normalizedSha1'    => sha1( $normalized ),
+					'normalizedPreview' => preview_bytes( $normalized ),
+				),
+			);
+		}
+
+		if ( $normalized !== $normalized_twice ) {
+			$first_difference = self::first_string_difference( $normalized, $normalized_twice );
+			return array(
+				'ok'                    => false,
+				'status'                => 'failed',
+				'mode'                  => $mode,
+				'api'                   => self::normalize_api_for_mode( $mode ),
+				'normalizedLength'      => strlen( $normalized ),
+				'normalizedTwiceLength' => strlen( $normalized_twice ),
+				'normalizedSha1'        => sha1( $normalized ),
+				'normalizedTwiceSha1'   => sha1( $normalized_twice ),
+				'firstDifference'       => $first_difference,
+				'failure' => array(
+					'name'                   => 'normalize-not-idempotent',
+					'message'                => 'Normalizing already-normalized HTML changed the output.',
+					'normalizedLength'       => strlen( $normalized ),
+					'normalizedTwiceLength'  => strlen( $normalized_twice ),
+					'normalizedSha1'         => sha1( $normalized ),
+					'normalizedTwiceSha1'    => sha1( $normalized_twice ),
+					'normalizedPreview'      => preview_bytes( $normalized ),
+					'normalizedTwicePreview' => preview_bytes( $normalized_twice ),
+					'firstDifference'        => $first_difference,
+				),
+			);
+		}
+
+		return array(
+			'ok'               => true,
+			'status'           => 'idempotent',
+			'mode'             => $mode,
+			'api'              => self::normalize_api_for_mode( $mode ),
+			'inputLength'      => strlen( $html ),
+			'normalizedLength' => strlen( $normalized ),
+			'normalizedSha1'   => sha1( $normalized ),
+		);
+	}
+
+	private static function normalize_html( string $html, string $mode ): ?string {
+		if ( Generator::MODE_FULL_DOCUMENT === $mode ) {
+			$processor = \WP_HTML_Processor::create_full_parser( $html );
+			return null === $processor ? null : $processor->serialize();
+		}
+
+		return \WP_HTML_Processor::normalize( $html );
+	}
+
+	private static function normalize_api_for_mode( string $mode ): string {
+		return Generator::MODE_FULL_DOCUMENT === $mode ? 'create_full_parser()->serialize()' : 'normalize()';
+	}
+
+	private static function first_string_difference( string $a, string $b ): array {
+		$max = min( strlen( $a ), strlen( $b ) );
+		$offset = 0;
+		while ( $offset < $max && $a[ $offset ] === $b[ $offset ] ) {
+			++$offset;
+		}
+
+		$window_start = max( 0, $offset - 16 );
+		return array(
+			'firstByteOffset'        => $offset,
+			'normalizedDiffHex'      => bin2hex( substr( $a, $window_start, 64 ) ),
+			'normalizedTwiceDiffHex' => bin2hex( substr( $b, $window_start, 64 ) ),
 		);
 	}
 
