@@ -1443,7 +1443,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			$html .= " {$qualified_attribute_name}";
-			$value = $this->get_attribute( $attribute_name );
+			$value = $this->get_attribute_for_serialization( $attribute_name );
 
 			if ( is_string( $value ) ) {
 				$html .= '="' . self::serialize_decoded_text( $value ) . '"';

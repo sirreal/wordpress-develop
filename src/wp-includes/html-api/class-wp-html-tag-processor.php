@@ -2359,13 +2359,14 @@ class WP_HTML_Tag_Processor {
 		}
 
 		if ( false === $existing_class && isset( $this->attributes['class'] ) ) {
-			$existing_class = WP_HTML_Decoder::decode_attribute(
-				substr(
-					$this->html,
-					$this->attributes['class']->value_starts_at,
-					$this->attributes['class']->value_length
-				)
+			$existing_class = substr(
+				$this->html,
+				$this->attributes['class']->value_starts_at,
+				$this->attributes['class']->value_length
 			);
+			$existing_class = str_replace( "\r\n", "\n", $existing_class );
+			$existing_class = str_replace( "\r", "\n", $existing_class );
+			$existing_class = WP_HTML_Decoder::decode_attribute( $existing_class );
 		}
 
 		if ( false === $existing_class ) {
@@ -2825,6 +2826,51 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$raw_value = substr( $this->html, $attribute->value_starts_at, $attribute->value_length );
+
+		return WP_HTML_Decoder::decode_attribute( $raw_value );
+	}
+
+	/**
+	 * Returns the value of an attribute, applying HTML input stream preprocessing.
+	 *
+	 * This is intended for serialization, where source HTML values have already
+	 * passed through preprocessing before character references decode. Enqueued
+	 * attribute updates are plaintext API values, so they are returned unchanged.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 *
+	 * @param string $name Name of attribute whose value is requested.
+	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
+	 */
+	protected function get_attribute_for_serialization( $name ) {
+		if ( self::STATE_MATCHED_TAG !== $this->parser_state ) {
+			return null;
+		}
+
+		$comparable = strtolower( $name );
+
+		if ( 'class' === $comparable ) {
+			$this->class_name_updates_to_attributes_updates();
+		}
+
+		$enqueued_value = $this->get_enqueued_attribute_value( $comparable );
+		if ( false !== $enqueued_value ) {
+			return $enqueued_value;
+		}
+
+		if ( ! isset( $this->attributes[ $comparable ] ) ) {
+			return null;
+		}
+
+		$attribute = $this->attributes[ $comparable ];
+		if ( true === $attribute->is_true ) {
+			return true;
+		}
+
+		$raw_value = substr( $this->html, $attribute->value_starts_at, $attribute->value_length );
+		$raw_value = str_replace( "\r\n", "\n", $raw_value );
+		$raw_value = str_replace( "\r", "\n", $raw_value );
 
 		return WP_HTML_Decoder::decode_attribute( $raw_value );
 	}
