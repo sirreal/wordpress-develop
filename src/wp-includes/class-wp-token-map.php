@@ -451,13 +451,20 @@ class WP_Token_Map {
 				return false;
 			}
 
-			$term    = str_pad( $word, $this->key_length + 1, "\x00", STR_PAD_RIGHT );
-			$word_at = $ignore_case ? stripos( $this->small_words, $term ) : strpos( $this->small_words, $term );
-			if ( false === $word_at ) {
-				return false;
+			$term = str_pad( $word, $this->key_length + 1, "\x00", STR_PAD_RIGHT );
+			if ( ! $ignore_case ) {
+				return false !== strpos( $this->small_words, $term );
 			}
 
-			return true;
+			$small_length  = strlen( $this->small_words );
+			$record_length = $this->key_length + 1;
+			for ( $at = 0; $at < $small_length; $at += $record_length ) {
+				if ( self::matches_at( $this->small_words, $term, $at, $record_length, $ignore_case ) ) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		$group_key = substr( $word, 0, $this->key_length );
@@ -478,7 +485,7 @@ class WP_Token_Map {
 			$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
 			$mapping_at     = $at;
 
-			if ( $token_length === $length && 0 === substr_compare( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
+			if ( $token_length === $length && self::matches_at( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
 				return true;
 			}
 
@@ -567,7 +574,7 @@ class WP_Token_Map {
 				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
 				$mapping_at     = $at;
 
-				if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
+				if ( self::matches_at( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
 					$matched_token_byte_length = $this->key_length + $token_length;
 					return substr( $group, $mapping_at, $mapping_length );
 				}
@@ -603,15 +610,18 @@ class WP_Token_Map {
 		}
 
 		if ( $ignore_case ) {
-			$search_text = strtoupper( $search_text );
+			$search_text = self::ascii_lowercase( $search_text );
 		}
 		$starting_char = $search_text[0];
 
 		$at = 0;
 		while ( $at < $small_length ) {
+			$stored_starting_char = $ignore_case
+				? self::ascii_lowercase( $this->small_words[ $at ] )
+				: $this->small_words[ $at ];
+
 			if (
-				$starting_char !== $this->small_words[ $at ] &&
-				( ! $ignore_case || strtoupper( $this->small_words[ $at ] ) !== $starting_char )
+				$starting_char !== $stored_starting_char
 			) {
 				$at += $this->key_length + 1;
 				continue;
@@ -628,9 +638,12 @@ class WP_Token_Map {
 					continue 2;
 				}
 
+				$stored_char = $ignore_case
+					? self::ascii_lowercase( $this->small_words[ $at + $adjust ] )
+					: $this->small_words[ $at + $adjust ];
+
 				if (
-					$search_text[ $adjust ] !== $this->small_words[ $at + $adjust ] &&
-					( ! $ignore_case || strtoupper( $this->small_words[ $at + $adjust ] !== $search_text[ $adjust ] ) )
+					$search_text[ $adjust ] !== $stored_char
 				) {
 					$at += $this->key_length + 1;
 					continue 2;
@@ -839,5 +852,42 @@ class WP_Token_Map {
 		}
 
 		return strcmp( $a, $b );
+	}
+
+	/**
+	 * Checks whether a substring matches at a given offset.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $haystack    String to search within.
+	 * @param string $needle      String to match.
+	 * @param int    $offset      Offset into the haystack.
+	 * @param int    $length      Number of bytes to compare.
+	 * @param bool   $ignore_case Whether to fold ASCII case while matching.
+	 * @return bool Whether the substring matched.
+	 */
+	private static function matches_at( string $haystack, string $needle, int $offset, int $length, bool $ignore_case ): bool {
+		$candidate = substr( $haystack, $offset, $length );
+		if ( strlen( $candidate ) !== $length ) {
+			return false;
+		}
+
+		if ( ! $ignore_case ) {
+			return $candidate === $needle;
+		}
+
+		return self::ascii_lowercase( $candidate ) === self::ascii_lowercase( $needle );
+	}
+
+	/**
+	 * Lowercases ASCII bytes only.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to lowercase.
+	 * @return string Text with only ASCII uppercase bytes folded to lowercase.
+	 */
+	private static function ascii_lowercase( string $text ): string {
+		return strtr( $text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
 	}
 }
