@@ -54,10 +54,36 @@ php tools/html-api-fuzz/launcher.php --lanes 4 --max-seeds 1000 --watcher
 For continuous fuzzing, run the launcher with `--duration-seconds 0 --max-seeds 0`
 and run `watcher.php` in a second shell against the same output directory.
 
-Replay a failure:
+Stop an indefinite run gracefully (each lane finishes its current batch, the
+watcher performs a final scan, and the codex orchestrator drains its running
+jobs):
+
+```sh
+php tools/html-api-fuzz/stop.php --run-dir artifacts/html-api-fuzz/run-...
+```
+
+Without `--run-dir` the most recently active *unfinished* run under
+`artifacts/html-api-fuzz` is targeted (finished runs are skipped, with a
+warning if nothing live is found). The script only creates `RUN_DIR/STOP`;
+`touch` works just as well. A standalone runner watches `OUTPUT_DIR/STOP`
+(override with `--stop-file PATH`). The launcher and runner refuse to start
+while a stop file already exists — remove `STOP` before reusing a run
+directory. (A stop requested in the sub-second window between the launcher's
+startup check and a lane's own makes that lane refuse rather than stop
+gracefully; the run still ends.)
+
+The watcher exits after a final scan once every runner under the run
+directory reports a stop reason. A runner whose state has gone silent is
+presumed dead after `--stop-stale-seconds` (default 120); per lane that
+threshold is floored at twice the lane's advertised batch budget
+(`timeout-ms × batch-size`), so long batches are not mistaken for crashes.
+
+Replay a failure from a retained seed directory, or from the lane's SQLite
+store when the seed directory was pruned (see "Artifact Retention"):
 
 ```sh
 php tools/html-api-fuzz/replay.php --replay artifacts/html-api-fuzz/run-.../seed-.../primary/replay.json
+php tools/html-api-fuzz/replay.php --store artifacts/html-api-fuzz/run-.../lane-00/results.sqlite --seed 12345
 ```
 
 Minimize a failure while preserving the same signature:
@@ -112,8 +138,21 @@ input for the same fuzzer version and corpus.
 
 The runner writes:
 
-- `summary.ndjson`: one line per seed, suitable for tailing and watcher scans.
+- `results.sqlite`: one row per attempted seed (table `attempts`, WAL mode).
+  Passing attempts store summary columns only — every attempt is regenerable
+  from its seed. Failure rows additionally store the summary, result, and
+  replay JSON documents; the replay embeds the input as base64, so a pruned
+  failure can be reproduced with `replay.php --store results.sqlite --seed N`.
+  `signature_hash` and `family_key` are indexed columns for grouping
+  failures without `json_extract`. The watcher tails these stores
+  incrementally by row id. (`summary.ndjson` files from older runs are still
+  scanned.) Durability is `synchronous=NORMAL`: an OS crash (not a process
+  crash) can lose the last moments of a run.
 - `events.ndjson`: runner lifecycle events, including batch boundaries.
+- `logs/batch-N.log`: output of a batch worker process, kept only when the
+  batch contained a retained failure or a seed that needed an isolated
+  re-run — over-cap repeats of a known signature do not accumulate batch
+  logs.
 - `state.json`: aggregate counters, stop reason, and compact Git metadata.
   Oracle losses are counted per class: `oracleParseErrors` (inputs the DOM
   oracle rejects receive no differential coverage), `oracleUnsupported`
@@ -125,6 +164,27 @@ The runner writes:
   standalone replay.
 - `seed-N/primary/result.json`: full worker result.
 - `seed-N/primary/wordpress-tree.txt` and `dom-tree.txt`: rendered trees when available.
+
+### Artifact Retention
+
+Seed directories are working space, not the archive. After each seed is
+recorded in `results.sqlite`, its `seed-N` directory is deleted unless the
+attempt failed *and* the failure's signature has fewer than
+`--max-keep-per-signature` (default 5, minimum 1) exemplar directories still
+on disk in this lane. The cap counts directories, not rows, so restarting a
+runner against the same output directory neither double-counts re-recorded
+seeds nor deletes a previously retained exemplar. The first exemplar of every
+new signature is always retained, so the watcher's minimization path keeps a
+replay file to work from; subsequent repeats of a known signature add a
+database row and nothing else. A failure whose replay document is missing
+(worker killed before writing it) always keeps its directory — the files are
+the only reproduction. Disk growth is therefore proportional to *new
+distinct failures*, not to seeds executed.
+
+The cap applies per lane: the launcher passes the same value to every lane,
+so a signature that appears in all lanes keeps up to `N × lanes` directories
+across the run. Use `--keep-all-artifacts` (runner or launcher) to keep every
+seed directory for debugging.
 
 The run-level Git metadata intentionally stays compact: full and short commit
 hash, current branch when available, commit date, and a dirty flag for
