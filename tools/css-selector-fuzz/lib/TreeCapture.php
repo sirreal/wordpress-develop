@@ -24,6 +24,13 @@ class TreeCapture {
 	const CAPTURE_ITERATION_LIMIT = 20000;
 
 	/**
+	 * Captures the processor's view of a document or a fragment.
+	 *
+	 * @param string      $html    The markup ( full document or fragment ).
+	 * @param string|null $context When set, parse as a fragment in this
+	 *                             context ( e.g. '<body>' ); the tag
+	 *                             processor has no fragment mode, so tagRows
+	 *                             is null in that case.
 	 * @return array{
 	 *     htmlRows: array|null,
 	 *     tagRows: array|null,
@@ -31,7 +38,7 @@ class TreeCapture {
 	 *     error: string|null,
 	 * }
 	 */
-	public static function capture( string $html ): array {
+	public static function capture( string $html, ?string $context = null ): array {
 		$out = array(
 			'htmlRows' => null,
 			'tagRows'  => null,
@@ -39,7 +46,13 @@ class TreeCapture {
 			'error'    => null,
 		);
 
-		$processor  = \WP_HTML_Processor::create_full_parser( $html );
+		$processor = null === $context
+			? \WP_HTML_Processor::create_full_parser( $html )
+			: \WP_HTML_Processor::create_fragment( $html, $context );
+		if ( null === $processor ) {
+			$out['error'] = 'fragment-context-unsupported';
+			return $out;
+		}
 		$rows       = array();
 		$iterations = 0;
 		while ( $processor->next_tag() ) {
@@ -68,6 +81,12 @@ class TreeCapture {
 
 		$out['htmlRows'] = $rows;
 		$out['quirks']   = $processor->is_quirks_mode();
+
+		// The tag processor has no fragment mode; a fragment case exercises
+		// the html processor's select() only.
+		if ( null !== $context ) {
+			return $out;
+		}
 
 		$tag_processor = new \WP_HTML_Tag_Processor( $html );
 		$tag_rows      = array();

@@ -10,8 +10,12 @@ produces the same document, the same selector, and the same verdict.
 ## What a case does
 
 1. Generate a random HTML document — 70% from a structurally "safe" element
-   set with a known model tree, 30% "wild" (misnested, implied-end-tag,
-   foreign-content, varied-doctype token soup with no model).
+   set with a known model tree (of these, ~20% are parsed as a `<body>`
+   fragment via `create_fragment` instead of a full document, exercising the
+   fragment `select()` path), 30% "wild" (misnested, implied-end-tag,
+   foreign-content, token soup with one of five doctypes spanning no-quirks,
+   quirks, and limited-quirks). `create_fragment` only accepts the `<body>`
+   context publicly, so that is the fragment context fuzzed.
 2. Capture the processor's own view of the document as the matching oracle's
    ground truth (`TreeCapture`): a flat list of rows in visit order, each
    carrying the element's tag, attributes, and ancestor tag list (context

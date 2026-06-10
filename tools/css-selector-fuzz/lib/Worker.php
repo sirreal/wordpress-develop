@@ -61,8 +61,9 @@ class Worker {
 	public static function run_case( int $seed ): array {
 		Bootstrap::load();
 
-		$prng    = new Prng( (string) $seed, 'css-selector-fuzz-case' );
-		$is_wild = $prng->chance( 30 );
+		$prng        = new Prng( (string) $seed, 'css-selector-fuzz-case' );
+		$is_wild     = $prng->chance( 30 );
+		$is_fragment = ! $is_wild && $prng->chance( 20 );
 
 		$failures = array();
 		$record   = static function ( string $invariant, array $detail ) use ( &$failures ) {
@@ -88,13 +89,18 @@ class Worker {
 		$capture_error = null;
 		$attempts      = $is_wild ? 8 : 1;
 		for ( $attempt = 0; $attempt < $attempts; $attempt++ ) {
-			$document = $is_wild
-				? WildDocumentGenerator::generate( $prng->fork( "wild-document:{$attempt}" ) )
-				: DocumentGenerator::generate( $prng->fork( 'document' ) );
+			if ( $is_wild ) {
+				$document = WildDocumentGenerator::generate( $prng->fork( "wild-document:{$attempt}" ) );
+			} elseif ( $is_fragment ) {
+				$document = DocumentGenerator::generate_fragment( $prng->fork( 'fragment' ) );
+			} else {
+				$document = DocumentGenerator::generate( $prng->fork( 'document' ) );
+			}
 
+			$context = ( $document['fragment'] ?? false ) ? $document['context'] : null;
 			list( $capture, $capture_error ) = self::guard(
-				static function () use ( $document ) {
-					return TreeCapture::capture( $document['html'] );
+				static function () use ( $document, $context ) {
+					return TreeCapture::capture( $document['html'], $context );
 				}
 			);
 
@@ -120,7 +126,9 @@ class Worker {
 			$tag_rows = $capture['tagRows'];
 			$quirks   = $capture['quirks'];
 
-			if ( ! $is_wild ) {
+			if ( $is_fragment ) {
+				self::check_fragment_capture_against_model( $document, $capture, $record );
+			} elseif ( ! $is_wild ) {
 				self::check_capture_against_model( $document, $capture, $record );
 			}
 		}
@@ -283,7 +291,10 @@ class Worker {
 
 			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
 
-			$lexbor_state = self::check_lexbor_differential( $complex_ast, $selector_string, $document, $rows, $quirks, $expected, $record );
+			// lexbor parses full documents only; fragments skip it.
+			if ( ! ( $document['fragment'] ?? false ) ) {
+				$lexbor_state = self::check_lexbor_differential( $complex_ast, $selector_string, $document, $rows, $quirks, $expected, $record );
+			}
 		} elseif ( null === $complex_list && null === $complex_error ) {
 			self::check_select_rejection( 'html', $selector_string, $document, $record );
 		}
@@ -496,6 +507,46 @@ class Worker {
 	}
 
 	/**
+	 * Fragment analogue of check_capture_against_model: the `<body>`-context
+	 * fragment capture must equal the model rows built from the body-level
+	 * children ( with the implicit HTML/BODY ancestors ).
+	 */
+	private static function check_fragment_capture_against_model( array $document, array $capture, callable $record ): void {
+		$model_rows = DocumentGenerator::rows_from_fragment( $document['children'] );
+
+		$normalize = static function ( array $rows ): array {
+			$out = array();
+			foreach ( $rows as $row ) {
+				$attrs = array();
+				foreach ( $row['attrs'] as $attr ) {
+					$attrs[ $attr[0] ] = $attr[1];
+				}
+				ksort( $attrs );
+				$out[] = array(
+					'tag'          => $row['tag'],
+					'fid'          => $row['fid'],
+					'attrs'        => $attrs,
+					'ancestorTags' => $row['ancestorTags'],
+				);
+			}
+			return $out;
+		};
+
+		$expected = $normalize( $model_rows );
+		$actual   = $normalize( $capture['htmlRows'] );
+		if ( $expected !== $actual ) {
+			$record(
+				'model-desync',
+				array(
+					'processor' => 'fragment',
+					'expected'  => $expected,
+					'actual'    => $actual,
+				)
+			);
+		}
+	}
+
+	/**
 	 * Verifies that the processor's captured view of a safe (model-built)
 	 * document agrees with the generated model — this guards the oracle
 	 * itself against renderer/model drift, and is what justifies trusting
@@ -566,15 +617,22 @@ class Worker {
 	/**
 	 * Runs a select() loop over the document, collecting matched data-fids.
 	 *
-	 * @param string $target 'html' or 'tag'.
+	 * @param string $target   'html' or 'tag'.
+	 * @param array  $document The case document ( may request fragment mode ).
 	 * @return array{0: string[]|null, 1: \Throwable|null}
 	 */
-	private static function collect_matches( string $target, string $selector_string, string $html ): array {
+	private static function collect_matches( string $target, string $selector_string, array $document ): array {
+		$html    = $document['html'];
+		$context = ( $document['fragment'] ?? false ) ? $document['context'] : null;
 		return self::guard(
-			static function () use ( $target, $selector_string, $html ) {
-				$processor = 'html' === $target
-					? \WP_HTML_Processor::create_full_parser( $html )
-					: new \WP_HTML_Tag_Processor( $html );
+			static function () use ( $target, $selector_string, $html, $context ) {
+				if ( 'tag' === $target ) {
+					$processor = new \WP_HTML_Tag_Processor( $html );
+				} elseif ( null !== $context ) {
+					$processor = \WP_HTML_Processor::create_fragment( $html, $context );
+				} else {
+					$processor = \WP_HTML_Processor::create_full_parser( $html );
+				}
 
 				$matches    = array();
 				$iterations = 0;
@@ -610,7 +668,7 @@ class Worker {
 	private static function check_select_matches( string $target, string $selector_string, array $document, array $expected, callable $record ): ?array {
 		Bootstrap::reset_doing_it_wrong();
 
-		list( $actual, $error ) = self::collect_matches( $target, $selector_string, $document['html'] );
+		list( $actual, $error ) = self::collect_matches( $target, $selector_string, $document );
 
 		if ( null !== $error ) {
 			$record(
@@ -831,7 +889,7 @@ class Worker {
 			}
 
 			Bootstrap::reset_doing_it_wrong();
-			list( $variant_matches, $match_error ) = self::collect_matches( 'html', $variant_selector, $document['html'] );
+			list( $variant_matches, $match_error ) = self::collect_matches( 'html', $variant_selector, $document );
 
 			if ( null !== $match_error ) {
 				$record(
@@ -866,11 +924,16 @@ class Worker {
 	private static function check_select_rejection( string $target, string $selector_string, array $document, callable $record ): void {
 		Bootstrap::reset_doing_it_wrong();
 
+		$context = ( $document['fragment'] ?? false ) ? $document['context'] : null;
 		list( $results, $error ) = self::guard(
-			static function () use ( $target, $selector_string, $document ) {
-				$processor = 'html' === $target
-					? \WP_HTML_Processor::create_full_parser( $document['html'] )
-					: new \WP_HTML_Tag_Processor( $document['html'] );
+			static function () use ( $target, $selector_string, $document, $context ) {
+				if ( 'tag' === $target ) {
+					$processor = new \WP_HTML_Tag_Processor( $document['html'] );
+				} elseif ( null !== $context ) {
+					$processor = \WP_HTML_Processor::create_fragment( $document['html'], $context );
+				} else {
+					$processor = \WP_HTML_Processor::create_full_parser( $document['html'] );
+				}
 
 				// Two calls: the second exercises the parse cache.
 				return array( $processor->select( $selector_string ), $processor->select( $selector_string ) );

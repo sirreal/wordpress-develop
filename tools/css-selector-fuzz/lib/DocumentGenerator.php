@@ -106,6 +106,103 @@ class DocumentGenerator {
 		return $generator->build();
 	}
 
+	/**
+	 * Generates a `<body>`-context fragment: body-level content rendered
+	 * without the document wrapper, parsed via create_fragment. The model's
+	 * top-level elements carry the implicit BODY/HTML ancestors the fragment
+	 * parser reports in breadcrumbs.
+	 *
+	 * @return array{
+	 *     model: null,
+	 *     children: array,
+	 *     html: string,
+	 *     context: string,
+	 *     fragment: true,
+	 *     quirks: bool,
+	 *     pools: array,
+	 * }
+	 */
+	public static function generate_fragment( Prng $prng ): array {
+		$generator = new self( $prng, $prng->int( 6, 30 ) );
+		return $generator->build_fragment();
+	}
+
+	private function build_fragment(): array {
+		$children     = array();
+		$child_budget = $this->prng->int( 1, 6 );
+		for ( $i = 0; $i < $child_budget && $this->element_count < $this->max_elements; $i++ ) {
+			$children[] = $this->random_subtree( 0 );
+		}
+
+		$bits = array();
+		foreach ( $children as $child ) {
+			$bits[] = $this->render_element( $child );
+		}
+		$filler = array( '', 'text', ' more ', "\n  ", '&amp; x', 'café ✓', '<!-- c -->' );
+		$html   = '';
+		foreach ( $bits as $bit ) {
+			if ( $this->prng->chance( 35 ) ) {
+				$html .= $this->prng->choice( $filler );
+			}
+			$html .= $bit;
+		}
+
+		foreach ( $this->pools as $key => $values ) {
+			$this->pools[ $key ] = array_values( array_unique( $values ) );
+		}
+
+		return array(
+			'model'    => null,
+			'children' => $children,
+			'html'     => $html,
+			'context'  => '<body>',
+			'fragment' => true,
+			'quirks'   => false,
+			'pools'    => $this->pools,
+		);
+	}
+
+	/**
+	 * Rows ( TreeCapture shape ) for a `<body>`-context fragment: the
+	 * top-level children flattened with the implicit HTML/BODY ancestors the
+	 * fragment parser reports.
+	 */
+	public static function rows_from_fragment( array $children ): array {
+		$html_root = array( 'tag' => 'html', 'fid' => '(html)', 'attrs' => array(), 'children' => array() );
+		$body_root = array( 'tag' => 'body', 'fid' => '(body)', 'attrs' => array(), 'children' => $children );
+
+		$rows = array();
+		foreach ( $children as $child ) {
+			foreach ( self::flatten_with_ancestors( $child, array( $body_root, $html_root ) ) as $pair ) {
+				list( $element, $ancestors ) = $pair;
+
+				$attrs = array();
+				$seen  = array();
+				foreach ( $element['attrs'] as $attr ) {
+					$lower = ascii_strtolower( $attr[0] );
+					if ( isset( $seen[ $lower ] ) ) {
+						continue;
+					}
+					$seen[ $lower ] = true;
+					$attrs[]        = array( $lower, $attr[1] );
+				}
+
+				$ancestor_tags = array();
+				foreach ( $ancestors as $ancestor ) {
+					$ancestor_tags[] = strtoupper( ascii_strtolower( $ancestor['tag'] ) );
+				}
+
+				$rows[] = array(
+					'tag'          => strtoupper( ascii_strtolower( $element['tag'] ) ),
+					'fid'          => $element['fid'],
+					'attrs'        => $attrs,
+					'ancestorTags' => $ancestor_tags,
+				);
+			}
+		}
+		return $rows;
+	}
+
 	private function build(): array {
 		$has_doctype = $this->prng->chance( 85 );
 
