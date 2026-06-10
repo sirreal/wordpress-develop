@@ -65,6 +65,7 @@ $reference_names = Bootstrap::named_reference_names();
 $seed            = (string) $options['seed'];
 $start           = $options['start-case'];
 $end             = $start + $options['cases'];
+$stderr_bytes_per_case = max( 0, (int) getenv( 'HTML_DECODER_FUZZ_STDERR_BYTES_PER_CASE' ) );
 $stats           = array(
 	'cases'       => 0,
 	'failures'    => 0,
@@ -86,6 +87,10 @@ Cli::emit(
 );
 
 for ( $case = $start; $case < $end; $case++ ) {
+	if ( $stderr_bytes_per_case > 0 ) {
+		fwrite( STDERR, str_repeat( 'E', $stderr_bytes_per_case ) . "\n" );
+	}
+
 	$prng      = new Prng( "{$seed}:{$case}" );
 	$generator = new Generator( $prng, $options['max-bytes'], $reference_names );
 	$generated = $generator->generate();
@@ -119,7 +124,31 @@ for ( $case = $start; $case < $end; $case++ ) {
 		}
 
 		if ( '' !== $output_dir ) {
-			$case_dir = "{$output_dir}/failure-seed{$seed}-case{$case}";
+			$signature_key = Cli::failure_signature_key( $record['signatures'] );
+			$base_case_dir = "{$output_dir}/failure-seed{$seed}-case{$case}";
+			$case_dir      = $base_case_dir;
+			$dir_matches_signature = static function ( string $dir ) use ( $signature_key ): bool {
+				if ( is_link( $dir ) ) {
+					return false;
+				}
+
+				$manifest = json_decode( (string) @file_get_contents( "{$dir}/failure.json" ), true );
+				return is_array( $manifest ) &&
+					isset( $manifest['signatures'] ) &&
+					is_array( $manifest['signatures'] ) &&
+					$signature_key === Cli::failure_signature_key( $manifest['signatures'] );
+			};
+
+			if ( is_link( $case_dir ) || ( is_dir( $case_dir ) && ! $dir_matches_signature( $case_dir ) ) ) {
+				$suffix   = substr( $signature_key, 0, 12 );
+				$case_dir = "{$base_case_dir}-sig{$suffix}";
+				$attempt  = 2;
+				while ( is_link( $case_dir ) || ( is_dir( $case_dir ) && ! $dir_matches_signature( $case_dir ) ) ) {
+					$case_dir = "{$base_case_dir}-sig{$suffix}-{$attempt}";
+					++$attempt;
+				}
+			}
+
 			if ( ! is_dir( $case_dir ) && ! mkdir( $case_dir, 0777, true ) ) {
 				Cli::emit(
 					array(

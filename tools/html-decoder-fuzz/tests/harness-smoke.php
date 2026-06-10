@@ -73,7 +73,7 @@ function remove_tree( string $path ): void {
 	);
 
 	foreach ( $items as $item ) {
-		$item->isDir() ? rmdir( $item->getPathname() ) : unlink( $item->getPathname() );
+		$item->isDir() && ! $item->isLink() ? rmdir( $item->getPathname() ) : unlink( $item->getPathname() );
 	}
 	rmdir( $path );
 }
@@ -230,6 +230,17 @@ clearstatcache( true, $unwritable_dir );
 remove_tree( $unwritable_dir );
 check( 'runner rejects unwritable output dir', 2 === $unwritable_runner['code'], $unwritable_runner['stdout'] . $unwritable_runner['stderr'] );
 
+$unreadable_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-unreadable-' . getmypid();
+remove_tree( $unreadable_dir );
+mkdir( $unreadable_dir, 0333, true );
+chmod( $unreadable_dir, 0333 );
+clearstatcache( true, $unreadable_dir );
+$unreadable_runner = run_process( array( PHP_BINARY, __DIR__ . '/../runner.php', '--duration-seconds', '1', '--output-dir', $unreadable_dir ) );
+chmod( $unreadable_dir, 0755 );
+clearstatcache( true, $unreadable_dir );
+remove_tree( $unreadable_dir );
+check( 'runner rejects unreadable output dir', 2 === $unreadable_runner['code'], $unreadable_runner['stdout'] . $unreadable_runner['stderr'] );
+
 $bad_state_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-bad-state-' . getmypid();
 remove_tree( $bad_state_dir );
 mkdir( $bad_state_dir, 0777, true );
@@ -253,6 +264,42 @@ $bad_state_runner = run_process(
 remove_tree( $bad_state_dir );
 check( 'runner reports state write failures', 2 === $bad_state_runner['code'], $bad_state_runner['stdout'] . $bad_state_runner['stderr'] );
 
+$state_hardlink_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-state-hardlink-' . getmypid();
+remove_tree( $state_hardlink_dir );
+mkdir( $state_hardlink_dir, 0777, true );
+$state_hardlink_target = $state_hardlink_dir . '-target';
+file_put_contents( $state_hardlink_target, "sentinel\n" );
+$state_hardlink_created = @link( $state_hardlink_target, $state_hardlink_dir . '/state.json' );
+if ( $state_hardlink_created ) {
+	$state_hardlink_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--summary-mode',
+			'none',
+			'--output-dir',
+			$state_hardlink_dir,
+		)
+	);
+	check(
+		'runner rejects hardlinked state output',
+		2 === $state_hardlink_runner['code'] && "sentinel\n" === file_get_contents( $state_hardlink_target ),
+		$state_hardlink_runner['stdout'] . $state_hardlink_runner['stderr']
+	);
+} else {
+	check( 'runner rejects hardlinked state output', true, 'hardlink unavailable' );
+}
+remove_tree( $state_hardlink_dir );
+@unlink( $state_hardlink_target );
+
 $bad_summary_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-bad-summary-' . getmypid();
 remove_tree( $bad_summary_dir );
 mkdir( $bad_summary_dir, 0777, true );
@@ -275,6 +322,790 @@ $bad_summary_runner = run_process(
 );
 remove_tree( $bad_summary_dir );
 check( 'runner reports summary open failures', 2 === $bad_summary_runner['code'], $bad_summary_runner['stdout'] . $bad_summary_runner['stderr'] );
+
+$summary_symlink_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-summary-symlink-' . getmypid();
+remove_tree( $summary_symlink_dir );
+mkdir( $summary_symlink_dir, 0777, true );
+$summary_symlink_target = $summary_symlink_dir . '-target';
+file_put_contents( $summary_symlink_target, "sentinel\n" );
+$summary_symlink_created = @symlink( $summary_symlink_target, $summary_symlink_dir . '/summary.ndjson' );
+if ( $summary_symlink_created ) {
+	$summary_symlink_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--output-dir',
+			$summary_symlink_dir,
+		)
+	);
+	check(
+		'runner rejects symlinked summary output',
+		2 === $summary_symlink_runner['code'] && "sentinel\n" === file_get_contents( $summary_symlink_target ),
+		$summary_symlink_runner['stdout'] . $summary_symlink_runner['stderr']
+	);
+} else {
+	check( 'runner rejects symlinked summary output', true, 'symlink unavailable' );
+}
+remove_tree( $summary_symlink_dir );
+@unlink( $summary_symlink_target );
+
+$summary_hardlink_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-summary-hardlink-' . getmypid();
+remove_tree( $summary_hardlink_dir );
+mkdir( $summary_hardlink_dir, 0777, true );
+$summary_hardlink_target = $summary_hardlink_dir . '-target';
+file_put_contents( $summary_hardlink_target, "sentinel\n" );
+$summary_hardlink_created = @link( $summary_hardlink_target, $summary_hardlink_dir . '/summary.ndjson' );
+if ( $summary_hardlink_created ) {
+	$summary_hardlink_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--output-dir',
+			$summary_hardlink_dir,
+		)
+	);
+	check(
+		'runner rejects hardlinked summary output',
+		2 === $summary_hardlink_runner['code'] && "sentinel\n" === file_get_contents( $summary_hardlink_target ),
+		$summary_hardlink_runner['stdout'] . $summary_hardlink_runner['stderr']
+	);
+} else {
+	check( 'runner rejects hardlinked summary output', true, 'hardlink unavailable' );
+}
+remove_tree( $summary_hardlink_dir );
+@unlink( $summary_hardlink_target );
+
+$lane_stderr_symlink_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-symlink-' . getmypid();
+remove_tree( $lane_stderr_symlink_dir );
+mkdir( $lane_stderr_symlink_dir, 0777, true );
+$lane_stderr_symlink_target = $lane_stderr_symlink_dir . '-target';
+file_put_contents( $lane_stderr_symlink_target, "sentinel\n" );
+$lane_stderr_symlink_created = @symlink( $lane_stderr_symlink_target, $lane_stderr_symlink_dir . '/lane-0-stderr.log' );
+if ( $lane_stderr_symlink_created ) {
+	$lane_stderr_symlink_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--output-dir',
+			$lane_stderr_symlink_dir,
+		)
+	);
+	check(
+		'runner rejects symlinked lane stderr output',
+		2 === $lane_stderr_symlink_runner['code'] && "sentinel\n" === file_get_contents( $lane_stderr_symlink_target ),
+		$lane_stderr_symlink_runner['stdout'] . $lane_stderr_symlink_runner['stderr']
+	);
+} else {
+	check( 'runner rejects symlinked lane stderr output', true, 'symlink unavailable' );
+}
+remove_tree( $lane_stderr_symlink_dir );
+@unlink( $lane_stderr_symlink_target );
+
+$lane_stderr_hardlink_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-hardlink-' . getmypid();
+remove_tree( $lane_stderr_hardlink_dir );
+mkdir( $lane_stderr_hardlink_dir, 0777, true );
+$lane_stderr_hardlink_target = $lane_stderr_hardlink_dir . '-target';
+file_put_contents( $lane_stderr_hardlink_target, "sentinel\n" );
+$lane_stderr_hardlink_created = @link( $lane_stderr_hardlink_target, $lane_stderr_hardlink_dir . '/lane-0-stderr.log' );
+if ( $lane_stderr_hardlink_created ) {
+	$lane_stderr_hardlink_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--output-dir',
+			$lane_stderr_hardlink_dir,
+		)
+	);
+	check(
+		'runner rejects hardlinked lane stderr output',
+		2 === $lane_stderr_hardlink_runner['code'] && "sentinel\n" === file_get_contents( $lane_stderr_hardlink_target ),
+		$lane_stderr_hardlink_runner['stdout'] . $lane_stderr_hardlink_runner['stderr']
+	);
+} else {
+	check( 'runner rejects hardlinked lane stderr output', true, 'hardlink unavailable' );
+}
+remove_tree( $lane_stderr_hardlink_dir );
+@unlink( $lane_stderr_hardlink_target );
+
+$lane_stderr_fifo_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-fifo-' . getmypid();
+remove_tree( $lane_stderr_fifo_dir );
+mkdir( $lane_stderr_fifo_dir, 0777, true );
+$lane_stderr_fifo_created = function_exists( 'posix_mkfifo' ) && @posix_mkfifo( $lane_stderr_fifo_dir . '/lane-0-stderr.log', 0600 );
+if ( $lane_stderr_fifo_created ) {
+	$lane_stderr_fifo_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--output-dir',
+			$lane_stderr_fifo_dir,
+		)
+	);
+	check(
+		'runner rejects non-regular lane stderr output',
+		2 === $lane_stderr_fifo_runner['code'],
+		$lane_stderr_fifo_runner['stdout'] . $lane_stderr_fifo_runner['stderr']
+	);
+} else {
+	check( 'runner rejects non-regular lane stderr output', true, 'fifo unavailable' );
+}
+remove_tree( $lane_stderr_fifo_dir );
+
+$lane_stderr_cap_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-cap-' . getmypid();
+remove_tree( $lane_stderr_cap_dir );
+$lane_stderr_cap_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'40',
+		'--cases-per-batch',
+		'20',
+		'--max-stderr-bytes',
+		'128',
+		'--output-dir',
+		$lane_stderr_cap_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_STDERR_BYTES_PER_CASE' => '100' )
+);
+$lane_stderr_cap_state = is_file( $lane_stderr_cap_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $lane_stderr_cap_dir . '/state.json' ), true )
+	: array();
+$lane_stderr_cap_size = is_file( $lane_stderr_cap_dir . '/lane-0-stderr.log' ) ? filesize( $lane_stderr_cap_dir . '/lane-0-stderr.log' ) : 0;
+check(
+	'runner caps per-lane stderr logs',
+	0 === $lane_stderr_cap_runner['code'] &&
+		$lane_stderr_cap_size <= 128 &&
+		1 === count( $lane_stderr_cap_state['worker_stderr_truncated'] ?? array() ),
+	$lane_stderr_cap_runner['stdout'] . $lane_stderr_cap_runner['stderr'] . ' stderr_size=' . $lane_stderr_cap_size . ' state=' . json_encode( $lane_stderr_cap_state['worker_stderr_truncated'] ?? null )
+);
+$lane_stderr_cap_reuse_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'40',
+		'--cases-per-batch',
+		'20',
+		'--max-stderr-bytes',
+		'128',
+		'--output-dir',
+		$lane_stderr_cap_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_STDERR_BYTES_PER_CASE' => '100' )
+);
+$lane_stderr_cap_reuse_size = is_file( $lane_stderr_cap_dir . '/lane-0-stderr.log' ) ? filesize( $lane_stderr_cap_dir . '/lane-0-stderr.log' ) : 0;
+check(
+	'runner preserves per-lane stderr cap on reused output dirs',
+	0 === $lane_stderr_cap_reuse_runner['code'] && $lane_stderr_cap_reuse_size <= 128,
+	$lane_stderr_cap_reuse_runner['stdout'] . $lane_stderr_cap_reuse_runner['stderr'] . ' stderr_size=' . $lane_stderr_cap_reuse_size
+);
+remove_tree( $lane_stderr_cap_dir );
+
+$lane_stderr_oversize_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-oversize-' . getmypid();
+remove_tree( $lane_stderr_oversize_dir );
+mkdir( $lane_stderr_oversize_dir, 0777, true );
+file_put_contents( $lane_stderr_oversize_dir . '/lane-0-stderr.log', str_repeat( 'X', 512 ) );
+$lane_stderr_oversize_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--max-stderr-bytes',
+		'128',
+		'--output-dir',
+		$lane_stderr_oversize_dir,
+	)
+);
+$lane_stderr_oversize_state = is_file( $lane_stderr_oversize_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $lane_stderr_oversize_dir . '/state.json' ), true )
+	: array();
+$lane_stderr_oversize_size = is_file( $lane_stderr_oversize_dir . '/lane-0-stderr.log' ) ? filesize( $lane_stderr_oversize_dir . '/lane-0-stderr.log' ) : 0;
+check(
+	'runner truncates oversized reused lane stderr logs',
+	0 === $lane_stderr_oversize_runner['code'] &&
+		$lane_stderr_oversize_size <= 128 &&
+		array() !== ( $lane_stderr_oversize_state['worker_stderr_startup_truncated'] ?? array() ),
+	$lane_stderr_oversize_runner['stdout'] . $lane_stderr_oversize_runner['stderr'] . ' stderr_size=' . $lane_stderr_oversize_size . ' state=' . json_encode( $lane_stderr_oversize_state['worker_stderr_startup_truncated'] ?? null )
+);
+remove_tree( $lane_stderr_oversize_dir );
+
+$lane_stderr_stale_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-lane-stderr-stale-' . getmypid();
+remove_tree( $lane_stderr_stale_dir );
+mkdir( $lane_stderr_stale_dir, 0777, true );
+file_put_contents( $lane_stderr_stale_dir . '/lane-1-stderr.log', str_repeat( 'X', 512 ) );
+$lane_stderr_stale_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--max-stderr-bytes',
+		'128',
+		'--output-dir',
+		$lane_stderr_stale_dir,
+	)
+);
+$lane_stderr_stale_size = is_file( $lane_stderr_stale_dir . '/lane-1-stderr.log' ) ? filesize( $lane_stderr_stale_dir . '/lane-1-stderr.log' ) : 0;
+check(
+	'runner truncates stale stderr logs from inactive lanes',
+	0 === $lane_stderr_stale_runner['code'] && $lane_stderr_stale_size <= 128,
+	$lane_stderr_stale_runner['stdout'] . $lane_stderr_stale_runner['stderr'] . ' stderr_size=' . $lane_stderr_stale_size
+);
+remove_tree( $lane_stderr_stale_dir );
+
+$no_summary_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-no-summary-' . getmypid();
+remove_tree( $no_summary_dir );
+$no_summary_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--summary-mode',
+		'none',
+		'--output-dir',
+		$no_summary_dir,
+	)
+);
+check(
+	'runner can disable summary output',
+	0 === $no_summary_runner['code'] && ! file_exists( $no_summary_dir . '/summary.ndjson' ),
+	$no_summary_runner['stdout'] . $no_summary_runner['stderr']
+);
+remove_tree( $no_summary_dir );
+
+$partial_artifact_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-partial-artifact-' . getmypid();
+remove_tree( $partial_artifact_dir );
+mkdir( $partial_artifact_dir . '/failure-orphan', 0777, true );
+file_put_contents( $partial_artifact_dir . '/failure-orphan/payload.txt', 'orphaned payload' );
+$partial_artifact_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--artifact-retention',
+		'none',
+		'--output-dir',
+		$partial_artifact_dir,
+	)
+);
+$partial_artifact_state = is_file( $partial_artifact_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $partial_artifact_dir . '/state.json' ), true )
+	: array();
+check(
+	'runner prunes partial failure artifacts on startup',
+	0 === $partial_artifact_runner['code'] &&
+		! is_dir( $partial_artifact_dir . '/failure-orphan' ) &&
+		( $partial_artifact_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0,
+	$partial_artifact_runner['stdout'] . $partial_artifact_runner['stderr'] . json_encode( $partial_artifact_state['artifact_retention'] ?? null )
+);
+remove_tree( $partial_artifact_dir );
+
+$symlink_artifact_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-symlink-artifact-' . getmypid();
+remove_tree( $symlink_artifact_dir );
+mkdir( $symlink_artifact_dir . '/keepdir', 0777, true );
+file_put_contents( $symlink_artifact_dir . '/keepdir/important.txt', 'keep me' );
+$symlink_created = @symlink( $symlink_artifact_dir . '/keepdir', $symlink_artifact_dir . '/failure-link' );
+if ( $symlink_created ) {
+	$symlink_artifact_runner = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../runner.php',
+			'--lanes',
+			'1',
+			'--duration-seconds',
+			'0',
+			'--max-cases',
+			'1',
+			'--cases-per-batch',
+			'1',
+			'--artifact-retention',
+			'none',
+			'--output-dir',
+			$symlink_artifact_dir,
+		)
+	);
+	check(
+		'runner prunes artifact symlinks without deleting targets',
+		0 === $symlink_artifact_runner['code'] &&
+			! file_exists( $symlink_artifact_dir . '/failure-link' ) &&
+			is_file( $symlink_artifact_dir . '/keepdir/important.txt' ),
+		$symlink_artifact_runner['stdout'] . $symlink_artifact_runner['stderr']
+	);
+} else {
+	check( 'runner prunes artifact symlinks without deleting targets', true, 'symlink unavailable' );
+}
+remove_tree( $symlink_artifact_dir );
+
+$glob_meta_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-glob-meta-' . getmypid();
+remove_tree( $glob_meta_dir );
+mkdir( $glob_meta_dir . '/run-*', 0777, true );
+mkdir( $glob_meta_dir . '/run-victim/keepdir', 0777, true );
+file_put_contents( $glob_meta_dir . '/run-victim/keepdir/important.txt', 'keep me' );
+$glob_meta_symlink_created = @symlink( $glob_meta_dir . '/run-victim/keepdir', $glob_meta_dir . '/run-victim/failure-link' );
+$glob_meta_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--artifact-retention',
+		'none',
+		'--output-dir',
+		$glob_meta_dir . '/run-*',
+	)
+);
+check(
+	'runner treats output dir metacharacters literally during startup pruning',
+	0 === $glob_meta_runner['code'] &&
+		( ! $glob_meta_symlink_created || file_exists( $glob_meta_dir . '/run-victim/failure-link' ) ) &&
+		is_file( $glob_meta_dir . '/run-victim/keepdir/important.txt' ),
+	$glob_meta_runner['stdout'] . $glob_meta_runner['stderr']
+);
+remove_tree( $glob_meta_dir );
+
+$symlink_write_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-symlink-write-' . getmypid();
+remove_tree( $symlink_write_dir );
+mkdir( $symlink_write_dir . '/keepdir', 0777, true );
+file_put_contents(
+	$symlink_write_dir . '/keepdir/failure.json',
+	json_encode(
+		array(
+			'signatures' => array( 'decode-mismatch:text', 'reader-decode-mismatch:text' ),
+		)
+	)
+);
+$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case30' );
+if ( $symlink_write_created ) {
+	$symlink_write_worker = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../worker.php',
+			'--seed',
+			'1',
+			'--cases',
+			'100',
+			'--output-dir',
+			$symlink_write_dir,
+			'--progress-every',
+			'100',
+		),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+	);
+	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case30-sig*/failure.json' );
+	check(
+		'worker does not write through symlinked failure artifact dirs',
+		1 === $symlink_write_worker['code'] &&
+			! is_file( $symlink_write_dir . '/keepdir/payload.txt' ) &&
+			is_array( $symlink_write_suffixed ) &&
+			array() !== $symlink_write_suffixed,
+		$symlink_write_worker['stdout'] . $symlink_write_worker['stderr']
+	);
+} else {
+	check( 'worker does not write through symlinked failure artifact dirs', true, 'symlink unavailable' );
+}
+remove_tree( $symlink_write_dir );
+
+$incomplete_manifest_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-incomplete-manifest-' . getmypid();
+remove_tree( $incomplete_manifest_dir );
+mkdir( $incomplete_manifest_dir . '/failure-bad', 0777, true );
+file_put_contents(
+	$incomplete_manifest_dir . '/failure-bad/failure.json',
+	json_encode(
+		array(
+			'signatures'     => array( 'reader-decode-mismatch:text' ),
+			'context'        => 'text',
+			'payload_base64' => '',
+		)
+	)
+);
+$incomplete_manifest_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$incomplete_manifest_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+$incomplete_manifest_state = is_file( $incomplete_manifest_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $incomplete_manifest_dir . '/state.json' ), true )
+	: array();
+$incomplete_manifest_files = glob( $incomplete_manifest_dir . '/failure-*/failure.json' );
+$retained_manifest         = is_array( $incomplete_manifest_files ) && 1 === count( $incomplete_manifest_files )
+	? json_decode( (string) file_get_contents( $incomplete_manifest_files[0] ), true )
+	: array();
+check(
+	'runner ignores incomplete manifests when enforcing retention cap',
+	1 === $incomplete_manifest_runner['code'] &&
+		! is_dir( $incomplete_manifest_dir . '/failure-bad' ) &&
+		( $incomplete_manifest_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
+		is_array( $retained_manifest ) &&
+		isset( $retained_manifest['payload_base64'] ),
+	$incomplete_manifest_runner['stdout'] . $incomplete_manifest_runner['stderr'] . json_encode( $incomplete_manifest_state['artifact_retention'] ?? null )
+);
+remove_tree( $incomplete_manifest_dir );
+
+$nonreproducing_manifest_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-nonreproducing-manifest-' . getmypid();
+remove_tree( $nonreproducing_manifest_dir );
+mkdir( $nonreproducing_manifest_dir . '/failure-fake', 0777, true );
+$fake_payload = 'plain text';
+file_put_contents(
+	$nonreproducing_manifest_dir . '/failure-fake/failure.json',
+	json_encode(
+		array(
+			'signatures'     => array( 'reader-decode-mismatch:text' ),
+			'context'        => 'text',
+			'input_size'     => strlen( $fake_payload ),
+			'payload_base64' => base64_encode( $fake_payload ),
+			'failures'       => array(
+				array( 'signature' => 'reader-decode-mismatch:text' ),
+			),
+		)
+	)
+);
+$nonreproducing_manifest_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$nonreproducing_manifest_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+$nonreproducing_manifest_state = is_file( $nonreproducing_manifest_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $nonreproducing_manifest_dir . '/state.json' ), true )
+	: array();
+$nonreproducing_manifest_files = glob( $nonreproducing_manifest_dir . '/failure-*/failure.json' );
+$nonreproducing_retained       = is_array( $nonreproducing_manifest_files ) && 1 === count( $nonreproducing_manifest_files )
+	? json_decode( (string) file_get_contents( $nonreproducing_manifest_files[0] ), true )
+	: array();
+check(
+	'runner ignores non-reproducing manifests when enforcing retention cap',
+	1 === $nonreproducing_manifest_runner['code'] &&
+		! is_dir( $nonreproducing_manifest_dir . '/failure-fake' ) &&
+		( $nonreproducing_manifest_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
+		is_array( $nonreproducing_retained ) &&
+		isset( $nonreproducing_retained['payload_base64'] ) &&
+		'plain text' !== base64_decode( $nonreproducing_retained['payload_base64'], true ),
+	$nonreproducing_manifest_runner['stdout'] . $nonreproducing_manifest_runner['stderr'] . json_encode( $nonreproducing_manifest_state['artifact_retention'] ?? null )
+);
+remove_tree( $nonreproducing_manifest_dir );
+
+$unverified_manifest_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-unverified-manifest-' . getmypid();
+remove_tree( $unverified_manifest_dir );
+$unverified_seed_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_manifest_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$unverified_before = glob( $unverified_manifest_dir . '/failure-*/failure.json' );
+$unverified_runner = run_process(
+	array(
+		PHP_BINARY,
+		'-d',
+		'disable_functions=mb_check_encoding',
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'9999',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_manifest_dir,
+	)
+);
+$unverified_after = glob( $unverified_manifest_dir . '/failure-*/failure.json' );
+$unverified_state = is_file( $unverified_manifest_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $unverified_manifest_dir . '/state.json' ), true )
+	: array();
+check(
+	'runner preserves retained artifacts when startup verification is unavailable',
+	1 === $unverified_seed_runner['code'] &&
+		0 === $unverified_runner['code'] &&
+		is_array( $unverified_before ) &&
+		is_array( $unverified_after ) &&
+		count( $unverified_before ) === count( $unverified_after ) &&
+		( false !== ( $unverified_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
+	$unverified_seed_runner['stdout'] . $unverified_seed_runner['stderr'] . $unverified_runner['stdout'] . $unverified_runner['stderr'] . json_encode( $unverified_state['artifact_retention'] ?? null )
+);
+remove_tree( $unverified_manifest_dir );
+
+$unverified_weak_manifest_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-unverified-weak-manifest-' . getmypid();
+remove_tree( $unverified_weak_manifest_dir );
+$unverified_weak_seed_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_weak_manifest_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+mkdir( $unverified_weak_manifest_dir . '/failure-000weak', 0777, true );
+file_put_contents(
+	$unverified_weak_manifest_dir . '/failure-000weak/failure.json',
+	json_encode(
+		array(
+			'signatures'     => array( 'decode-mismatch:text', 'reader-decode-mismatch:text' ),
+			'context'        => 'text',
+			'payload_base64' => base64_encode( 'x' ),
+		)
+	)
+);
+$unverified_weak_runner = run_process(
+	array(
+		PHP_BINARY,
+		'-d',
+		'disable_functions=mb_check_encoding',
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'9999',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_weak_manifest_dir,
+	)
+);
+$unverified_weak_state = is_file( $unverified_weak_manifest_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $unverified_weak_manifest_dir . '/state.json' ), true )
+	: array();
+check(
+	'runner ignores weak manifests when startup verification is unavailable',
+	1 === $unverified_weak_seed_runner['code'] &&
+		0 === $unverified_weak_runner['code'] &&
+		! is_dir( $unverified_weak_manifest_dir . '/failure-000weak' ) &&
+		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case30/failure.json' ) &&
+		( $unverified_weak_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
+		( false !== ( $unverified_weak_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
+	$unverified_weak_seed_runner['stdout'] . $unverified_weak_seed_runner['stderr'] . $unverified_weak_runner['stdout'] . $unverified_weak_runner['stderr'] . json_encode( $unverified_weak_state['artifact_retention'] ?? null )
+);
+remove_tree( $unverified_weak_manifest_dir );
+
+$unverified_fake_manifest_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-unverified-fake-manifest-' . getmypid();
+remove_tree( $unverified_fake_manifest_dir );
+$unverified_fake_seed_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_fake_manifest_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$fake_payload = 'x';
+mkdir( $unverified_fake_manifest_dir . '/failure-000fake', 0777, true );
+file_put_contents(
+	$unverified_fake_manifest_dir . '/failure-000fake/failure.json',
+	json_encode(
+		array(
+			'signatures'     => array( 'decode-mismatch:text', 'reader-decode-mismatch:text' ),
+			'context'        => 'text',
+			'input_size'     => strlen( $fake_payload ),
+			'payload_base64' => base64_encode( $fake_payload ),
+			'failures'       => array(
+				array( 'signature' => 'decode-mismatch:text' ),
+				array( 'signature' => 'reader-decode-mismatch:text' ),
+			),
+		)
+	)
+);
+$unverified_fake_runner = run_process(
+	array(
+		PHP_BINARY,
+		'-d',
+		'disable_functions=mb_check_encoding',
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'9999',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$unverified_fake_manifest_dir,
+	)
+);
+$unverified_fake_state = is_file( $unverified_fake_manifest_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $unverified_fake_manifest_dir . '/state.json' ), true )
+	: array();
+$unverified_fake_counts = $unverified_fake_state['artifact_retention']['retained_by_signature'] ?? array();
+check(
+	'runner preserves real artifacts when startup verification cannot reject full-shape fakes',
+	1 === $unverified_fake_seed_runner['code'] &&
+		0 === $unverified_fake_runner['code'] &&
+		is_file( $unverified_fake_manifest_dir . '/failure-000fake/failure.json' ) &&
+		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case30/failure.json' ) &&
+		array_sum( is_array( $unverified_fake_counts ) ? $unverified_fake_counts : array() ) >= 2 &&
+		( false !== ( $unverified_fake_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
+	$unverified_fake_seed_runner['stdout'] . $unverified_fake_seed_runner['stderr'] . $unverified_fake_runner['stdout'] . $unverified_fake_runner['stderr'] . json_encode( $unverified_fake_state['artifact_retention'] ?? null )
+);
+remove_tree( $unverified_fake_manifest_dir );
 
 $bad_integer = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', 'abc' ) );
 check( 'worker rejects non-numeric integer options', 2 === $bad_integer['code'], $bad_integer['stdout'] . $bad_integer['stderr'] );
@@ -349,11 +1180,13 @@ $faulted_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'1000',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'1000',
+		'--max-artifacts-per-signature',
+		'1',
 		'--output-dir',
 		$runner_dir,
 	),
@@ -367,7 +1200,244 @@ check(
 	1 === $faulted_runner['code'] && ( $runner_state['failures'] ?? 0 ) > 0,
 	$faulted_runner['stdout'] . $faulted_runner['stderr']
 );
+$retained_counts = $runner_state['artifact_retention']['retained_by_signature'] ?? array();
+check(
+	'faulted runner caps retained artifacts by signature',
+	array() !== $retained_counts && array() === array_filter( $retained_counts, static fn( $count ) => $count > 1 ),
+	json_encode( $retained_counts )
+);
+check(
+	'faulted runner prunes repeated failure artifacts',
+	( $runner_state['artifact_retention']['pruned'] ?? 0 ) > 0,
+	json_encode( $runner_state['artifact_retention'] ?? null )
+);
+$retained_failure_dirs = glob( $runner_dir . '/failure-*/failure.json' );
+check(
+	'faulted runner prunes over-cap failure directories',
+	is_array( $retained_failure_dirs ) && count( $retained_failure_dirs ) === array_sum( $retained_counts ),
+	'dirs=' . ( is_array( $retained_failure_dirs ) ? count( $retained_failure_dirs ) : 0 ) . ' counts=' . json_encode( $retained_counts )
+);
+$runner_summary_failures = array();
+if ( is_file( $runner_dir . '/summary.ndjson' ) ) {
+	foreach ( file( $runner_dir . '/summary.ndjson', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) ?: array() as $line ) {
+		$summary_record = json_decode( $line, true );
+		if ( is_array( $summary_record ) && 'failure' === ( $summary_record['type'] ?? null ) ) {
+			$runner_summary_failures[] = $summary_record;
+		}
+	}
+}
+check(
+	'faulted runner writes bounded default failure summary',
+	count( $runner_summary_failures ) === array_sum( $retained_counts ) &&
+		( $runner_state['failures'] ?? 0 ) > count( $runner_summary_failures ),
+	'failures=' . ( $runner_state['failures'] ?? 0 ) . ' summary_failures=' . count( $runner_summary_failures )
+);
+$runner_state_failure_seeds = $runner_state['failure_seeds'] ?? array();
+check(
+	'faulted runner writes bounded failure seed state',
+	is_array( $runner_state_failure_seeds ) &&
+		count( $runner_state_failure_seeds ) === array_sum( $retained_counts ) &&
+		( $runner_state['failures'] ?? 0 ) > count( $runner_state_failure_seeds ),
+	'failures=' . ( $runner_state['failures'] ?? 0 ) . ' state_failure_seeds=' . count( $runner_state_failure_seeds )
+);
+
+$reuse_same_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1000',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'1000',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$runner_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$reuse_same_state = is_file( $runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $runner_dir . '/state.json' ), true )
+	: array();
+$reuse_same_counts = $reuse_same_state['artifact_retention']['retained_by_signature'] ?? array();
+$reuse_same_dirs   = glob( $runner_dir . '/failure-*/failure.json' );
+check(
+	'runner preserves retained same-seed artifacts on reuse',
+	1 === $reuse_same_runner['code'] &&
+		is_array( $reuse_same_dirs ) &&
+		count( $reuse_same_dirs ) === array_sum( $reuse_same_counts ) &&
+		is_file( $runner_dir . '/failure-seed1-case30/failure.json' ) &&
+		array() === array_filter( $reuse_same_counts, static fn( $count ) => $count > 1 ),
+	$reuse_same_runner['stdout'] . $reuse_same_runner['stderr'] . json_encode( $reuse_same_state['artifact_retention'] ?? null )
+);
 remove_tree( $runner_dir );
+
+$different_signature_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-different-signature-reuse-' . getmypid();
+remove_tree( $different_signature_dir );
+$different_signature_first = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'100',
+		'--output-dir',
+		$different_signature_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$different_signature_second = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'100',
+		'--artifact-retention',
+		'all',
+		'--output-dir',
+		$different_signature_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+$different_signature_case30 = glob( $different_signature_dir . '/failure-seed1-case30*/failure.json' );
+$different_signature_seen   = array();
+foreach ( is_array( $different_signature_case30 ) ? $different_signature_case30 : array() as $failure_file ) {
+	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
+	if ( is_array( $manifest ) && isset( $manifest['signatures'] ) && is_array( $manifest['signatures'] ) ) {
+		$different_signature_seen[] = implode( ',', $manifest['signatures'] );
+	}
+}
+check(
+	'runner preserves same-seed artifacts with different signatures',
+	1 === $different_signature_first['code'] &&
+		1 === $different_signature_second['code'] &&
+		in_array( 'decode-mismatch:text,reader-decode-mismatch:text', $different_signature_seen, true ) &&
+		in_array( 'reader-decode-mismatch:text', $different_signature_seen, true ),
+	$different_signature_first['stdout'] . $different_signature_first['stderr'] . $different_signature_second['stdout'] . $different_signature_second['stderr'] . json_encode( $different_signature_seen )
+);
+remove_tree( $different_signature_dir );
+
+$overcap_reuse_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-overcap-reuse-' . getmypid();
+remove_tree( $overcap_reuse_dir );
+$overcap_seed_run = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1000',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'1000',
+		'--artifact-retention',
+		'all',
+		'--output-dir',
+		$overcap_reuse_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$overcap_before_dirs = glob( $overcap_reuse_dir . '/failure-*/failure.json' );
+$overcap_prune_run   = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'1',
+		'--seed-base',
+		'9999',
+		'--cases-per-batch',
+		'1',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$overcap_reuse_dir,
+	)
+);
+$overcap_state = is_file( $overcap_reuse_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $overcap_reuse_dir . '/state.json' ), true )
+	: array();
+$overcap_counts = $overcap_state['artifact_retention']['retained_by_signature'] ?? array();
+$overcap_after_dirs = glob( $overcap_reuse_dir . '/failure-*/failure.json' );
+check(
+	'runner prunes reused output dirs back under cap',
+	1 === $overcap_seed_run['code'] &&
+		0 === $overcap_prune_run['code'] &&
+		is_array( $overcap_before_dirs ) &&
+		is_array( $overcap_after_dirs ) &&
+		count( $overcap_before_dirs ) > count( $overcap_after_dirs ) &&
+		( $overcap_state['artifact_retention']['startup_pruned'] ?? 0 ) > 0 &&
+		count( $overcap_after_dirs ) === array_sum( $overcap_counts ) &&
+		array() === array_filter( $overcap_counts, static fn( $count ) => $count > 1 ),
+	$overcap_seed_run['stdout'] . $overcap_seed_run['stderr'] . $overcap_prune_run['stdout'] . $overcap_prune_run['stderr'] . json_encode( $overcap_state['artifact_retention'] ?? null )
+);
+remove_tree( $overcap_reuse_dir );
+
+$no_artifact_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-no-artifacts-' . getmypid();
+remove_tree( $no_artifact_dir );
+$no_artifact_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--artifact-retention',
+		'none',
+		'--output-dir',
+		$no_artifact_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
+);
+$no_artifact_state = is_file( $no_artifact_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $no_artifact_dir . '/state.json' ), true )
+	: array();
+$no_artifact_dirs = glob( $no_artifact_dir . '/failure-*/failure.json' );
+check(
+	'runner can prune all failure artifacts',
+	1 === $no_artifact_runner['code'] && ( $no_artifact_state['failures'] ?? 0 ) > 0 && ( $no_artifact_state['artifact_retention']['pruned'] ?? 0 ) > 0 && is_array( $no_artifact_dirs ) && 0 === count( $no_artifact_dirs ),
+	$no_artifact_runner['stdout'] . $no_artifact_runner['stderr'] . json_encode( $no_artifact_state['artifact_retention'] ?? null )
+);
+remove_tree( $no_artifact_dir );
 
 $corrupt_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-corrupt-runner-' . getmypid();
 remove_tree( $corrupt_runner_dir );

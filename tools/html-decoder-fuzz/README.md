@@ -97,6 +97,39 @@ Run indefinitely:
 php tools/html-decoder-fuzz/runner.php --lanes 8 --duration-seconds 0 --max-cases 0
 ```
 
+Long runs keep disk use bounded by default. The runner records aggregate
+counters in `state.json`, writes only newly retained failure exemplars plus
+oracle/fatal events to `summary.ndjson`, and retains at most five failure
+artifact directories for each distinct signature. Per-lane stderr logs are
+capped at 64 KiB each, including reused output directories with existing
+oversized lane logs. Repeated over-cap failures remain counted in `state.json`
+without growing the event log.
+
+When startup verification is unavailable, the runner preserves complete
+existing artifacts instead of pruning them to the cap; without the verifier it
+cannot safely distinguish stale or fake full-shape manifests from valuable
+findings.
+
+Useful retention options:
+
+```sh
+# Preserve the previous verbose event log.
+php tools/html-decoder-fuzz/runner.php --summary-mode all
+
+# Keep only one on-disk exemplar per signature.
+php tools/html-decoder-fuzz/runner.php --max-artifacts-per-signature 1
+
+# Prune every failure artifact and rely on state counters/signatures.
+php tools/html-decoder-fuzz/runner.php --artifact-retention none
+
+# Keep every failure artifact for a short diagnostic run.
+php tools/html-decoder-fuzz/runner.php --artifact-retention all
+
+# Raise or disable per-lane stderr capture.
+php tools/html-decoder-fuzz/runner.php --max-stderr-bytes 262144
+php tools/html-decoder-fuzz/runner.php --max-stderr-bytes 0
+```
+
 Replay a failure, an input file, or a generated case:
 
 ```sh
@@ -117,14 +150,18 @@ Exit codes everywhere: `0` clean, `1` findings, `2` harness error.
 
 The runner writes under `artifacts/html-decoder-fuzz/run-*` by default:
 
-- `summary.ndjson` with every worker event
+- `summary.ndjson` with retained failure exemplars plus oracle/fatal events by
+  default (`--summary-mode all` preserves every worker event;
+  `--summary-mode none` disables the file)
 - `state.json` with aggregate counters, stop reason, Git metadata, and failure
-  seeds
-- per-lane stderr logs
-- one directory per failing case containing `payload.txt` and a self-contained
+  seeds for retained exemplars, including retained/pruned artifact counts by
+  signature
+- per-lane stderr logs, capped by `--max-stderr-bytes`
+- retained failure directories containing `payload.txt` and a self-contained
   `failure.json` with base64 payload, context, signatures, failure details,
   full expected/got output as base64 for differential failures, environment
-  metadata, and Git metadata
+  metadata, and Git metadata. By default retention is capped per signature;
+  use `--artifact-retention all` to keep every directory.
 
 ## Harness Self-Test
 

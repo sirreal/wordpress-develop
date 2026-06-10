@@ -77,8 +77,94 @@ class Cli {
 	}
 
 	public static function write_file( string $path, string $contents ): bool {
+		if ( self::is_linked_file( $path ) ) {
+			return false;
+		}
+
 		$written = file_put_contents( $path, $contents );
 		return is_int( $written ) && strlen( $contents ) === $written;
+	}
+
+	public static function append_file( string $path, string $contents ): bool {
+		if ( '' === $contents ) {
+			return true;
+		}
+		if ( self::is_linked_file( $path ) ) {
+			return false;
+		}
+
+		$written = file_put_contents( $path, $contents, FILE_APPEND );
+		return is_int( $written ) && strlen( $contents ) === $written;
+	}
+
+	public static function is_linked_file( string $path ): bool {
+		if ( is_link( $path ) ) {
+			return true;
+		}
+		if ( ! file_exists( $path ) || is_dir( $path ) ) {
+			return false;
+		}
+		if ( ! is_file( $path ) ) {
+			return true;
+		}
+
+		$stat = @lstat( $path );
+		return is_array( $stat ) && isset( $stat['nlink'] ) && $stat['nlink'] > 1;
+	}
+
+	public static function failure_signature_key( array $signatures ): string {
+		$normalized = array_map( 'strval', $signatures );
+		sort( $normalized, SORT_STRING );
+		return hash( 'sha256', implode( "\0", $normalized ) );
+	}
+
+	public static function remove_tree( string $path, string $root ): bool {
+		if ( is_link( $path ) || is_file( $path ) ) {
+			$real_root = realpath( $root );
+			$real_parent = realpath( dirname( $path ) );
+			if ( false === $real_root || false === $real_parent ) {
+				return false;
+			}
+
+			$root_prefix = rtrim( $real_root, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR;
+			if ( $real_parent !== $real_root && 0 !== strncmp( $real_parent . DIRECTORY_SEPARATOR, $root_prefix, strlen( $root_prefix ) ) ) {
+				return false;
+			}
+
+			return @unlink( $path );
+		}
+		if ( ! is_dir( $path ) ) {
+			return true;
+		}
+
+		$real_path = realpath( $path );
+		$real_root = realpath( $root );
+		if ( false === $real_path || false === $real_root || $real_path === $real_root ) {
+			return false;
+		}
+
+		$root_prefix = rtrim( $real_root, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR;
+		if ( 0 !== strncmp( $real_path . DIRECTORY_SEPARATOR, $root_prefix, strlen( $root_prefix ) ) ) {
+			return false;
+		}
+
+		$items = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $real_path, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $items as $item ) {
+			$pathname = $item->getPathname();
+			if ( $item->isDir() && ! $item->isLink() ) {
+				if ( ! @rmdir( $pathname ) ) {
+					return false;
+				}
+			} elseif ( ! @unlink( $pathname ) ) {
+				return false;
+			}
+		}
+
+		return @rmdir( $real_path );
 	}
 
 	public static function require_int_at_least( array $options, string $name, int $minimum ): void {
