@@ -408,7 +408,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_push_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || $this->is_tag_closer();
+				$is_virtual            = $this->is_eof_token() || ! isset( $this->state->current_token ) || $this->is_tag_closer();
 				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
 				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
 				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $provenance );
@@ -419,7 +419,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_pop_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || ! $this->is_tag_closer();
+				$is_virtual            = $this->is_eof_token() || ! isset( $this->state->current_token ) || ! $this->is_tag_closer();
 				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
 				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
 				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $provenance );
@@ -5260,6 +5260,20 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/*
 	 * Internal helpers
 	 */
+
+	/**
+	 * Indicates if the Tag Processor has consumed all input.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return bool Whether the current token is the end-of-file token.
+	 */
+	private function is_eof_token(): bool {
+		return (
+			WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $this->parser_state ||
+			WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state
+		);
+	}
 
 	/**
 	 * Creates a new bookmark for the currently-matched token and returns the generated name.

@@ -368,6 +368,14 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 				'<html><title>x</title><template><table><tr><td>x',
 				'<html><head><title>x</title><template><table><tbody><tr><td>x</td></tr></tbody></table></template></head><body></body></html>',
 			),
+			'Ignored BODY in TEMPLATE at EOF'    => array(
+				'<template><body>',
+				'<html><head><template></template></head><body></body></html>',
+			),
+			'Ignored BODY closer in NOSCRIPT'    => array(
+				'<noscript></body>',
+				'<html><head><noscript></noscript></head><body></body></html>',
+			),
 		);
 	}
 
