@@ -538,6 +538,39 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that an HTML heading end tag inside a MathML text integration
+	 * point is ignored, so following content stays inside the integration point.
+	 *
+	 * The `</h2>` is dispatched through the foreign-content rules, which walk up
+	 * to the HTML-namespace `H2` and hand off to the "in body" heading end-tag
+	 * steps. Those require the heading to be in scope, but a MathML text
+	 * integration point (`MI`) is a scope boundary, so `H2` is not in scope and
+	 * the end tag is dropped. The following `<x-0>` is therefore inserted into
+	 * `MI` rather than becoming a sibling of `H2`.
+	 *
+	 * This matches the HTML specification and browsers (verified against
+	 * Chromium); PHP's `Dom\HTMLDocument` reparents `<x-0>` out of `MI`, which is
+	 * a limitation of that parser, not of the HTML API.
+	 *
+	 * @see https://software.hixie.ch/utilities/js/live-dom-viewer/?%3Ch2%3E%3Cmath%3E%3Cmi%3Ea%3C%2Fh2%3E%3Cx-0%3Eb%3C%2Fx-0%3E
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 */
+	public function test_heading_end_tag_in_mathml_text_integration_point_is_ignored() {
+		$processor = WP_HTML_Processor::create_fragment( '<h2><math><mi>a</h2><x-0>b</x-0>' );
+
+		$this->assertTrue( $processor->next_tag( 'X-0' ), 'Failed to find the X-0 element following the ignored heading end tag.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'H2', 'MATH', 'MI', 'X-0' ),
+			$processor->get_breadcrumbs(),
+			'The X-0 element should remain inside the MathML MI text integration point because the </h2> end tag is not in scope and is ignored.'
+		);
+	}
+
+	/**
 	 * Ensures that an outer A element removed from the stack of open elements
 	 * remains visitable as a virtual closer after its existing child subtree closes.
 	 *
