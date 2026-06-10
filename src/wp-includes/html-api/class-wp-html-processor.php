@@ -231,7 +231,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Whether the end-of-file token has been processed through the insertion modes.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @var bool
 	 */
@@ -5264,7 +5264,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Indicates if the Tag Processor has consumed all input.
 	 *
-	 * @since 7.0.0
+	 * @since 7.1.0
 	 *
 	 * @return bool Whether the current token is the end-of-file token.
 	 */
