@@ -58,8 +58,48 @@ function html_api_fuzz_tree_normalization_run( string $tmp, string $name, string
 	);
 }
 
+/*
+ * Synthetic compare_trees() cases exercise the comparison logic directly and
+ * need no DOM oracle, so they run before the Dom\HTMLDocument guard below.
+ *
+ * The comparison must keep failing on structural differences: scalar
+ * tolerance only applies when the spec substitution explains the entire
+ * differing line.
+ */
+$synthetic_mismatch = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\"\n\n", "<div>\n  \"b\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_mismatch['ok'] ?? null ), 'Structural tree mismatches should still fail.' );
+html_api_fuzz_tree_normalization_assert( is_array( $synthetic_mismatch['firstDifference'] ?? null ) && 2 === ( $synthetic_mismatch['firstDifference']['line'] ?? null ), 'Structural mismatch should report the first differing line.' );
+
+$synthetic_structure_with_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n  \"a\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n  \"b\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_structure_with_nul['ok'] ?? null ), 'Scalar tolerance must not mask structural differences on other lines.' );
+
+$synthetic_tolerated = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_tolerated['ok'] ?? null ), 'Scalar-only differences should be tolerated.' );
+html_api_fuzz_tree_normalization_assert( array( 1 ) === ( $synthetic_tolerated['scalarToleratedLines'] ?? null ), 'Scalar tolerance should report the tolerated line number.' );
+
+$synthetic_nul_with_agreed_cr = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0)\\r\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD)\\r\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_nul_with_agreed_cr['ok'] ?? null ), 'NUL tolerance should not rewrite an agreed escaped CR on the same line.' );
+
+$synthetic_cr_only_wordpress = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"a\\nb\"\n\n", "<div>\n  x=\"a\\rb\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_cr_only_wordpress['ok'] ?? null ), 'A DOM-side CR where WordPress holds LF is not the spec substitution and must fail.' );
+
+$synthetic_cr_before_decoded_lf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\n\"\n\n", "<div>\n  x=\"\\n\\n\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_cr_before_decoded_lf['ok'] ?? null ), 'WordPress CR+LF opposite DOM LF+LF should be tolerated as CR-to-LF plus an agreed LF.' );
+
+$synthetic_raw_crlf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\nX\"\n\n", "<div>\n  x=\"\\nX\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_raw_crlf['ok'] ?? null ), 'Raw CRLF collapsed to a single DOM LF should remain tolerated.' );
+
+$synthetic_backslash_collision = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\\\r\"\n\n", "<div>\n  x=\"\\\\n\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_backslash_collision['ok'] ?? null ), 'A literal backslash followed by r must not be rewritten as a CR escape.' );
+
+$synthetic_repeated_cr_lf = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	"<div>\n  x=\"" . str_repeat( '\\r\\n', 500 ) . "\"\n\n",
+	"<div>\n  x=\"" . str_repeat( '\\n\\n', 500 ) . "\"\n\n"
+);
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_repeated_cr_lf['ok'] ?? null ), 'A long run of raw CR plus decoded LF pairs should be tolerated without exhausting the matcher.' );
+
 if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
-	echo "tree renderer normalization smoke tests skipped: Dom\\HTMLDocument unavailable\n";
+	echo "tree renderer normalization oracle smoke tests skipped: Dom\\HTMLDocument unavailable\n";
 	exit( 0 );
 }
 
@@ -177,12 +217,6 @@ html_api_fuzz_tree_normalization_assert_compares( $nul_with_agreed_cr, 'NUL besi
 html_api_fuzz_tree_normalization_assert( true === ( $nul_with_agreed_cr['comparison']['ok'] ?? null ), 'NUL beside an agreed decoded CR comparison should pass.' );
 html_api_fuzz_tree_normalization_assert( ! empty( $nul_with_agreed_cr['comparison']['scalarToleratedLines'] ), 'NUL beside an agreed decoded CR should report tolerated lines.' );
 
-$synthetic_nul_with_agreed_cr = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0)\\r\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD)\\r\"\n\n" );
-html_api_fuzz_tree_normalization_assert( true === ( $synthetic_nul_with_agreed_cr['ok'] ?? null ), 'NUL tolerance should not rewrite an agreed escaped CR on the same line.' );
-
-$synthetic_cr_only_wordpress = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"a\\nb\"\n\n", "<div>\n  x=\"a\\rb\"\n\n" );
-html_api_fuzz_tree_normalization_assert( false === ( $synthetic_cr_only_wordpress['ok'] ?? null ), 'A DOM-side CR where WordPress holds LF is not the spec substitution and must fail.' );
-
 /*
  * A raw CR immediately followed by a decoded `&#10;` renders as `\r\n` in
  * the WordPress tree while the DOM holds `\n\n`: input preprocessing maps
@@ -208,21 +242,6 @@ $nul_raw_cr_decoded_lf = html_api_fuzz_tree_normalization_run(
 html_api_fuzz_tree_normalization_assert_compares( $nul_raw_cr_decoded_lf, 'NUL plus raw CR before a decoded LF should compare with scalar tolerance.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_raw_cr_decoded_lf['comparison']['ok'] ?? null ), 'NUL plus raw CR before a decoded LF comparison should pass.' );
 
-$synthetic_cr_before_decoded_lf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\n\"\n\n", "<div>\n  x=\"\\n\\n\"\n\n" );
-html_api_fuzz_tree_normalization_assert( true === ( $synthetic_cr_before_decoded_lf['ok'] ?? null ), 'WordPress CR+LF opposite DOM LF+LF should be tolerated as CR-to-LF plus an agreed LF.' );
-
-$synthetic_raw_crlf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\nX\"\n\n", "<div>\n  x=\"\\nX\"\n\n" );
-html_api_fuzz_tree_normalization_assert( true === ( $synthetic_raw_crlf['ok'] ?? null ), 'Raw CRLF collapsed to a single DOM LF should remain tolerated.' );
-
-$synthetic_backslash_collision = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\\\r\"\n\n", "<div>\n  x=\"\\\\n\"\n\n" );
-html_api_fuzz_tree_normalization_assert( false === ( $synthetic_backslash_collision['ok'] ?? null ), 'A literal backslash followed by r must not be rewritten as a CR escape.' );
-
-$synthetic_repeated_cr_lf = \HtmlApiFuzz\TreeRenderer::compare_trees(
-	"<div>\n  x=\"" . str_repeat( '\\r\\n', 500 ) . "\"\n\n",
-	"<div>\n  x=\"" . str_repeat( '\\n\\n', 500 ) . "\"\n\n"
-);
-html_api_fuzz_tree_normalization_assert( true === ( $synthetic_repeated_cr_lf['ok'] ?? null ), 'A long run of raw CR plus decoded LF pairs should be tolerated without exhausting the matcher.' );
-
 /*
  * NUL attributes whose scrubbed name sorts differently from the raw name
  * must align with the DOM oracle ordering: sorting uses scrubbed names.
@@ -235,21 +254,5 @@ $nul_attribute_sort = html_api_fuzz_tree_normalization_run(
 );
 html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_sort, 'NUL attribute names should sort by scrubbed name on both sides.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_sort['comparison']['ok'] ?? null ), 'NUL attribute sort comparison should pass.' );
-
-/*
- * The comparison itself must keep failing on structural differences:
- * scalar tolerance only applies when the spec substitution explains the
- * entire differing line.
- */
-$synthetic_mismatch = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\"\n\n", "<div>\n  \"b\"\n\n" );
-html_api_fuzz_tree_normalization_assert( false === ( $synthetic_mismatch['ok'] ?? null ), 'Structural tree mismatches should still fail.' );
-html_api_fuzz_tree_normalization_assert( is_array( $synthetic_mismatch['firstDifference'] ?? null ) && 2 === ( $synthetic_mismatch['firstDifference']['line'] ?? null ), 'Structural mismatch should report the first differing line.' );
-
-$synthetic_structure_with_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n  \"a\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n  \"b\"\n\n" );
-html_api_fuzz_tree_normalization_assert( false === ( $synthetic_structure_with_nul['ok'] ?? null ), 'Scalar tolerance must not mask structural differences on other lines.' );
-
-$synthetic_tolerated = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n\n" );
-html_api_fuzz_tree_normalization_assert( true === ( $synthetic_tolerated['ok'] ?? null ), 'Scalar-only differences should be tolerated.' );
-html_api_fuzz_tree_normalization_assert( array( 1 ) === ( $synthetic_tolerated['scalarToleratedLines'] ?? null ), 'Scalar tolerance should report the tolerated line number.' );
 
 echo "tree renderer normalization smoke tests passed\n";
