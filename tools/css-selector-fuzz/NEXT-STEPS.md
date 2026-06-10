@@ -167,7 +167,10 @@ keep-failing) to a minimal reproducer. Wire into `replay.php` or a new
   a fuzzer-oracle fix — never left ambiguous.
 - Metamorphic invariants in place and passing.
 - Positive-match rate for combinator selectors materially raised (path-directed
-  generation); match assertions are mostly non-vacuous.
+  generation): ~68% in that bucket vs ~14% before, so the combinator/breadcrumb
+  walker is genuinely exercised. (Aggregate across all buckets remains ~62%
+  vacuous `[] == []`, by design — the negative-oriented and parse-focused
+  buckets are intentionally mostly empty-set; see `README.md`.)
 - Minimizer produces minimal repros automatically.
 - A clean multi-thousand-seed run with all signatures triaged; `FINDINGS.md`
   updated with any new bugs (each with a minimal repro and a one-line fix

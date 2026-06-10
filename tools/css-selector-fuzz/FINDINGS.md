@@ -9,6 +9,11 @@ No new bugs surfaced beyond these three, and no fuzzer-side (oracle or
 generator) defect surfaced: with all three fixes applied a 5000-seed run is
 completely clean, and the lexbor differential (third independent oracle) agreed
 with the reference matcher on every compared no-quirks case (0 `lexbor-divergence`).
+Caveats on the strength of that agreement: roughly half of the `compared`
+cases (and ~62% of all match assertions across buckets) are vacuous `[] == []`;
+quirks-mode class/ID matching is excluded from the differential (lexbor #368)
+and so rests on `ReferenceMatcher` alone. See `README.md` for the full
+disclosure.
 
 Reproduce any case: `php tools/css-selector-fuzz/replay.php --selector '<sel>' [--html '<html>']`.
 Auto-minimize a failing seed: `php tools/css-selector-fuzz/minimize.php --seed <seed>`

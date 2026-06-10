@@ -35,9 +35,16 @@ produces the same document, the same selector, and the same verdict.
      match that element — or flipped into a near-miss (wrong type/class/attr
      guarantees a non-match; loosening `>` to descendant must keep matching).
      The guarantee is asserted against the reference matcher
-     (`path-expectation`), making most match assertions non-vacuous:
-     measured positive-match rate for combinator selectors is ~68% in this
-     bucket vs ~14% in `supported-complex`.
+     (`path-expectation`). Within this bucket ~67% of match assertions are
+     non-vacuous (positive-match rate ~68% for combinator selectors, vs ~14%
+     in `supported-complex`). Across *all* buckets ~38% of match assertions
+     are non-vacuous: the negative-oriented buckets (`unsupported`,
+     `invalid`, much of `supported-*`) and `edge-escape` (which targets the
+     parse/escape-decode path, not matching) are intentionally mostly
+     empty-set, so the aggregate `[] == []` rate is ~62%. The point of
+     path-directed generation is that the *combinator/breadcrumb* walker —
+     the part most likely to harbor a matching bug — is now exercised with
+     real depth, not that every assertion is non-vacuous.
    - `unsupported` — valid CSS the API intentionally rejects (pseudo-classes
      and -elements, `+`/`~`/`||` combinators, namespaces, non-type context
      selectors); must not parse.
@@ -80,8 +87,13 @@ produces the same document, the same selector, and the same verdict.
      the selector layer, not tree construction. Verdicts: `lexbor-divergence`
      (lexbor ≠ reference) is a fuzzer-oracle problem; `match-mismatch-html`
      with no accompanying divergence means reference == lexbor ≠ WP — a
-     high-confidence WP finding.
+     high-confidence WP finding. (Roughly half of `compared` cases are
+     themselves non-vacuous; the rest assert `[] == []` on both engines.)
    - Repeating a case yields a byte-identical result digest (determinism).
+     Note the digest covers the WP-under-test surface (selector, html,
+     parse-nullness, ASTs, failure invariants) but **not** the lexbor
+     oracle's own output, so it would not flag a flaky lexbor result that
+     never escalates to a `lexbor-divergence` failure.
 
 ## lexbor harness
 
@@ -107,7 +119,14 @@ Known lexbor issues compensated for at this pin:
   case-sensitive). Detected by a startup probe; when present, lexbor is
   compared against the reference matcher run with quirks-style class/ID
   folding, and quirks-mode documents are excluded from the differential
-  entirely (the reference matcher is the sole quirks authority).
+  entirely. **Consequence — a real coverage hole:** quirks-mode class/ID
+  matching has no independent third oracle. `ReferenceMatcher` is the sole
+  authority there, and it encodes the same "ASCII-only case fold in quirks"
+  reading WP does (both fold via ASCII-only lowercasing), so if that reading
+  is wrong they would be wrong identically and lexbor — the one engine that
+  could disagree — is excluded. This is inherent to lexbor #368 being open;
+  it is the weakest-covered behavior in the suite and is called out here
+  rather than papered over.
 - lexbor rejects uppercase `I`/`S` attribute-selector modifiers, and its
   non-ASCII ident-codepoint table omits U+00B7 and U+00C0–U+00F6 (it
   starts at U+00F8), rejecting e.g. `.Über` while accepting `.über`.
