@@ -28,6 +28,13 @@ namespace CssSelectorFuzz;
  *  - select-on-null:          select() returned true for an unparseable selector.
  *  - processor-error:         the processor entered an error/unsupported state.
  *  - case-determinism:        running the full case twice gave different digests.
+ *  - metamorphic-parse:       a meaning-preserving transform of a parseable
+ *                             selector no longer parses.
+ *  - metamorphic-ast:         an AST-preserving transform parsed to a
+ *                             different AST.
+ *  - metamorphic-mismatch:    a meaning-preserving transform selected a
+ *                             different element set than the original.
+ *  - metamorphic-error:       parsing/matching a transformed selector raised.
  */
 class Worker {
 
@@ -172,9 +179,10 @@ class Worker {
 
 		// --- Match phase ---------------------------------------------------
 
+		$html_matches = null;
 		if ( null !== $complex_ast ) {
-			$expected = ReferenceMatcher::expected_html_processor_matches( $complex_ast, $document['model'], $document['quirks'] );
-			self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
+			$expected     = ReferenceMatcher::expected_html_processor_matches( $complex_ast, $document['model'], $document['quirks'] );
+			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
 		} elseif ( null === $complex_list && null === $complex_error ) {
 			self::check_select_rejection( 'html', $selector_string, $document, $record );
 		}
@@ -184,6 +192,15 @@ class Worker {
 			self::check_select_matches( 'tag', $selector_string, $document, $expected, $record );
 		} elseif ( null === $compound_list && null === $compound_error ) {
 			self::check_select_rejection( 'tag', $selector_string, $document, $record );
+		}
+
+		// --- Metamorphic phase ----------------------------------------------
+		// Oracle-free relations: meaning-preserving transforms of the selector
+		// must select exactly the same elements. Run only on otherwise-clean
+		// cases so a single root cause does not multiply into noise.
+
+		if ( null !== $complex_ast && null !== $html_matches && array() === $failures ) {
+			self::check_metamorphic( $complex_ast, $html_matches, $document, $prng->fork( 'metamorph' ), $record );
 		}
 
 		$digest = sha1(
@@ -304,19 +321,17 @@ class Worker {
 	}
 
 	/**
-	 * Runs a select() loop on a parseable selector and compares the match set
-	 * against the reference matcher.
+	 * Runs a select() loop over the document, collecting matched data-fids.
 	 *
 	 * @param string $target 'html' or 'tag'.
+	 * @return array{0: string[]|null, 1: \Throwable|null}
 	 */
-	private static function check_select_matches( string $target, string $selector_string, array $document, array $expected, callable $record ): void {
-		Bootstrap::reset_doing_it_wrong();
-
-		list( $actual, $error ) = self::guard(
-			static function () use ( $target, $selector_string, $document ) {
+	private static function collect_matches( string $target, string $selector_string, string $html ): array {
+		return self::guard(
+			static function () use ( $target, $selector_string, $html ) {
 				$processor = 'html' === $target
-					? \WP_HTML_Processor::create_full_parser( $document['html'] )
-					: new \WP_HTML_Tag_Processor( $document['html'] );
+					? \WP_HTML_Processor::create_full_parser( $html )
+					: new \WP_HTML_Tag_Processor( $html );
 
 				$matches    = array();
 				$iterations = 0;
@@ -340,6 +355,19 @@ class Worker {
 				return $matches;
 			}
 		);
+	}
+
+	/**
+	 * Runs a select() loop on a parseable selector and compares the match set
+	 * against the reference matcher.
+	 *
+	 * @param string $target 'html' or 'tag'.
+	 * @return string[]|null The actual match set, or null when matching failed.
+	 */
+	private static function check_select_matches( string $target, string $selector_string, array $document, array $expected, callable $record ): ?array {
+		Bootstrap::reset_doing_it_wrong();
+
+		list( $actual, $error ) = self::collect_matches( $target, $selector_string, $document['html'] );
 
 		if ( null !== $error ) {
 			$record(
@@ -349,7 +377,7 @@ class Worker {
 					'error'  => self::describe_throwable( $error ),
 				)
 			);
-			return;
+			return null;
 		}
 
 		$doing_it_wrong = Bootstrap::doing_it_wrong_calls();
@@ -371,6 +399,111 @@ class Worker {
 					'actual'   => $actual,
 				)
 			);
+		}
+
+		return $actual;
+	}
+
+	/**
+	 * Checks the metamorphic relations: each meaning-preserving transform of
+	 * the parsed selector must parse, must (for AST-preserving transforms)
+	 * parse to exactly the transformed AST, and must select exactly the same
+	 * elements the original selector selected.
+	 *
+	 * @param array    $complex_ast  Canonical AST of the original selector.
+	 * @param string[] $html_matches The original's WP_HTML_Processor match set.
+	 */
+	private static function check_metamorphic( array $complex_ast, array $html_matches, array $document, Prng $prng, callable $record ): void {
+		foreach ( Metamorph::variants( $complex_ast, $prng ) as $variant ) {
+			$transform        = $variant['name'];
+			$variant_selector = $variant['selector'];
+
+			list( $variant_list, $parse_error ) = self::guard(
+				static function () use ( $variant_selector ) {
+					return \WP_CSS_Complex_Selector_List::from_selectors( $variant_selector );
+				}
+			);
+
+			if ( null !== $parse_error ) {
+				$record(
+					'metamorphic-error',
+					array(
+						'transform' => $transform,
+						'selector'  => printable_bytes( $variant_selector ),
+						'error'     => self::describe_throwable( $parse_error ),
+					)
+				);
+				continue;
+			}
+
+			if ( null === $variant_list ) {
+				$record(
+					'metamorphic-parse',
+					array(
+						'transform' => $transform,
+						'selector'  => printable_bytes( $variant_selector ),
+					)
+				);
+				continue;
+			}
+
+			if ( $variant['astMustMatch'] ) {
+				list( $variant_ast, $shape_error ) = self::guard(
+					static function () use ( $variant_list ) {
+						return AstExtractor::from_complex_list( $variant_list );
+					}
+				);
+				if ( null !== $shape_error ) {
+					$record(
+						'metamorphic-error',
+						array(
+							'transform' => $transform,
+							'selector'  => printable_bytes( $variant_selector ),
+							'error'     => self::describe_throwable( $shape_error ),
+						)
+					);
+					continue;
+				}
+				if ( $variant_ast !== $variant['ast'] ) {
+					$record(
+						'metamorphic-ast',
+						array(
+							'transform'   => $transform,
+							'selector'    => printable_bytes( $variant_selector ),
+							'expectedAst' => $variant['ast'],
+							'parsedAst'   => $variant_ast,
+						)
+					);
+					continue;
+				}
+			}
+
+			Bootstrap::reset_doing_it_wrong();
+			list( $variant_matches, $match_error ) = self::collect_matches( 'html', $variant_selector, $document['html'] );
+
+			if ( null !== $match_error ) {
+				$record(
+					'metamorphic-error',
+					array(
+						'transform' => $transform,
+						'selector'  => printable_bytes( $variant_selector ),
+						'error'     => self::describe_throwable( $match_error ),
+					)
+				);
+				continue;
+			}
+
+			if ( $variant_matches !== $html_matches ) {
+				$record(
+					'metamorphic-mismatch',
+					array(
+						'transform' => $transform,
+						'selector'  => printable_bytes( $variant_selector ),
+						'expected'  => $html_matches,
+						'actual'    => $variant_matches,
+					)
+				);
+			}
 		}
 	}
 
@@ -527,6 +660,9 @@ class Worker {
 		}
 		if ( isset( $failure['detail']['target'] ) ) {
 			$parts[] = $failure['detail']['target'];
+		}
+		if ( isset( $failure['detail']['transform'] ) ) {
+			$parts[] = $failure['detail']['transform'];
 		}
 		if ( isset( $failure['detail']['error']['class'] ) ) {
 			$parts[] = $failure['detail']['error']['class'];

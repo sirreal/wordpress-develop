@@ -36,10 +36,23 @@ class SelectorGenerator {
 	private $prng;
 	/** @var array */
 	private $pools;
+	/** @var bool Escape ident codepoints aggressively when rendering. */
+	private $escape_boost = false;
 
 	private function __construct( Prng $prng, array $pools ) {
 		$this->prng  = $prng;
 		$this->pools = $pools;
+	}
+
+	/**
+	 * Renders a canonical complex-list AST to a selector string. Parsing the
+	 * result must yield exactly the given AST. With $escape_boost, idents are
+	 * escaped far more often (exercises the escape decoder on no-op escapes).
+	 */
+	public static function render( Prng $prng, array $list_ast, bool $escape_boost = false ): string {
+		$generator               = new self( $prng, array() );
+		$generator->escape_boost = $escape_boost;
+		return $generator->render_complex_list( $list_ast );
 	}
 
 	/**
@@ -520,7 +533,7 @@ class SelectorGenerator {
 				|| ( 1 === $i && '-' === $points[0][0] && $is_digit )
 				|| ( 1 === $count && '-' === $char );
 
-			if ( $must_escape || $this->prng->chance( 8 ) ) {
+			if ( $must_escape || $this->prng->chance( $this->escape_boost ? 50 : 8 ) ) {
 				$out .= $this->render_escape( $char, $cp );
 			} else {
 				$out .= $char;

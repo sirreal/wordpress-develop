@@ -37,6 +37,15 @@ produces the same document, the same selector, and the same verdict.
      `_doing_it_wrong` fires exactly once per call (also via the parse
      cache), and the processor remains usable.
    - The processor ends with no `get_last_error()`/unsupported state.
+   - Metamorphic relations (oracle-free, run on otherwise-clean cases whose
+     selector parsed): meaning-preserving transforms of the selector must
+     select exactly the same elements as the original, and AST-preserving
+     transforms must parse to exactly the transformed AST. Transforms:
+     re-render with fresh whitespace/quoting and aggressive no-op escapes,
+     ASCII-case-fold of type names, subclass reordering within a compound,
+     explicit `*` for an omitted type, and selector-list branch duplication.
+     Skipped for ASTs containing invalid UTF-8 (reachable only from
+     chaos/mutated inputs), which the renderer cannot round-trip.
    - Repeating a case yields a byte-identical result digest (determinism).
 
 ## Usage
