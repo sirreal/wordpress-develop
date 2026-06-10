@@ -43,6 +43,9 @@ class Worker {
 
 	const SELECT_ITERATION_LIMIT = 10000;
 
+	/** Metamorphic PRNG draws tried per pair in run_pair (minimizer). */
+	const PAIR_METAMORPH_DRAWS = 12;
+
 	/**
 	 * Runs a single fuzz case.
 	 *
@@ -328,6 +331,167 @@ class Worker {
 			'selector' => $selector_string,
 			'html'     => $document['html'],
 			'lexbor'   => $lexbor_state,
+		);
+	}
+
+	/**
+	 * Runs the SELF-CONTAINED invariants on an explicit ( selector, html )
+	 * pair — no generated model, intended AST, or parse expectation. This is
+	 * what the minimizer drives: every checked property is computable from
+	 * the pair alone ( WP select() vs the reference matcher over WP's own
+	 * parsed AST and the captured tree; metamorphic relations; the lexbor
+	 * differential; parse/shape/cross-grammar invariants; rejection
+	 * bookkeeping for unparseable selectors ).
+	 *
+	 * Bug 1 surfaces here as metamorphic-ast, Bug 2 as match-mismatch-*,
+	 * Bug 3 as metamorphic-parse — so all three known bugs are minimizable
+	 * without the generator.
+	 *
+	 * @return array{
+	 *     failures: array,
+	 *     signatures: string[],
+	 * }
+	 */
+	public static function run_pair( string $selector_string, string $html, ?string $target = null ): array {
+		Bootstrap::load();
+
+		$failures = array();
+		$record   = static function ( string $invariant, array $detail ) use ( &$failures ) {
+			$failures[] = array(
+				'invariant' => $invariant,
+				'detail'    => $detail,
+			);
+		};
+
+		// When the minimizer fixes a target signature, the metamorphic loop
+		// ( the only expensive, multi-draw stage ) is only worth running if
+		// the target is itself a metamorphic signature.
+		$target_invariant     = null === $target ? null : substr( strrchr( $target, ':' ), 1 );
+		$target_is_metamorph  = null !== $target_invariant && 0 === strpos( $target_invariant, 'metamorphic' );
+		$has_target_signature = static function () use ( &$failures, $target ) {
+			if ( null === $target ) {
+				return false;
+			}
+			foreach ( $failures as $failure ) {
+				if ( self::signature( $failure ) === $target ) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		list( $capture, $capture_error ) = self::guard(
+			static function () use ( $html ) {
+				return TreeCapture::capture( $html );
+			}
+		);
+
+		$rows     = null;
+		$tag_rows = null;
+		$quirks   = false;
+		if ( null === $capture_error && null === $capture['error'] ) {
+			$rows     = $capture['htmlRows'];
+			$tag_rows = $capture['tagRows'];
+			$quirks   = $capture['quirks'];
+		}
+
+		$document = array( 'html' => $html );
+
+		list( $compound_list, $compound_error ) = self::guard(
+			static function () use ( $selector_string ) {
+				return \WP_CSS_Compound_Selector_List::from_selectors( $selector_string );
+			}
+		);
+		list( $complex_list, $complex_error )   = self::guard(
+			static function () use ( $selector_string ) {
+				return \WP_CSS_Complex_Selector_List::from_selectors( $selector_string );
+			}
+		);
+
+		if ( null !== $compound_error ) {
+			$record( 'parse-error', array( 'grammar' => 'compound', 'error' => self::describe_throwable( $compound_error ) ) );
+		}
+		if ( null !== $complex_error ) {
+			$record( 'parse-error', array( 'grammar' => 'complex', 'error' => self::describe_throwable( $complex_error ) ) );
+		}
+		if ( null !== $compound_list && null === $complex_list && null === $complex_error ) {
+			$record( 'compound-implies-complex', array() );
+		}
+
+		$compound_ast = null;
+		$complex_ast  = null;
+		if ( null !== $compound_list ) {
+			list( $compound_ast, $shape_error ) = self::guard(
+				static function () use ( $compound_list ) {
+					return AstExtractor::from_compound_list( $compound_list );
+				}
+			);
+			if ( null !== $shape_error ) {
+				$record( 'ast-shape', array( 'grammar' => 'compound', 'error' => self::describe_throwable( $shape_error ) ) );
+			}
+		}
+		if ( null !== $complex_list ) {
+			list( $complex_ast, $shape_error ) = self::guard(
+				static function () use ( $complex_list ) {
+					return AstExtractor::from_complex_list( $complex_list );
+				}
+			);
+			if ( null !== $shape_error ) {
+				$record( 'ast-shape', array( 'grammar' => 'complex', 'error' => self::describe_throwable( $shape_error ) ) );
+			}
+		}
+		if ( null !== $compound_ast && null !== $complex_ast && $compound_ast !== $complex_ast ) {
+			$record( 'ast-cross-grammar', array( 'compoundAst' => $compound_ast, 'complexAst' => $complex_ast ) );
+		}
+
+		$html_matches = null;
+		if ( null !== $complex_ast && null !== $rows ) {
+			$expected     = ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, $quirks );
+			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
+			self::check_lexbor_differential( $complex_ast, $selector_string, $document, $rows, $quirks, $expected, $record );
+		} elseif ( null === $complex_list && null === $complex_error && null !== $rows ) {
+			self::check_select_rejection( 'html', $selector_string, $document, $record );
+		}
+
+		if ( null !== $compound_ast && null !== $tag_rows ) {
+			$expected = ReferenceMatcher::expected_tag_matches_rows( $compound_ast, $tag_rows );
+			self::check_select_matches( 'tag', $selector_string, $document, $expected, $record );
+		} elseif ( null === $compound_list && null === $compound_error && null !== $tag_rows ) {
+			self::check_select_rejection( 'tag', $selector_string, $document, $record );
+		}
+
+		$run_metamorph = ( null === $target || $target_is_metamorph )
+			&& null !== $complex_ast && null !== $html_matches && array() === $failures;
+		if ( $run_metamorph ) {
+			/*
+			 * Metamorphic transforms randomize escapes / case / order, so a
+			 * transform-sensitive bug ( e.g. Bug 1 and Bug 3 ) only fires for
+			 * some PRNG draws. run_case sees one draw; here several fixed
+			 * draws are tried so minimization can reliably preserve such a
+			 * signature regardless of which draw first exposed it. With a
+			 * target fixed, stop at the first draw that reproduces it.
+			 */
+			for ( $i = 0; $i < self::PAIR_METAMORPH_DRAWS && array() === $failures; $i++ ) {
+				// A FIXED draw seed ( not derived from the pair ) keeps the
+				// test monotonic under shrinking: the same coin-flips apply to
+				// whatever AST survives, so a smaller selector that still has
+				// the bug reproduces the same transform signature.
+				$metamorph_prng = new Prng( 'css-selector-fuzz-minimize', "metamorph:{$i}" );
+				self::check_metamorphic( $complex_ast, $html_matches, $document, $metamorph_prng, $record );
+				if ( $has_target_signature() ) {
+					break;
+				}
+			}
+		}
+
+		$signatures = array();
+		foreach ( $failures as $failure ) {
+			$signatures[] = self::signature( $failure );
+		}
+
+		return array(
+			'failures'   => $failures,
+			'signatures' => array_values( array_unique( $signatures ) ),
 		);
 	}
 

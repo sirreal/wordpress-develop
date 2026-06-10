@@ -123,6 +123,17 @@ Probe a specific selector:
 
     php tools/css-selector-fuzz/replay.php --selector 'section > div.cls' --html '<section><div class=cls></div></section>'
 
+Minimize a failing case to a small reproducer (delta-debugging; shrinks
+both the selector and the HTML while preserving a failure signature):
+
+    php tools/css-selector-fuzz/minimize.php --seed 1234
+    php tools/css-selector-fuzz/minimize.php --selector 'sel' --html '<…>' --signature match-mismatch
+
+The minimizer drives `Worker::run_pair`, which checks only self-contained
+invariants — those computable from the (selector, html) pair without the
+generator's intended AST. All three known bugs reduce to one: Bug 1 →
+`metamorphic-ast`, Bug 2 → `match-mismatch-html`, Bug 3 → `metamorphic-parse`.
+
 Run a batch in-process (no isolation, faster):
 
     php tools/css-selector-fuzz/worker.php --start-seed 1 --count 500
