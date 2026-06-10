@@ -160,6 +160,30 @@ html_api_fuzz_tree_normalization_assert( false !== $cr_attribute_value_tree, 'CR
 html_api_fuzz_tree_normalization_assert( false !== strpos( $cr_attribute_value_tree, "}ig-pe]j:us2c0=\"\\r\"" ), 'CR attribute values should render raw as escaped CR.' );
 
 /*
+ * A decoded CR (from a character reference such as `&#13;`) survives input
+ * preprocessing identically on both sides, so it appears as `\r` in both
+ * trees. NUL tolerance on the same line must not rewrite that agreed `\r`:
+ * CR may only map to LF where the DOM side actually holds the normalized LF.
+ *
+ * Fuzzer signature 1d48d2e9a6bc: `><title\t...=\0)&#13;">(</title>`.
+ */
+$nul_with_agreed_cr = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'nul-with-agreed-cr',
+	'Pjx0aXRsZQk3UiV8Sjl1V0hofVU9ACkmIzEzOyI+KDwvdGl0bGU+',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert_compares( $nul_with_agreed_cr, 'NUL beside an agreed decoded CR should compare with scalar tolerance.' );
+html_api_fuzz_tree_normalization_assert( true === ( $nul_with_agreed_cr['comparison']['ok'] ?? null ), 'NUL beside an agreed decoded CR comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $nul_with_agreed_cr['comparison']['scalarToleratedLines'] ), 'NUL beside an agreed decoded CR should report tolerated lines.' );
+
+$synthetic_nul_with_agreed_cr = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0)\\r\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD)\\r\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_nul_with_agreed_cr['ok'] ?? null ), 'NUL tolerance should not rewrite an agreed escaped CR on the same line.' );
+
+$synthetic_cr_only_wordpress = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"a\\nb\"\n\n", "<div>\n  x=\"a\\rb\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_cr_only_wordpress['ok'] ?? null ), 'A DOM-side CR where WordPress holds LF is not the spec substitution and must fail.' );
+
+/*
  * NUL attributes whose scrubbed name sorts differently from the raw name
  * must align with the DOM oracle ordering: sorting uses scrubbed names.
  */
