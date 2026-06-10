@@ -14,6 +14,7 @@ const HTML_API_FUZZ_CODEX_CLASSIFICATIONS = array(
 
 function html_api_fuzz_codex_usage(): void {
 	echo "Usage: php tools/html-api-fuzz/codex-triage-orchestrator.php --triage-dir DIR [--diagnostics-dir DIR] [--repo-root DIR] [--codex-bin BIN] [--model MODEL] [--interval-seconds N] [--max-concurrent N] [--max-launch-per-pass N] [--stale-after-seconds N] [--once] [--mode classify|fix] [--sandbox read-only|workspace-write|danger-full-access]\n";
+	echo "A STOP file in the run directory (from the watcher state's runDir, falling back to the triage dir's parent) stops new launches; running jobs finish before exit.\n";
 }
 
 function html_api_fuzz_codex_validate_cli_options( array $options ): void {
@@ -833,7 +834,25 @@ function html_api_fuzz_codex_main( array $argv ): int {
 				unset( $running[ $key ] );
 			}
 
-			$can_scan = ! $args['once'] || ! $scanned;
+			/*
+			 * Graceful stop: a STOP file in the run directory stops new
+			 * launches; running jobs finish before the orchestrator exits.
+			 * The run directory comes from the watcher state when available
+			 * (the triage dir may live outside the run dir), matching how
+			 * launches resolve it below.
+			 */
+			$stop_run_dir = dirname( $args['triageDir'] );
+			$stop_state   = html_api_fuzz_codex_read_json( $state_path );
+			if ( is_array( $stop_state ) && is_string( $stop_state['runDir'] ?? null ) && ! html_api_fuzz_codex_path_has_control_chars( $stop_state['runDir'] ) ) {
+				$stop_run_dir = html_api_fuzz_codex_normalize_path( $stop_state['runDir'] );
+			}
+			$stop_file_present = is_file( html_api_fuzz_codex_path_join( $stop_run_dir, 'STOP' ) );
+			if ( $stop_file_present && empty( $running ) ) {
+				echo "stop requested; exiting\n";
+				break;
+			}
+
+			$can_scan = ( ! $args['once'] || ! $scanned ) && ! $stop_file_present;
 			if ( $can_scan ) {
 				$available = max( 0, $args['maxConcurrent'] - count( $running ) );
 				$launched  = 0;
