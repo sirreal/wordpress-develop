@@ -2837,7 +2837,7 @@ class WP_HTML_Tag_Processor {
 	 * passed through preprocessing before character references decode. Enqueued
 	 * attribute updates are plaintext API values, so they are returned unchanged.
 	 *
-	 * @since 6.9.0
+	 * @since 7.1.0
 	 * @ignore
 	 *
 	 * @param string $name Name of attribute whose value is requested.

@@ -1513,7 +1513,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Serializes decoded text for use in text nodes and attribute values.
 	 *
-	 * @since 6.9.0
+	 * @since 7.1.0
 	 *
 	 * @param string $text Decoded text to serialize.
 	 * @return string Serialized text.
