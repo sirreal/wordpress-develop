@@ -3256,7 +3256,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Parses an "any other end tag" token in the "in body" insertion mode.
 	 *
-	 * @since 6.9.0
+	 * @since 7.1.0
 	 * @ignore
 	 *
 	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
