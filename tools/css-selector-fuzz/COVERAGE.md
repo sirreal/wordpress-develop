@@ -70,6 +70,9 @@ guarantees, or branches for grammar the parser never emits:
   (`consume_escaped_codepoint` for NUL / surrogate / over-max codepoints)
   and the `normalize_selector_input` NUL→U+FFFD and CR/CRLF/FF→LF paths,
   which the structural generators cannot reach.
-- A few `invalid`-bucket templates (`[ a`, `[a="x\`) were added to reach
-  attribute/string parse guards that random structural generation rarely
-  lands on.
+- A few `invalid`-bucket templates (`[ a`, `[a="x\`, `a.`) were added to reach
+  attribute / string / class parse guards that random structural generation
+  rarely lands on. With them the per-file numbers above are **deterministic**
+  at the documented 3000-seed window (e.g. `class-wp-css-class-selector.php`
+  reaches 10/10 reliably rather than depending on whether a bare `.` happened
+  to be sampled).

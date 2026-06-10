@@ -1273,6 +1273,7 @@ class SelectorGenerator {
 						'   ',
 						"\t\n\f ",
 						'.',
+						'a.',
 						'#',
 						'[',
 						']',
