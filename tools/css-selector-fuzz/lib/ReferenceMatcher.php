@@ -172,6 +172,14 @@ class ReferenceMatcher {
 			$word        = substr( $class_value, $at, $word_length );
 			$at         += $word_length;
 
+			/*
+			 * WP_HTML_Tag_Processor::class_list() replaces NUL with U+FFFD in
+			 * each class token before comparison; model that so a class value
+			 * containing a raw NUL matches a `\0`-escaped ( U+FFFD ) selector
+			 * the same way select() does.
+			 */
+			$word = str_replace( "\0", "\u{FFFD}", $word );
+
 			if (
 				$quirks
 					? ascii_strtolower( $word ) === ascii_strtolower( $wanted )

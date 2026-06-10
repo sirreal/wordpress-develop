@@ -649,7 +649,10 @@ class Worker {
 				$iterations = 0;
 				while ( $processor->select( $selector_string ) ) {
 					$fid       = $processor->get_attribute( 'data-fid' );
-					$matches[] = is_string( $fid ) ? $fid : '(missing-fid:' . $processor->get_tag() . ')';
+					// Sanitize identically to TreeCapture/lexbor so a fid with
+					// a control char can never produce a false divergence on
+					// the match path ( unreachable today: fids are integers ).
+					$matches[] = is_string( $fid ) ? TreeCapture::sanitize_fid( $fid ) : '(missing-fid:' . $processor->get_tag() . ')';
 					if ( ++$iterations > self::SELECT_ITERATION_LIMIT ) {
 						throw new \RuntimeException( 'select() did not terminate within the iteration limit.' );
 					}

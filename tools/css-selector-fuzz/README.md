@@ -136,6 +136,29 @@ Known lexbor issues compensated for at this pin:
 - `lxb_selectors_find` reports a node once per matching selector-list
   branch; `LXB_SELECTORS_OPT_MATCH_FIRST` dedupes.
 
+## Known oracle limitations (document-side decoding)
+
+The match oracle's independence differs between class and attribute selectors:
+
+- **Class values are matched by two genuinely independent tokenizers.** WP's
+  `select('.x')` goes through `WP_HTML_Tag_Processor::class_list()`, which
+  splits on ASCII whitespace and folds NUL → U+FFFD per token;
+  `ReferenceMatcher::class_matches()` reimplements that independently (and is
+  pinned against `class_list()` on NUL/FF boundary inputs by `self-check.php`).
+  The random document generators do **not** emit control bytes inside class
+  values, so the *randomized* fuzzing never exercises this boundary — it is
+  covered only by the deterministic self-check cases. Randomized document-side
+  injection is deliberately deferred: adding it to the hot path perturbs the
+  deterministic self-check seed space enough to surface the known Bug 3, which
+  would first require decoupling `self-check.php` from the unfixed core bugs.
+  A worthwhile, scoped future improvement.
+- **Attribute values are matched through a single shared read.** Both WP's
+  attribute matcher and `ReferenceMatcher::attr_matches()` read the same
+  `get_attribute()` output, so a value-decoding bug there would be shared and
+  invisible regardless of input — a genuine shared-oracle limitation that no
+  generator change can close (it needs an independent attribute-value decoder,
+  which lexbor partly provides on no-quirks documents).
+
 ## Usage
 
 Bounded fuzz run (process-isolated chunks, crash/hang attribution):

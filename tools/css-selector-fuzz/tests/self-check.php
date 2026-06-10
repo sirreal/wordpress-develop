@@ -115,6 +115,42 @@ check( array() === select_fids( $known_html, 'section > em' ), 'Known: section >
 check( array( 'e4' ) === select_fids( $known_html, '[data-v|="hello"]' ), 'Known: [data-v|=hello].' );
 check( array( 'e7' ) === select_fids( $known_html, '[lang^="en"]' ), 'Known: [lang^=en].' );
 
+// --- Class-value decode boundary (ReferenceMatcher vs WP class_list) --------
+// WP's class_list() folds NUL -> U+FFFD and treats FF as a separator; the
+// reference matcher reimplements tokenization independently. Pin both engines
+// against each other on these boundary inputs ( exercised deterministically
+// here since the random document generator does not emit control bytes in
+// class values — see README #10 ). Each case also checks the reference matcher
+// agrees with select() over a TreeCapture of the same markup.
+
+function ref_fids( string $html, string $selector ): array {
+	$capture = \CssSelectorFuzz\TreeCapture::capture( $html );
+	$list    = WP_CSS_Complex_Selector_List::from_selectors( $selector );
+	if ( null !== $capture['error'] || null === $list ) {
+		return array( '(error)' );
+	}
+	$ast = \CssSelectorFuzz\AstExtractor::from_complex_list( $list );
+	return \CssSelectorFuzz\ReferenceMatcher::expected_html_matches_rows( $ast, $capture['htmlRows'], $capture['quirks'] );
+}
+
+$nul_html = "<!DOCTYPE html><i data-fid=\"n0\" class=\"foo\x00bar\"></i><b data-fid=\"n1\" class=\"x\x00\"></b>";
+$ff_html  = "<!DOCTYPE html><i data-fid=\"f0\" class=\"alpha\x0Cbeta\"></i>";
+
+$nul_cases = array(
+	array( "class NUL -> FFFD", $nul_html, ".foo\u{FFFD}bar", array( 'n0' ) ),
+	array( "class trailing NUL", $nul_html, ".x\u{FFFD}", array( 'n1' ) ),
+	array( "class raw NUL no-match", $nul_html, '.foobar', array() ),
+	array( "class FF separator (first)", $ff_html, '.alpha', array( 'f0' ) ),
+	array( "class FF separator (second)", $ff_html, '.beta', array( 'f0' ) ),
+);
+foreach ( $nul_cases as $case ) {
+	list( $label, $html, $selector, $expected ) = $case;
+	$wp  = select_fids( $html, $selector );
+	$ref = ref_fids( $html, $selector );
+	check( $expected === $wp, "Decode boundary ({$label}): select() == expected." );
+	check( $ref === $wp, "Decode boundary ({$label}): ReferenceMatcher == select()." );
+}
+
 // --- Worker end-to-end on a few seeds ---------------------------------------
 
 for ( $seed = 1; $seed <= 5; $seed++ ) {

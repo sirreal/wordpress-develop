@@ -9,9 +9,13 @@
  *
  * The minimizer drives Worker::run_pair, which checks only self-contained
  * invariants (computable from the pair alone), so it needs no generator
- * intent. The three known bugs reduce to self-contained signatures:
- * Bug 1 -> metamorphic-ast, Bug 2 -> match-mismatch-html, Bug 3 ->
- * metamorphic-parse.
+ * intent. --seed faithfully minimizes only seeds whose failure is
+ * self-contained; the generator-side invariants (ast-mismatch,
+ * parse-expectation, path-expectation, model-desync) are invisible to
+ * run_pair, so a seed whose failure is only those is refused by default
+ * (each of the three known bugs DOES also surface a self-contained
+ * signature — Bug 1 -> metamorphic-ast, Bug 2 -> match-mismatch-html,
+ * Bug 3 -> metamorphic-parse — reachable via --signature).
  *
  * Usage:
  *   php tools/css-selector-fuzz/minimize.php --seed 1234 [--signature SUBSTR]
@@ -19,8 +23,9 @@
  *
  * Options:
  *   --signature SUBSTR  Target a signature whose id or invariant contains
- *                       SUBSTR (default: the first signature of the seed's
- *                       failure set).
+ *                       SUBSTR. For --seed, also the way to opt into a
+ *                       related self-contained signature when the seed's own
+ *                       failure is generator-side (printed as a retarget).
  *   --max-attempts N    Cap test evaluations (default 4000).
  *   --json              Emit the reproducer as JSON.
  */
