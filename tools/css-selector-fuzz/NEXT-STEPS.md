@@ -1,0 +1,178 @@
+# CSS Selector Fuzzer — Next Steps / Improvement Roadmap
+
+Status: first-generation fuzzer is implemented, validated, and has found three
+real WordPress-core bugs (see `FINDINGS.md`). Design and current coverage are in
+`README.md`. This document is the prioritized plan to take it from "found three
+bugs" to "exhaustive and trustworthy." Do NOT re-explain the existing tool here;
+read `README.md` and `FINDINGS.md` first.
+
+Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
+`html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
+PHP 8.4.21. Everything under `tools/css-selector-fuzz/` is untracked; nothing
+committed. `/artifacts` is gitignored (runner output lives there).
+
+## Measured weaknesses driving this plan
+
+- Match oracle is a hand-reimplementation (`ReferenceMatcher`) by the same author
+  who could share a spec misreading with WP — no third opinion exists today.
+- Positive-match rate is low (measured): supported-compound 39.6% of parseable
+  cases match ≥1 element; supported-complex only **14.5%**; ~72% of all supported
+  cases match nothing. Most match assertions are vacuous `[] == []`.
+- The "structurally safe element set" restriction (needed so `model ==
+  parse-tree` holds) means combinator/breadcrumb matching is only ever tested on
+  clean trees — never on foster-parented / adoption-agency / foreign-content /
+  implied-end-tag restructured trees, which are the hard cases.
+- No metamorphic invariants (the cheapest oracle-free signal class) — absent.
+- Line coverage never measured. Some target branches are provably unreachable by
+  the current generator (e.g. `consume_escaped_codepoint`'s U+FFFD path for
+  null/surrogate/over-max codepoints; the `normalize_selector_input` NUL→U+FFFD
+  path).
+- No automatic minimizer (the sibling `html-api-fuzz` branch ships
+  `tools/html-api-fuzz/minimize.php` as a pattern to copy).
+- Match path only exercises `WP_HTML_Processor::create_full_parser`; fragment
+  contexts and varied quirks-mode triggers (only doctype presence is toggled)
+  are untested.
+
+## Work items, in priority order
+
+### 1. Metamorphic invariants (cheapest, highest signal-per-effort, no deps)
+
+Add oracle-free relations to `Worker::run_case` that must hold for any parseable
+supported selector over any document. For each, transform the selector, assert
+the match set (both processors) is unchanged — or for AST-level ones, assert the
+extracted AST is unchanged:
+
+- ASCII-case-fold a type-selector name → identical matches (type names are
+  case-insensitive).
+- Reorder subclass selectors within a compound (`div.a#b[c]` ≡ any permutation of
+  the subclass part) → identical matches and structurally-equivalent AST.
+- Escape an arbitrary ident codepoint that does not require escaping → identical
+  AST and matches (exercises the escape decoder against the no-op case).
+- Append a redundant universal (`sel` vs `sel:where`-free `*sel` where the type
+  slot is empty → `*` + subclasses) → identical matches.
+- Duplicate a selector-list branch (`a, a`) → identical matches.
+- Whitespace-insert around combinators and commas where insignificant → identical
+  matches.
+
+These need no external engine; they would have independently caught Bug 1.
+
+### 2. Path-directed generation (fix the 14.5% positive-match rate)
+
+Add a generation mode that GUARANTEES positive matches and meaningful negatives:
+
+- Pick a random element in the generated model tree.
+- Synthesize a selector that must match it: type from its tag, subclasses from a
+  subset of its real classes/id/attributes, and (for complex) a context chain
+  drawn from its real ancestor tags with `>`/descendant combinators matching the
+  actual nesting.
+- Emit the matching selector (assert it matches that element) AND near-miss
+  mutations (swap one ancestor combinator `>`↔descendant, drop/extend a class,
+  change one attribute operator) and assert the flip.
+
+This makes the combinator/breadcrumb walker actually exercised with real depth
+and real positive/negative boundaries instead of mostly-empty match sets. Keep
+the existing buckets; add this as a new bucket.
+
+### 3. lexbor differential oracle (the match-oracle correctness ceiling)
+
+Use lexbor as a THIRD, independent oracle — primarily to validate
+`ReferenceMatcher`, secondarily to unlock wilder HTML. Build cost is acceptable
+(confirmed by maintainer). Refs: https://lexbor.com/modules/selectors/ and the
+HTML module for selector matching.
+
+Design:
+
+- C harness linking liblexbor: read many `{html, selector}` cases from stdin
+  (one process, batched — invoked by the runner like the existing PHP worker
+  subprocess; isolate crashes). Parse HTML with `lxb_html_document_parse`, parse
+  the selector with the CSS/selectors module, run `lxb_selectors_find`, and via
+  the callback collect each matched element's unique `data-fid` attribute. Emit
+  one line of matched-fid sets per case. FFI to `liblexbor.so` is an acceptable
+  alternative but a standalone CLI isolates crashes better.
+- Mark every generated element with a unique `data-fid` (the generator already
+  does this).
+- **Tree-equality gate:** only run the differential on cases where WP's tree and
+  lexbor's tree agree (compare the fid→tag→breadcrumb sequence from each). This
+  isolates the SELECTOR layer from HTML tree-construction differences (which are
+  a different fuzzer's concern — see `html-api-fuzz`). Bonus: this gate lets you
+  fuzz ARBITRARY/wild HTML and keep any case where the two trees agree, which
+  relaxes the current "safe element set" restriction and reaches restructured
+  trees the present generator can't produce.
+- Three-way verdict: `reference ≠ lexbor` ⇒ fuzzer-oracle bug (fix the fuzzer);
+  `reference == lexbor ≠ WP` ⇒ high-confidence WP finding.
+
+**CRITICAL CAVEAT — quirks-mode / case-sensitivity:** lexbor has a known
+class/ID case-sensitivity bug — https://github.com/lexbor/lexbor/issues/368.
+WP folds class/ID names ASCII-case-insensitively in QUIRKS mode and
+case-sensitively in no-quirks (`WP_HTML_Tag_Processor::is_quirks_mode()`); type
+names are always case-insensitive. Do NOT trust lexbor on quirks-mode case
+behavior. Restrict the lexbor differential to **no-quirks documents** (emit
+`<!DOCTYPE html>`), and keep `ReferenceMatcher` as the authority for the
+quirks-mode path. Pin the exact lexbor version used and note whether #368 is
+fixed in it. Re-evaluate enabling quirks comparison only after verifying lexbor's
+behavior against that issue.
+
+- Also surface (don't auto-fail) **attribute default case-insensitivity**:
+  Selectors-4/HTML define a set of attributes matched case-insensitively by
+  default; WP appears to implement only explicit `i`/`s` modifiers. lexbor may
+  implement the default set, producing divergence that is either a real WP
+  conformance gap or an intentional subset limitation — triage per case and
+  report.
+
+### 4. Parser-derived oracle tree (decouple "tree right" from "match right")
+
+Instead of asserting `model == parse-tree`, walk the processor ONCE to capture
+the ground-truth tree (fid → tag → breadcrumbs → attributes), then run both the
+reference matcher and the lexbor differential against arbitrary/wild HTML using
+that captured tree as truth for the selector layer. This is the structural
+change that makes #3's wild-HTML mode fully general and lets the generator reuse
+`html-api-fuzz`'s nasty-HTML generator. (`model-desync` becomes a separate,
+optional sanity check rather than a precondition.)
+
+### 5. Coverage measurement + reach the unreachable branches
+
+- Wire line/branch coverage (phpdbg is available: `phpdbg -qrr` with
+  coverage, or install pcov/xdebug) over the `src/wp-includes/html-api/css/`
+  classes; gate "done" on a coverage target and a written list of intentionally-
+  unreached lines.
+- Add a generator path emitting raw hex escapes for null / surrogate
+  (U+D800–U+DFFF) / over-max (> U+10FFFF) codepoints and assert they decode to
+  U+FFFD (currently unreachable — the renderer only escapes real codepoints).
+- Fuzz NUL bytes and CR/FF in the selector INPUT to exercise
+  `normalize_selector_input` (NUL→U+FFFD, CR/CRLF/FF→LF).
+
+### 6. Automatic minimizer
+
+Port the delta-debugging pattern from `tools/html-api-fuzz/minimize.php`: given a
+failing seed, shrink both the HTML and the selector (byte/structural deletes,
+keep-failing) to a minimal reproducer. Wire into `replay.php` or a new
+`minimize.php`. Bugs 1 and 3 were hand-minimized; automate it.
+
+### 7. Broaden match surface
+
+- Run the match oracle through `create_fragment` with varied fragment contexts,
+  not just `create_full_parser`.
+- Vary all quirks-mode triggers (not only doctype presence): no-doctype,
+  malformed doctype, `<!DOCTYPE html SYSTEM ...>`, limited-quirks doctypes.
+
+## Acceptance bar for "exacting standards"
+
+- Coverage measured and reported for the `css/` classes, with a justified list of
+  any unreached lines.
+- Three independent oracles agree on no-quirks supported cases (AST round-trip,
+  `ReferenceMatcher`, lexbor); divergences are triaged to either a WP finding or
+  a fuzzer-oracle fix — never left ambiguous.
+- Metamorphic invariants in place and passing.
+- Positive-match rate for combinator selectors materially raised (path-directed
+  generation); match assertions are mostly non-vacuous.
+- Minimizer produces minimal repros automatically.
+- A clean multi-thousand-seed run with all signatures triaged; `FINDINGS.md`
+  updated with any new bugs (each with a minimal repro and a one-line fix
+  direction), and confirmation that the three known bugs still reproduce.
+
+## Existing bugs to keep verifying (regression anchors)
+
+From `FINDINGS.md` — minimal repros, all must still trigger until core is fixed:
+1. Identity escape after multibyte mis-decodes: `#Ü,\sup #x` → type `uup` (want `sup`).
+2. Empty-value matchers match everything: `[x^=""]`, `[x*=""]`, `[x$=""]`.
+3. Off-by-one length guard: `[a=b]` (single-char unquoted value, exact `=`, at EOF) → `null`.
