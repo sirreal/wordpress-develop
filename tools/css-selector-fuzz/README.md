@@ -135,6 +135,12 @@ Known lexbor issues compensated for at this pin:
   findings.
 - `lxb_selectors_find` reports a node once per matching selector-list
   branch; `LXB_SELECTORS_OPT_MATCH_FIRST` dedupes.
+- lexbor matches `[x~=""]` against whitespace-only attribute values
+  (e.g. `x=" "`); Selectors-4 and Chrome say an empty operand never
+  matches a list item, and WP agrees with them. Latent
+  `lexbor-divergence` noise source if the generator ever pairs `~=""`
+  with whitespace-valued attributes; candidate upstream report, not a
+  WP finding.
 
 ## Known oracle limitations (document-side decoding)
 

@@ -9,16 +9,29 @@
 > 5000-seed run with all signatures triaged to the three known bugs, all of
 > which still reproduce. The notes below are retained as the design rationale.
 >
+> **Core fixes landed:** the three FINDINGS.md bugs are fixed on this branch
+> (`CSS selector:` commits `7419a9fef6` / `0cefeb2fc8` / `16d03e2c5f`), each
+> with PHPUnit regression tests. A post-fix 5000-seed run is clean.
+>
 > **Open follow-up hardening (post-review):** `tests/self-check.php` runs its
-> parse-expectation assertions over a fixed seed window (1–400) that currently
-> dodges the three known core bugs only by seed luck. Any generator change that
-> shifts the PRNG stream can collide with Bug 1/3 there (it already does for the
-> deferred document-side class-NUL injection — see README "Known oracle
-> limitations"). Decouple self-check from the unfixed core bugs — e.g. apply the
-> three FINDINGS.md fixes inside the self-check harness, or allowlist their
+> parse-expectation assertions over a fixed seed window (1–400) that, against
+> an *unfixed* core, dodges the known core bugs only by seed luck. On this
+> branch the bugs are fixed so the collision risk is gone, but the hazard
+> returns whenever the tooling runs against a core without the fixes (e.g.
+> cherry-picked onto trunk before the fixes land) or when a future unfixed bug
+> is found. Decouple self-check from unfixed core bugs — e.g. allowlist known
 > signatures in the parse-expectation loop — as a standalone hardening. This is
 > worth doing on its own (it makes self-check robust to *any* future generator
 > change) and is the prerequisite for randomized class-NUL document injection.
+>
+> **Candidate finding 4 (unverified, found in fix review):** per CSS Syntax 3
+> §4.3.8, `\` followed by EOF is a valid escape (EOF is not a newline), and
+> §4.3.7 says consuming it returns U+FFFD — so `.foo\` should parse as class
+> `foo\u{FFFD}`. WP's `next_two_are_valid_escape()` requires a code point after
+> the backslash, so `.foo\` is rejected (`from_selectors()` → null). The
+> string-context behavior (`'foo\` → `foo`, "do nothing" at EOF) is already
+> spec-correct; only ident context diverges. Low severity (fail-safe null, not
+> a mis-match); verify against browsers, then fix or document as intentional.
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
@@ -189,7 +202,8 @@ keep-failing) to a minimal reproducer. Wire into `replay.php` or a new
 
 ## Existing bugs to keep verifying (regression anchors)
 
-From `FINDINGS.md` — minimal repros, all must still trigger until core is fixed:
-1. Identity escape after multibyte mis-decodes: `#Ü,\sup #x` → type `uup` (want `sup`).
-2. Empty-value matchers match everything: `[x^=""]`, `[x*=""]`, `[x$=""]`.
-3. Off-by-one length guard: `[a=b]` (single-char unquoted value, exact `=`, at EOF) → `null`.
+From `FINDINGS.md` — all three are fixed on this branch and pinned by PHPUnit
+tests; the minimal repros must now NOT trigger (a clean 5000-seed run confirms):
+1. Identity escape after multibyte mis-decodes: `#Ü,\sup #x` → type must be `sup`.
+2. Empty-value substring matchers: `[x^=""]`, `[x*=""]`, `[x$=""]` must match nothing.
+3. Off-by-one length guard: `[a=b]` (single-char unquoted value, exact `=`, at EOF) must parse.

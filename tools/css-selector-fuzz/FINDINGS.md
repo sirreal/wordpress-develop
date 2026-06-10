@@ -5,6 +5,12 @@ seeds, 0 crashes/timeouts. Three distinct, reproduced WordPress-core correctness
 bugs in the new HTML-API CSS selector support. Every selector below is valid,
 supported CSS that the API mis-handles **without** reporting lack of support.
 
+**Status: all three bugs are fixed on this branch** (commit prefix
+`CSS selector:` — Bug 1 `7419a9fef6`, Bug 2 `0cefeb2fc8`, Bug 3 `16d03e2c5f`),
+each with PHPUnit regression tests that fail pre-fix. A post-fix 5000-seed run
+is clean (0 failures, 0 crashes). The repros below no longer trigger; they
+remain as regression anchors and Trac-ready minimal test cases.
+
 No new bugs surfaced beyond these three, and no fuzzer-side (oracle or
 generator) defect surfaced: with all three fixes applied a 5000-seed run is
 completely clean, and the lexbor differential (third independent oracle) agreed
@@ -54,9 +60,8 @@ non-hex identity-escape branch is wrong. Depending on what wrong codepoint is
 produced this also causes spurious parse failures (a valid selector returns
 `null`).
 
-**Fix direction:** read the next codepoint by byte offset, e.g.
-`mb_substr( substr( $input, $offset ), 0, 1, 'UTF-8' )`, or decode the UTF-8
-lead byte length from `$input[$offset]` directly.
+**Fix (landed in `7419a9fef6`):** read the next codepoint from the byte
+offset: `mb_substr( substr( $input, $offset ), 0, 1, 'UTF-8' )`.
 
 ---
 
@@ -82,9 +87,11 @@ Reproduction against `<i x="">…</i><b x="abc">…</b><u>…</u>`:
 | `[x$=""]` | `I`    | none |
 | `[x~=""]` | none ✅ | none |
 
-**Fix direction:** in `matches()`, return `false` for `^= $= *=` (and `~=`) when
-`'' === $this->value`, before the `substr_compare`/`strpos` calls. (This also
-removes a `substr_compare` negative-length edge with very short attribute values.)
+**Fix (landed in `0cefeb2fc8`):** in `matches()`, return `false` for `^= $= *=`
+when `'' === $this->value`, before the `substr_compare`/`strpos` calls. `~=`
+needs no guard — a whitespace-delimited list never yields an empty item — and
+a test pins that. (No `substr_compare` length edge exists here: `-strlen('')`
+is `0`, and PHP clamps out-of-range negative offsets rather than erroring.)
 
 ---
 
@@ -115,7 +122,8 @@ character of the selector string.
 | `[a^=b]`       | parsed ✅ (2-char operator) |
 | `[a=b].c`      | parsed ✅ (trailing content) |
 
-**Fix direction:** change `>=` to `>` (need `strlen - $updated_offset >= 3`).
+**Fix (landed in `16d03e2c5f`):** change `>=` to `>` (need
+`strlen - $updated_offset >= 3`).
 
 ---
 
