@@ -650,6 +650,51 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that the removed outer A element's virtual closer is visited
+	 * before a new same-name opener immediately following the subtree.
+	 *
+	 * This is the one input where the adjusted-current-node guard and the
+	 * same-name next-event lookahead in the virtual-closer queueing must
+	 * cooperate: the new A opener shares the removed element's tag name, but
+	 * the virtual closer must still fire first so the new element opens as a
+	 * sibling, not a child.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::is_tag_closer
+	 */
+	public function test_visits_outer_anchor_virtual_closer_before_same_name_opener() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y</a></mi></math><a>z' );
+
+		$visits = array();
+		while ( $processor->next_tag(
+			array(
+				'tag_name'    => 'A',
+				'tag_closers' => 'visit',
+			)
+		) ) {
+			$visits[] = array(
+				$processor->is_tag_closer() ? 'closer' : 'opener',
+				$processor->get_breadcrumbs(),
+			);
+		}
+
+		$this->assertSame(
+			array(
+				array( 'opener', array( 'HTML', 'BODY', 'A' ) ),
+				array( 'opener', array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ) ),
+				array( 'closer', array( 'HTML', 'BODY', 'A', 'MATH', 'MI' ) ),
+				array( 'closer', array( 'HTML', 'BODY' ) ),
+				array( 'opener', array( 'HTML', 'BODY', 'A' ) ),
+				array( 'closer', array( 'HTML', 'BODY' ) ),
+			),
+			$visits,
+			'Expected the removed outer A virtual closer to be visited before the new same-name A opener.'
+		);
+	}
+
+	/**
 	 * Ensures that an outer A element removed from the stack of open elements
 	 * remains visitable as a virtual closer when the fragment ends inside its
 	 * existing child subtree.
