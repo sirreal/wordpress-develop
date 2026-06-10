@@ -53,6 +53,12 @@ php tools/html-api-fuzz/launcher.php --lanes 4 --max-seeds 1000 --watcher
 
 For continuous fuzzing, run the launcher with `--duration-seconds 0 --max-seeds 0`
 and run `watcher.php` in a second shell against the same output directory.
+The tmux helper, `tools/html-api-fuzz/start-continuous-run-tmux.sh`, starts this
+indefinite launcher/watcher/orchestrator setup. It does not currently support a
+graceful shutdown signal. A good follow-up feature would be a stop signal that
+lets each process finish its current unit of work (seed, watcher scan/minimize,
+or Codex turn) and then exit cleanly. For now, stop it by attaching to the tmux
+session and interrupting the panes, or by killing the tmux session.
 
 Replay a failure:
 
