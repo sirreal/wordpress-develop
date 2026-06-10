@@ -85,6 +85,32 @@ class Tests_HtmlApi_WpCssAttributeSelector extends WP_UnitTestCase {
 			"Invalid: [att='val\\n']"  => array( "[att='val\n']" ),
 			'Invalid: [att=val i '     => array( '[att=val i ' ),
 			'Invalid: [att="val"ix'    => array( '[att="val"ix' ),
+
+			// Additional malformed selector tests
+			'Invalid: [att=val'        => array( '[att=val' ),
+			'Invalid: [att="val'       => array( '[att="val' ),
+			'Invalid: [att=val"'       => array( '[att=val"' ),
+			'Invalid: [att =val i i]'  => array( '[att =val i i]' ),
+			'Invalid: [att~=]'         => array( '[att~=]' ),
+			'Invalid: [att^=]'         => array( '[att^=]' ),
+			'Invalid: [att$=]'         => array( '[att$=]' ),
+			'Invalid: [att*=]'         => array( '[att*=]' ),
+			'Invalid: [att|=]'         => array( '[att|=]' ),
+			'Invalid: [att==val]'      => array( '[att==val]' ),
+			'Invalid: [att =~ val]'    => array( '[att =~ val]' ),
+			'Invalid: [att!val]'       => array( '[att!val]' ),
+			'Invalid: [att?=val]'      => array( '[att?=val]' ),
+			'Invalid: [att =val x]'    => array( '[att =val x]' ),
+			'Invalid: [att =val ii]'   => array( '[att =val ii]' ),
+			'Invalid: [att =val ss]'   => array( '[att =val ss]' ),
+
+			// Namespace attribute selectors (currently unsupported)
+			'Invalid: [ns|attr]'       => array( '[ns|attr]' ),
+			'Invalid: [*|attr]'        => array( '[*|attr]' ),
+			'Invalid: [|attr]'         => array( '[|attr]' ),
+			'Invalid: [xml|attr]'      => array( '[xml|lang]' ),
+			'Invalid: [svg|attr]'      => array( '[svg|viewBox]' ),
+			'Invalid: [xmlns|attr]'    => array( '[xmlns:xlink]' ),
 		);
 	}
 }

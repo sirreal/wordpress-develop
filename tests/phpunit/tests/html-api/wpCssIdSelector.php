@@ -41,10 +41,21 @@ class Tests_HtmlApi_WpCssIdSelector extends WP_UnitTestCase {
 			'escaped #\31 23'             => array( '#\\31 23', '123', '' ),
 			'with descendant #\31 23 div' => array( '#\\31 23 div', '123', ' div' ),
 
+			// Additional edge cases
+			'multiple hashes #a#b'        => array( '#a#b', 'a', '#b' ),
+			'escaped hash #\\23 hash'     => array( '#\\23 hash', '#hash', '' ),
+			'unicode ID #café'            => array( '#café', 'café', '' ),
+			'hyphen ID #my-id'            => array( '#my-id', 'my-id', '' ),
+			'underscore ID #my_id'        => array( '#my_id', 'my_id', '' ),
+			'long ID name'                => array( '#very-long-id-name-with-many-hyphens', 'very-long-id-name-with-many-hyphens', '' ),
+
 			// Invalid
 			'not ID foo'                  => array( 'foo' ),
 			'not ID .bar'                 => array( '.bar' ),
 			'not valid #1foo'             => array( '#1foo' ),
+			'empty after hash'            => array( '#' ),
+			'space after hash'            => array( '# ' ),
+			'invalid after hash'          => array( '#@invalid' ),
 		);
 	}
 }

@@ -41,11 +41,27 @@ class Tests_HtmlApi_WpCssTypeSelector extends WP_UnitTestCase {
 			'div.class'               => array( 'div.class', 'div', '.class' ),
 			'custom-type#id'          => array( 'custom-type#id', 'custom-type', '#id' ),
 
+			// Edge cases
+			'hyphenated-element'      => array( 'my-element', 'my-element', '' ),
+			'underscored_element'     => array( 'my_element', 'my_element', '' ),
+			'CamelCase'               => array( 'MyElement', 'MyElement', '' ),
+			'single-char'             => array( 'a', 'a', '' ),
+			'numbers'                 => array( 'h1', 'h1', '' ),
+			'with-space'              => array( 'div ', 'div', ' ' ),
+			'with-tab'                => array( "div\t", 'div', "\t" ),
+			'with-newline'            => array( "div\n", 'div', "\n" ),
+			'unicode-element'         => array( 'é', 'é', '' ),
+
 			// Invalid
 			'Invalid: (empty string)' => array( '' ),
 			'Invalid: #id'            => array( '#id' ),
 			'Invalid: .class'         => array( '.class' ),
 			'Invalid: [attr]'         => array( '[attr]' ),
+			'Invalid: starts-digit'   => array( '1div' ),
+			'Invalid: special-char'   => array( '@element' ),
+			'Invalid: whitespace'     => array( ' div' ),
+			'Invalid: combinator'     => array( '>' ),
+			'Invalid: comma'          => array( ',' ),
 		);
 	}
 }
