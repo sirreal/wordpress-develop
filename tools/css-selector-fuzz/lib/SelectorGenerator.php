@@ -545,11 +545,60 @@ class SelectorGenerator {
 	private function gen_edge_escape(): array {
 		$kind = $this->prng->weighted(
 			array(
-				'fffd-ident' => 50,
-				'nul-input'  => 25,
-				'ws-input'   => 25,
+				'fffd-ident' => 40,
+				'eof-escape' => 20,
+				'nul-input'  => 20,
+				'ws-input'   => 20,
 			)
 		);
+
+		if ( 'eof-escape' === $kind ) {
+			/*
+			 * A backslash at the end of input is a valid escape ( EOF is not
+			 * a newline ) and decodes to U+FFFD, in ident context only:
+			 * `.foo\` is the class `foo\u{FFFD}`.
+			 *
+			 * https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
+			 */
+			$name = $this->prng->chance( 30 ) ? '' : 'a' . $this->prng->int( 0, 99 );
+			list( $selector, $self ) = $this->prng->choice(
+				array(
+					array(
+						'.' . $name . '\\',
+						array(
+							'type' => null,
+							'subs' => array( array( 'kind' => 'class', 'name' => $name . "\u{FFFD}" ) ),
+						),
+					),
+					array(
+						'#' . $name . '\\',
+						array(
+							'type' => null,
+							'subs' => array( array( 'kind' => 'id', 'name' => $name . "\u{FFFD}" ) ),
+						),
+					),
+					array(
+						$name . '\\',
+						array(
+							'type' => $name . "\u{FFFD}",
+							'subs' => null,
+						),
+					),
+				)
+			);
+			return array(
+				'bucket'         => 'edge-escape',
+				'selector'       => $selector,
+				'expectCompound' => true,
+				'expectComplex'  => true,
+				'ast'            => array(
+					array(
+						'context' => array(),
+						'self'    => $self,
+					),
+				),
+			);
+		}
 
 		if ( 'fffd-ident' === $kind ) {
 			// A class selector whose name is a single U+FFFD, produced by a
@@ -1307,7 +1356,9 @@ class SelectorGenerator {
 						'a >> b',
 						'>',
 						'-',
-						'\\',
+						// A lone '\' is a valid escape at EOF ( type selector U+FFFD );
+						// '\' before a newline is not a valid escape.
+						"\\\n",
 						"a\\\nb",
 						'a/**/b',
 						'/* comment */ a',

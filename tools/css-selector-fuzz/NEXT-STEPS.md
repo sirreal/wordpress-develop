@@ -24,14 +24,29 @@
 > worth doing on its own (it makes self-check robust to *any* future generator
 > change) and is the prerequisite for randomized class-NUL document injection.
 >
-> **Candidate finding 4 (unverified, found in fix review):** per CSS Syntax 3
-> §4.3.8, `\` followed by EOF is a valid escape (EOF is not a newline), and
-> §4.3.7 says consuming it returns U+FFFD — so `.foo\` should parse as class
-> `foo\u{FFFD}`. WP's `next_two_are_valid_escape()` requires a code point after
-> the backslash, so `.foo\` is rejected (`from_selectors()` → null). The
-> string-context behavior (`'foo\` → `foo`, "do nothing" at EOF) is already
-> spec-correct; only ident context diverges. Low severity (fail-safe null, not
-> a mis-match); verify against browsers, then fix or document as intentional.
+> **Candidate finding 4 — FIXED:** per CSS Syntax 3 §4.3.8, `\` followed by
+> EOF is a valid escape (EOF is not a newline), and §4.3.7 says consuming it
+> returns U+FFFD — so `.foo\` parses as class `foo\u{FFFD}`. Verified against
+> lexbor (agrees: `.foo\` matches class `foo\u{FFFD}`; `\` parses as type
+> `\u{FFFD}`). Fixed on this branch (`CSS selector:` commit): EOF guard in
+> `consume_escaped_codepoint()` returns U+FFFD, `next_two_are_valid_escape()`
+> accepts a backslash as the final byte. Review of the fix surfaced a second
+> bug in the same family: `normalize_selector_input()` trimmed *trailing*
+> whitespace before tokenizing, so `.foo\ ` (escaped space — valid class
+> `foo `, matches nothing) and `.foo\<LF>` (invalid escape — must be
+> rejected) both collapsed to `.foo\` and matched class `foo\u{FFFD}` — a
+> wrong-match-set bug. Fixed by switching to `ltrim()`; the grammar consumes
+> insignificant trailing whitespace. Fuzzer updated to match: the lone `\`
+> invalid-bucket entry became `\<LF>` (still invalid), and `edge-escape`
+> gained an `eof-escape` kind covering `.name\` / `#name\` / `name\`.
+>
+> **Session decisions (2026-06-10):** EOF-truncated selectors (`div[a=b`)
+> will be made spec-conformant — CSS Syntax auto-closes open blocks at EOF —
+> rather than documented as an intentional rejection. HTML's default
+> case-insensitive attribute value list will be implemented (no-modifier +
+> html-namespace + listed attribute; explicit `s` keeps forcing
+> case-sensitivity). Grammar-level truncations (`[`, `[a=`, `div >`, `div,`)
+> stay invalid — browsers reject those too. No Trac tickets for any of this.
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
