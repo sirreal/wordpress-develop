@@ -3,7 +3,9 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--watcher]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher]\n";
+	echo "Create OUTPUT_DIR/STOP (see stop.php) to stop all lanes gracefully: each finishes its current batch and exits.\n";
+	echo "--max-keep-per-signature is applied per lane; a signature seen in every lane keeps up to N x lanes exemplar directories.\n";
 }
 
 function html_api_fuzz_launcher_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
@@ -116,8 +118,20 @@ $max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $stop_on_failure  = \HtmlApiFuzz\option_bool( $options, 'stop-on-failure', false );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
 $run_watcher      = \HtmlApiFuzz\option_bool( $options, 'watcher', false );
+$max_keep_per_signature = \HtmlApiFuzz\option_int( $options, 'max-keep-per-signature', 5 );
+$keep_all_artifacts     = \HtmlApiFuzz\option_bool( $options, 'keep-all-artifacts', false );
+if ( $max_keep_per_signature < 1 ) {
+	throw new InvalidArgumentException( 'Expected --max-keep-per-signature to be at least 1.' );
+}
 html_api_fuzz_launcher_validate_generator_options( $profile, $mode, $payload_policy );
 html_api_fuzz_launcher_validate_runtime_options( $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes );
+
+if ( is_file( $output_dir . '/STOP' ) ) {
+	// A leftover stop request must not silently turn this launch into a
+	// 0-seed success; starting again is an explicit operator decision.
+	fwrite( STDERR, "Stop file already exists: {$output_dir}/STOP\nRemove it to start a run in this directory.\n" );
+	exit( 1 );
+}
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $events_path = $output_dir . '/events.ndjson';
@@ -190,11 +204,18 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		(string) $max_nodes,
 		'--git-metadata-base64',
 		$git_metadata_base64,
+		'--max-keep-per-signature',
+		(string) $max_keep_per_signature,
+		'--stop-file',
+		$output_dir . '/STOP',
 	);
 
 	if ( 0 !== $max_seeds ) {
 		$command[] = '--max-seeds';
 		$command[] = (string) $lane_max_seeds;
+	}
+	if ( $keep_all_artifacts ) {
+		$command[] = '--keep-all-artifacts';
 	}
 	if ( $stop_on_failure ) {
 		$command[] = '--stop-on-failure';

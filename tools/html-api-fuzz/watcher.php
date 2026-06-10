@@ -3,7 +3,9 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_watcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/watcher.php --run-dir DIR [--state-dir DIR] [--once]\n";
+	echo "Usage: php tools/html-api-fuzz/watcher.php --run-dir DIR [--state-dir DIR] [--once] [--interval-seconds N] [--stop-stale-seconds N]\n";
+	echo "When RUN_DIR/STOP exists, the watcher exits after a final scan once every runner reports a stop reason.\n";
+	echo "--stop-stale-seconds (default 120) presumes a non-reporting runner dead; per lane it is floored at twice the lane's advertised batch budget (timeout-ms x batch-size).\n";
 }
 
 function html_api_fuzz_watcher_load_state( string $path ): array {
@@ -20,6 +22,7 @@ function html_api_fuzz_watcher_load_state( string $path ): array {
 		'signatures'    => array(),
 		'seenAttempts'  => array(),
 		'summaryOffsets'=> array(),
+		'sqliteOffsets' => array(),
 	);
 }
 
@@ -198,14 +201,108 @@ function html_api_fuzz_watcher_read_summary_records( string $summary_path, int $
 	);
 }
 
-function html_api_fuzz_watcher_attempt_key( string $summary_path, int $line_no, array $record ): string {
+function html_api_fuzz_watcher_attempt_key( array $record, string $fallback_key ): string {
 	if ( ! empty( $record['resultPath'] ) ) {
 		return 'result:' . $record['resultPath'];
 	}
 	if ( ! empty( $record['replayPath'] ) ) {
 		return 'replay:' . $record['replayPath'];
 	}
-	return 'summary:' . $summary_path . ':' . $line_no;
+	return $fallback_key;
+}
+
+/**
+ * Per-lane results.sqlite stores written by runner lanes: directly in the run
+ * directory for a standalone runner, one level down for launcher lanes.
+ */
+function html_api_fuzz_watcher_sqlite_paths( string $run_dir ): array {
+	$paths = array();
+	$direct = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . '/' . \HtmlApiFuzz\ResultStore::FILENAME;
+	if ( is_file( $direct ) ) {
+		$paths[] = $direct;
+	}
+
+	$items = @scandir( $run_dir );
+	if ( false === $items ) {
+		return $paths;
+	}
+
+	foreach ( $items as $item ) {
+		if ( '.' === $item || '..' === $item || in_array( $item, array( '.git', '.triage-watcher', 'triage' ), true ) ) {
+			continue;
+		}
+
+		$store_path = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $item . '/' . \HtmlApiFuzz\ResultStore::FILENAME;
+		if ( is_file( $store_path ) ) {
+			$paths[] = $store_path;
+		}
+	}
+
+	sort( $paths );
+	return array_values( array_unique( $paths ) );
+}
+
+/**
+ * True when every runner under the run directory has recorded a stop reason;
+ * gates the watcher's graceful exit after a stop request so the final scan
+ * covers everything the runners wrote.
+ *
+ * A runner whose state has not been touched for $stale_seconds is presumed
+ * dead (crashed lanes never record a stop reason and must not block the exit
+ * forever). With no runner state at all the run has not started; the watcher
+ * keeps scanning rather than racing a launcher that is still spawning lanes.
+ */
+function html_api_fuzz_watcher_runners_stopped( string $run_dir, float $stale_seconds ): bool {
+	$state_paths = array();
+	$direct = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . '/state.json';
+	if ( is_file( $direct ) ) {
+		$state_paths[] = $direct;
+	}
+	$items = @scandir( $run_dir );
+	if ( false !== $items ) {
+		foreach ( $items as $item ) {
+			if ( '.' === $item || '..' === $item || in_array( $item, array( '.git', '.triage-watcher', 'triage' ), true ) ) {
+				continue;
+			}
+			$state_path = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $item . '/state.json';
+			if ( is_file( $state_path ) ) {
+				$state_paths[] = $state_path;
+			}
+		}
+	}
+
+	$found_runner_state = false;
+	foreach ( $state_paths as $state_path ) {
+		try {
+			$runner_state = \HtmlApiFuzz\read_json_file( $state_path );
+		} catch ( \RuntimeException $e ) {
+			// Mid-write; the runner is alive.
+			return false;
+		}
+		if ( ! is_array( $runner_state ) || 'html-api-fuzz-runner-state' !== ( $runner_state['kind'] ?? null ) ) {
+			continue;
+		}
+		$found_runner_state = true;
+		if ( null !== ( $runner_state['stopReason'] ?? null ) ) {
+			continue;
+		}
+		/*
+		 * A live lane is legitimately silent for up to one batch worker run
+		 * (its advertised batchBudgetMs), so the staleness threshold is
+		 * floored at twice that budget — otherwise large --timeout-ms or
+		 * --batch-size values would get a live lane presumed dead and the
+		 * "final scan covers everything" contract silently broken.
+		 */
+		$lane_stale_seconds = max( $stale_seconds, 2.0 * ( (int) ( $runner_state['batchBudgetMs'] ?? 0 ) ) / 1000.0 );
+		$updated_at = strtotime( (string) ( $runner_state['updatedAt'] ?? '' ) );
+		if ( false !== $updated_at && ( time() - $updated_at ) > $lane_stale_seconds ) {
+			fwrite( STDERR, '[' . gmdate( 'c' ) . "] watcher: presuming dead runner (state stale): {$state_path}\n" );
+			continue;
+		}
+		return false;
+	}
+
+	return $found_runner_state;
 }
 
 function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array &$state, array $options ): void {
@@ -253,10 +350,34 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 	\HtmlApiFuzz\write_json_file( $signature_dir . '/failure.json', $state['signatures'][ $hash ] );
 }
 
+function html_api_fuzz_watcher_process_failure_record( array $record, string $fallback_key, string $state_dir, array &$state, array &$new_hashes, int &$failures_seen ): void {
+	if ( $record['ok'] ?? true ) {
+		return;
+	}
+	if ( empty( $record['signature'] ) ) {
+		$signature = \HtmlApiFuzz\Signature::from_result( $record );
+		if ( null !== $signature ) {
+			$record['signature'] = $signature;
+		}
+	}
+	$attempt_key = html_api_fuzz_watcher_attempt_key( $record, $fallback_key );
+	if ( isset( $state['seenAttempts'][ $attempt_key ] ) ) {
+		return;
+	}
+	$state['seenAttempts'][ $attempt_key ] = gmdate( 'c' );
+	++$failures_seen;
+	if ( html_api_fuzz_watcher_record_failure( $record, $state_dir, $state ) ) {
+		$new_hashes[] = $record['signature']['hash'];
+	}
+}
+
 function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, string $state_path, array &$state, array $options ): array {
 	$summary_paths = html_api_fuzz_watcher_summary_paths( $run_dir );
 	if ( ! is_array( $state['summaryOffsets'] ?? null ) ) {
 		$state['summaryOffsets'] = array();
+	}
+	if ( ! is_array( $state['sqliteOffsets'] ?? null ) ) {
+		$state['sqliteOffsets'] = array();
 	}
 
 	$new_hashes = array();
@@ -265,24 +386,47 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 		$read = html_api_fuzz_watcher_read_summary_records( $summary_path, (int) ( $state['summaryOffsets'][ $summary_path ] ?? 0 ) );
 		$state['summaryOffsets'][ $summary_path ] = $read['offset'];
 		foreach ( $read['records'] as $entry ) {
-			$record = $entry['record'];
-			if ( $record['ok'] ?? true ) {
-				continue;
+			html_api_fuzz_watcher_process_failure_record( $entry['record'], 'summary:' . $summary_path . ':' . $entry['line'], $state_dir, $state, $new_hashes, $failures_seen );
+		}
+	}
+
+	$sqlite_paths = html_api_fuzz_watcher_sqlite_paths( $run_dir );
+	foreach ( $sqlite_paths as $store_path ) {
+		/*
+		 * Lane stores fail transiently: a lane may not have committed its
+		 * schema yet (SQLite opens lazily, so that surfaces on the first
+		 * query, not in the constructor), and busy/corrupt stores throw on
+		 * read. None of those may kill the long-lived watcher — log, skip,
+		 * and retry on the next scan. Offsets only advance on success.
+		 */
+		$store = null;
+		try {
+			$store = new \HtmlApiFuzz\ResultStore( $store_path, true );
+			$after  = (int) ( $state['sqliteOffsets'][ $store_path ] ?? 0 );
+			$max_id = $store->max_id();
+			if ( $after > $max_id ) {
+				// The store shrank: it was recreated. Re-read from the start;
+				// the seenAttempts keys dedupe anything genuinely re-seen.
+				// (A recreated store that already grew past the stale offset
+				// is not detected; recreating a lane store without wiping the
+				// watcher state is unsupported.)
+				$after = 0;
 			}
-			if ( empty( $record['signature'] ) ) {
-				$signature = \HtmlApiFuzz\Signature::from_result( $record );
-				if ( null !== $signature ) {
-					$record['signature'] = $signature;
+			if ( $max_id > $after ) {
+				foreach ( $store->failures_after( $after, $max_id ) as $row ) {
+					html_api_fuzz_watcher_process_failure_record( $row['record'], 'sqlite:' . $store_path . ':' . $row['id'], $state_dir, $state, $new_hashes, $failures_seen );
 				}
 			}
-			$attempt_key = html_api_fuzz_watcher_attempt_key( $summary_path, $entry['line'], $record );
-			if ( isset( $state['seenAttempts'][ $attempt_key ] ) ) {
-				continue;
-			}
-			$state['seenAttempts'][ $attempt_key ] = gmdate( 'c' );
-			++$failures_seen;
-			if ( html_api_fuzz_watcher_record_failure( $record, $state_dir, $state ) ) {
-				$new_hashes[] = $record['signature']['hash'];
+			$state['sqliteOffsets'][ $store_path ] = $max_id;
+		} catch ( \Throwable $e ) {
+			fwrite( STDERR, '[' . gmdate( 'c' ) . "] watcher: could not read {$store_path}: {$e->getMessage()}\n" );
+		} finally {
+			if ( null !== $store ) {
+				try {
+					$store->close();
+				} catch ( \Throwable $e ) {
+					// Already unusable; nothing to release.
+				}
 			}
 		}
 	}
@@ -329,6 +473,7 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 
 	return array(
 		'summaryFiles'  => count( $summary_paths ),
+		'sqliteStores'  => count( $sqlite_paths ),
 		'failuresSeen'  => $failures_seen,
 		'newSignatures' => count( array_unique( $new_hashes ) ),
 	);
@@ -348,12 +493,31 @@ $state = html_api_fuzz_watcher_load_state( $state_path );
 $state['runDir'] = $run_dir;
 $state['stateDir'] = $state_dir;
 
-$interval = max( 1.0, \HtmlApiFuzz\option_float( $options, 'interval-seconds', 10.0 ) );
+$interval      = max( 1.0, \HtmlApiFuzz\option_float( $options, 'interval-seconds', 10.0 ) );
+$stop_file     = rtrim( $run_dir, DIRECTORY_SEPARATOR ) . '/STOP';
+$stale_seconds = max( 10.0, \HtmlApiFuzz\option_float( $options, 'stop-stale-seconds', 120.0 ) );
 
 do {
+	/*
+	 * Graceful stop: once a stop is requested and every runner has recorded a
+	 * stop reason (or gone stale), this scan is the final one — nothing
+	 * writes after it.
+	 */
+	$stop_requested = is_file( $stop_file );
+	$final_scan     = $stop_requested && html_api_fuzz_watcher_runners_stopped( $run_dir, $stale_seconds );
 	$scan = html_api_fuzz_watcher_scan_once( $run_dir, $state_dir, $state_path, $state, $options );
-	echo \HtmlApiFuzz\json_encode_safe( array_merge( array( 'ok' => true, 'at' => gmdate( 'c' ) ), $scan ) ) . "\n";
-	if ( \HtmlApiFuzz\option_bool( $options, 'once', false ) ) {
+	echo \HtmlApiFuzz\json_encode_safe(
+		array_merge(
+			array(
+				'ok'          => true,
+				'at'          => gmdate( 'c' ),
+				'finalScan'   => $final_scan,
+				'stopPending' => $stop_requested && ! $final_scan,
+			),
+			$scan
+		)
+	) . "\n";
+	if ( $final_scan || \HtmlApiFuzz\option_bool( $options, 'once', false ) ) {
 		break;
 	}
 	usleep( (int) round( $interval * 1000000 ) );

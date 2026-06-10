@@ -541,6 +541,9 @@ $metadata_runner_proc = \HtmlApiFuzz\run_php_process(
 		'1',
 		'--duration-seconds',
 		'0',
+		// Passing seed directories are pruned by default; this run asserts on
+		// the on-disk replay document.
+		'--keep-all-artifacts',
 		'--output-dir',
 		$metadata_runner_dir,
 	),
@@ -572,6 +575,12 @@ $metadata_launcher_proc = \HtmlApiFuzz\run_php_process(
 		'1',
 		'--duration-seconds',
 		'0',
+		// Passing seed directories are pruned by default; this run asserts on
+		// the on-disk replay document.
+		'--keep-all-artifacts',
+		// Non-default value pins the launcher-to-lane flag passthrough.
+		'--max-keep-per-signature',
+		'3',
 		'--output-dir',
 		$metadata_launcher_dir,
 	),
@@ -585,6 +594,8 @@ html_api_fuzz_smoke_assert( 'html-api-fuzz-launcher-state' === ( $metadata_launc
 html_api_fuzz_smoke_assert( is_array( $metadata_launcher_state['git'] ?? null ), 'launcher state should include compact git metadata.' );
 $metadata_launcher_events = \HtmlApiFuzz\read_ndjson_records( $metadata_launcher_dir . '/events.ndjson' );
 html_api_fuzz_smoke_assert( is_array( $metadata_launcher_events[0]['git'] ?? null ), 'launcher start event should include compact git metadata.' );
+$metadata_launcher_lane_state = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/lane-00/state.json' );
+html_api_fuzz_smoke_assert( 3 === ( $metadata_launcher_lane_state['maxKeepPerSignature'] ?? null ), 'launcher should pass --max-keep-per-signature through to lanes.' );
 $metadata_launcher_replay = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/lane-00/seed-1/primary/replay.json' );
 if ( $git_metadata['available'] ?? false ) {
 	html_api_fuzz_smoke_assert( $git_metadata['commit'] === ( $metadata_launcher_state['git']['commit'] ?? null ), 'launcher state git metadata should match the current commit.' );

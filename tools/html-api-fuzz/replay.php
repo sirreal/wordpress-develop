@@ -4,9 +4,39 @@ require_once __DIR__ . '/lib/autoload.php';
 
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
-if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
+$store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
+if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
 	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY]\n";
-	exit( null === $replay_path ? 1 : 0 );
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite --seed N [--output-dir DIR] [--payload-policy POLICY]\n";
+	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
+	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
+}
+
+if ( null !== $store_path ) {
+	// Materialize the stored replay as a file and proceed exactly as if it
+	// had been read from a retained seed directory.
+	$store_seed = \HtmlApiFuzz\option_int( $options, 'seed', -1 );
+	if ( $store_seed < 0 ) {
+		fwrite( STDERR, "The --store form requires --seed N.\n" );
+		exit( 1 );
+	}
+	try {
+		$store        = new \HtmlApiFuzz\ResultStore( $store_path, true );
+		$store_replay = $store->replay_for_seed( $store_seed );
+		$store->close();
+	} catch ( \Throwable $e ) {
+		fwrite( STDERR, "Could not read store {$store_path}: {$e->getMessage()}\n" );
+		exit( 1 );
+	}
+	if ( null === $store_replay ) {
+		fwrite( STDERR, "No stored replay for seed {$store_seed} in {$store_path}.\n" );
+		exit( 1 );
+	}
+	$replay_dir  = \HtmlApiFuzz\option_string( $options, 'output-dir', dirname( $store_path ) . '/replay-seed-' . $store_seed . '-' . \HtmlApiFuzz\timestamp() );
+	\HtmlApiFuzz\ensure_dir( $replay_dir );
+	$replay_path = $replay_dir . '/source-replay.json';
+	\HtmlApiFuzz\write_json_file( $replay_path, $store_replay );
+	$options['output-dir'] = $replay_dir;
 }
 
 $replay = \HtmlApiFuzz\read_json_file( $replay_path );

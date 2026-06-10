@@ -3,8 +3,9 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_runner_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N]\n";
+	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
+	echo "Create the stop file (default OUTPUT_DIR/STOP) to stop gracefully: the current batch finishes and no new batch starts.\n";
 }
 
 function html_api_fuzz_runner_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
@@ -19,7 +20,12 @@ function html_api_fuzz_runner_validate_generator_options( string $profile, strin
 	}
 }
 
-function html_api_fuzz_runner_validate_runtime_options( int $seed_stride, int $max_seeds, float $duration_seconds, int $timeout_ms, int $max_input_bytes, int $max_tokens, int $max_nodes ): void {
+function html_api_fuzz_runner_validate_runtime_options( int $seed_stride, int $max_seeds, float $duration_seconds, int $timeout_ms, int $max_input_bytes, int $max_tokens, int $max_nodes, int $max_keep_per_signature ): void {
+	if ( $max_keep_per_signature < 1 ) {
+		// The first exemplar of every signature must stay on disk: the
+		// watcher's minimizer works from a replay file, not the store.
+		throw new InvalidArgumentException( 'Expected --max-keep-per-signature to be at least 1.' );
+	}
 	if ( $seed_stride < 1 ) {
 		throw new InvalidArgumentException( 'Expected --seed-stride to be at least 1.' );
 	}
@@ -66,11 +72,21 @@ $batch_size       = max( 1, \HtmlApiFuzz\option_int( $options, 'batch-size', 25 
 $max_tokens       = \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 );
 $max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
+$max_keep_per_signature = \HtmlApiFuzz\option_int( $options, 'max-keep-per-signature', 5 );
+$keep_all_artifacts     = \HtmlApiFuzz\option_bool( $options, 'keep-all-artifacts', false );
+$stop_file              = \HtmlApiFuzz\option_string( $options, 'stop-file', $output_dir . '/STOP' );
 html_api_fuzz_runner_validate_generator_options( $profile, $mode, $payload_policy );
-html_api_fuzz_runner_validate_runtime_options( $seed_stride, $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes );
+html_api_fuzz_runner_validate_runtime_options( $seed_stride, $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes, $max_keep_per_signature );
+
+if ( is_file( $stop_file ) ) {
+	// A leftover stop request must not silently turn this run into a 0-seed
+	// success; starting again is an explicit operator decision.
+	fwrite( STDERR, "Stop file already exists: {$stop_file}\nRemove it (or pass a different --stop-file) to start this run.\n" );
+	exit( 1 );
+}
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
-$summary_path = $output_dir . '/summary.ndjson';
+$result_store = new \HtmlApiFuzz\ResultStore( $output_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME );
 $events_path  = $output_dir . '/events.ndjson';
 $state_path   = $output_dir . '/state.json';
 $runner_log   = $output_dir . '/runner.log';
@@ -93,6 +109,12 @@ $state = array(
 	'payloadPolicy' => $payload_policy,
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
+	'maxKeepPerSignature' => $max_keep_per_signature,
+	'keepAllArtifacts'    => $keep_all_artifacts,
+	'stopFile'            => $stop_file,
+	// Longest legitimate silence between state writes: one full batch worker
+	// run. The watcher floors its dead-runner presumption on this.
+	'batchBudgetMs'       => $timeout_ms * $batch_size,
 	'successes'         => 0,
 	'failures'          => 0,
 	'unsupported'       => 0,
@@ -148,12 +170,41 @@ function html_api_fuzz_runner_worker_args( int $seed, string $output_dir, string
 	return $args;
 }
 
-$pending_batch = array();
+/**
+ * A batch worker killed mid-write can leave truncated JSON behind; such a
+ * file must behave like a missing one so the seed takes the isolation
+ * fallback instead of fataling the lane.
+ */
+function html_api_fuzz_runner_read_json_or_null( string $path ) {
+	try {
+		return \HtmlApiFuzz\read_json_file( $path );
+	} catch ( \RuntimeException $e ) {
+		return null;
+	}
+}
+
+$pending_batch  = array();
+$batch_log      = null;
+$batch_keep_log = false;
 
 // Already-computed batch results are always processed; the deadline and seed
 // budget gate only the formation of new batches.
 while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_seeds || $count < $max_seeds ) ) ) {
 	if ( array() === $pending_batch ) {
+		/*
+		 * Graceful stop: the already-computed batch above has fully drained
+		 * and is recorded; honor a stop request (or a stop-on-failure from
+		 * inside the batch) before committing to a new batch.
+		 */
+		if ( null !== $state['stopReason'] ) {
+			break;
+		}
+		if ( is_file( $stop_file ) ) {
+			$state['stopReason'] = 'stop-requested';
+			\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'stop-requested', 'stopFile' => $stop_file ) );
+			break;
+		}
+
 		/*
 		 * Run a batch of seeds in one worker process: per-seed process spawns
 		 * dominate wall-clock otherwise. Seeds missing a result.json after
@@ -170,9 +221,12 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 			$batch_seeds[] = $seed + ( $i * $seed_stride );
 		}
 
-		$batch_log = $output_dir . '/seed-' . $batch_seeds[0] . '/primary/batch-worker.log';
+		// Batch logs live outside the prunable seed directories; clean
+		// batches drop theirs once fully recorded (see end of loop).
+		$batch_log      = $output_dir . '/logs/batch-' . $batch_seeds[0] . '.log';
+		$batch_keep_log = false;
 		\HtmlApiFuzz\ensure_dir( dirname( $batch_log ) );
-		\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'batch-start', 'seeds' => $batch_seeds ) );
+		\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'batch-start', 'seeds' => $batch_seeds, 'logPath' => $batch_log ) );
 		$batch_args = html_api_fuzz_runner_worker_args( $batch_seeds[0], $output_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, $batch_count, $seed_stride );
 		$batch_proc = \HtmlApiFuzz\run_php_process( $batch_args, $repo_root, $timeout_ms * $batch_count, $batch_log );
 		$pending_batch = $batch_seeds;
@@ -183,18 +237,18 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 	\HtmlApiFuzz\ensure_dir( $attempt_dir );
 	$log_path = $attempt_dir . '/worker.log';
 
-	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-start', 'seed' => $current_seed, 'attemptDir' => $attempt_dir ) );
-	$result = \HtmlApiFuzz\read_json_file( $attempt_dir . '/result.json' );
+	$result = html_api_fuzz_runner_read_json_or_null( $attempt_dir . '/result.json' );
 	$proc   = $batch_proc;
 	if ( null === $result ) {
 		// Isolation fallback: re-run this seed in its own process.
+		$batch_keep_log = true;
 		$args = html_api_fuzz_runner_worker_args( $current_seed, $attempt_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, 1, $seed_stride );
 		$proc   = \HtmlApiFuzz\run_php_process( $args, $repo_root, $timeout_ms, $log_path );
-		$result = \HtmlApiFuzz\read_json_file( $attempt_dir . '/result.json' );
+		$result = html_api_fuzz_runner_read_json_or_null( $attempt_dir . '/result.json' );
 	}
 
 	if ( null === $result ) {
-		$replay = \HtmlApiFuzz\read_json_file( $attempt_dir . '/replay.json' );
+		$replay = html_api_fuzz_runner_read_json_or_null( $attempt_dir . '/replay.json' );
 		$result = array(
 			'ok'             => false,
 			'status'         => $proc['timedOut'] ? 'timeout' : 'worker-failed',
@@ -238,25 +292,81 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		\HtmlApiFuzz\write_json_file( $attempt_dir . '/result.json', $result );
 	}
 
-	if ( ! ( $result['ok'] ?? false ) ) {
+	$attempt_ok = (bool) ( $result['ok'] ?? false );
+
+	/*
+	 * Artifact retention: every attempt is regenerable from its seed, so seed
+	 * directories are kept only for failures, and only until the failure's
+	 * signature has enough exemplars on disk. Everything else lives in the
+	 * SQLite store (failures include their result and replay JSON there, so a
+	 * pruned failure remains reproducible).
+	 */
+	$retain_artifacts = $keep_all_artifacts;
+	$replay           = null;
+	if ( ! $attempt_ok ) {
 		$replay_path = $attempt_dir . '/replay.json';
-		$replay = \HtmlApiFuzz\read_json_file( $replay_path );
+		$replay      = html_api_fuzz_runner_read_json_or_null( $replay_path );
+
+		if ( ! $retain_artifacts ) {
+			$signature_hash = $result['signature']['hash'] ?? null;
+			if ( null === $signature_hash || ! is_array( $replay ) ) {
+				// Without a signature there is nothing to cap by; without a
+				// replay document the files are the only reproduction.
+				$retain_artifacts = true;
+			} else {
+				/*
+				 * Count exemplar directories still on disk rather than rows
+				 * ever written: a restarted runner re-records seeds, and row
+				 * counting would saturate the cap without keeping anything.
+				 */
+				$retained_on_disk = 0;
+				foreach ( $result_store->retained_seeds( $signature_hash ) as $retained_seed ) {
+					if ( is_dir( $output_dir . '/seed-' . $retained_seed ) ) {
+						++$retained_on_disk;
+					}
+				}
+				$retain_artifacts = $retained_on_disk < $max_keep_per_signature;
+			}
+		}
+
+		if ( $retain_artifacts ) {
+			// Over-cap repeats of a known signature do not justify keeping
+			// their batch log; retained exemplars and re-runs do.
+			$batch_keep_log = true;
+		}
+
 		if ( is_array( $replay ) ) {
 			$replay['result'] = array(
 				'ok'           => $result['ok'] ?? false,
 				'status'       => $result['status'] ?? 'unknown',
 				'failureClass' => $result['failureClass'] ?? null,
 				'signature'    => $result['signature'] ?? null,
-				'resultPath'   => $attempt_dir . '/result.json',
+				'resultPath'   => $retain_artifacts ? $attempt_dir . '/result.json' : null,
 			);
 			$replay['signature'] = $result['signature'] ?? null;
-			\HtmlApiFuzz\write_json_file( $replay_path, $replay );
+			if ( $retain_artifacts ) {
+				\HtmlApiFuzz\write_json_file( $replay_path, $replay );
+			} else {
+				// The stored copy outlives the pruned files; its replay
+				// command must point at the store, not at deleted paths.
+				$replay['command'] = array(
+					'program' => PHP_BINARY,
+					'args'    => array(
+						'tools/html-api-fuzz/replay.php',
+						'--store',
+						$output_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME,
+						'--seed',
+						(string) $current_seed,
+					),
+					'cwd'     => $repo_root,
+				);
+			}
 		}
 	}
 
 	$summary = array(
-		'kind'          => ( $result['ok'] ?? false ) ? 'attempt' : 'failure',
-		'ok'            => $result['ok'] ?? false,
+		'kind'          => $attempt_ok ? 'attempt' : 'failure',
+		'ok'            => $attempt_ok,
 		'status'        => $result['status'] ?? 'unknown',
 		'failureClass'  => $result['failureClass'] ?? null,
 		'seed'          => $current_seed,
@@ -268,15 +378,26 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		'inputSha1'     => $result['inputSha1'] ?? null,
 		'inputLength'   => $result['inputLength'] ?? null,
 		'signature'     => $result['signature'] ?? null,
-		'resultPath'    => $attempt_dir . '/result.json',
-		'replayPath'    => $attempt_dir . '/replay.json',
-		'logPath'       => $log_path,
+		'artifactsRetained' => $retain_artifacts,
+		'resultPath'    => $retain_artifacts ? $attempt_dir . '/result.json' : null,
+		'replayPath'    => $retain_artifacts ? $attempt_dir . '/replay.json' : null,
+		// Batch-executed seeds have no per-seed worker.log; point at a log
+		// that exists (isolation re-run log, else the shared batch log).
+		'logPath'       => $retain_artifacts ? ( is_file( $log_path ) ? $log_path : $batch_log ) : null,
 		'durationMs'    => $proc['durationMs'],
 		'workerCode'    => $proc['code'],
 		'workerTimedOut'=> $proc['timedOut'],
 	);
-	\HtmlApiFuzz\append_ndjson( $summary_path, $summary );
-	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-complete', 'seed' => $current_seed, 'ok' => $summary['ok'], 'status' => $summary['status'], 'signature' => $summary['signature']['hash'] ?? null ) );
+	$result_store->record_attempt(
+		$summary,
+		$attempt_ok ? null : $result,
+		( $attempt_ok || ! is_array( $replay ) ) ? null : $replay
+	);
+	if ( ! $retain_artifacts && ! $result_store->seed_artifacts_retained( $current_seed ) ) {
+		// The retained check covers earlier rows: a re-run of a previously
+		// retained seed must not delete the exemplar directory they cite.
+		\HtmlApiFuzz\remove_dir_recursive( $output_dir . '/seed-' . $current_seed );
+	}
 
 	if ( $summary['ok'] ) {
 		if ( 'unsupported' === $summary['status'] ) {
@@ -306,8 +427,11 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 	$state['updatedAt'] = gmdate( 'c' );
 	\HtmlApiFuzz\write_json_file( $state_path, $state );
 
-	if ( 'stop-on-failure' === $state['stopReason'] ) {
-		break;
+	// A stop-on-failure stop reason is honored at the top of the loop, after
+	// the rest of the batch has been recorded and pruned. Under
+	// --keep-all-artifacts every recorded logPath must keep existing.
+	if ( array() === $pending_batch && ! $batch_keep_log && ! $keep_all_artifacts && null !== $batch_log ) {
+		@unlink( $batch_log );
 	}
 }
 
@@ -317,4 +441,5 @@ if ( null === $state['stopReason'] ) {
 $state['updatedAt'] = gmdate( 'c' );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
 \HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'runner-stop', 'stopReason' => $state['stopReason'], 'nextSeed' => $seed ) );
+$result_store->close();
 echo \HtmlApiFuzz\json_encode_safe( $state ) . "\n";
