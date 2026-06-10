@@ -257,6 +257,19 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * Ensures that XMP contents are not escaped, as they are not parsed like text nodes are.
+	 *
+	 * @ticket 62036
+	 */
+	public function test_xmp_contents_are_not_escaped() {
+		$this->assertSame(
+			WP_HTML_Processor::normalize( "<xmp>apples > or\x00anges & pears < plums</xmp>" ),
+			"<xmp>apples > or\u{FFFD}anges & pears < plums</xmp>",
+			'Should have preserved text inside an XMP element, except for replacing NULL bytes.'
+		);
+	}
+
 	public function test_unexpected_closing_tags_are_removed() {
 		$this->assertSame(
 			WP_HTML_Processor::normalize( 'one</div>two</span>three' ),
@@ -616,6 +629,7 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 			'FORM with SVG TITLE text edge'             => array( "<form ><svg ><title \"'></form><form>" ),
 			'FORM with TABLE and SCRIPT'                => array( '<form id><table te"><script></script><td srce" ID/></form><form claslicate">' ),
 			'FORM with TABLE CAPTION'                   => array( '<form><table><caption></form><form >' ),
+			'XMP rawtext with entity-looking text'      => array( '<xmp>apples > oranges &amp; <</xmp>' ),
 			'Short malformed G attribute C'             => array( '<g c/=>' ),
 			'Short malformed G attribute S'             => array( '<g s/=>' ),
 			'Duplicate SRC boundary'                    => array( '<g src=""g src="">' ),
