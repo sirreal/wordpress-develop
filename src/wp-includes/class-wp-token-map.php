@@ -467,29 +467,33 @@ class WP_Token_Map {
 			return false;
 		}
 
-		$group_key = substr( $word, 0, $this->key_length );
-		$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
-		if ( false === $group_at ) {
+		$group_key     = substr( $word, 0, $this->key_length );
+		$group_indexes = $this->find_group_indexes( $group_key, $ignore_case );
+		if ( empty( $group_indexes ) ) {
 			return false;
 		}
-		$group        = $this->large_words[ $group_at / ( $this->key_length + 1 ) ];
-		$group_length = strlen( $group );
-		$slug         = substr( $word, $this->key_length );
-		$length       = strlen( $slug );
-		$at           = 0;
 
-		while ( $at < $group_length ) {
-			$token_length   = unpack( 'C', $group[ $at++ ] )[1];
-			$token_at       = $at;
-			$at            += $token_length;
-			$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
-			$mapping_at     = $at;
+		$slug   = substr( $word, $this->key_length );
+		$length = strlen( $slug );
 
-			if ( $token_length === $length && self::matches_at( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
-				return true;
+		foreach ( $group_indexes as $group_index ) {
+			$group        = $this->large_words[ $group_index ];
+			$group_length = strlen( $group );
+			$at           = 0;
+
+			while ( $at < $group_length ) {
+				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+				$token_at       = $at;
+				$at            += $token_length;
+				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+				$mapping_at     = $at;
+
+				if ( $token_length === $length && self::matches_at( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
+					return true;
+				}
+
+				$at = $mapping_at + $mapping_length;
 			}
-
-			$at = $mapping_at + $mapping_length;
 		}
 
 		return false;
@@ -555,31 +559,67 @@ class WP_Token_Map {
 					: null;
 			}
 
-			$group_key = substr( $text, $offset, $this->key_length );
-			$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
-			if ( false === $group_at ) {
+			$group_key     = substr( $text, $offset, $this->key_length );
+			$group_indexes = $this->find_group_indexes( $group_key, $ignore_case );
+			if ( empty( $group_indexes ) ) {
 				// Perhaps a short word then.
 				return strlen( $this->small_words ) > 0
 					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
 					: null;
 			}
 
-			$group        = $this->large_words[ $group_at / ( $this->key_length + 1 ) ];
-			$group_length = strlen( $group );
-			$at           = 0;
-			while ( $at < $group_length ) {
-				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
-				$token          = substr( $group, $at, $token_length );
-				$at            += $token_length;
-				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
-				$mapping_at     = $at;
+			if ( ! $ignore_case ) {
+				$group        = $this->large_words[ $group_indexes[0] ];
+				$group_length = strlen( $group );
+				$at           = 0;
+				while ( $at < $group_length ) {
+					$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+					$token          = substr( $group, $at, $token_length );
+					$at            += $token_length;
+					$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+					$mapping_at     = $at;
 
-				if ( self::matches_at( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
-					$matched_token_byte_length = $this->key_length + $token_length;
-					return substr( $group, $mapping_at, $mapping_length );
+					if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length ) ) {
+						$matched_token_byte_length = $this->key_length + $token_length;
+						return substr( $group, $mapping_at, $mapping_length );
+					}
+
+					$at = $mapping_at + $mapping_length;
 				}
 
-				$at = $mapping_at + $mapping_length;
+				return strlen( $this->small_words ) > 0
+					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
+					: null;
+			}
+
+			$best_match_length = null;
+			$best_mapping      = null;
+			foreach ( $group_indexes as $group_index ) {
+				$group        = $this->large_words[ $group_index ];
+				$group_length = strlen( $group );
+				$at           = 0;
+				while ( $at < $group_length ) {
+					$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+					$token          = substr( $group, $at, $token_length );
+					$at            += $token_length;
+					$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+					$mapping_at     = $at;
+
+					if ( self::matches_at( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
+						$match_length = $this->key_length + $token_length;
+						if ( null === $best_match_length || $match_length > $best_match_length ) {
+							$best_match_length = $match_length;
+							$best_mapping      = substr( $group, $mapping_at, $mapping_length );
+						}
+					}
+
+					$at = $mapping_at + $mapping_length;
+				}
+			}
+
+			if ( null !== $best_match_length ) {
+				$matched_token_byte_length = $best_match_length;
+				return $best_mapping;
 			}
 		}
 
@@ -852,6 +892,40 @@ class WP_Token_Map {
 		}
 
 		return strcmp( $a, $b );
+	}
+
+	/**
+	 * Finds group indexes that match a lookup key.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $group_key   Group key to find.
+	 * @param bool   $ignore_case Whether to fold ASCII case while searching.
+	 * @return int[] Matching group indexes.
+	 */
+	private function find_group_indexes( string $group_key, bool $ignore_case ): array {
+		if ( ! $ignore_case ) {
+			$group_at = strpos( $this->groups, $group_key );
+
+			return false === $group_at
+				? array()
+				: array( $group_at / ( $this->key_length + 1 ) );
+		}
+
+		$group_indexes = array();
+		$record_length = $this->key_length + 1;
+		$groups_length = strlen( $this->groups );
+		$group_index   = 0;
+
+		for ( $at = 0; $at < $groups_length; $at += $record_length ) {
+			if ( self::matches_at( $this->groups, $group_key, $at, $this->key_length, $ignore_case ) ) {
+				$group_indexes[] = $group_index;
+			}
+
+			++$group_index;
+		}
+
+		return $group_indexes;
 	}
 
 	/**
