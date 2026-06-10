@@ -40,6 +40,15 @@
 > invalid-bucket entry became `\<LF>` (still invalid), and `edge-escape`
 > gained an `eof-escape` kind covering `.name\` / `#name\` / `name\`.
 >
+> **Candidate finding 5 (recorded 2026-06-10, low severity, not fixed):**
+> the attribute-selector case modifier is matched byte-wise (`i`/`I`/`s`/`S`
+> literals), so an *escaped* modifier ident like `[a=b \69]` (tokenizes to
+> the ident `i`) is rejected. Per the Selectors-4 grammar `<attr-modifier> =
+> i | s` these are ident tokens, so escapes should arguably be accepted —
+> but browsers are themselves inconsistent (Chromium accepts `[a=b \69]`
+> and rejects `[a=b \73]`). Fail-safe refusal, not a mis-match; revisit only
+> if the matcher ever moves to token-level parsing.
+>
 > **Session decisions (2026-06-10):** EOF-truncated selectors (`div[a=b`)
 > will be made spec-conformant — CSS Syntax auto-closes open blocks at EOF —
 > rather than documented as an intentional rejection. HTML's default

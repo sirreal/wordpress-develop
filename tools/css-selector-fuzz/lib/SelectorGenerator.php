@@ -545,12 +545,68 @@ class SelectorGenerator {
 	private function gen_edge_escape(): array {
 		$kind = $this->prng->weighted(
 			array(
-				'fffd-ident' => 40,
-				'eof-escape' => 20,
-				'nul-input'  => 20,
-				'ws-input'   => 20,
+				'fffd-ident'    => 35,
+				'eof-escape'    => 20,
+				'eof-truncated' => 15,
+				'nul-input'     => 15,
+				'ws-input'      => 15,
 			)
 		);
+
+		if ( 'eof-truncated' === $kind ) {
+			/*
+			 * The end of input auto-closes an unterminated attribute selector
+			 * block ( and an unterminated string inside it ): `[a=b` is the
+			 * same selector as `[a=b]`.
+			 *
+			 * https://www.w3.org/TR/css-syntax-3/#consume-simple-block
+			 */
+			$matcher  = $this->prng->choice( array( null, 'exact', 'one-of', 'exact-or-hyphen-suffixed', 'prefixed', 'suffixed', 'contains' ) );
+			$value    = null === $matcher ? null : $this->prng->choice( array( 'v' . $this->prng->int( 0, 99 ), 'a b', '', 'x,y', "caf\u{E9}" ) );
+			$modifier = null !== $matcher && $this->prng->chance( 30 )
+				? $this->prng->choice( array( 'case-insensitive', 'case-sensitive' ) )
+				: null;
+			$compound = array(
+				'type' => $this->prng->chance( 50 ) ? 'div' : null,
+				'subs' => array(
+					array(
+						'kind'     => 'attr',
+						'name'     => 'a' . $this->prng->int( 0, 99 ),
+						'matcher'  => $matcher,
+						'value'    => $value,
+						'modifier' => $modifier,
+					),
+				),
+			);
+
+			// The attribute selector is the final rendered unit, so the render always ends with ']'.
+			$rendered  = $this->render_compound( $compound );
+			$truncated = substr( $rendered, 0, -1 );
+
+			// Sometimes also drop a closing string quote: EOF terminates the string, then closes the block.
+			$last_byte = substr( $truncated, -1 );
+			if ( ( '"' === $last_byte || "'" === $last_byte ) && $this->prng->chance( 50 ) ) {
+				$truncated = substr( $truncated, 0, -1 );
+
+				// A backslash at the end of an unterminated string "does nothing": the value is unchanged.
+				if ( $this->prng->chance( 40 ) ) {
+					$truncated .= '\\';
+				}
+			}
+
+			return array(
+				'bucket'         => 'edge-escape',
+				'selector'       => $truncated,
+				'expectCompound' => true,
+				'expectComplex'  => true,
+				'ast'            => array(
+					array(
+						'context' => array(),
+						'self'    => $compound,
+					),
+				),
+			);
+		}
 
 		if ( 'eof-escape' === $kind ) {
 			/*
@@ -1333,23 +1389,29 @@ class SelectorGenerator {
 						'. x',
 						'..a',
 						'.#a',
-						'[a',
-						'[ a',
+						/*
+						 * EOF auto-closes an open attribute selector block
+						 * ( '[a', '[a=b', '[a="b]', '[a=b i' are valid ), but
+						 * grammar-level truncation is still invalid.
+						 */
 						'[a=',
+						'[a= ',
+						'[a~',
+						'[a^',
 						'[a=]',
-						'[a="x\\',
 						'[=b]',
 						'[a==b]',
 						'[a~b]',
 						'[a!=b]',
-						'[a=b',
-						'[a="b]',
-						"[a='b]",
 						"[a=\"b\nc\"]",
+						"[a=\"b\nc",
 						'[a=b x]',
+						'[a=b x',
 						'[a=b ix]',
-						'[a=b i',
+						'[a=b ix',
+						'[a=b i x',
 						'[5=b]',
+						'[5=b',
 						'a >',
 						'> a',
 						'a > > b',
