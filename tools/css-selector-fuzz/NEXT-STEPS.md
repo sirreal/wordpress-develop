@@ -49,6 +49,28 @@
 > and rejects `[a=b \73]`). Fail-safe refusal, not a mis-match; revisit only
 > if the matcher ever moves to token-level parsing.
 >
+> **EOF auto-close for attribute selectors — IMPLEMENTED (2026-06-10):**
+> per CSS Syntax 3 §5.4.8/§4.3.5, the end of input closes an unterminated
+> simple block (and an unterminated string), so `[att=val`, `[att`,
+> `[att="a b`, and `[att=val i` are valid selectors; grammar-level
+> truncations (`[`, `[a=`, `[a~`, `[a=b, div`) stay invalid. Verified
+> against Chromium form-by-form, including an exhaustive per-byte
+> truncation table in review. lexbor rejects all EOF-truncated forms
+> (drafted as `lexbor/UPSTREAM-ISSUES.md` issue 4); the differential is
+> unaffected because it compares canonical re-renders. Fuzzer gained an
+> `eof-truncated` edge-escape kind and the invalid corpus was reshuffled
+> along the new validity boundary; COVERAGE.md regenerated.
+>
+> **Escape decode of invalid UTF-8 bytes (recorded 2026-06-10, not fixed):**
+> `\` followed by an invalid UTF-8 byte decodes through `mb_substr()`'s
+> substitution character — `?` by default — instead of U+FFFD
+> (`consume_escaped_codepoint()`, identity-escape arm). Pre-existing,
+> byte-identical before/after the EOF fixes; flagged independently by both
+> review panels. Belongs to the open invalid-UTF-8 input policy decision
+> (handoff item 5): per spec, input preprocessing operates on decoded code
+> points, so byte-level decode errors should arguably become U+FFFD before
+> tokenization rather than leak `mb_substitute_character`.
+>
 > **HTML case-insensitive attribute value list — IMPLEMENTED (2026-06-10):**
 > per https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
 > the values of ~46 listed attributes (`type`, `rel`, `lang`, `dir`,
@@ -59,7 +81,16 @@
 > - **lexbor does not implement the rule at all** (`[rel=nofollow]` does
 >   not match `rel="NOFOLLOW"`) — compensated in the differential the same
 >   way as lexbor #368 (lexbor is compared against the reference run with
->   the list disabled); candidate upstream report.
+>   the list disabled); drafted as `lexbor/UPSTREAM-ISSUES.md` issue 5.
+> - The case-flip generator twist in `path_attr_feature` makes the folding
+>   load-bearing for `mustMatchFid` (mutation-tested: disabling the core
+>   branch fires 11 failures in 3000 seeds). Minor leftovers from review:
+>   the unused `expected_*_processor_matches` back-compat helpers in
+>   `ReferenceMatcher` silently default rows to the html namespace — fine
+>   today (the safe model generator emits no foreign content) but a trap
+>   for a future caller; and `s`-forces-sensitivity only gets differential
+>   coverage when sampled values happen to differ in case (pinned by unit
+>   tests instead).
 > - **Chromium applies the list to foreign elements too** (`[type=TEXT]`
 >   matches `<svg><a type="text">`), diverging from the HTML spec's "on an
 >   HTML element" scoping. WP follows the spec (html namespace only, via
@@ -67,18 +98,26 @@
 >   tracking and applies the list to every element — an inherent
 >   tag-processor approximation, same as its ancestor-blind matching.
 >
-> **Session decisions (2026-06-10):** EOF-truncated selectors (`div[a=b`)
-> will be made spec-conformant — CSS Syntax auto-closes open blocks at EOF —
-> rather than documented as an intentional rejection. HTML's default
-> case-insensitive attribute value list will be implemented (no-modifier +
-> html-namespace + listed attribute; explicit `s` keeps forcing
-> case-sensitivity). Grammar-level truncations (`[`, `[a=`, `div >`, `div,`)
-> stay invalid — browsers reject those too. No Trac tickets for any of this.
+> **Session decisions (2026-06-10, both since implemented — see the
+> IMPLEMENTED entries above):** EOF-truncated selectors (`div[a=b`) are
+> spec-conformant (CSS Syntax auto-closes open blocks at EOF) rather than
+> documented as an intentional rejection. HTML's default case-insensitive
+> attribute value list is implemented (no-modifier + html-namespace +
+> listed attribute; explicit `s` keeps forcing case-sensitivity).
+> Grammar-level truncations (`[`, `[a=`, `div >`, `div,`) stay invalid —
+> browsers reject those too. No Trac tickets for any of this.
+>
+> **Still open from the original follow-up list:** the O(1) identity-escape
+> decode (perf only, do only if asked) and the invalid-UTF-8 input policy
+> (contract decision; see the escape-decode note above), plus the tooling
+> items in this file's hardening notes (self-check decoupling, class-NUL
+> injection, vacuous-assertion rate, quirks-mode single-oracle gap).
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
-`html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
-PHP 8.4.21. Everything under `tools/css-selector-fuzz/` is untracked; nothing
-committed. `/artifacts` is gitignored (runner output lives there).
+`html-css-fuzz` (trunk + merged `html-api/add-css-selector-parser`).
+PHP 8.4.21. The fuzzer and all fixes are committed on this branch
+(`CSS selector:` / `CSS selector fuzz:` prefixed commits). `/artifacts` is
+gitignored (runner output lives there).
 
 ## Measured weaknesses driving this plan
 
