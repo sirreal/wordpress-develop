@@ -1,0 +1,143 @@
+# WP_HTML_Decoder Fuzzer
+
+Differential fuzzer for `WP_HTML_Decoder`:
+
+- `decode_text_node()`
+- `decode_attribute()`
+- `read_character_reference()`
+- `attribute_starts_with()`
+
+The fuzzer runs in a bare PHP process. It loads only `WP_Token_Map`, the
+generated HTML5 named-character-reference map, and `WP_HTML_Decoder`; it does
+not bootstrap WordPress, a database, browsers, Node, or `wp-env`.
+
+## Requirements
+
+- PHP 8.4+ with `Dom\HTMLDocument`
+- `mbstring`
+- Run from the repository root
+
+## Oracle
+
+The primary oracle is PHP's HTML5 parser:
+
+- Text context: parse `<!DOCTYPE html><body><div>PAYLOAD</div>` and read the
+  div's `textContent`.
+- Attribute context: parse `<div title="PAYLOAD">` and read
+  `getAttribute( 'title' )`.
+
+`html_entity_decode( ENT_HTML5 )` is deliberately not used as the primary
+oracle because it does not implement the HTML attribute-context rule for
+semicolonless named references followed by `=` or an alphanumeric byte.
+
+The generator neutralizes parser-vs-decoder confounders by producing valid
+UTF-8 payloads with no raw `<`, no raw double quote, no CR, and no NUL. This
+keeps the DOM parser focused on character-reference decoding instead of tag
+structure, attribute termination, input-preprocessing newline normalization, or
+NUL substitution. Raw invalid UTF-8 inside or around references is left for a
+later extension.
+
+## Checks
+
+For each generated `(context, payload)` case:
+
+1. Compare `decode_text_node()` or `decode_attribute()` to the DOM oracle.
+2. Rebuild the decoded string with repeated `read_character_reference()` calls
+   plus literal spans, then compare it to the high-level decoder.
+3. Assert every matched character reference reports a positive byte length and
+   does not overrun the input.
+4. Check `attribute_starts_with()` against the decoded attribute prefix for
+   ASCII search strings in both case-sensitive and ASCII-case-insensitive modes.
+5. Assert decoded output is valid UTF-8.
+6. Assert text without `&` is an identity decode.
+
+Decoding is not treated as idempotent; `&amp;amp;` should decode only one level
+to `&amp;`.
+
+## Generator
+
+Every case is determined by `(seed, case index)`. The generator uses the real
+generated named-reference map, with weighted strategies for:
+
+- exact named references
+- semicolonless legacy references
+- attribute-context ambiguous followers
+- numeric decimal and hex references, including C1 controls, surrogates,
+  noncharacters, zero, overflow, and leading zeros
+- adjacent references
+- truncation sweeps
+- multibyte UTF-8 around references
+- `attribute_starts_with()` prefixes such as encoded `javascript:`
+- nonexistent lookalikes and ampersand boundaries
+- plain no-ampersand text
+
+## Common Commands
+
+Run the smoke test:
+
+```sh
+php tools/html-decoder-fuzz/tests/harness-smoke.php
+```
+
+Run one worker batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --seed 1 --cases 5000
+```
+
+Run parallel lanes for one minute:
+
+```sh
+php tools/html-decoder-fuzz/runner.php --lanes 4 --duration-seconds 60
+```
+
+Run indefinitely:
+
+```sh
+php tools/html-decoder-fuzz/runner.php --lanes 8 --duration-seconds 0 --max-cases 0
+```
+
+Replay a failure, an input file, or a generated case:
+
+```sh
+php tools/html-decoder-fuzz/replay.php --failure artifacts/html-decoder-fuzz/run-.../failure-seedS-caseN/failure.json
+php tools/html-decoder-fuzz/replay.php --input payload.txt --context attribute
+php tools/html-decoder-fuzz/replay.php --seed 123 --case 45
+```
+
+Minimize a failure while preserving its signature:
+
+```sh
+php tools/html-decoder-fuzz/minimize.php --failure artifacts/html-decoder-fuzz/run-.../failure-seedS-caseN/failure.json
+```
+
+Exit codes everywhere: `0` clean, `1` findings, `2` harness error.
+
+## Artifacts
+
+The runner writes under `artifacts/html-decoder-fuzz/run-*` by default:
+
+- `summary.ndjson` with every worker event
+- `state.json` with aggregate counters, stop reason, Git metadata, and failure
+  seeds
+- per-lane stderr logs
+- one directory per failing case containing `payload.txt` and a self-contained
+  `failure.json` with base64 payload, context, signatures, failure details,
+  full expected/got output as base64 for differential failures, environment
+  metadata, and Git metadata
+
+## Harness Self-Test
+
+`tests/harness-smoke.php` verifies the DOM oracle battery, real target behavior
+on the battery, generator determinism and safety, a short real fuzz run, and
+mutation-tested broken targets:
+
+- C1 numeric references not remapped through the Windows-1252 table
+- semicolonless named references decoded in attributes despite ambiguous
+  followers
+- off-by-one `read_character_reference()` match lengths
+- partial-prefix `attribute_starts_with()` matches
+
+For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
+`skip-c1-remap`, `attribute-semicolonless`, or `match-length-off-by-one` before
+running `worker.php`, `runner.php`, `replay.php`, or `minimize.php`.
