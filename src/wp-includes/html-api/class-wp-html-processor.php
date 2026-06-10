@@ -1477,7 +1477,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				break;
 
 			case '#text':
-				$html .= htmlspecialchars( $this->get_modifiable_text(), ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
+				$html .= self::serialize_decoded_text( $this->get_modifiable_text() );
 				break;
 
 			// Unlike the `<>` which is interpreted as plaintext, this is ignored entirely.
@@ -1538,10 +1538,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			$html .= " {$serialized_attribute_name}";
-			$value = $this->get_attribute( $attribute_name );
+			$value = $this->get_attribute_for_serialization( $attribute_name );
 
 			if ( is_string( $value ) ) {
-				$html .= '="' . htmlspecialchars( $value, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5 ) . '"';
+				$html .= '="' . self::serialize_decoded_text( $value ) . '"';
 			}
 
 			$previous_attribute_was_true = true === $value;
@@ -1596,13 +1596,29 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					break;
 
 				default:
-					$text = htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
+					$text = self::serialize_decoded_text( $text );
 			}
 
 			$html .= "{$text}</{$qualified_name}>";
 		}
 
 		return $html;
+	}
+
+	/**
+	 * Serializes decoded text for use in text nodes and attribute values.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $text Decoded text to serialize.
+	 * @return string Serialized text.
+	 */
+	private static function serialize_decoded_text( string $text ): string {
+		return str_replace(
+			"\r",
+			'&#13;',
+			htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' )
+		);
 	}
 
 	/**
