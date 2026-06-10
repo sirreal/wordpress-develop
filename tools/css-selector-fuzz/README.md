@@ -12,10 +12,19 @@ produces the same document, the same selector, and the same verdict.
 1. Generate a random HTML document from a structurally "safe" element set so
    the model tree is provably identical to the parsed tree (this is itself
    verified every case — `model-desync`).
-2. Generate a selector in one of six buckets:
+2. Generate a selector in one of seven buckets:
    - `supported-compound` — must parse in both grammars; carries intended AST.
    - `supported-complex` — uses `>`/descendant combinators; must parse only
      in the complex grammar; carries intended AST.
+   - `path-directed` — synthesized from a real element of the generated tree
+     (type from its tag, subclasses from its actual classes/id/attributes,
+     context chain from its actual ancestors), guaranteed by construction to
+     match that element — or flipped into a near-miss (wrong type/class/attr
+     guarantees a non-match; loosening `>` to descendant must keep matching).
+     The guarantee is asserted against the reference matcher
+     (`path-expectation`), making most match assertions non-vacuous:
+     measured positive-match rate for combinator selectors is ~68% in this
+     bucket vs ~14% in `supported-complex`.
    - `unsupported` — valid CSS the API intentionally rejects (pseudo-classes
      and -elements, `+`/`~`/`||` combinators, namespaces, non-type context
      selectors); must not parse.

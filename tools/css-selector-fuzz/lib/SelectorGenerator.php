@@ -26,6 +26,7 @@ class SelectorGenerator {
 	const BUCKETS = array(
 		'supported-compound',
 		'supported-complex',
+		'path-directed',
 		'unsupported',
 		'invalid',
 		'chaos',
@@ -56,29 +57,46 @@ class SelectorGenerator {
 	}
 
 	/**
-	 * @param array $pools Pools from DocumentGenerator ( tags, classes, ids, attrNames, attrValues ).
+	 * @param array      $pools Pools from DocumentGenerator ( tags, classes, ids, attrNames, attrValues ).
+	 * @param array|null $model Root element model; enables the path-directed bucket.
 	 * @return array{
 	 *     bucket: string,
 	 *     selector: string,
 	 *     expectCompound: bool|null,
 	 *     expectComplex: bool|null,
 	 *     ast: array|null,
+	 *     mustMatchFid: string|null,
+	 *     mustNotMatchFid: string|null,
 	 * }
 	 */
-	public static function generate( Prng $prng, array $pools, ?string $bucket = null ): array {
+	public static function generate( Prng $prng, array $pools, ?array $model = null, ?string $bucket = null ): array {
 		$generator = new self( $prng, $pools );
 
 		if ( null === $bucket ) {
 			$bucket = $prng->weighted(
-				array(
-					'supported-compound' => 30,
-					'supported-complex'  => 25,
-					'unsupported'        => 15,
-					'invalid'            => 12,
-					'chaos'              => 8,
-					'mutated'            => 10,
-				)
+				null === $model
+					? array(
+						'supported-compound' => 30,
+						'supported-complex'  => 25,
+						'unsupported'        => 15,
+						'invalid'            => 12,
+						'chaos'              => 8,
+						'mutated'            => 10,
+					)
+					: array(
+						'supported-compound' => 24,
+						'supported-complex'  => 20,
+						'path-directed'      => 22,
+						'unsupported'        => 12,
+						'invalid'            => 10,
+						'chaos'              => 6,
+						'mutated'            => 6,
+					)
 			);
+		}
+
+		if ( 'path-directed' === $bucket && null === $model ) {
+			$bucket = 'supported-complex';
 		}
 
 		switch ( $bucket ) {
@@ -101,6 +119,9 @@ class SelectorGenerator {
 					'expectComplex'  => true,
 					'ast'            => $ast,
 				);
+
+			case 'path-directed':
+				return $generator->gen_path_directed( $model );
 
 			case 'unsupported':
 				return array(
@@ -397,6 +418,313 @@ class SelectorGenerator {
 				'mixedCase',
 			)
 		);
+	}
+
+	/*
+	 * ------------------------
+	 * Path-directed generation
+	 * ------------------------
+	 *
+	 * Synthesizes a selector from a real element of the model tree so that
+	 * the selector is guaranteed (by construction) to match that element:
+	 * the type comes from its tag, subclasses from its actual classes / id /
+	 * attributes, and the context chain from its actual ancestor tags with
+	 * combinators consistent with the real nesting. Optionally one feature
+	 * is then flipped into a "near-miss" that is guaranteed NOT to match
+	 * the element ( or, for combinator loosening, still guaranteed to ).
+	 */
+
+	private function gen_path_directed( array $model ): array {
+		$pairs = DocumentGenerator::flatten_with_ancestors( $model );
+
+		// Bias toward elements deep enough for a meaningful context chain.
+		$deep = array();
+		foreach ( $pairs as $pair ) {
+			if ( count( $pair[1] ) >= 2 ) {
+				$deep[] = $pair;
+			}
+		}
+		if ( array() !== $deep && $this->prng->chance( 75 ) ) {
+			$pair = $this->prng->choice( $deep );
+		} else {
+			$pair = $this->prng->choice( $pairs );
+		}
+		list( $element, $ancestors ) = $pair;
+
+		$compound = $this->path_compound_for( $element );
+		$context  = array() !== $ancestors && $this->prng->chance( 75 )
+			? $this->path_context_for( $ancestors )
+			: array();
+
+		$list = array(
+			array(
+				'context' => $context,
+				'self'    => $compound,
+			),
+		);
+
+		$must_match     = $element['fid'];
+		$must_not_match = null;
+
+		if ( $this->prng->chance( 40 ) ) {
+			list( $list, $must_match, $must_not_match ) = $this->path_near_miss( $list, $element );
+		} elseif ( $this->prng->chance( 20 ) ) {
+			// Extra unrelated branch: a list union can only add matches.
+			$list[] = $this->gen_complex( $this->prng->chance( 30 ) );
+		}
+
+		$has_context = false;
+		foreach ( $list as $complex ) {
+			if ( array() !== $complex['context'] ) {
+				$has_context = true;
+				break;
+			}
+		}
+
+		return array(
+			'bucket'          => 'path-directed',
+			'selector'        => $this->render_complex_list( $list ),
+			'expectCompound'  => ! $has_context,
+			'expectComplex'   => true,
+			'ast'             => $list,
+			'mustMatchFid'    => $must_match,
+			'mustNotMatchFid' => $must_not_match,
+		);
+	}
+
+	/** A compound selector built only from features the element really has. */
+	private function path_compound_for( array $element ): array {
+		$tag = ascii_strtolower( $element['tag'] );
+
+		$features = array();
+
+		$class_value = DocumentGenerator::get_attribute_value( $element, 'class' );
+		if ( is_string( $class_value ) ) {
+			foreach ( preg_split( '/[ \t\n\f\r]+/', $class_value, -1, PREG_SPLIT_NO_EMPTY ) as $word ) {
+				$features[] = array( 'kind' => 'class', 'name' => $word );
+			}
+		}
+
+		$id_value = DocumentGenerator::get_attribute_value( $element, 'id' );
+		if ( is_string( $id_value ) && '' !== $id_value ) {
+			$features[] = array( 'kind' => 'id', 'name' => $id_value );
+		}
+
+		$seen_attrs = array();
+		foreach ( $element['attrs'] as $attr ) {
+			$lower = ascii_strtolower( $attr[0] );
+			if ( isset( $seen_attrs[ $lower ] ) || 'data-fid' === $lower ) {
+				continue;
+			}
+			$seen_attrs[ $lower ] = true;
+			$features[]           = $this->path_attr_feature( $lower, $attr[1] );
+		}
+
+		$subs      = array();
+		$available = count( $features );
+		if ( $available > 0 ) {
+			$want = min( $available, $this->prng->weighted( array( 0 => 25, 1 => 40, 2 => 25, 3 => 10 ) ) );
+			for ( $i = 0; $i < $want; $i++ ) {
+				$at     = $this->prng->int( 0, count( $features ) - 1 );
+				$subs[] = $features[ $at ];
+				array_splice( $features, $at, 1 );
+			}
+		}
+
+		$type = null;
+		if ( array() === $subs || $this->prng->chance( 70 ) ) {
+			$type = $this->prng->chance( 12 ) ? '*' : ( $this->prng->chance( 30 ) ? $this->random_case( $tag ) : $tag );
+		}
+
+		return array(
+			'type' => $type,
+			'subs' => array() === $subs ? null : $subs,
+		);
+	}
+
+	/** An attribute selector that the (name, value) pair satisfies. */
+	private function path_attr_feature( string $name, $value ): array {
+		$presence = array(
+			'kind'     => 'attr',
+			'name'     => $this->prng->chance( 15 ) ? $this->random_case( $name ) : $name,
+			'matcher'  => null,
+			'value'    => null,
+			'modifier' => null,
+		);
+
+		if ( true === $value ) {
+			// A boolean attribute has the empty string as its value.
+			$value = '';
+		}
+		if ( ! is_string( $value ) || $this->prng->chance( 30 ) ) {
+			return $presence;
+		}
+
+		$points = utf8_codepoints( $value );
+		$total  = count( $points );
+
+		$candidates = array( array( 'exact', $value ) );
+
+		foreach ( preg_split( '/[ \t\n\f\r]+/', $value, -1, PREG_SPLIT_NO_EMPTY ) as $word ) {
+			$candidates[] = array( 'one-of', $word );
+			break;
+		}
+
+		$hyphen_at = strpos( $value, '-' );
+		$candidates[] = array( 'exact-or-hyphen-suffixed', false === $hyphen_at ? $value : substr( $value, 0, $hyphen_at ) );
+
+		if ( $total > 0 ) {
+			$slice = static function ( array $points, int $start, int $length ): string {
+				$out = '';
+				for ( $i = $start; $i < $start + $length; $i++ ) {
+					$out .= $points[ $i ][0];
+				}
+				return $out;
+			};
+
+			$candidates[] = array( 'prefixed', $slice( $points, 0, $this->prng->int( 1, $total ) ) );
+			$length       = $this->prng->int( 1, $total );
+			$candidates[] = array( 'suffixed', $slice( $points, $total - $length, $length ) );
+			$start        = $this->prng->int( 0, $total - 1 );
+			$candidates[] = array( 'contains', $slice( $points, $start, $this->prng->int( 1, $total - $start ) ) );
+		}
+
+		list( $matcher, $operand ) = $this->prng->choice( $candidates );
+
+		/*
+		 * `|=` with an operand cut at a hyphen only matches when the operand
+		 * is non-empty and actually a value prefix; an operand equal to the
+		 * value always matches. Guard the degenerate empty-operand cases.
+		 */
+		if ( 'exact-or-hyphen-suffixed' === $matcher && '' === $operand && '' !== $value ) {
+			$matcher = 'exact';
+			$operand = $value;
+		}
+		if ( in_array( $matcher, array( 'one-of', 'prefixed', 'suffixed', 'contains' ), true ) && '' === $operand ) {
+			return $presence;
+		}
+
+		$modifier = null;
+		if ( $this->prng->chance( 25 ) ) {
+			if ( $this->prng->chance( 60 ) ) {
+				$modifier = 'case-insensitive';
+				$operand  = $this->random_case( $operand );
+			} else {
+				$modifier = 'case-sensitive';
+			}
+		}
+
+		return array(
+			'kind'     => 'attr',
+			'name'     => $presence['name'],
+			'matcher'  => $matcher,
+			'value'    => $operand,
+			'modifier' => $modifier,
+		);
+	}
+
+	/**
+	 * A context chain ( right-to-left ( type, combinator ) pairs ) drawn from
+	 * the element's real ancestors so the chain is satisfied by construction:
+	 * `>` is only used for the immediately-next ancestor, descendant
+	 * combinators may skip generations.
+	 *
+	 * @param array $ancestors Nearest-first ancestor elements.
+	 */
+	private function path_context_for( array $ancestors ): array {
+		$chain = array();
+		$pos   = 0;
+		$count = count( $ancestors );
+
+		while ( $pos < $count && ( array() === $chain || $this->prng->chance( 45 ) ) ) {
+			$jump = $this->prng->chance( 65 ) ? 0 : $this->prng->int( 0, $count - 1 - $pos );
+			$at   = $pos + $jump;
+
+			$combinator = ( 0 === $jump && $this->prng->chance( 55 ) ) ? '>' : ' ';
+			$tag        = ascii_strtolower( $ancestors[ $at ]['tag'] );
+			$type       = $this->prng->chance( 12 )
+				? '*'
+				: ( $this->prng->chance( 25 ) ? $this->random_case( $tag ) : $tag );
+
+			$chain[] = array( $type, $combinator );
+			$pos     = $at + 1;
+		}
+
+		return $chain;
+	}
+
+	/**
+	 * Flips one feature of the guaranteed-match selector. Most flips
+	 * guarantee the element no longer matches; loosening a `>` to a
+	 * descendant combinator must keep it matching.
+	 *
+	 * @return array{0: array, 1: string|null, 2: string|null} list, mustMatchFid, mustNotMatchFid.
+	 */
+	private function path_near_miss( array $list, array $element ): array {
+		$complex  = $list[0];
+		$compound = $complex['self'];
+		$fid      = $element['fid'];
+
+		$flips = array( 'wrong-class', 'wrong-attr' );
+		if ( null !== $compound['type'] && '*' !== $compound['type'] ) {
+			$flips[] = 'wrong-type';
+		}
+		foreach ( $complex['context'] as $pair ) {
+			if ( '>' === $pair[1] ) {
+				$flips[] = 'loosen-combinator';
+			}
+			$flips[] = 'tighten-combinator';
+			break;
+		}
+
+		switch ( $this->prng->choice( $flips ) ) {
+			case 'wrong-type':
+				$tag = ascii_strtolower( $element['tag'] );
+				do {
+					$other = $this->prng->choice( DocumentGenerator::SAFE_TAGS );
+				} while ( $other === $tag );
+				$complex['self']['type'] = $this->prng->chance( 25 ) ? $this->random_case( $other ) : $other;
+				return array( array( $complex ), null, $fid );
+
+			case 'wrong-attr':
+				$subs   = (array) $complex['self']['subs'];
+				$subs[] = array(
+					'kind'     => 'attr',
+					'name'     => 'zz-no-such-attr',
+					'matcher'  => null,
+					'value'    => null,
+					'modifier' => null,
+				);
+				$complex['self']['subs'] = $subs;
+				return array( array( $complex ), null, $fid );
+
+			case 'loosen-combinator':
+				// Replacing every `>` with a descendant combinator can only
+				// widen the context; the element must still match.
+				foreach ( $complex['context'] as &$pair ) {
+					$pair[1] = ' ';
+				}
+				unset( $pair );
+				$list[0] = $complex;
+				return array( $list, $fid, null );
+
+			case 'tighten-combinator':
+				// May or may not still match; no membership expectation.
+				$at = $this->prng->int( 0, count( $complex['context'] ) - 1 );
+				$complex['context'][ $at ][1] = '>';
+				$list[0]                      = $complex;
+				return array( $list, null, null );
+
+			case 'wrong-class':
+			default:
+				$subs   = (array) $complex['self']['subs'];
+				$subs[] = array(
+					'kind' => 'class',
+					'name' => 'zz-no-such-class',
+				);
+				$complex['self']['subs'] = $subs;
+				return array( array( $complex ), null, $fid );
+		}
 	}
 
 	/*

@@ -35,6 +35,9 @@ namespace CssSelectorFuzz;
  *  - metamorphic-mismatch:    a meaning-preserving transform selected a
  *                             different element set than the original.
  *  - metamorphic-error:       parsing/matching a transformed selector raised.
+ *  - path-expectation:        a path-directed selector's guaranteed
+ *                             (non-)membership does not hold in the reference
+ *                             matcher ( generator/oracle defect ).
  */
 class Worker {
 
@@ -57,7 +60,7 @@ class Worker {
 
 		$prng     = new Prng( (string) $seed, 'css-selector-fuzz-case' );
 		$document = DocumentGenerator::generate( $prng->fork( 'document' ) );
-		$selector = SelectorGenerator::generate( $prng->fork( 'selector' ), $document['pools'] );
+		$selector = SelectorGenerator::generate( $prng->fork( 'selector' ), $document['pools'], $document['model'] );
 
 		$failures = array();
 		$record   = static function ( string $invariant, array $detail ) use ( &$failures ) {
@@ -181,7 +184,37 @@ class Worker {
 
 		$html_matches = null;
 		if ( null !== $complex_ast ) {
-			$expected     = ReferenceMatcher::expected_html_processor_matches( $complex_ast, $document['model'], $document['quirks'] );
+			$expected = ReferenceMatcher::expected_html_processor_matches( $complex_ast, $document['model'], $document['quirks'] );
+
+			/*
+			 * Path-directed selectors are guaranteed by construction to match
+			 * ( or, for near-misses, not to match ) a specific element. The
+			 * reference matcher disagreeing means the generator or the
+			 * reference matcher itself is wrong — a fuzzer-side defect.
+			 */
+			$must_match     = $selector['mustMatchFid'] ?? null;
+			$must_not_match = $selector['mustNotMatchFid'] ?? null;
+			if ( null !== $must_match && ! in_array( $must_match, $expected, true ) ) {
+				$record(
+					'path-expectation',
+					array(
+						'expectation' => 'must-match',
+						'fid'         => $must_match,
+						'expected'    => $expected,
+					)
+				);
+			}
+			if ( null !== $must_not_match && in_array( $must_not_match, $expected, true ) ) {
+				$record(
+					'path-expectation',
+					array(
+						'expectation' => 'must-not-match',
+						'fid'         => $must_not_match,
+						'expected'    => $expected,
+					)
+				);
+			}
+
 			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
 		} elseif ( null === $complex_list && null === $complex_error ) {
 			self::check_select_rejection( 'html', $selector_string, $document, $record );
