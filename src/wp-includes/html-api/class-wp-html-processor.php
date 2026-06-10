@@ -914,6 +914,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
+		/*
+		 * The depth and node-name checks above cannot distinguish the removed
+		 * element from a same-named element at the same depth; identity is
+		 * recovered here. If a queued POP closes a different element with the
+		 * same name, that element owns the current breadcrumb and the virtual
+		 * closer must wait for it.
+		 */
 		$next_event = reset( $this->element_queue );
 		if (
 			false !== $next_event &&
