@@ -510,6 +510,44 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that decoded carriage returns are serialized as character references.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_decoded_carriage_returns
+	 *
+	 * @param string $input    HTML input containing a decoded carriage return.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_normalize_serializes_decoded_carriage_returns_as_character_references( string $input, string $expected ) {
+		$normalized = WP_HTML_Processor::normalize( $input );
+
+		$this->assertSame( $expected, $normalized, 'Should have serialized the carriage return as a character reference.' );
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $normalized ),
+			'Normalizing already-normalized HTML should not change the serialized carriage return.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_decoded_carriage_returns() {
+		return array(
+			'Regular text'    => array( '<p>a&#13;b</p>', '<p>a&#13;b</p>' ),
+			'Regular text with non-canonical character reference' => array( '<p>a&#x0D;b</p>', '<p>a&#13;b</p>' ),
+			'RCDATA title'    => array( '<title>a&#13;b</title>', '<title>a&#13;b</title>' ),
+			'RCDATA textarea with leading-newline preservation' => array( '<textarea>a&#13;b</textarea>', "<textarea>\na&#13;b</textarea>" ),
+			'Attribute value' => array( '<p title="a&#13;b"></p>', '<p title="a&#13;b"></p>' ),
+			'Table text'      => array( '<table><tr><td>x&#13;</td></tr></table>', '<table><tbody><tr><td>x&#13;</td></tr></tbody></table>' ),
+			'Template text'   => array( '<template><p>a&#13;b</p></template>', '<template><p>a&#13;b</p></template>' ),
+		);
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return array[]
