@@ -536,14 +536,16 @@ class WP_Token_Map {
 		$text_length = strlen( $text );
 
 		// Search for a long word first, if the text is long enough, and if that fails, a short one.
-		if ( $text_length > $this->key_length ) {
+		if ( $text_length - $offset > $this->key_length ) {
 			/*
 			 * Keys cannot contain null bytes, which is taken care of for the full words,
 			 * but here it’s required to reject group keys with null bytes so that the
 			 * lookup doesn’t get off track when scanning the group string.
 			 */
 			if ( strcspn( $text, "\x00", $offset, $this->key_length ) < $this->key_length ) {
-				return null;
+				return strlen( $this->small_words ) > 0
+					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
+					: null;
 			}
 
 			$group_key = substr( $text, $offset, $this->key_length );
@@ -596,6 +598,10 @@ class WP_Token_Map {
 		$ignore_case  = 'ascii-case-insensitive' === $case_sensitivity;
 		$small_length = strlen( $this->small_words );
 		$search_text  = substr( $text, $offset, $this->key_length );
+		if ( '' === $search_text ) {
+			return null;
+		}
+
 		if ( $ignore_case ) {
 			$search_text = strtoupper( $search_text );
 		}
@@ -615,6 +621,11 @@ class WP_Token_Map {
 				if ( "\x00" === $this->small_words[ $at + $adjust ] ) {
 					$matched_token_byte_length = $adjust;
 					return $this->small_mappings[ $at / ( $this->key_length + 1 ) ];
+				}
+
+				if ( ! isset( $search_text[ $adjust ] ) ) {
+					$at += $this->key_length + 1;
+					continue 2;
 				}
 
 				if (
