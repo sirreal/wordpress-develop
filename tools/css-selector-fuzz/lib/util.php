@@ -118,6 +118,21 @@ function git_metadata(): array {
 	);
 }
 
+/** Whether every string anywhere in a nested array is valid UTF-8. */
+function ast_strings_are_utf8( $node ): bool {
+	if ( is_string( $node ) ) {
+		return (bool) preg_match( '//u', $node );
+	}
+	if ( is_array( $node ) ) {
+		foreach ( $node as $child ) {
+			if ( ! ast_strings_are_utf8( $child ) ) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 function ascii_strtolower( string $input ): string {
 	return strtr( $input, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
 }

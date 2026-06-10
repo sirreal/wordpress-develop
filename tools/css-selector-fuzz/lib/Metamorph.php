@@ -41,7 +41,7 @@ class Metamorph {
 		 * UTF-8 names, so such ASTs (only reachable from chaos/mutated
 		 * inputs) are not transformable.
 		 */
-		if ( ! self::ast_strings_are_utf8( $list_ast ) ) {
+		if ( ! ast_strings_are_utf8( $list_ast ) ) {
 			return array();
 		}
 
@@ -107,21 +107,6 @@ class Metamorph {
 		);
 
 		return $out;
-	}
-
-	/** Whether every string anywhere in the AST is valid UTF-8. */
-	private static function ast_strings_are_utf8( $node ): bool {
-		if ( is_string( $node ) ) {
-			return (bool) preg_match( '//u', $node );
-		}
-		if ( is_array( $node ) ) {
-			foreach ( $node as $child ) {
-				if ( ! self::ast_strings_are_utf8( $child ) ) {
-					return false;
-				}
-			}
-		}
-		return true;
 	}
 
 	/** Applies $fn to every type-selector name: compound types and context types. */

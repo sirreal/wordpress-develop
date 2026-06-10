@@ -64,7 +64,41 @@ produces the same document, the same selector, and the same verdict.
      explicit `*` for an omitted type, and selector-list branch duplication.
      Skipped for ASTs containing invalid UTF-8 (reachable only from
      chaos/mutated inputs), which the renderer cannot round-trip.
+   - lexbor differential (third, independent oracle; requires the harness —
+     see below): on no-quirks documents whose selector parsed, a canonical
+     re-render of the verified AST is matched by liblexbor and compared,
+     as a multiset of fids, against the reference matcher. Gated on WP and
+     lexbor building the same element tree (fid/tag/ancestry), so it tests
+     the selector layer, not tree construction. Verdicts: `lexbor-divergence`
+     (lexbor ≠ reference) is a fuzzer-oracle problem; `match-mismatch-html`
+     with no accompanying divergence means reference == lexbor ≠ WP — a
+     high-confidence WP finding.
    - Repeating a case yields a byte-identical result digest (determinism).
+
+## lexbor harness
+
+Build with `sh tools/css-selector-fuzz/lexbor/build.sh` (clones and builds
+liblexbor, pinned to v3.0.0 = `2ae88a1c6b52`). The worker auto-detects the
+binary at `tools/css-selector-fuzz/lexbor/harness` and reports per-batch
+tallies (`compared` / `tree-gated` / `skipped-quirks` / `off`).
+
+Known lexbor issues compensated for at this pin:
+
+- [#368](https://github.com/lexbor/lexbor/issues/368) (open at v3.0.0):
+  class and `#id` selectors match ASCII case-insensitively even in
+  no-quirks documents (`[id=…]` attribute matching is correctly
+  case-sensitive). Detected by a startup probe; when present, lexbor is
+  compared against the reference matcher run with quirks-style class/ID
+  folding, and quirks-mode documents are excluded from the differential
+  entirely (the reference matcher is the sole quirks authority).
+- lexbor rejects uppercase `I`/`S` attribute-selector modifiers, and its
+  non-ASCII ident-codepoint table omits U+00B7 and U+00C0–U+00F6 (it
+  starts at U+00F8), rejecting e.g. `.Über` while accepting `.über`.
+  Both sidestepped by the canonical re-render (lowercase modifiers, all
+  non-ASCII hex-escaped); both are candidate upstream reports, not WP
+  findings.
+- `lxb_selectors_find` reports a node once per matching selector-list
+  branch; `LXB_SELECTORS_OPT_MATCH_FIRST` dedupes.
 
 ## Usage
 

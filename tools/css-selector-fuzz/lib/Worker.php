@@ -245,6 +245,7 @@ class Worker {
 		// --- Match phase ---------------------------------------------------
 
 		$html_matches = null;
+		$lexbor_state = 'off';
 		if ( null !== $complex_ast && null !== $rows ) {
 			$expected = ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, $quirks );
 
@@ -278,6 +279,8 @@ class Worker {
 			}
 
 			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
+
+			$lexbor_state = self::check_lexbor_differential( $complex_ast, $selector_string, $document, $rows, $quirks, $expected, $record );
 		} elseif ( null === $complex_list && null === $complex_error ) {
 			self::check_select_rejection( 'html', $selector_string, $document, $record );
 		}
@@ -324,6 +327,7 @@ class Worker {
 			'failures' => $failures,
 			'selector' => $selector_string,
 			'html'     => $document['html'],
+			'lexbor'   => $lexbor_state,
 		);
 	}
 
@@ -477,6 +481,115 @@ class Worker {
 		}
 
 		return $actual;
+	}
+
+	/**
+	 * Runs the lexbor differential — the THIRD, independent matching opinion.
+	 *
+	 * Quirks-mode documents are excluded ( lexbor #368 makes its quirks
+	 * behavior untrustworthy and WP's quirks class/ID folding is owned by
+	 * ReferenceMatcher ). The comparison only runs when lexbor built the
+	 * same element tree as WP ( fid/tag/ancestry multiset ), so it tests
+	 * the selector layer, not tree construction.
+	 *
+	 * Verdict triage:
+	 *  - 'lexbor-divergence'   lexbor != reference: a fuzzer-oracle problem
+	 *                          ( or an un-compensated lexbor bug ) — never a
+	 *                          WP verdict on its own.
+	 *  - 'lexbor-parse-reject' lexbor refused a selector WP accepted.
+	 *  - match-mismatch-html with NO lexbor-divergence on the same case
+	 *                          means reference == lexbor != WP: a
+	 *                          high-confidence WP finding.
+	 *
+	 * @return string Tally state: off|skipped-quirks|error|tree-gated|compared.
+	 */
+	private static function check_lexbor_differential( array $complex_ast, string $selector_string, array $document, array $rows, bool $quirks, array $expected, callable $record ): string {
+		if ( ! LexborOracle::available() ) {
+			return 'off';
+		}
+		if ( $quirks ) {
+			return 'skipped-quirks';
+		}
+
+		/*
+		 * lexbor receives a canonical re-render of the (already verified)
+		 * AST rather than the original byte form: the differential targets
+		 * matching semantics, while byte-level parsing (escapes, whitespace,
+		 * modifier case — lexbor e.g. rejects uppercase I/S modifiers) is
+		 * covered by the AST round-trip and metamorphic invariants. ASTs
+		 * containing invalid UTF-8 cannot be re-rendered and are skipped.
+		 */
+		if ( ! ast_strings_are_utf8( $complex_ast ) ) {
+			return 'skipped-utf8';
+		}
+		$canonical = SelectorGenerator::render_canonical( $complex_ast );
+
+		$lex = LexborOracle::query( $document['html'], $canonical );
+		if ( null === $lex ) {
+			return 'error';
+		}
+
+		if ( 'parse' === $lex['error'] ) {
+			$record(
+				'lexbor-parse-reject',
+				array(
+					'note'      => 'lexbor rejected the canonical form of a selector the WP parser accepted',
+					'canonical' => printable_bytes( $canonical ),
+				)
+			);
+			return 'compared';
+		}
+		if ( null !== $lex['error'] ) {
+			return 'error';
+		}
+
+		if ( ! self::trees_agree( $rows, $lex['rows'] ) ) {
+			return 'tree-gated';
+		}
+
+		/*
+		 * lexbor #368: class/#id match ASCII case-insensitively even in
+		 * no-quirks documents. Compare lexbor against the reference run
+		 * with quirks-style class/ID folding ( the only thing the flag
+		 * affects ) so the rest of the semantics still get differential
+		 * coverage; WP itself is still held to the strict expectation.
+		 */
+		$expected_for_lexbor = LexborOracle::has_issue_368()
+			? ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, true )
+			: $expected;
+
+		// lexbor reports in document order, WP/reference in visit order —
+		// compare as multisets.
+		$lex_matches = $lex['matches'];
+		sort( $lex_matches );
+		sort( $expected_for_lexbor );
+
+		if ( $lex_matches !== $expected_for_lexbor ) {
+			$record(
+				'lexbor-divergence',
+				array(
+					'reference' => $expected_for_lexbor,
+					'lexbor'    => $lex_matches,
+					'issue368'  => LexborOracle::has_issue_368(),
+				)
+			);
+		}
+
+		return 'compared';
+	}
+
+	/** Multiset equality of ( tag, fid, ancestry ) between WP and lexbor rows. */
+	private static function trees_agree( array $wp_rows, array $lexbor_rows ): bool {
+		$serialize = static function ( array $rows ): array {
+			$out = array();
+			foreach ( $rows as $row ) {
+				$out[] = $row['tag'] . '|' . $row['fid'] . '|' . implode( ',', $row['ancestorTags'] );
+			}
+			sort( $out );
+			return $out;
+		};
+
+		return $serialize( $wp_rows ) === $serialize( $lexbor_rows );
 	}
 
 	/**
@@ -660,6 +773,7 @@ class Worker {
 		$failures    = 0;
 		$buckets     = array();
 		$signatures  = array();
+		$lexbor      = array();
 		$last_seed   = null;
 		$stop_reason = 'completed';
 
@@ -688,6 +802,7 @@ class Worker {
 			}
 
 			$buckets[ $result['bucket'] ] = ( $buckets[ $result['bucket'] ] ?? 0 ) + 1;
+			$lexbor[ $result['lexbor'] ]  = ( $lexbor[ $result['lexbor'] ] ?? 0 ) + 1;
 			$last_seed                    = $seed;
 
 			foreach ( $result['failures'] as $failure ) {
@@ -722,6 +837,7 @@ class Worker {
 			'failures'    => $failures,
 			'buckets'     => $buckets,
 			'signatures'  => $signatures,
+			'lexbor'      => $lexbor,
 			'stopReason'  => $stop_reason,
 			'durationMs'  => (int) round( 1000 * ( microtime( true ) - $started_at ) ),
 		);

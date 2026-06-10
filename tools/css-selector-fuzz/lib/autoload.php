@@ -9,4 +9,5 @@ require_once __DIR__ . '/SelectorGenerator.php';
 require_once __DIR__ . '/AstExtractor.php';
 require_once __DIR__ . '/ReferenceMatcher.php';
 require_once __DIR__ . '/Metamorph.php';
+require_once __DIR__ . '/LexborOracle.php';
 require_once __DIR__ . '/Worker.php';

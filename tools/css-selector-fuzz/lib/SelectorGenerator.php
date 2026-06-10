@@ -57,6 +57,106 @@ class SelectorGenerator {
 	}
 
 	/**
+	 * Renders a canonical complex-list AST deterministically with minimal
+	 * escaping: single spaces around combinators, `, ` between branches,
+	 * double-quoted attribute values, lowercase `i`/`s` modifiers, and all
+	 * non-ASCII codepoints hex-escaped. Used to hand a semantically-identical
+	 * selector to external engines: lexbor rejects some byte-level forms WP
+	 * correctly accepts ( uppercase I/S attribute modifiers; raw non-ASCII
+	 * ident codepoints in U+00B7, U+00C0-U+00F6 — its non-ASCII ident table
+	 * starts at U+00F8 ). Escaping sidesteps codepoint classification.
+	 */
+	public static function render_canonical( array $list_ast ): string {
+		$branches = array();
+		foreach ( $list_ast as $complex ) {
+			$out = '';
+			foreach ( array_reverse( $complex['context'] ) as $pair ) {
+				list( $type, $combinator ) = $pair;
+				$out                      .= '*' === $type ? '*' : self::canonical_ident( $type );
+				$out                      .= '>' === $combinator ? ' > ' : ' ';
+			}
+
+			$compound = $complex['self'];
+			if ( null !== $compound['type'] ) {
+				$out .= '*' === $compound['type'] ? '*' : self::canonical_ident( $compound['type'] );
+			}
+			foreach ( (array) $compound['subs'] as $sub ) {
+				switch ( $sub['kind'] ) {
+					case 'class':
+						$out .= '.' . self::canonical_ident( $sub['name'] );
+						break;
+					case 'id':
+						$out .= '#' . self::canonical_ident( $sub['name'] );
+						break;
+					case 'attr':
+						$out .= '[' . self::canonical_ident( $sub['name'] );
+						if ( null !== $sub['matcher'] ) {
+							$matchers = array(
+								'exact'                    => '=',
+								'one-of'                   => '~=',
+								'exact-or-hyphen-suffixed' => '|=',
+								'prefixed'                 => '^=',
+								'suffixed'                 => '$=',
+								'contains'                 => '*=',
+							);
+							$out     .= $matchers[ $sub['matcher'] ] . self::canonical_string( (string) $sub['value'] );
+							if ( 'case-insensitive' === $sub['modifier'] ) {
+								$out .= ' i';
+							} elseif ( 'case-sensitive' === $sub['modifier'] ) {
+								$out .= ' s';
+							}
+						}
+						$out .= ']';
+						break;
+				}
+			}
+			$branches[] = $out;
+		}
+		return implode( ', ', $branches );
+	}
+
+	private static function canonical_ident( string $name ): string {
+		$points = utf8_codepoints( $name );
+		$count  = count( $points );
+		$out    = '';
+
+		foreach ( $points as $i => $point ) {
+			list( $char, $cp ) = $point;
+
+			$is_digit      = $cp >= 0x30 && $cp <= 0x39;
+			$is_ident_char = (
+				'-' === $char ||
+				'_' === $char ||
+				$is_digit ||
+				( $cp >= 0x41 && $cp <= 0x5A ) ||
+				( $cp >= 0x61 && $cp <= 0x7A )
+			);
+
+			$must_escape = ! $is_ident_char
+				|| ( 0 === $i && $is_digit )
+				|| ( 1 === $i && '-' === $points[0][0] && $is_digit )
+				|| ( 1 === $count && '-' === $char );
+
+			$out .= $must_escape ? '\\' . dechex( $cp ) . ' ' : $char;
+		}
+
+		return $out;
+	}
+
+	private static function canonical_string( string $value ): string {
+		$out = '"';
+		foreach ( utf8_codepoints( $value ) as $point ) {
+			list( $char, $cp ) = $point;
+			if ( '"' === $char || '\\' === $char || $cp < 0x20 || $cp > 0x7E ) {
+				$out .= '\\' . dechex( $cp ) . ' ';
+			} else {
+				$out .= $char;
+			}
+		}
+		return $out . '"';
+	}
+
+	/**
 	 * @param array      $pools Pools from DocumentGenerator ( tags, classes, ids, attrNames, attrValues ).
 	 * @param array|null $rows  Element rows ( TreeCapture shape ) with real
 	 *                          fids; enables the path-directed bucket.
