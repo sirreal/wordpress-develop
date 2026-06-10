@@ -65,13 +65,18 @@ b64_decode(const char *in, size_t in_len, size_t *out_len)
 
     for (size_t i = 0; i < in_len; i++) {
         unsigned char c = (unsigned char) in[i];
+        /*
+         * The PHP adapter always feeds well-formed base64_encode() output,
+         * but guard anyway: skip padding/whitespace, and actually skip any
+         * byte not in the alphabet ('A' legitimately maps to 0, so test the
+         * byte itself, not its table value). c is unsigned, so table[c] is
+         * always in bounds.
+         */
         if (c == '=' || c == '\n' || c == '\r') {
             continue;
         }
-        if (c != 'A' && table[c] == 0 && c != 'A') {
-            if (c != 'A') {
-                /* invalid chars are skipped; base64 here is machine-made */
-            }
+        if (c != 'A' && table[c] == 0) {
+            continue;
         }
         acc = (acc << 6) | (unsigned int) table[c];
         bits += 6;
@@ -97,6 +102,24 @@ put_upper(const lxb_char_t *name, size_t len)
     }
 }
 
+/*
+ * Emit a data-fid value, replacing the framing bytes TAB / LF / CR with '?'.
+ * Generated documents only ever use fids like "w12" / "e3", so this never
+ * fires in practice; it guards the line-and-tab protocol against a fid that
+ * contains a control char (which would otherwise desync row/match parsing on
+ * the PHP side). LexborOracle applies the identical replacement when reading
+ * WP's own fids, so a sanitized fid still compares equal — the worst case is
+ * a benign tree-gated skip, never a false divergence.
+ */
+static void
+put_fid_value(const lxb_char_t *value, size_t value_len)
+{
+    for (size_t i = 0; i < value_len; i++) {
+        unsigned char c = value[i];
+        putchar((c == '\t' || c == '\n' || c == '\r') ? '?' : c);
+    }
+}
+
 static void
 put_fid(lxb_dom_node_t *node)
 {
@@ -106,7 +129,7 @@ put_fid(lxb_dom_node_t *node)
         element, (const lxb_char_t *) "data-fid", 8, &value_len);
 
     if (value != NULL) {
-        fwrite(value, 1, value_len, stdout);
+        put_fid_value(value, value_len);
         return;
     }
 

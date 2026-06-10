@@ -110,7 +110,18 @@ class TreeCapture {
 	/** The element's data-fid, or the same placeholder collect_matches() uses. */
 	private static function fid_of( $processor ): string {
 		$fid = $processor->get_attribute( 'data-fid' );
-		return is_string( $fid ) ? $fid : '(missing-fid:' . $processor->get_tag() . ')';
+		return is_string( $fid ) ? self::sanitize_fid( $fid ) : '(missing-fid:' . $processor->get_tag() . ')';
+	}
+
+	/**
+	 * Replaces the lexbor protocol framing bytes ( TAB / LF / CR ) in a fid
+	 * with '?'. Generated fids never contain these, but the lexbor harness
+	 * applies the same replacement, so matching this here keeps the two trees
+	 * comparable even for a hypothetical control-char fid ( the worst case is
+	 * a benign tree-gated skip, never a false divergence ).
+	 */
+	public static function sanitize_fid( string $fid ): string {
+		return strtr( $fid, "\t\n\r", '???' );
 	}
 
 	/**
