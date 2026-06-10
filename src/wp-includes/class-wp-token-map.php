@@ -785,7 +785,7 @@ class WP_Token_Map {
 		$output .= "{$i2}\"storage_version\" => \"{$class_version}\",\n";
 		$output .= "{$i2}\"key_length\" => {$this->key_length},\n";
 
-		$group_line = str_replace( "\x00", "\\x00", $this->groups );
+		$group_line = self::escape_precomputed_php_string( $this->groups );
 		$output    .= "{$i2}\"groups\" => \"{$group_line}\",\n";
 
 		$output .= "{$i2}\"large_words\" => array(\n";
@@ -798,7 +798,7 @@ class WP_Token_Map {
 			$group        = $this->large_words[ $index ];
 			$group_length = strlen( $group );
 			$comment_line = "{$i3}//";
-			$data_line    = "{$i3}\"";
+			$group_data   = '';
 			$at           = 0;
 			while ( $at < $group_length ) {
 				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
@@ -808,32 +808,11 @@ class WP_Token_Map {
 				$mapping        = substr( $group, $at, $mapping_length );
 				$at            += $mapping_length;
 
-				$token_digits   = str_pad( dechex( $token_length ), 2, '0', STR_PAD_LEFT );
-				$mapping_digits = str_pad( dechex( $mapping_length ), 2, '0', STR_PAD_LEFT );
-
-				$mapping = preg_replace_callback(
-					"~[\\x00-\\x1f\\x22\\x5c]~",
-					static function ( $match_result ) {
-						switch ( $match_result[0] ) {
-							case '"':
-								return '\\"';
-
-							case '\\':
-								return '\\\\';
-
-							default:
-								$hex = dechex( ord( $match_result[0] ) );
-								return "\\x{$hex}";
-						}
-					},
-					$mapping
-				);
-
-				$comment_line .= " {$prefix}{$token}[{$mapping}]";
-				$data_line    .= "\\x{$token_digits}{$token}\\x{$mapping_digits}{$mapping}";
+				$group_data   .= pack( 'C', $token_length ) . $token . pack( 'C', $mapping_length ) . $mapping;
+				$comment_line .= ' ' . self::escape_precomputed_php_comment( "{$prefix}{$token}" ) . '[' . self::escape_precomputed_php_comment( $mapping ) . ']';
 			}
 			$comment_line .= ".\n";
-			$data_line    .= "\",\n";
+			$data_line     = "{$i3}\"" . self::escape_precomputed_php_string( $group_data ) . "\",\n";
 
 			$output .= $comment_line;
 			$output .= $data_line;
@@ -849,12 +828,12 @@ class WP_Token_Map {
 			$at           += $this->key_length + 1;
 		}
 
-		$small_text = str_replace( "\x00", '\x00', implode( '', $small_words ) );
+		$small_text = self::escape_precomputed_php_string( implode( '', $small_words ) );
 		$output    .= "{$i2}\"small_words\" => \"{$small_text}\",\n";
 
 		$output .= "{$i2}\"small_mappings\" => array(\n";
 		foreach ( $this->small_mappings as $mapping ) {
-			$output .= "{$i3}\"{$mapping}\",\n";
+			$output .= "{$i3}\"" . self::escape_precomputed_php_string( $mapping ) . "\",\n";
 		}
 		$output .= "{$i2})\n";
 		$output .= "{$i1})\n";
@@ -963,5 +942,66 @@ class WP_Token_Map {
 	 */
 	private static function ascii_lowercase( string $text ): string {
 		return strtr( $text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
+	}
+
+	/**
+	 * Escapes text for use inside a double-quoted PHP string literal.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to escape.
+	 * @return string Escaped string literal body.
+	 */
+	private static function escape_precomputed_php_string( string $text ): string {
+		$escaped = '';
+		$length  = strlen( $text );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $text[ $i ] );
+			switch ( $text[ $i ] ) {
+				case '"':
+					$escaped .= '\\"';
+					break;
+
+				case '\\':
+					$escaped .= '\\\\';
+					break;
+
+				case '$':
+					$escaped .= '\\$';
+					break;
+
+				default:
+					$escaped .= ( $byte < 0x20 || $byte >= 0x7f )
+						? sprintf( '\\x%02x', $byte )
+						: $text[ $i ];
+			}
+		}
+
+		return $escaped;
+	}
+
+	/**
+	 * Escapes text for use inside generated PHP comments.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to escape.
+	 * @return string Escaped comment text.
+	 */
+	private static function escape_precomputed_php_comment( string $text ): string {
+		$escaped = '';
+		$length  = strlen( $text );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $text[ $i ] );
+			$char = $text[ $i ];
+
+			$escaped .= ( $byte < 0x20 || $byte >= 0x7f || '?' === $char || '\\' === $char )
+				? sprintf( '\\x%02x', $byte )
+				: $char;
+		}
+
+		return $escaped;
 	}
 }
