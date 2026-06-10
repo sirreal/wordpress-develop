@@ -1,11 +1,17 @@
 # CSS Selector Fuzzer — Findings
 
-Run: branch `html-css-fuzz` @ `6ebbcc2fe4`, PHP 8.4.21. ~3600 deterministic
+Run: branch `html-css-fuzz` @ `46334f170b`, PHP 8.4.21. 5000 deterministic
 seeds, 0 crashes/timeouts. Three distinct, reproduced WordPress-core correctness
 bugs in the new HTML-API CSS selector support. Every selector below is valid,
 supported CSS that the API mis-handles **without** reporting lack of support.
 
+No new bugs surfaced beyond these three, and no fuzzer-side (oracle or
+generator) defect surfaced: with all three fixes applied a 5000-seed run is
+completely clean, and the lexbor differential (third independent oracle) agreed
+with the reference matcher on every compared no-quirks case (0 `lexbor-divergence`).
+
 Reproduce any case: `php tools/css-selector-fuzz/replay.php --selector '<sel>' [--html '<html>']`.
+Auto-minimize a failing seed: `php tools/css-selector-fuzz/minimize.php --seed <seed>`.
 
 ---
 
@@ -105,10 +111,46 @@ character of the selector string.
 
 ---
 
+## Triage of the 5000-seed run (unpatched core)
+
+427 failures, every one attributable to one of the three bugs above. The
+signature → bug mapping (and why each is a WP finding, not a fuzzer defect):
+
+| signature | hits | bug | how it manifests |
+|---|---|---|---|
+| `metamorphic-ast` (5 variants) | 328 | Bug 1 | a re-rendered / escaped variant of a selector parses to a different AST because an identity escape after multibyte content mis-decodes |
+| `ast-mismatch` | 71 | Bug 1 | generated AST ≠ parsed AST, same root cause |
+| `path-expectation` | 1 | Bug 1 | a path-directed selector with a multibyte-then-identity-escape value (`Über90\ x`) mis-parses, so the element it was built from no longer matches |
+| `metamorphic-parse` (4 variants) | 9 | Bug 3 | a re-rendered variant ending in a single-char unquoted value at EOF is wrongly rejected |
+| `parse-expectation` (2 variants) | 7 | Bug 3 | the generated selector itself ends in `=x]` and is wrongly rejected (e.g. `[dir =a]`) |
+| `match-mismatch-html` | 7 | Bug 2 | empty-operand `^= *= $=` match elements the spec says they must not |
+| `match-mismatch-tag` | 4 | Bug 2 | same, via the tag processor |
+
+Zero `lexbor-divergence`, zero `model-desync`, zero crashes/timeouts. With all
+three fixes applied, the same 5000 seeds run with **0 failures** — confirming
+the fuzzer reports exactly these three bugs and nothing spurious.
+
 ## Fuzzer status
 
-Implemented and validated: deterministic seeds, seed-based replay, generative
-6-bucket selector generation, independent reference matcher, ~18 invariants,
-process-isolated runner, self-check suite. `php tools/css-selector-fuzz/tests/self-check.php`
-passes; see `README.md` for usage. No fuzzer-side (oracle/generator) defects
-surfaced in 3600 seeds — all failures are the three target bugs above.
+Implemented and validated:
+
+- Deterministic seeds, seed-based replay, self-check suite
+  (`php tools/css-selector-fuzz/tests/self-check.php` passes).
+- Seven-bucket selector generation including **path-directed** synthesis
+  (combinator positive-match rate ~68% vs ~14% before) and **edge-escape**
+  (U+FFFD escape decoder, input normalization).
+- Three independent match oracles: the spec-faithful `ReferenceMatcher`, the
+  AST round-trip, and a **lexbor differential** (liblexbor v3.0.0, no-quirks
+  documents, tree-equality gated). The three agree on every compared case.
+- **Metamorphic invariants** (oracle-free): meaning-preserving transforms keep
+  the match set; AST-preserving transforms keep the AST.
+- **Parser-derived oracle tree** (`TreeCapture`): the processor's own parse is
+  ground truth, so **wild / restructured HTML** and **`<body>` fragments** are
+  fuzzed, not only clean trees.
+- **Line coverage** measured (93.8%, see `COVERAGE.md`; 96.8% of reachable
+  code, remainder justified).
+- **Automatic minimizer** (`minimize.php`): delta-debugs selector and HTML to a
+  minimal reproducer preserving a chosen signature.
+
+See `README.md` for usage and `NEXT-STEPS.md` for the roadmap this work
+completed.

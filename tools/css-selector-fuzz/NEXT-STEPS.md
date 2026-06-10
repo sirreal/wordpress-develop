@@ -1,10 +1,13 @@
 # CSS Selector Fuzzer — Next Steps / Improvement Roadmap
 
-Status: first-generation fuzzer is implemented, validated, and has found three
-real WordPress-core bugs (see `FINDINGS.md`). Design and current coverage are in
-`README.md`. This document is the prioritized plan to take it from "found three
-bugs" to "exhaustive and trustworthy." Do NOT re-explain the existing tool here;
-read `README.md` and `FINDINGS.md` first.
+> **Status: all seven work items below are implemented and validated** (see
+> `README.md`, `COVERAGE.md`, `FINDINGS.md`). The acceptance bar is met:
+> coverage measured (93.8%; 96.8% of reachable code, remainder justified);
+> three oracles agree on no-quirks supported cases with every divergence
+> triaged; metamorphic invariants passing; combinator positive-match rate
+> raised from 14.5% to ~68% (path-directed bucket); minimizer working; a clean
+> 5000-seed run with all signatures triaged to the three known bugs, all of
+> which still reproduce. The notes below are retained as the design rationale.
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
