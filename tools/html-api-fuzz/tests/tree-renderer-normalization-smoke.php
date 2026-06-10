@@ -120,6 +120,15 @@ $synthetic_quoted_attribute_name_nul = \HtmlApiFuzz\TreeRenderer::compare_trees(
 html_api_fuzz_tree_normalization_assert( true === ( $synthetic_quoted_attribute_name_nul['ok'] ?? null ), 'An attribute name that begins with a quote is still an attribute line, not a text line.' );
 
 /*
+ * The tokenizer permits `<` and `!` in attribute names, so `<div <!--a="...">`
+ * carries an attribute named `<!--a` and the renderer emits a line that
+ * begins like a comment. It is an attribute line and keeps the tolerance;
+ * real comment lines end with ` -->`, not a quoted value.
+ */
+$synthetic_comment_prefixed_attribute = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  <!--a=\"x\\0y\"\n\n", "<div>\n  <!--a=\"x\xEF\xBF\xBDy\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_comment_prefixed_attribute['ok'] ?? null ), 'An attribute name that begins with a comment opener is still an attribute line.' );
+
+/*
  * Line classification must hold on lines far past the PCRE JIT stack
  * comfort zone (~8KB with backtracking quantifiers): the generator's
  * stress payloads produce long attribute values, and the scalar matcher
@@ -219,6 +228,16 @@ html_api_fuzz_tree_normalization_assert( ! empty( $nul_attribute_name['compariso
 $nul_attribute_name_tree = file_get_contents( $nul_attribute_name['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $nul_attribute_name_tree, 'NUL attribute name WordPress tree should be written.' );
 html_api_fuzz_tree_normalization_assert( false !== strpos( $nul_attribute_name_tree, '7fy\\0mt4=""' ), 'NUL attribute names should render raw as escaped NUL.' );
+
+$comment_prefixed_attribute_name = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'comment-prefixed-attribute-name',
+	base64_encode( "<div <!--a=\"x\0y\">k</div>" ),
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert_compares( $comment_prefixed_attribute_name, 'Attribute names beginning with a comment opener should compare with scalar tolerance.' );
+html_api_fuzz_tree_normalization_assert( true === ( $comment_prefixed_attribute_name['comparison']['ok'] ?? null ), 'Comment-opener attribute name comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $comment_prefixed_attribute_name['comparison']['scalarToleratedLines'] ), 'Comment-opener attribute name comparison should report tolerated lines.' );
 
 $foreign_tag_name = html_api_fuzz_tree_normalization_run(
 	$tmp,

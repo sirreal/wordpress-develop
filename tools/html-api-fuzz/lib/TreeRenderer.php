@@ -796,10 +796,13 @@ class TreeRenderer {
 	 * spec substitutions itself, so a scalar difference on those lines is
 	 * a real divergence the tolerance must not mask.
 	 *
-	 * Operates on the escaped rendering, where a text line is exactly one
-	 * quoted escaped string (interior quotes render as `\"`). An attribute
-	 * line whose name begins with a raw `"` has unescaped structure after
-	 * the name and does not match the text shape.
+	 * Operates on the escaped rendering, where the shapes are disjoint: a
+	 * text line is exactly one quoted escaped string (interior quotes
+	 * render as `\"`, so its content can never contain an unescaped `="`),
+	 * comment, doctype, and tag lines end with `>` or ` -->`, and only an
+	 * attribute line ends with `="…"`. The attribute shape is therefore
+	 * tested before the comment prefix: the tokenizer permits `<` and `!`
+	 * in attribute names, so an attribute line may begin with `<!--`.
 	 */
 	private static function scalar_tolerance_eligible_line( string $line ): bool {
 		$trimmed = ltrim( $line, ' ' );
@@ -813,6 +816,10 @@ class TreeRenderer {
 		if ( preg_match( '/^"(?:\\\\.|[^"\\\\])*+"$/', $trimmed ) ) {
 			return false;
 		}
+		// Attribute line: name followed by a quoted escaped value.
+		if ( preg_match( '/="(?:\\\\.|[^"\\\\])*+"$/', $trimmed ) ) {
+			return true;
+		}
 		if ( str_starts_with( $trimmed, '<!--' ) || str_starts_with( $trimmed, '<!DOCTYPE' ) ) {
 			return false;
 		}
@@ -821,11 +828,7 @@ class TreeRenderer {
 			return false;
 		}
 		// Tag line.
-		if ( '<' === $trimmed[0] ) {
-			return true;
-		}
-		// Attribute line: name followed by a quoted escaped value.
-		return 1 === preg_match( '/="(?:\\\\.|[^"\\\\])*+"$/', $trimmed );
+		return '<' === $trimmed[0];
 	}
 
 	/**
