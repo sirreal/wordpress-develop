@@ -250,10 +250,12 @@ while ( $running ) {
 }
 
 $aggregate = array(
-	'successes'    => 0,
-	'failures'     => 0,
-	'unsupported'  => 0,
-	'oracleErrors' => 0,
+	'successes'         => 0,
+	'failures'          => 0,
+	'unsupported'       => 0,
+	'oracleParseErrors' => 0,
+	'oracleUnsupported' => 0,
+	'oracleTolerated'   => 0,
 );
 foreach ( $state['laneResults'] as $lane ) {
 	$runner_state = $lane['runnerState'] ?? array();

@@ -219,6 +219,7 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 	$output_dir    = $signature_dir . '/minimize-' . \HtmlApiFuzz\timestamp();
 	$state['signatures'][ $hash ]['status'] = 'minimizing';
 	$state['signatures'][ $hash ]['minimizeStartedAt'] = gmdate( 'c' );
+	$state['signatures'][ $hash ]['minimizeAttempts'] = (int) ( $state['signatures'][ $hash ]['minimizeAttempts'] ?? 0 ) + 1;
 
 	$args = array(
 		__DIR__ . '/minimize.php',
@@ -229,7 +230,7 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 		'--timeout-ms',
 		(string) \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 ),
 		'--max-attempts',
-		(string) \HtmlApiFuzz\option_int( $options, 'max-attempts', 250 ),
+		(string) \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 ),
 	);
 	if ( \HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ) {
 		$args[] = '--any-failure';
@@ -294,9 +295,17 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 			$state['signatures'][ $hash ]['status'] = 'queued';
 		}
 	} else {
+		$max_minimize_retries = \HtmlApiFuzz\option_int( $options, 'max-minimize-retries', 3 );
 		$queue = array();
 		foreach ( $state['signatures'] as $hash => $record ) {
-			if ( in_array( $record['status'] ?? 'new', array( 'new', 'queued' ), true ) ) {
+			$status = $record['status'] ?? 'new';
+			if ( in_array( $status, array( 'new', 'queued' ), true ) ) {
+				$queue[] = $hash;
+				continue;
+			}
+			// Re-queue failed minimizations on later scans, up to the cap:
+			// transient timeouts and load spikes should not strand a finding.
+			if ( 'minimize-failed' === $status && (int) ( $record['minimizeAttempts'] ?? 0 ) < $max_minimize_retries ) {
 				$queue[] = $hash;
 			}
 		}

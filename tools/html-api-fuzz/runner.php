@@ -61,6 +61,8 @@ $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
 $payload_policy   = \HtmlApiFuzz\option_string( $options, 'payload-policy', 'auto' );
 $max_input_bytes  = \HtmlApiFuzz\option_int( $options, 'max-input-bytes', 0 );
+$corpus_percent   = \HtmlApiFuzz\option_int( $options, 'corpus-mutate-percent', 20 );
+$batch_size       = max( 1, \HtmlApiFuzz\option_int( $options, 'batch-size', 25 ) );
 $max_tokens       = \HtmlApiFuzz\option_int( $options, 'max-tokens', 2000 );
 $max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
@@ -91,11 +93,13 @@ $state = array(
 	'payloadPolicy' => $payload_policy,
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
-	'successes'     => 0,
-	'failures'      => 0,
-	'unsupported'   => 0,
-	'oracleErrors'  => 0,
-	'stopReason'    => null,
+	'successes'         => 0,
+	'failures'          => 0,
+	'unsupported'       => 0,
+	'oracleParseErrors' => 0,
+	'oracleUnsupported' => 0,
+	'oracleTolerated'   => 0,
+	'stopReason'        => null,
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
 \HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'runner-start', 'outputDir' => $output_dir, 'git' => $git_metadata ) );
@@ -106,11 +110,7 @@ $deadline     = $has_deadline ? microtime( true ) + $duration_seconds : null;
 $seed         = $start_seed;
 $count        = 0;
 
-while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_seeds || $count < $max_seeds ) ) {
-	$attempt_dir = $output_dir . '/seed-' . $seed . '/primary';
-	\HtmlApiFuzz\ensure_dir( $attempt_dir );
-	$log_path = $attempt_dir . '/worker.log';
-
+function html_api_fuzz_runner_worker_args( int $seed, string $output_dir, string $profile, string $mode, string $payload_policy, int $max_tokens, int $max_nodes, string $git_metadata_base64, bool $fail_unsupported, int $max_input_bytes, int $corpus_percent, int $batch_count, int $seed_stride ): array {
 	$args = array(
 		__DIR__ . '/worker.php',
 		'--seed',
@@ -122,7 +122,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'--payload-policy',
 		$payload_policy,
 		'--output-dir',
-		$attempt_dir,
+		$output_dir,
 		'--max-tokens',
 		(string) $max_tokens,
 		'--max-nodes',
@@ -130,6 +130,12 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'--git-metadata-base64',
 		$git_metadata_base64,
 	);
+	if ( $batch_count > 1 ) {
+		$args[] = '--batch-count';
+		$args[] = (string) $batch_count;
+		$args[] = '--seed-stride';
+		$args[] = (string) $seed_stride;
+	}
 	if ( $fail_unsupported ) {
 		$args[] = '--fail-unsupported';
 	}
@@ -137,10 +143,55 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		$args[] = '--max-input-bytes';
 		$args[] = (string) $max_input_bytes;
 	}
+	$args[] = '--corpus-mutate-percent';
+	$args[] = (string) $corpus_percent;
+	return $args;
+}
 
-	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-start', 'seed' => $seed, 'attemptDir' => $attempt_dir ) );
-	$proc   = \HtmlApiFuzz\run_php_process( $args, $repo_root, $timeout_ms, $log_path );
+$pending_batch = array();
+
+// Already-computed batch results are always processed; the deadline and seed
+// budget gate only the formation of new batches.
+while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_seeds || $count < $max_seeds ) ) ) {
+	if ( array() === $pending_batch ) {
+		/*
+		 * Run a batch of seeds in one worker process: per-seed process spawns
+		 * dominate wall-clock otherwise. Seeds missing a result.json after
+		 * the batch (the batch process died or timed out mid-way) are re-run
+		 * individually below.
+		 */
+		$batch_count = $batch_size;
+		if ( 0 !== $max_seeds ) {
+			$batch_count = min( $batch_count, $max_seeds - $count );
+		}
+		$batch_count = max( 1, $batch_count );
+		$batch_seeds = array();
+		for ( $i = 0; $i < $batch_count; $i++ ) {
+			$batch_seeds[] = $seed + ( $i * $seed_stride );
+		}
+
+		$batch_log = $output_dir . '/seed-' . $batch_seeds[0] . '/primary/batch-worker.log';
+		\HtmlApiFuzz\ensure_dir( dirname( $batch_log ) );
+		\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'batch-start', 'seeds' => $batch_seeds ) );
+		$batch_args = html_api_fuzz_runner_worker_args( $batch_seeds[0], $output_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, $batch_count, $seed_stride );
+		$batch_proc = \HtmlApiFuzz\run_php_process( $batch_args, $repo_root, $timeout_ms * $batch_count, $batch_log );
+		$pending_batch = $batch_seeds;
+	}
+
+	$current_seed = array_shift( $pending_batch );
+	$attempt_dir  = $output_dir . '/seed-' . $current_seed . '/primary';
+	\HtmlApiFuzz\ensure_dir( $attempt_dir );
+	$log_path = $attempt_dir . '/worker.log';
+
+	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-start', 'seed' => $current_seed, 'attemptDir' => $attempt_dir ) );
 	$result = \HtmlApiFuzz\read_json_file( $attempt_dir . '/result.json' );
+	$proc   = $batch_proc;
+	if ( null === $result ) {
+		// Isolation fallback: re-run this seed in its own process.
+		$args = html_api_fuzz_runner_worker_args( $current_seed, $attempt_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, 1, $seed_stride );
+		$proc   = \HtmlApiFuzz\run_php_process( $args, $repo_root, $timeout_ms, $log_path );
+		$result = \HtmlApiFuzz\read_json_file( $attempt_dir . '/result.json' );
+	}
 
 	if ( null === $result ) {
 		$replay = \HtmlApiFuzz\read_json_file( $attempt_dir . '/replay.json' );
@@ -149,7 +200,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 			'status'         => $proc['timedOut'] ? 'timeout' : 'worker-failed',
 			'failureClass'   => $proc['timedOut'] ? 'timeout' : 'worker-failed',
 			'failureSnippet' => substr( $proc['output'], -2000 ),
-			'seed'           => $seed,
+			'seed'           => $current_seed,
 			'profile'        => is_array( $replay ) ? ( $replay['profile'] ?? $profile ) : $profile,
 			'mode'           => is_array( $replay ) ? ( $replay['mode'] ?? $mode ) : $mode,
 			'payloadPolicy'  => is_array( $replay ) ? ( $replay['payloadPolicy'] ?? $payload_policy ) : $payload_policy,
@@ -170,7 +221,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		\HtmlApiFuzz\write_json_file( $attempt_dir . '/result.json', $result );
 	}
 
-	$result['seed']    = $result['seed'] ?? $seed;
+	$result['seed']    = $result['seed'] ?? $current_seed;
 	$result['profile'] = $result['profile'] ?? $profile;
 	$result['mode']    = $result['mode'] ?? $mode;
 	$result['payloadPolicy'] = $result['payloadPolicy'] ?? $payload_policy;
@@ -208,7 +259,7 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'ok'            => $result['ok'] ?? false,
 		'status'        => $result['status'] ?? 'unknown',
 		'failureClass'  => $result['failureClass'] ?? null,
-		'seed'          => $seed,
+		'seed'          => $current_seed,
 		'profile'       => $result['profile'] ?? $profile,
 		'mode'          => $result['mode'] ?? $mode,
 		'payloadPolicy' => $result['payloadPolicy'] ?? $payload_policy,
@@ -225,13 +276,20 @@ while ( ( ! $has_deadline || microtime( true ) < $deadline ) && ( 0 === $max_see
 		'workerTimedOut'=> $proc['timedOut'],
 	);
 	\HtmlApiFuzz\append_ndjson( $summary_path, $summary );
-	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-complete', 'seed' => $seed, 'ok' => $summary['ok'], 'status' => $summary['status'], 'signature' => $summary['signature']['hash'] ?? null ) );
+	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'seed-complete', 'seed' => $current_seed, 'ok' => $summary['ok'], 'status' => $summary['status'], 'signature' => $summary['signature']['hash'] ?? null ) );
 
 	if ( $summary['ok'] ) {
 		if ( 'unsupported' === $summary['status'] ) {
 			++$state['unsupported'];
-		} elseif ( in_array( $summary['status'], array( 'oracle-parse-error', 'oracle-unsupported', 'oracle-tolerated' ), true ) ) {
-			++$state['oracleErrors'];
+		} elseif ( 'oracle-parse-error' === $summary['status'] ) {
+			// Inputs the DOM oracle cannot parse receive no differential
+			// coverage; track the loss per class so long runs surface how
+			// much of the input space the oracle gives up on.
+			++$state['oracleParseErrors'];
+		} elseif ( 'oracle-unsupported' === $summary['status'] ) {
+			++$state['oracleUnsupported'];
+		} elseif ( 'oracle-tolerated' === $summary['status'] ) {
+			++$state['oracleTolerated'];
 		} else {
 			++$state['successes'];
 		}

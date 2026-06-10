@@ -23,18 +23,36 @@ class Signature {
 			$facts['invariant'] = $failure['name'] ?? 'unknown';
 			$facts['throwable'] = $failure['throwable'] ?? null;
 		} elseif ( 'normalize-invariant-failed' === $failure_class ) {
+			/*
+			 * Facts must not include input-derived values (hashes, hex windows,
+			 * byte offsets): every distinct failing input would mint a distinct
+			 * signature and the watcher would treat one normalize bug as an
+			 * unbounded stream of new findings. Forensics stay in result.json.
+			 */
 			$normalize = $result['tagProcessor']['normalize'] ?? array();
 			$failure   = $normalize['failure'] ?? array();
-			$diff      = $normalize['firstDifference'] ?? $failure['firstDifference'] ?? array();
-			$facts['invariant']             = $failure['name'] ?? 'normalize-unknown';
-			$facts['normalizeStatus']       = $normalize['status'] ?? null;
-			$facts['normalizeApi']          = $normalize['api'] ?? null;
-			$facts['normalizedSha1']        = $normalize['normalizedSha1'] ?? $failure['normalizedSha1'] ?? null;
-			$facts['normalizedTwiceSha1']   = $normalize['normalizedTwiceSha1'] ?? $failure['normalizedTwiceSha1'] ?? null;
-			$facts['firstByteOffset']       = $diff['firstByteOffset'] ?? null;
-			$facts['normalizedDiffHex']     = $diff['normalizedDiffHex'] ?? null;
-			$facts['normalizedTwiceDiffHex'] = $diff['normalizedTwiceDiffHex'] ?? null;
-			$facts['throwable']             = $normalize['throwable'] ?? $failure['throwable'] ?? null;
+			$facts['invariant']       = $failure['name'] ?? 'normalize-unknown';
+			$facts['normalizeStatus'] = $normalize['status'] ?? null;
+			$facts['normalizeApi']    = $normalize['api'] ?? null;
+			$facts['throwable']       = $normalize['throwable'] ?? $failure['throwable'] ?? null;
+			$facts['message']         = self::normalize_message( $failure['message'] ?? '' );
+		} elseif ( 'normalize-tree-changed' === $failure_class ) {
+			$diff = $result['normalizePreservation']['firstDifference'] ?? array();
+			$facts['treePath']      = $diff['path'] ?? null;
+			$facts['wordpressNorm'] = $diff['wordpressNorm'] ?? null;
+			$facts['domNorm']       = $diff['domNorm'] ?? null;
+		} elseif ( in_array( $failure_class, array( 'mutation-tree-mismatch', 'mutation-delta-mismatch' ), true ) ) {
+			$diff = $result['mutation']['firstDifference'] ?? array();
+			$facts['treePath']      = $diff['path'] ?? null;
+			$facts['wordpressNorm'] = $diff['wordpressNorm'] ?? null;
+			$facts['domNorm']       = $diff['domNorm'] ?? null;
+		} elseif ( 'breadcrumb-mismatch' === $failure_class ) {
+			$breadcrumbs = $result['wordpress']['breadcrumbs'] ?? array();
+			$divergence  = $breadcrumbs['divergenceDepth'] ?? null;
+			$facts['kind']            = $breadcrumbs['kind'] ?? null;
+			$facts['divergenceDepth'] = $divergence;
+			$facts['expectedAt']      = null === $divergence ? null : ( $breadcrumbs['expected'][ $divergence ] ?? null );
+			$facts['actualAt']        = null === $divergence ? null : ( $breadcrumbs['actual'][ $divergence ] ?? null );
 		} elseif ( 'resource-limit' === $failure_class ) {
 			$limit_failures = self::resource_limit_failures( $result );
 			$limit_failures = array_values( array_unique( $limit_failures ) );
@@ -62,10 +80,21 @@ class Signature {
 
 		$hash = substr( sha1( json_encode( $facts, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE ) ), 0, 12 );
 
+		/*
+		 * The family key clusters likely-same-root-cause findings. Prefer the
+		 * masked line pair over the tree path: paths embed generated element
+		 * names and spread one bug across many families.
+		 */
+		if ( isset( $facts['wordpressNorm'] ) || isset( $facts['domNorm'] ) ) {
+			$family_fact = ( $facts['wordpressNorm'] ?? '' ) . '|' . ( $facts['domNorm'] ?? '' );
+		} else {
+			$family_fact = $facts['invariant'] ?? $facts['unsupportedMessage'] ?? $facts['kind'] ?? '';
+		}
+
 		return array(
 			'hash'             => $hash,
 			'equivalenceClass' => $failure_class,
-			'familyKey'        => substr( sha1( $failure_class . ':' . ( $facts['treePath'] ?? $facts['invariant'] ?? $facts['unsupportedMessage'] ?? '' ) ), 0, 12 ),
+			'familyKey'        => substr( sha1( $failure_class . ':' . $family_fact ), 0, 12 ),
 			'facts'            => $facts,
 			'normalized'       => self::normalized_text( $facts ),
 		);

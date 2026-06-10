@@ -35,6 +35,10 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 		$args[] = '--payload-policy';
 		$args[] = $base['payloadPolicy'];
 	}
+	if ( 'body' !== $base['fragmentContext'] ) {
+		$args[] = '--fragment-context';
+		$args[] = $base['fragmentContext'];
+	}
 	$proc   = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $dir . '/worker.log' );
 	$result = \HtmlApiFuzz\read_json_file( $dir . '/result.json' );
 	if ( null === $result ) {
@@ -81,6 +85,7 @@ $base = array(
 	'profile'           => $replay['profile'] ?? 'replay',
 	'payloadPolicy'     => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
 		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null ),
+	'fragmentContext'   => is_string( $replay['fragmentContext'] ?? null ) ? $replay['fragmentContext'] : 'body',
 	'originalGenerator' => $original_generator,
 	'seed'              => (int) ( $replay['seed'] ?? 1 ),
 	'targetHash'        => $target_hash,
@@ -91,12 +96,45 @@ $base = array(
 	'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
 );
 $timeout_ms    = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
-$max_attempts  = \HtmlApiFuzz\option_int( $options, 'max-attempts', 250 );
+$max_attempts  = \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 );
 $any_failure   = \HtmlApiFuzz\option_bool( $options, 'any-failure', false );
 $attempt_count = 0;
 
 $current = $input;
-$chunks  = 2;
+
+/*
+ * Phase 1: markup-aligned segment deletion. Splitting on tag boundaries is
+ * token-naive (rawtext contents split incorrectly), but unsound candidates
+ * simply fail the signature check; aligned deletions converge far faster on
+ * HTML than blind byte chunks.
+ */
+$progress = true;
+while ( $progress && $attempt_count < $max_attempts ) {
+	$progress = false;
+	preg_match_all( '/<[^>]*>?|[^<]+/s', $current, $matches );
+	$segments = $matches[0];
+	if ( count( $segments ) < 2 ) {
+		break;
+	}
+	for ( $i = count( $segments ) - 1; $i >= 0 && $attempt_count < $max_attempts; $i-- ) {
+		$candidate_segments = $segments;
+		unset( $candidate_segments[ $i ] );
+		$candidate = implode( '', $candidate_segments );
+		if ( $candidate === $current || '' === $candidate ) {
+			continue;
+		}
+		++$attempt_count;
+		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+		if ( $test['accepted'] ) {
+			$current  = $candidate;
+			$progress = true;
+			break;
+		}
+	}
+}
+
+// Phase 2: byte-chunk deletion for reductions that cross tag boundaries.
+$chunks = 2;
 while ( strlen( $current ) > 0 && $attempt_count < $max_attempts ) {
 	$length     = strlen( $current );
 	$chunk_size = (int) ceil( $length / $chunks );
@@ -125,7 +163,12 @@ while ( strlen( $current ) > 0 && $attempt_count < $max_attempts ) {
 	}
 }
 
-$simple_replacements = array( 'a', ' ', "\n", '<p></p>', '' );
+/*
+ * Phase 3: per-byte canonicalization. Deletion is tried first; replacements
+ * never grow the input. After a deletion the same index holds the next byte,
+ * so stay in place; after a substitution move on.
+ */
+$simple_replacements = array( '', 'a', ' ', "\n" );
 for ( $i = 0; $i < strlen( $current ) && $attempt_count < $max_attempts; ++$i ) {
 	foreach ( $simple_replacements as $replacement ) {
 		$candidate = substr( $current, 0, $i ) . $replacement . substr( $current, $i + 1 );
@@ -136,7 +179,9 @@ for ( $i = 0; $i < strlen( $current ) && $attempt_count < $max_attempts; ++$i ) 
 		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
 		if ( $test['accepted'] ) {
 			$current = $candidate;
-			$i       = max( -1, $i - 2 );
+			if ( '' === $replacement ) {
+				--$i;
+			}
 			break;
 		}
 	}
@@ -173,6 +218,10 @@ if ( $base['failUnsupported'] ) {
 if ( null !== $base['payloadPolicy'] ) {
 	$args[] = '--payload-policy';
 	$args[] = $base['payloadPolicy'];
+}
+if ( 'body' !== $base['fragmentContext'] ) {
+	$args[] = '--fragment-context';
+	$args[] = $base['fragmentContext'];
 }
 \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $final_dir . '/worker.log' );
 $final_result = \HtmlApiFuzz\read_json_file( $final_dir . '/result.json' );

@@ -67,17 +67,24 @@ function html_api_fuzz_smoke_rm_tree( string $path ): void {
 	@rmdir( $path );
 }
 
-$valid = \HtmlApiFuzz\Generator::generate(
-	1,
-	'balanced',
-	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-	'valid-utf8',
-	64
-);
-html_api_fuzz_smoke_assert( 'valid-utf8' === $valid['payloadPolicy'], 'valid-utf8 policy should be resolved.' );
-html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $valid['input'] ), 'valid-utf8 policy should produce valid UTF-8 bytes.' );
-html_api_fuzz_smoke_assert( strlen( $valid['input'] ) <= 64, 'max-input-bytes should cap generated input.' );
-html_api_fuzz_smoke_assert( true === $valid['parameters']['truncated'], 'max-input-bytes smoke should exercise truncation.' );
+$valid = null;
+for ( $truncation_seed = 1; $truncation_seed <= 64; $truncation_seed++ ) {
+	$candidate = \HtmlApiFuzz\Generator::generate(
+		$truncation_seed,
+		'balanced',
+		\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'valid-utf8',
+		64
+	);
+	html_api_fuzz_smoke_assert( 'valid-utf8' === $candidate['payloadPolicy'], 'valid-utf8 policy should be resolved.' );
+	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $candidate['input'] ), 'valid-utf8 policy should produce valid UTF-8 bytes.' );
+	html_api_fuzz_smoke_assert( strlen( $candidate['input'] ) <= 64, 'max-input-bytes should cap generated input.' );
+	if ( true === $candidate['parameters']['truncated'] ) {
+		$valid = $candidate;
+		break;
+	}
+}
+html_api_fuzz_smoke_assert( null !== $valid, 'max-input-bytes smoke should exercise truncation within the seed budget.' );
 html_api_fuzz_smoke_assert( in_array( 'generator:truncated', $valid['parameters']['features'], true ), 'truncation should be recorded as a feature.' );
 html_api_fuzz_smoke_assert( 'valid-utf8' === $valid['parameters']['payloadPolicy'], 'parameters should include payload policy.' );
 html_api_fuzz_smoke_expect_invalid_argument(
@@ -145,10 +152,27 @@ $required_generator_features = array(
 	'tag:alpha-weird-name',
 	'tag:bogus-open-name',
 	'tag:weird-spacing',
+	'attr:duplicate',
+	'select',
+	'select:option',
+	'select:optgroup',
+	'select:breaker',
+	'select:nested',
+	'adoption-agency-pattern',
+	'adoption:misnested-closers',
+	'adoption:reconstruction',
+	'adoption:noahs-ark',
+	'auto-closing-chain',
+	'special-closers',
+	'foreign:breakout',
+	'foreign:annotation-xml-encoding-variant',
+	'foreign:cdata',
+	'foreign:case-mangled-name',
+	'plaintext',
 );
 $found_generator_features = array_fill_keys( $required_generator_features, false );
 $all_generator_features_found = false;
-foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'incomplete-malformed', 'balanced' ) as $feature_profile ) {
+foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'incomplete-malformed', 'balanced', 'select', 'formatting-adoption', 'foreign-content' ) as $feature_profile ) {
 	for ( $seed = 1; $seed <= 128; ++$seed ) {
 		$generated = \HtmlApiFuzz\Generator::generate( $seed, $feature_profile, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
 		html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "{$feature_profile}/{$seed} feature-coverage sample should produce valid UTF-8 bytes." );
@@ -708,10 +732,15 @@ html_api_fuzz_smoke_assert( 'oracle-unsupported' === ( $dom_nested_template_cont
 html_api_fuzz_smoke_assert( null === ( $dom_nested_template_context_result['comparison'] ?? null ), 'Nested DOM template table-sensitive fallback should not compare a lossy DOM tree.' );
 html_api_fuzz_smoke_assert( null === ( $dom_nested_template_context_result['signature'] ?? null ), 'Nested DOM template table-sensitive fallback should not produce a fuzz signature.' );
 
+/*
+ * Template content that round-trips faithfully through body-context fragment
+ * parsing is rendered and counted: node ceilings still apply inside template
+ * content and must win over any other classification.
+ */
 $dom_template_context_resource_dir = $tmp . '/dom-template-context-resource-limit';
 $dom_template_context_resource_result = \HtmlApiFuzz\Worker::run(
 	array(
-		'input-base64'    => base64_encode( '<template><col><x></x></template>' ),
+		'input-base64'    => base64_encode( '<template><i>a</i><i>b</i></template>' ),
 		'profile'         => 'replay',
 		'mode'            => \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
 		'payload-policy'  => 'ascii-structural',
@@ -720,10 +749,30 @@ $dom_template_context_resource_result = \HtmlApiFuzz\Worker::run(
 		'max-nodes'       => '3',
 	)
 );
-html_api_fuzz_smoke_assert( false === ( $dom_template_context_resource_result['ok'] ?? null ), 'DOM template oracle quarantine should not mask DOM node ceilings.' );
-html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_template_context_resource_result['status'] ?? null ), 'DOM template oracle quarantine node ceilings should use resource-limit status.' );
-html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_template_context_resource_result['failureClass'] ?? null ), 'DOM template oracle quarantine node ceilings should use resource-limit failure class.' );
-html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_template_context_resource_result['dom']['failureClass'] ?? null ), 'DOM template oracle quarantine should preserve the concrete DOM node ceiling.' );
+html_api_fuzz_smoke_assert( false === ( $dom_template_context_resource_result['ok'] ?? null ), 'DOM template rendering should not mask DOM node ceilings.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_template_context_resource_result['status'] ?? null ), 'DOM template node ceilings should use resource-limit status.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_template_context_resource_result['failureClass'] ?? null ), 'DOM template node ceilings should use resource-limit failure class.' );
+html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_template_context_resource_result['dom']['failureClass'] ?? null ), 'DOM template rendering should preserve the concrete DOM node ceiling.' );
+
+/*
+ * Template content that cannot round-trip is quarantined as unsupported even
+ * under a small node budget: the count of its (lossy) body-context parse is
+ * bounded, so quarantine stays deterministic for resource-stress inputs.
+ */
+$dom_template_context_quarantine_dir = $tmp . '/dom-template-context-quarantine-small-budget';
+$dom_template_context_quarantine_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<template><col><x></x></template>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $dom_template_context_quarantine_dir,
+		'max-tokens'      => '200',
+		'max-nodes'       => '3',
+	)
+);
+html_api_fuzz_smoke_assert( true === ( $dom_template_context_quarantine_result['ok'] ?? null ), 'Non-round-trippable DOM template content should be quarantined, not failed.' );
+html_api_fuzz_smoke_assert( 'oracle-unsupported' === ( $dom_template_context_quarantine_result['status'] ?? null ), 'Non-round-trippable DOM template content should be quarantined as oracle-unsupported.' );
 
 $dom_template_table_context_dir = $tmp . '/dom-template-table-context';
 $dom_template_table_context_result = \HtmlApiFuzz\Worker::run(
@@ -988,19 +1037,47 @@ html_api_fuzz_smoke_assert( ( $encoding_diff['wordpressHex'] ?? null ) === ( $en
 html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['wordpressDiffHex'] ?? '', 'c0' ), 'long encoding mismatch should include the differing WordPress byte in the diff window.' );
 html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['domDiffHex'] ?? '', 'efbfbd' ), 'long encoding mismatch should include the differing DOM replacement bytes in the diff window.' );
 
-$structural_with_invalid_dir = $tmp . '/structural-with-invalid';
-$structural_with_invalid_result = \HtmlApiFuzz\Worker::run(
-	array(
-		'input-base64'    => base64_encode( '<select><track e><!-->' . "\xC0" ),
-		'profile'         => 'replay',
-		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-		'payload-policy'  => 'invalid-byte-heavy',
-		'output-dir'      => $structural_with_invalid_dir,
-		'max-tokens'      => '2000',
-		'max-nodes'       => '3000',
-	)
+/*
+ * The encoding-mismatch classifier must not relabel structural differences:
+ * exercised directly because no live WordPress/DOM structural divergence is
+ * available to drive a worker-level fixture (parser fixes resolved them).
+ */
+$is_encoding_mismatch = new \ReflectionMethod( \HtmlApiFuzz\Worker::class, 'is_encoding_mismatch' );
+$is_encoding_mismatch->setAccessible( true );
+$invalid_input = "<p>\xC0</p>";
+html_api_fuzz_smoke_assert(
+	false === $is_encoding_mismatch->invoke(
+		null,
+		$invalid_input,
+		array(
+			'wordpressLine' => '  <p>',
+			'domLine'       => '  <div>',
+		)
+	),
+	'invalid bytes elsewhere should not relabel structural tree mismatches as encoding-mismatch.'
 );
-html_api_fuzz_smoke_assert( 'tree-mismatch' === ( $structural_with_invalid_result['failureClass'] ?? null ), 'invalid bytes elsewhere should not relabel structural tree mismatches as encoding-mismatch.' );
+html_api_fuzz_smoke_assert(
+	true === $is_encoding_mismatch->invoke(
+		null,
+		$invalid_input,
+		array(
+			'wordpressLine' => "  \"a\xC0b\"",
+			'domLine'       => "  \"a\xEF\xBF\xBDb\"",
+		)
+	),
+	'invalid-byte line differences explained by the UTF-8 scrub should classify as encoding-mismatch.'
+);
+html_api_fuzz_smoke_assert(
+	false === $is_encoding_mismatch->invoke(
+		null,
+		'<p>valid</p>',
+		array(
+			'wordpressLine' => "  \"a\xC0b\"",
+			'domLine'       => "  \"a\xEF\xBF\xBDb\"",
+		)
+	),
+	'valid UTF-8 input should never classify as encoding-mismatch.'
+);
 
 $newline_scalar_cases = array(
 	'text'    => array(

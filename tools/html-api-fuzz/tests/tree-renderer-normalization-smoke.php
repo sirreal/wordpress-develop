@@ -102,18 +102,26 @@ $presumptuous_tag_full_document = html_api_fuzz_tree_normalization_run(
 html_api_fuzz_tree_normalization_assert_compares( $presumptuous_tag_full_document, 'Full-document presumptuous tag closers after HTML should be ignored by the worker.' );
 html_api_fuzz_tree_normalization_assert( true === ( $presumptuous_tag_full_document['comparison']['ok'] ?? null ), 'Full-document presumptuous tag closer comparison should pass.' );
 
+/*
+ * WordPress preserves raw NUL and CR bytes that spec-following parsers
+ * substitute during input preprocessing. Trees render those bytes raw, and
+ * the comparison tolerates a line only when the exact spec substitution
+ * (NUL to U+FFFD, CR/CRLF to LF) explains the whole difference, reporting
+ * the tolerated line numbers instead of silently scrubbing both sides.
+ */
 $nul_attribute_value = html_api_fuzz_tree_normalization_run(
 	$tmp,
 	'nul-attribute-value',
 	'PCEgcD48L3A+PGh0bWwgaWQ9AD4=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_value, 'NUL attribute values should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_value, 'NUL attribute values should compare with scalar tolerance.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_value['comparison']['ok'] ?? null ), 'NUL attribute value comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $nul_attribute_value['comparison']['scalarToleratedLines'] ), 'NUL attribute value comparison should report tolerated lines.' );
 $nul_attribute_value_tree = file_get_contents( $nul_attribute_value['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $nul_attribute_value_tree, 'NUL attribute value WordPress tree should be written.' );
-html_api_fuzz_tree_normalization_assert( false !== strpos( $nul_attribute_value_tree, "id=\"\xEF\xBF\xBD\"" ), 'NUL attribute values should render as U+FFFD.' );
-html_api_fuzz_tree_normalization_assert( false === strpos( $nul_attribute_value_tree, '\\0' ), 'NUL attribute values should not render as \0.' );
+html_api_fuzz_tree_normalization_assert( false !== strpos( $nul_attribute_value_tree, 'id="\\0"' ), 'NUL attribute values should render raw as escaped NUL.' );
+html_api_fuzz_tree_normalization_assert( false === strpos( $nul_attribute_value_tree, "\xEF\xBF\xBD" ), 'NUL attribute values should not be scrubbed to U+FFFD in the WordPress tree.' );
 
 $nul_attribute_name = html_api_fuzz_tree_normalization_run(
 	$tmp,
@@ -121,11 +129,12 @@ $nul_attribute_name = html_api_fuzz_tree_normalization_run(
 	'PGh0bWwKN0Z5AG10ND4=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_name, 'NUL attribute names should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_name, 'NUL attribute names should compare with scalar tolerance.' );
 html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_name['comparison']['ok'] ?? null ), 'NUL attribute name comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $nul_attribute_name['comparison']['scalarToleratedLines'] ), 'NUL attribute name comparison should report tolerated lines.' );
 $nul_attribute_name_tree = file_get_contents( $nul_attribute_name['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $nul_attribute_name_tree, 'NUL attribute name WordPress tree should be written.' );
-html_api_fuzz_tree_normalization_assert( false !== strpos( $nul_attribute_name_tree, "7fy\xEF\xBF\xBDmt4=\"\"" ), 'NUL attribute names should render as U+FFFD.' );
+html_api_fuzz_tree_normalization_assert( false !== strpos( $nul_attribute_name_tree, '7fy\\0mt4=""' ), 'NUL attribute names should render raw as escaped NUL.' );
 
 $foreign_tag_name = html_api_fuzz_tree_normalization_run(
 	$tmp,
@@ -133,8 +142,9 @@ $foreign_tag_name = html_api_fuzz_tree_normalization_run(
 	'PHN0cm9uZyBz16oiPjxzdmcgPjxnPjx0aXRsZT7wn5mCPFBiKQAsRTMmI3hmZmZkOzwvPg==',
 	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY
 );
-html_api_fuzz_tree_normalization_assert_compares( $foreign_tag_name, 'NUL foreign-content tag names should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $foreign_tag_name, 'NUL foreign-content tag names should compare with scalar tolerance.' );
 html_api_fuzz_tree_normalization_assert( true === ( $foreign_tag_name['comparison']['ok'] ?? null ), 'NUL foreign-content tag name comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $foreign_tag_name['comparison']['scalarToleratedLines'] ), 'NUL foreign-content tag name comparison should report tolerated lines.' );
 
 $cr_attribute_value = html_api_fuzz_tree_normalization_run(
 	$tmp,
@@ -142,21 +152,40 @@ $cr_attribute_value = html_api_fuzz_tree_normalization_run(
 	'PCE+PGh0bWwgfUlnLXBlXWo6dXMyYzA9Ig0iPmE=',
 	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
 );
-html_api_fuzz_tree_normalization_assert_compares( $cr_attribute_value, 'CR attribute values should compare after tree scalar normalization.' );
+html_api_fuzz_tree_normalization_assert_compares( $cr_attribute_value, 'CR attribute values should compare with scalar tolerance.' );
 html_api_fuzz_tree_normalization_assert( true === ( $cr_attribute_value['comparison']['ok'] ?? null ), 'CR attribute value comparison should pass.' );
+html_api_fuzz_tree_normalization_assert( ! empty( $cr_attribute_value['comparison']['scalarToleratedLines'] ), 'CR attribute value comparison should report tolerated lines.' );
 $cr_attribute_value_tree = file_get_contents( $cr_attribute_value['wordpress']['treePath'] ?? '' );
 html_api_fuzz_tree_normalization_assert( false !== $cr_attribute_value_tree, 'CR attribute value WordPress tree should be written.' );
-html_api_fuzz_tree_normalization_assert( false !== strpos( $cr_attribute_value_tree, "}ig-pe]j:us2c0=\"\\n\"" ), 'CR attribute values should render as escaped LF.' );
-html_api_fuzz_tree_normalization_assert( false === strpos( $cr_attribute_value_tree, '\\r' ), 'CR attribute values should not render as escaped CR.' );
+html_api_fuzz_tree_normalization_assert( false !== strpos( $cr_attribute_value_tree, "}ig-pe]j:us2c0=\"\\r\"" ), 'CR attribute values should render raw as escaped CR.' );
 
-$structural_mismatch = html_api_fuzz_tree_normalization_run(
+/*
+ * NUL attributes whose scrubbed name sorts differently from the raw name
+ * must align with the DOM oracle ordering: sorting uses scrubbed names.
+ */
+$nul_attribute_sort = html_api_fuzz_tree_normalization_run(
 	$tmp,
-	'structural-select-track',
-	'PHNlbGVjdD48dHJhY2sgZT48IS0+',
+	'nul-attribute-sort',
+	base64_encode( "<p \0z=\"\" j=\"\">x</p>" ),
 	\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY
 );
-html_api_fuzz_tree_normalization_assert( false === ( $structural_mismatch['ok'] ?? null ), 'Structural tree mismatches should still fail.' );
-html_api_fuzz_tree_normalization_assert( 'tree-mismatch' === ( $structural_mismatch['failureClass'] ?? null ), 'Structural tree mismatches should keep the tree-mismatch class.' );
-html_api_fuzz_tree_normalization_assert( false === ( $structural_mismatch['comparison']['ok'] ?? null ), 'Structural tree mismatch comparison should not be normalized away.' );
+html_api_fuzz_tree_normalization_assert_compares( $nul_attribute_sort, 'NUL attribute names should sort by scrubbed name on both sides.' );
+html_api_fuzz_tree_normalization_assert( true === ( $nul_attribute_sort['comparison']['ok'] ?? null ), 'NUL attribute sort comparison should pass.' );
+
+/*
+ * The comparison itself must keep failing on structural differences:
+ * scalar tolerance only applies when the spec substitution explains the
+ * entire differing line.
+ */
+$synthetic_mismatch = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\"\n\n", "<div>\n  \"b\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_mismatch['ok'] ?? null ), 'Structural tree mismatches should still fail.' );
+html_api_fuzz_tree_normalization_assert( is_array( $synthetic_mismatch['firstDifference'] ?? null ) && 2 === ( $synthetic_mismatch['firstDifference']['line'] ?? null ), 'Structural mismatch should report the first differing line.' );
+
+$synthetic_structure_with_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n  \"a\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n  \"b\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_structure_with_nul['ok'] ?? null ), 'Scalar tolerance must not mask structural differences on other lines.' );
+
+$synthetic_tolerated = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\0\"\n\n", "<div>\n  x=\"\xEF\xBF\xBD\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_tolerated['ok'] ?? null ), 'Scalar-only differences should be tolerated.' );
+html_api_fuzz_tree_normalization_assert( array( 1 ) === ( $synthetic_tolerated['scalarToleratedLines'] ?? null ), 'Scalar tolerance should report the tolerated line number.' );
 
 echo "tree renderer normalization smoke tests passed\n";

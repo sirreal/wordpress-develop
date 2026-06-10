@@ -56,6 +56,11 @@ if ( null !== $payload_policy ) {
 	$args[] = '--payload-policy';
 	$args[] = $payload_policy;
 }
+$fragment_context = $replay['fragmentContext'] ?? null;
+if ( is_string( $fragment_context ) && 'body' !== $fragment_context ) {
+	$args[] = '--fragment-context';
+	$args[] = $fragment_context;
+}
 if ( \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', (bool) ( $replay['options']['failUnsupported'] ?? false ) ) ) {
 	$args[] = '--fail-unsupported';
 }
