@@ -93,6 +93,27 @@ function ensure_dir( string $path ): void {
 	}
 }
 
+function remove_dir_recursive( string $path ): void {
+	if ( is_link( $path ) || is_file( $path ) ) {
+		@unlink( $path );
+		return;
+	}
+	if ( ! is_dir( $path ) ) {
+		return;
+	}
+
+	$items = scandir( $path );
+	if ( false !== $items ) {
+		foreach ( $items as $item ) {
+			if ( '.' === $item || '..' === $item ) {
+				continue;
+			}
+			remove_dir_recursive( $path . DIRECTORY_SEPARATOR . $item );
+		}
+	}
+	@rmdir( $path );
+}
+
 function json_encode_safe( $value, int $flags = 0 ): string {
 	$json = json_encode( $value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | $flags );
 	if ( false === $json ) {
