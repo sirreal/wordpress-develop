@@ -352,7 +352,13 @@ Raw bytes are rendered without normalization. The WordPress HTML API
 deliberately preserves NUL and CR bytes where spec-following parsers
 substitute U+FFFD and normalize newlines during input preprocessing, so the
 comparison tolerates a differing line only when that exact substitution
-explains the entire difference. Tolerated lines are reported per seed
+explains the entire difference. The tolerance is additionally gated by line
+type: WordPress preserves raw bytes only in attribute values and
+tag/attribute names (verified empirically across text, RCDATA, rawtext,
+foreign text, CDATA, comment, and doctype contexts, where WordPress applies
+the spec substitutions itself), so only tag lines and attribute lines are
+eligible. A scalar difference on any other line type is a real divergence
+and fails. Tolerated lines are reported per seed
 (`comparison.scalarToleratedLines`) and per run (`oracleTolerated`), and the
 result is classified `oracle-tolerated` rather than silently passed. Any
 difference beyond the substitution fails as usual, and the first-difference
@@ -373,6 +379,29 @@ hex previews, including a diff-window hex preview around the differing byte, so
 the mismatch remains inspectable even when JSON display substitutes replacement
 characters. Full comparison lines are kept out of `result.json` to avoid large
 artifacts from stress inputs.
+
+### Known classification gaps
+
+Two known issues affect labeling, not pass/fail correctness:
+
+- **Dual-axis lines classify as `tree-mismatch`, not `encoding-mismatch`.**
+  A differing line explained only by *both* an invalid-UTF-8 substitution and
+  a NUL/CR scalar substitution (e.g. an attribute value containing a raw NUL
+  *and* a raw `0x82`) matches neither single-axis check:
+  `linesMatchAfterWordPressUtf8Scrub` fails on the unscrubbed NUL, and the
+  scalar matcher fails on the invalid byte. Such results report
+  `tree-mismatch` although encoding is involved.
+- **CDATA at SVG/MathML integration points is a real WordPress divergence
+  the fuzzer will keep reporting.** For
+  `<svg><foreignObject><![CDATA[a\0b]]>` (likewise `<svg><desc>`,
+  `<math><mtext>`, HTML-encoded `annotation-xml`), WordPress substitutes
+  NUL with U+FFFD in CDATA text while the spec routes those characters
+  through the HTML insertion mode, which drops NUL — WordPress handles
+  plain text at integration points correctly; only the CDATA path diverges
+  (a known `@todo` in `WP_HTML_Tag_Processor`'s CDATA handling). The shape
+  is U+FFFD-versus-removed, which no tolerance covers in either direction,
+  so these report as genuine `tree-mismatch` findings. This is distinct
+  from the upstream-fixed PHP-DOM integration-point reparenting family.
 
 ## Minimization
 
