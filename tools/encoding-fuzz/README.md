@@ -210,3 +210,29 @@ ENCODING_FUZZ_FAULT=non-maximal php tools/encoding-fuzz/minimize.php --failure .
 
 (The `non-maximal` fault minimizes to the two bytes `E0 F4`: two
 adjacent maximal subparts whose replacement characters get collapsed.)
+
+## One-Shot Exhaustive Tests
+
+```sh
+php tools/encoding-fuzz/tests/code-point-to-utf8-exhaustive.php
+```
+
+`WP_HTML_Decoder::code_point_to_utf8_bytes()` has a domain small
+enough (~1.1M code points) to test completely instead of fuzzing: every
+code point 0x0–0x10FFFF plus out-of-range probes. The independent
+oracle is the fuzzer's pure-arithmetic `Generator::encode_code_point()`;
+a second comparison against `mb_chr( $cp, 'UTF-8' )` is a consistency
+cross-check (the implementation is itself mb_chr-backed) that would
+expose a bug shared between the implementation and the arithmetic
+encoder. Surrogates and out-of-range values must yield U+FFFD. Runs in
+under a second; exit codes `0`/`1`/`2` like everything else. The smoke
+test runs it and proves its detection fires via
+`ENCODING_FUZZ_FAULT=codepoint-surrogate-qmark`.
+
+The script also pins a known upstream issue: since [r62424] (#65342,
+unreleased) the implementation calls `mb_chr()` without an explicit
+encoding, so under a non-UTF-8 `mb_internal_encoding()` (WordPress
+sets it from `blog_charset`) it returns raw legacy bytes for mappable
+code points while still returning UTF-8 U+FFFD for invalid ones —
+contradicting its docblock. The pin fails when the upstream behavior
+changes, so the documented stance cannot silently go stale.

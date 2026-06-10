@@ -282,6 +282,18 @@ for ( $i = 0; $i < 300; $i++ ) {
 }
 check( '300-case fuzz run clean (real findings would also surface here)', 0 === $fuzz_failures );
 
+// ---------------------------------------------------------------------
+// 6. One-shot exhaustive companion test: must pass, and its detection
+//    must provably fire (same mutation-testing rule as everything else).
+// ---------------------------------------------------------------------
+$exhaustive = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/code-point-to-utf8-exhaustive.php' );
+
+exec( "{$exhaustive} 2>&1", $exh_output, $exh_code );
+check( 'code-point-to-utf8 exhaustive test passes', 0 === $exh_code, implode( ' | ', array_slice( $exh_output, -3 ) ) );
+
+exec( "ENCODING_FUZZ_FAULT=codepoint-surrogate-qmark {$exhaustive} 2>&1", $exh_fault_output, $exh_fault_code );
+check( 'exhaustive test catches broken surrogate handling', 1 === $exh_fault_code, "exit {$exh_fault_code}" );
+
 $oracles->shutdown();
 
 echo $failed > 0 ? "\n{$failed} smoke check(s) FAILED\n" : "\nAll smoke checks passed\n";

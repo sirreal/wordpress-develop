@@ -2,15 +2,15 @@
 
 ## Status
 
-Sections 1 (utf8_encode/decode) and 2 (wp_has_noncharacters) DONE;
-section 3 in progress. The
-host fuzzer (`tools/encoding-fuzz/`) is complete and working on branch
-`fuzz-encoder`; read its `README.md` first. ~570k cases had run clean
-against the original targets before this work started.
+All three sections DONE. The host fuzzer (`tools/encoding-fuzz/`) is
+complete and working on branch `fuzz-encoder`; read its `README.md`
+first. ~570k cases had run clean against the original targets before
+this work started.
 
 ## Goal
 
-Round out coverage of `src/wp-includes/compat-utf8.php` by adding:
+Round out coverage of `src/wp-includes/compat-utf8.php` (plus one
+html-api encoder) by adding:
 
 1. `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
    differentials against the native `utf8_encode()` / `utf8_decode()`.
@@ -92,30 +92,74 @@ reference oracle and its battery must be extended for ill-formed input
 too — removing the valid-only gate alone is NOT sufficient, since the
 reference throws on ill-formed input by design.
 
-## 3. code_point_to_utf8_bytes — exhaust, don't fuzz
+## 3. code_point_to_utf8_bytes — DONE; upstream finding documented
 
-`WP_HTML_Decoder::code_point_to_utf8_bytes()`
-(`src/wp-includes/html-api/class-wp-html-decoder.php:426`) has a domain
-of ~1.1M values. Write a standalone script (or slow-group PHPUnit test)
-asserting equality with `mb_chr( $cp, 'UTF-8' )` for every code point
-0x0–0x10FFFF, including expected behavior for surrogates and
-out-of-range values (check what the function documents; `mb_chr`
-returns `false` for surrogates — decide the comparison accordingly).
-Runs in seconds; total coverage; done forever. Note this class is
-loaded from `html-api/`, so the fuzzer bootstrap (`lib/Bootstrap.php`)
-needs to require it (it has no dependencies beyond the token map — if
-it pulls more, load only for this check).
+Implemented as `tools/encoding-fuzz/tests/code-point-to-utf8-exhaustive.php`
+(standalone, not wired into `Bootstrap.php` — the class is required
+only by this script, which parses cleanly with no other dependencies;
+loading html-api code into every fuzz worker would buy nothing).
+Every code point 0x0–0x10FFFF plus out-of-range probes, compared
+against the pure-arithmetic `Generator::encode_code_point()` (the
+independent oracle) with an additional `mb_chr( $cp, 'UTF-8' )`
+consistency cross-check (the implementation is itself mb_chr-backed;
+the cross-check would expose a bug shared between implementation and
+arithmetic encoder). Surrogates and out-of-range values yield U+FFFD
+as documented. Runs in ~0.4s, passes on PHP 8.4.21. The harness smoke
+test executes it and proves its detection fires via the
+`ENCODING_FUZZ_FAULT=codepoint-surrogate-qmark` broken variant.
+
+**Upstream finding (real bug — an unreleased trunk REGRESSION, not
+fixed here):** the implementation is `mb_chr( $code_point )` with NO
+explicit encoding, so it inherits `mb_internal_encoding()` — which
+WordPress sets from `blog_charset` (`wp_set_internal_encoding()`,
+`src/wp-includes/load.php`). On a non-UTF-8 site it returns raw legacy
+bytes for mappable code points (e.g. `"\xE9"` for U+00E9 under
+ISO-8859-1) while still returning UTF-8 U+FFFD for invalid ones,
+contradicting its docblock. Aggravating facts for the upstream report:
+
+- Introduced by [62424] (#65342, `@since 7.1.0`, unreleased): the
+  6.6.0 original was a pure-arithmetic encoder that always emitted
+  UTF-8 regardless of mbstring state. Fix-before-release territory.
+- WP's own `_mb_chr()` polyfill in `compat.php` documents
+  `@param "UTF-8"|null $encoding Must be 'UTF-8' or null` and treats
+  null as UTF-8 — so mbstring-less hosts always emit UTF-8 while
+  mbstring hosts follow `blog_charset`. Same WordPress, divergent
+  output by extension presence.
+- Named character references decode through the UTF-8 token map
+  regardless: on a latin1 site `&eacute;` → UTF-8 `C3 A9` but
+  `&#233;` → latin1 `E9` in the same decoded string. There is no
+  intentional-behavior steelman; output is mixed-encoding either way.
+- The same commit silently changed `code_point_to_utf8_bytes( 0 )`
+  from `U+FFFD` to `"\0"` (the old guard was `$code_point <= 0`).
+  Callers are unaffected (`&#0;` is intercepted earlier) and the new
+  behavior matches the docblock, but it belongs in the same report.
+
+One-line fix: `mb_chr( $code_point, 'UTF-8' )`. The script pins the
+current buggy behavior as a labeled KNOWN ISSUE check so the stance
+cannot silently go stale; update or remove the pin when fixed.
 
 ## Verification / definition of done
 
+All verified 2026-06-10 on PHP 8.4.21:
+
 - `php tools/encoding-fuzz/tests/harness-smoke.php` passes, including
-  new broken-variant detections for every added check.
-- A fault-injection variant per new target in `lib/Targets.php`
-  (`ENCODING_FUZZ_FAULT=...`) exercises worker → replay → minimize end
-  to end.
+  broken-variant detections for every added check (seventeen mutation
+  classes plus the exhaustive script's surrogate fault).
+- Fault-injection variants per new target
+  (`ENCODING_FUZZ_FAULT=encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager`)
+  exercised worker → replay → minimize end to end; artifacts now record
+  the fault name and `pcre_u` in environment metadata. The script-local
+  `codepoint-surrogate-qmark` fault is proven via the smoke test's
+  subprocess run (the exhaustive script never enters the worker
+  pipeline).
 - `php tools/encoding-fuzz/runner.php --lanes 4 --duration-seconds 60`
-  runs clean (or findings are triaged and documented, not silenced).
-- README.md oracle/check tables updated.
+  ran clean (32,000 cases, 0 failures, 0 stalled, final tree). Findings
+  that were
+  triaged and documented rather than silenced: the legacy
+  `utf8_decode()` divergence (§1), the `wp_has_noncharacters()`
+  ill-formed-input divergence (§2), the `code_point_to_utf8_bytes()`
+  internal-encoding regression and the #63863 test bug (§§1, 3).
+- README.md oracle/check tables updated (Encode/Decode/Nonchars).
 
 ## Gotchas inherited from the existing harness
 
