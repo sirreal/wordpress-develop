@@ -143,4 +143,37 @@ $claimed = html_api_fuzz_codex_claim_signature( $diag, '123456', $signature, 1 )
 html_api_fuzz_codex_test_assert( null !== $claimed, 'Malformed done metadata should not be treated as a successful completed job.' );
 html_api_fuzz_codex_test_assert( 1 <= count( glob( $signature_dir . '/done.failed.*.json' ) ), 'Malformed done metadata should be archived for retry.' );
 
+/*
+ * Main-loop STOP handling: with a STOP file in the run directory (resolved
+ * from the watcher state's runDir), the orchestrator must exit cleanly
+ * without launching anything.
+ */
+\HtmlApiFuzz\write_json_file(
+	$triage . '/state.json',
+	array(
+		'kind'       => 'html-api-fuzz-triage-state',
+		'runDir'     => $run_dir,
+		'signatures' => array(),
+	)
+);
+file_put_contents( $run_dir . '/STOP', "{}\n" );
+$stop_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/codex-triage-orchestrator.php',
+		'--triage-dir',
+		$triage,
+		'--diagnostics-dir',
+		$diag,
+		'--repo-root',
+		$repo_root,
+		'--codex-bin',
+		'false',
+	),
+	$repo_root,
+	30000
+);
+html_api_fuzz_codex_test_assert( 0 === $stop_proc['code'] && ! $stop_proc['timedOut'], 'Orchestrator should exit cleanly when a STOP file is present.' );
+html_api_fuzz_codex_test_assert( false !== strpos( $stop_proc['output'], 'stop requested' ), 'Orchestrator should report the stop request.' );
+html_api_fuzz_codex_test_assert( false === strpos( $stop_proc['output'], 'launched ' ), 'Orchestrator should not launch jobs after a stop request.' );
+
 echo "codex triage orchestrator smoke tests passed\n";
