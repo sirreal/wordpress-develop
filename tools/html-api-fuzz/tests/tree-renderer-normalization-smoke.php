@@ -98,6 +98,27 @@ $synthetic_repeated_cr_lf = \HtmlApiFuzz\TreeRenderer::compare_trees(
 );
 html_api_fuzz_tree_normalization_assert( true === ( $synthetic_repeated_cr_lf['ok'] ?? null ), 'A long run of raw CR plus decoded LF pairs should be tolerated without exhausting the matcher.' );
 
+/*
+ * WordPress preserves raw NUL/CR only in attribute values and tag/attribute
+ * names. In text, RCDATA, rawtext, and comments it applies the spec
+ * substitutions itself, so a scalar difference on those lines is a real
+ * divergence and the tolerance must not mask it.
+ */
+$synthetic_text_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\\0b\"\n\n", "<div>\n  \"a\xEF\xBF\xBDb\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_text_nul['ok'] ?? null ), 'Scalar tolerance must not apply to NUL differences on text lines.' );
+
+$synthetic_text_cr = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"x\\ry\"\n\n", "<div>\n  \"x\\ny\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_text_cr['ok'] ?? null ), 'Scalar tolerance must not apply to CR differences on text lines.' );
+
+$synthetic_comment_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  <!-- a\\0b -->\n\n", "<div>\n  <!-- a\xEF\xBF\xBDb -->\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_comment_nul['ok'] ?? null ), 'Scalar tolerance must not apply to NUL differences on comment lines.' );
+
+$synthetic_tag_name_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  <svg x\\0y>\n\n", "<div>\n  <svg x\xEF\xBF\xBDy>\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_tag_name_nul['ok'] ?? null ), 'Scalar tolerance should still apply to NUL differences on tag-name lines.' );
+
+$synthetic_quoted_attribute_name_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\\0\"=\"\"\n\n", "<div>\n  \"a\xEF\xBF\xBD\"=\"\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_quoted_attribute_name_nul['ok'] ?? null ), 'An attribute name that begins with a quote is still an attribute line, not a text line.' );
+
 if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
 	echo "tree renderer normalization oracle smoke tests skipped: Dom\\HTMLDocument unavailable\n";
 	exit( 0 );

@@ -757,7 +757,11 @@ class TreeRenderer {
 			if ( $wordpress_lines[ $i ] === $dom_lines[ $i ] ) {
 				continue;
 			}
-			if ( self::escaped_scalar_lines_match( $wordpress_lines[ $i ], $dom_lines[ $i ] ) ) {
+			if (
+				self::scalar_tolerance_eligible_line( $wordpress_lines[ $i ] ) &&
+				self::scalar_tolerance_eligible_line( $dom_lines[ $i ] ) &&
+				self::escaped_scalar_lines_match( $wordpress_lines[ $i ], $dom_lines[ $i ] )
+			) {
 				$tolerated[] = $adjusted['lineMap'][ $i ] ?? $i;
 				continue;
 			}
@@ -781,6 +785,44 @@ class TreeRenderer {
 			'ok'              => false,
 			'firstDifference' => self::first_difference( $adjusted_wordpress, $dom_tree, $adjusted['lineMap'], $first_unexplained ?? 0 ),
 		);
+	}
+
+	/**
+	 * Indicates whether a rendered tree line is one where WordPress
+	 * deliberately preserves raw NUL/CR bytes that spec-following parsers
+	 * substitute: tag lines (NUL survives in foreign tag names) and
+	 * attribute lines (NUL/CR in values, NUL in names). Everywhere else —
+	 * text, RCDATA, rawtext, comments, doctypes — WordPress applies the
+	 * spec substitutions itself, so a scalar difference on those lines is
+	 * a real divergence the tolerance must not mask.
+	 *
+	 * Operates on the escaped rendering, where a text line is exactly one
+	 * quoted escaped string (interior quotes render as `\"`). An attribute
+	 * line whose name begins with a raw `"` has unescaped structure after
+	 * the name and does not match the text shape.
+	 */
+	private static function scalar_tolerance_eligible_line( string $line ): bool {
+		$trimmed = ltrim( $line, ' ' );
+		if ( '' === $trimmed ) {
+			return false;
+		}
+		// Text line: a single quoted escaped string.
+		if ( preg_match( '/^"(?:\\\\.|[^"\\\\])*"$/', $trimmed ) ) {
+			return false;
+		}
+		if ( str_starts_with( $trimmed, '<!--' ) || str_starts_with( $trimmed, '<!DOCTYPE' ) ) {
+			return false;
+		}
+		// Template content marker.
+		if ( 'content' === $trimmed ) {
+			return false;
+		}
+		// Tag line.
+		if ( '<' === $trimmed[0] ) {
+			return true;
+		}
+		// Attribute line: name followed by a quoted escaped value.
+		return 1 === preg_match( '/="(?:\\\\.|[^"\\\\])*"$/', $trimmed );
 	}
 
 	/**
