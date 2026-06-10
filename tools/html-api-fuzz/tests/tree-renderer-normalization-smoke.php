@@ -119,6 +119,29 @@ html_api_fuzz_tree_normalization_assert( true === ( $synthetic_tag_name_nul['ok'
 $synthetic_quoted_attribute_name_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"a\\0\"=\"\"\n\n", "<div>\n  \"a\xEF\xBF\xBD\"=\"\"\n\n" );
 html_api_fuzz_tree_normalization_assert( true === ( $synthetic_quoted_attribute_name_nul['ok'] ?? null ), 'An attribute name that begins with a quote is still an attribute line, not a text line.' );
 
+/*
+ * Line classification must hold on lines far past the PCRE JIT stack
+ * comfort zone (~8KB with backtracking quantifiers): the generator's
+ * stress payloads produce long attribute values, and the scalar matcher
+ * itself budgets a million steps. Classification failing on length must
+ * not silently revoke an otherwise-legitimate tolerance.
+ */
+$synthetic_long_value = str_repeat( 'a', 9000 );
+$synthetic_long_attribute_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"{$synthetic_long_value}\\0\"\n\n", "<div>\n  x=\"{$synthetic_long_value}\xEF\xBF\xBD\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_long_attribute_nul['ok'] ?? null ), 'Scalar tolerance should survive attribute values longer than the PCRE JIT stack allows.' );
+
+$synthetic_long_repeated_cr_lf = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	"<div>\n  x=\"" . str_repeat( '\\r\\n', 4096 ) . "\"\n\n",
+	"<div>\n  x=\"" . str_repeat( '\\n\\n', 4096 ) . "\"\n\n"
+);
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_long_repeated_cr_lf['ok'] ?? null ), 'A CR plus decoded LF run crossing the JIT stack boundary should stay tolerated.' );
+
+$synthetic_long_text_nul = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  \"{$synthetic_long_value}\\0\"\n\n", "<div>\n  \"{$synthetic_long_value}\xEF\xBF\xBD\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_long_text_nul['ok'] ?? null ), 'Long text lines must stay ineligible for scalar tolerance.' );
+
+$synthetic_long_norm = \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "  x=\"{$synthetic_long_value}\\0\"" );
+html_api_fuzz_tree_normalization_assert( 'x="<value>"' === $synthetic_long_norm, 'Line normalization should mask long attribute values rather than fail on them.' );
+
 if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
 	echo "tree renderer normalization oracle smoke tests skipped: Dom\\HTMLDocument unavailable\n";
 	exit( 0 );
