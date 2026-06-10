@@ -88,7 +88,16 @@ produces the same document, the same selector, and the same verdict.
 Build with `sh tools/css-selector-fuzz/lexbor/build.sh` (clones and builds
 liblexbor, pinned to v3.0.0 = `2ae88a1c6b52`). The worker auto-detects the
 binary at `tools/css-selector-fuzz/lexbor/harness` and reports per-batch
-tallies (`compared` / `tree-gated` / `skipped-quirks` / `off`).
+tallies, persisted to `state.json` under `lexbor`:
+
+- `compared` — the differential ran and matched fid-multisets.
+- `tree-gated` — WP and lexbor built different trees; differential skipped.
+- `skipped-quirks` / `skipped-utf8` — quirks document / non-UTF-8 AST.
+- `n/a` — the differential does not apply (unparseable selector, fragment, no
+  captured tree).
+- `unavailable` / `error` — the harness was missing or died. The runner prints
+  a loud warning if these appear after the harness had run, so a third oracle
+  that dies mid-run cannot hide behind a green run.
 
 Known lexbor issues compensated for at this pin:
 

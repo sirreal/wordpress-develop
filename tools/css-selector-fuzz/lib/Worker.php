@@ -256,7 +256,12 @@ class Worker {
 		// --- Match phase ---------------------------------------------------
 
 		$html_matches = null;
-		$lexbor_state = 'off';
+		// 'n/a' = the lexbor differential does not apply to this case
+		// ( unparseable selector, fragment, no captured tree ). Distinct from
+		// 'unavailable', which check_lexbor_differential reports only when the
+		// harness itself is missing or died — so a silently-dropped third
+		// oracle shows up in the per-batch tally instead of hiding in 'off'.
+		$lexbor_state = 'n/a';
 		if ( null !== $complex_ast && null !== $rows ) {
 			$expected = ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, $quirks );
 
@@ -729,11 +734,12 @@ class Worker {
 	 *                          means reference == lexbor != WP: a
 	 *                          high-confidence WP finding.
 	 *
-	 * @return string Tally state: off|skipped-quirks|error|tree-gated|compared.
+	 * @return string Tally state:
+	 *   unavailable|skipped-quirks|skipped-utf8|error|tree-gated|compared.
 	 */
 	private static function check_lexbor_differential( array $complex_ast, string $selector_string, array $document, array $rows, bool $quirks, array $expected, callable $record ): string {
 		if ( ! LexborOracle::available() ) {
-			return 'off';
+			return 'unavailable';
 		}
 		if ( $quirks ) {
 			return 'skipped-quirks';

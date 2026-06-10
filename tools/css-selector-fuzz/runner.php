@@ -158,6 +158,7 @@ $state = array(
 	'crashes'          => 0,
 	'buckets'          => array(),
 	'signatures'       => array(),
+	'lexbor'           => array(),
 	'nextSeed'         => $start_seed,
 	'stopReason'       => null,
 );
@@ -244,6 +245,9 @@ while ( $seed < $end_seed ) {
 		foreach ( $summary['signatures'] as $signature => $signature_count ) {
 			$state['signatures'][ $signature ] = ( $state['signatures'][ $signature ] ?? 0 ) + $signature_count;
 		}
+		foreach ( $summary['lexbor'] ?? array() as $lexbor_state => $lexbor_count ) {
+			$state['lexbor'][ $lexbor_state ] = ( $state['lexbor'][ $lexbor_state ] ?? 0 ) + $lexbor_count;
+		}
 	}
 
 	$seed             += $count;
@@ -262,6 +266,21 @@ if ( null === $state['stopReason'] ) {
 }
 $state['updatedAt'] = gmdate( 'c' );
 write_json_file( $state_path, $state );
+
+/*
+ * The lexbor differential is the third oracle. If it ever ran ( 'compared' )
+ * it was built and live; any 'unavailable' or 'error' tally then means it
+ * was missing for some cases or died mid-run, so part of the run had only
+ * two oracles. Surface that loudly rather than letting a green run hide it.
+ */
+$lexbor       = $state['lexbor'];
+$lexbor_ran   = ( $lexbor['compared'] ?? 0 ) > 0;
+$lexbor_lost  = ( $lexbor['unavailable'] ?? 0 ) + ( $lexbor['error'] ?? 0 );
+if ( $lexbor_ran && $lexbor_lost > 0 ) {
+	fwrite( STDERR, "WARNING: lexbor third oracle was unavailable/errored for {$lexbor_lost} case(s); those ran with two oracles.\n" );
+} elseif ( ! $lexbor_ran ) {
+	fwrite( STDERR, "NOTE: lexbor third oracle never ran (harness not built?); run `sh tools/css-selector-fuzz/lexbor/build.sh` for the differential.\n" );
+}
 
 echo json_encode_safe( $state ) . "\n";
 exit( 0 === $state['failures'] ? 0 : 2 );
