@@ -794,15 +794,34 @@ class TreeRenderer {
 	 * trees — and the tolerance would then fail to fire.
 	 *
 	 * Operates on the escaped rendering produced by escape_tree_scalar(),
-	 * where `\` starts an escape sequence and a literal backslash is `\\`,
-	 * so a left-to-right lockstep scan is unambiguous.
+	 * where `\` starts an escape sequence and a literal backslash is `\\`.
+	 *
+	 * One alignment is ambiguous: WordPress `\r\n` opposite DOM `\n` is
+	 * either a raw CRLF the DOM collapsed to one LF, or a raw CR mapped to
+	 * LF followed by a decoded LF both sides agree on (`\r&#10;` renders
+	 * `\r\n` in WordPress and `\n\n` in the DOM). Both are legitimate, so
+	 * that site backtracks. Every other step is deterministic. The step
+	 * budget bounds pathological backtracking; exceeding it fails closed,
+	 * reporting a mismatch rather than tolerating one.
 	 */
 	private static function escaped_scalar_lines_match( string $wordpress_line, string $dom_line ): bool {
+		$failed = array();
+		$steps  = 0;
+		return self::escaped_scalar_match_at( $wordpress_line, $dom_line, 0, 0, $failed, $steps );
+	}
+
+	/**
+	 * Matches a WordPress escaped line suffix against a DOM line suffix,
+	 * branching at the ambiguous CR alignment and memoizing dead ends.
+	 */
+	private static function escaped_scalar_match_at( string $wordpress_line, string $dom_line, int $i, int $j, array &$failed, int &$steps ): bool {
 		$wordpress_length = strlen( $wordpress_line );
 		$dom_length       = strlen( $dom_line );
-		$i                = 0;
-		$j                = 0;
 		while ( $i < $wordpress_length && $j < $dom_length ) {
+			if ( ++$steps > 1000000 ) {
+				return false;
+			}
+
 			if ( '\\' === $wordpress_line[ $i ] ) {
 				if (
 					0 === substr_compare( $wordpress_line, '\\0', $i, 2 ) &&
@@ -814,20 +833,31 @@ class TreeRenderer {
 					continue;
 				}
 				if (
-					$i + 4 <= $wordpress_length &&
-					0 === substr_compare( $wordpress_line, '\\r\\n', $i, 4 ) &&
-					$j + 2 <= $dom_length &&
-					0 === substr_compare( $dom_line, '\\n', $j, 2 )
-				) {
-					$i += 4;
-					$j += 2;
-					continue;
-				}
-				if (
 					0 === substr_compare( $wordpress_line, '\\r', $i, 2 ) &&
 					$j + 2 <= $dom_length &&
 					0 === substr_compare( $dom_line, '\\n', $j, 2 )
 				) {
+					if (
+						$i + 4 <= $wordpress_length &&
+						0 === substr_compare( $wordpress_line, '\\r\\n', $i, 4 )
+					) {
+						$key = $i . ':' . $j;
+						if ( isset( $failed[ $key ] ) ) {
+							return false;
+						}
+						// CR maps to LF and the WordPress `\n` matches on its
+						// own (a raw CR before a decoded LF), or the raw CRLF
+						// pair collapsed to the one DOM LF. Lockstep first:
+						// it resolves the common case without backtracking.
+						if (
+							self::escaped_scalar_match_at( $wordpress_line, $dom_line, $i + 2, $j + 2, $failed, $steps ) ||
+							self::escaped_scalar_match_at( $wordpress_line, $dom_line, $i + 4, $j + 2, $failed, $steps )
+						) {
+							return true;
+						}
+						$failed[ $key ] = true;
+						return false;
+					}
 					$i += 2;
 					$j += 2;
 					continue;

@@ -184,6 +184,46 @@ $synthetic_cr_only_wordpress = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\
 html_api_fuzz_tree_normalization_assert( false === ( $synthetic_cr_only_wordpress['ok'] ?? null ), 'A DOM-side CR where WordPress holds LF is not the spec substitution and must fail.' );
 
 /*
+ * A raw CR immediately followed by a decoded `&#10;` renders as `\r\n` in
+ * the WordPress tree while the DOM holds `\n\n`: input preprocessing maps
+ * the lone CR to LF before the character reference decodes to a second LF.
+ * The CR-to-LF substitution must bind per occurrence; the pair-collapse
+ * rule for raw CRLF must not consume a decoded LF.
+ */
+$raw_cr_decoded_lf = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'raw-cr-decoded-lf',
+	'PGRpdiBhPSINJiMxMDt4Ij4=',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert_compares( $raw_cr_decoded_lf, 'Raw CR before a decoded LF should compare with scalar tolerance.' );
+html_api_fuzz_tree_normalization_assert( true === ( $raw_cr_decoded_lf['comparison']['ok'] ?? null ), 'Raw CR before a decoded LF comparison should pass.' );
+
+$nul_raw_cr_decoded_lf = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'nul-raw-cr-decoded-lf',
+	'PGRpdiBhPSIADSYjMTA7eCI+',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert_compares( $nul_raw_cr_decoded_lf, 'NUL plus raw CR before a decoded LF should compare with scalar tolerance.' );
+html_api_fuzz_tree_normalization_assert( true === ( $nul_raw_cr_decoded_lf['comparison']['ok'] ?? null ), 'NUL plus raw CR before a decoded LF comparison should pass.' );
+
+$synthetic_cr_before_decoded_lf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\n\"\n\n", "<div>\n  x=\"\\n\\n\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_cr_before_decoded_lf['ok'] ?? null ), 'WordPress CR+LF opposite DOM LF+LF should be tolerated as CR-to-LF plus an agreed LF.' );
+
+$synthetic_raw_crlf = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\r\\nX\"\n\n", "<div>\n  x=\"\\nX\"\n\n" );
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_raw_crlf['ok'] ?? null ), 'Raw CRLF collapsed to a single DOM LF should remain tolerated.' );
+
+$synthetic_backslash_collision = \HtmlApiFuzz\TreeRenderer::compare_trees( "<div>\n  x=\"\\\\r\"\n\n", "<div>\n  x=\"\\\\n\"\n\n" );
+html_api_fuzz_tree_normalization_assert( false === ( $synthetic_backslash_collision['ok'] ?? null ), 'A literal backslash followed by r must not be rewritten as a CR escape.' );
+
+$synthetic_repeated_cr_lf = \HtmlApiFuzz\TreeRenderer::compare_trees(
+	"<div>\n  x=\"" . str_repeat( '\\r\\n', 500 ) . "\"\n\n",
+	"<div>\n  x=\"" . str_repeat( '\\n\\n', 500 ) . "\"\n\n"
+);
+html_api_fuzz_tree_normalization_assert( true === ( $synthetic_repeated_cr_lf['ok'] ?? null ), 'A long run of raw CR plus decoded LF pairs should be tolerated without exhausting the matcher.' );
+
+/*
  * NUL attributes whose scrubbed name sorts differently from the raw name
  * must align with the DOM oracle ordering: sorting uses scrubbed names.
  */
