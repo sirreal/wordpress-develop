@@ -279,6 +279,36 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that unexpected closing formatting tags are ignored.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_unexpected_closing_formatting_tags
+	 *
+	 * @param string $html     HTML containing an unexpected closing formatting tag.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_unexpected_closing_formatting_tags_are_ignored( string $html, string $expected ) {
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $html ),
+			'Should have ignored unexpected closing formatting tags.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_unexpected_closing_formatting_tags() {
+		return array(
+			'Unexpected A end tag' => array( 'one</a>two', 'onetwo' ),
+			'Unexpected B end tag' => array( 'one</b>two', 'onetwo' ),
+		);
+	}
+
+	/**
 	 * Ensures that self-closing elements in foreign content retain their self-closing flag.
 	 *
 	 * @ticket 62036
