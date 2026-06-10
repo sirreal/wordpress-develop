@@ -13,6 +13,8 @@ class Worker {
 		$payload_policy        = $payload_policy_option ?? 'auto';
 		$max_input_bytes_value = option_int( $options, 'max-input-bytes', 0 );
 		$max_input_bytes       = $max_input_bytes_value > 0 ? $max_input_bytes_value : null;
+		$fragment_context      = option_string( $options, 'fragment-context', 'body' );
+		self::validate_fragment_context_metadata( $fragment_context );
 		$generator_parameters  = null;
 		$input_source          = 'generated';
 		$git_metadata          = null === option_string( $options, 'git-metadata-base64', null )
@@ -43,12 +45,33 @@ class Worker {
 			self::validate_profile_metadata( $profile );
 			self::validate_mode_metadata( $mode );
 			self::validate_payload_policy_metadata( $payload_policy );
+		} elseif ( self::seed_selects_corpus_stage( $seed, option_int( $options, 'corpus-mutate-percent', 20 ) ) ) {
+			$corpus = self::corpus_mutated_input( $seed, $mode, $max_input_bytes );
+			if ( null === $corpus ) {
+				// Corpus unavailable: fall back to the generator.
+				$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes );
+				$input                = $generated['input'];
+				$profile              = $generated['profile'];
+				$mode                 = $generated['mode'];
+				$payload_policy       = $generated['payloadPolicy'];
+				$fragment_context     = $generated['fragmentContext'];
+				$generator_parameters = $generated['parameters'];
+			} else {
+				$input                = $corpus['input'];
+				$profile              = 'corpus-mutated';
+				$mode                 = $corpus['mode'];
+				$payload_policy       = null;
+				$fragment_context     = 'body';
+				$generator_parameters = $corpus['parameters'];
+				$input_source         = 'corpus-mutated';
+			}
 		} else {
 			$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes );
 			$input                = $generated['input'];
 			$profile              = $generated['profile'];
 			$mode                 = $generated['mode'];
 			$payload_policy       = $generated['payloadPolicy'];
+			$fragment_context     = $generated['fragmentContext'];
 			$generator_parameters = $generated['parameters'];
 		}
 
@@ -63,11 +86,11 @@ class Worker {
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata );
 		write_json_file( $replay_path, $replay );
 
-		$tag_result = TagInvariants::check( $input, $limits, $mode );
-		$wp_result  = TreeRenderer::render_wordpress( $input, $mode, $limits );
+		$tag_result = TagInvariants::check( $input, $limits, $mode, $fragment_context );
+		$wp_result  = TreeRenderer::render_wordpress( $input, $mode, $limits, $fragment_context );
 		$dom_result = array( 'status' => TreeRenderer::STATUS_ERROR, 'error' => 'Not run.' );
 
 		$result = array(
@@ -80,6 +103,7 @@ class Worker {
 			'profile'       => $profile,
 			'mode'          => $mode,
 			'payloadPolicy' => $payload_policy,
+			'fragmentContext' => $fragment_context,
 			'generator'     => $generator_parameters,
 			'inputSource'   => $input_source,
 			'inputSha1'     => sha1( $input ),
@@ -114,7 +138,7 @@ class Worker {
 			$result['failureClass'] = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : $wp_failure_class;
 		} else {
 			try {
-				$dom_result = TreeRenderer::render_dom( $input, $mode, $limits );
+				$dom_result = TreeRenderer::render_dom( $input, $mode, $limits, $fragment_context );
 			} catch ( \Throwable $e ) {
 				$dom_result = array(
 					'status'       => TreeRenderer::STATUS_ERROR,
@@ -140,6 +164,14 @@ class Worker {
 			} else {
 				$dom_oracle_line_tolerances = $wp_result['domOracleLineTolerances'] ?? array();
 				$comparison = TreeRenderer::compare_trees( $wp_result['tree'], $dom_result['tree'], $dom_oracle_line_tolerances );
+				if ( ! $comparison['ok'] && self::is_oracle_form_feed_quirk( $input, $mode, $limits, $fragment_context, $wp_result['tree'] ?? null, $dom_oracle_line_tolerances ) ) {
+					$comparison = array(
+						'ok'            => true,
+						'formFeedQuirk' => true,
+					);
+					$result['status']       = 'oracle-tolerated';
+					$result['failureClass'] = 'oracle-tolerated';
+				}
 				$result['comparison'] = $comparison;
 				if ( ! $comparison['ok'] ) {
 					$result['ok']           = false;
@@ -147,7 +179,7 @@ class Worker {
 					$result['failureClass'] = self::is_encoding_mismatch( $input, $comparison['firstDifference'] ?? array() )
 						? 'encoding-mismatch'
 						: 'tree-mismatch';
-				} elseif ( ! empty( $dom_oracle_line_tolerances ) ) {
+				} elseif ( ! empty( $dom_oracle_line_tolerances ) || ! empty( $comparison['scalarToleratedLines'] ) ) {
 					$result['status']       = 'oracle-tolerated';
 					$result['failureClass'] = 'oracle-tolerated';
 				}
@@ -155,6 +187,35 @@ class Worker {
 		}
 
 		$normalize_result = $tag_result['normalize'] ?? array( 'ok' => true );
+		$normalized_html  = $normalize_result['normalizedHtml'] ?? null;
+		unset( $result['tagProcessor']['normalize']['normalizedHtml'] );
+
+		$has_clean_baseline = true === ( $result['ok'] ?? false )
+			&& in_array( $result['status'] ?? null, array( 'passed', 'oracle-tolerated' ), true )
+			&& true === ( $result['comparison']['ok'] ?? false );
+
+		if ( $has_clean_baseline ) {
+			$mutation           = self::check_mutation_differential( $input, $mode, $limits, $wp_result['tree'] ?? null, $fragment_context );
+			$result['mutation'] = $mutation;
+			if ( false === $mutation['ok'] ) {
+				$result['ok']           = false;
+				$result['status']       = 'failed';
+				$result['failureClass'] = $mutation['failureClass'];
+				$has_clean_baseline     = false;
+			}
+		}
+
+		if ( $has_clean_baseline && is_string( $normalized_html ) ) {
+			$preservation                  = self::check_normalize_tree_preservation( $normalized_html, $mode, $limits, $wp_result['tree'] ?? null, $fragment_context );
+			$result['normalizePreservation'] = $preservation;
+			if ( false === $preservation['ok'] ) {
+				$result['ok']           = false;
+				$result['status']       = 'failed';
+				$result['failureClass'] = 'normalize-tree-changed';
+				$has_clean_baseline     = false;
+			}
+		}
+
 		if (
 			false === ( $normalize_result['ok'] ?? true ) &&
 			true === ( $result['ok'] ?? false ) &&
@@ -191,8 +252,67 @@ class Worker {
 	}
 
 	private static function validate_profile_metadata( string $profile ): void {
-		if ( 'replay' !== $profile && ! in_array( $profile, Generator::profiles(), true ) ) {
+		if ( ! in_array( $profile, array( 'replay', 'corpus-mutated' ), true ) && ! in_array( $profile, Generator::profiles(), true ) ) {
 			throw new \InvalidArgumentException( 'Unknown generator profile: ' . $profile );
+		}
+	}
+
+	/**
+	 * Deterministically routes a share of seeds to the corpus-mutation stage.
+	 * Uses a hash of the seed rather than a modulus so stride-partitioned
+	 * lanes (which see arithmetic seed progressions) still sample evenly.
+	 */
+	private static function seed_selects_corpus_stage( int $seed, int $percent ): bool {
+		if ( $percent <= 0 ) {
+			return false;
+		}
+		$bucket = hexdec( substr( hash( 'sha256', 'corpus-stage:' . $seed ), 0, 8 ) ) % 100;
+		return $bucket < min( 100, $percent );
+	}
+
+	/**
+	 * Builds a deterministic mutated input from the html5lib corpus.
+	 */
+	private static function corpus_mutated_input( int $seed, ?string $mode, ?int $max_input_bytes ): ?array {
+		$entries = Corpus::entries();
+		if ( array() === $entries ) {
+			return null;
+		}
+
+		$rng   = new Prng( 'corpus:' . $seed );
+		$index = $rng->int( 0, count( $entries ) - 1 );
+		$entry = $entries[ $index ];
+
+		$mutation = Mutator::mutate( $entry['data'], $rng, $entries );
+		$input    = $mutation['input'];
+		$truncated = false;
+		if ( null !== $max_input_bytes && $max_input_bytes > 0 && strlen( $input ) > $max_input_bytes ) {
+			$input     = substr( $input, 0, $max_input_bytes );
+			$truncated = true;
+		}
+
+		$resolved_mode = ( null === $mode || 'auto' === $mode )
+			? $rng->weighted( array( Generator::MODE_FRAGMENT_BODY => 60, Generator::MODE_FULL_DOCUMENT => 40 ) )
+			: $mode;
+
+		return array(
+			'input'      => $input,
+			'mode'       => $resolved_mode,
+			'parameters' => array(
+				'seed'        => $seed,
+				'stage'       => 'corpus-mutated',
+				'corpusFile'  => $entry['file'],
+				'corpusIndex' => $index,
+				'operations'  => $mutation['operations'],
+				'truncated'   => $truncated,
+				'byteLength'  => strlen( $input ),
+			),
+		);
+	}
+
+	private static function validate_fragment_context_metadata( string $fragment_context ): void {
+		if ( ! in_array( $fragment_context, Generator::fragment_contexts(), true ) ) {
+			throw new \InvalidArgumentException( 'Unknown fragment context: ' . $fragment_context );
 		}
 	}
 
@@ -202,7 +322,7 @@ class Worker {
 		}
 	}
 
-	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata ): array {
+	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata ): array {
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
@@ -215,6 +335,7 @@ class Worker {
 			'profile'       => $profile,
 			'mode'          => $mode,
 			'payloadPolicy' => $payload_policy,
+			'fragmentContext' => $fragment_context,
 			'generator'     => $generator_parameters,
 			'inputSource'   => $input_source,
 			'inputBase64'   => base64_encode( $input ),
@@ -237,6 +358,205 @@ class Worker {
 		);
 	}
 
+	/**
+	 * Differential check of a simple mutation: set data-fuzz="1" on the first
+	 * tag, then verify the mutated document still parses identically in
+	 * WordPress and the DOM oracle, and that the WordPress tree changed by
+	 * exactly that one attribute line.
+	 *
+	 * Runs only on a clean baseline so a failure is attributable to the
+	 * mutation machinery rather than to a pre-existing divergence.
+	 */
+	private static function check_mutation_differential( string $input, string $mode, array $limits, ?string $original_tree, string $fragment_context = 'body' ): array {
+		if ( ! is_string( $original_tree ) ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-no-baseline-tree',
+			);
+		}
+		if ( false !== strpos( $input, 'data-fuzz' ) ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-input-contains-marker',
+			);
+		}
+
+		$processor = new \WP_HTML_Tag_Processor( $input );
+		if ( ! $processor->next_tag() || ! $processor->set_attribute( 'data-fuzz', '1' ) ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-no-mutable-tag',
+			);
+		}
+		$updated = $processor->get_updated_html();
+
+		$wp_updated = TreeRenderer::render_wordpress( $updated, $mode, $limits, $fragment_context );
+		if ( TreeRenderer::STATUS_OK !== $wp_updated['status'] ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-wordpress-' . $wp_updated['status'],
+			);
+		}
+		$dom_updated = TreeRenderer::render_dom( $updated, $mode, $limits, $fragment_context );
+		if ( TreeRenderer::STATUS_OK !== $dom_updated['status'] ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-dom-' . $dom_updated['status'],
+			);
+		}
+
+		$comparison = TreeRenderer::compare_trees( $wp_updated['tree'], $dom_updated['tree'], $wp_updated['domOracleLineTolerances'] ?? array() );
+		if ( ! $comparison['ok'] ) {
+			if ( self::is_oracle_form_feed_quirk( $updated, $mode, $limits, $fragment_context, $wp_updated['tree'], $wp_updated['domOracleLineTolerances'] ?? array() ) ) {
+				return array(
+					'ok'     => true,
+					'status' => 'skipped-oracle-form-feed-quirk',
+				);
+			}
+			return array(
+				'ok'              => false,
+				'status'          => 'failed',
+				'failureClass'    => 'mutation-tree-mismatch',
+				'message'         => 'The mutated document parses differently in WordPress and the DOM oracle.',
+				'firstDifference' => $comparison['firstDifference'] ?? array(),
+			);
+		}
+
+		$marker        = 'data-fuzz="1"';
+		$updated_lines = explode( "\n", $wp_updated['tree'] );
+		$marker_lines  = array();
+		foreach ( $updated_lines as $i => $line ) {
+			if ( ltrim( $line, ' ' ) === $marker ) {
+				$marker_lines[] = $i;
+			}
+		}
+
+		if ( 0 === count( $marker_lines ) ) {
+			/*
+			 * Tree construction can legitimately drop the mutated element
+			 * (for example <col> outside a table), taking the attribute with
+			 * it. The mutation must then be a tree no-op.
+			 */
+			if ( $wp_updated['tree'] !== $original_tree ) {
+				return array(
+					'ok'              => false,
+					'status'          => 'failed',
+					'failureClass'    => 'mutation-delta-mismatch',
+					'message'         => 'The attribute is missing from the re-parsed tree, yet the tree changed.',
+					'firstDifference' => TreeRenderer::diff_trees( $wp_updated['tree'], $original_tree ),
+				);
+			}
+			return array(
+				'ok'     => true,
+				'status' => 'passed-element-dropped',
+			);
+		}
+
+		if ( count( $marker_lines ) > 1 ) {
+			/*
+			 * Active formatting element reconstruction clones attributes onto
+			 * reconstructed elements, so a strict one-line delta does not
+			 * apply. Correctness is still covered by the differential
+			 * comparison of the mutated document above.
+			 */
+			return array(
+				'ok'     => true,
+				'status' => 'passed-differential-only',
+			);
+		}
+
+		unset( $updated_lines[ $marker_lines[0] ] );
+		$delta_tree = implode( "\n", $updated_lines );
+		if ( $delta_tree !== $original_tree ) {
+			return array(
+				'ok'              => false,
+				'status'          => 'failed',
+				'failureClass'    => 'mutation-delta-mismatch',
+				'message'         => 'The mutation changed the parsed tree beyond the added attribute.',
+				'firstDifference' => TreeRenderer::diff_trees( $delta_tree, $original_tree ),
+			);
+		}
+
+		return array(
+			'ok'     => true,
+			'status' => 'passed',
+		);
+	}
+
+	/**
+	 * Verifies that normalize() output parses to the same tree as its input:
+	 * normalization may rewrite syntax but must not change document
+	 * structure. Stricter than idempotence, which a consistently wrong
+	 * serializer can satisfy.
+	 */
+	private static function check_normalize_tree_preservation( string $normalized_html, string $mode, array $limits, ?string $original_tree, string $fragment_context = 'body' ): array {
+		if ( ! is_string( $original_tree ) ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-no-baseline-tree',
+			);
+		}
+
+		$rendered = TreeRenderer::render_wordpress( $normalized_html, $mode, $limits, $fragment_context );
+		if ( TreeRenderer::STATUS_OK !== $rendered['status'] ) {
+			return array(
+				'ok'     => true,
+				'status' => 'skipped-render-' . $rendered['status'],
+			);
+		}
+
+		/*
+		 * normalize() applies the spec scalar substitutions (NUL to U+FFFD,
+		 * CR to LF) when serializing raw bytes the parser preserves, so the
+		 * re-parsed tree may differ from the original by exactly those
+		 * substitutions. Apply the same scrub-explained tolerance as the
+		 * WordPress/DOM comparison; anything beyond it is a real change.
+		 */
+		$comparison = TreeRenderer::compare_trees( $original_tree, $rendered['tree'] );
+		if ( ! $comparison['ok'] ) {
+			return array(
+				'ok'              => false,
+				'status'          => 'failed',
+				'failureClass'    => 'normalize-tree-changed',
+				'message'         => 'Parsing normalize() output produced a different tree than the original input.',
+				'firstDifference' => $comparison['firstDifference'] ?? array(),
+			);
+		}
+
+		return array(
+			'ok'                   => true,
+			'status'               => empty( $comparison['scalarToleratedLines'] ) ? 'passed' : 'passed-scalar-tolerated',
+			'scalarToleratedLines' => $comparison['scalarToleratedLines'] ?? array(),
+		);
+	}
+
+	/**
+	 * Detects mismatches fully explained by the DOM oracle's form feed bug
+	 * (see TreeRenderer::dom_oracle_mishandles_form_feed()): when the oracle,
+	 * given the input with form feeds substituted by spaces, produces exactly
+	 * the WordPress tree, the divergence is the oracle's, not WordPress's.
+	 * The substitution is conservative: form feeds in attribute values or
+	 * body text make the trees differ and the tolerance simply not apply.
+	 */
+	private static function is_oracle_form_feed_quirk( string $input, string $mode, array $limits, string $fragment_context, ?string $wp_tree, array $dom_oracle_line_tolerances ): bool {
+		if (
+			! is_string( $wp_tree ) ||
+			Generator::MODE_FULL_DOCUMENT !== $mode ||
+			false === strpos( $input, "" ) ||
+			! TreeRenderer::dom_oracle_mishandles_form_feed()
+		) {
+			return false;
+		}
+
+		$substituted = TreeRenderer::render_dom( str_replace( "", ' ', $input ), $mode, $limits, $fragment_context );
+		if ( TreeRenderer::STATUS_OK !== $substituted['status'] ) {
+			return false;
+		}
+
+		$comparison = TreeRenderer::compare_trees( $wp_tree, $substituted['tree'], $dom_oracle_line_tolerances );
+		return true === $comparison['ok'] && empty( $comparison['scalarToleratedLines'] );
+	}
+
 	private static function is_encoding_mismatch( string $input, array $diff ): bool {
 		if ( function_exists( 'wp_is_valid_utf8' ) && wp_is_valid_utf8( $input ) ) {
 			return false;
@@ -250,15 +570,7 @@ class Worker {
 			}
 		}
 
-		if ( true === ( $diff['linesMatchAfterWordPressUtf8Scrub'] ?? null ) ) {
-			return true;
-		}
-
-		if ( empty( $diff['wordpressHex'] ) || empty( $diff['domHex'] ) || $diff['wordpressHex'] === $diff['domHex'] ) {
-			return false;
-		}
-
-		return false;
+		return true === ( $diff['linesMatchAfterWordPressUtf8Scrub'] ?? null );
 	}
 
 	private static function tag_invariant_failure_class( array $tag_result ): string {

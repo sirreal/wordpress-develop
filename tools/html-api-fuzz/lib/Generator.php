@@ -12,9 +12,9 @@ class Generator {
 
 	private $normal_tags = array( 'div', 'p', 'span', 'section', 'article', 'main', 'header', 'footer', 'a', 'b', 'i', 'em', 'strong', 'small', 'mark', 'code', 'pre', 'blockquote', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'h1', 'h2', 'h3', 'button', 'form', 'label', 'select', 'option' );
 	private $void_tags   = array( 'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr' );
-	private $raw_tags    = array( 'script', 'style', 'iframe', 'noembed', 'noframes', 'xmp' );
+	private $raw_tags    = array( 'script', 'style', 'iframe', 'noembed', 'noframes', 'xmp', 'noscript' );
 	private $rcdata_tags = array( 'title', 'textarea' );
-	private $named_character_references = array( 'amp', 'AMP', 'lt', 'LT', 'gt', 'GT', 'quot', 'QUOT', 'apos', 'nbsp', 'copy', 'COPY', 'reg', 'not', 'notin', 'AElig', 'NotEqualTilde', 'CounterClockwiseContourIntegral' );
+	private $named_character_references = array( 'amp', 'AMP', 'lt', 'LT', 'gt', 'GT', 'quot', 'QUOT', 'apos', 'nbsp', 'copy', 'COPY', 'reg', 'not', 'notin', 'notinva', 'AElig', 'NotEqualTilde', 'CounterClockwiseContourIntegral', 'centerdot', 'divideontimes', 'ncaron', 'ngt', 'nGt' );
 	private $legacy_semicolonless_named_character_references = array( 'amp', 'AMP', 'lt', 'LT', 'gt', 'GT', 'quot', 'QUOT', 'nbsp', 'copy', 'COPY', 'reg', 'not', 'AElig' );
 	private $invalid_semicolonless_named_character_references = array( 'apos', 'notin', 'NotEqualTilde', 'CounterClockwiseContourIntegral' );
 	private $unusual_attr_names         = array( 'aria-label', 'data-id', 'data--x', '_', ':colon', '@click', '[data-x]', 'xml:space', 'xmlns:xlink', 'xlink:href', 'on:click', 'data.thing', 'data🙂' );
@@ -27,6 +27,7 @@ class Generator {
 			'body-fragment',
 			'tables',
 			'template',
+			'select',
 			'foreign-content',
 			'rawtext-rcdata',
 			'formatting-adoption',
@@ -63,6 +64,16 @@ class Generator {
 		);
 	}
 
+	/**
+	 * Fragment parsing context elements. WordPress currently supports only
+	 * `<body>`; the others receive a small probe weight so the fuzzer
+	 * exercises the unsupported-context path today and picks up real
+	 * coverage automatically when create_fragment() gains context support.
+	 */
+	public static function fragment_contexts(): array {
+		return array( 'body', 'div', 'p', 'td', 'tr', 'table', 'caption', 'colgroup', 'select', 'option', 'template', 'title', 'textarea', 'script', 'style', 'svg', 'math' );
+	}
+
 	public static function generate( int $seed, string $profile = 'auto', string $mode = 'auto', string $payload_policy = 'auto', ?int $max_input_bytes = null ): array {
 		$rng = new Prng( $seed );
 		$requested_profile        = $profile;
@@ -71,20 +82,21 @@ class Generator {
 		if ( 'auto' === $profile ) {
 			$profile = $rng->weighted(
 				array(
-					'balanced'                => 24,
-					'full-document'           => 8,
-					'body-fragment'           => 8,
-					'tables'                  => 12,
-					'template'                => 9,
-					'foreign-content'         => 11,
-					'rawtext-rcdata'          => 9,
-					'formatting-adoption'     => 10,
-						'attributes-entities'     => 7,
-						'comments-doctype-bogus'  => 5,
-						'deep-nesting'            => 2,
-						'resource-stress'         => 1,
-						'incomplete-malformed'    => 2,
-					)
+					'balanced'               => 22,
+					'full-document'          => 8,
+					'body-fragment'          => 8,
+					'tables'                 => 11,
+					'template'               => 8,
+					'select'                 => 8,
+					'foreign-content'        => 10,
+					'rawtext-rcdata'         => 8,
+					'formatting-adoption'    => 10,
+					'attributes-entities'    => 7,
+					'comments-doctype-bogus' => 5,
+					'deep-nesting'           => 2,
+					'resource-stress'        => 1,
+					'incomplete-malformed'   => 2,
+				)
 			);
 		} elseif ( ! in_array( $profile, self::profiles(), true ) ) {
 			throw new \InvalidArgumentException( 'Unknown generator profile: ' . $profile );
@@ -116,7 +128,21 @@ class Generator {
 			throw new \InvalidArgumentException( 'Unknown generator mode: ' . $mode );
 		}
 
+		$fragment_context = 'body';
+		if ( self::MODE_FRAGMENT_BODY === $mode ) {
+			$weights = array( 'body' => 240 );
+			foreach ( self::fragment_contexts() as $context ) {
+				if ( 'body' !== $context ) {
+					$weights[ $context ] = 1;
+				}
+			}
+			$fragment_context = $rng->weighted( $weights );
+		}
+
 		$generator = new self( $rng, $profile, $payload_policy );
+		if ( 'body' !== $fragment_context ) {
+			$generator->mark_feature( 'fragment-context:' . $fragment_context );
+		}
 		$max_depth = $generator->depth_for_profile();
 		$body      = $generator->nodes( $max_depth, 'body' );
 
@@ -133,11 +159,12 @@ class Generator {
 		}
 
 		return array(
-			'input'         => $html,
-			'mode'          => $mode,
-			'profile'       => $profile,
-			'payloadPolicy' => $payload_policy,
-			'parameters'    => array(
+			'input'           => $html,
+			'mode'            => $mode,
+			'profile'         => $profile,
+			'payloadPolicy'   => $payload_policy,
+			'fragmentContext' => $fragment_context,
+			'parameters'      => array(
 				'seed'                   => $seed,
 				'requestedProfile'       => $requested_profile,
 				'requestedMode'          => $requested_mode,
@@ -145,6 +172,7 @@ class Generator {
 				'profile'                => $profile,
 				'mode'                   => $mode,
 				'payloadPolicy'          => $payload_policy,
+				'fragmentContext'        => $fragment_context,
 				'maxDepth'               => $max_depth,
 				'maxInputBytes'          => $max_input_bytes,
 				'truncated'              => $truncated,
@@ -198,11 +226,23 @@ class Generator {
 		$attrs   = $this->attrs();
 		$body_at = $this->attrs();
 
+		if ( $this->rng->chance( 4 ) ) {
+			$this->mark_feature( 'frameset' );
+			$frames = '<frame src="a"><frame' . $this->attrs() . '><noframes>' . $this->terminal_text( true ) . '</noframes>';
+			return $doctype . '<html' . $attrs . '>' . $head . '<frameset' . $this->attrs() . '>' . $frames . ( $this->rng->chance( 70 ) ? '</frameset>' : '' ) . ( $this->rng->chance( 40 ) ? $body : '' );
+		}
+
 		if ( $this->rng->chance( 20 ) ) {
 			return $doctype . $head . $body;
 		}
 
-		return $doctype . '<html' . $attrs . '>' . $head . '<body' . $body_at . '>' . $body . ( $this->rng->chance( 75 ) ? '</body></html>' : '' );
+		$trailer = '';
+		if ( $this->rng->chance( 8 ) ) {
+			$this->mark_feature( 'content-after-html' );
+			$trailer = $this->rng->choice( array( $this->terminal_ascii( 6 ), '<!--x-->', '<div>tail</div>', '<!DOCTYPE html>' ) );
+		}
+
+		return $doctype . '<html' . $attrs . '>' . $head . '<body' . $body_at . '>' . $body . ( $this->rng->chance( 75 ) ? '</body></html>' . $trailer : '' );
 	}
 
 	private function head_nodes(): string {
@@ -247,18 +287,22 @@ class Generator {
 		}
 
 		$weights = array(
-			'element'   => 35,
-			'text'      => 16,
-			'charref'   => 1,
-			'comment'   => 7,
-			'void'      => 8,
-			'raw'       => 5,
-			'template'  => 5,
-			'table'     => 5,
-			'foreign'   => 5,
-			'weird-tag' => 0,
-			'doctype'   => 2,
-			'bogus'     => 2,
+			'element'         => 33,
+			'text'            => 16,
+			'charref'         => 1,
+			'comment'         => 7,
+			'void'            => 8,
+			'raw'             => 5,
+			'template'        => 5,
+			'table'           => 5,
+			'select'          => 2,
+			'foreign'         => 5,
+			'adoption'        => 2,
+			'list-chain'      => 1,
+			'special-closers' => 1,
+			'weird-tag'       => 0,
+			'doctype'         => 2,
+			'bogus'           => 2,
 		);
 
 		if ( 'tables' === $this->profile ) {
@@ -266,6 +310,10 @@ class Generator {
 			$weights['element'] = 15;
 		} elseif ( 'template' === $this->profile ) {
 			$weights['template'] = 35;
+		} elseif ( 'select' === $this->profile ) {
+			$weights['select'] = 35;
+			$weights['table']  = 8;
+			$weights['element'] = 15;
 		} elseif ( 'foreign-content' === $this->profile ) {
 			$weights['foreign'] = 35;
 		} elseif ( 'rawtext-rcdata' === $this->profile ) {
@@ -280,11 +328,13 @@ class Generator {
 			$weights['charref'] = 12;
 			$weights['weird-tag'] = 8;
 		} elseif ( 'formatting-adoption' === $this->profile ) {
-			$weights['element'] = 55;
+			$weights['element'] = 40;
+			$weights['adoption'] = 20;
 		} elseif ( 'incomplete-malformed' === $this->profile ) {
 			$weights['bogus'] = 25;
-			$weights['element'] = 30;
+			$weights['element'] = 28;
 			$weights['weird-tag'] = 15;
+			$weights['special-closers'] = 4;
 		}
 
 		switch ( $this->rng->weighted( $weights ) ) {
@@ -307,8 +357,16 @@ class Generator {
 				return '<template' . $this->attrs() . '>' . $this->nodes( $depth - 1, 'body' ) . ( $this->rng->chance( 80 ) ? '</template>' : '' );
 			case 'table':
 				return $this->table( $depth - 1 );
+			case 'select':
+				return $this->select_stress( $depth - 1 );
 			case 'foreign':
 				return $this->foreign( $depth - 1 );
+			case 'adoption':
+				return $this->adoption_pattern( $depth - 1 );
+			case 'list-chain':
+				return $this->auto_closing_chain( $depth - 1 );
+			case 'special-closers':
+				return $this->special_closers();
 			case 'weird-tag':
 				return $this->weird_element( $depth - 1 );
 			case 'doctype':
@@ -371,6 +429,147 @@ class Generator {
 		return '<' . $tag . $this->attrs() . '>' . $this->nodes( $depth, 'body' ) . ( $this->rng->chance( 75 ) ? '</' . $tag . '>' : '' );
 	}
 
+	/**
+	 * select/option/optgroup nesting stress, including elements that end or
+	 * are disallowed in select (input, textarea, button, nested select) and
+	 * select inside table structures.
+	 */
+	private function select_stress( int $depth ): string {
+		$this->mark_feature( 'select' );
+		$out   = '';
+		$count = $this->rng->int( 1, 4 );
+		for ( $i = 0; $i < $count; ++$i ) {
+			switch ( $this->rng->weighted( array( 'option' => 38, 'optgroup' => 22, 'breaker' => 18, 'nested-select' => 10, 'other' => 12 ) ) ) {
+				case 'option':
+					$this->mark_feature( 'select:option' );
+					$out .= '<option' . $this->attrs() . '>' . $this->terminal_text() . ( $this->rng->chance( 55 ) ? '</option>' : '' );
+					break;
+				case 'optgroup':
+					$this->mark_feature( 'select:optgroup' );
+					$out .= '<optgroup' . $this->attrs() . '><option>' . $this->terminal_text() . ( $this->rng->chance( 50 ) ? '</optgroup>' : '' );
+					break;
+				case 'breaker':
+					$this->mark_feature( 'select:breaker' );
+					$out .= $this->rng->choice( array( '<input>', '<textarea>x</textarea>', '<keygen>', '<button>b</button>', '<hr>', '<datalist><option>d</datalist>' ) );
+					break;
+				case 'nested-select':
+					$this->mark_feature( 'select:nested' );
+					$out .= '<select' . $this->attrs() . '><option>' . $this->terminal_text();
+					break;
+				default:
+					$out .= $depth > 0 ? $this->node( max( 0, $depth - 1 ), 'select' ) : $this->terminal_text();
+					break;
+			}
+		}
+
+		$select = '<select' . $this->attrs() . '>' . $out . ( $this->rng->chance( 70 ) ? '</select>' : '' );
+		if ( $this->rng->chance( 20 ) ) {
+			$this->mark_feature( 'select:in-table' );
+			$cell = $this->rng->choice( array( 'td', 'caption', 'tr' ) );
+			return '<table><' . $cell . '>' . $select . '</' . $cell . '></table>';
+		}
+		return $select;
+	}
+
+	/**
+	 * Classic adoption-agency and formatting-reconstruction shapes. Random
+	 * unclosed formatting tags reach these interleavings too rarely to rely
+	 * on, so emit the canonical patterns directly with random filler.
+	 */
+	private function adoption_pattern( int $depth ): string {
+		$this->mark_feature( 'adoption-agency-pattern' );
+		$f1 = $this->rng->choice( array( 'b', 'i', 'em', 'strong', 'a', 'font', 'nobr', 'big' ) );
+		$f2 = $this->rng->choice( array( 'b', 'i', 'em', 'strong', 'a', 'font', 'nobr', 'big' ) );
+		$block = $this->rng->choice( array( 'p', 'div', 'address', 'blockquote' ) );
+		$t1 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
+		$t2 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
+		$t3 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
+		$inner = $depth > 0 ? $this->node( max( 0, $depth - 1 ), 'body' ) : $t3;
+
+		switch ( $this->rng->int( 1, 6 ) ) {
+			case 1:
+				// Misnested closers: <b><i></b></i>
+				$this->mark_feature( 'adoption:misnested-closers' );
+				return "<{$f1}>{$t1}<{$f2}>{$t2}</{$f1}>{$t3}</{$f2}>";
+			case 2:
+				// Formatting element spanning a block: <b><p>...</b>...</p>
+				$this->mark_feature( 'adoption:block-boundary' );
+				return "<{$f1}>{$t1}<{$block}>{$t2}</{$f1}>{$inner}</{$block}>";
+			case 3:
+				// Reconstruction across sibling blocks: <p><b>x</p><p>y</p>
+				$this->mark_feature( 'adoption:reconstruction' );
+				return "<{$block}><{$f1}>{$t1}</{$block}><{$block}>{$t2}</{$block}>";
+			case 4:
+				// Nested anchors: <a>1<div>2<a>3
+				$this->mark_feature( 'adoption:nested-anchor' );
+				return "<a>{$t1}<{$block}>{$t2}<a>{$t3}";
+			case 5:
+				// Noah's Ark: more than three identical formatting entries.
+				$this->mark_feature( 'adoption:noahs-ark' );
+				$open = str_repeat( "<{$f1}>{$t1}", $this->rng->int( 4, 8 ) );
+				return "<{$block}>{$open}</{$block}>{$t2}";
+			default:
+				// Repeated closers with content between.
+				$this->mark_feature( 'adoption:repeated-closers' );
+				return "<{$f1}><{$f2}>{$t1}</{$f1}>{$t2}</{$f1}>{$t3}</{$f2}>";
+		}
+	}
+
+	/**
+	 * Elements that auto-close same-kind predecessors: li, dd/dt, headings,
+	 * option, p — chains without explicit closers.
+	 */
+	private function auto_closing_chain( int $depth ): string {
+		$this->mark_feature( 'auto-closing-chain' );
+		switch ( $this->rng->int( 1, 4 ) ) {
+			case 1:
+				$wrap  = $this->rng->choice( array( 'ul', 'ol', 'menu' ) );
+				$items = '';
+				for ( $i = $this->rng->int( 2, 5 ); $i > 0; $i-- ) {
+					$items .= '<li' . $this->attrs() . '>' . $this->terminal_text();
+				}
+				return '<' . $wrap . '>' . $items . ( $this->rng->chance( 70 ) ? '</' . $wrap . '>' : '' );
+			case 2:
+				$items = '';
+				for ( $i = $this->rng->int( 2, 5 ); $i > 0; $i-- ) {
+					$items .= '<' . $this->rng->choice( array( 'dt', 'dd' ) ) . '>' . $this->terminal_text();
+				}
+				return '<dl>' . $items . ( $this->rng->chance( 70 ) ? '</dl>' : '' );
+			case 3:
+				$out = '';
+				for ( $i = $this->rng->int( 2, 4 ); $i > 0; $i-- ) {
+					$out .= '<h' . $this->rng->int( 1, 6 ) . '>' . $this->terminal_text();
+				}
+				return $out;
+			default:
+				$out = '';
+				for ( $i = $this->rng->int( 2, 5 ); $i > 0; $i-- ) {
+					$out .= '<p' . $this->attrs() . '>' . $this->terminal_text();
+				}
+				return $out;
+		}
+	}
+
+	/**
+	 * Spec-special end tags: </br> and </p> create elements, plus assorted
+	 * stray closers and the <image> to <img> rename.
+	 */
+	private function special_closers(): string {
+		$this->mark_feature( 'special-closers' );
+		return $this->rng->choice(
+			array(
+				'</br>',
+				'</p>',
+				'</p>' . $this->terminal_ascii( 4 ),
+				'<image' . $this->attrs() . '>',
+				'</body>' . $this->terminal_ascii( 4 ),
+				'</html>' . $this->terminal_ascii( 4 ),
+				'</head>' . $this->terminal_ascii( 4 ),
+				'</' . $this->rng->choice( array( 'div', 'span', 'b', 'table', 'select', 'option', 'li' ) ) . '>',
+			)
+		);
+	}
+
 	private function table( int $depth ): string {
 		$this->mark_feature( 'table' );
 		$cells = '';
@@ -393,18 +592,85 @@ class Generator {
 
 	private function foreign( int $depth ): string {
 		$this->mark_feature( 'foreign-content' );
+
+		if ( $this->rng->chance( 18 ) ) {
+			return $this->foreign_breakout( $depth );
+		}
+
 		if ( $this->rng->chance( 50 ) ) {
 			$this->mark_feature( 'mathml-html-integration-point' );
-			$inner = '<mi' . $this->attrs() . '>' . $this->terminal_text() . '</mi><annotation-xml encoding="text/html">' . $this->nodes( max( 0, $depth - 1 ), 'body' ) . '</annotation-xml>';
+			$encoding = $this->rng->weighted(
+				array(
+					'encoding="text/html"'              => 55,
+					'encoding="application/xhtml+xml"'  => 15,
+					'ENCODING="TEXT/HTML"'              => 10,
+					'encoding="text/bogus"'             => 10,
+					''                                  => 10,
+				)
+			);
+			if ( 'encoding="text/html"' !== $encoding ) {
+				$this->mark_feature( 'foreign:annotation-xml-encoding-variant' );
+			}
+			$inner = '<mi' . $this->attrs() . '>' . $this->terminal_text() . '</mi><annotation-xml' . ( '' === $encoding ? '' : ' ' . $encoding ) . '>' . $this->nodes( max( 0, $depth - 1 ), 'body' ) . '</annotation-xml>';
+			if ( $this->rng->chance( 12 ) ) {
+				$this->mark_feature( 'foreign:cdata' );
+				$inner .= '<![CDATA[' . $this->terminal_ascii( $this->rng->int( 1, 12 ) ) . ']]>';
+			}
 			return '<math' . $this->attrs() . '>' . $inner . ( $this->rng->chance( 85 ) ? '</math>' : '' );
 		}
 
 		$this->mark_feature( 'svg-foreignobject' );
-		$inner = '<g><title>' . $this->terminal_text() . '</title><foreignObject>' . $this->nodes( max( 0, $depth - 1 ), 'body' ) . '</foreignObject></g>';
+		$foreign_object = $this->rng->weighted(
+			array(
+				'foreignObject' => 70,
+				'foreignobject' => 15,
+				'FOREIGNOBJECT' => 8,
+				'foreignObjecT' => 7,
+			)
+		);
+		if ( 'foreignObject' !== $foreign_object ) {
+			$this->mark_feature( 'foreign:case-mangled-name' );
+		}
+		$inner = '<g><title>' . $this->terminal_text() . '</title><' . $foreign_object . '>' . $this->nodes( max( 0, $depth - 1 ), 'body' ) . '</' . $foreign_object . '>';
+		if ( $this->rng->chance( 12 ) ) {
+			$this->mark_feature( 'foreign:cdata' );
+			$inner .= '<![CDATA[' . $this->terminal_ascii( $this->rng->int( 1, 12 ) ) . ']]>';
+		}
 		return '<svg' . $this->attrs() . ' viewBox="0 0 10 10">' . $inner . ( $this->rng->chance( 85 ) ? '</svg>' : '' );
 	}
 
+	/**
+	 * HTML breakout constructs inside foreign content: breakout start tags
+	 * (div, p, table, ...) and <font> with color/face/size, which exit
+	 * foreign content; <font> without those attributes, which does not.
+	 */
+	private function foreign_breakout( int $depth ): string {
+		$this->mark_feature( 'foreign:breakout' );
+		$root = $this->rng->chance( 50 ) ? 'svg' : 'math';
+		switch ( $this->rng->int( 1, 4 ) ) {
+			case 1:
+				$breaker = $this->rng->choice( array( 'div', 'p', 'table', 'ul', 'h1', 'blockquote', 'body', 'br', 'center', 'dl', 'pre' ) );
+				$this->mark_feature( 'foreign:breakout-tag' );
+				return '<' . $root . '><g>' . $this->terminal_ascii( 3 ) . '<' . $breaker . '>' . $this->nodes( max( 0, $depth - 1 ), 'body' ) . ( $this->rng->chance( 50 ) ? '</' . $breaker . '>' : '' );
+			case 2:
+				$this->mark_feature( 'foreign:font-breakout' );
+				$attr = $this->rng->choice( array( 'color="red"', 'face="serif"', 'size="3"', 'COLOR="x"' ) );
+				return '<' . $root . '><font ' . $attr . '>' . $this->terminal_ascii( 4 );
+			case 3:
+				$this->mark_feature( 'foreign:font-no-breakout' );
+				return '<' . $root . '><font ' . $this->rng->choice( array( 'data-x="1"', 'href="x"', '' ) ) . '>' . $this->terminal_ascii( 4 );
+			default:
+				$this->mark_feature( 'foreign:breakout-closer' );
+				return '<' . $root . '><g>' . $this->terminal_ascii( 3 ) . '</' . $root . '>' . $this->terminal_ascii( 3 );
+		}
+	}
+
 	private function raw_element(): string {
+		if ( $this->rng->chance( 4 ) ) {
+			$this->mark_feature( 'plaintext' );
+			return '<plaintext' . $this->attrs() . '>' . $this->terminal_text( true ) . $this->rng->choice( array( '', '</plaintext>', '<div>x' ) );
+		}
+
 		if ( $this->rng->chance( 45 ) ) {
 			$tag = $this->rng->choice( $this->rcdata_tags );
 			$this->mark_feature( 'rcdata' );
@@ -502,16 +768,27 @@ class Generator {
 		$count = 'attributes-entities' === $this->profile ? $this->rng->int( 1, 8 ) : $this->rng->int( 0, 4 );
 		$out   = '';
 		$weird_attr_chance = 'attributes-entities' === $this->profile ? 28 : ( 'incomplete-malformed' === $this->profile ? 18 : 0 );
+		$seen_names = array();
 		for ( $i = 0; $i < $count; ++$i ) {
 			if ( $this->rng->chance( $weird_attr_chance ) ) {
 				$out .= $this->weird_attr_chunk();
 				continue;
 			}
 
-			$name = $this->attr_name();
+			if ( ! empty( $seen_names ) && $this->rng->chance( 8 ) ) {
+				// Duplicate attribute names: the parser must keep the first.
+				$this->mark_feature( 'attr:duplicate' );
+				$name = $this->rng->choice( $seen_names );
+				if ( $this->rng->chance( 40 ) ) {
+					$name = $this->rng->chance( 50 ) ? strtoupper( $name ) : ucfirst( $name );
+				}
+			} else {
+				$name = $this->attr_name();
+			}
 			if ( '' === $name ) {
 				continue;
 			}
+			$seen_names[] = $name;
 			$gap = $this->attribute_gap();
 			if ( $this->rng->chance( 18 ) ) {
 				$out .= $gap . $name;
@@ -633,6 +910,20 @@ class Generator {
 	private function doctype(): string {
 		if ( $this->rng->chance( 70 ) ) {
 			return '<!DOCTYPE html>';
+		}
+		if ( $this->rng->chance( 35 ) ) {
+			// Quirks and limited-quirks doctypes change tree construction.
+			$this->mark_feature( 'doctype:quirky' );
+			return $this->rng->choice(
+				array(
+					'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">',
+					'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">',
+					'<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd">',
+					'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+					'<!doctype HtMl>',
+					'<!DOCTYPE>',
+				)
+			);
 		}
 		return '<!DOCTYPE ' . $this->rng->choice( array( 'html', 'HTML', 'svg', 'bogus' ) ) . ' "' . $this->terminal_ascii( 8 ) . '">';
 	}
@@ -835,7 +1126,7 @@ class Generator {
 			case 'named':
 			default:
 				$this->mark_character_reference_feature( $context, 'named' );
-				return $this->rng->choice( array( '&bogus;', '&NoSuchEntity', '&;', '&amp ;', '&noti;' ) );
+				return $this->rng->choice( array( '&bogus;', '&NoSuchEntity', '&;', '&amp ;', '&noti;', '&notit;', '&copyright;', '&centerdo;', '&ngE', '&divideontime;', '&amp&amp;', '&&gt;' ) );
 		}
 	}
 

@@ -5,22 +5,7 @@ class TreeRenderer {
 	const STATUS_OK          = 'ok';
 	const STATUS_UNSUPPORTED = 'unsupported';
 	const STATUS_ERROR       = 'error';
-	private const DOM_TEMPLATE_CONTEXT_UNSUPPORTED = 'DOM template innerHTML fallback requires template insertion mode for table-sensitive content.';
-	private const DOM_TEMPLATE_CONTEXT_TAGS = array(
-		'CAPTION'  => true,
-		'COL'      => true,
-		'COLGROUP' => true,
-		'TBODY'    => true,
-		'TD'       => true,
-		'TFOOT'    => true,
-		'TH'       => true,
-		'THEAD'    => true,
-		'TR'       => true,
-	);
-	private const DOM_TEMPLATE_FOREIGN_CONTEXT_TAGS = array(
-		'MATH' => true,
-		'SVG'  => true,
-	);
+	private const DOM_TEMPLATE_CONTEXT_UNSUPPORTED = 'DOM template content does not round-trip through body-context fragment parsing.';
 	private const XLINK_LOCAL_NAMES = array(
 		'actuate' => true,
 		'arcrole' => true,
@@ -31,14 +16,22 @@ class TreeRenderer {
 		'type'    => true,
 	);
 
-	public static function render_wordpress( string $html, string $mode, array $limits = array() ): array {
+	public static function render_wordpress( string $html, string $mode, array $limits = array(), string $fragment_context = 'body' ): array {
 		HtmlApiBootstrap::load();
 		$max_tokens = $limits['maxTokens'] ?? 2000;
 		$processor  = Generator::MODE_FULL_DOCUMENT === $mode
 			? \WP_HTML_Processor::create_full_parser( $html )
-			: \WP_HTML_Processor::create_fragment( $html );
+			: \WP_HTML_Processor::create_fragment( $html, "<{$fragment_context}>" );
 
 		if ( null === $processor ) {
+			if ( Generator::MODE_FULL_DOCUMENT !== $mode && 'body' !== $fragment_context ) {
+				return array(
+					'status'      => self::STATUS_UNSUPPORTED,
+					'unsupported' => array(
+						'message' => "create_fragment() does not support the <{$fragment_context}> context.",
+					),
+				);
+			}
 			return array(
 				'status' => self::STATUS_ERROR,
 				'error'  => 'Could not create WP_HTML_Processor.',
@@ -52,6 +45,23 @@ class TreeRenderer {
 		$tokens       = 0;
 		$line_count   = 0;
 		$dom_oracle_line_tolerances = array();
+
+		/*
+		 * The renderer derives tree structure from token order and
+		 * expects_closer(). get_breadcrumbs() reports the processor's own
+		 * stack of open elements; the two must agree at every tag token, or
+		 * the processor's stack bookkeeping and its token stream have
+		 * diverged.
+		 */
+		if ( Generator::MODE_FULL_DOCUMENT === $mode ) {
+			$breadcrumb_prefix = array();
+		} elseif ( 'body' === $fragment_context ) {
+			$breadcrumb_prefix = array( 'HTML', 'BODY' );
+		} else {
+			// Unknown context ancestry; calibrated from the first tag token.
+			$breadcrumb_prefix = null;
+		}
+		$element_stack = array();
 
 		try {
 			while ( $processor->next_token() ) {
@@ -107,6 +117,11 @@ class TreeRenderer {
 							: "{$namespace} {$processor->get_qualified_tag_name()}";
 
 						if ( $is_closer ) {
+							array_pop( $element_stack );
+							$breadcrumb_mismatch = self::breadcrumb_mismatch( $processor, $breadcrumb_prefix, $element_stack, null );
+							if ( null !== $breadcrumb_mismatch ) {
+								return $breadcrumb_mismatch;
+							}
 							--$indent_level;
 							if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
 								--$indent_level;
@@ -114,9 +129,15 @@ class TreeRenderer {
 							break;
 						}
 
+						$breadcrumb_mismatch = self::breadcrumb_mismatch( $processor, $breadcrumb_prefix, $element_stack, $token_name );
+						if ( null !== $breadcrumb_mismatch ) {
+							return $breadcrumb_mismatch;
+						}
+
 						$tag_indent = $indent_level;
 						if ( $processor->expects_closer() ) {
 							++$indent_level;
+							$element_stack[] = $token_name;
 						}
 
 						$output .= str_repeat( '  ', $tag_indent ) . '<' . self::escape_tree_scalar( $tag_name ) . ">\n";
@@ -233,6 +254,49 @@ class TreeRenderer {
 		);
 	}
 
+	/**
+	 * Compares get_breadcrumbs() with the renderer's element stack at a tag
+	 * token. $current is the token name for openers (breadcrumbs include the
+	 * element being opened) and null for closers (the element is already
+	 * popped). Returns an error result on divergence, null when consistent.
+	 */
+	private static function breadcrumb_mismatch( \WP_HTML_Processor $processor, ?array &$prefix, array $element_stack, ?string $current ): ?array {
+		$actual = $processor->get_breadcrumbs();
+
+		if ( null === $prefix ) {
+			$suffix_length = count( $element_stack ) + ( null === $current ? 0 : 1 );
+			$prefix        = array_slice( $actual, 0, max( 0, count( $actual ) - $suffix_length ) );
+		}
+
+		$expected = array_merge( $prefix, $element_stack );
+		if ( null !== $current ) {
+			$expected[] = $current;
+		}
+		if ( $actual === $expected ) {
+			return null;
+		}
+
+		$divergence = 0;
+		$limit      = min( count( $expected ), count( $actual ) );
+		while ( $divergence < $limit && $expected[ $divergence ] === $actual[ $divergence ] ) {
+			++$divergence;
+		}
+
+		return array(
+			'status'       => self::STATUS_ERROR,
+			'error'        => 'get_breadcrumbs() diverged from the token-derived element stack.',
+			'failureClass' => 'breadcrumb-mismatch',
+			'breadcrumbs'  => array(
+				'kind'            => count( $expected ) === count( $actual ) ? 'name' : 'depth',
+				'divergenceDepth' => $divergence,
+				'expectedDepth'   => count( $expected ),
+				'actualDepth'     => count( $actual ),
+				'expected'        => array_slice( $expected, 0, 40 ),
+				'actual'          => array_slice( $actual, 0, 40 ),
+			),
+		);
+	}
+
 	private static function is_ignored_presumptuous_tag_exception( \WP_HTML_Unsupported_Exception $e ): bool {
 		return '#presumptuous-tag' === $e->token_name
 			&& '</>' === $e->token
@@ -250,10 +314,7 @@ class TreeRenderer {
 		$sorted = array();
 		foreach ( $attribute_names as $attribute_name ) {
 			$display_name = (string) $processor->get_qualified_attribute_name( $attribute_name );
-			$sorted[ $attribute_name ] = array(
-				'displayName' => $display_name,
-				'renderName'  => self::escape_tree_scalar( $display_name ),
-			);
+			$sorted[ $attribute_name ] = self::attribute_record( $display_name );
 		}
 		uasort( $sorted, array( __CLASS__, 'compare_attribute_records' ) );
 
@@ -322,7 +383,39 @@ class TreeRenderer {
 		return $drops;
 	}
 
-	public static function render_dom( string $html, string $mode, array $limits = array() ): array {
+	/**
+	 * PHP's Lexbor-based parser fails to treat U+000C FORM FEED as ignorable
+	 * whitespace in the pre-body insertion modes (initial, before html,
+	 * before head, in head, after head), leaking it into body text where
+	 * spec-following parsers — including WordPress — drop it. Probed at
+	 * runtime so the tolerance disables itself when PHP fixes the bug.
+	 */
+	public static function dom_oracle_mishandles_form_feed(): bool {
+		static $mishandles = null;
+		if ( null !== $mishandles ) {
+			return $mishandles;
+		}
+
+		if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
+			$mishandles = false;
+			return $mishandles;
+		}
+
+		$previous = libxml_use_internal_errors( true );
+		try {
+			$document   = \Dom\HTMLDocument::createFromString( "\fa", LIBXML_NOERROR );
+			$body       = $document->getElementsByTagName( 'body' )->item( 0 );
+			$mishandles = null !== $body && "\fa" === $body->textContent;
+		} catch ( \Throwable $e ) {
+			$mishandles = false;
+		}
+		libxml_clear_errors();
+		libxml_use_internal_errors( $previous );
+
+		return $mishandles;
+	}
+
+	public static function render_dom( string $html, string $mode, array $limits = array(), string $fragment_context = 'body' ): array {
 		if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
 			return array(
 				'status'       => self::STATUS_ERROR,
@@ -332,43 +425,39 @@ class TreeRenderer {
 		}
 
 		$max_nodes = $limits['maxNodes'] ?? 3000;
-		$parse_html = $html;
-		if ( Generator::MODE_FRAGMENT_BODY === $mode ) {
-			$parse_html = '<!DOCTYPE html><html><head></head><body>' . $html . '</body></html>';
-		}
-
-		$previous = libxml_use_internal_errors( true );
-		try {
-			$document = \Dom\HTMLDocument::createFromString( $parse_html, LIBXML_NOERROR );
-		} catch ( \Throwable $e ) {
-			libxml_clear_errors();
-			libxml_use_internal_errors( $previous );
-			return array(
-				'status'       => self::STATUS_ERROR,
-				'error'        => $e->getMessage(),
-				'throwable'    => get_class( $e ),
-				'failureClass' => 'oracle-parse-error',
-			);
-		}
-		libxml_clear_errors();
-		libxml_use_internal_errors( $previous );
 
 		$node_count = 0;
 		$output     = '';
 		try {
 			if ( Generator::MODE_FRAGMENT_BODY === $mode ) {
-				$body = $document->getElementsByTagName( 'body' )->item( 0 );
-				if ( null === $body ) {
+				try {
+					$context = self::parse_dom_fragment( $html, $fragment_context );
+				} catch ( \Throwable $e ) {
 					return array(
 						'status'       => self::STATUS_ERROR,
-						'error'        => 'Dom\\HTMLDocument did not produce a body element for fragment wrapper.',
-						'failureClass' => 'oracle-renderer-error',
+						'error'        => $e->getMessage(),
+						'throwable'    => get_class( $e ),
+						'failureClass' => 'oracle-parse-error',
 					);
 				}
-				foreach ( $body->childNodes as $child ) {
+				foreach ( $context->childNodes as $child ) {
 					$output .= self::render_dom_node( $child, 0, $node_count, $max_nodes );
 				}
 			} else {
+				$previous = libxml_use_internal_errors( true );
+				try {
+					$document = \Dom\HTMLDocument::createFromString( $html, LIBXML_NOERROR );
+				} catch ( \Throwable $e ) {
+					return array(
+						'status'       => self::STATUS_ERROR,
+						'error'        => $e->getMessage(),
+						'throwable'    => get_class( $e ),
+						'failureClass' => 'oracle-parse-error',
+					);
+				} finally {
+					libxml_clear_errors();
+					libxml_use_internal_errors( $previous );
+				}
 				foreach ( $document->childNodes as $child ) {
 					$output .= self::render_dom_node( $child, 0, $node_count, $max_nodes );
 				}
@@ -401,6 +490,34 @@ class TreeRenderer {
 			'tree'      => $output . "\n",
 			'nodeCount' => $node_count,
 		);
+	}
+
+	/**
+	 * Parses HTML as a fragment in the given context element using the DOM
+	 * innerHTML setter, which performs context-aware fragment parsing.
+	 *
+	 * Returns the context element whose children are the parsed fragment.
+	 */
+	private static function parse_dom_fragment( string $html, string $context_tag ) {
+		$document = \Dom\HTMLDocument::createEmpty();
+		$lower    = strtolower( $context_tag );
+		if ( 'svg' === $lower ) {
+			$context = $document->createElementNS( 'http://www.w3.org/2000/svg', 'svg' );
+		} elseif ( 'math' === $lower ) {
+			$context = $document->createElementNS( 'http://www.w3.org/1998/Math/MathML', 'math' );
+		} else {
+			$context = $document->createElement( $lower );
+		}
+
+		$previous = libxml_use_internal_errors( true );
+		try {
+			$context->innerHTML = $html;
+		} finally {
+			libxml_clear_errors();
+			libxml_use_internal_errors( $previous );
+		}
+
+		return $context;
 	}
 
 	private static function render_dom_node( $node, int $indent_level, int &$node_count, int $max_nodes ): string {
@@ -453,6 +570,20 @@ class TreeRenderer {
 		return $output;
 	}
 
+	/**
+	 * Renders the children of a template element.
+	 *
+	 * PHP's Dom\HTMLDocument hides template content (childNodes is empty and no
+	 * `content` property is exposed), but the innerHTML getter serializes the
+	 * true, template-context-parsed content. Re-parse that serialization in a
+	 * body context and verify fidelity by re-serializing: when the round-trip
+	 * reproduces the source serialization byte-for-byte, the body-context tree
+	 * is the template content tree. When it does not (table parts, foreign
+	 * fragments, and other template-mode-sensitive content), declare the case
+	 * unsupported rather than render a wrong tree. This check is deliberately
+	 * self-contained: it must not consult the WordPress HTML API, which is the
+	 * system under test.
+	 */
 	private static function render_dom_template_children( $node, int $indent_level, int &$node_count, int $max_nodes ): string {
 		$output = '';
 		foreach ( $node->childNodes as $child ) {
@@ -462,87 +593,39 @@ class TreeRenderer {
 			return $output;
 		}
 
-		$inner_html = $node->innerHTML ?? '';
+		$inner_html = (string) ( $node->innerHTML ?? '' );
 		if ( '' === $inner_html ) {
 			return '';
 		}
 
-		if ( self::dom_template_fallback_requires_template_context( (string) $inner_html ) ) {
-			self::count_dom_template_fallback_source_nodes( (string) $inner_html, $node_count, $max_nodes );
+		try {
+			$body = self::parse_dom_fragment( $inner_html, 'body' );
+		} catch ( \Throwable $e ) {
+			throw new \RuntimeException( 'Could not render DOM template innerHTML: ' . $e->getMessage(), 0, $e );
+		}
+
+		if ( (string) ( $body->innerHTML ?? '' ) !== $inner_html ) {
+			// Count the nodes that were parsed so resource-stress template
+			// content reports node-limit-exceeded ahead of unsupported.
+			$scratch_count = $node_count;
+			self::count_dom_children( $body, $scratch_count, $max_nodes );
 			throw new \RuntimeException( self::DOM_TEMPLATE_CONTEXT_UNSUPPORTED );
 		}
 
-		$previous = libxml_use_internal_errors( true );
-		try {
-			$template_document = \Dom\HTMLDocument::createFromString( '<!DOCTYPE html><html><head></head><body>' . $inner_html . '</body></html>', LIBXML_NOERROR );
-		} catch ( \Throwable $e ) {
-			libxml_clear_errors();
-			libxml_use_internal_errors( $previous );
-			throw new \RuntimeException( 'Could not render DOM template innerHTML: ' . $e->getMessage(), 0, $e );
-		}
-		libxml_clear_errors();
-		libxml_use_internal_errors( $previous );
-
-		$body = $template_document->getElementsByTagName( 'body' )->item( 0 );
-		if ( null === $body ) {
-			return '';
-		}
-
-		$output = '';
 		foreach ( $body->childNodes as $child ) {
 			$output .= self::render_dom_node( $child, $indent_level, $node_count, $max_nodes );
 		}
 		return $output;
 	}
 
-	private static function dom_template_fallback_requires_template_context( string $inner_html ): bool {
-		HtmlApiBootstrap::load();
-
-		$processor = new \WP_HTML_Tag_Processor( $inner_html );
-		$table_depth = 0;
-		$foreign_depth = 0;
-		while ( $processor->next_tag( array( 'tag_closers' => 'visit' ) ) ) {
-			$tag_name = $processor->get_tag();
-			if ( isset( self::DOM_TEMPLATE_FOREIGN_CONTEXT_TAGS[ $tag_name ?? '' ] ) ) {
-				$foreign_depth += $processor->is_tag_closer() ? -1 : 1;
-				$foreign_depth = max( 0, $foreign_depth );
-				continue;
-			}
-
-			if ( $foreign_depth > 0 ) {
-				continue;
-			}
-
-			if ( 'TABLE' === $tag_name ) {
-				$table_depth += $processor->is_tag_closer() ? -1 : 1;
-				$table_depth = max( 0, $table_depth );
-				continue;
-			}
-
-			if ( 0 === $table_depth && ! $processor->is_tag_closer() && isset( self::DOM_TEMPLATE_CONTEXT_TAGS[ $tag_name ?? '' ] ) ) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	private static function count_dom_template_fallback_source_nodes( string $inner_html, int &$node_count, int $max_nodes ): void {
-		HtmlApiBootstrap::load();
-
-		$processor = new \WP_HTML_Tag_Processor( $inner_html );
-		while ( $processor->next_token() ) {
-			$token_type = $processor->get_token_type();
-			if ( '#tag' === $token_type && $processor->is_tag_closer() ) {
-				continue;
-			}
-			if ( '#text' === $token_type && '' === $processor->get_modifiable_text() ) {
-				continue;
-			}
-
+	private static function count_dom_children( $node, int &$node_count, int $max_nodes ): void {
+		foreach ( $node->childNodes as $child ) {
 			++$node_count;
 			if ( $node_count > $max_nodes ) {
 				throw new \RuntimeException( 'DOM node limit exceeded.' );
+			}
+			if ( XML_ELEMENT_NODE === $child->nodeType ) {
+				self::count_dom_children( $child, $node_count, $max_nodes );
 			}
 		}
 	}
@@ -569,12 +652,9 @@ class TreeRenderer {
 
 		$attrs = array();
 		foreach ( $node->attributes as $attr ) {
-			$display_name = self::dom_attribute_display_name( $attr );
-			$attrs[] = array(
-				'displayName' => $display_name,
-				'renderName'  => self::escape_tree_scalar( $display_name ),
-				'value'       => $attr->nodeValue,
-			);
+			$record          = self::attribute_record( self::dom_attribute_display_name( $attr ) );
+			$record['value'] = $attr->nodeValue;
+			$attrs[]         = $record;
 		}
 
 		usort( $attrs, array( __CLASS__, 'compare_attribute_records' ) );
@@ -617,13 +697,38 @@ class TreeRenderer {
 		return $a <=> $b;
 	}
 
+	/**
+	 * Builds the per-attribute record used for sorting and rendering.
+	 *
+	 * Sorting must use the spec-scrubbed name (NUL as U+FFFD, newlines
+	 * normalized): WordPress preserves raw bytes that the DOM oracle
+	 * substitutes, and sorting each side by its own raw rendering would put
+	 * the same logical attribute at different positions in the two trees.
+	 * Rendering keeps the raw escaped name so divergent bytes stay visible.
+	 */
+	private static function attribute_record( string $display_name ): array {
+		return array(
+			'sortName'    => self::escape_tree_scalar( self::scrub_scalar( $display_name ) ),
+			'renderName'  => self::escape_tree_scalar( $display_name ),
+		);
+	}
+
+	/**
+	 * Applies the spec-mandated scalar substitutions to a raw string:
+	 * NUL becomes U+FFFD and CR / CRLF become LF.
+	 */
+	private static function scrub_scalar( string $value ): string {
+		$value = str_replace( "\0", "\xEF\xBF\xBD", $value );
+		return str_replace( array( "\r\n", "\r" ), "\n", $value );
+	}
+
 	private static function compare_attribute_records( array $a, array $b ): int {
-		$rendered = self::compare_attribute_display_names( $a['renderName'], $b['renderName'] );
-		if ( 0 !== $rendered ) {
-			return $rendered;
+		$sorted = self::compare_attribute_display_names( $a['sortName'], $b['sortName'] );
+		if ( 0 !== $sorted ) {
+			return $sorted;
 		}
 
-		return self::compare_attribute_display_names( $a['displayName'], $b['displayName'] );
+		return self::compare_attribute_display_names( $a['renderName'], $b['renderName'] );
 	}
 
 	public static function compare_trees( string $wordpress_tree, string $dom_tree, array $wordpress_line_tolerances = array() ): array {
@@ -635,10 +740,57 @@ class TreeRenderer {
 			);
 		}
 
+		/*
+		 * The WordPress HTML API deliberately preserves raw NUL and CR bytes
+		 * where spec-following parsers substitute U+FFFD and normalize
+		 * newlines during input preprocessing. Render both trees raw, and
+		 * tolerate a differing line only when that exact substitution
+		 * explains the whole difference. Tolerated lines are reported so
+		 * runs account for them instead of silently scrubbing both sides.
+		 */
+		$wordpress_lines   = explode( "\n", $adjusted_wordpress );
+		$dom_lines         = explode( "\n", $dom_tree );
+		$tolerated         = array();
+		$first_unexplained = null;
+		$shared_line_count = min( count( $wordpress_lines ), count( $dom_lines ) );
+		for ( $i = 0; $i < $shared_line_count; ++$i ) {
+			if ( $wordpress_lines[ $i ] === $dom_lines[ $i ] ) {
+				continue;
+			}
+			if ( self::scrub_escaped_scalar_line( $wordpress_lines[ $i ] ) === $dom_lines[ $i ] ) {
+				$tolerated[] = $adjusted['lineMap'][ $i ] ?? $i;
+				continue;
+			}
+			$first_unexplained = $i;
+			break;
+		}
+		if ( null === $first_unexplained ) {
+			if ( count( $wordpress_lines ) === count( $dom_lines ) ) {
+				return array(
+					'ok'                  => true,
+					'scalarToleratedLines' => $tolerated,
+				);
+			}
+			// One tree has extra trailing lines; report from the tail.
+			$first_unexplained = $shared_line_count;
+		}
+
+		// Report the first line the scalar tolerance cannot explain, not
+		// merely the first line that differs.
 		return array(
 			'ok'              => false,
-			'firstDifference' => self::first_difference( $adjusted_wordpress, $dom_tree, $adjusted['lineMap'] ),
+			'firstDifference' => self::first_difference( $adjusted_wordpress, $dom_tree, $adjusted['lineMap'], $first_unexplained ?? 0 ),
 		);
+	}
+
+	/**
+	 * Applies the spec-mandated scalar substitutions to an escaped tree line:
+	 * NUL becomes U+FFFD and CR / CRLF become LF. Operates on the escaped
+	 * rendering produced by escape_tree_scalar().
+	 */
+	private static function scrub_escaped_scalar_line( string $line ): string {
+		$line = str_replace( '\\0', "\xEF\xBF\xBD", $line );
+		return str_replace( array( '\\r\\n', '\\r' ), '\\n', $line );
 	}
 
 	private static function remove_tolerated_wordpress_lines( string $wordpress_tree, array $line_tolerances ): array {
@@ -713,14 +865,22 @@ class TreeRenderer {
 		return substr( $haystack, -strlen( $needle ) ) === $needle;
 	}
 
-	private static function first_difference( string $left, string $right, array $left_line_map = array() ): array {
+	/**
+	 * Public first-difference diff between two rendered trees, for invariant
+	 * checks that compare WordPress trees against each other.
+	 */
+	public static function diff_trees( string $left, string $right ): array {
+		return self::first_difference( $left, $right );
+	}
+
+	private static function first_difference( string $left, string $right, array $left_line_map = array(), int $start_line = 0 ): array {
 		$left_lines  = explode( "\n", $left );
 		$right_lines = explode( "\n", $right );
 		$max         = max( count( $left_lines ), count( $right_lines ) );
 		$left_paths  = self::line_paths( $left_lines );
 		$right_paths = self::line_paths( $right_lines );
 
-		for ( $i = 0; $i < $max; ++$i ) {
+		for ( $i = $start_line; $i < $max; ++$i ) {
 			$l = $left_lines[ $i ] ?? null;
 			$r = $right_lines[ $i ] ?? null;
 			if ( $l !== $r ) {
@@ -756,7 +916,6 @@ class TreeRenderer {
 	}
 
 	private static function escape_tree_scalar( string $value ): string {
-		$value = self::normalize_tree_scalar( $value );
 		$output = '';
 		$length = strlen( $value );
 		for ( $i = 0; $i < $length; ++$i ) {
@@ -790,11 +949,6 @@ class TreeRenderer {
 		}
 
 		return $output;
-	}
-
-	private static function normalize_tree_scalar( string $value ): string {
-		$value = str_replace( "\0", "\xEF\xBF\xBD", $value );
-		return str_replace( array( "\r\n", "\r" ), "\n", $value );
 	}
 
 	private static function line_preview( ?string $line ): ?string {
@@ -868,6 +1022,14 @@ class TreeRenderer {
 		return $paths;
 	}
 
+	private const KNOWN_TREE_ELEMENT_NAMES = array(
+		// HTML
+		'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'dir', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map', 'mark', 'marquee', 'menu', 'meta', 'meter', 'nav', 'nobr', 'noembed', 'noframes', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp',
+		// SVG / MathML locals the generator and real content commonly use
+		'svg', 'g', 'circle', 'rect', 'path', 'defs', 'desc', 'use', 'symbol', 'text', 'foreignObject', 'clipPath', 'linearGradient', 'radialGradient', 'stop', 'ellipse', 'line', 'polygon', 'polyline', 'image',
+		'math', 'mi', 'mo', 'mn', 'ms', 'mtext', 'mrow', 'mfrac', 'msqrt', 'annotation-xml', 'annotation', 'semantics',
+	);
+
 	public static function normalize_tree_line( ?string $line ): ?string {
 		if ( null === $line ) {
 			return null;
@@ -876,9 +1038,32 @@ class TreeRenderer {
 		if ( preg_match( '/^([^=]+)="(?:\\\\.|[^"\\\\])*"$/s', $trimmed, $m ) ) {
 			return $m[1] . '="<value>"';
 		}
+		/*
+		 * Element lines whose names are not recognized spec names are masked:
+		 * the generator mints random custom and invalid tag names, and
+		 * leaving them in normalized lines spreads one root cause across
+		 * many signatures and families.
+		 */
+		if ( preg_match( '/^<([^!>][^>]*)>$/s', $trimmed, $m ) && ! self::is_known_tree_element_name( $m[1] ) ) {
+			return '<custom-element>';
+		}
 		$line = preg_replace( '/"(?:\\\\.|[^"\\\\])*"/s', '"<value>"', $line );
 		$line = preg_replace( '/<!--.*-->/s', '<!-- <comment> -->', $line );
 		return trim( (string) $line );
+	}
+
+	private static function is_known_tree_element_name( string $display_name ): bool {
+		$local = $display_name;
+		if ( str_starts_with( $display_name, 'svg ' ) || str_starts_with( $display_name, 'math ' ) ) {
+			$local = substr( $display_name, strpos( $display_name, ' ' ) + 1 );
+		}
+
+		static $known = null;
+		if ( null === $known ) {
+			$known = array_fill_keys( self::KNOWN_TREE_ELEMENT_NAMES, true );
+		}
+
+		return isset( $known[ $local ] ) || isset( $known[ strtolower( $local ) ] );
 	}
 
 	private static function unsupported_details( \WP_HTML_Unsupported_Exception $e ): array {
