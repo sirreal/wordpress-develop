@@ -557,17 +557,15 @@ class Worker {
 		return true === $comparison['ok'] && empty( $comparison['scalarToleratedLines'] );
 	}
 
+	/**
+	 * The wp_scrub_utf8() line comparison happens in
+	 * TreeRenderer::first_difference(), where the full differing lines are
+	 * available; the diff carries only truncated previews, which would
+	 * misclassify long lines if scrubbed and compared here.
+	 */
 	private static function is_encoding_mismatch( string $input, array $diff ): bool {
 		if ( function_exists( 'wp_is_valid_utf8' ) && wp_is_valid_utf8( $input ) ) {
 			return false;
-		}
-
-		$wordpress_line = $diff['wordpressLine'] ?? null;
-		$dom_line       = $diff['domLine'] ?? null;
-		if ( is_string( $wordpress_line ) && is_string( $dom_line ) && $wordpress_line !== $dom_line ) {
-			if ( function_exists( 'wp_scrub_utf8' ) && wp_scrub_utf8( $wordpress_line ) === $dom_line ) {
-				return true;
-			}
 		}
 
 		return true === ( $diff['linesMatchAfterWordPressUtf8Scrub'] ?? null );
