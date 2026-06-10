@@ -8,6 +8,17 @@
 > raised from 14.5% to ~68% (path-directed bucket); minimizer working; a clean
 > 5000-seed run with all signatures triaged to the three known bugs, all of
 > which still reproduce. The notes below are retained as the design rationale.
+>
+> **Open follow-up hardening (post-review):** `tests/self-check.php` runs its
+> parse-expectation assertions over a fixed seed window (1–400) that currently
+> dodges the three known core bugs only by seed luck. Any generator change that
+> shifts the PRNG stream can collide with Bug 1/3 there (it already does for the
+> deferred document-side class-NUL injection — see README "Known oracle
+> limitations"). Decouple self-check from the unfixed core bugs — e.g. apply the
+> three FINDINGS.md fixes inside the self-check harness, or allowlist their
+> signatures in the parse-expectation loop — as a standalone hardening. This is
+> worth doing on its own (it makes self-check robust to *any* future generator
+> change) and is the prerequisite for randomized class-NUL document injection.
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` @ `6ebbcc2fe4` (trunk + merged `html-api/add-css-selector-parser`).
