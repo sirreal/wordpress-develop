@@ -229,6 +229,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $element_queue = array();
 
 	/**
+	 * Whether the end-of-file token has been processed through the insertion modes.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @var bool
+	 */
+	private $has_processed_eof = false;
+
+	/**
 	 * Stores the current breadcrumbs.
 	 *
 	 * @since 6.7.0
@@ -1036,12 +1045,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 		}
 
-		// Finish stepping when there are no more tokens in the document.
+		// Process EOF once in the insertion modes before finishing.
+		$is_eof = false;
 		if (
 			WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $this->parser_state ||
 			WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state
 		) {
-			return false;
+			if ( self::PROCESS_NEXT_NODE === $node_to_process ) {
+				if ( $this->has_processed_eof || ! isset( $this->state->current_token ) ) {
+					return false;
+				}
+
+				$this->has_processed_eof = true;
+			} elseif ( ! isset( $this->state->current_token ) ) {
+				return false;
+			}
+
+			$is_eof = true;
 		}
 
 		$adjusted_current_node = $this->get_adjusted_current_node();
@@ -1049,7 +1069,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$is_start_tag          = WP_HTML_Tag_Processor::STATE_MATCHED_TAG === $this->parser_state && ! $is_closer;
 		$token_name            = $this->get_token_name();
 
-		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
+		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process && ! $is_eof ) {
 			try {
 				$bookmark_name = $this->bookmark_token();
 			} catch ( Exception $e ) {
@@ -1087,6 +1107,33 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				( $is_start_tag || '#text' === $token_name )
 			)
 		);
+
+		if ( $is_eof && ! $parse_in_current_insertion_mode ) {
+			if ( ! empty( $this->state->stack_of_template_insertion_modes ) ) {
+				return $this->step_in_template();
+			}
+
+			return false;
+		}
+
+		if ( $is_eof ) {
+			switch ( $this->state->insertion_mode ) {
+				case WP_HTML_Processor_State::INSERTION_MODE_BEFORE_HEAD:
+				case WP_HTML_Processor_State::INSERTION_MODE_IN_HEAD:
+				case WP_HTML_Processor_State::INSERTION_MODE_IN_HEAD_NOSCRIPT:
+				case WP_HTML_Processor_State::INSERTION_MODE_AFTER_HEAD:
+				case WP_HTML_Processor_State::INSERTION_MODE_IN_BODY:
+				case WP_HTML_Processor_State::INSERTION_MODE_IN_TEMPLATE:
+					break;
+
+				default:
+					if ( ! empty( $this->state->stack_of_template_insertion_modes ) ) {
+						return $this->step_in_template();
+					}
+
+					return false;
+			}
+		}
 
 		try {
 			if ( ! $parse_in_current_insertion_mode ) {
@@ -3238,6 +3285,17 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				return $this->step();
 		}
 
+		/*
+		 * > An end-of-file token
+		 */
+		if ( null === $token_name ) {
+			if ( ! empty( $this->state->stack_of_template_insertion_modes ) ) {
+				return $this->step_in_template();
+			}
+
+			return false;
+		}
+
 		if ( ! parent::is_tag_closer() ) {
 			/*
 			 * > Any other start tag
@@ -4413,6 +4471,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		/*
+		 * > An end-of-file token
+		 */
+		if ( null === $token_name ) {
+			if ( ! $this->state->stack_of_open_elements->contains( 'TEMPLATE' ) ) {
+				// Stop parsing.
+				return false;
+			}
+
+			// @todo Indicate a parse error once it's possible.
+			$this->state->stack_of_open_elements->pop_until( 'TEMPLATE' );
+			$this->state->active_formatting_elements->clear_up_to_last_marker();
+			array_pop( $this->state->stack_of_template_insertion_modes );
+			$this->reset_insertion_mode_appropriately();
+			return $this->step( self::REPROCESS_CURRENT_NODE );
+		}
+
+		/*
 		 * > Any other start tag
 		 */
 		if ( ! $is_closer ) {
@@ -4430,20 +4505,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return $this->step();
 		}
 
-		/*
-		 * > An end-of-file token
-		 */
-		if ( ! $this->state->stack_of_open_elements->contains( 'TEMPLATE' ) ) {
-			// Stop parsing.
-			return false;
-		}
-
-		// @todo Indicate a parse error once it's possible.
-		$this->state->stack_of_open_elements->pop_until( 'TEMPLATE' );
-		$this->state->active_formatting_elements->clear_up_to_last_marker();
-		array_pop( $this->state->stack_of_template_insertion_modes );
-		$this->reset_insertion_mode_appropriately();
-		return $this->step( self::REPROCESS_CURRENT_NODE );
+		return false;
 	}
 
 	/**
@@ -5675,6 +5737,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->state->current_token                     = null;
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
+			$this->has_processed_eof                        = false;
 
 			/*
 			 * The absence of a context node indicates a full parse.
@@ -6413,7 +6476,22 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	private function insert_virtual_node( $token_name, $bookmark_name = null ): WP_HTML_Token {
 		$here = $this->bookmarks[ $this->state->current_token->bookmark_name ];
-		$name = $bookmark_name ?? $this->bookmark_token();
+		if (
+			null === $bookmark_name &&
+			(
+				WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $this->parser_state ||
+				WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state
+			)
+		) {
+			if ( count( $this->bookmarks ) >= static::MAX_BOOKMARKS ) {
+				$this->last_error = self::ERROR_EXCEEDED_MAX_BOOKMARKS;
+				throw new Exception( 'could not allocate bookmark' );
+			}
+
+			$name = (string) ++$this->bookmark_counter;
+		} else {
+			$name = $bookmark_name ?? $this->bookmark_token();
+		}
 
 		$this->bookmarks[ $name ] = new WP_HTML_Span( $here->start, 0 );
 
