@@ -806,8 +806,11 @@ class TreeRenderer {
 		if ( '' === $trimmed ) {
 			return false;
 		}
-		// Text line: a single quoted escaped string.
-		if ( preg_match( '/^"(?:\\\\.|[^"\\\\])*"$/', $trimmed ) ) {
+		// Text line: a single quoted escaped string. The escape loop is
+		// possessive: its branches are disjoint, so backtracking can never
+		// help, and PCRE's JIT stack gives out near 8KB when it tracks
+		// backtrack frames anyway. Same for every escape loop below.
+		if ( preg_match( '/^"(?:\\\\.|[^"\\\\])*+"$/', $trimmed ) ) {
 			return false;
 		}
 		if ( str_starts_with( $trimmed, '<!--' ) || str_starts_with( $trimmed, '<!DOCTYPE' ) ) {
@@ -822,7 +825,7 @@ class TreeRenderer {
 			return true;
 		}
 		// Attribute line: name followed by a quoted escaped value.
-		return 1 === preg_match( '/="(?:\\\\.|[^"\\\\])*"$/', $trimmed );
+		return 1 === preg_match( '/="(?:\\\\.|[^"\\\\])*+"$/', $trimmed );
 	}
 
 	/**
@@ -1169,7 +1172,7 @@ class TreeRenderer {
 			return null;
 		}
 		$trimmed = trim( $line );
-		if ( preg_match( '/^([^=]+)="(?:\\\\.|[^"\\\\])*"$/s', $trimmed, $m ) ) {
+		if ( preg_match( '/^([^=]+)="(?:\\\\.|[^"\\\\])*+"$/s', $trimmed, $m ) ) {
 			return $m[1] . '="<value>"';
 		}
 		/*
@@ -1181,7 +1184,7 @@ class TreeRenderer {
 		if ( preg_match( '/^<([^!>][^>]*)>$/s', $trimmed, $m ) && ! self::is_known_tree_element_name( $m[1] ) ) {
 			return '<custom-element>';
 		}
-		$line = preg_replace( '/"(?:\\\\.|[^"\\\\])*"/s', '"<value>"', $line );
+		$line = preg_replace( '/"(?:\\\\.|[^"\\\\])*+"/s', '"<value>"', $line );
 		$line = preg_replace( '/<!--.*-->/s', '<!-- <comment> -->', $line );
 		return trim( (string) $line );
 	}
