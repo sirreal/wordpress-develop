@@ -757,7 +757,7 @@ class TreeRenderer {
 			if ( $wordpress_lines[ $i ] === $dom_lines[ $i ] ) {
 				continue;
 			}
-			if ( self::scrub_escaped_scalar_line( $wordpress_lines[ $i ] ) === $dom_lines[ $i ] ) {
+			if ( self::escaped_scalar_lines_match( $wordpress_lines[ $i ], $dom_lines[ $i ] ) ) {
 				$tolerated[] = $adjusted['lineMap'][ $i ] ?? $i;
 				continue;
 			}
@@ -784,13 +784,75 @@ class TreeRenderer {
 	}
 
 	/**
-	 * Applies the spec-mandated scalar substitutions to an escaped tree line:
-	 * NUL becomes U+FFFD and CR / CRLF become LF. Operates on the escaped
-	 * rendering produced by escape_tree_scalar().
+	 * Indicates whether the spec-mandated scalar substitutions explain the
+	 * entire difference between a WordPress tree line and a DOM tree line:
+	 * NUL becomes U+FFFD and CR / CRLF become LF.
+	 *
+	 * The substitutions apply per occurrence, only where the DOM side holds
+	 * the substituted form. A whole-line rewrite would also rewrite escapes
+	 * the two sides agree on — a decoded `&#13;` renders as `\r` in both
+	 * trees — and the tolerance would then fail to fire.
+	 *
+	 * Operates on the escaped rendering produced by escape_tree_scalar(),
+	 * where `\` starts an escape sequence and a literal backslash is `\\`,
+	 * so a left-to-right lockstep scan is unambiguous.
 	 */
-	private static function scrub_escaped_scalar_line( string $line ): string {
-		$line = str_replace( '\\0', "\xEF\xBF\xBD", $line );
-		return str_replace( array( '\\r\\n', '\\r' ), '\\n', $line );
+	private static function escaped_scalar_lines_match( string $wordpress_line, string $dom_line ): bool {
+		$wordpress_length = strlen( $wordpress_line );
+		$dom_length       = strlen( $dom_line );
+		$i                = 0;
+		$j                = 0;
+		while ( $i < $wordpress_length && $j < $dom_length ) {
+			if ( '\\' === $wordpress_line[ $i ] ) {
+				if (
+					0 === substr_compare( $wordpress_line, '\\0', $i, 2 ) &&
+					$j + 3 <= $dom_length &&
+					0 === substr_compare( $dom_line, "\xEF\xBF\xBD", $j, 3 )
+				) {
+					$i += 2;
+					$j += 3;
+					continue;
+				}
+				if (
+					$i + 4 <= $wordpress_length &&
+					0 === substr_compare( $wordpress_line, '\\r\\n', $i, 4 ) &&
+					$j + 2 <= $dom_length &&
+					0 === substr_compare( $dom_line, '\\n', $j, 2 )
+				) {
+					$i += 4;
+					$j += 2;
+					continue;
+				}
+				if (
+					0 === substr_compare( $wordpress_line, '\\r', $i, 2 ) &&
+					$j + 2 <= $dom_length &&
+					0 === substr_compare( $dom_line, '\\n', $j, 2 )
+				) {
+					$i += 2;
+					$j += 2;
+					continue;
+				}
+				// Any other escape must match the DOM side byte for byte,
+				// including both bytes of a literal `\\`.
+				if (
+					$i + 1 < $wordpress_length &&
+					$j + 1 < $dom_length &&
+					0 === substr_compare( $dom_line, $wordpress_line[ $i ] . $wordpress_line[ $i + 1 ], $j, 2 )
+				) {
+					$i += 2;
+					$j += 2;
+					continue;
+				}
+				return false;
+			}
+			if ( $wordpress_line[ $i ] !== $dom_line[ $j ] ) {
+				return false;
+			}
+			++$i;
+			++$j;
+		}
+
+		return $i === $wordpress_length && $j === $dom_length;
 	}
 
 	private static function remove_tolerated_wordpress_lines( string $wordpress_tree, array $line_tolerances ): array {
