@@ -2,10 +2,10 @@
 
 ## Status
 
-Not started. The host fuzzer (`tools/encoding-fuzz/`) is complete and
-working at commit `3cc3e64765` on branch `fuzz-encoder`; read its
-`README.md` first. ~570k cases have run clean against the current
-targets, so the infrastructure is trustworthy.
+Sections 1 (utf8_encode/decode) DONE; sections 2–3 in progress. The
+host fuzzer (`tools/encoding-fuzz/`) is complete and working on branch
+`fuzz-encoder`; read its `README.md` first. ~570k cases had run clean
+against the original targets before this work started.
 
 ## Goal
 
@@ -18,30 +18,43 @@ Round out coverage of `src/wp-includes/compat-utf8.php` by adding:
 3. A one-shot exhaustive test of
    `WP_HTML_Decoder::code_point_to_utf8_bytes()` (not fuzzing).
 
-## 1. utf8_encode / utf8_decode fallbacks
+## 1. utf8_encode / utf8_decode fallbacks — DONE, premise corrected
 
-**Why now:** the native functions are the only ground truth, deprecated
-since PHP 8.2 and removed in PHP 9. Fuzz the differential while the
-oracle still exists in the runtime.
+**Implemented**, but a premise of this section was falsified during
+implementation and the oracle design adapted (2026-06-10, PHP 8.4.21):
 
-- Oracles: `@utf8_encode()` / `@utf8_decode()` (suppress deprecation
-  notices; on PHP 9+ skip these checks with an `oracle-unavailable`
-  event, same pattern `lib/Oracles.php` already uses).
-- Spot-probes already done (2026-06-10, PHP 8.4.21): native and
-  fallback agree on valid input, invalid maximal subparts (`?` per
-  subpart), code points > U+00FF (`?`), and round-trip text. No known
-  divergence going in.
-- Checks to add: byte equality vs native on arbitrary input (decode)
-  and on arbitrary input treated as latin1 (encode); round-trip
-  `decode(encode(s)) === s` for any byte string `s` (encode is total
-  and injective per byte); encode output is always valid UTF-8 per
-  the existing `mb` oracle.
-- Wire-up: add target entries in `lib/Targets.php`, checks in
-  `lib/Checks.php`, and broken-implementation cases in
-  `tests/harness-smoke.php` (the smoke test mutation-tests detection —
-  every new check needs a deliberately broken variant proving it fires;
-  e.g. a decode that emits one `?` per invalid *byte* instead of per
-  maximal subpart).
+- The original claim "No known divergence going in" was wrong: the
+  earlier spot-probes missed it. Native `utf8_decode()` groups a
+  well-formed lead byte with its expected continuation length and emits
+  a single `?` for surrogates (`ED A0 80` → `?`), beyond-U+10FFFF
+  sequences (`F4 90 80 80` → `?`), 3-/4-byte overlongs, and a
+  well-formed lead before an invalid continuation (`C2 C0` → `?`),
+  where the fallback emits one `?` per maximal subpart (`???` etc.).
+- That divergence is **intentional** in WordPress: the PHP 9 polyfill
+  in `compat.php` prefers `mb_convert_encoding()` (which uses maximal
+  subparts) over the fallback, and the #63863 PHPUnit tests assert
+  mb-equivalence. So "the native functions are the only ground truth"
+  was also wrong — WP's chosen ground truth is `mb_convert_encoding()`.
+- Oracle design as built: `mb` (`mb_convert_encoding()`) is the primary
+  encode/decode oracle on arbitrary input; `native` is an encode oracle
+  on arbitrary input and a decode oracle on **valid input only**
+  (native ≡ mb on every valid code point, verified exhaustively). On
+  PHP 9+ `native` reports `oracle-unavailable` and is skipped. The
+  legacy divergence is pinned by hand-computed battery vectors.
+- Round-trip `decode(encode(s)) === s`, encode-output-validity, the
+  smoke-test mutation variants (cp1252-confused encoder, identity
+  encoder, per-byte decoder, valid-input mangler, round-trip violator,
+  null-returning targets), and the `ENCODING_FUZZ_FAULT=encode-cp1252`
+  / `decode-per-byte` end-to-end fault variants are all in place.
+
+**Upstream finding, not fixed here:** the cited core test
+`tests/phpunit/tests/formatting/deprecatedUtfEncodeDecode.php` has
+vacuous invalid-input coverage — its surrogate branch interpolates
+integers instead of `chr()` bytes (`"{$byte1}{$byte2}{$byte3}"`
+produces ASCII digits), its single-quoted `'\x95'` data is literal
+backslash text, and the `$i < 0xD800 || $i > 0xE000` boundary routes
+valid U+E000 through the broken branch. It only ever asserts
+mb-equivalence on valid input. Worth a follow-up patch on #63863.
 
 ## 2. wp_has_noncharacters — resolve semantics first
 

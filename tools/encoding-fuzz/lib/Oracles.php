@@ -6,13 +6,33 @@ namespace EncodingFuzz;
  *
  * Validity oracles answer "is this well-formed UTF-8?".
  * Scrub oracles answer "what does maximal-subpart replacement produce?".
+ * Encode oracles answer "what is this ISO-8859-1 text as UTF-8?".
+ * Decode oracles answer "what is this UTF-8 text as ISO-8859-1?".
  *
  *  - mbstring:  `mb_check_encoding()` / `mb_scrub()` (maximal subpart
- *               since PHP 8.1.6).
+ *               since PHP 8.1.6), `mb_convert_encoding()` for the
+ *               ISO-8859-1 encode/decode pair.
  *  - pcre:      PCRE2's strict UTF validity check (validity only).
  *  - intl:      ICU via `UConverter::transcode()` (scrub only).
  *  - python3:   CPython codec in a persistent subprocess.
  *  - node:      WHATWG TextDecoder in a persistent subprocess.
+ *  - native:    the deprecated `utf8_encode()` / `utf8_decode()` pair,
+ *               available until its removal in PHP 9. The decode side is
+ *               trusted on VALID input only: on ill-formed input the
+ *               legacy decoder groups bytes differently from the maximal
+ *               subpart rule, consuming a well-formed lead byte together
+ *               with its expected continuation length as a single '?'
+ *               unit in several classes — surrogates (`ED A0 80` → '?'
+ *               vs '???'), sequences past U+10FFFF (`F4 90 80 80` → '?'
+ *               vs '????'), three/four-byte overlongs (`E0 80 AF`), and
+ *               even a well-formed lead before an invalid continuation
+ *               (`C2 C0` → '?' vs '??'). It does agree with maximal
+ *               subparts elsewhere (e.g. C0/C1 overlongs and lone
+ *               continuations). WordPress deliberately follows
+ *               `mb_convert_encoding()` maximal-subpart semantics
+ *               instead: the PHP 9 polyfill in `compat.php` prefers
+ *               `mb_convert_encoding()`, with the fallback as its
+ *               shadow (ticket #63863).
  *
  * iconv is deliberately NOT an oracle: GNU libiconv accepts code points
  * above U+10FFFF (e.g. F4 90 80 80), so it fails the battery.
@@ -26,6 +46,22 @@ class Oracles {
 
 	/** @var array<string, callable(string): ?string> */
 	private array $scrub = array();
+
+	/*
+	 * Unlike validity/scrub oracles, encode/decode oracles are all
+	 * in-process and never return null; `Checks` has no transport-failure
+	 * handling for them. An external (nullable) encode/decode oracle
+	 * would need that handling added first.
+	 */
+
+	/** @var array<string, callable(string): string> */
+	private array $encode = array();
+
+	/** @var array<string, callable(string): string> */
+	private array $decode = array();
+
+	/** @var array<string, bool> Decode oracles trusted on valid UTF-8 input only. */
+	private array $decode_valid_only = array();
 
 	/** @var ExternalOracle[] */
 	private array $externals = array();
@@ -55,6 +91,41 @@ class Oracles {
 				'type'   => 'oracle-unavailable',
 				'oracle' => 'mb',
 				'detail' => 'mbstring with mb_scrub is required as the primary oracle',
+			);
+		}
+
+		if ( function_exists( 'mb_convert_encoding' ) ) {
+			// Encode is total over ISO-8859-1 bytes; no substitutions can occur.
+			$oracles->encode['mb'] = static function ( string $bytes ): string {
+				return mb_convert_encoding( $bytes, 'UTF-8', 'ISO-8859-1' );
+			};
+			// Pin the legacy '?' substitute per call (like the scrub oracle
+			// pins 0xFFFD) so ambient changes to the global cannot skew results.
+			$oracles->decode['mb'] = static function ( string $bytes ): string {
+				$previous = mb_substitute_character();
+				mb_substitute_character( 0x3F );
+				$decoded = mb_convert_encoding( $bytes, 'ISO-8859-1', 'UTF-8' );
+				mb_substitute_character( $previous );
+				return $decoded;
+			};
+		}
+
+		if ( function_exists( 'utf8_encode' ) && function_exists( 'utf8_decode' ) ) {
+			$oracles->encode['native'] = static function ( string $bytes ): string {
+				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Deprecated since PHP 8.2.
+				return (string) @utf8_encode( $bytes );
+			};
+			$oracles->decode['native'] = static function ( string $bytes ): string {
+				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Deprecated since PHP 8.2.
+				return (string) @utf8_decode( $bytes );
+			};
+
+			$oracles->decode_valid_only['native'] = true;
+		} else {
+			$oracles->events[] = array(
+				'type'   => 'oracle-unavailable',
+				'oracle' => 'native',
+				'detail' => 'utf8_encode()/utf8_decode() removed (PHP 9+); legacy encode/decode differential skipped',
 			);
 		}
 
@@ -148,6 +219,72 @@ class Oracles {
 		);
 	}
 
+	/**
+	 * Known-answer vectors for the ISO-8859-1 → UTF-8 encode oracles.
+	 *
+	 * Every byte 0x00–0xFF is a defined ISO-8859-1 code point whose UTF-8
+	 * form is hand-computable: identity below 0x80, the two-byte sequence
+	 * `C2|C3 80..BF` above.
+	 *
+	 * @return array<int, array{0: string, 1: string}> [latin1 bytes, utf8 bytes]
+	 */
+	public static function encode_battery(): array {
+		return array(
+			array( '', '' ),
+			array( 'abc', 'abc' ),
+			array( "\x00", "\x00" ),
+			array( "\x7F", "\x7F" ),
+			array( "\x80", "\xC2\x80" ),             // First two-byte mapping.
+			array( "\x9F", "\xC2\x9F" ),             // NOT a Windows-1252 smart quote.
+			array( "\xA0", "\xC2\xA0" ),
+			array( "\xBF", "\xC2\xBF" ),             // Last byte with C2 lead.
+			array( "\xC0", "\xC3\x80" ),             // First byte with C3 lead.
+			array( "\xFF", "\xC3\xBF" ),
+			array( "B\xFCch", "B\xC3\xBCch" ),
+			array( "\xC3\xBC", "\xC3\x83\xC2\xBC" ), // Already-UTF-8 input double-encodes.
+		);
+	}
+
+	/**
+	 * Known-answer vectors for the UTF-8 → ISO-8859-1 decode oracles.
+	 *
+	 * Hand-computed: code points U+00–U+FF map to their byte, anything
+	 * higher becomes '?', and each maximal subpart of an ill-formed span
+	 * becomes one '?'. The valid flag marks vectors safe for decode
+	 * oracles that are trusted on valid input only (legacy `utf8_decode()`
+	 * groups some ill-formed sequences into a single '?' unit; see the
+	 * class docblock).
+	 *
+	 * @return array<int, array{0: string, 1: bool, 2: string}> [utf8 bytes, valid, latin1 bytes]
+	 */
+	public static function decode_battery(): array {
+		return array(
+			array( '', true, '' ),
+			array( 'abc', true, 'abc' ),
+			array( "\x00", true, "\x00" ),
+			array( "\xC2\x80", true, "\x80" ),                  // U+0080, first two-byte mapping.
+			array( "\xC3\xBC", true, "\xFC" ),                  // U+00FC ü.
+			array( "\xC3\xBF", true, "\xFF" ),                  // U+00FF, last mappable.
+			array( "\xC4\x80", true, '?' ),                     // U+0100, first unmappable.
+			array( "\xE2\x9C\x8F", true, '?' ),                 // U+270F.
+			array( "\xF0\x9F\x98\x80", true, '?' ),             // U+1F600.
+			array( "\xEF\xBB\xBF", true, '?' ),                 // BOM is unmappable, not dropped.
+			array( "a\xC3\xA9b", true, "a\xE9b" ),
+			array( "\x80", false, '?' ),                        // Lone continuation.
+			array( "\xC0", false, '?' ),                        // Never-valid lead.
+			array( "\xC0\xAF", false, '??' ),                   // Overlong '/': two subparts, NOT '/'.
+			array( "\xE2\x8C", false, '?' ),                    // Two-byte maximal subpart at EOF.
+			array( "\xE2\x8Cx", false, '?x' ),                  // Subpart cut short by ASCII.
+			array( "\xF1\x80\x80", false, '?' ),                // Three-byte maximal subpart.
+			array( "\xED\xA0\x80", false, '???' ),              // Surrogate: per subpart (legacy native says '?').
+			array( "\xF4\x90\x80\x80", false, '????' ),         // Past U+10FFFF (legacy native says '?').
+			array( ".\xC0.", false, '.?.' ),
+			array( "\xC3\xBC\x80", false, "\xFC?" ),            // Invalid span right after a mappable high byte.
+			array( "\x80\xC3\xBC", false, "?\xFC" ),            // Mappable high byte right after an invalid span.
+			array( "a\xF1\x80\x80\xE1\x80\xC2b", false, 'a???b' ), // Unicode Table 3-8.
+		);
+	}
+
 	private function verify_battery(): void {
 		foreach ( self::battery() as $i => $vector ) {
 			list( $bytes, $expected_valid, $expected_scrub ) = $vector;
@@ -178,14 +315,69 @@ class Oracles {
 				}
 			}
 		}
+
+		foreach ( self::encode_battery() as $i => $vector ) {
+			list( $bytes, $expected ) = $vector;
+
+			foreach ( $this->encode as $name => $check ) {
+				$got = $check( $bytes );
+				if ( $got !== $expected ) {
+					$this->disable( $name, sprintf(
+						'encode battery vector %d (%s): expected %s, got %s',
+						$i,
+						bin2hex( $bytes ),
+						bin2hex( $expected ),
+						null === $got ? 'null' : bin2hex( $got )
+					) );
+				}
+			}
+		}
+
+		foreach ( self::decode_battery() as $i => $vector ) {
+			list( $bytes, $input_valid, $expected ) = $vector;
+
+			foreach ( $this->decode as $name => $check ) {
+				if ( ! $input_valid && $this->decode_oracle_is_valid_only( $name ) ) {
+					continue;
+				}
+
+				$got = $check( $bytes );
+				if ( $got !== $expected ) {
+					$this->disable( $name, sprintf(
+						'decode battery vector %d (%s): expected %s, got %s',
+						$i,
+						bin2hex( $bytes ),
+						bin2hex( $expected ),
+						null === $got ? 'null' : bin2hex( $got )
+					) );
+				}
+			}
+		}
 	}
 
+	/**
+	 * Removes every role a named oracle backs. Note that disabling `mb`
+	 * therefore makes `has_required()` false and the harness refuses to
+	 * run — failing closed is preferable to fuzzing without the primary
+	 * oracle.
+	 */
 	public function disable( string $name, string $detail ): void {
-		if ( ! isset( $this->validity[ $name ] ) && ! isset( $this->scrub[ $name ] ) ) {
+		if (
+			! isset( $this->validity[ $name ] ) &&
+			! isset( $this->scrub[ $name ] ) &&
+			! isset( $this->encode[ $name ] ) &&
+			! isset( $this->decode[ $name ] )
+		) {
 			return;
 		}
 
-		unset( $this->validity[ $name ], $this->scrub[ $name ] );
+		unset(
+			$this->validity[ $name ],
+			$this->scrub[ $name ],
+			$this->encode[ $name ],
+			$this->decode[ $name ],
+			$this->decode_valid_only[ $name ]
+		);
 		$this->events[] = array(
 			'type'   => 'oracle-disabled',
 			'oracle' => $name,
@@ -203,12 +395,31 @@ class Oracles {
 		return $this->scrub;
 	}
 
+	/** @return array<string, callable(string): string> */
+	public function encode_oracles(): array {
+		return $this->encode;
+	}
+
+	/** @return array<string, callable(string): string> */
+	public function decode_oracles(): array {
+		return $this->decode;
+	}
+
+	public function decode_oracle_is_valid_only( string $name ): bool {
+		return $this->decode_valid_only[ $name ] ?? false;
+	}
+
 	public function has_required(): bool {
 		return isset( $this->validity['mb'], $this->scrub['mb'] );
 	}
 
 	public function names(): array {
-		return array_values( array_unique( array_merge( array_keys( $this->validity ), array_keys( $this->scrub ) ) ) );
+		return array_values( array_unique( array_merge(
+			array_keys( $this->validity ),
+			array_keys( $this->scrub ),
+			array_keys( $this->encode ),
+			array_keys( $this->decode )
+		) ) );
 	}
 
 	/** @return array<int, array{type: string, oracle: string, detail: string}> */

@@ -4,6 +4,7 @@ Differential fuzzer for the WordPress UTF-8 functions:
 
 - `wp_is_valid_utf8()` / `_wp_is_valid_utf8_fallback()`
 - `wp_scrub_utf8()` / `_wp_scrub_utf8_fallback()`
+- `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
 - `_wp_utf8_codepoint_count()` and the resumable `_wp_scan_utf8()` paths (secondary)
 
 The pure-PHP fallbacks in `src/wp-includes/compat-utf8.php` are the main
@@ -15,13 +16,39 @@ bootstrap, database, or `wp-env`.
 
 Every result is compared against independent known-good implementations:
 
-| Oracle    | Backing                              | Validity | Scrub |
-|-----------|--------------------------------------|----------|-------|
-| `mb`      | `mb_check_encoding()` / `mb_scrub()` | ✓        | ✓ (primary) |
-| `pcre`    | PCRE2 strict UTF validation          | ✓        |       |
-| `intl`    | ICU `UConverter::transcode()`        |          | ✓     |
-| `python3` | CPython codec, persistent subprocess | ✓        | ✓     |
-| `node`    | WHATWG `TextDecoder`, persistent subprocess | ✓ | ✓     |
+| Oracle    | Backing                              | Validity | Scrub | Encode | Decode |
+|-----------|--------------------------------------|----------|-------|--------|--------|
+| `mb`      | `mb_check_encoding()` / `mb_scrub()` / `mb_convert_encoding()` | ✓ | ✓ (primary) | ✓ (primary) | ✓ (primary) |
+| `pcre`    | PCRE2 strict UTF validation          | ✓        |       |        |        |
+| `intl`    | ICU `UConverter::transcode()`        |          | ✓     |        |        |
+| `python3` | CPython codec, persistent subprocess | ✓        | ✓     |        |        |
+| `node`    | WHATWG `TextDecoder`, persistent subprocess | ✓ | ✓     |        |        |
+| `native`  | deprecated `utf8_encode()` / `utf8_decode()` | |       | ✓      | ✓ (valid input only) |
+
+Encode oracles answer "what is this ISO-8859-1 text as UTF-8?"; decode
+oracles the reverse. The `native` pair exists until PHP 9 removes it; on
+PHP 9+ it is reported as `oracle-unavailable` and skipped. Its decode
+side is trusted on valid input only: on ill-formed input the legacy
+decoder groups a well-formed lead byte with its expected continuation
+length and emits a single `?` in several classes — surrogates
+(`ED A0 80` → `?` vs `???`), sequences past U+10FFFF (`F4 90 80 80`),
+three/four-byte overlongs (`E0 80 AF`), and even a well-formed lead
+before an invalid continuation (`C2 C0`) — though it agrees with
+maximal subparts elsewhere (e.g. C0/C1 overlongs and lone
+continuations). WordPress deliberately follows the maximal-subpart
+semantics of `mb_convert_encoding()` (one `?` per subpart) instead:
+the PHP 9 polyfill in `compat.php` prefers `mb_convert_encoding()`
+with `_wp_utf8_decode_fallback()` as its mbstring-less shadow
+(ticket #63863).
+
+Because native and mb decoding agree on *every* valid code point
+(verified exhaustively over U+0000–U+10FFFF), the valid-input-only
+native decode differential adds little detection power beyond `mb`; it
+exists to scream if mb and the fallback ever jointly drift from legacy
+behavior on valid text. The legacy-vs-WordPress behavior on ill-formed
+input is a documented, intentional divergence — pinned here by battery
+vectors, not fuzzed. Cataloguing the full legacy divergence surface is
+the separate `legacy-utf8-divergence-survey` work lane.
 
 All scrub oracles implement the Unicode "maximal subpart" replacement
 recommendation (Unicode 16.0 §3.9, Table 3-8), which is the documented
@@ -38,7 +65,10 @@ External oracles are auto-detected; control them with
 ## Checks
 
 Differentials: both validity targets against every validity oracle, both
-scrub targets against every scrub oracle. Oracle-vs-oracle disagreements
+scrub targets against every scrub oracle, `_wp_utf8_encode_fallback()`
+against every encode oracle (input treated as ISO-8859-1), and
+`_wp_utf8_decode_fallback()` against every decode oracle (the `native`
+decode oracle on valid input only). Oracle-vs-oracle disagreements
 are reported separately (`oracle-disagreement`) so they don't masquerade
 as WordPress bugs.
 
@@ -52,6 +82,9 @@ Internal invariants:
 - scanning with `_wp_scan_utf8()` in pseudo-random `max_code_points`
   chunks reconstructs the same scrubbed text and always makes forward
   progress (chunk sizes derive from the input hash, so replays are exact)
+- `_wp_utf8_encode_fallback()` output is always valid UTF-8
+- `_wp_utf8_decode_fallback( _wp_utf8_encode_fallback( $s ) ) === $s`
+  for any byte string `$s` (encode is total and injective per byte)
 
 ## Inputs
 
@@ -121,16 +154,18 @@ php tools/encoding-fuzz/tests/harness-smoke.php
 ```
 
 Verifies the oracle battery, runs the real targets over the battery
-vectors, and — most importantly — mutation-tests the harness: seven
+vectors, and — most importantly — mutation-tests the harness: fourteen
 classes of deliberately broken implementations (validator accepting
 0xC0, validator rejecting noncharacters, non-maximal-subpart scrubber,
 identity scrubber, byte-dropping scrubber, off-by-one code point count,
-throwing target) must all be caught. It also asserts generator
-determinism and the valid/invalid input mix.
+throwing target, cp1252-confused encoder, identity encoder, per-byte
+decoder, valid-input-mangling decoder, round-trip-violating decoder,
+null-returning encoder, sometimes-null decoder) must all be caught. It
+also asserts generator determinism and the valid/invalid input mix.
 
 For end-to-end pipeline testing while the real implementations are
-healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal` injects a broken
-target into worker, replay, and minimize alike:
+healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte`
+injects a broken target into worker, replay, and minimize alike:
 
 ```sh
 ENCODING_FUZZ_FAULT=non-maximal php tools/encoding-fuzz/runner.php --lanes 2 --duration-seconds 5

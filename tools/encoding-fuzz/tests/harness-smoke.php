@@ -53,10 +53,15 @@ check( 'at least one external oracle', in_array( 'python3', $names, true ) || in
 // ---------------------------------------------------------------------
 // 2. Real targets pass every check on the battery vectors.
 // ---------------------------------------------------------------------
-$checks        = new Checks( $oracles );
-$battery_fails = array();
-foreach ( Oracles::battery() as $i => $vector ) {
-	foreach ( $checks->run( $vector[0] ) as $failure ) {
+$checks          = new Checks( $oracles );
+$battery_fails   = array();
+$battery_vectors = array_merge(
+	array_column( Oracles::battery(), 0 ),
+	array_column( Oracles::encode_battery(), 0 ),
+	array_column( Oracles::decode_battery(), 0 )
+);
+foreach ( $battery_vectors as $i => $bytes ) {
+	foreach ( $checks->run( $bytes ) as $failure ) {
 		$battery_fails[] = "vector {$i}: {$failure['signature']}";
 	}
 }
@@ -71,18 +76,21 @@ $real_targets = array(
 	'scrub'           => 'wp_scrub_utf8',
 	'scrub_fb'        => '_wp_scrub_utf8_fallback',
 	'codepoint_count' => '_wp_utf8_codepoint_count',
+	'utf8_encode_fb'  => '_wp_utf8_encode_fallback',
+	'utf8_decode_fb'  => '_wp_utf8_decode_fallback',
 );
 
 /**
- * Runs the battery against a broken variant and reports which checks fired.
+ * Runs every battery vector against a broken variant and reports which
+ * checks fired.
  *
  * @return string[] Distinct check names observed.
  */
-function broken_run( Oracles $oracles, array $real, array $overrides ): array {
+function broken_run( Oracles $oracles, array $real, array $vectors, array $overrides ): array {
 	$checks = new Checks( $oracles, array_merge( $real, $overrides ) );
 	$seen   = array();
-	foreach ( Oracles::battery() as $vector ) {
-		foreach ( $checks->run( $vector[0] ) as $failure ) {
+	foreach ( $vectors as $bytes ) {
+		foreach ( $checks->run( $bytes ) as $failure ) {
 			$seen[ $failure['check'] ] = true;
 		}
 	}
@@ -90,26 +98,26 @@ function broken_run( Oracles $oracles, array $real, array $overrides ): array {
 }
 
 // 3a. Validator that wrongly accepts a never-valid byte.
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'is_valid_fb' => static fn( string $bytes ): bool => str_contains( $bytes, "\xC0" ) ? true : _wp_is_valid_utf8_fallback( $bytes ),
 ) );
 check( 'catches validator accepting 0xC0', in_array( 'validity-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // 3b. Validator that wrongly rejects noncharacters (a plausible spec misreading).
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'is_valid' => static fn( string $bytes ): bool => wp_is_valid_utf8( $bytes ) && ! wp_has_noncharacters( $bytes ),
 ) );
 check( 'catches validator rejecting noncharacters', in_array( 'validity-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // 3c. Scrubber that collapses adjacent replacement characters (one-FFFD-per-run
 //     instead of one per maximal subpart).
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'scrub_fb' => static fn( string $bytes ): string => (string) preg_replace( "/(\u{FFFD})+/u", "\u{FFFD}", _wp_scrub_utf8_fallback( $bytes ) ),
 ) );
 check( 'catches non-maximal-subpart scrubber', in_array( 'scrub-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // 3d. Scrubber that passes invalid bytes through untouched.
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'scrub_fb' => static fn( string $bytes ): string => $bytes,
 ) );
 check(
@@ -119,24 +127,75 @@ check(
 );
 
 // 3e. Scrubber that drops invalid bytes instead of replacing them.
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'scrub' => static fn( string $bytes ): string => str_replace( "\u{FFFD}", '', wp_scrub_utf8( $bytes ) ),
 ) );
 check( 'catches byte-dropping scrubber', in_array( 'scrub-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // 3f. Code point counter that counts invalid bytes individually.
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_count' => static fn( string $bytes ): int => _wp_utf8_codepoint_count( $bytes ) + ( wp_is_valid_utf8( $bytes ) ? 0 : 1 ),
 ) );
 check( 'catches off-by-one code point count', in_array( 'codepoint-count-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // 3g. Throwing target is reported, not fatal.
-$seen = broken_run( $oracles, $real_targets, array(
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'is_valid_fb' => static function ( string $bytes ): bool {
 		throw new \RuntimeException( 'boom' );
 	},
 ) );
 check( 'reports throwing target', in_array( 'target-exception', $seen, true ), implode( ',', $seen ) );
+
+// 3h. Encoder that confuses ISO-8859-1 with Windows-1252 (0x80 becomes '€').
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_encode_fb' => static fn( string $bytes ): string => str_replace( "\xC2\x80", "\xE2\x82\xAC", _wp_utf8_encode_fallback( $bytes ) ),
+) );
+check( 'catches cp1252-confused encoder', in_array( 'utf8-encode-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3i. Encoder that passes high bytes through raw (invalid UTF-8 output).
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_encode_fb' => static fn( string $bytes ): string => $bytes,
+) );
+check(
+	'catches identity encoder',
+	in_array( 'utf8-encode-mismatch', $seen, true ) && in_array( 'utf8-encode-not-valid', $seen, true ),
+	implode( ',', $seen )
+);
+
+// 3j. Decoder that emits one '?' per invalid byte instead of per maximal
+//     subpart (`E2 8C` becomes '??' instead of '?').
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_decode_fb' => Targets::decode_per_invalid_byte( ... ),
+) );
+check( 'catches per-byte decoder', in_array( 'utf8-decode-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3k. Decoder that mangles a mappable code point on fully valid input.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_decode_fb' => static fn( string $bytes ): string => str_replace( "\xFC", "\xFD", _wp_utf8_decode_fallback( $bytes ) ),
+) );
+check( 'catches decoder mangling valid input', in_array( 'utf8-decode-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3l. Decoder that drops U+0080 entirely; the encode→decode round trip
+//     must restore every input byte string exactly.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_decode_fb' => static fn( string $bytes ): string => str_replace( "\x80", '', _wp_utf8_decode_fallback( $bytes ) ),
+) );
+check( 'catches round-trip violation', in_array( 'utf8-round-trip-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3m. Encoder that returns null (the fallbacks are untyped, so a broken
+//     variant can return non-strings without throwing); must be reported,
+//     not silently skipped by every encode-side check.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_encode_fb' => static fn( string $bytes ) => null,
+) );
+check( 'catches null-returning encoder', in_array( 'target-bad-return', $seen, true ), implode( ',', $seen ) );
+
+// 3n. Decoder that returns null only for some inputs; must be reported
+//     from both the direct call and the round-trip path without crashing.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'utf8_decode_fb' => static fn( string $bytes ) => str_contains( $bytes, "\x80" ) ? null : _wp_utf8_decode_fallback( $bytes ),
+) );
+check( 'catches sometimes-null decoder', in_array( 'target-bad-return', $seen, true ), implode( ',', $seen ) );
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.

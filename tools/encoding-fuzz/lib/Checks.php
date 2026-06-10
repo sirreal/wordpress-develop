@@ -20,6 +20,16 @@ namespace EncodingFuzz;
  *    chunks reconstructs the same scrubbed text and always makes
  *    forward progress
  *
+ * Legacy `utf8_encode()` / `utf8_decode()` fallbacks:
+ *  - `_wp_utf8_encode_fallback()` vs every encode oracle on arbitrary
+ *    input treated as ISO-8859-1.
+ *  - `_wp_utf8_decode_fallback()` vs the mb decode oracle on arbitrary
+ *    input; the legacy native oracle is consulted on valid input only
+ *    (see the divergence note in `Oracles`).
+ *  - encode output is always valid UTF-8
+ *  - `decode(encode(s)) === s` for any byte string `s` (encode is total
+ *    and injective per byte)
+ *
  * Target callables are injectable so the harness smoke test can verify
  * that deliberately broken implementations are caught.
  */
@@ -236,6 +246,174 @@ class Checks {
 		$chunk_failure = $this->check_chunked_scan( $input, $ref_scrub );
 		if ( null !== $chunk_failure ) {
 			$failures[] = $chunk_failure;
+		}
+
+		// 8. Legacy utf8_encode()/utf8_decode() fallback differentials.
+		foreach ( $this->check_utf8_encode_decode( $input, $ref_valid, $mb_validity ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * Differentials and invariants for the `utf8_encode()` /
+	 * `utf8_decode()` fallback pair. The same input is exercised both as
+	 * ISO-8859-1 (encode, total over arbitrary bytes) and as UTF-8
+	 * (decode). The legacy native decode oracle is consulted on valid
+	 * input only; on ill-formed input WordPress deliberately follows
+	 * `mb_convert_encoding()` maximal-subpart semantics instead.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_utf8_encode_decode( string $input, bool $ref_valid, callable $mb_validity ): array {
+		$failures       = array();
+		$encode_oracles = $this->oracles->encode_oracles();
+		$decode_oracles = $this->oracles->decode_oracles();
+
+		/*
+		 * The fallbacks are untyped, so a broken variant could return null
+		 * (or anything else) instead of throwing; treat any non-string
+		 * return as a failure rather than silently skipping every check.
+		 */
+		$results = array();
+		foreach ( array( 'utf8_encode_fb', 'utf8_decode_fb' ) as $key ) {
+			try {
+				$result = ( $this->targets[ $key ] )( $input );
+
+				if ( ! is_string( $result ) ) {
+					$failures[] = self::failure(
+						'target-bad-return',
+						$key,
+						array(
+							'target' => $key,
+							'type'   => get_debug_type( $result ),
+						)
+					);
+					$result = null;
+				}
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					$key,
+					array(
+						'target'  => $key,
+						'message' => $error->getMessage(),
+						'class'   => get_class( $error ),
+					)
+				);
+				$result = null;
+			}
+
+			$results[ $key ] = $result;
+		}
+
+		// Differentials against the encode/decode oracles.
+		$ref_encode = isset( $encode_oracles['mb'] ) ? $encode_oracles['mb']( $input ) : null;
+		$ref_decode = isset( $decode_oracles['mb'] ) ? $decode_oracles['mb']( $input ) : null;
+
+		if ( null !== $ref_encode && null !== $results['utf8_encode_fb'] && $results['utf8_encode_fb'] !== $ref_encode ) {
+			$failures[] = self::failure(
+				'utf8-encode-mismatch',
+				'utf8_encode_fb',
+				self::diff_detail( 'utf8_encode_fb', $ref_encode, $results['utf8_encode_fb'] )
+			);
+		}
+
+		if ( null !== $ref_decode && null !== $results['utf8_decode_fb'] && $results['utf8_decode_fb'] !== $ref_decode ) {
+			$failures[] = self::failure(
+				'utf8-decode-mismatch',
+				'utf8_decode_fb',
+				self::diff_detail( 'utf8_decode_fb', $ref_decode, $results['utf8_decode_fb'] )
+			);
+		}
+
+		if ( null !== $ref_encode ) {
+			foreach ( $encode_oracles as $name => $oracle ) {
+				if ( 'mb' === $name ) {
+					continue;
+				}
+
+				$oracle_encode = $oracle( $input );
+				if ( $oracle_encode !== $ref_encode ) {
+					$failures[] = self::failure(
+						'oracle-disagreement',
+						"utf8-encode:{$name}",
+						self::diff_detail( $name, $ref_encode, $oracle_encode )
+					);
+				}
+			}
+		}
+
+		if ( null !== $ref_decode ) {
+			foreach ( $decode_oracles as $name => $oracle ) {
+				if ( 'mb' === $name ) {
+					continue;
+				}
+
+				if ( ! $ref_valid && $this->oracles->decode_oracle_is_valid_only( $name ) ) {
+					continue;
+				}
+
+				$oracle_decode = $oracle( $input );
+				if ( $oracle_decode !== $ref_decode ) {
+					$failures[] = self::failure(
+						'oracle-disagreement',
+						"utf8-decode:{$name}",
+						self::diff_detail( $name, $ref_decode, $oracle_decode )
+					);
+				}
+			}
+		}
+
+		// Encode output must be valid UTF-8 (every byte has a code point).
+		// This and the round trip below need no conversion oracle.
+		if ( null !== $results['utf8_encode_fb'] && ! $mb_validity( $results['utf8_encode_fb'] ) ) {
+			$failures[] = self::failure(
+				'utf8-encode-not-valid',
+				'utf8_encode_fb',
+				array(
+					'target'         => 'utf8_encode_fb',
+					'encode_preview' => self::preview( $results['utf8_encode_fb'] ),
+				)
+			);
+		}
+
+		// Round trip: encode is total and injective per byte, so decoding
+		// its output must restore the input exactly. A violation implicates
+		// the pair, not a single side.
+		if ( null !== $results['utf8_encode_fb'] ) {
+			try {
+				$round_trip = ( $this->targets['utf8_decode_fb'] )( $results['utf8_encode_fb'] );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					'utf8_decode_fb:round-trip',
+					array(
+						'target'  => 'utf8_decode_fb',
+						'message' => $error->getMessage(),
+						'class'   => get_class( $error ),
+					)
+				);
+				$round_trip = $input;
+			}
+
+			if ( ! is_string( $round_trip ) ) {
+				$failures[] = self::failure(
+					'target-bad-return',
+					'utf8_decode_fb:round-trip',
+					array(
+						'target' => 'utf8_decode_fb',
+						'type'   => get_debug_type( $round_trip ),
+					)
+				);
+			} elseif ( $round_trip !== $input ) {
+				$failures[] = self::failure(
+					'utf8-round-trip-mismatch',
+					'round-trip',
+					self::diff_detail( 'round-trip', $input, $round_trip )
+				);
+			}
 		}
 
 		return $failures;
