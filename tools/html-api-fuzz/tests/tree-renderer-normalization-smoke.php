@@ -306,6 +306,22 @@ html_api_fuzz_tree_normalization_assert_compares( $nul_raw_cr_decoded_lf, 'NUL p
 html_api_fuzz_tree_normalization_assert( true === ( $nul_raw_cr_decoded_lf['comparison']['ok'] ?? null ), 'NUL plus raw CR before a decoded LF comparison should pass.' );
 
 /*
+ * An invalid UTF-8 byte (here raw 0x82 in a tag name) makes the trees
+ * differ by exactly the wp_scrub_utf8() substitution; the worker must
+ * classify that as encoding-mismatch, not tree-mismatch. Classification
+ * rests on the linesMatchAfterWordPressUtf8Scrub flag, which
+ * first_difference() computes on full lines.
+ */
+$invalid_utf8_tag_name = html_api_fuzz_tree_normalization_run(
+	$tmp,
+	'invalid-utf8-tag-name',
+	base64_encode( "<body><sma\x82>x" ),
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT
+);
+html_api_fuzz_tree_normalization_assert( 'failed' === ( $invalid_utf8_tag_name['status'] ?? null ), 'Invalid UTF-8 in a tag name should fail the comparison.' );
+html_api_fuzz_tree_normalization_assert( 'encoding-mismatch' === ( $invalid_utf8_tag_name['failureClass'] ?? null ), 'Invalid UTF-8 in a tag name should classify as encoding-mismatch.' );
+
+/*
  * NUL attributes whose scrubbed name sorts differently from the raw name
  * must align with the DOM oracle ordering: sorting uses scrubbed names.
  */

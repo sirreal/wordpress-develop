@@ -1052,6 +1052,8 @@ html_api_fuzz_smoke_assert( false !== strpos( $encoding_diff['domDiffHex'] ?? ''
  * The encoding-mismatch classifier must not relabel structural differences:
  * exercised directly because no live WordPress/DOM structural divergence is
  * available to drive a worker-level fixture (parser fixes resolved them).
+ * Diffs carry the linesMatchAfterWordPressUtf8Scrub flag, computed by
+ * TreeRenderer::first_difference() on the full differing lines.
  */
 $is_encoding_mismatch = new \ReflectionMethod( \HtmlApiFuzz\Worker::class, 'is_encoding_mismatch' );
 $is_encoding_mismatch->setAccessible( true );
@@ -1061,8 +1063,7 @@ html_api_fuzz_smoke_assert(
 		null,
 		$invalid_input,
 		array(
-			'wordpressLine' => '  <p>',
-			'domLine'       => '  <div>',
+			'linesMatchAfterWordPressUtf8Scrub' => false,
 		)
 	),
 	'invalid bytes elsewhere should not relabel structural tree mismatches as encoding-mismatch.'
@@ -1072,8 +1073,7 @@ html_api_fuzz_smoke_assert(
 		null,
 		$invalid_input,
 		array(
-			'wordpressLine' => "  \"a\xC0b\"",
-			'domLine'       => "  \"a\xEF\xBF\xBDb\"",
+			'linesMatchAfterWordPressUtf8Scrub' => true,
 		)
 	),
 	'invalid-byte line differences explained by the UTF-8 scrub should classify as encoding-mismatch.'
@@ -1083,8 +1083,7 @@ html_api_fuzz_smoke_assert(
 		null,
 		'<p>valid</p>',
 		array(
-			'wordpressLine' => "  \"a\xC0b\"",
-			'domLine'       => "  \"a\xEF\xBF\xBDb\"",
+			'linesMatchAfterWordPressUtf8Scrub' => true,
 		)
 	),
 	'valid UTF-8 input should never classify as encoding-mismatch.'
