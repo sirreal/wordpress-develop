@@ -58,7 +58,8 @@ $battery_fails   = array();
 $battery_vectors = array_merge(
 	array_column( Oracles::battery(), 0 ),
 	array_column( Oracles::encode_battery(), 0 ),
-	array_column( Oracles::decode_battery(), 0 )
+	array_column( Oracles::decode_battery(), 0 ),
+	array_column( Oracles::noncharacter_battery(), 0 )
 );
 foreach ( $battery_vectors as $i => $bytes ) {
 	foreach ( $checks->run( $bytes ) as $failure ) {
@@ -66,6 +67,29 @@ foreach ( $battery_vectors as $i => $bytes ) {
 	}
 }
 check( 'real targets clean on battery', array() === $battery_fails, implode( '; ', $battery_fails ) );
+
+/*
+ * Documented stance: `wp_has_noncharacters()` is undefined on ill-formed
+ * input. On hosts with PCRE-u the public function answers false on ANY
+ * ill-formed input (`preg_match` fails) while the fallback skips invalid
+ * spans and reports the noncharacters around them. This regression
+ * vector pins the divergence; if it ever changes, the semantics were
+ * touched and the valid-input-only fuzzing policy must be revisited.
+ */
+$nonchar_probe = "\xC0\xEF\xBF\xBE"; // Invalid byte, then U+FFFE.
+if ( _wp_can_use_pcre_u() ) {
+	check(
+		'documented wp_has_noncharacters divergence on ill-formed input unchanged',
+		false === wp_has_noncharacters( $nonchar_probe ) && true === _wp_has_noncharacters_fallback( $nonchar_probe ),
+		sprintf(
+			'public: %s, fallback: %s',
+			var_export( wp_has_noncharacters( $nonchar_probe ), true ),
+			var_export( _wp_has_noncharacters_fallback( $nonchar_probe ), true )
+		)
+	);
+} else {
+	echo "SKIP documented wp_has_noncharacters divergence (no PCRE-u: public function aliases the fallback)\n";
+}
 
 // ---------------------------------------------------------------------
 // 3. Broken implementations must be caught.
@@ -78,6 +102,8 @@ $real_targets = array(
 	'codepoint_count' => '_wp_utf8_codepoint_count',
 	'utf8_encode_fb'  => '_wp_utf8_encode_fallback',
 	'utf8_decode_fb'  => '_wp_utf8_decode_fallback',
+	'has_nonchars'    => 'wp_has_noncharacters',
+	'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
 );
 
 /**
@@ -196,6 +222,25 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_decode_fb' => static fn( string $bytes ) => str_contains( $bytes, "\x80" ) ? null : _wp_utf8_decode_fallback( $bytes ),
 ) );
 check( 'catches sometimes-null decoder', in_array( 'target-bad-return', $seen, true ), implode( ',', $seen ) );
+
+// 3o. Noncharacter detector that never finds anything.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'has_nonchars_fb' => static fn( string $text ): bool => false,
+) );
+check( 'catches blind noncharacter detector', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3p. Detector that misses the contiguous U+FDD0–U+FDEF block (the
+//     plane-final pairs alone are a plausible spec misreading).
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'has_nonchars_fb' => Targets::nonchars_missing_fdd0_block( ... ),
+) );
+check( 'catches detector missing U+FDD0 block', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3q. Over-eager detector that flags U+FDCF, just below the block.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'has_nonchars' => Targets::nonchars_overeager( ... ),
+) );
+check( 'catches over-eager noncharacter detector', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.

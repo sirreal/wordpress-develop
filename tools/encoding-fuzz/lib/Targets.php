@@ -9,10 +9,12 @@ namespace EncodingFuzz;
  * be exercised end to end even while the real implementations are
  * healthy. It exists only for harness validation:
  *
- *   ENCODING_FUZZ_FAULT=accept-c0       validator accepts the 0xC0 byte
- *   ENCODING_FUZZ_FAULT=non-maximal     scrubber collapses adjacent U+FFFD
- *   ENCODING_FUZZ_FAULT=encode-cp1252   encoder maps 0x80 like Windows-1252
- *   ENCODING_FUZZ_FAULT=decode-per-byte decoder emits '?' per invalid byte
+ *   ENCODING_FUZZ_FAULT=accept-c0          validator accepts the 0xC0 byte
+ *   ENCODING_FUZZ_FAULT=non-maximal        scrubber collapses adjacent U+FFFD
+ *   ENCODING_FUZZ_FAULT=encode-cp1252      encoder maps 0x80 like Windows-1252
+ *   ENCODING_FUZZ_FAULT=decode-per-byte    decoder emits '?' per invalid byte
+ *   ENCODING_FUZZ_FAULT=nonchars-miss-fdd0 fallback detector misses U+FDD0–U+FDEF
+ *   ENCODING_FUZZ_FAULT=nonchars-overeager public detector also flags U+FDCF
  */
 class Targets {
 	/**
@@ -27,6 +29,8 @@ class Targets {
 			'codepoint_count' => '_wp_utf8_codepoint_count',
 			'utf8_encode_fb'  => '_wp_utf8_encode_fallback',
 			'utf8_decode_fb'  => '_wp_utf8_decode_fallback',
+			'has_nonchars'    => 'wp_has_noncharacters',
+			'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
 		);
 
 		switch ( getenv( 'ENCODING_FUZZ_FAULT' ) ) {
@@ -53,9 +57,35 @@ class Targets {
 			case 'decode-per-byte':
 				$targets['utf8_decode_fb'] = self::decode_per_invalid_byte( ... );
 				break;
+
+			case 'nonchars-miss-fdd0':
+				$targets['has_nonchars_fb'] = self::nonchars_missing_fdd0_block( ... );
+				break;
+
+			case 'nonchars-overeager':
+				$targets['has_nonchars'] = self::nonchars_overeager( ... );
+				break;
 		}
 
 		return $targets;
+	}
+
+	/**
+	 * Deliberately broken detector: finds only the plane-final
+	 * noncharacters, missing the contiguous U+FDD0–U+FDEF block — a
+	 * plausible spec misreading.
+	 */
+	public static function nonchars_missing_fdd0_block( string $text ): bool {
+		$stripped = (string) preg_replace( '/[\x{FDD0}-\x{FDEF}]/u', '', $text );
+		return _wp_has_noncharacters_fallback( $stripped );
+	}
+
+	/**
+	 * Deliberately broken detector: also flags U+FDCF, the code point
+	 * just below the contiguous noncharacter block.
+	 */
+	public static function nonchars_overeager( string $text ): bool {
+		return wp_has_noncharacters( $text ) || str_contains( $text, "\u{FDCF}" );
 	}
 
 	/**

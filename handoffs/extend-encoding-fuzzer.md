@@ -2,7 +2,8 @@
 
 ## Status
 
-Sections 1 (utf8_encode/decode) DONE; sections 2–3 in progress. The
+Sections 1 (utf8_encode/decode) and 2 (wp_has_noncharacters) DONE;
+section 3 in progress. The
 host fuzzer (`tools/encoding-fuzz/`) is complete and working on branch
 `fuzz-encoder`; read its `README.md` first. ~570k cases had run clean
 against the original targets before this work started.
@@ -56,7 +57,7 @@ backslash text, and the `$i < 0xD800 || $i > 0xE000` boundary routes
 valid U+E000 through the broken branch. It only ever asserts
 mb-equivalence on valid input. Worth a follow-up patch on #63863.
 
-## 2. wp_has_noncharacters — resolve semantics first
+## 2. wp_has_noncharacters — DONE via option (a); core decision still open
 
 **Known divergence, confirmed empirically (2026-06-10):**
 
@@ -66,24 +67,30 @@ wp_has_noncharacters( $probe );             // false — PCRE path: preg_match f
 _wp_has_noncharacters_fallback( $probe );   // true  — scan skips invalid spans, finds U+FFFE
 ```
 
-The same public function answers differently depending on which
-environment branch of `src/wp-includes/utf8.php` loaded. A naive
-differential will fail on roughly its first invalid-input case. Do NOT
-just add the check and let it scream:
+**Implemented as option (a):** the fuzzer treats behavior as undefined
+unless `wp_is_valid_utf8()` and runs the three-way differential —
+`wp_has_noncharacters()` (PCRE branch) vs
+`_wp_has_noncharacters_fallback()` vs a trivial `mb_str_split()` /
+`mb_ord()` reference (battery-verified at block boundaries, block
+interior, and the final two code points of every plane with their
+neighbors — the PCRE class enumerates each plane by hand, so per-plane
+vectors are the point) — on **valid inputs only**. The probe above is
+pinned as a fixed regression vector in the smoke test, so any semantic
+change to either branch surfaces immediately. `BOUNDARY_CODE_POINTS`
+in `lib/Generator.php` gained adjacent NON-noncharacters, a block
+interior point, and mid-plane finals. Mutation variants: blind
+detector, U+FDD0-block miss, over-eager detector; fault injection:
+`ENCODING_FUZZ_FAULT=nonchars-miss-fdd0|nonchars-overeager` (one per
+target).
 
-1. Decide (or get a decision on) intended behavior for ill-formed
-   input. Options: (a) document that behavior is undefined unless
-   `wp_is_valid_utf8()` — then fuzz the differential on valid inputs
-   only, plus a fixed regression vector for the documented stance;
-   (b) align the implementations (likely the fallback is the *better*
-   semantic — finding real noncharacters — but the PCRE version ships
-   on most hosts). This probably warrants a Trac ticket / discussion
-   with the function author before code changes.
-2. Either way, fuzz the three-way differential on **valid** inputs
-   immediately: PCRE implementation vs fallback vs a trivial reference
-   (decode code points, check the U+FDD0–U+FDEF / U+xFFFE / U+xFFFF
-   list). The generator already emits noncharacter-dense input
-   (`BOUNDARY_CODE_POINTS` in `lib/Generator.php`).
+**Still open upstream (option b path):** whether core should align the
+implementations or document the undefined-on-invalid stance in the
+`wp_has_noncharacters()` docblock. That needs a decision from the
+function author (Trac discussion). Note for whoever picks that up: if
+core aligns on PCRE semantics (false on any ill-formed input), the mb
+reference oracle and its battery must be extended for ill-formed input
+too — removing the valid-only gate alone is NOT sufficient, since the
+reference throws on ill-formed input by design.
 
 ## 3. code_point_to_utf8_bytes — exhaust, don't fuzz
 

@@ -8,6 +8,9 @@ namespace EncodingFuzz;
  * Scrub oracles answer "what does maximal-subpart replacement produce?".
  * Encode oracles answer "what is this ISO-8859-1 text as UTF-8?".
  * Decode oracles answer "what is this UTF-8 text as ISO-8859-1?".
+ * Noncharacter oracles answer "does this VALID UTF-8 text contain a
+ * Unicode noncharacter?" (U+FDD0–U+FDEF, or any code point whose low
+ * sixteen bits are FFFE or FFFF). They are defined on valid input only.
  *
  *  - mbstring:  `mb_check_encoding()` / `mb_scrub()` (maximal subpart
  *               since PHP 8.1.6), `mb_convert_encoding()` for the
@@ -63,6 +66,9 @@ class Oracles {
 	/** @var array<string, bool> Decode oracles trusted on valid UTF-8 input only. */
 	private array $decode_valid_only = array();
 
+	/** @var array<string, callable(string): bool> Defined on valid UTF-8 input only. */
+	private array $noncharacters = array();
+
 	/** @var ExternalOracle[] */
 	private array $externals = array();
 
@@ -107,6 +113,36 @@ class Oracles {
 				$decoded = mb_convert_encoding( $bytes, 'ISO-8859-1', 'UTF-8' );
 				mb_substitute_character( $previous );
 				return $decoded;
+			};
+		}
+
+		if ( function_exists( 'mb_str_split' ) && function_exists( 'mb_ord' ) ) {
+			/*
+			 * Trivial decode-and-test reference for noncharacter detection,
+			 * independent of both implementations under test (the PCRE
+			 * character-class regex and the `_wp_scan_utf8()`-based scan).
+			 * Callers must pass valid UTF-8.
+			 */
+			$oracles->noncharacters['mb'] = static function ( string $valid_utf8 ): bool {
+				foreach ( mb_str_split( $valid_utf8, 1, 'UTF-8' ) as $character ) {
+					$code_point = mb_ord( $character, 'UTF-8' );
+
+					// Fail loudly on contract violations: on ill-formed
+					// input `mb_ord()` returns false, which would otherwise
+					// coerce into "not a noncharacter" and silently mimic
+					// the fallback's skip-invalid-spans semantics.
+					if ( ! is_int( $code_point ) ) {
+						throw new \LogicException( 'noncharacter oracle requires valid UTF-8 input' );
+					}
+
+					if (
+						( $code_point >= 0xFDD0 && $code_point <= 0xFDEF ) ||
+						0xFFFE === ( $code_point & 0xFFFE )
+					) {
+						return true;
+					}
+				}
+				return false;
 			};
 		}
 
@@ -285,6 +321,52 @@ class Oracles {
 		);
 	}
 
+	/**
+	 * Known-answer vectors for the noncharacter oracles. All inputs are
+	 * valid UTF-8 (the question is only defined there) and cover the
+	 * boundaries AND interior of the U+FDD0–U+FDEF block plus the final
+	 * two code points of EVERY plane with their U+xFFFD neighbors — the
+	 * PCRE implementation under test enumerates each plane as a separate
+	 * hand-typed escape, exactly where a single-plane typo would hide.
+	 *
+	 * Expectations are hand-derived from the Unicode definition; bytes
+	 * for the looped vectors come from the pure-arithmetic
+	 * `Generator::encode_code_point()` (itself exhaustively verified
+	 * against `mb_chr()` by `tests/code-point-to-utf8-exhaustive.php`),
+	 * keeping the encoding independent of the mbstring-backed oracle.
+	 *
+	 * @return array<int, array{0: string, 1: bool}> [valid utf8 bytes, has noncharacters]
+	 */
+	public static function noncharacter_battery(): array {
+		$vectors = array(
+			array( '', false ),
+			array( 'abc', false ),
+			array( "\u{FDCF}", false ),       // Last code point before the contiguous block.
+			array( "\u{FDD0}", true ),        // First of the contiguous block.
+			array( "\u{FDDA}", true ),        // Interior of the block: a lookup-table bug
+			array( "\u{FDE5}", true ),        // is not necessarily a boundary bug.
+			array( "\u{FDEF}", true ),        // Last of the contiguous block.
+			array( "\u{FDF0}", false ),       // First code point after the block.
+			array( "\u{FEFF}", false ),       // BOM is not a noncharacter.
+			array( "\u{FFFD}", false ),       // Replacement character is not a noncharacter.
+			array( "\u{ABCD}", false ),       // Arbitrary interior scalar.
+			array( "a\u{FFFE}b", true ),      // Embedded in surrounding text.
+			array( "ascii only", false ),
+		);
+
+		// Both plane-final noncharacters and their lower neighbor, for
+		// all seventeen planes (0–16).
+		for ( $plane = 0; $plane <= 0x10; $plane++ ) {
+			$final = ( $plane << 16 ) | 0xFFFF;
+
+			$vectors[] = array( Generator::encode_code_point( $final - 2 ), false );
+			$vectors[] = array( Generator::encode_code_point( $final - 1 ), true );
+			$vectors[] = array( Generator::encode_code_point( $final ), true );
+		}
+
+		return $vectors;
+	}
+
 	private function verify_battery(): void {
 		foreach ( self::battery() as $i => $vector ) {
 			list( $bytes, $expected_valid, $expected_scrub ) = $vector;
@@ -333,6 +415,23 @@ class Oracles {
 			}
 		}
 
+		foreach ( self::noncharacter_battery() as $i => $vector ) {
+			list( $bytes, $expected ) = $vector;
+
+			foreach ( $this->noncharacters as $name => $check ) {
+				$got = $check( $bytes );
+				if ( $got !== $expected ) {
+					$this->disable( $name, sprintf(
+						'noncharacter battery vector %d (%s): expected %s, got %s',
+						$i,
+						bin2hex( $bytes ),
+						var_export( $expected, true ),
+						var_export( $got, true )
+					) );
+				}
+			}
+		}
+
 		foreach ( self::decode_battery() as $i => $vector ) {
 			list( $bytes, $input_valid, $expected ) = $vector;
 
@@ -366,7 +465,8 @@ class Oracles {
 			! isset( $this->validity[ $name ] ) &&
 			! isset( $this->scrub[ $name ] ) &&
 			! isset( $this->encode[ $name ] ) &&
-			! isset( $this->decode[ $name ] )
+			! isset( $this->decode[ $name ] ) &&
+			! isset( $this->noncharacters[ $name ] )
 		) {
 			return;
 		}
@@ -376,7 +476,8 @@ class Oracles {
 			$this->scrub[ $name ],
 			$this->encode[ $name ],
 			$this->decode[ $name ],
-			$this->decode_valid_only[ $name ]
+			$this->decode_valid_only[ $name ],
+			$this->noncharacters[ $name ]
 		);
 		$this->events[] = array(
 			'type'   => 'oracle-disabled',
@@ -409,6 +510,11 @@ class Oracles {
 		return $this->decode_valid_only[ $name ] ?? false;
 	}
 
+	/** @return array<string, callable(string): bool> Defined on valid UTF-8 input only. */
+	public function noncharacter_oracles(): array {
+		return $this->noncharacters;
+	}
+
 	public function has_required(): bool {
 		return isset( $this->validity['mb'], $this->scrub['mb'] );
 	}
@@ -418,7 +524,8 @@ class Oracles {
 			array_keys( $this->validity ),
 			array_keys( $this->scrub ),
 			array_keys( $this->encode ),
-			array_keys( $this->decode )
+			array_keys( $this->decode ),
+			array_keys( $this->noncharacters )
 		) ) );
 	}
 

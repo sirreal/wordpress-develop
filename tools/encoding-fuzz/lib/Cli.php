@@ -107,6 +107,11 @@ class Cli {
 			'php'     => PHP_VERSION,
 			'os'      => PHP_OS_FAMILY,
 			'oracles' => $oracles->names(),
+			// Which environment branch of utf8.php loaded (PCRE vs fallback).
+			'pcre_u'  => function_exists( '_wp_can_use_pcre_u' ) ? _wp_can_use_pcre_u() : null,
+			// Mark fault-injected artifacts so they can never be mistaken
+			// for real findings.
+			'fault'   => getenv( 'ENCODING_FUZZ_FAULT' ) ?: null,
 		);
 	}
 }

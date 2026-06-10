@@ -20,6 +20,12 @@ namespace EncodingFuzz;
  *    chunks reconstructs the same scrubbed text and always makes
  *    forward progress
  *
+ * Noncharacter detection (VALID input only — the public function's
+ * answer on ill-formed input depends on which environment branch of
+ * `utf8.php` loaded, a documented divergence pinned by the smoke test):
+ *  - `wp_has_noncharacters()` and `_wp_has_noncharacters_fallback()` vs
+ *    a trivial decode-and-test reference.
+ *
  * Legacy `utf8_encode()` / `utf8_decode()` fallbacks:
  *  - `_wp_utf8_encode_fallback()` vs every encode oracle on arbitrary
  *    input treated as ISO-8859-1.
@@ -251,6 +257,95 @@ class Checks {
 		// 8. Legacy utf8_encode()/utf8_decode() fallback differentials.
 		foreach ( $this->check_utf8_encode_decode( $input, $ref_valid, $mb_validity ) as $failure ) {
 			$failures[] = $failure;
+		}
+
+		// 9. Noncharacter detection, on valid input only.
+		foreach ( $this->check_noncharacters( $input, $ref_valid ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * Three-way differential for noncharacter detection on VALID input:
+	 * the public `wp_has_noncharacters()` (the PCRE branch on hosts with
+	 * PCRE-u; otherwise it aliases the fallback and this degenerates to
+	 * two distinct implementations), the `_wp_scan_utf8()`-based
+	 * fallback, and the trivial mb reference must all agree.
+	 *
+	 * Ill-formed input is deliberately skipped: the PCRE branch answers
+	 * false on any ill-formed input (`preg_match` fails) while the
+	 * fallback skips invalid spans and reports noncharacters around
+	 * them, so the same public function answers differently depending
+	 * on which environment branch loaded. That stance — behavior is
+	 * undefined unless `wp_is_valid_utf8()` — is pinned by a fixed
+	 * regression vector in the smoke test, not fuzzed.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_noncharacters( string $input, bool $ref_valid ): array {
+		if ( ! $ref_valid ) {
+			return array();
+		}
+
+		$oracles = $this->oracles->noncharacter_oracles();
+		if ( ! isset( $oracles['mb'] ) ) {
+			return array();
+		}
+
+		$failures = array();
+		$expected = $oracles['mb']( $input );
+
+		foreach ( $oracles as $name => $oracle ) {
+			if ( 'mb' === $name ) {
+				continue;
+			}
+
+			$oracle_result = $oracle( $input );
+			if ( $oracle_result !== $expected ) {
+				$failures[] = self::failure(
+					'oracle-disagreement',
+					"noncharacters:{$name}",
+					array(
+						'kind'     => 'noncharacters',
+						'oracle'   => $name,
+						'got'      => $oracle_result,
+						'expected' => $expected,
+					)
+				);
+			}
+		}
+
+		foreach ( array( 'has_nonchars', 'has_nonchars_fb' ) as $key ) {
+			try {
+				$result = ( $this->targets[ $key ] )( $input );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					$key,
+					array(
+						'target'  => $key,
+						'message' => $error->getMessage(),
+						'class'   => get_class( $error ),
+					)
+				);
+				continue;
+			}
+
+			if ( $result !== $expected ) {
+				$failures[] = self::failure(
+					'noncharacters-mismatch',
+					$key,
+					array(
+						'target'        => $key,
+						'got'           => $result,
+						'expected'      => $expected,
+						'oracle'        => 'mb',
+						'input_preview' => self::preview( $input ),
+					)
+				);
+			}
 		}
 
 		return $failures;

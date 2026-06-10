@@ -25,9 +25,11 @@ class Generator {
 		0x80, 0x7FF,                                               // Two-byte edges.
 		0x800, 0xFFF, 0x1000, 0xCFFF, 0xD000, 0xD7FF,              // Three-byte lead splits.
 		0xE000, 0xFFFD,                                            // After the surrogate gap.
-		0xFDD0, 0xFDEF, 0xFFFE, 0xFFFF,                            // Noncharacters (valid UTF-8!).
+		0xFDD0, 0xFDDA, 0xFDEF, 0xFFFE, 0xFFFF,                    // Noncharacters (valid UTF-8!), incl. block interior.
+		0xFDCF, 0xFDF0,                                            // Adjacent NON-noncharacters.
 		0x10000, 0x3FFFF, 0x40000, 0xFFFFF, 0x100000, 0x10FFFF,    // Four-byte lead splits.
-		0x1FFFE, 0x1FFFF, 0x10FFFE,                                // Supplementary noncharacters.
+		0x1FFFD, 0x1FFFE, 0x1FFFF, 0x5FFFE, 0x8FFFF, 0x10FFFE,     // Supplementary noncharacters, mid planes, neighbors.
+		0x10FFFD,
 	);
 
 	/**
