@@ -1522,6 +1522,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$qualified_attribute_name = $this->get_qualified_attribute_name( $attribute_name );
 			$qualified_attribute_name = str_replace( "\x00", "\u{FFFD}", $qualified_attribute_name );
 			$qualified_attribute_name = wp_scrub_utf8( $qualified_attribute_name );
+			$serialized_attribute_name = str_replace( ' ', ':', $qualified_attribute_name );
 			if ( isset( $seen_attribute_names[ $qualified_attribute_name ] ) ) {
 				continue;
 			} else {
@@ -1530,13 +1531,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			if (
 				$previous_attribute_was_true &&
-				isset( $qualified_attribute_name[0] ) &&
-				'=' === $qualified_attribute_name[0]
+				isset( $serialized_attribute_name[0] ) &&
+				'=' === $serialized_attribute_name[0]
 			) {
 				$html .= '=""';
 			}
 
-			$html .= " {$qualified_attribute_name}";
+			$html .= " {$serialized_attribute_name}";
 			$value = $this->get_attribute( $attribute_name );
 
 			if ( is_string( $value ) ) {
