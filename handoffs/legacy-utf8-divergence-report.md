@@ -18,6 +18,10 @@ The generated pass was deterministic: case `N` used
 php /private/tmp/legacy_utf8_divergence_survey.php 3000000 256 > /private/tmp/legacy_utf8_divergence_survey_results.json
 ```
 
+For auditability, a cleaned-up copy of the throwaway runner was committed in
+`700d7c8c910f` (`Charset: Add legacy UTF-8 survey runner`) and removed in the
+follow-up commit after this report recorded that provenance.
+
 Important current-branch note: the handoff describes
 `wp_check_invalid_utf8()` as PCRE-based. That is historically correct, but this
 checkout already contains the 6.9-era rewrite from `d1e7f5625b`, so the current
