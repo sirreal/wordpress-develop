@@ -67,6 +67,7 @@ class TreeCapture {
 				'fid'          => self::fid_of( $processor ),
 				'attrs'        => self::attrs_of( $processor ),
 				'ancestorTags' => array_reverse( $breadcrumbs ),
+				'namespace'    => $processor->get_namespace(),
 			);
 		}
 

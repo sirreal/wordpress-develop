@@ -18,7 +18,9 @@ namespace CssSelectorFuzz;
  *  - Class and ID matching is exact, except in quirks mode where it is
  *    ASCII case-insensitive.
  *  - Attribute value matching is exact (byte-wise) unless the `i` modifier
- *    requests ASCII case-insensitivity.
+ *    requests ASCII case-insensitivity, or the attribute is in HTML's
+ *    case-insensitive list, the selector has no modifier, and the element
+ *    is in the html namespace (rows without a namespace field are html).
  *  - For `^=`, `$=`, `*=` and `~=`, an empty (or for `~=`, whitespace-
  *    containing) value matches nothing.
  *
@@ -29,17 +31,77 @@ class ReferenceMatcher {
 	const WHITESPACE = " \t\r\n\f";
 
 	/**
+	 * HTML's case-insensitive attribute value list: with no `i`/`s`
+	 * modifier, these attributes' values match ASCII case-insensitively on
+	 * HTML elements. Independent copy — the matcher must not share a
+	 * possible misreading with the implementation under test.
+	 *
+	 * https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+	 */
+	const HTML_CASE_INSENSITIVE_ATTRIBUTES = array(
+		'accept'         => true,
+		'accept-charset' => true,
+		'align'          => true,
+		'alink'          => true,
+		'axis'           => true,
+		'bgcolor'        => true,
+		'charset'        => true,
+		'checked'        => true,
+		'clear'          => true,
+		'codetype'       => true,
+		'color'          => true,
+		'compact'        => true,
+		'declare'        => true,
+		'defer'          => true,
+		'dir'            => true,
+		'direction'      => true,
+		'disabled'       => true,
+		'enctype'        => true,
+		'face'           => true,
+		'frame'          => true,
+		'hreflang'       => true,
+		'http-equiv'     => true,
+		'lang'           => true,
+		'language'       => true,
+		'link'           => true,
+		'media'          => true,
+		'method'         => true,
+		'multiple'       => true,
+		'nohref'         => true,
+		'noresize'       => true,
+		'noshade'        => true,
+		'nowrap'         => true,
+		'readonly'       => true,
+		'rel'            => true,
+		'rev'            => true,
+		'rules'          => true,
+		'scope'          => true,
+		'scrolling'      => true,
+		'selected'       => true,
+		'shape'          => true,
+		'target'         => true,
+		'text'           => true,
+		'type'           => true,
+		'valign'         => true,
+		'valuetype'      => true,
+		'vlink'          => true,
+	);
+
+	/**
 	 * Expected match list for WP_HTML_Processor::select().
 	 *
-	 * @param array $list_ast Canonical complex selector list AST.
-	 * @param array $rows     Element rows in visit order, with ancestorTags.
-	 * @param bool  $quirks   Whether the document parses in quirks mode.
+	 * @param array $list_ast     Canonical complex selector list AST.
+	 * @param array $rows         Element rows in visit order, with ancestorTags.
+	 * @param bool  $quirks       Whether the document parses in quirks mode.
+	 * @param bool  $html_attr_ci Whether HTML's case-insensitive attribute value
+	 *                            list applies. True models WP/browsers; false
+	 *                            models an engine without the rule ( lexbor ).
 	 * @return string[] data-fid values in visit order.
 	 */
-	public static function expected_html_matches_rows( array $list_ast, array $rows, bool $quirks ): array {
+	public static function expected_html_matches_rows( array $list_ast, array $rows, bool $quirks, bool $html_attr_ci = true ): array {
 		$out = array();
 		foreach ( $rows as $row ) {
-			if ( self::list_matches_row( $list_ast, $row, $quirks ) ) {
+			if ( self::list_matches_row( $list_ast, $row, $quirks, $html_attr_ci ) ) {
 				$out[] = $row['fid'];
 			}
 		}
@@ -60,7 +122,7 @@ class ReferenceMatcher {
 		foreach ( $rows as $row ) {
 			$matched = false;
 			foreach ( $list_ast as $complex ) {
-				if ( self::compound_matches( $complex['self'], $row, false ) ) {
+				if ( self::compound_matches( $complex['self'], $row, false, true ) ) {
 					$matched = true;
 					break;
 				}
@@ -82,10 +144,10 @@ class ReferenceMatcher {
 		return self::expected_tag_matches_rows( $list_ast, DocumentGenerator::rows_from_model( $model ) );
 	}
 
-	public static function list_matches_row( array $list_ast, array $row, bool $quirks ): bool {
+	public static function list_matches_row( array $list_ast, array $row, bool $quirks, bool $html_attr_ci = true ): bool {
 		foreach ( $list_ast as $complex ) {
 			if (
-				self::compound_matches( $complex['self'], $row, $quirks ) &&
+				self::compound_matches( $complex['self'], $row, $quirks, $html_attr_ci ) &&
 				self::explore_context( $complex['context'], $row['ancestorTags'] )
 			) {
 				return true;
@@ -127,12 +189,12 @@ class ReferenceMatcher {
 		return false;
 	}
 
-	public static function compound_matches( array $compound, array $row, bool $quirks ): bool {
+	public static function compound_matches( array $compound, array $row, bool $quirks, bool $html_attr_ci = true ): bool {
 		if ( null !== $compound['type'] && ! self::type_matches( $compound['type'], $row['tag'] ) ) {
 			return false;
 		}
 		foreach ( (array) $compound['subs'] as $sub ) {
-			if ( ! self::sub_matches( $sub, $row, $quirks ) ) {
+			if ( ! self::sub_matches( $sub, $row, $quirks, $html_attr_ci ) ) {
 				return false;
 			}
 		}
@@ -143,14 +205,14 @@ class ReferenceMatcher {
 		return '*' === $type || ascii_strtolower( $type ) === ascii_strtolower( $tag );
 	}
 
-	private static function sub_matches( array $sub, array $row, bool $quirks ): bool {
+	private static function sub_matches( array $sub, array $row, bool $quirks, bool $html_attr_ci ): bool {
 		switch ( $sub['kind'] ) {
 			case 'class':
 				return self::class_matches( $sub['name'], $row, $quirks );
 			case 'id':
 				return self::id_matches( $sub['name'], $row, $quirks );
 			case 'attr':
-				return self::attr_matches( $sub, $row );
+				return self::attr_matches( $sub, $row, $html_attr_ci );
 		}
 		return false;
 	}
@@ -201,7 +263,7 @@ class ReferenceMatcher {
 			: $id === $wanted;
 	}
 
-	private static function attr_matches( array $sub, array $row ): bool {
+	private static function attr_matches( array $sub, array $row, bool $html_attr_ci ): bool {
 		$attr_value = DocumentGenerator::get_attribute_value( $row, $sub['name'] );
 		if ( null === $attr_value ) {
 			return false;
@@ -214,7 +276,12 @@ class ReferenceMatcher {
 		}
 
 		$wanted           = (string) $sub['value'];
-		$case_insensitive = 'case-insensitive' === $sub['modifier'];
+		$case_insensitive = 'case-insensitive' === $sub['modifier'] || (
+			$html_attr_ci &&
+			null === $sub['modifier'] &&
+			'html' === ( $row['namespace'] ?? 'html' ) &&
+			isset( self::HTML_CASE_INSENSITIVE_ATTRIBUTES[ ascii_strtolower( $sub['name'] ) ] )
+		);
 		if ( $case_insensitive ) {
 			$attr_value = ascii_strtolower( $attr_value );
 			$wanted     = ascii_strtolower( $wanted );

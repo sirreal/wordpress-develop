@@ -785,15 +785,24 @@ class Worker {
 		}
 
 		/*
-		 * lexbor #368: class/#id match ASCII case-insensitively even in
-		 * no-quirks documents. Compare lexbor against the reference run
-		 * with quirks-style class/ID folding ( the only thing the flag
-		 * affects ) so the rest of the semantics still get differential
-		 * coverage; WP itself is still held to the strict expectation.
+		 * Two known lexbor deviations are compensated for so the rest of the
+		 * semantics still get differential coverage; WP itself is still held
+		 * to the strict expectation:
+		 *
+		 *  - lexbor #368: class/#id match ASCII case-insensitively even in
+		 *    no-quirks documents. Compare lexbor against the reference run
+		 *    with quirks-style class/ID folding.
+		 *  - lexbor does not implement HTML's case-insensitive attribute
+		 *    value list ( [rel=NOFOLLOW] does not match rel="nofollow" ),
+		 *    where browsers and WP do. Compare lexbor against the reference
+		 *    run with that list disabled.
 		 */
-		$expected_for_lexbor = LexborOracle::has_issue_368()
-			? ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, true )
-			: $expected;
+		$expected_for_lexbor = ReferenceMatcher::expected_html_matches_rows(
+			$complex_ast,
+			$rows,
+			LexborOracle::has_issue_368() ? true : $quirks,
+			false
+		);
 
 		// lexbor reports in document order, WP/reference in visit order —
 		// compare as multisets.

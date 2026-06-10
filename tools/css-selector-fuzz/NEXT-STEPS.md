@@ -49,6 +49,24 @@
 > and rejects `[a=b \73]`). Fail-safe refusal, not a mis-match; revisit only
 > if the matcher ever moves to token-level parsing.
 >
+> **HTML case-insensitive attribute value list — IMPLEMENTED (2026-06-10):**
+> per https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+> the values of ~46 listed attributes (`type`, `rel`, `lang`, `dir`,
+> `media`, ...) match ASCII case-insensitively on HTML elements when the
+> selector has no modifier; an explicit `s` still forces sensitivity, and
+> elements outside the html namespace are unaffected. Oracle notes from
+> verification:
+> - **lexbor does not implement the rule at all** (`[rel=nofollow]` does
+>   not match `rel="NOFOLLOW"`) — compensated in the differential the same
+>   way as lexbor #368 (lexbor is compared against the reference run with
+>   the list disabled); candidate upstream report.
+> - **Chromium applies the list to foreign elements too** (`[type=TEXT]`
+>   matches `<svg><a type="text">`), diverging from the HTML spec's "on an
+>   HTML element" scoping. WP follows the spec (html namespace only, via
+>   `get_namespace()`). The standalone Tag Processor has no namespace
+>   tracking and applies the list to every element — an inherent
+>   tag-processor approximation, same as its ancestor-blind matching.
+>
 > **Session decisions (2026-06-10):** EOF-truncated selectors (`div[a=b`)
 > will be made spec-conformant — CSS Syntax auto-closes open blocks at EOF —
 > rather than documented as an intentional rejection. HTML's default

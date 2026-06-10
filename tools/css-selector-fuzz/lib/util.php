@@ -137,6 +137,23 @@ function ascii_strtolower( string $input ): string {
 	return strtr( $input, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
 }
 
+function ascii_strtoupper( string $input ): string {
+	return strtr( $input, 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' );
+}
+
+/** Flips the case of each ASCII letter independently with 50% probability. */
+function str_shuffle_case( string $input, Prng $prng ): string {
+	$out = '';
+	for ( $i = 0; $i < strlen( $input ); $i++ ) {
+		$byte = $input[ $i ];
+		if ( $prng->chance( 50 ) ) {
+			$byte = ctype_lower( $byte ) ? ascii_strtoupper( $byte ) : ascii_strtolower( $byte );
+		}
+		$out .= $byte;
+	}
+	return $out;
+}
+
 /**
  * Splits a valid UTF-8 string into codepoints.
  *

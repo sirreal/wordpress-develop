@@ -423,11 +423,29 @@ class SelectorGenerator {
 			)
 		);
 
+		$value = $this->gen_attr_value();
+
+		/*
+		 * HTML's case-insensitive attribute value list: with no modifier,
+		 * the values of listed attributes ( type, rel, lang, dir, ... )
+		 * match ASCII case-insensitively on HTML elements. Sometimes flip
+		 * the case of the selector value for a listed attribute so the
+		 * differential exercises that rule rather than relying on sampled
+		 * values happening to differ in case.
+		 */
+		if (
+			'' === $modifier &&
+			isset( ReferenceMatcher::HTML_CASE_INSENSITIVE_ATTRIBUTES[ ascii_strtolower( $name ) ] ) &&
+			$this->prng->chance( 40 )
+		) {
+			$value = $this->prng->chance( 50 ) ? ascii_strtoupper( $value ) : str_shuffle_case( $value, $this->prng );
+		}
+
 		return array(
 			'kind'     => 'attr',
 			'name'     => $name,
 			'matcher'  => $matcher,
-			'value'    => $this->gen_attr_value(),
+			'value'    => $value,
 			'modifier' => '' === $modifier ? null : $modifier,
 		);
 	}
@@ -838,7 +856,7 @@ class SelectorGenerator {
 				continue;
 			}
 			$seen_attrs[ $lower ] = true;
-			$features[]           = $this->path_attr_feature( $lower, $attr[1] );
+			$features[]           = $this->path_attr_feature( $lower, $attr[1], 'html' === ( $element['namespace'] ?? 'html' ) );
 		}
 
 		$subs      = array();
@@ -864,7 +882,7 @@ class SelectorGenerator {
 	}
 
 	/** An attribute selector that the (name, value) pair satisfies. */
-	private function path_attr_feature( string $name, $value ): array {
+	private function path_attr_feature( string $name, $value, bool $is_html_namespace = true ): array {
 		$presence = array(
 			'kind'     => 'attr',
 			'name'     => $this->prng->chance( 15 ) ? $this->random_case( $name ) : $name,
@@ -933,6 +951,20 @@ class SelectorGenerator {
 			} else {
 				$modifier = 'case-sensitive';
 			}
+		} elseif (
+			$is_html_namespace &&
+			isset( ReferenceMatcher::HTML_CASE_INSENSITIVE_ATTRIBUTES[ $name ] ) &&
+			$this->prng->chance( 50 )
+		) {
+			/*
+			 * HTML's case-insensitive attribute value list: with no modifier
+			 * the flipped operand still satisfies the (name, value) pair on
+			 * an html-namespace element, which makes the folding rule
+			 * load-bearing for the mustMatchFid invariant — name and value
+			 * here come from the same real element, unlike the independent
+			 * pools in gen_attr_selector.
+			 */
+			$operand = $this->random_case( $operand );
 		}
 
 		return array(
