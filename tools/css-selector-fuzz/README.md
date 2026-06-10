@@ -41,6 +41,10 @@ produces the same document, the same selector, and the same verdict.
    - `chaos` — arbitrary bytes; no parse expectation.
    - `mutated` — a supported selector with random byte mutations; no parse
      expectation.
+   - `edge-escape` — selectors that exercise otherwise-unreachable parser
+     branches: hex escapes for NUL / surrogate / over-max codepoints (must
+     decode to U+FFFD) and raw NUL / CR / CRLF / FF bytes in the input (must
+     normalize per `normalize_selector_input`); carries the intended AST.
 4. Check invariants:
    - No PHP error/warning/exception from parsing or matching, ever.
    - Parse result (instance vs `null`) matches the bucket's expectation.
@@ -122,6 +126,11 @@ Probe a specific selector:
 Run a batch in-process (no isolation, faster):
 
     php tools/css-selector-fuzz/worker.php --start-seed 1 --count 500
+
+Measure line coverage of the `css/` classes (see `COVERAGE.md` for the
+current report and a justified list of unreached lines):
+
+    phpdbg -qrr tools/css-selector-fuzz/coverage.php --seeds 3000 --list-uncovered
 
 Options of note:
 

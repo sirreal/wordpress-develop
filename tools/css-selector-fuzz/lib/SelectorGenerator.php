@@ -31,6 +31,7 @@ class SelectorGenerator {
 		'invalid',
 		'chaos',
 		'mutated',
+		'edge-escape',
 	);
 
 	/** @var Prng */
@@ -177,21 +178,23 @@ class SelectorGenerator {
 			$bucket = $prng->weighted(
 				null === $rows || array() === $rows
 					? array(
-						'supported-compound' => 30,
-						'supported-complex'  => 25,
-						'unsupported'        => 15,
-						'invalid'            => 12,
+						'supported-compound' => 28,
+						'supported-complex'  => 24,
+						'unsupported'        => 14,
+						'invalid'            => 11,
 						'chaos'              => 8,
 						'mutated'            => 10,
+						'edge-escape'        => 5,
 					)
 					: array(
-						'supported-compound' => 24,
-						'supported-complex'  => 20,
-						'path-directed'      => 22,
-						'unsupported'        => 12,
-						'invalid'            => 10,
+						'supported-compound' => 23,
+						'supported-complex'  => 19,
+						'path-directed'      => 21,
+						'unsupported'        => 11,
+						'invalid'            => 9,
 						'chaos'              => 6,
 						'mutated'            => 6,
+						'edge-escape'        => 5,
 					)
 			);
 		}
@@ -223,6 +226,9 @@ class SelectorGenerator {
 
 			case 'path-directed':
 				return $generator->gen_path_directed( $rows );
+
+			case 'edge-escape':
+				return $generator->gen_edge_escape();
 
 			case 'unsupported':
 				return array(
@@ -518,6 +524,120 @@ class SelectorGenerator {
 				'-9hyphen-digit',
 				'mixedCase',
 			)
+		);
+	}
+
+	/*
+	 * ---------------------------
+	 * Edge-case escapes and input
+	 * ---------------------------
+	 *
+	 * Targets parser branches the structural generators can't reach:
+	 *  - hex escapes whose codepoint is NUL / a surrogate / over-max, which
+	 *    `consume_escaped_codepoint` must decode to U+FFFD;
+	 *  - raw NUL / CR / CRLF / FF bytes in the selector input, which
+	 *    `normalize_selector_input` rewrites ( NUL→U+FFFD, the rest→LF ).
+	 *
+	 * These carry a known intended AST: the decoded ident is the U+FFFD
+	 * replacement character ( or, for input normalization, the same selector
+	 * with whitespace normalized ), so the AST round-trip still applies.
+	 */
+	private function gen_edge_escape(): array {
+		$kind = $this->prng->weighted(
+			array(
+				'fffd-ident' => 50,
+				'nul-input'  => 25,
+				'ws-input'   => 25,
+			)
+		);
+
+		if ( 'fffd-ident' === $kind ) {
+			// A class selector whose name is a single U+FFFD, produced by a
+			// hex escape for an out-of-range codepoint.
+			$hex = $this->prng->choice(
+				array(
+					'0',
+					'00',
+					'000000',
+					dechex( $this->prng->int( 0xD800, 0xDFFF ) ),       // surrogate
+					dechex( $this->prng->int( 0x110000, 0xFFFFFF ) ),   // over-max
+				)
+			);
+			if ( $this->prng->chance( 40 ) ) {
+				$hex = strtoupper( $hex );
+			}
+			$selector = '.\\' . $hex . ' ';
+			$ast      = array(
+				array(
+					'context' => array(),
+					'self'    => array(
+						'type' => null,
+						'subs' => array( array( 'kind' => 'class', 'name' => "\u{FFFD}" ) ),
+					),
+				),
+			);
+			return array(
+				'bucket'         => 'edge-escape',
+				'selector'       => $selector,
+				'expectCompound' => true,
+				'expectComplex'  => true,
+				'ast'            => $ast,
+			);
+		}
+
+		/*
+		 * Raw control bytes in the selector input. A small fixed compound
+		 * keeps the case focused on normalize_selector_input and avoids
+		 * entangling with unrelated attribute-selector edge cases.
+		 */
+		$compound = array(
+			'type' => $this->prng->chance( 50 ) ? 'span' : null,
+			'subs' => array(
+				array( 'kind' => 'class', 'name' => 'foo' ),
+				array( 'kind' => 'id', 'name' => 'bar' ),
+			),
+		);
+		if ( null === $compound['type'] && $this->prng->chance( 50 ) ) {
+			array_pop( $compound['subs'] );
+		}
+		$rendered = $this->render_compound( $compound );
+
+		if ( 'nul-input' === $kind ) {
+			// A NUL between a class dot's selectors becomes part of an ident
+			// only in limited spots; simplest reliable case: a class whose
+			// name contains a NUL ( → U+FFFD ).
+			$ast = array(
+				array(
+					'context' => array(),
+					'self'    => array(
+						'type' => null,
+						'subs' => array( array( 'kind' => 'class', 'name' => "a\u{FFFD}b" ) ),
+					),
+				),
+			);
+			return array(
+				'bucket'         => 'edge-escape',
+				'selector'       => ".a\0b",
+				'expectCompound' => true,
+				'expectComplex'  => true,
+				'ast'            => $ast,
+			);
+		}
+
+		// ws-input: wrap/insert CR, CRLF, FF as insignificant whitespace.
+		$lead  = $this->prng->choice( array( "\r", "\f", "\r\n", "\r\r", "\f\f" ) );
+		$trail = $this->prng->choice( array( "\r", "\f", "\r\n", '' ) );
+		return array(
+			'bucket'         => 'edge-escape',
+			'selector'       => $lead . $rendered . $trail,
+			'expectCompound' => true,
+			'expectComplex'  => true,
+			'ast'            => array(
+				array(
+					'context' => array(),
+					'self'    => $compound,
+				),
+			),
 		);
 	}
 
@@ -1164,8 +1284,10 @@ class SelectorGenerator {
 						'..a',
 						'.#a',
 						'[a',
+						'[ a',
 						'[a=',
 						'[a=]',
+						'[a="x\\',
 						'[=b]',
 						'[a==b]',
 						'[a~b]',
