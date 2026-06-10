@@ -1,0 +1,16 @@
+<?php
+/**
+ * Minimal global stand-ins so `src/wp-includes/utf8.php` can load
+ * without pulling in the rest of WordPress.
+ */
+
+if ( ! function_exists( '_wp_can_use_pcre_u' ) ) {
+	function _wp_can_use_pcre_u( $set = null ): bool {
+		static $utf8_pcre = null;
+		if ( null === $utf8_pcre ) {
+			// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			$utf8_pcre = false !== @preg_match( '/^./u', 'a' );
+		}
+		return (bool) $utf8_pcre;
+	}
+}
