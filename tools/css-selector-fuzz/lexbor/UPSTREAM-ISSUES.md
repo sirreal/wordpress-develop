@@ -1,9 +1,10 @@
 # lexbor — draft upstream bug reports
 
-Three spec-conformance bugs in liblexbor's CSS selectors support, found while
+Five spec-conformance bugs in liblexbor's CSS selectors support, found while
 using lexbor as a differential oracle for the WordPress HTML-API CSS selector
-fuzzer (`tools/css-selector-fuzz/`). All three were re-verified directly
-against the harness on 2026-06-10.
+fuzzer (`tools/css-selector-fuzz/`). Issues 1–3 were re-verified directly
+against the harness on 2026-06-10; issues 4–5 surfaced during the WP
+conformance-fix session and were re-verified on 2026-06-11.
 
 - **Pinned version:** lexbor v3.0.0 (`2ae88a1c6b52`), built by
   `tools/css-selector-fuzz/lexbor/build.sh`.
@@ -20,7 +21,9 @@ against the harness on 2026-06-10.
    the report which commit you tested.
 2. **Search for duplicates** before filing (suggested queries: `~=`,
    `attr-modifier`, `case insensitive modifier`, `ident code point`,
-   `U+00B7`, `non-ascii`). #368 shows the maintainer's preferred repro style.
+   `U+00B7`, `non-ascii`, `EOF`, `unclosed`, `simple block`,
+   `case-insensitive attribute`, `querySelector`). #368 shows the
+   maintainer's preferred repro style.
 3. **One issue per bug.** Reduce each to a self-contained C repro (sketch
    below); maintainers should not need this repo's harness.
 4. Reproduction via this repo (fast path): build the harness
@@ -139,3 +142,78 @@ The U+00F7 row is a control: the division sign is correctly NOT an ident code
 point, so lexbor's boundary is off by exactly the U+00B7 / U+00C0–U+00F6
 ranges. Workaround used by this fuzzer: hex-escape all non-ASCII (`\dc ber`
 parses fine), which is why this surfaces only with raw multibyte selectors.
+
+## Issue 4 — EOF does not auto-close an open attribute selector block
+
+Per CSS Syntax Level 3, tokenization auto-closes unterminated simple blocks
+at the end of input (a parse error, but the block is returned), and an
+unterminated string at EOF returns the string token:
+
+> \<EOF-token\>: This is a parse error. Return the block.
+> — https://www.w3.org/TR/css-syntax-3/#consume-simple-block (§5.4.8)
+
+> EOF: This is a parse error. Return the \<string-token\>.
+> — https://www.w3.org/TR/css-syntax-3/#consume-string-token (§4.3.5)
+
+So `[att=val` is the same selector as `[att=val]`, and `[att="a b` carries
+the string value `a b`. lexbor reports a selector parse error for every
+EOF-truncated attribute selector. Verified at v3.0.0 against
+`<div att="val">` / `<div att="a b">`:
+
+| selector        | lexbor        | spec / Chrome 149 |
+|-----------------|---------------|-------------------|
+| `[att]`         | parses ✅      | parses            |
+| `[att=val]`     | parses ✅      | parses            |
+| `[att`          | parse error ❌ | parses, matches   |
+| `[att=val`      | parse error ❌ | parses, matches   |
+| `[att="a b`     | parse error ❌ | parses, matches   |
+| `[att=val i`    | parse error ❌ | parses, matches   |
+| `div[att`       | parse error ❌ | parses, matches   |
+| `[att=`         | parse error ✅ | error (grammar)   |
+| `[att~`         | parse error ✅ | error (grammar)   |
+| `[`             | parse error ✅ | error (grammar)   |
+| `[att=val, div` | parse error ✅ | error (comma is inside the open block) |
+
+The last four rows are controls: truncation inside the selector *grammar*
+(matcher without value, lone bracket) is invalid even after auto-close, and
+lexbor correctly rejects those. Chrome 149 (`document.querySelectorAll`)
+accepts and rejects exactly per the table (verified 2026-06-10 via
+Playwright). Note lexbor's escape handling at EOF is fine — `.foo\` parses
+as class `foo\u{FFFD}` per §4.3.7 — the gap is specifically the simple-block
+auto-close.
+
+## Issue 5 — HTML's case-insensitive attribute value list not implemented
+
+HTML defines 46 attributes (`type`, `rel`, `lang`, `dir`, `media`,
+`hreflang`, `http-equiv`, ...) whose values must match ASCII
+case-insensitively in attribute selectors on an HTML element when the
+selector has no `i`/`s` modifier:
+
+> Attribute selectors on an HTML element in an HTML document must treat the
+> values of attributes with the following names as ASCII case-insensitive: …
+> — https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+
+lexbor matches all attribute values case-sensitively unless the selector
+carries an explicit `i`. Verified at v3.0.0 against
+`<a rel="NOFOLLOW">` (`e1`), `<a rel="nofollow">` (`e2`),
+`<i data-x="ABC">` (`e3`):
+
+| selector           | lexbor       | spec / Chrome 149 |
+|--------------------|--------------|-------------------|
+| `[rel=nofollow]`   | `e2` only ❌  | `e1` and `e2`     |
+| `[rel=NOFOLLOW]`   | `e1` only ❌  | `e1` and `e2`     |
+| `[rel=nofollow i]` | `e1`, `e2` ✅ | `e1` and `e2`     |
+| `[rel=nofollow s]` | `e2` only ✅  | `e2` only         |
+| `[data-x=abc]`     | no match ✅   | no match (unlisted attribute) |
+
+The last three rows are controls: explicit modifiers work, and attributes
+outside the list stay case-sensitive. Chrome 149 agrees with the spec column
+(verified 2026-06-10 via Playwright), with one scoping caveat the report
+should mention: the spec restricts the rule to elements in the HTML
+namespace, but Chrome also folds on SVG-namespace elements
+(`<svg><a type="text">` matches `[type=TEXT]`), so an implementation true
+to the spec letter would scope by element namespace. This may be framed as
+a feature request rather than a bug if lexbor considers document-language
+selector rules out of scope for its selectors module — but lexbor is an
+HTML engine and browsers uniformly implement the folding, so matching
+against HTML documents diverges from every browser without it.
