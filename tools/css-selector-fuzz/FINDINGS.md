@@ -11,7 +11,10 @@ completely clean, and the lexbor differential (third independent oracle) agreed
 with the reference matcher on every compared no-quirks case (0 `lexbor-divergence`).
 
 Reproduce any case: `php tools/css-selector-fuzz/replay.php --selector '<sel>' [--html '<html>']`.
-Auto-minimize a failing seed: `php tools/css-selector-fuzz/minimize.php --seed <seed>`.
+Auto-minimize a failing seed: `php tools/css-selector-fuzz/minimize.php --seed <seed>`
+(faithful for seeds with a self-contained failure; seeds whose only recorded
+failure is generator-side — `ast-mismatch`, `parse-expectation` — are refused
+unless a related self-contained signature is opted into with `--signature`).
 
 ---
 

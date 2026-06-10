@@ -133,10 +133,22 @@ both the selector and the HTML while preserving a failure signature):
     php tools/css-selector-fuzz/minimize.php --seed 1234
     php tools/css-selector-fuzz/minimize.php --selector 'sel' --html '<…>' --signature match-mismatch
 
-The minimizer drives `Worker::run_pair`, which checks only self-contained
+The minimizer drives `Worker::run_pair`, which checks only **self-contained**
 invariants — those computable from the (selector, html) pair without the
-generator's intended AST. All three known bugs reduce to one: Bug 1 →
-`metamorphic-ast`, Bug 2 → `match-mismatch-html`, Bug 3 → `metamorphic-parse`.
+generator's intended AST: `match-mismatch-*`, `metamorphic-*`,
+`lexbor-divergence`, `parse-error`, `ast-shape`, `ast-cross-grammar`, and the
+rejection checks. The generator-side invariants `ast-mismatch`,
+`parse-expectation`, `path-expectation`, and `model-desync` are **not**
+self-contained and cannot be reproduced from the pair alone.
+
+So `--seed` faithfully minimizes only seeds whose failure is self-contained.
+The three known bugs each *also* surface a self-contained signature (Bug 1 →
+`metamorphic-ast`, Bug 2 → `match-mismatch-html`, Bug 3 → `metamorphic-parse`),
+but a seed whose recorded failure is *only* the generator-side form (e.g. a
+Bug-1 seed that recorded `ast-mismatch` before the metamorphic phase ran) is
+**refused by default** rather than silently retargeted — pass `--signature`
+to opt into minimizing a related self-contained signature, which is then
+clearly labelled as a retarget in the output.
 
 Run a batch in-process (no isolation, faster):
 

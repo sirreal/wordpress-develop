@@ -334,14 +334,20 @@ class Worker {
 			)
 		);
 
+		$signatures = array();
+		foreach ( $failures as $failure ) {
+			$signatures[] = self::signature( $failure );
+		}
+
 		return array(
-			'seed'     => $seed,
-			'bucket'   => $selector['bucket'],
-			'digest'   => $digest,
-			'failures' => $failures,
-			'selector' => $selector_string,
-			'html'     => $document['html'],
-			'lexbor'   => $lexbor_state,
+			'seed'       => $seed,
+			'bucket'     => $selector['bucket'],
+			'digest'     => $digest,
+			'failures'   => $failures,
+			'signatures' => array_values( array_unique( $signatures ) ),
+			'selector'   => $selector_string,
+			'html'       => $document['html'],
+			'lexbor'     => $lexbor_state,
 		);
 	}
 

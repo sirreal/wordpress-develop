@@ -39,11 +39,27 @@ $options      = parse_cli_options( $argv );
 $max_attempts = option_int( $options, 'max-attempts', 20000 );
 $sig_filter   = option_string( $options, 'signature', null );
 
-$seed = option_int( $options, 'seed', -1 );
+/*
+ * In --seed mode, the seed's OWN failures ( from run_case ) are the source
+ * of truth. The minimizer can only preserve "self-contained" signatures
+ * ( those run_pair re-checks without the generator's intended AST ); the
+ * generator-side ones ( ast-mismatch, parse-expectation, path-expectation,
+ * model-desync ) are invisible to run_pair. Targeting must therefore be
+ * restricted to the intersection of the seed's failures and run_pair's
+ * view — otherwise the minimizer could silently retarget to an unrelated
+ * incidental signature and report a false "reproduced".
+ */
+$seed            = option_int( $options, 'seed', -1 );
+$seed_signatures = null;
 if ( $seed >= 0 ) {
-	$case     = Worker::run_case( $seed );
-	$selector = $case['selector'];
-	$html     = $case['html'];
+	$case            = Worker::run_case( $seed );
+	$selector        = $case['selector'];
+	$html            = $case['html'];
+	$seed_signatures = $case['signatures'];
+	if ( array() === $seed_signatures ) {
+		fwrite( STDERR, "Seed {$seed} produced no failure; nothing to minimize.\n" );
+		exit( 1 );
+	}
 } else {
 	$selector = option_string( $options, 'selector', null );
 	$html     = option_string( $options, 'html', null );
@@ -61,14 +77,66 @@ $signatures_of = static function ( string $selector, string $html, ?string $targ
 $baseline = $signatures_of( $selector, $html );
 if ( array() === $baseline ) {
 	fwrite( STDERR, "The starting pair does not reproduce any self-contained failure.\n" );
+	if ( null !== $seed_signatures ) {
+		fwrite( STDERR, 'Seed failure(s): ' . implode( ', ', $seed_signatures ) . "\n" );
+		fwrite( STDERR, "These are generator-side signatures the minimizer cannot reproduce from the\n" );
+		fwrite( STDERR, "pair alone. Minimize a seed whose failure is self-contained, or pass\n" );
+		fwrite( STDERR, "--selector/--html directly.\n" );
+	}
 	fwrite( STDERR, 'selector: ' . printable_bytes( $selector ) . "\n" );
 	exit( 1 );
 }
 
-// Pick the target signature.
-$target = $baseline[0];
+/*
+ * Candidate targets are matched at the INVARIANT level, not the exact
+ * signature hash: a signature embeds transform-specific detail ( e.g.
+ * metamorphic-parse via `rerender` vs via `dup-branch` ), and run_pair's
+ * fixed metamorphic draws may expose the same invariant through a
+ * different transform than run_case did. Same invariant == same bug class,
+ * so that is faithful. A DIFFERENT invariant ( e.g. the seed's generator-
+ * side ast-mismatch vs an incidental self-contained metamorphic-ast ) is a
+ * genuine retarget and must be opted into.
+ */
+$invariant_of = static function ( string $signature ): string {
+	$pos = strrpos( $signature, ':' );
+	return false === $pos ? $signature : substr( $signature, $pos + 1 );
+};
+
+$retargeted = false;
+if ( null === $seed_signatures ) {
+	$candidates = $baseline;
+} else {
+	$seed_invariants = array_map( $invariant_of, $seed_signatures );
+	$candidates      = array();
+	foreach ( $baseline as $signature ) {
+		if ( in_array( $invariant_of( $signature ), $seed_invariants, true ) ) {
+			$candidates[] = $signature;
+		}
+	}
+}
+
+if ( array() === $candidates ) {
+	// The seed's failures are all generator-side ( no self-contained
+	// invariant in common ); refuse to silently minimize an unrelated
+	// incidental signature.
+	fwrite( STDERR, "Seed {$seed}'s failures are not self-contained, so the minimizer cannot\n" );
+	fwrite( STDERR, "faithfully reproduce them.\n" );
+	fwrite( STDERR, 'Seed failure(s):       ' . implode( ', ', $seed_signatures ) . "\n" );
+	fwrite( STDERR, 'Self-contained nearby: ' . implode( ', ', $baseline ) . "\n" );
+	fwrite( STDERR, "Re-run with --signature <id> to minimize one of the nearby signatures\n" );
+	fwrite( STDERR, "explicitly ( understanding it is a related, not identical, failure ).\n" );
+	if ( null === $sig_filter ) {
+		exit( 1 );
+	}
+	// User explicitly opted into a nearby signature.
+	$candidates = $baseline;
+	$retargeted = true;
+}
+
+// Pick the target signature from the eligible candidates.
+$target = $candidates[0];
 if ( null !== $sig_filter ) {
-	foreach ( $baseline as $candidate ) {
+	foreach ( $candidates as $candidate ) {
 		if ( false !== strpos( $candidate, $sig_filter ) ) {
 			$target = $candidate;
 			break;
@@ -165,6 +233,8 @@ if ( option_bool( $options, 'json', false ) ) {
 	echo json_encode_safe(
 		array(
 			'target'        => $target,
+			'retargeted'    => $retargeted,
+			'seedSignatures' => $seed_signatures,
 			'reproduced'    => $ok,
 			'attempts'      => $attempts,
 			'selector'      => printable_bytes( $selector ),
@@ -179,6 +249,10 @@ if ( option_bool( $options, 'json', false ) ) {
 }
 
 echo "target:    {$target}\n";
+if ( $retargeted ) {
+	echo 'NOTE:      seed failure(s) ' . implode( ', ', $seed_signatures ) . " are generator-side;\n";
+	echo "           minimized the related self-contained signature above instead.\n";
+}
 echo 'reproduced: ' . ( $ok ? 'yes' : 'NO' ) . "\n";
 echo "attempts:  {$attempts}\n";
 echo 'selector:  ' . printable_bytes( $selector ) . ' (' . strlen( $selector ) . " bytes)\n";
