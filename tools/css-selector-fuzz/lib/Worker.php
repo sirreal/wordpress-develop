@@ -58,9 +58,8 @@ class Worker {
 	public static function run_case( int $seed ): array {
 		Bootstrap::load();
 
-		$prng     = new Prng( (string) $seed, 'css-selector-fuzz-case' );
-		$document = DocumentGenerator::generate( $prng->fork( 'document' ) );
-		$selector = SelectorGenerator::generate( $prng->fork( 'selector' ), $document['pools'], $document['model'] );
+		$prng    = new Prng( (string) $seed, 'css-selector-fuzz-case' );
+		$is_wild = $prng->chance( 30 );
 
 		$failures = array();
 		$record   = static function ( string $invariant, array $detail ) use ( &$failures ) {
@@ -70,7 +69,70 @@ class Worker {
 			);
 		};
 
-		self::check_document_model( $document, $record );
+		/*
+		 * The processor's own parse is the matching oracle's ground truth.
+		 * For safe (model-built) documents the model must agree with the
+		 * capture — that soundness check is what lets the capture be trusted
+		 * on wild documents, where no model exists.
+		 *
+		 * Wild documents that hit one of the processor's unsupported
+		 * constructs (it bails on foster parenting, complex adoption-agency
+		 * runs, …) are deterministically regenerated a bounded number of
+		 * times so nearly every wild case carries a usable ground truth.
+		 */
+		$document      = null;
+		$capture       = null;
+		$capture_error = null;
+		$attempts      = $is_wild ? 8 : 1;
+		for ( $attempt = 0; $attempt < $attempts; $attempt++ ) {
+			$document = $is_wild
+				? WildDocumentGenerator::generate( $prng->fork( "wild-document:{$attempt}" ) )
+				: DocumentGenerator::generate( $prng->fork( 'document' ) );
+
+			list( $capture, $capture_error ) = self::guard(
+				static function () use ( $document ) {
+					return TreeCapture::capture( $document['html'] );
+				}
+			);
+
+			if ( null === $capture_error && null === $capture['error'] ) {
+				break;
+			}
+		}
+
+		$rows     = null;
+		$tag_rows = null;
+		$quirks   = false;
+
+		if ( null !== $capture_error ) {
+			$record( 'model-desync', array( 'phase' => 'capture', 'error' => self::describe_throwable( $capture_error ) ) );
+		} elseif ( null !== $capture['error'] ) {
+			if ( ! $is_wild ) {
+				$record( 'model-desync', array( 'phase' => 'capture', 'error' => $capture['error'] ) );
+			}
+			// Wild markup the processor cannot fully visit is skipped:
+			// parsing invariants still run, matching has no ground truth.
+		} else {
+			$rows     = $capture['htmlRows'];
+			$tag_rows = $capture['tagRows'];
+			$quirks   = $capture['quirks'];
+
+			if ( ! $is_wild ) {
+				self::check_capture_against_model( $document, $capture, $record );
+			}
+		}
+
+		$path_rows = null;
+		if ( null !== $rows ) {
+			$path_rows = array();
+			foreach ( $rows as $row ) {
+				if ( 0 !== strpos( $row['fid'], '(missing-fid:' ) ) {
+					$path_rows[] = $row;
+				}
+			}
+		}
+
+		$selector = SelectorGenerator::generate( $prng->fork( 'selector' ), $document['pools'], $path_rows );
 
 		$selector_string = $selector['selector'];
 
@@ -183,8 +245,8 @@ class Worker {
 		// --- Match phase ---------------------------------------------------
 
 		$html_matches = null;
-		if ( null !== $complex_ast ) {
-			$expected = ReferenceMatcher::expected_html_processor_matches( $complex_ast, $document['model'], $document['quirks'] );
+		if ( null !== $complex_ast && null !== $rows ) {
+			$expected = ReferenceMatcher::expected_html_matches_rows( $complex_ast, $rows, $quirks );
 
 			/*
 			 * Path-directed selectors are guaranteed by construction to match
@@ -220,8 +282,8 @@ class Worker {
 			self::check_select_rejection( 'html', $selector_string, $document, $record );
 		}
 
-		if ( null !== $compound_ast ) {
-			$expected = ReferenceMatcher::expected_tag_processor_matches( $compound_ast, $document['model'] );
+		if ( null !== $compound_ast && null !== $tag_rows ) {
+			$expected = ReferenceMatcher::expected_tag_matches_rows( $compound_ast, $tag_rows );
 			self::check_select_matches( 'tag', $selector_string, $document, $expected, $record );
 		} elseif ( null === $compound_list && null === $compound_error ) {
 			self::check_select_rejection( 'tag', $selector_string, $document, $record );
@@ -266,45 +328,38 @@ class Worker {
 	}
 
 	/**
-	 * Verifies that both processors see exactly the modeled element list —
-	 * this guards the oracle itself against renderer/model drift.
+	 * Verifies that the processor's captured view of a safe (model-built)
+	 * document agrees with the generated model — this guards the oracle
+	 * itself against renderer/model drift, and is what justifies trusting
+	 * the capture on wild documents.
 	 */
-	private static function check_document_model( array $document, callable $record ): void {
-		$expected = array();
-		foreach ( DocumentGenerator::flatten_with_ancestors( $document['model'] ) as $pair ) {
-			list( $element, $ancestors ) = $pair;
-			$expected[]                  = array(
-				strtoupper( ascii_strtolower( $element['tag'] ) ),
-				$element['fid'],
-				count( $ancestors ) + 1,
-			);
-		}
+	private static function check_capture_against_model( array $document, array $capture, callable $record ): void {
+		$model_rows = DocumentGenerator::rows_from_model( $document['model'] );
 
-		list( $actual, $error ) = self::guard(
-			static function () use ( $document ) {
-				$processor = \WP_HTML_Processor::create_full_parser( $document['html'] );
-				$out       = array();
-				while ( $processor->next_tag() ) {
-					$fid   = $processor->get_attribute( 'data-fid' );
-					$out[] = array(
-						(string) $processor->get_tag(),
-						is_string( $fid ) ? $fid : '(missing)',
-						count( $processor->get_breadcrumbs() ),
-					);
+		$normalize = static function ( array $rows, bool $with_ancestors ): array {
+			$out = array();
+			foreach ( $rows as $row ) {
+				$attrs = array();
+				foreach ( $row['attrs'] as $attr ) {
+					$attrs[ $attr[0] ] = $attr[1];
 				}
-				if ( null !== $processor->get_last_error() ) {
-					throw new \RuntimeException( 'Processor error: ' . $processor->get_last_error() );
+				ksort( $attrs );
+				$normalized = array(
+					'tag'   => $row['tag'],
+					'fid'   => $row['fid'],
+					'attrs' => $attrs,
+				);
+				if ( $with_ancestors ) {
+					$normalized['ancestorTags'] = $row['ancestorTags'];
 				}
-				return $out;
+				$out[] = $normalized;
 			}
-		);
+			return $out;
+		};
 
-		if ( null !== $error ) {
-			$record( 'model-desync', array( 'processor' => 'html', 'error' => self::describe_throwable( $error ) ) );
-			return;
-		}
-
-		if ( $actual !== $expected ) {
+		$expected = $normalize( $model_rows, true );
+		$actual   = $normalize( $capture['htmlRows'], true );
+		if ( $expected !== $actual ) {
 			$record(
 				'model-desync',
 				array(
@@ -315,39 +370,26 @@ class Worker {
 			);
 		}
 
-		// The tag processor must see the same elements ( without breadcrumbs ).
-		$expected_tags = array();
-		foreach ( $expected as $row ) {
-			$expected_tags[] = array( $row[0], $row[1] );
-		}
-
-		list( $actual_tags, $tag_error ) = self::guard(
-			static function () use ( $document ) {
-				$processor = new \WP_HTML_Tag_Processor( $document['html'] );
-				$out       = array();
-				while ( $processor->next_tag() ) {
-					$fid   = $processor->get_attribute( 'data-fid' );
-					$out[] = array(
-						(string) $processor->get_tag(),
-						is_string( $fid ) ? $fid : '(missing)',
-					);
-				}
-				return $out;
-			}
-		);
-
-		if ( null !== $tag_error ) {
-			$record( 'model-desync', array( 'processor' => 'tag', 'error' => self::describe_throwable( $tag_error ) ) );
-			return;
-		}
-
-		if ( $actual_tags !== $expected_tags ) {
+		$expected_tags = $normalize( $model_rows, false );
+		$actual_tags   = $normalize( $capture['tagRows'], false );
+		if ( $expected_tags !== $actual_tags ) {
 			$record(
 				'model-desync',
 				array(
 					'processor' => 'tag',
 					'expected'  => $expected_tags,
 					'actual'    => $actual_tags,
+				)
+			);
+		}
+
+		if ( $document['quirks'] !== $capture['quirks'] ) {
+			$record(
+				'model-desync',
+				array(
+					'processor' => 'quirks',
+					'expected'  => $document['quirks'],
+					'actual'    => $capture['quirks'],
 				)
 			);
 		}

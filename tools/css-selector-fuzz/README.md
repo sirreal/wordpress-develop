@@ -9,10 +9,19 @@ produces the same document, the same selector, and the same verdict.
 
 ## What a case does
 
-1. Generate a random HTML document from a structurally "safe" element set so
-   the model tree is provably identical to the parsed tree (this is itself
-   verified every case — `model-desync`).
-2. Generate a selector in one of seven buckets:
+1. Generate a random HTML document — 70% from a structurally "safe" element
+   set with a known model tree, 30% "wild" (misnested, implied-end-tag,
+   foreign-content, varied-doctype token soup with no model).
+2. Capture the processor's own view of the document as the matching oracle's
+   ground truth (`TreeCapture`): a flat list of rows in visit order, each
+   carrying the element's tag, attributes, and ancestor tag list (context
+   selectors are type-only, so that is everything matching can observe).
+   For safe documents the capture must agree with the generated model
+   (`model-desync`) — that soundness check is what justifies trusting the
+   capture on wild documents. Wild documents that hit a construct the
+   processor bails on (foster parenting, complex adoption-agency runs) are
+   deterministically regenerated a bounded number of times.
+3. Generate a selector in one of seven buckets:
    - `supported-compound` — must parse in both grammars; carries intended AST.
    - `supported-complex` — uses `>`/descendant combinators; must parse only
      in the complex grammar; carries intended AST.
@@ -32,7 +41,7 @@ produces the same document, the same selector, and the same verdict.
    - `chaos` — arbitrary bytes; no parse expectation.
    - `mutated` — a supported selector with random byte mutations; no parse
      expectation.
-3. Check invariants:
+4. Check invariants:
    - No PHP error/warning/exception from parsing or matching, ever.
    - Parse result (instance vs `null`) matches the bucket's expectation.
    - Anything the compound grammar parses, the complex grammar parses, and

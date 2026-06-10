@@ -2,9 +2,14 @@
 namespace CssSelectorFuzz;
 
 /**
- * Independent implementation of the supported CSS selector semantics,
- * operating on the document model produced by DocumentGenerator and the
- * canonical selector AST.
+ * Independent implementation of the supported CSS selector semantics.
+ *
+ * Operates on flat element "rows" in visit order — either derived from the
+ * generated document model or captured from the processor itself
+ * ( TreeCapture ). Each row carries the element's tag, attributes, and
+ * ( for the html processor view ) its nearest-first ancestor tag list,
+ * which is all the supported grammar can observe: context selectors are
+ * type-only.
  *
  * Semantics follow the CSS Selectors Level 4 specification:
  *  - Tag names match ASCII case-insensitively (HTML documents).
@@ -24,19 +29,18 @@ class ReferenceMatcher {
 	const WHITESPACE = " \t\r\n\f";
 
 	/**
-	 * Expected match list for WP_HTML_Processor::select() over a full document.
+	 * Expected match list for WP_HTML_Processor::select().
 	 *
 	 * @param array $list_ast Canonical complex selector list AST.
-	 * @param array $model    Root element model ( the `html` element ).
+	 * @param array $rows     Element rows in visit order, with ancestorTags.
 	 * @param bool  $quirks   Whether the document parses in quirks mode.
-	 * @return string[] data-fid values in document order.
+	 * @return string[] data-fid values in visit order.
 	 */
-	public static function expected_html_processor_matches( array $list_ast, array $model, bool $quirks ): array {
+	public static function expected_html_matches_rows( array $list_ast, array $rows, bool $quirks ): array {
 		$out = array();
-		foreach ( DocumentGenerator::flatten_with_ancestors( $model ) as $pair ) {
-			list( $element, $ancestors ) = $pair;
-			if ( self::list_matches( $list_ast, $element, $ancestors, $quirks ) ) {
-				$out[] = $element['fid'];
+		foreach ( $rows as $row ) {
+			if ( self::list_matches_row( $list_ast, $row, $quirks ) ) {
+				$out[] = $row['fid'];
 			}
 		}
 		return $out;
@@ -48,37 +52,46 @@ class ReferenceMatcher {
 	 * compound selector list never inspects ancestors.
 	 *
 	 * @param array $list_ast Canonical complex selector list AST ( contexts must be empty ).
-	 * @param array $model    Root element model.
-	 * @return string[] data-fid values in document order.
+	 * @param array $rows     Tag-view element rows in token order.
+	 * @return string[] data-fid values in token order.
 	 */
-	public static function expected_tag_processor_matches( array $list_ast, array $model ): array {
+	public static function expected_tag_matches_rows( array $list_ast, array $rows ): array {
 		$out = array();
-		foreach ( DocumentGenerator::flatten( $model ) as $element ) {
-			if ( self::list_matches( $list_ast, $element, array(), false ) ) {
-				$out[] = $element['fid'];
+		foreach ( $rows as $row ) {
+			$matched = false;
+			foreach ( $list_ast as $complex ) {
+				if ( self::compound_matches( $complex['self'], $row, false ) ) {
+					$matched = true;
+					break;
+				}
+			}
+			if ( $matched ) {
+				$out[] = $row['fid'];
 			}
 		}
 		return $out;
 	}
 
-	public static function list_matches( array $list_ast, array $element, array $ancestors, bool $quirks ): bool {
+	/** Back-compat: expected html-processor matches from a generated model. */
+	public static function expected_html_processor_matches( array $list_ast, array $model, bool $quirks ): array {
+		return self::expected_html_matches_rows( $list_ast, DocumentGenerator::rows_from_model( $model ), $quirks );
+	}
+
+	/** Back-compat: expected tag-processor matches from a generated model. */
+	public static function expected_tag_processor_matches( array $list_ast, array $model ): array {
+		return self::expected_tag_matches_rows( $list_ast, DocumentGenerator::rows_from_model( $model ) );
+	}
+
+	public static function list_matches_row( array $list_ast, array $row, bool $quirks ): bool {
 		foreach ( $list_ast as $complex ) {
-			if ( self::complex_matches( $complex, $element, $ancestors, $quirks ) ) {
+			if (
+				self::compound_matches( $complex['self'], $row, $quirks ) &&
+				self::explore_context( $complex['context'], $row['ancestorTags'] )
+			) {
 				return true;
 			}
 		}
 		return false;
-	}
-
-	private static function complex_matches( array $complex, array $element, array $ancestors, bool $quirks ): bool {
-		if ( ! self::compound_matches( $complex['self'], $element, $quirks ) ) {
-			return false;
-		}
-		$ancestor_tags = array();
-		foreach ( $ancestors as $ancestor ) {
-			$ancestor_tags[] = $ancestor['tag'];
-		}
-		return self::explore_context( $complex['context'], $ancestor_tags );
 	}
 
 	/**
@@ -114,12 +127,12 @@ class ReferenceMatcher {
 		return false;
 	}
 
-	public static function compound_matches( array $compound, array $element, bool $quirks ): bool {
-		if ( null !== $compound['type'] && ! self::type_matches( $compound['type'], $element['tag'] ) ) {
+	public static function compound_matches( array $compound, array $row, bool $quirks ): bool {
+		if ( null !== $compound['type'] && ! self::type_matches( $compound['type'], $row['tag'] ) ) {
 			return false;
 		}
 		foreach ( (array) $compound['subs'] as $sub ) {
-			if ( ! self::sub_matches( $sub, $element, $quirks ) ) {
+			if ( ! self::sub_matches( $sub, $row, $quirks ) ) {
 				return false;
 			}
 		}
@@ -130,20 +143,20 @@ class ReferenceMatcher {
 		return '*' === $type || ascii_strtolower( $type ) === ascii_strtolower( $tag );
 	}
 
-	private static function sub_matches( array $sub, array $element, bool $quirks ): bool {
+	private static function sub_matches( array $sub, array $row, bool $quirks ): bool {
 		switch ( $sub['kind'] ) {
 			case 'class':
-				return self::class_matches( $sub['name'], $element, $quirks );
+				return self::class_matches( $sub['name'], $row, $quirks );
 			case 'id':
-				return self::id_matches( $sub['name'], $element, $quirks );
+				return self::id_matches( $sub['name'], $row, $quirks );
 			case 'attr':
-				return self::attr_matches( $sub, $element );
+				return self::attr_matches( $sub, $row );
 		}
 		return false;
 	}
 
-	private static function class_matches( string $wanted, array $element, bool $quirks ): bool {
-		$class_value = DocumentGenerator::get_attribute_value( $element, 'class' );
+	private static function class_matches( string $wanted, array $row, bool $quirks ): bool {
+		$class_value = DocumentGenerator::get_attribute_value( $row, 'class' );
 		if ( ! is_string( $class_value ) ) {
 			return false;
 		}
@@ -170,8 +183,8 @@ class ReferenceMatcher {
 		return false;
 	}
 
-	private static function id_matches( string $wanted, array $element, bool $quirks ): bool {
-		$id = DocumentGenerator::get_attribute_value( $element, 'id' );
+	private static function id_matches( string $wanted, array $row, bool $quirks ): bool {
+		$id = DocumentGenerator::get_attribute_value( $row, 'id' );
 		if ( ! is_string( $id ) ) {
 			return false;
 		}
@@ -180,8 +193,8 @@ class ReferenceMatcher {
 			: $id === $wanted;
 	}
 
-	private static function attr_matches( array $sub, array $element ): bool {
-		$attr_value = DocumentGenerator::get_attribute_value( $element, $sub['name'] );
+	private static function attr_matches( array $sub, array $row ): bool {
+		$attr_value = DocumentGenerator::get_attribute_value( $row, $sub['name'] );
 		if ( null === $attr_value ) {
 			return false;
 		}

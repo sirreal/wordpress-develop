@@ -58,7 +58,8 @@ class SelectorGenerator {
 
 	/**
 	 * @param array      $pools Pools from DocumentGenerator ( tags, classes, ids, attrNames, attrValues ).
-	 * @param array|null $model Root element model; enables the path-directed bucket.
+	 * @param array|null $rows  Element rows ( TreeCapture shape ) with real
+	 *                          fids; enables the path-directed bucket.
 	 * @return array{
 	 *     bucket: string,
 	 *     selector: string,
@@ -69,12 +70,12 @@ class SelectorGenerator {
 	 *     mustNotMatchFid: string|null,
 	 * }
 	 */
-	public static function generate( Prng $prng, array $pools, ?array $model = null, ?string $bucket = null ): array {
+	public static function generate( Prng $prng, array $pools, ?array $rows = null, ?string $bucket = null ): array {
 		$generator = new self( $prng, $pools );
 
 		if ( null === $bucket ) {
 			$bucket = $prng->weighted(
-				null === $model
+				null === $rows || array() === $rows
 					? array(
 						'supported-compound' => 30,
 						'supported-complex'  => 25,
@@ -95,7 +96,7 @@ class SelectorGenerator {
 			);
 		}
 
-		if ( 'path-directed' === $bucket && null === $model ) {
+		if ( 'path-directed' === $bucket && ( null === $rows || array() === $rows ) ) {
 			$bucket = 'supported-complex';
 		}
 
@@ -121,7 +122,7 @@ class SelectorGenerator {
 				);
 
 			case 'path-directed':
-				return $generator->gen_path_directed( $model );
+				return $generator->gen_path_directed( $rows );
 
 			case 'unsupported':
 				return array(
@@ -434,26 +435,21 @@ class SelectorGenerator {
 	 * the element ( or, for combinator loosening, still guaranteed to ).
 	 */
 
-	private function gen_path_directed( array $model ): array {
-		$pairs = DocumentGenerator::flatten_with_ancestors( $model );
-
+	private function gen_path_directed( array $rows ): array {
 		// Bias toward elements deep enough for a meaningful context chain.
 		$deep = array();
-		foreach ( $pairs as $pair ) {
-			if ( count( $pair[1] ) >= 2 ) {
-				$deep[] = $pair;
+		foreach ( $rows as $row ) {
+			if ( count( $row['ancestorTags'] ) >= 2 ) {
+				$deep[] = $row;
 			}
 		}
-		if ( array() !== $deep && $this->prng->chance( 75 ) ) {
-			$pair = $this->prng->choice( $deep );
-		} else {
-			$pair = $this->prng->choice( $pairs );
-		}
-		list( $element, $ancestors ) = $pair;
+		$element = array() !== $deep && $this->prng->chance( 75 )
+			? $this->prng->choice( $deep )
+			: $this->prng->choice( $rows );
 
 		$compound = $this->path_compound_for( $element );
-		$context  = array() !== $ancestors && $this->prng->chance( 75 )
-			? $this->path_context_for( $ancestors )
+		$context  = array() !== $element['ancestorTags'] && $this->prng->chance( 75 )
+			? $this->path_context_for( $element['ancestorTags'] )
 			: array();
 
 		$list = array(
@@ -492,7 +488,7 @@ class SelectorGenerator {
 		);
 	}
 
-	/** A compound selector built only from features the element really has. */
+	/** A compound selector built only from features the element row really has. */
 	private function path_compound_for( array $element ): array {
 		$tag = ascii_strtolower( $element['tag'] );
 
@@ -513,7 +509,7 @@ class SelectorGenerator {
 		$seen_attrs = array();
 		foreach ( $element['attrs'] as $attr ) {
 			$lower = ascii_strtolower( $attr[0] );
-			if ( isset( $seen_attrs[ $lower ] ) || 'data-fid' === $lower ) {
+			if ( isset( $seen_attrs[ $lower ] ) ) {
 				continue;
 			}
 			$seen_attrs[ $lower ] = true;
@@ -629,19 +625,19 @@ class SelectorGenerator {
 	 * `>` is only used for the immediately-next ancestor, descendant
 	 * combinators may skip generations.
 	 *
-	 * @param array $ancestors Nearest-first ancestor elements.
+	 * @param string[] $ancestor_tags Nearest-first ancestor tag names.
 	 */
-	private function path_context_for( array $ancestors ): array {
+	private function path_context_for( array $ancestor_tags ): array {
 		$chain = array();
 		$pos   = 0;
-		$count = count( $ancestors );
+		$count = count( $ancestor_tags );
 
 		while ( $pos < $count && ( array() === $chain || $this->prng->chance( 45 ) ) ) {
 			$jump = $this->prng->chance( 65 ) ? 0 : $this->prng->int( 0, $count - 1 - $pos );
 			$at   = $pos + $jump;
 
 			$combinator = ( 0 === $jump && $this->prng->chance( 55 ) ) ? '>' : ' ';
-			$tag        = ascii_strtolower( $ancestors[ $at ]['tag'] );
+			$tag        = ascii_strtolower( $ancestor_tags[ $at ] );
 			$type       = $this->prng->chance( 12 )
 				? '*'
 				: ( $this->prng->chance( 25 ) ? $this->random_case( $tag ) : $tag );

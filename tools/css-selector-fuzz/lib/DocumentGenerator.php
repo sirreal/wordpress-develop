@@ -437,6 +437,43 @@ class DocumentGenerator {
 		return $out;
 	}
 
+	/**
+	 * Flat element rows ( the TreeCapture row shape ) derived from a model:
+	 * pre-order, tags uppercased, attribute names lowercased with the first
+	 * of duplicates winning — directly comparable to a TreeCapture of the
+	 * rendered document.
+	 */
+	public static function rows_from_model( array $model ): array {
+		$rows = array();
+		foreach ( self::flatten_with_ancestors( $model ) as $pair ) {
+			list( $element, $ancestors ) = $pair;
+
+			$attrs = array();
+			$seen  = array();
+			foreach ( $element['attrs'] as $attr ) {
+				$lower = ascii_strtolower( $attr[0] );
+				if ( isset( $seen[ $lower ] ) ) {
+					continue;
+				}
+				$seen[ $lower ] = true;
+				$attrs[]        = array( $lower, $attr[1] );
+			}
+
+			$ancestor_tags = array();
+			foreach ( $ancestors as $ancestor ) {
+				$ancestor_tags[] = strtoupper( ascii_strtolower( $ancestor['tag'] ) );
+			}
+
+			$rows[] = array(
+				'tag'          => strtoupper( ascii_strtolower( $element['tag'] ) ),
+				'fid'          => $element['fid'],
+				'attrs'        => $attrs,
+				'ancestorTags' => $ancestor_tags,
+			);
+		}
+		return $rows;
+	}
+
 	/** First attribute value for a name, ASCII case-insensitive; null if absent. */
 	public static function get_attribute_value( array $element, string $name ) {
 		$comparable = ascii_strtolower( $name );
