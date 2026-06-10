@@ -63,20 +63,31 @@ php tools/html-api-fuzz/stop.php --run-dir artifacts/html-api-fuzz/run-...
 ```
 
 Without `--run-dir` the most recently active *unfinished* run under
-`artifacts/html-api-fuzz` is targeted (finished runs are skipped, with a
-warning if nothing live is found). The script only creates `RUN_DIR/STOP`;
-`touch` works just as well. A standalone runner watches `OUTPUT_DIR/STOP`
-(override with `--stop-file PATH`). The launcher and runner refuse to start
-while a stop file already exists — remove `STOP` before reusing a run
+`artifacts/html-api-fuzz` is targeted. Finished and stale runs are not
+preferred; if nothing live is found, the most recent stopped-looking run is
+targeted with a warning. The script creates the stop file advertised by the
+run state and also `RUN_DIR/STOP` when a run directory is known, so watchers
+and orchestrators see the stop request. For a standalone runner with custom
+`--stop-file PATH`, both files are written. Relative custom stop files are
+resolved with the runner cwd recorded in new runner state; for older state,
+pass only `--stop-file PATH` to write a known stop file directly if needed.
+With `--run-dir --stop-file PATH`, the explicit path is added to the run-state
+and `RUN_DIR/STOP` targets. `touch` works just as well. The launcher and runner refuse to start while a stop file already
+exists — remove `STOP` (or the custom stop file) before reusing a run
 directory. (A stop requested in the sub-second window between the launcher's
 startup check and a lane's own makes that lane refuse rather than stop
 gracefully; the run still ends.)
+If state cannot be read or old state lacks enough context to locate a relative
+custom stop file, the tool still writes `RUN_DIR/STOP` but exits `2` with
+`ok: false` and warnings because a standalone custom stop file may be unknown.
 
 The watcher exits after a final scan once every runner under the run
 directory reports a stop reason. A runner whose state has gone silent is
 presumed dead after `--stop-stale-seconds` (default 120); per lane that
 threshold is floored at twice the lane's advertised batch budget
 (`timeout-ms × batch-size`), so long batches are not mistaken for crashes.
+The stop tool uses the same default stale threshold when auto-selecting the
+latest unfinished run.
 
 Replay a failure from a retained seed directory, or from the lane's SQLite
 store when the seed directory was pruned (see "Artifact Retention"):

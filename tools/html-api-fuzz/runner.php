@@ -75,6 +75,10 @@ $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', fals
 $max_keep_per_signature = \HtmlApiFuzz\option_int( $options, 'max-keep-per-signature', 5 );
 $keep_all_artifacts     = \HtmlApiFuzz\option_bool( $options, 'keep-all-artifacts', false );
 $stop_file              = \HtmlApiFuzz\option_string( $options, 'stop-file', $output_dir . '/STOP' );
+if ( array_key_exists( 'stop-file', $options ) && ( true === $options['stop-file'] || null === $stop_file || '' === $stop_file ) ) {
+	fwrite( STDERR, "Expected --stop-file to be a non-empty path.\n" );
+	exit( 1 );
+}
 html_api_fuzz_runner_validate_generator_options( $profile, $mode, $payload_policy );
 html_api_fuzz_runner_validate_runtime_options( $seed_stride, $max_seeds, $duration_seconds, $timeout_ms, $max_input_bytes, $max_tokens, $max_nodes, $max_keep_per_signature );
 
@@ -101,6 +105,7 @@ $state = array(
 	'startedAt'     => gmdate( 'c' ),
 	'updatedAt'     => gmdate( 'c' ),
 	'outputDir'     => $output_dir,
+	'cwd'           => getcwd() ?: null,
 	'startSeed'     => $start_seed,
 	'seedStride'    => $seed_stride,
 	'nextSeed'      => $start_seed,
