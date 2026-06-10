@@ -2945,15 +2945,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
 							$is_current_node = $item === $this->state->stack_of_open_elements->current_node();
-							if ( $this->state->stack_of_open_elements->remove_node( $item ) && ! $is_current_node ) {
-								$breadcrumb_depth = count( $this->breadcrumbs );
-								while ( 0 < $breadcrumb_depth && $this->breadcrumbs[ $breadcrumb_depth - 1 ] !== $item->node_name ) {
-									--$breadcrumb_depth;
-								}
 
+							/*
+							 * The removed node's breadcrumb sits at its position in the
+							 * stack of open elements: one crumb for each open element at
+							 * or below it. Fragment parsers carry an extra crumb for the
+							 * context node, which never appears on the stack.
+							 */
+							$stack_position = 0;
+							foreach ( $this->state->stack_of_open_elements->walk_down() as $node ) {
+								++$stack_position;
+								if ( $node === $item ) {
+									break;
+								}
+							}
+
+							if ( $this->state->stack_of_open_elements->remove_node( $item ) && ! $is_current_node ) {
 								$this->non_lifo_breadcrumb_removals[] = array(
 									'token'            => $item,
-									'breadcrumb_depth' => $breadcrumb_depth,
+									'breadcrumb_depth' => isset( $this->context_node ) ? $stack_position + 1 : $stack_position,
 								);
 							}
 							break 2;

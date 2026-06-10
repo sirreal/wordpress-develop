@@ -493,6 +493,51 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that a removed outer A element's breadcrumb is not confused with
+	 * a same-named foreign element between it and the integration point.
+	 *
+	 * Foreign A elements never participate in the active formatting elements,
+	 * so the removed node is the outer HTML A element, not the foreign one.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::matches_breadcrumbs
+	 *
+	 * @dataProvider data_intervening_foreign_anchor_html
+	 *
+	 * @param string $html HTML with a foreign A element between the removed outer A element and the integration point.
+	 */
+	public function test_removes_outer_anchor_breadcrumb_with_intervening_foreign_anchor( string $html ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+
+		$this->assertTrue( $processor->next_tag( 'SPAN' ), 'Failed to find the SPAN element after the foreign subtree.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'SPAN' ),
+			$processor->get_breadcrumbs(),
+			'The SPAN element after the foreign subtree should not remain nested inside the removed outer A element.'
+		);
+
+		$this->assertFalse(
+			$processor->matches_breadcrumbs( array( 'A', 'SPAN' ) ),
+			'The SPAN element should not match breadcrumbs inside the removed outer A element.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_intervening_foreign_anchor_html() {
+		return array(
+			'MathML A before text integration point' => array( '<a><math><a><mtext>x<a>y</a></mtext></a></math>z<span>t' ),
+			'SVG A before integration point'         => array( '<a><svg><a><foreignObject>x<a>y</a></foreignObject></a></svg>z<span>t' ),
+		);
+	}
+
+	/**
 	 * Ensures that an outer A element removed from the stack of open elements
 	 * remains visitable as a virtual closer after its existing child subtree closes.
 	 *
