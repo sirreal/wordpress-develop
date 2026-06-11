@@ -7,6 +7,7 @@ const treeIndent = "  ";
 const supportedFragmentContexts = new Set([
 	"body",
 	"div",
+	"head",
 	"html",
 	"math math",
 	"math mi",
