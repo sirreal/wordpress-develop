@@ -19,6 +19,10 @@ namespace EncodingFuzz;
  *   ENCODING_FUZZ_FAULT=span-invalid-bytes code point span counts invalid bytes individually
  *   ENCODING_FUZZ_FAULT=span-found-max     code point span over-reports found_code_points
  *   ENCODING_FUZZ_FAULT=span-found-stale   code point span leaves found_code_points stale
+ *   ENCODING_FUZZ_FAULT=substr-byte-level   substr treats UTF-8 offsets as byte offsets
+ *   ENCODING_FUZZ_FAULT=substr-scrub        substr slices scrubbed invalid input
+ *   ENCODING_FUZZ_FAULT=substr-no-neg-len   substr ignores negative lengths
+ *   ENCODING_FUZZ_FAULT=substr-force-utf8   substr ignores non-UTF-8 byte fallback
  */
 class Targets {
 	/**
@@ -38,6 +42,7 @@ class Targets {
 			'mb_chr'          => '_mb_chr',
 			'mb_ord'          => '_mb_ord',
 			'codepoint_span'  => '_wp_utf8_codepoint_span',
+			'mb_substr'       => '_mb_substr',
 		);
 
 		switch ( getenv( 'ENCODING_FUZZ_FAULT' ) ) {
@@ -87,6 +92,22 @@ class Targets {
 
 			case 'span-found-stale':
 				$targets['codepoint_span'] = self::codepoint_span_stale_empty_found( ... );
+				break;
+
+			case 'substr-byte-level':
+				$targets['mb_substr'] = self::mb_substr_byte_level( ... );
+				break;
+
+			case 'substr-scrub':
+				$targets['mb_substr'] = self::mb_substr_scrub_invalid( ... );
+				break;
+
+			case 'substr-no-neg-len':
+				$targets['mb_substr'] = self::mb_substr_no_negative_length( ... );
+				break;
+
+			case 'substr-force-utf8':
+				$targets['mb_substr'] = self::mb_substr_force_utf8( ... );
 				break;
 		}
 
@@ -197,5 +218,39 @@ class Targets {
 		}
 
 		return $span;
+	}
+
+	/**
+	 * Deliberately broken substring: treats character offsets as byte offsets.
+	 */
+	public static function mb_substr_byte_level( $str, $start, $length = null, $encoding = null ) {
+		return is_null( $length ) ? substr( $str, $start ) : substr( $str, $start, $length );
+	}
+
+	/**
+	 * Deliberately broken substring: slices scrubbed UTF-8, masking that
+	 * `_mb_substr()` is expected to preserve original invalid bytes.
+	 */
+	public static function mb_substr_scrub_invalid( $str, $start, $length = null, $encoding = null ) {
+		if ( _is_utf8_charset( $encoding ?? get_option( 'blog_charset' ) ) ) {
+			$str = wp_scrub_utf8( $str );
+		}
+
+		return _mb_substr( $str, $start, $length, $encoding );
+	}
+
+	/**
+	 * Deliberately broken substring: handles negative lengths as "to the end".
+	 */
+	public static function mb_substr_no_negative_length( $str, $start, $length = null, $encoding = null ) {
+		return _mb_substr( $str, $start, is_int( $length ) && $length < 0 ? null : $length, $encoding );
+	}
+
+	/**
+	 * Deliberately broken substring: runs the UTF-8 path even for explicit
+	 * non-UTF-8 encodings, instead of falling back to byte-level `substr()`.
+	 */
+	public static function mb_substr_force_utf8( $str, $start, $length = null, $encoding = null ) {
+		return _mb_substr( $str, $start, $length, _is_utf8_charset( $encoding ?? get_option( 'blog_charset' ) ) ? $encoding : 'UTF-8' );
 	}
 }

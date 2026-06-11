@@ -14,3 +14,9 @@ if ( ! function_exists( '_wp_can_use_pcre_u' ) ) {
 		return (bool) $utf8_pcre;
 	}
 }
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( $option, $default_value = false ) {
+		return 'blog_charset' === $option ? 'UTF-8' : $default_value;
+	}
+}

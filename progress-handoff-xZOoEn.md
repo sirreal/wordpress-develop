@@ -31,3 +31,27 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-xZOoEn
   - Reviewer 2: satisfied after checking mutation adequacy, replay/minimize fault behavior, and the README clarification.
   - Reviewer 3: initially found the stale `found_code_points` gap; satisfied after the sentinel and stale-count mutation were added.
 - Commit: this step commit.
+
+### Step 2: `_mb_substr()` property coverage
+
+- Status: done; included in the step 2 commit.
+- Prior step commit: `6ea247f9da`.
+- Scope:
+  - Load `_mb_substr()` and its `_is_utf8_charset()` dependency into the fuzzer bootstrap.
+  - Add UTF-8 substring properties over valid and arbitrary input.
+  - Pin current invalid-input semantics: invalid maximal subparts count as one code point, but the returned substring preserves the original bytes rather than returning scrubbed text.
+  - Add explicit non-UTF-8 encoding fallback checks against byte-level `substr()`.
+  - Add mutation tests for byte-offset slicing, scrubbed-input slicing, negative length handling, and non-UTF-8 fallback drift.
+- Verification:
+  - `php -l tools/encoding-fuzz/lib/Checks.php`
+  - `php -l tools/encoding-fuzz/lib/Targets.php`
+  - `php -l tools/encoding-fuzz/lib/Bootstrap.php`
+  - `php -l tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/worker.php --seed 1 --cases 200 --external none`
+  - `git diff --check`
+- Review gate: satisfied by 3 adversarial reviewers.
+  - Reviewer 1: satisfied after checking invalid-input expected substrings, negative start/length semantics, and valid native `mb_substr()` comparison.
+  - Reviewer 2: satisfied after checking mutation adequacy and faulted worker/replay/minimize behavior.
+  - Reviewer 3: satisfied after checking bootstrap/stub wiring, edge coverage, performance, and docs/progress accuracy.
+- Commit: this step commit.

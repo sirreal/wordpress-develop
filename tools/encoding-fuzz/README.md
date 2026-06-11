@@ -7,13 +7,15 @@ Differential fuzzer for the WordPress UTF-8 functions:
 - `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
 - `wp_has_noncharacters()` / `_wp_has_noncharacters_fallback()` (valid input only)
 - `_mb_chr()` / `_mb_ord()`
+- `_mb_substr()`
 - `_wp_utf8_codepoint_count()`, `_wp_utf8_codepoint_span()`, and the
   resumable `_wp_scan_utf8()` paths (secondary)
 
 The pure-PHP fallbacks in `src/wp-includes/compat-utf8.php` are the main
 fuzz surface; the mbstring-backed public functions are checked alongside
-them. Only `compat-utf8.php` and `utf8.php` are loaded — no WordPress
-bootstrap, database, or `wp-env`.
+them. The harness loads `compat-utf8.php`, `utf8.php`, and selected private
+UTF-8 helpers extracted from `compat.php` — no WordPress bootstrap,
+database, or `wp-env`.
 
 ## Oracles
 
@@ -127,6 +129,10 @@ Internal invariants:
 - `_mb_ord( _mb_chr( $cp ) ) === $cp` for valid scalar values, and
   `_mb_chr( _mb_ord( $s ) )` reconstructs the first UTF-8 character in
   `$s` when it is well-formed
+- `_mb_substr()` in UTF-8 mode preserves original bytes while treating each
+  invalid maximal subpart as one code point; on valid input it also agrees
+  with native `mb_substr()`, and explicit non-UTF-8 encodings fall back to
+  byte-level `substr()` semantics
 
 ## Inputs
 
@@ -200,7 +206,7 @@ php tools/encoding-fuzz/tests/harness-smoke.php
 ```
 
 Verifies the oracle battery, runs the real targets over the battery
-vectors, and — most importantly — mutation-tests the harness: twenty-three
+vectors, and — most importantly — mutation-tests the harness: twenty-seven
 classes of deliberately broken implementations (validator accepting
 0xC0, validator rejecting noncharacters, non-maximal-subpart scrubber,
 identity scrubber, byte-dropping scrubber, off-by-one code point count,
@@ -210,13 +216,15 @@ null-returning encoder, sometimes-null decoder, blind noncharacter
 detector, U+FDD0-block-missing detector, over-eager noncharacter
 detector, cp1252-confused `_mb_chr()`, invalid-accepting `_mb_ord()`,
 off-by-one code point span, invalid-subpart byte-counted span, and
-wrong or stale `found_code_points` span)
+wrong or stale `found_code_points` span, byte-offset `_mb_substr()`,
+scrubbed-input `_mb_substr()`, negative-length `_mb_substr()`, and
+non-UTF-8 fallback drift)
 must all be caught. It also asserts generator determinism, the
 valid/invalid input mix, and the documented
 `wp_has_noncharacters()` divergence stance on ill-formed input.
 
 For end-to-end pipeline testing while the real implementations are
-healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale`
+healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale|substr-byte-level|substr-scrub|substr-no-neg-len|substr-force-utf8`
 injects a broken target into worker, replay, and minimize alike.
 Fault-injected artifacts record the fault name in their environment
 metadata so they cannot be mistaken for real findings. Replaying or

@@ -4,7 +4,7 @@ namespace EncodingFuzz;
 /**
  * Loads the WordPress UTF-8 functions under test into a bare PHP process.
  *
- * Only the UTF-8 files under test are loaded. `_mb_chr()` and `_mb_ord()`
+ * Only the UTF-8 files under test are loaded. A few private UTF-8 helpers
  * live in `compat.php`, so their function bodies are extracted from that
  * source file without loading the rest of WordPress compatibility glue.
  */
@@ -21,7 +21,7 @@ class Bootstrap {
 		$root = self::repo_root();
 		require_once __DIR__ . '/wp-stubs.php';
 		require_once $root . '/src/wp-includes/compat-utf8.php';
-		self::load_compat_functions( $root . '/src/wp-includes/compat.php', array( '_mb_chr', '_mb_ord' ) );
+		self::load_compat_functions( $root . '/src/wp-includes/compat.php', array( '_is_utf8_charset', '_mb_chr', '_mb_ord', '_mb_substr' ) );
 		require_once $root . '/src/wp-includes/utf8.php';
 
 		/*

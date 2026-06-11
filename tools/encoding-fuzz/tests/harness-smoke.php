@@ -107,6 +107,7 @@ $real_targets = array(
 	'mb_chr'          => '_mb_chr',
 	'mb_ord'          => '_mb_ord',
 	'codepoint_span'  => '_wp_utf8_codepoint_span',
+	'mb_substr'       => '_mb_substr',
 );
 
 /**
@@ -282,6 +283,30 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_span' => Targets::codepoint_span_stale_empty_found( ... ),
 ) );
 check( 'catches stale empty code point span found count', in_array( 'codepoint-span-found-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3x. UTF-8 substring that treats character offsets as byte offsets.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_substr' => Targets::mb_substr_byte_level( ... ),
+) );
+check( 'catches byte-offset _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3y. UTF-8 substring that slices scrubbed text, losing original invalid bytes.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_substr' => Targets::mb_substr_scrub_invalid( ... ),
+) );
+check( 'catches scrubbed-input _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3z. UTF-8 substring that ignores negative length semantics.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_substr' => Targets::mb_substr_no_negative_length( ... ),
+) );
+check( 'catches negative-length _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3aa. Non-UTF-8 substring must fall back to byte-level substr().
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_substr' => Targets::mb_substr_force_utf8( ... ),
+) );
+check( 'catches non-UTF-8 _mb_substr fallback drift', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.

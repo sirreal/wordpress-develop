@@ -48,6 +48,10 @@ namespace EncodingFuzz;
  *  - `_mb_ord( _mb_chr( cp ) ) === cp` and
  *    `_mb_chr( _mb_ord( s ) ) === first UTF-8 character in s` where
  *    those expressions are defined.
+ *  - `_mb_substr()` preserves original bytes while using UTF-8
+ *    code-point/maximal-subpart offsets; on valid input it agrees with
+ *    native `mb_substr()`, and for non-UTF-8 encodings it agrees with
+ *    byte-level `substr()`.
  *
  * Target callables are injectable so the harness smoke test can verify
  * that deliberately broken implementations are caught.
@@ -306,7 +310,12 @@ class Checks {
 			$failures[] = $failure;
 		}
 
-		// 11. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
+		// 11. _mb_substr() UTF-8 and byte-fallback properties.
+		foreach ( $this->check_mb_substr( $input, $ref_valid, $ref_scrub ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		// 12. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
 		foreach ( $this->check_mb_chr_ord( $input ) as $failure ) {
 			$failures[] = $failure;
 		}
@@ -467,6 +476,145 @@ class Checks {
 					'span'            => $actual_span,
 					'input_preview'   => self::preview( $input, $byte_offset ),
 				)
+			);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Tests `_mb_substr()` against the semantics currently implemented by
+	 * `compat.php`: UTF-8 mode computes character offsets by treating each
+	 * invalid maximal subpart as one code point, then returns the original
+	 * bytes in the selected range. It does not slice scrubbed text.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_mb_substr( string $input, bool $ref_valid, string $ref_scrub ): array {
+		if ( ! isset( $this->targets['mb_substr'] ) ) {
+			return array();
+		}
+
+		$failures = array();
+
+		list( $offsets, $reference_scrub ) = self::reference_utf8_offsets_and_scrub( $input );
+		if ( $reference_scrub !== $ref_scrub ) {
+			return array(
+				self::failure(
+					'substr-reference-disagreement',
+					'maximal-subpart-reference',
+					self::diff_detail( 'maximal-subpart-reference', $ref_scrub, $reference_scrub )
+				),
+			);
+		}
+
+		$code_points = count( $offsets ) - 1;
+		$encodings   = array( 'UTF-8', 'utf8', null );
+		foreach ( self::mb_substr_probes( $code_points, $input . ':utf8' ) as $i => $probe ) {
+			list( $start, $length ) = $probe;
+			$encoding              = $encodings[ $i % count( $encodings ) ];
+			$expected              = self::expected_mb_substr_from_offsets( $input, $offsets, $start, $length );
+
+			$failure = $this->assert_mb_substr(
+				$input,
+				$start,
+				$length,
+				$encoding,
+				$expected,
+				'utf8-maximal-subpart'
+			);
+
+			if ( null !== $failure ) {
+				$failures[] = $failure;
+			}
+		}
+
+		if ( $ref_valid && function_exists( 'mb_substr' ) ) {
+			foreach ( self::mb_substr_probes( $code_points, $input . ':native' ) as $probe ) {
+				list( $start, $length ) = $probe;
+				$expected              = mb_substr( $input, $start, $length, 'UTF-8' );
+
+				$failure = $this->assert_mb_substr(
+					$input,
+					$start,
+					$length,
+					'UTF-8',
+					$expected,
+					'valid-native-mb-substr'
+				);
+
+				if ( null !== $failure ) {
+					$failures[] = $failure;
+				}
+			}
+		}
+
+		$byte_encodings = array( 'ISO-8859-1', 'latin1', 'Windows-1252', 'UTF 8' );
+		foreach ( array_slice( self::mb_substr_probes( strlen( $input ), $input . ':bytes' ), 0, 18 ) as $i => $probe ) {
+			list( $start, $length ) = $probe;
+			$encoding              = $byte_encodings[ $i % count( $byte_encodings ) ];
+			$expected              = is_null( $length ) ? substr( $input, $start ) : substr( $input, $start, $length );
+
+			$failure = $this->assert_mb_substr(
+				$input,
+				$start,
+				$length,
+				$encoding,
+				$expected,
+				'non-utf8-byte-substr'
+			);
+
+			if ( null !== $failure ) {
+				$failures[] = $failure;
+			}
+		}
+
+		return $failures;
+	}
+
+	private function assert_mb_substr( string $input, int $start, ?int $length, ?string $encoding, string $expected, string $property ): ?array {
+		try {
+			$actual = ( $this->targets['mb_substr'] )( $input, $start, $length, $encoding );
+		} catch ( \Throwable $error ) {
+			return self::failure(
+				'target-exception',
+				'mb_substr',
+				array(
+					'target'   => 'mb_substr',
+					'property' => $property,
+					'start'    => $start,
+					'length'   => $length,
+					'encoding' => $encoding,
+					'message'  => $error->getMessage(),
+					'class'    => get_class( $error ),
+				)
+			);
+		}
+
+		if ( ! is_string( $actual ) ) {
+			return self::failure(
+				'mb-substr-bad-return',
+				'mb_substr',
+				array(
+					'property' => $property,
+					'start'    => $start,
+					'length'   => $length,
+					'encoding' => $encoding,
+					'type'     => get_debug_type( $actual ),
+				)
+			);
+		}
+
+		if ( $actual !== $expected ) {
+			return self::failure(
+				'mb-substr-mismatch',
+				'mb_substr',
+				array(
+					'property' => $property,
+					'start'    => $start,
+					'length'   => $length,
+					'encoding' => $encoding,
+				) + self::diff_detail( 'mb_substr', $expected, $actual )
 			);
 		}
 
@@ -1166,6 +1314,78 @@ class Checks {
 
 		sort( $counts );
 		return array_values( array_unique( $counts ) );
+	}
+
+	/**
+	 * @return array<int, array{0: int, 1: int|null}> Start/length probes.
+	 */
+	private static function mb_substr_probes( int $code_points, string $salt ): array {
+		$mid  = intdiv( $code_points, 2 );
+		$last = max( 0, $code_points - 1 );
+
+		$probes = array(
+			array( 0, null ),
+			array( 0, 0 ),
+			array( 0, 1 ),
+			array( 1, null ),
+			array( 1, 1 ),
+			array( 2, 3 ),
+			array( $mid, 1 ),
+			array( $last, 1 ),
+			array( $code_points, 1 ),
+			array( $code_points + 1, 1 ),
+			array( -1, null ),
+			array( -1, 1 ),
+			array( -2, 1 ),
+			array( -$code_points, 2 ),
+			array( -( $code_points + 1 ), 2 ),
+			array( 0, -1 ),
+			array( 1, -1 ),
+			array( $mid, -1 ),
+			array( -2, -1 ),
+			array( 0, -$code_points ),
+			array( 1, -( $code_points + 1 ) ),
+		);
+
+		$range = max( 3, $code_points + 3 );
+		$hash  = hash( 'sha256', $salt, true );
+		for ( $i = 0; $i < 4; $i++ ) {
+			$start  = ( ord( $hash[ $i ] ) % ( ( 2 * $range ) + 1 ) ) - $range;
+			$length = ( ord( $hash[ $i + 4 ] ) % ( ( 2 * $range ) + 2 ) ) - $range;
+			if ( 0 === ord( $hash[ $i + 8 ] ) % 5 ) {
+				$length = null;
+			}
+
+			$probes[] = array( $start, $length );
+		}
+
+		$unique = array();
+		foreach ( $probes as $probe ) {
+			$unique[ json_encode( $probe ) ] = $probe;
+		}
+
+		return array_values( $unique );
+	}
+
+	/**
+	 * @param int[] $offsets Boundary offsets from `reference_utf8_offsets_and_scrub()`.
+	 */
+	private static function expected_mb_substr_from_offsets( string $input, array $offsets, int $start, ?int $length ): string {
+		$total            = count( $offsets ) - 1;
+		$normalized_start = $start < 0 ? max( 0, $total + $start ) : $start;
+		$start_index      = min( $normalized_start, $total );
+		$start_offset     = $offsets[ $start_index ];
+
+		if ( null === $length ) {
+			return substr( $input, $start_offset );
+		}
+
+		$normalized_length = $length < 0
+			? max( 0, $total - $normalized_start + $length )
+			: $length;
+		$end_index         = min( $start_index + $normalized_length, $total );
+
+		return substr( $input, $start_offset, $offsets[ $end_index ] - $start_offset );
 	}
 
 	/**
