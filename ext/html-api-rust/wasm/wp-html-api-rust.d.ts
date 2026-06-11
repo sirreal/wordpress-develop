@@ -93,6 +93,11 @@ export interface WP_HTML_Doctype_Info_Constructor {
 
 export interface WP_HTML_Unsupported_Exception {
 	message: string;
+	token_name: string;
+	token_at: number;
+	token: string;
+	stack_of_open_elements: string[];
+	active_formatting_elements: string[];
 }
 
 export interface WP_HTML_Tag_Processor {

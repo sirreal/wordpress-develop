@@ -3134,11 +3134,47 @@ export function createHtmlApi(wasm) {
 
 		#bailUnsupported(message) {
 			this.last_error = WP_HTML_Processor.ERROR_UNSUPPORTED;
-			this.unsupported_exception = { message };
+			this.unsupported_exception = this.#createUnsupportedException(message);
 			this.virtual_tokens = [];
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = true;
+		}
+
+		#createUnsupportedException(message) {
+			const span = this.is_virtual() ? null : this.#currentRealTokenSpan();
+			return {
+				message,
+				token_name: this.get_token_name() ?? "",
+				token_at: span?.start ?? 0,
+				token: this.is_virtual() ? "" : this.#currentRealTokenString(),
+				stack_of_open_elements: [...this.open_elements],
+				active_formatting_elements: this.active_formatting_elements.map((entry) => entry.tagName),
+			};
+		}
+
+		#currentRealTokenSpan() {
+			return runtime.withOutPair((startPtr, lengthPtr) => {
+				if (!wasm.wp_html_api_rust_tag_processor_current_span(this.pointer, startPtr, lengthPtr)) {
+					return null;
+				}
+				return {
+					start: runtime.readU32(startPtr),
+					length: runtime.readU32(lengthPtr),
+				};
+			});
+		}
+
+		#currentRealTokenString() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return "";
+			}
+
+			const html = runtime.readOutputBytes((out) => (
+				wasm.wp_html_api_rust_tag_processor_get_html(this.pointer, out)
+			));
+			return html === null ? "" : textDecoder.decode(html.slice(span.start, span.start + span.length));
 		}
 
 		#bailIfExceededMaxBookmarks() {

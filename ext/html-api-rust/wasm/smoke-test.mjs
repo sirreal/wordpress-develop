@@ -331,7 +331,14 @@ for (const [html, message] of [
 	const unsupportedMetaProcessor = new WP_HTML_Processor(html, { fullParser: true });
 	assert.equal(unsupportedMetaProcessor.next_tag("meta"), false);
 	assert.equal(unsupportedMetaProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(unsupportedMetaProcessor.get_unsupported_exception().message, message);
+	const exception = unsupportedMetaProcessor.get_unsupported_exception();
+	const tokenAt = html.indexOf("<meta");
+	assert.equal(exception.message, message);
+	assert.equal(exception.token_name, "META");
+	assert.equal(exception.token_at, tokenAt);
+	assert.equal(exception.token, html.slice(tokenAt));
+	assert.deepEqual(exception.stack_of_open_elements, ["HTML", "HEAD"]);
+	assert.deepEqual(exception.active_formatting_elements, []);
 	unsupportedMetaProcessor.destroy();
 }
 
