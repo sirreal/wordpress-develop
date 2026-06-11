@@ -476,6 +476,17 @@ assert.equal(svgProcessor.get_namespace(), "html");
 assert.deepEqual(svgProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 svgProcessor.destroy();
 
+const qualifiedSvgProcessor = WP_HTML_Processor.create_fragment('<svg /><svg><lineargradient gradientunits="userSpaceOnUse"></lineargradient></svg>');
+assert.equal(qualifiedSvgProcessor.next_tag("svg"), true);
+assert.equal(qualifiedSvgProcessor.get_namespace(), "svg");
+assert.equal(qualifiedSvgProcessor.get_qualified_tag_name(), "svg");
+assert.equal(qualifiedSvgProcessor.serialize_token(), "<svg />");
+assert.equal(qualifiedSvgProcessor.next_tag("lineargradient"), true);
+assert.equal(qualifiedSvgProcessor.get_namespace(), "svg");
+assert.equal(qualifiedSvgProcessor.get_qualified_tag_name(), "linearGradient");
+assert.equal(qualifiedSvgProcessor.get_qualified_attribute_name("gradientunits"), "gradientUnits");
+qualifiedSvgProcessor.destroy();
+
 const foreignObjectProcessor = WP_HTML_Processor.create_fragment("<svg><foreignObject><div></div></foreignObject></svg>");
 assert.equal(foreignObjectProcessor.next_tag("div"), true);
 assert.equal(foreignObjectProcessor.get_namespace(), "html");

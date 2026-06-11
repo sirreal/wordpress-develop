@@ -1356,6 +1356,27 @@ export function createHtmlApi(wasm) {
 			return this.current_token_namespace;
 		}
 
+		get_qualified_tag_name() {
+			const tagName = this.get_tag();
+			if (tagName === null || this.get_namespace() === "html") {
+				return tagName;
+			}
+
+			const lower = asciiLower(tagName);
+			return this.get_namespace() === "svg" ? qualifySvgTagName(lower) : lower;
+		}
+
+		get_qualified_attribute_name(attributeName) {
+			if (this.get_token_type() !== "#tag") {
+				return null;
+			}
+
+			const lower = asciiLower(attributeName);
+			return this.get_namespace() === "html"
+				? lower
+				: qualifyForeignAttributeName(this.get_namespace(), lower);
+		}
+
 		expects_closer() {
 			const tokenName = this.get_token_name();
 			if (tokenName === null) {
