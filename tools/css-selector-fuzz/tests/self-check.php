@@ -179,6 +179,24 @@ foreach ( array_keys( $expected_byte_classes ) as $class_name ) {
 	check( isset( $byte_classes[ $class_name ] ), "Invalid-utf8 variety: byte class {$class_name} was generated." );
 }
 
+// --- Mutated bucket: raw invalid-byte splicing -------------------------------
+// mutate() must be able to splice raw ill-formed UTF-8 into a selector at
+// arbitrary byte offsets; these cases carry no AST expectation and exercise
+// crash / scrub-notice / differential paths only. The marker bytes here can
+// appear in NO rendered selector (the pools' multibyte characters use other
+// lead bytes), so their presence proves the mutation operation fired.
+
+$mutated_with_invalid = 0;
+for ( $seed = 1; $seed <= 200; $seed++ ) {
+	$prng     = new Prng( (string) $seed, 'self-check-mutated-utf8' );
+	$document = DocumentGenerator::generate( $prng->fork( 'doc' ) );
+	$case     = SelectorGenerator::generate( $prng->fork( 'sel' ), $document['pools'], null, 'mutated' );
+	if ( false !== strpbrk( $case['selector'], "\xC0\xC1\xED\xF4\xF5\xFF" ) ) {
+		++$mutated_with_invalid;
+	}
+}
+check( $mutated_with_invalid >= 10, "Mutated bucket splices raw invalid bytes ({$mutated_with_invalid} of 200 seeds)." );
+
 // --- Known-answer matching cases -------------------------------------------
 
 $known_html = '<!DOCTYPE html><html data-fid="e0"><head data-fid="e1"></head><body data-fid="e2">'

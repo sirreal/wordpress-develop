@@ -57,7 +57,8 @@ produces the same document, the same selector, and the same verdict.
      maximal subpart, with per-class subpart counts pinned independently of
      `wp_scrub_utf8()`).
    - `chaos` — arbitrary bytes; no parse expectation.
-   - `mutated` — a supported selector with random byte mutations; no parse
+   - `mutated` — a supported selector with random byte mutations, including
+     raw ill-formed UTF-8 splices at arbitrary byte offsets; no parse
      expectation.
    - `edge-escape` — selectors that exercise otherwise-unreachable parser
      branches: hex escapes for NUL / surrogate / over-max codepoints (must

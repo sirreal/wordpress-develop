@@ -1666,11 +1666,12 @@ class SelectorGenerator {
 			$length = strlen( $selector );
 			$kind   = $this->prng->weighted(
 				array(
-					'insert'    => 30,
-					'delete'    => 25,
-					'replace'   => 25,
-					'duplicate' => 10,
-					'case-flip' => 10,
+					'insert'       => 30,
+					'delete'       => 25,
+					'replace'      => 25,
+					'duplicate'    => 10,
+					'case-flip'    => 10,
+					'invalid-utf8' => 12,
 				)
 			);
 
@@ -1713,6 +1714,17 @@ class SelectorGenerator {
 						$flip = ctype_lower( $char ) ? strtoupper( $char ) : strtolower( $char );
 						$selector = substr( $selector, 0, $at ) . $flip . substr( $selector, $at + 1 );
 					}
+					break;
+
+				case 'invalid-utf8':
+					// Splice a raw ill-formed sequence at an arbitrary byte
+					// offset — possibly splitting an existing multibyte
+					// character or landing before a continuation byte that
+					// completes a truncated lead. No expectations here; these
+					// exercise crash / scrub-notice / differential paths.
+					$bytes    = $this->prng->choice( array_column( self::INVALID_UTF8_CLASSES, 0 ) );
+					$at       = $this->prng->int( 0, $length );
+					$selector = substr( $selector, 0, $at ) . $bytes . substr( $selector, $at );
 					break;
 			}
 		}
