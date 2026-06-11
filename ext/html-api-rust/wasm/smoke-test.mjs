@@ -143,6 +143,12 @@ assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("dat
 assert.equal(duplicateAttributeNameTags.get_attribute("data-x"), "1");
 duplicateAttributeNameTags.destroy();
 
+const decodedClassQueryTags = new WP_HTML_Tag_Processor('<div class="&notin;-class &lt;egg&gt; &#xff03;">');
+assert.equal(decodedClassQueryTags.next_tag({ class_name: "<egg>" }), true);
+assert.equal(decodedClassQueryTags.get_tag(), "DIV");
+assert.deepEqual(decodedClassQueryTags.class_list(), ["∉-class", "<egg>", "＃"]);
+decodedClassQueryTags.destroy();
+
 const rawClassNameUpdates = new WP_HTML_Tag_Processor('<div class="x\uFFFDy">');
 assert.equal(rawClassNameUpdates.next_tag("div"), true);
 assert.equal(rawClassNameUpdates.has_class("x\0y"), false);

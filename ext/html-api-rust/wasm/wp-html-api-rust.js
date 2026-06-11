@@ -814,6 +814,8 @@ export function createHtmlApi(wasm) {
 
 			let found = 0;
 			while (this.#nativeNextTag(tagName, visitClosers)) {
+				this.#updateParserStateFromNative();
+
 				if (className !== null && this.has_class(className) !== true) {
 					continue;
 				}
@@ -823,7 +825,6 @@ export function createHtmlApi(wasm) {
 					continue;
 				}
 
-				this.#updateParserStateFromNative();
 				return true;
 			}
 
