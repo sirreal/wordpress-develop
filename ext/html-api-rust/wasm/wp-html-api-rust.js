@@ -1999,6 +1999,9 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.current_token_namespace = this.open_element_namespaces[existingIndex];
+				if (tagName === "TEMPLATE" && closingNamespace === "html") {
+					this.#clearActiveFormattingElementsForTemplateClose(existingIndex);
+				}
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 				if (FORMATTING_ELEMENTS.has(tagName)) {
@@ -2122,6 +2125,9 @@ export function createHtmlApi(wasm) {
 			} else if (token.operation === "pop") {
 				const existingIndex = this.#lastOpenElementIndex(token.tagName, token.namespaceName);
 				if (existingIndex !== -1) {
+					if (token.tagName === "TEMPLATE" && token.namespaceName === "html") {
+						this.#clearActiveFormattingElementsForTemplateClose(existingIndex);
+					}
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
@@ -2253,6 +2259,7 @@ export function createHtmlApi(wasm) {
 				tagName,
 				namespaceName: this.current_token_namespace,
 				attributes: this.#currentTokenAttributes(),
+				templateDepth: this.#countOpenHtmlElements("TEMPLATE"),
 			};
 		}
 
@@ -2277,6 +2284,7 @@ export function createHtmlApi(wasm) {
 			if (
 				left.tagName !== right.tagName ||
 				left.namespaceName !== right.namespaceName ||
+				(left.templateDepth ?? 0) !== (right.templateDepth ?? 0) ||
 				left.attributes.length !== right.attributes.length
 			) {
 				return false;
@@ -2308,6 +2316,7 @@ export function createHtmlApi(wasm) {
 			return {
 				tagName: entry.tagName,
 				namespaceName: entry.namespaceName,
+				templateDepth: entry.templateDepth ?? 0,
 				attributes: entry.attributes.map((attribute) => ({
 					name: attribute.name,
 					value: attribute.value,
@@ -2856,6 +2865,13 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return false;
+		}
+
+		#clearActiveFormattingElementsForTemplateClose(templateIndex) {
+			const closedTemplateDepth = this.#countOpenHtmlElements("TEMPLATE", templateIndex + 1);
+			this.active_formatting_elements = this.active_formatting_elements.filter((entry) => (
+				(entry.templateDepth ?? 0) < closedTemplateDepth
+			));
 		}
 
 		#bailUnsupported(message) {
@@ -3611,6 +3627,19 @@ export function createHtmlApi(wasm) {
 				nodeName === tagName &&
 				this.open_element_namespaces[index] === "html"
 			));
+		}
+
+		#countOpenHtmlElements(tagName, endIndex = this.open_elements.length) {
+			let count = 0;
+			for (let i = 0; i < endIndex; i += 1) {
+				if (
+					this.open_elements[i] === tagName &&
+					this.open_element_namespaces[i] === "html"
+				) {
+					count += 1;
+				}
+			}
+			return count;
 		}
 
 		#isInHeadTemplateContent() {
