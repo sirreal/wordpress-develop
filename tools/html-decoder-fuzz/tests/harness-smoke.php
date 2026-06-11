@@ -147,6 +147,25 @@ function broken_oracle_free_run( Oracles $oracles, array $real_targets, array $o
 	return array_keys( $seen );
 }
 
+function reference_at_eof_shape( string $payload ): ?string {
+	if ( 1 === preg_match( '/&\z/', $payload ) ) {
+		return 'bare-introducer';
+	}
+	if ( 1 === preg_match( '/&#(?:[xX])?\z/', $payload ) ) {
+		return 'partial-numeric-introducer';
+	}
+	if ( 1 === preg_match( '/&#[0-9]+\z/', $payload ) ) {
+		return 'decimal-digits';
+	}
+	if ( 1 === preg_match( '/&#[xX][0-9A-Fa-f]+\z/', $payload ) ) {
+		return 'hex-digits';
+	}
+	if ( 1 === preg_match( '/&[A-Za-z][A-Za-z0-9]*\z/', $payload ) ) {
+		return 'named-prefix';
+	}
+	return null;
+}
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -222,10 +241,13 @@ $a = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 $b = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 check( 'generator deterministic for (seed, case)', $a === $b );
 
-$strategies = array();
-$contexts   = array();
-$unsafe     = 0;
-$total      = 1200;
+$strategies            = array();
+$contexts              = array();
+$unsafe                = 0;
+$reference_at_eof      = 0;
+$reference_at_eof_bad = 0;
+$reference_at_eof_shapes = array();
+$total                 = 1200;
 for ( $i = 0; $i < $total; $i++ ) {
 	$generated = ( new Generator( new Prng( "smoke:{$i}" ), 4096, $names ) )->generate();
 	$strategies[ $generated['strategy'] ] = true;
@@ -233,10 +255,28 @@ for ( $i = 0; $i < $total; $i++ ) {
 	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
 		++$unsafe;
 	}
+	if ( 'reference-at-eof' === $generated['strategy'] ) {
+		++$reference_at_eof;
+		$shape = reference_at_eof_shape( $generated['payload'] );
+		if ( null === $shape ) {
+			++$reference_at_eof_bad;
+		} else {
+			$reference_at_eof_shapes[ $shape ] = true;
+		}
+	}
 }
-check( 'all 10 strategies appear', 10 === count( $strategies ), implode( ',', array_keys( $strategies ) ) );
+check( 'all 11 strategies appear', 11 === count( $strategies ), implode( ',', array_keys( $strategies ) ) );
 check( 'generated cases run both contexts', array( 'both' ) === array_keys( $contexts ), implode( ',', array_keys( $contexts ) ) );
 check( 'generated payloads are oracle-safe', 0 === $unsafe, (string) $unsafe );
+check( 'reference-at-EOF cases end inside a reference', $reference_at_eof > 0 && 0 === $reference_at_eof_bad, "{$reference_at_eof_bad}/{$reference_at_eof}" );
+check(
+	'reference-at-EOF covers expected suffix shapes',
+	array() === array_diff(
+		array( 'bare-introducer', 'partial-numeric-introducer', 'decimal-digits', 'hex-digits', 'named-prefix' ),
+		array_keys( $reference_at_eof_shapes )
+	),
+	implode( ',', array_keys( $reference_at_eof_shapes ) )
+);
 
 $byte_strategies = array();
 $byte_contexts   = array();
@@ -860,7 +900,7 @@ file_put_contents(
 		)
 	)
 );
-$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case30' );
+$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case170' );
 if ( $symlink_write_created ) {
 	$symlink_write_worker = run_process(
 		array(
@@ -869,15 +909,15 @@ if ( $symlink_write_created ) {
 			'--seed',
 			'1',
 			'--cases',
-			'100',
+			'200',
 			'--output-dir',
 			$symlink_write_dir,
 			'--progress-every',
-			'100',
+			'200',
 		),
 		array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
 	);
-	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case30-sig*/failure.json' );
+	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case170-sig*/failure.json' );
 	check(
 		'worker does not write through symlinked failure artifact dirs',
 		1 === $symlink_write_worker['code'] &&
@@ -1012,11 +1052,11 @@ $unverified_seed_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'1',
 		'--output-dir',
@@ -1074,11 +1114,11 @@ $unverified_weak_seed_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'1',
 		'--output-dir',
@@ -1127,7 +1167,7 @@ check(
 	1 === $unverified_weak_seed_runner['code'] &&
 		0 === $unverified_weak_runner['code'] &&
 		! is_dir( $unverified_weak_manifest_dir . '/failure-000weak' ) &&
-		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case30/failure.json' ) &&
+		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case170/failure.json' ) &&
 		( $unverified_weak_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
 		( false !== ( $unverified_weak_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_weak_seed_runner['stdout'] . $unverified_weak_seed_runner['stderr'] . $unverified_weak_runner['stdout'] . $unverified_weak_runner['stderr'] . json_encode( $unverified_weak_state['artifact_retention'] ?? null )
@@ -1145,11 +1185,11 @@ $unverified_fake_seed_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'1',
 		'--output-dir',
@@ -1205,7 +1245,7 @@ check(
 	1 === $unverified_fake_seed_runner['code'] &&
 		0 === $unverified_fake_runner['code'] &&
 		is_file( $unverified_fake_manifest_dir . '/failure-000fake/failure.json' ) &&
-		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case30/failure.json' ) &&
+		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case170/failure.json' ) &&
 		array_sum( is_array( $unverified_fake_counts ) ? $unverified_fake_counts : array() ) >= 2 &&
 		( false !== ( $unverified_fake_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_fake_seed_runner['stdout'] . $unverified_fake_seed_runner['stderr'] . $unverified_fake_runner['stdout'] . $unverified_fake_runner['stderr'] . json_encode( $unverified_fake_state['artifact_retention'] ?? null )
@@ -1352,11 +1392,11 @@ $mixed_mode_oracle_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'1',
 		'--output-dir',
@@ -1375,11 +1415,11 @@ $mixed_mode_byte_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'1',
 		'--output-dir',
@@ -1409,11 +1449,11 @@ $faulted_worker = run_process(
 		'--seed',
 		'1',
 		'--cases',
-		'100',
+		'200',
 		'--output-dir',
 		$pipeline_dir,
 		'--progress-every',
-		'100',
+		'200',
 	),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
 );
@@ -1559,7 +1599,7 @@ check(
 	1 === $reuse_same_runner['code'] &&
 		is_array( $reuse_same_dirs ) &&
 		count( $reuse_same_dirs ) === array_sum( $reuse_same_counts ) &&
-		is_file( $runner_dir . '/failure-seed1-case30/failure.json' ) &&
+		is_file( $runner_dir . '/failure-seed1-case170/failure.json' ) &&
 		array() === array_filter( $reuse_same_counts, static fn( $count ) => $count > 1 ),
 	$reuse_same_runner['stdout'] . $reuse_same_runner['stderr'] . json_encode( $reuse_same_state['artifact_retention'] ?? null )
 );
@@ -1576,11 +1616,11 @@ $different_signature_first = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'100',
 		'--output-dir',
@@ -1597,11 +1637,11 @@ $different_signature_second = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--max-artifacts-per-signature',
 		'100',
 		'--artifact-retention',
@@ -1611,9 +1651,9 @@ $different_signature_second = run_process(
 	),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
-$different_signature_case30 = glob( $different_signature_dir . '/failure-seed1-case30*/failure.json' );
+$different_signature_case170 = glob( $different_signature_dir . '/failure-seed1-case170*/failure.json' );
 $different_signature_seen   = array();
-foreach ( is_array( $different_signature_case30 ) ? $different_signature_case30 : array() as $failure_file ) {
+foreach ( is_array( $different_signature_case170 ) ? $different_signature_case170 : array() as $failure_file ) {
 	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
 	if ( is_array( $manifest ) && isset( $manifest['signatures'] ) && is_array( $manifest['signatures'] ) ) {
 		$different_signature_seen[] = implode( ',', $manifest['signatures'] );
@@ -1703,11 +1743,11 @@ $no_artifact_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--artifact-retention',
 		'none',
 		'--output-dir',
@@ -1737,11 +1777,11 @@ $corrupt_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--output-dir',
 		$corrupt_runner_dir,
 	),
@@ -1771,11 +1811,11 @@ $bogus_mode_runner = run_process(
 		'--duration-seconds',
 		'0',
 		'--max-cases',
-		'100',
+		'200',
 		'--seed-base',
 		'1',
 		'--cases-per-batch',
-		'100',
+		'200',
 		'--output-dir',
 		$bogus_mode_dir,
 	),

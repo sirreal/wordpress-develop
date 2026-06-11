@@ -67,7 +67,11 @@ to `&amp;`.
 Every case is determined by `(seed, case index)`. Generated cases run in both
 text and attribute contexts so the same payload exercises semicolonless and
 attribute-disambiguation differences side by side. The generator preserves the
-former context PRNG draw to keep existing seed-to-payload replay stable.
+former context PRNG draw, so the earlier both-context lane change did not by
+itself shift payload mapping.
+Adding or reweighting generation strategies intentionally changes future
+`--seed --case` payload mapping; failure-manifest replay remains stable because
+manifests store `payload_base64`.
 
 The generator uses the real generated named-reference map, with weighted
 strategies for:
@@ -79,6 +83,8 @@ strategies for:
   noncharacters, zero, overflow, and leading zeros
 - adjacent references
 - truncation sweeps
+- references ending at EOF, including bare introducers, partial numeric
+  references, semicolonless numeric references, and truncated names
 - multibyte UTF-8 around references
 - `attribute_starts_with()` prefixes such as encoded `javascript:`
 - nonexistent lookalikes and ampersand boundaries

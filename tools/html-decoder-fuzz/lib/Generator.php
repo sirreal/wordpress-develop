@@ -68,6 +68,7 @@ class Generator {
 				'numeric'                => 22,
 				'adjacency'              => 10,
 				'truncation-sweep'       => 9,
+				'reference-at-eof'       => 12,
 				'multibyte-around'       => 9,
 				'attribute-prefix'       => 8,
 				'lookalike'              => 8,
@@ -180,6 +181,50 @@ class Generator {
 		$prefix    = substr( $reference, 0, $this->prng->int( 1, max( 1, $length - 1 ) ) );
 
 		return $this->plain_text() . $prefix . $this->plain_text();
+	}
+
+	private function gen_reference_at_eof(): string {
+		$kind = $this->prng->weighted(
+			array(
+				'fixed'          => 45,
+				'named-prefix'   => 25,
+				'decimal-digits' => 15,
+				'hex-digits'     => 15,
+			)
+		);
+		$suffix = '';
+
+		if ( 'named-prefix' === $kind ) {
+			$name      = $this->pick_semicolon_name();
+			$reference = '&' . $name;
+			$suffix    = substr( $reference, 0, $this->prng->int( 1, strlen( $reference ) - 1 ) );
+		} elseif ( 'decimal-digits' === $kind ) {
+			$digits = $this->ascii_digits( $this->prng->int( 1, 9 ) );
+			$suffix = substr( '&#' . $digits, 0, max( 1, min( strlen( '&#' . $digits ), $this->max_bytes ) ) );
+		} elseif ( 'hex-digits' === $kind ) {
+			$prefix = $this->prng->chance( 50 ) ? '&#x' : '&#X';
+			$digits = $this->hex_digits( $this->prng->int( 1, 8 ) );
+			$suffix = substr( $prefix . $digits, 0, max( 1, min( strlen( $prefix . $digits ), $this->max_bytes ) ) );
+		} else {
+			$suffix = $this->prng->choice(
+				array(
+					'&',
+					'&#',
+					'&#x',
+					'&#X',
+					'&g',
+					'&gt',
+					'&not',
+					'&noti',
+					'&amp',
+					'&#123',
+					'&#x1F',
+				)
+			);
+			$suffix = substr( $suffix, 0, max( 1, min( strlen( $suffix ), $this->max_bytes ) ) );
+		}
+
+		return $this->plain_text_up_to( max( 0, $this->max_bytes - strlen( $suffix ) ) ) . $suffix;
 	}
 
 	private function gen_multibyte_around(): string {
@@ -355,7 +400,11 @@ class Generator {
 	}
 
 	private function plain_text( bool $allow_amp = false ): string {
-		$length = $this->prng->biased_length( min( 128, $this->max_bytes ) );
+		return $this->plain_text_up_to( min( 128, $this->max_bytes ), $allow_amp );
+	}
+
+	private function plain_text_up_to( int $max_bytes, bool $allow_amp = false ): string {
+		$length = $this->prng->biased_length( max( 0, $max_bytes ) );
 		if ( 0 === $length ) {
 			return '';
 		}
@@ -376,6 +425,23 @@ class Generator {
 		$out = '';
 		for ( $i = 0; $i < $length; $i++ ) {
 			$out .= self::ASCII_ALPHABET[ $this->prng->int( 0, strlen( self::ASCII_ALPHABET ) - 1 ) ];
+		}
+		return $out;
+	}
+
+	private function ascii_digits( int $length ): string {
+		$out = '';
+		for ( $i = 0; $i < $length; $i++ ) {
+			$out .= (string) $this->prng->int( 0, 9 );
+		}
+		return $out;
+	}
+
+	private function hex_digits( int $length ): string {
+		$digits = '0123456789abcdefABCDEF';
+		$out    = '';
+		for ( $i = 0; $i < $length; $i++ ) {
+			$out .= $digits[ $this->prng->int( 0, strlen( $digits ) - 1 ) ];
 		}
 		return $out;
 	}

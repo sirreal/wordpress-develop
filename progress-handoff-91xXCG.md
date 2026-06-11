@@ -7,7 +7,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Confirmed no active `html-decoder-fuzz` run before editing.
 - [x] Tier 1 item 1: run both decoder contexts per generated case.
 - [x] Tier 1 item 2: add oracle-free arbitrary byte-space lane.
-- [ ] Tier 1 items 3-6.
+- [x] Tier 1 item 3: add reference-at-EOF generation strategy.
+- [ ] Tier 1 items 4-6.
 - [ ] Tier 2 items 7-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
@@ -27,6 +28,12 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after byte-space lane coverage was added.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding mode-aware artifact separation, oracle-trap, and bogus-mode malformed-record coverage.
 - 2026-06-11: `git diff --check` passed.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` passed after adding the reference-at-EOF strategy.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed and reported `reference-at-eof: 46`.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding reference-at-EOF coverage.
+- 2026-06-11: Documented that adding the new weighted strategy intentionally changes generated-case `--seed --case` payload mapping; failure-manifest replay remains payload-stable.
+- 2026-06-11: Verified `reference-at-eof` still ends in a reference for `max-bytes` 1, 2, 3, 4, 5, and 8 after reserving suffix space.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after tightening EOF suffix-shape coverage.
 
 ## Review Log
 
@@ -38,3 +45,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Jason: APPROVE, byte generator/check semantics.
   - Rawls: APPROVE, CLI/artifact compatibility after mode-aware artifact keying fix.
   - Sartre: APPROVE, tests and documentation after oracle-trap and bogus-mode coverage.
+- Tier 1 item 3:
+  - Hegel: APPROVE, generator semantics after max-bytes suffix reservation fix.
+  - Lovelace: APPROVE, smoke coverage after strict EOF suffix-shape checks.
+  - Erdos: APPROVE, docs/replay compatibility after documenting generated-case mapping drift.
