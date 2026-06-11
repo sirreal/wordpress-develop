@@ -10,6 +10,62 @@ const {
 } = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 
 assert.equal(version(), "0.1.0");
+
+for (const method of [
+	"change_parsing_namespace",
+	"next_tag",
+	"next_token",
+	"paused_at_incomplete_token",
+	"class_list",
+	"has_class",
+	"set_bookmark",
+	"release_bookmark",
+	"has_bookmark",
+	"seek",
+	"get_attribute",
+	"get_attribute_names_with_prefix",
+	"get_namespace",
+	"get_tag",
+	"get_qualified_tag_name",
+	"get_qualified_attribute_name",
+	"has_self_closing_flag",
+	"is_tag_closer",
+	"get_token_type",
+	"get_token_name",
+	"get_comment_type",
+	"get_full_comment_text",
+	"subdivide_text_appropriately",
+	"get_modifiable_text",
+	"set_modifiable_text",
+	"set_attribute",
+	"remove_attribute",
+	"add_class",
+	"remove_class",
+	"get_updated_html",
+	"get_doctype_info",
+]) {
+	assert.equal(typeof WP_HTML_Tag_Processor.prototype[method], "function", `Missing tag processor method ${method}`);
+	assert.equal(typeof WP_HTML_Processor.prototype[method], "function", `Missing inherited processor method ${method}`);
+}
+
+for (const method of [
+	"get_last_error",
+	"get_unsupported_exception",
+	"matches_breadcrumbs",
+	"expects_closer",
+	"step",
+	"get_breadcrumbs",
+	"get_current_depth",
+	"serialize",
+	"serialize_token",
+]) {
+	assert.equal(typeof WP_HTML_Processor.prototype[method], "function", `Missing processor method ${method}`);
+}
+
+for (const method of ["create_fragment", "create_full_parser", "normalize", "is_special", "is_void"]) {
+	assert.equal(typeof WP_HTML_Processor[method], "function", `Missing processor static method ${method}`);
+}
+
 assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT, "COMMENT_AS_HTML_COMMENT");
 assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, "COMMENT_AS_PI_NODE_LOOKALIKE");
 
