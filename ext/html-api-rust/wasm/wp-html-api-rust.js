@@ -1529,6 +1529,10 @@ export function createHtmlApi(wasm) {
 				return this.#consumeVirtualToken();
 			}
 
+			if (this.#queueFullParserMissingBodyAtEof()) {
+				return this.#consumeVirtualToken();
+			}
+
 			if (this.#queueEofVirtualClosers()) {
 				return this.#consumeVirtualToken();
 			}
@@ -2353,6 +2357,10 @@ export function createHtmlApi(wasm) {
 
 			const tagName = tokenType === "#tag" ? this.#getCurrentTreeTagName() : tokenName;
 			if (tagName === null) {
+				return false;
+			}
+
+			if (this.#isInHeadTemplateContent()) {
 				return false;
 			}
 
@@ -3238,6 +3246,38 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
+		#queueFullParserMissingBodyAtEof() {
+			if (
+				!this.is_full_parser ||
+				!["in_head", "after_head"].includes(this.full_parser_insertion_mode) ||
+				this.#hasOpenHtmlElement("BODY") ||
+				this.#hasOpenHtmlElement("FRAMESET")
+			) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_elements[topIndex] !== "HEAD" ||
+				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				if (
+					this.full_parser_insertion_mode !== "after_head" ||
+					this.open_elements[topIndex] !== "HTML" ||
+					this.open_element_namespaces[topIndex] !== "html"
+				) {
+					return false;
+				}
+			} else {
+				this.#queueVirtualPop("HEAD");
+			}
+
+			this.full_parser_insertion_mode = "in_body";
+			this.#queueVirtualPush("BODY");
+			return true;
+		}
+
 		#queueEofVirtualClosers() {
 			if (this.open_elements.length <= this.base_open_element_count) {
 				return false;
@@ -3519,6 +3559,29 @@ export function createHtmlApi(wasm) {
 				nodeName === tagName &&
 				this.open_element_namespaces[index] === "html"
 			));
+		}
+
+		#isInHeadTemplateContent() {
+			const templateIndex = this.#lastOpenElementIndex("TEMPLATE", "html");
+			if (templateIndex === -1) {
+				return false;
+			}
+
+			for (let i = templateIndex - 1; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					continue;
+				}
+
+				if (this.open_elements[i] === "BODY") {
+					return false;
+				}
+
+				if (this.open_elements[i] === "HEAD") {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#openHtmlElementBefore(tagName, beforeIndex) {
