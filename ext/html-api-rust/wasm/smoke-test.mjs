@@ -450,6 +450,26 @@ assert.equal(fullParserDoctype.get_tag(), "P");
 assert.deepEqual(fullParserDoctype.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 fullParserDoctype.destroy();
 
+const fullParserHeadNoscriptBreakout = WP_HTML_Processor.create_full_parser("<head><noscript></br><!--foo--></noscript>");
+assert.equal(fullParserHeadNoscriptBreakout.next_tag("noscript"), true);
+assert.deepEqual(fullParserHeadNoscriptBreakout.get_breadcrumbs(), ["HTML", "HEAD", "NOSCRIPT"]);
+assert.equal(fullParserHeadNoscriptBreakout.next_tag("br"), true);
+assert.deepEqual(fullParserHeadNoscriptBreakout.get_breadcrumbs(), ["HTML", "BODY", "BR"]);
+assert.equal(fullParserHeadNoscriptBreakout.next_token(), true);
+assert.equal(fullParserHeadNoscriptBreakout.get_token_type(), "#comment");
+assert.deepEqual(fullParserHeadNoscriptBreakout.get_breadcrumbs(), ["HTML", "BODY", "#comment"]);
+fullParserHeadNoscriptBreakout.destroy();
+
+const fullParserNestedHeadNoscript = WP_HTML_Processor.create_full_parser('<head><noscript><noscript class="foo"><!--foo--></noscript>');
+assert.equal(fullParserNestedHeadNoscript.next_tag("noscript"), true);
+assert.deepEqual(fullParserNestedHeadNoscript.get_breadcrumbs(), ["HTML", "HEAD", "NOSCRIPT"]);
+assert.equal(fullParserNestedHeadNoscript.next_token(), true);
+assert.equal(fullParserNestedHeadNoscript.get_token_type(), "#comment");
+assert.deepEqual(fullParserNestedHeadNoscript.get_breadcrumbs(), ["HTML", "HEAD", "NOSCRIPT", "#comment"]);
+assert.equal(fullParserNestedHeadNoscript.next_tag("noscript"), false);
+assert.equal(fullParserNestedHeadNoscript.get_last_error(), null);
+fullParserNestedHeadNoscript.destroy();
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

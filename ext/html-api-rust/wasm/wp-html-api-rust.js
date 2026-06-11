@@ -89,6 +89,14 @@ const HEAD_CONTENT_ELEMENTS = new Set([
 	"TEMPLATE",
 	"TITLE",
 ]);
+const IN_HEAD_NOSCRIPT_ALLOWED_START_TAGS = new Set([
+	"BASEFONT",
+	"BGSOUND",
+	"LINK",
+	"META",
+	"NOFRAMES",
+	"STYLE",
+]);
 
 const FOREIGN_CONTENT_HTML_BREAKOUT_START_TAGS = new Set([
 	"B",
@@ -2419,6 +2427,11 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (tokenType === "#tag" && !isCloser && tagName === "NOSCRIPT") {
+							this.full_parser_insertion_mode = "in_head_noscript";
+							return false;
+						}
+
 						if (
 							isWhitespaceText ||
 							tokenType === "#comment" ||
@@ -2446,6 +2459,44 @@ export function createHtmlApi(wasm) {
 
 						this.full_parser_insertion_mode = "after_head";
 						this.#queueVirtualPop("HEAD");
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+
+					case "in_head_noscript":
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (
+							isWhitespaceText ||
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag" ||
+							(tokenType === "#tag" && !isCloser && IN_HEAD_NOSCRIPT_ALLOWED_START_TAGS.has(tagName))
+						) {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (isCloser && tagName === "NOSCRIPT") {
+							this.full_parser_insertion_mode = "in_head";
+							return false;
+						}
+
+						if (
+							(tokenType === "#tag" && !isCloser && (tagName === "HEAD" || tagName === "NOSCRIPT")) ||
+							(isCloser && tagName !== "BR")
+						) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						this.full_parser_insertion_mode = "in_head";
+						this.#queueVirtualPop("NOSCRIPT");
 						return this.#reprocessCurrentTokenAfterVirtualTokens();
 
 					case "after_head":
