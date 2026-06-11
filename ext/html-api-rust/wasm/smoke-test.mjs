@@ -306,6 +306,8 @@ assert.equal(reconstructedFormattingProcessor.get_attribute("class"), "tone");
 assert.equal(reconstructedFormattingProcessor.next_tag("em"), true);
 assert.equal(reconstructedFormattingProcessor.is_virtual(), true);
 assert.equal(reconstructedFormattingProcessor.get_attribute("class"), "tone");
+assert.equal(reconstructedFormattingProcessor.has_class("tone"), true);
+assert.deepEqual(reconstructedFormattingProcessor.class_list(), ["tone"]);
 assert.deepEqual(reconstructedFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "P", "EM"]);
 reconstructedFormattingProcessor.destroy();
 assert.equal(

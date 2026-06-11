@@ -1392,11 +1392,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		has_class(className) {
-			return this.is_virtual() ? null : super.has_class(className);
+			return this.is_virtual() ? this.#virtualHasClass(className) : super.has_class(className);
 		}
 
 		class_list() {
-			return this.is_virtual() ? null : super.class_list();
+			return this.is_virtual() ? this.#virtualClassList() : super.class_list();
 		}
 
 		has_self_closing_flag() {
@@ -1906,6 +1906,40 @@ export function createHtmlApi(wasm) {
 			}
 
 			return names.length === 0 ? null : names;
+		}
+
+		#virtualHasClass(className) {
+			const comparableClassName = this.#comparableClassName(String(className).replaceAll("\0", "\uFFFD"));
+			return this.#virtualClassEntries().some((entry) => entry.comparable === comparableClassName);
+		}
+
+		#virtualClassList() {
+			return this.#virtualClassEntries().map((entry) => this.#virtualUsesQuirksMode() ? entry.comparable : entry.name);
+		}
+
+		#virtualClassEntries() {
+			const classAttribute = this.#getVirtualAttribute("class");
+			if (typeof classAttribute !== "string") {
+				return [];
+			}
+
+			const entries = [];
+			for (const className of splitHtmlWhitespace(classAttribute.replaceAll("\0", "\uFFFD"))) {
+				const comparable = this.#comparableClassName(className);
+				if (entries.some((entry) => entry.comparable === comparable)) {
+					continue;
+				}
+				entries.push({ name: className, comparable });
+			}
+			return entries;
+		}
+
+		#comparableClassName(className) {
+			return this.#virtualUsesQuirksMode() ? asciiLower(className) : className;
+		}
+
+		#virtualUsesQuirksMode() {
+			return this.compat_mode === WP_HTML_Tag_Processor.QUIRKS_MODE;
 		}
 
 		#createActiveFormattingElement(tagName) {
@@ -2994,6 +3028,24 @@ function skipHtmlWhitespace(value, at, end) {
 
 function isHtmlWhitespaceCode(code) {
 	return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d;
+}
+
+function splitHtmlWhitespace(value) {
+	const parts = [];
+	let start = 0;
+
+	for (let i = 0; i <= value.length; i += 1) {
+		if (i < value.length && !isHtmlWhitespaceCode(value.charCodeAt(i))) {
+			continue;
+		}
+
+		if (i > start) {
+			parts.push(value.slice(start, i));
+		}
+		start = i + 1;
+	}
+
+	return parts;
 }
 
 function asciiStartsWithAt(value, needle, at) {
