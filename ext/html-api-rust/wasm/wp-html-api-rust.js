@@ -1133,6 +1133,7 @@ export function createHtmlApi(wasm) {
 				currentSpan.start === bookmark.start &&
 				currentSpan.length === bookmark.length
 			) {
+				this.#updateParserStateFromNative();
 				return true;
 			}
 

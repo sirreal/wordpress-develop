@@ -453,6 +453,23 @@ for (let i = 0; i < WP_HTML_Tag_Processor.MAX_SEEK_OPS + 2; i += 1) {
 }
 repeatedSameTokenSeek.destroy();
 
+for (const html of [
+	"<div><img target></div>",
+	"<div><img target></div",
+]) {
+	const seekAfterEnd = new WP_HTML_Tag_Processor(html);
+	let targetTag = null;
+	while (seekAfterEnd.next_tag()) {
+		if (seekAfterEnd.get_attribute("target") !== null) {
+			assert.equal(seekAfterEnd.set_bookmark("target"), true);
+			targetTag = seekAfterEnd.get_tag();
+		}
+	}
+	assert.equal(seekAfterEnd.seek("target"), true);
+	assert.equal(seekAfterEnd.get_tag(), targetTag);
+	seekAfterEnd.destroy();
+}
+
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
