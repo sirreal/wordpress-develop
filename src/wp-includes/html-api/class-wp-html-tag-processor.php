@@ -3767,6 +3767,28 @@ class WP_HTML_Tag_Processor {
 	 * language-specific escaping or workarounds. Similarly, it will not allow
 	 * setting content into a comment which would prematurely terminate the comment.
 	 *
+	 * This method operates on the CURRENTLY MATCHED TOKEN, which must be one
+	 * that carries modifiable text: a `#text` node, a comment, or an element
+	 * whose contents are raw text (SCRIPT, STYLE, TEXTAREA, TITLE, and
+	 * similar). An ordinary container element (P, DIV, FIGCAPTION, SPAN, …)
+	 * carries no text of its own — its text lives in `#text` child tokens —
+	 * so calling this method while matched on such a tag returns `false`
+	 * and changes nothing. Always check the return value.
+	 *
+	 * In particular, an EMPTY element like `<figcaption></figcaption>`
+	 * contains no `#text` token at all, so there is no token on which this
+	 * method could set text: it cannot insert text where none exists. To
+	 * fill empty elements when building markup from a template, include
+	 * placeholder text in the template and replace it:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<figure><figcaption>.</figcaption></figure>' );
+	 *     while ( $processor->next_token() ) {
+	 *         if ( '#text' === $processor->get_token_type() ) {
+	 *             $processor->set_modifiable_text( 'A caption with <safe> encoding' );
+	 *             break;
+	 *         }
+	 *     }
+	 *
 	 * Example:
 	 *
 	 *     // Add a preface to all STYLE contents.
