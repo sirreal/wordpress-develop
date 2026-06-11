@@ -1236,6 +1236,20 @@ assert.equal(mathQualifiedProcessor.get_namespace(), "math");
 assert.equal(mathQualifiedProcessor.get_qualified_attribute_name("definitionurl"), "definitionURL");
 mathQualifiedProcessor.destroy();
 
+const mathIntegrationEndTagProcessor = WP_HTML_Processor.create_fragment("<math><mi>x</mi><mn>1</mn></math>");
+assert.equal(mathIntegrationEndTagProcessor.next_tag("mn"), true);
+assert.equal(mathIntegrationEndTagProcessor.get_namespace(), "math");
+assert.deepEqual(mathIntegrationEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "MATH", "MN"]);
+mathIntegrationEndTagProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<math><mi>x</mi><mn>1</mn></math>"),
+	"<math><mi>x</mi><mn>1</mn></math>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<math><mo><image /></mo><mn>1</mn></math>"),
+	"<math><mo><img></mo><mn>1</mn></math>",
+);
+
 const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
 assert.equal(foreignModifiableTextProcessor.next_tag("title"), true);
 assert.equal(foreignModifiableTextProcessor.get_namespace(), "svg");

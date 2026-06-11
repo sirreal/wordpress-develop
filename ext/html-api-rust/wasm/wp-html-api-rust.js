@@ -1785,7 +1785,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.is_tag_closer()) {
-				const closingNamespace = this.current_namespace;
+				const closingNamespace = this.#namespaceForEndTag(tagName);
 
 				if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForEndTag(tagName)) {
 					this.pending_real_token = true;
@@ -2981,6 +2981,19 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return -1;
+		}
+
+		#namespaceForEndTag(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex >= 0 &&
+				this.open_elements[topIndex] === tagName &&
+				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				return this.open_element_namespaces[topIndex];
+			}
+
+			return this.current_namespace;
 		}
 
 		#hasElementInTableScope(match) {
