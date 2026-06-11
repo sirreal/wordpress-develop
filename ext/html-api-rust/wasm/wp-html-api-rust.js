@@ -688,12 +688,8 @@ async function bytesFromInput(input) {
 	}
 
 	if (typeof input === "string") {
-		if (/^https?:\/\//.test(input) && typeof fetch === "function") {
-			const response = await fetch(input);
-			if (!response.ok) {
-				throw new Error(`Failed to load WASM: ${response.status} ${response.statusText}`);
-			}
-			return response.arrayBuffer();
+		if (typeof fetch === "function" && (/^https?:\/\//.test(input) || !isNodeLikeRuntime())) {
+			return fetchBytes(input);
 		}
 
 		const { readFile } = await import("node:fs/promises");
@@ -701,14 +697,22 @@ async function bytesFromInput(input) {
 	}
 
 	if (typeof fetch === "function") {
-		const response = await fetch(input);
-		if (!response.ok) {
-			throw new Error(`Failed to load WASM: ${response.status} ${response.statusText}`);
-		}
-		return response.arrayBuffer();
+		return fetchBytes(input);
 	}
 
 	throw new TypeError("Unsupported WASM input.");
+}
+
+function isNodeLikeRuntime() {
+	return typeof process === "object" && process !== null && Boolean(process.versions?.node);
+}
+
+async function fetchBytes(input) {
+	const response = await fetch(input);
+	if (!response.ok) {
+		throw new Error(`Failed to load WASM: ${response.status} ${response.statusText}`);
+	}
+	return response.arrayBuffer();
 }
 
 export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url)) {

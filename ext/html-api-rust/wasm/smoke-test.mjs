@@ -19,6 +19,46 @@ const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", im
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
 assert.equal(apiFromDataView.version(), "0.1.0");
 
+const apiFromModule = await loadWasm(await WebAssembly.compile(wasmBytes));
+assert.equal(apiFromModule.version(), "0.1.0");
+
+const originalProcessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+const originalFetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+try {
+	Object.defineProperty(globalThis, "process", {
+		configurable: true,
+		value: undefined,
+		writable: true,
+	});
+	Object.defineProperty(globalThis, "fetch", {
+		configurable: true,
+		value: async (input) => {
+			assert.equal(input, "./dist/wp_html_api_rust_core.wasm");
+			return {
+				ok: true,
+				arrayBuffer: async () => wasmBytes.buffer.slice(
+					wasmBytes.byteOffset,
+					wasmBytes.byteOffset + wasmBytes.byteLength,
+				),
+			};
+		},
+		writable: true,
+	});
+	const apiFromBrowserString = await loadWasm("./dist/wp_html_api_rust_core.wasm");
+	assert.equal(apiFromBrowserString.version(), "0.1.0");
+} finally {
+	if (originalProcessDescriptor) {
+		Object.defineProperty(globalThis, "process", originalProcessDescriptor);
+	} else {
+		delete globalThis.process;
+	}
+	if (originalFetchDescriptor) {
+		Object.defineProperty(globalThis, "fetch", originalFetchDescriptor);
+	} else {
+		delete globalThis.fetch;
+	}
+}
+
 for (const method of [
 	"change_parsing_namespace",
 	"next_tag",
