@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to build the figure fragment from a template. The approach: (1) Create a processor with the exact template structure including empty attribute placeholders and placeholder text; (2) Use next_tag() to find the img element and set_attribute() to populate src (then alt) in the correct order; (3) Find the figcaption tag, then use next_token() with get_token_type() to locate the text node and set_modifiable_text() to safely encode and insert the caption. The set_attribute() and set_modifiable_text() methods handle all necessary HTML encoding automatically.",
+  "confidence": 82
+}

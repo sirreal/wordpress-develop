@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to construct the figure fragment safely. A template containing the exact HTML structure is created with placeholder values. The processor then finds the img tag and sets its src and alt attributes using set_attribute(), which handles all necessary encoding. For the figcaption, the processor uses next_token() to locate the text node and set_modifiable_text() to replace the placeholder with the caption text, ensuring proper encoding. Finally, get_updated_html() returns the fully-encoded result.",
+  "confidence": 75
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then finds the first TABLE element using next_tag(). It iterates through TR elements within the table, and for each row, collects TD and TH cells. For each cell, it uses next_token() to visit all tokens and accumulates text from #text nodes using get_modifiable_text(), which automatically handles character reference decoding. The depth-based traversal naturally handles missing closing tags as the HTML Processor implements HTML5 parsing semantics.",
+  "confidence": 72
+}

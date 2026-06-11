@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then next_tag() to locate the first H1 element. It records the nesting depth of the H1, then iterates through subsequent tokens using next_token(). For each #text token at or deeper than the H1's depth, it accumulates the text using get_modifiable_text() which automatically decodes character references. The loop terminates when depth drops below the H1's level, indicating the H1 has closed. Returns null if no H1 exists, empty string if H1 contains no text.",
+  "confidence": 82
+}

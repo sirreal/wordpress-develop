@@ -2,6 +2,21 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 8 — Haiku, UTF-8 fix lands; T08 isolated as the last functional gap
+
+**Train 97.70 — new high.** T05 +14.0 → 99.3 (UTF-8/mb-encoding
+statement); T07 at 100; T01 produced the experiment's first EMPTY
+judge gap list (smoke task fully saturated). Only T08 weak (78.1,
+traversal 91.3): failing trials nest collect-until-close loops which
+double-advance the single shared cursor — the inner loop exits already
+matched on the next region's boundary token and the outer loop's
+next_token() skips it (second cell of each row dropped, rows lost).
+
+Round-9 hypotheses (committed): the one-cursor contract on
+next_token() with a verified closer-driven single-pass state-machine
+example (DT terms from a DL); the last-X bookmark idiom surfaced at
+the top of the bookmarks narrative (T10).
+
 ## Round 7 — Haiku, RCDATA + drain idioms land
 
 **Train 97.51 (statistically flat vs round-6 train 97.84; nothing near

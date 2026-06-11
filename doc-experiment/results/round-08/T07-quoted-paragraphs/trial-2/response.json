@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor for its structural awareness. It creates a fragment processor, iterates through each P tag using next_tag(), checks if 'BLOCKQUOTE' is present anywhere in the breadcrumbs array (which represents all ancestors), and adds the \"quoted\" class if found. The get_updated_html() method returns the modified HTML with all queued changes applied while preserving everything else byte-for-byte.",
+  "confidence": 92
+}

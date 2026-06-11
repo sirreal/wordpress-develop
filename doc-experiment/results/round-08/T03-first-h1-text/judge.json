@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment) for structure-aware H1 text extraction. All six methods called (create_fragment, next_tag, get_current_depth, next_token, get_token_type, get_modifiable_text) are documented; no _doing_it_wrong records. Idiomatic: token-walking with the documented `>=` depth-guard pattern that mirrors the worked example at html-processor.md:624-631 almost verbatim. Edge cases handled correctly: relies on get_modifiable_text already-decoded semantics (no double-decode), accumulates empty string for image-only H1, captures unclosed-H1 text. Minor gap: omits the null check on create_fragment despite the documented `static|null` return; not reachable with the default <body> context so all 8 cases pass, but the reference solution guards it. Passed 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Identical logic to trial-1 with the documented `>=` depth loop; all methods documented, no misuse, no _doing_it_wrong. Uses leading-backslash \\WP_HTML_Processor (valid, harmless). Same minor robustness gap: no null check on create_fragment. Self-report correctly states get_modifiable_text returns already-decoded text. Passed 8/8."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and all-documented methods, with two refinements over the others: (1) includes the create_fragment null check the reference has and trials 1-2 omit, and (2) uses an explicit `if (depth < h1_depth) break;` instead of the combined while-guard — equivalent semantics, arguably clearer. Uses next_tag with array query `array('tag_name' => 'h1')`; the documented array-query form (html-processor.md:692) and lowercase tag name both work. No _doing_it_wrong. Correctly reasons about decoded text and empty-string-vs-null. Passed 8/8."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 8 hidden cases. This task is the closest possible match to existing documentation — html-processor.md:624-631 contains a worked LI-text-extraction example using exactly the pattern needed here (record get_current_depth() at the opener, then `while ( next_token() && get_current_depth() >= $depth )`, filtering `'#text' === get_token_type()` and concatenating get_modifiable_text()). All three candidates reproduced this pattern; trials 1 and 2 are near-line-for-line copies of it and of the reference solution.\\n\\nWhat the docs did well, mapped to the trickier cases:\\n- entities-decoded (Fish & Chips, mdash): get_modifiable_text() at html-processor.md:2077 states plainly that for #text nodes the returned text is DECODED and warns \\\"Do not decode it again.\\\" Every candidate relied on this and none double-decoded.\\n- image-only-empty-string vs no-h1-null: the distinction between returning \\\"\\\" (H1 with no text) and null (no H1) was driven by the task spec, but the docs reinforce it — get_modifiable_text() documents returning an empty string for tokens with no modifiable text, and next_tag()'s bool return cleanly signals \\\"no H1 found.\\\" All three got both branches right.\\n- nested-in-div / nested-markup: the `>=` depth guard (the example even annotates \\\"// >= and not >.\\\" at html-processor.md:891) is precisely what makes nested text and text-after-nested-elements get captured while stopping at the H1 closer. The breadcrumbs/depth section (html-processor.md:686) explaining that a closer reports depth one-less than its opener underpins why the loop terminates at the right token.\\n- unclosed-h1: handled implicitly correctly because next_token() walks to end-of-document and depth never drops below the H1 depth, so the run-to-end text is collected. No candidate needed special-casing.\\n\\nNear-misses in the explanations: trials 1 and 2 omit the documented `create_fragment(): static|null` null check. This is harmless for the test inputs (the only documented null causes are non-default context/encoding, impossible here), and trial 3 includes it, but the explanations for trials 1-2 don't acknowledge the unchecked null return. No correctness impact.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md:348-383)",
+      "problem": "The signature documents `static|null` and the Returns row says \"otherwise null,\" but no example or guidance shows callers guarding the null. Two of three subjects skipped the null check entirely. It happens to be safe here only because the sole documented null triggers (non-default context/encoding) are unreachable with defaults, but the docs never state that, so subjects can't know whether their omission is safe or lucky.",
+      "suggestion": "Add one sentence enumerating when create_fragment actually returns null (currently: unsupported context or encoding) and a one-line `if ( null === $processor ) { return ...; }` guard in the first usage example, so callers learn both that the guard is idiomatic and when it can actually fire."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() (html-processor.md:575-578) and the tag-name matching docs",
+      "problem": "Subjects passed the target tag in three different forms — string 'H1', and array `array('tag_name' => 'h1')` (lowercase) — all of which worked, but the docs never state that tag-name matching is case-insensitive or that the array `tag_name` key accepts lowercase. Subjects guessed correctly here; on a less forgiving task this ambiguity could cause silent no-match failures.",
+      "suggestion": "In next_tag()'s description, state explicitly that tag-name queries are ASCII-case-insensitive (so 'h1', 'H1', and `array('tag_name' => 'h1')` are equivalent) and cross-link the supported query keys (tag_name, breadcrumbs, tag_closers) in one place."
+    },
+    {
+      "location": "Token-walking / subtree-extraction pattern (html-processor.md:614-631 next_token section)",
+      "problem": "The canonical depth-guarded subtree-walk example is buried inside the next_token() prose and uses an LI element. It is the single most reusable pattern in the API (it answers 'collect everything inside element X'), yet there is no named, standalone section a reader can find by searching for 'text content', 'inner text', or 'subtree'. Subjects succeeded only because the example happened to be near-identical to this task.",
+      "suggestion": "Promote the depth-guarded `while ( next_token() && get_current_depth() >= $depth )` subtree walk to a short named subsection or recipe (e.g. \"Reading an element's full text content\") with a generic element, explicitly noting that it captures text from nested elements and stops at the matching closer, and that it naturally handles unclosed elements by running to end-of-document."
+    }
+  ]
+}

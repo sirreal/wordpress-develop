@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to construct the HTML from a template. It creates a template with the structure and empty attribute values to preserve order. The processor then sets src and alt attributes with the provided values (automatically encoded), and finds the text node in figcaption to set the caption content (also automatically encoded).",
+  "confidence": 50
+}
