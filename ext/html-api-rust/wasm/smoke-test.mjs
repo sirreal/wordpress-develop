@@ -549,6 +549,28 @@ assert.equal(processor.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 
+for (const [html, breadcrumbs, expected] of [
+	["<div><span><figure><img target></figure></span></div>", ["span", "figure", "img"], true],
+	["<div><span><figure><img target></figure></span></div>", ["span", "*", "img"], true],
+	["<div><span><figure><img target></figure></span></div>", ["span", "img"], false],
+	["<div><span><figure><img target></figure></span></div>", ["html", "body", "div", "span", "figure", "img"], true],
+	["<div><span><figure><img target></figure></span></div>", ["html", "div", "span", "figure", "img"], false],
+	["<div><span><figure><p target></figure></span></div>", ["span", "figure", "p"], true],
+	["<div><span><figure><p target></figure></span></div>", ["span", "*", "p"], true],
+	["<div><span><figure><p target></figure></span></div>", ["span", "p"], false],
+	["<div><span><figure><p target></figure></span></div>", ["html", "body", "div", "span", "figure", "p"], true],
+	["<div><span><figure><p target></figure></span></div>", ["html", "div", "span", "figure", "p"], false],
+	["<div><span><figure></p target></figure></span></div>", ["span", "figure", "p"], false],
+	["<figure><code><div><p><span><img target></span></p></div></code></figure>", ["*"], true],
+	["<figure><code><div><p><span><img target></span></p></div></code></figure>", ["SPAN", "*"], true],
+]) {
+	const breadcrumbsProcessor = WP_HTML_Processor.create_fragment(html);
+	while (breadcrumbsProcessor.next_tag() && breadcrumbsProcessor.get_attribute("target") === null) {
+	}
+	assert.equal(breadcrumbsProcessor.matches_breadcrumbs(breadcrumbs), expected);
+	breadcrumbsProcessor.destroy();
+}
+
 const completedProcessor = WP_HTML_Processor.create_fragment('<div class="test">Test</div>');
 assert.equal(completedProcessor.next_tag(), true);
 assert.equal(completedProcessor.get_tag(), "DIV");
