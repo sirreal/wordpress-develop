@@ -2883,6 +2883,20 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (HEADING_ELEMENTS.has(tagName) && closingNamespace === "html") {
+					const headingIndex = this.#findOpenElementBeforeBoundary(
+						(nodeName) => HEADING_ELEMENTS.has(nodeName),
+						DEFAULT_SCOPE_BOUNDARIES,
+					);
+					if (headingIndex !== -1 && (existingIndex === -1 || headingIndex > existingIndex)) {
+						this.current_token_namespace = this.current_namespace;
+						this.breadcrumbs = [...this.open_elements];
+						this.#queueVirtualPopsFrom(headingIndex);
+						this.skip_current_token = true;
+						return;
+					}
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					existingIndex !== -1 &&

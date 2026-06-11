@@ -638,6 +638,14 @@ for (const [html, expectedTree] of [
 		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <tbody>\n        <tr>\n          <td>\n            <span>\n              <font>\n            <font>\n              <span>\n\n",
 	],
 	[
+		"<!doctype html><h1><div><h3><span></h1>foo",
+		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <h1>\n      <div>\n        <h3>\n          <span>\n        "foo"\n\n',
+	],
+	[
+		"<!doctype html><h3><li>abc</h2>foo",
+		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <h3>\n      <li>\n        "abc"\n    "foo"\n\n',
+	],
+	[
 		"<!DOCTYPE html><table><caption><svg>foo</table>bar",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <caption>\n        <svg svg>\n          "foo"\n    "bar"\n\n',
 	],
