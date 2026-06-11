@@ -76,6 +76,7 @@ assert.deepEqual(
 		tag_end: 17,
 		name_start: 1,
 		name_len: 1,
+		name_length: 1,
 		tag_name: "P",
 		is_closing: false,
 		has_self_closing_flag: false,
@@ -83,6 +84,7 @@ assert.deepEqual(
 		token_type: 1,
 	},
 );
+assert.equal(scanNextTag("<span>", -10).tag_name, "SPAN");
 
 const tags = new WP_HTML_Tag_Processor('<div class="one"><span data-id="7">Hi</span></div>');
 assert.equal(tags.next_tag({ tag_name: "span" }), true);

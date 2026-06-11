@@ -2852,10 +2852,11 @@ class WasmRuntime {
 
 	scanNextTag(html, offset = 0) {
 		const input = this.encode(html);
+		const normalizedOffset = Math.max(0, phpIntegerCast(offset));
 		return this.withBytes(input, ({ ptr, len }) => {
 			const out = this.allocBytes(new Uint8Array(32));
 			try {
-				if (!this.wasm.wp_html_api_rust_scan_next_tag(ptr, len, offset, out.ptr)) {
+				if (!this.wasm.wp_html_api_rust_scan_next_tag(ptr, len, normalizedOffset, out.ptr)) {
 					return false;
 				}
 
@@ -2869,6 +2870,7 @@ class WasmRuntime {
 					tag_end: tagEnd,
 					name_start: nameStart,
 					name_len: nameLen,
+					name_length: nameLen,
 					tag_name: asciiUpper(textDecoder.decode(memory.subarray(ptr + nameStart, ptr + nameStart + nameLen))),
 					is_closing: Boolean(memory[out.ptr + 16]),
 					has_self_closing_flag: Boolean(memory[out.ptr + 17]),

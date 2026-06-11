@@ -11,6 +11,7 @@ export interface ScanNextTagResult {
 	tag_end: number;
 	name_start: number;
 	name_len: number;
+	name_length: number;
 	tag_name: string;
 	is_closing: boolean;
 	has_self_closing_flag: boolean;
