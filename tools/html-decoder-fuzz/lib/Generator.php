@@ -17,6 +17,17 @@ class Generator {
 
 	private const ASCII_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_:/.,;#[](){}\'=+!?*';
 	private const NAME_MUTATION_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+	private const COMPOSITION_SEPARATOR = '|';
+	private const ATTRIBUTE_PREFIX_TARGETS = array(
+		'javascript:',
+		'JaVaScRiPt:',
+		'http://',
+		'https://',
+		'mailto:user@example.com',
+		'data:text/plain,',
+		'urn:wp:html5:',
+		'ftp://',
+	);
 
 	private Prng $prng;
 	private int $max_bytes;
@@ -79,6 +90,7 @@ class Generator {
 				'multibyte-around'       => 9,
 				'attribute-prefix'       => 8,
 				'lookalike'              => 8,
+				'composition'            => 9,
 			)
 		);
 
@@ -331,24 +343,27 @@ class Generator {
 	}
 
 	private function gen_attribute_prefix(): string {
-		$prefixes = array(
-			'javascript:',
-			'JaVaScRiPt:',
-			'javascript&colon;',
-			'javascript&#58;',
-			'javascript&#0000058',
-			'javascript&#x3A;',
-			'&#x6A;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3A;',
-			'&nvlt;',
-			'&nvgt;',
-			'&NotLessLess;',
-			'&bne;',
-			'http://',
-			'https://',
-			'jav',
+		if ( $this->prng->chance( 72 ) ) {
+			$encoded = $this->encode_attribute_prefix_target( $this->prng->choice( self::ATTRIBUTE_PREFIX_TARGETS ) );
+			$suffix  = $this->plain_text_up_to( max( 0, $this->max_bytes - strlen( $encoded['payload'] ) ) );
+			if ( null !== $encoded['semicolonless_base'] && '' !== $suffix && self::would_extend_semicolonless_numeric( $encoded['semicolonless_base'], $suffix[0] ) ) {
+				$suffix = '_' . substr( $suffix, 1 );
+			}
+
+			return $encoded['payload'] . $suffix;
+		}
+
+		$prefix = $this->prng->choice(
+			array(
+				'&nvlt;',
+				'&nvgt;',
+				'&NotLessLess;',
+				'&bne;',
+				'jav',
+			)
 		);
 
-		return $this->prng->choice( $prefixes ) . $this->plain_text();
+		return $prefix . $this->plain_text_up_to( max( 0, $this->max_bytes - strlen( $prefix ) ) );
 	}
 
 	private function gen_lookalike(): string {
@@ -357,6 +372,187 @@ class Generator {
 			: $this->legacy_lookalike();
 
 		return $this->plain_text() . $lookalike . $this->plain_text();
+	}
+
+	private function gen_composition(): string {
+		if ( $this->max_bytes < 3 ) {
+			return self::trim_to_safe_max( $this->named_exact(), $this->max_bytes );
+		}
+
+		$strategies = array(
+			'named-exact',
+			'named-missing-semi',
+			'attribute-discriminator',
+			'numeric',
+			'adjacency',
+			'truncation-sweep',
+			'reference-at-eof',
+			'multibyte-around',
+			'attribute-prefix',
+			'lookalike',
+		);
+		$max_count          = min( 3, intdiv( $this->max_bytes + strlen( self::COMPOSITION_SEPARATOR ), 1 + strlen( self::COMPOSITION_SEPARATOR ) ) );
+		$count              = $this->prng->int( 2, $max_count );
+		$original_max_bytes = $this->max_bytes;
+		$out                = '';
+
+		for ( $i = 0; $i < $count; $i++ ) {
+			if ( $i > 0 ) {
+				$out .= self::COMPOSITION_SEPARATOR;
+			}
+
+			$remaining_fragments = $count - $i - 1;
+			$reserved_bytes      = $remaining_fragments * ( 1 + strlen( self::COMPOSITION_SEPARATOR ) );
+			$fragment_max_bytes  = max( 1, $original_max_bytes - strlen( $out ) - $reserved_bytes );
+
+			$out .= $this->composition_fragment( $strategies, $fragment_max_bytes );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param string[] $strategies
+	 */
+	private function composition_fragment( array $strategies, int $max_bytes ): string {
+		for ( $attempt = 0; $attempt < 8; $attempt++ ) {
+			$strategy = $this->prng->choice( $strategies );
+			$method   = 'gen_' . str_replace( '-', '_', $strategy );
+			$fragment = $this->with_max_bytes(
+				$max_bytes,
+				function () use ( $method ): string {
+					return $this->$method();
+				}
+			);
+			$fragment = self::trim_to_safe_max( $fragment, $max_bytes );
+
+			if ( '' !== $fragment && ! str_contains( $fragment, self::COMPOSITION_SEPARATOR ) ) {
+				return $fragment;
+			}
+		}
+
+		return '&';
+	}
+
+	/**
+	 * @return array{payload: string, semicolonless_base: ?string}
+	 */
+	private function encode_attribute_prefix_target( string $target ): array {
+		if ( '' === $target ) {
+			return array(
+				'payload'            => '',
+				'semicolonless_base' => null,
+			);
+		}
+
+		$length             = strlen( $target );
+		$force_reference_at = $this->prng->int( 0, $length - 1 );
+		$out                = '';
+		$previous_base      = null;
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$char          = $target[ $i ];
+			$allow_literal = $i !== $force_reference_at && self::is_oracle_safe_literal( $char ) && ! self::would_extend_semicolonless_numeric( $previous_base, $char );
+			$encoded       = $this->encode_attribute_prefix_character( ord( $char ), $allow_literal );
+			$out          .= $encoded['payload'];
+			$previous_base = $encoded['semicolonless_base'];
+		}
+
+		return array(
+			'payload'            => $out,
+			'semicolonless_base' => $previous_base,
+		);
+	}
+
+	/**
+	 * @return array{payload: string, semicolonless_base: ?string}
+	 */
+	private function encode_attribute_prefix_character( int $code_point, bool $allow_literal ): array {
+		$encoding = $this->prng->weighted(
+			array(
+				'literal'              => $allow_literal ? 34 : 0,
+				'decimal'              => 17,
+				'decimal-leading-zero' => 17,
+				'hex-lower'            => 14,
+				'hex-upper'            => 10,
+				'hex-leading-zero'     => 8,
+			)
+		);
+
+		if ( 'literal' === $encoding ) {
+			return array(
+				'payload'            => chr( $code_point ),
+				'semicolonless_base' => null,
+			);
+		}
+
+		$is_hex = str_starts_with( $encoding, 'hex' );
+		$digits = $is_hex ? dechex( $code_point ) : (string) $code_point;
+
+		if ( str_ends_with( $encoding, 'leading-zero' ) ) {
+			$digits = str_repeat( '0', $this->prng->int( 1, 4 ) ) . $digits;
+		}
+		if ( 'hex-upper' === $encoding || ( 'hex-leading-zero' === $encoding && $this->prng->chance( 50 ) ) ) {
+			$digits = strtoupper( $digits );
+		}
+
+		$semicolon = $this->prng->chance( 68 ) ? ';' : '';
+		$prefix    = $is_hex
+			? ( $this->prng->chance( 50 ) ? '&#x' : '&#X' )
+			: '&#';
+
+		return array(
+			'payload'            => $prefix . $digits . $semicolon,
+			'semicolonless_base' => '' === $semicolon ? ( $is_hex ? 'hex' : 'decimal' ) : null,
+		);
+	}
+
+	private static function is_oracle_safe_literal( string $char ): bool {
+		return ! in_array( $char, array( '<', '"', "\r", "\x00" ), true );
+	}
+
+	private static function would_extend_semicolonless_numeric( ?string $base, string $char ): bool {
+		if ( null === $base ) {
+			return false;
+		}
+
+		if ( ';' === $char ) {
+			return true;
+		}
+
+		if ( 'decimal' === $base ) {
+			return self::is_ascii_digit( $char );
+		}
+
+		return self::is_ascii_hex_digit( $char );
+	}
+
+	private static function is_ascii_digit( string $char ): bool {
+		$ord = ord( $char );
+		return $ord >= 0x30 && $ord <= 0x39;
+	}
+
+	private static function is_ascii_hex_digit( string $char ): bool {
+		$ord = ord( $char );
+		return (
+			( $ord >= 0x30 && $ord <= 0x39 ) ||
+			( $ord >= 0x41 && $ord <= 0x46 ) ||
+			( $ord >= 0x61 && $ord <= 0x66 )
+		);
+	}
+
+	/**
+	 * @param callable(): string $callback
+	 */
+	private function with_max_bytes( int $max_bytes, callable $callback ): string {
+		$previous_max_bytes = $this->max_bytes;
+		$this->max_bytes    = max( 1, $max_bytes );
+
+		try {
+			return $callback();
+		} finally {
+			$this->max_bytes = $previous_max_bytes;
+		}
 	}
 
 	private function edit_distance_lookalike(): string {

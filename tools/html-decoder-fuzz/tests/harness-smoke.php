@@ -125,6 +125,7 @@ function start_windows_are_distinct( array $windows, int $cases_per_batch ): boo
 
 $oracles = Oracles::build();
 $events  = $oracles->drain_events();
+$skip_c1_fault_case = 157;
 
 check( 'required oracles available', $oracles->has_required(), json_encode( $events ) );
 check(
@@ -466,6 +467,67 @@ function numeric_boundary_shape( string $payload ): array {
 		'leading_zero'       => strlen( $digits ) > strlen( $significant ),
 		'semicolon'          => ';' === ( $match[4] ?? '' ),
 		'mixed_hex'          => $is_hex && '' !== $letters && strtolower( $letters ) !== $letters && strtoupper( $letters ) !== $letters,
+	);
+}
+
+/**
+ * @return string[]
+ */
+function attribute_prefix_smoke_targets(): array {
+	return array(
+		'javascript:',
+		'JaVaScRiPt:',
+		'http://',
+		'https://',
+		'mailto:user@example.com',
+		'data:text/plain,',
+		'urn:wp:html5:',
+		'ftp://',
+	);
+}
+
+/**
+ * @return string[]
+ */
+function attribute_prefix_encoding_forms( string $payload ): array {
+	$forms = array();
+
+	if ( '' !== $payload && '&' !== $payload[0] ) {
+		$forms['literal'] = true;
+	}
+	if ( 1 === preg_match( '/&#[1-9][0-9]*;?/', $payload ) ) {
+		$forms['decimal'] = true;
+	}
+	if ( 1 === preg_match( '/&#0+[0-9]+;?/', $payload ) ) {
+		$forms['leading-zero'] = true;
+	}
+	if ( 1 === preg_match( '/&#[xX][0-9A-Fa-f]+;?/', $payload ) ) {
+		$forms['hex'] = true;
+	}
+	if ( 1 === preg_match( '/(?:&#[0-9]+(?:$|[^0-9;])|&#[xX][0-9A-Fa-f]+(?:$|[^0-9A-Fa-f;]))/', $payload ) ) {
+		$forms['semicolonless'] = true;
+	}
+
+	return array_keys( $forms );
+}
+
+/**
+ * @return string[]
+ */
+function expected_weighted_strategies(): array {
+	return array(
+		'adjacency',
+		'attribute-discriminator',
+		'attribute-prefix',
+		'composition',
+		'lookalike',
+		'multibyte-around',
+		'named-exact',
+		'named-missing-semi',
+		'numeric',
+		'plain-no-amp',
+		'reference-at-eof',
+		'truncation-sweep',
 	);
 }
 
@@ -980,6 +1042,9 @@ $reference_at_eof      = 0;
 $reference_at_eof_bad = 0;
 $reference_at_eof_shapes = array();
 $attribute_multicodepoint_prefix = 0;
+$composition = 0;
+$composition_bad_shape = 0;
+$composition_multi_reference_fragments = 0;
 $total                 = 1200;
 for ( $i = 0; $i < $total; $i++ ) {
 	$generated = ( new Generator( new Prng( "smoke:{$i}" ), 4096, $names ) )->generate();
@@ -1008,11 +1073,32 @@ for ( $i = 0; $i < $total; $i++ ) {
 	) {
 		++$attribute_multicodepoint_prefix;
 	}
+	if ( 'composition' === $generated['strategy'] ) {
+		++$composition;
+		$fragments = explode( '|', $generated['payload'] );
+		if ( count( $fragments ) < 2 || count( $fragments ) > 3 || in_array( '', $fragments, true ) ) {
+			++$composition_bad_shape;
+		}
+
+		$reference_fragments = 0;
+		foreach ( $fragments as $fragment ) {
+			if ( str_contains( $fragment, '&' ) ) {
+				++$reference_fragments;
+			}
+		}
+		if ( $reference_fragments >= 2 ) {
+			++$composition_multi_reference_fragments;
+		}
+	}
 }
-check( 'all 11 strategies appear', 11 === count( $strategies ), implode( ',', array_keys( $strategies ) ) );
+$seen_strategies = array_keys( $strategies );
+sort( $seen_strategies );
+check( 'all weighted strategies appear', expected_weighted_strategies() === $seen_strategies, implode( ',', $seen_strategies ) );
 check( 'generated cases run both contexts', array( 'both' ) === array_keys( $contexts ), implode( ',', array_keys( $contexts ) ) );
 check( 'generated payloads are oracle-safe', 0 === $unsafe, (string) $unsafe );
 check( 'attribute-prefix generator emits multi-code-point references', $attribute_multicodepoint_prefix > 0, (string) $attribute_multicodepoint_prefix );
+check( 'composition generator emits 2-3 separated fragments', $composition > 0 && 0 === $composition_bad_shape, "{$composition_bad_shape}/{$composition}" );
+check( 'composition generator splices multiple reference-bearing fragments', $composition_multi_reference_fragments > 0, "{$composition_multi_reference_fragments}/{$composition}" );
 check( 'reference-at-EOF cases end inside a reference', $reference_at_eof > 0 && 0 === $reference_at_eof_bad, "{$reference_at_eof_bad}/{$reference_at_eof}" );
 check(
 	'reference-at-EOF covers expected suffix shapes',
@@ -1021,6 +1107,77 @@ check(
 		array_keys( $reference_at_eof_shapes )
 	),
 	implode( ',', array_keys( $reference_at_eof_shapes ) )
+);
+
+$small_compositions = 0;
+$small_composition_bad = array();
+foreach ( array( 3, 5, 7, 12 ) as $max_bytes ) {
+	for ( $i = 0; $i < 1200; $i++ ) {
+		$generated = ( new Generator( new Prng( "composition-small:{$max_bytes}:{$i}" ), $max_bytes, $names ) )->generate();
+		if ( 'composition' !== $generated['strategy'] ) {
+			continue;
+		}
+
+		++$small_compositions;
+		$fragments = explode( '|', $generated['payload'] );
+		if (
+			strlen( $generated['payload'] ) > $max_bytes ||
+			count( $fragments ) < 2 ||
+			count( $fragments ) > 3 ||
+			in_array( '', $fragments, true )
+		) {
+			$small_composition_bad[] = "{$max_bytes}:{$i}:" . bin2hex( $generated['payload'] );
+		}
+	}
+}
+check( 'composition generator keeps small max-bytes fragments nonempty', $small_compositions > 0 && array() === $small_composition_bad, implode( ',', $small_composition_bad ) );
+
+$attribute_prefix_targets = array();
+$attribute_prefix_forms = array();
+$attribute_prefix_bad_targets = array();
+for ( $i = 0; $i < 8000; $i++ ) {
+	$generated = ( new Generator( new Prng( "attribute-prefix-smoke:{$i}" ), 4096, $names ) )->generate();
+	if ( 'attribute-prefix' !== $generated['strategy'] ) {
+		continue;
+	}
+
+	$decoded = $oracles->decode( 'attribute', $generated['payload'] );
+	foreach ( attribute_prefix_smoke_targets() as $target ) {
+		if ( ! str_starts_with( $decoded, $target ) ) {
+			continue;
+		}
+
+		$attribute_prefix_targets[ $target ] = true;
+		foreach ( attribute_prefix_encoding_forms( $generated['payload'] ) as $form ) {
+			$attribute_prefix_forms[ $form ] = true;
+		}
+		if ( ! \WP_HTML_Decoder::attribute_starts_with( $generated['payload'], $target, 'case-sensitive' ) ) {
+			$attribute_prefix_bad_targets[] = $target . ':' . bin2hex( substr( $generated['payload'], 0, 64 ) );
+		}
+		break;
+	}
+}
+check(
+	'attribute-prefix encoder covers every target string',
+	array() === array_diff( attribute_prefix_smoke_targets(), array_keys( $attribute_prefix_targets ) ),
+	implode( ',', array_keys( $attribute_prefix_targets ) )
+);
+check(
+	'attribute-prefix encoder covers literal, numeric, zero, hex, and semicolonless forms',
+	array() === array_diff( array( 'literal', 'decimal', 'leading-zero', 'hex', 'semicolonless' ), array_keys( $attribute_prefix_forms ) ),
+	implode( ',', array_keys( $attribute_prefix_forms ) )
+);
+check( 'attribute-prefix encoded targets satisfy attribute_starts_with', array() === $attribute_prefix_bad_targets, implode( ',', $attribute_prefix_bad_targets ) );
+
+$semicolonless_guard = new \ReflectionMethod( Generator::class, 'would_extend_semicolonless_numeric' );
+check(
+	'attribute-prefix semicolonless numeric guard protects terminators and digits',
+	true === $semicolonless_guard->invoke( null, 'decimal', ';' ) &&
+		true === $semicolonless_guard->invoke( null, 'hex', ';' ) &&
+		true === $semicolonless_guard->invoke( null, 'decimal', '7' ) &&
+		true === $semicolonless_guard->invoke( null, 'hex', 'A' ) &&
+		false === $semicolonless_guard->invoke( null, 'decimal', 'A' ) &&
+		false === $semicolonless_guard->invoke( null, null, ';' )
 );
 
 $numeric_ranges = array();
@@ -2172,7 +2329,7 @@ file_put_contents(
 		)
 	)
 );
-$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case128' );
+$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . "/failure-seed1-case{$skip_c1_fault_case}" );
 if ( $symlink_write_created ) {
 	$symlink_write_worker = run_process(
 		array(
@@ -2189,7 +2346,7 @@ if ( $symlink_write_created ) {
 		),
 		array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
 	);
-	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case128-sig*/failure.json' );
+	$symlink_write_suffixed = glob( $symlink_write_dir . "/failure-seed1-case{$skip_c1_fault_case}-sig*/failure.json" );
 	check(
 		'worker does not write through symlinked failure artifact dirs',
 		1 === $symlink_write_worker['code'] &&
@@ -2439,7 +2596,7 @@ check(
 	1 === $unverified_weak_seed_runner['code'] &&
 		0 === $unverified_weak_runner['code'] &&
 		! is_dir( $unverified_weak_manifest_dir . '/failure-000weak' ) &&
-		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case128/failure.json' ) &&
+		is_file( $unverified_weak_manifest_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
 		( $unverified_weak_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
 		( false !== ( $unverified_weak_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_weak_seed_runner['stdout'] . $unverified_weak_seed_runner['stderr'] . $unverified_weak_runner['stdout'] . $unverified_weak_runner['stderr'] . json_encode( $unverified_weak_state['artifact_retention'] ?? null )
@@ -2517,7 +2674,7 @@ check(
 	1 === $unverified_fake_seed_runner['code'] &&
 		0 === $unverified_fake_runner['code'] &&
 		is_file( $unverified_fake_manifest_dir . '/failure-000fake/failure.json' ) &&
-		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case128/failure.json' ) &&
+		is_file( $unverified_fake_manifest_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
 		array_sum( is_array( $unverified_fake_counts ) ? $unverified_fake_counts : array() ) >= 2 &&
 		( false !== ( $unverified_fake_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_fake_seed_runner['stdout'] . $unverified_fake_seed_runner['stderr'] . $unverified_fake_runner['stdout'] . $unverified_fake_runner['stderr'] . json_encode( $unverified_fake_state['artifact_retention'] ?? null )
@@ -2871,7 +3028,7 @@ check(
 	1 === $reuse_same_runner['code'] &&
 		is_array( $reuse_same_dirs ) &&
 		count( $reuse_same_dirs ) === array_sum( $reuse_same_counts ) &&
-		is_file( $runner_dir . '/failure-seed1-case128/failure.json' ) &&
+		is_file( $runner_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
 		array() === array_filter( $reuse_same_counts, static fn( $count ) => $count > 1 ),
 	$reuse_same_runner['stdout'] . $reuse_same_runner['stderr'] . json_encode( $reuse_same_state['artifact_retention'] ?? null )
 );
@@ -2923,9 +3080,9 @@ $different_signature_second = run_process(
 	),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
-$different_signature_case128 = glob( $different_signature_dir . '/failure-seed1-case128*/failure.json' );
+$different_signature_case_files = glob( $different_signature_dir . "/failure-seed1-case{$skip_c1_fault_case}*/failure.json" );
 $different_signature_seen   = array();
-foreach ( is_array( $different_signature_case128 ) ? $different_signature_case128 : array() as $failure_file ) {
+foreach ( is_array( $different_signature_case_files ) ? $different_signature_case_files : array() as $failure_file ) {
 	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
 	if ( is_array( $manifest ) && isset( $manifest['signatures'] ) && is_array( $manifest['signatures'] ) ) {
 		$different_signature_seen[] = implode( ',', $manifest['signatures'] );

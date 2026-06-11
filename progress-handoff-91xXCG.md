@@ -16,7 +16,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 9: add full follower-byte sweep after legacy names.
 - [x] Tier 2 item 10: add prefix-family stress generation.
 - [x] Tier 2 item 11: add digit-count numeric boundary stress generation.
-- [ ] Tier 2 items 12-15.
+- [x] Tier 2 item 12: add strategy composition and generalized attribute-prefix encoding.
+- [ ] Tier 2 items 13-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -80,6 +81,11 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting numeric-boundary full-period mapping over 6/7 hex and 7/8 decimal significant digit counts, leading-zero variants, semicolon variants, mixed-case hex digits, worker, runner, replay, seed-replay fault, and failure-manifest fault-pipeline coverage.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode numeric-boundaries --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-numeric-boundaries-runner-check`, `php tools/html-decoder-fuzz/replay.php --mode numeric-boundaries --seed 1 --case 25`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-numeric-boundaries-fault-check`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/replay.php --failure /tmp/html-decoder-fuzz-numeric-boundaries-fault-check/failure-seed1-case0/failure.json`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-numeric-boundaries-fault-check/failure-seed1-case0/failure.json`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
 - 2026-06-11: After reviewer feedback, exact-max numeric-boundary cases now use in-range payloads (`&#1114111` and `&#x10ffee` casing variants) while max-plus-one cases remain invalid; `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/replay.php --mode numeric-boundaries --seed 1 --case 25`, the refreshed fault-manifest replay/minimize, default 500-case worker, and `git diff --check` passed.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding the weighted composition strategy and generalized attribute-prefix encoder.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting all 12 weighted strategies appear, composition generates multi-reference splices, generalized attribute-prefix encoding covers every target string and literal/decimal/leading-zero/hex/semicolonless forms, and the skip-C1 fault artifact checks use the new deterministic case 157 after generator weighting shifted seed/case mapping.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed after adding strategy composition and reported `by_strategy` including `"composition":30`; `git diff --check` passed.
+- 2026-06-11: After reviewer feedback, semicolonless numeric boundary protection now treats `;` as a reference-extending follower, composition inserts explicit fragment separators, and smoke asserts the exact weighted strategy set plus 2-3 separated composition fragments; `php tools/html-decoder-fuzz/tests/harness-smoke.php` and `git diff --check` passed.
+- 2026-06-11: After follow-up reviewer feedback, composition now keeps separated fragments nonempty under small public `max-bytes` values; a targeted probe for max bytes 3, 5, 7, and 12, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
 
 ## Review Log
 
@@ -127,3 +133,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Plato: APPROVE, numeric-boundary generator semantics after in-range exact-max correction and decode-outcome smoke tightening.
   - Socrates: APPROVE, CLI/worker/replay/runner integration and artifact replay after the mixed-case case update.
   - Volta: APPROVE, smoke/docs/progress coverage after exact-max and max-plus-one replacement assertions.
+- Tier 2 item 12:
+  - Lagrange: APPROVE, generator semantics after semicolon follower protection and small-`max-bytes` composition fixes.
+  - Pauli: APPROVE, smoke coverage after exact strategy-set and delimiter-based composition assertions.
+  - Locke: APPROVE, integration/docs/progress accuracy after weighted composition and generalized encoder changes.
