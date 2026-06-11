@@ -2803,6 +2803,21 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
+				allowVirtualPreclosures &&
+				this.current_namespace === "html" &&
+				tagName === "SELECT"
+			) {
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (selectIndex !== -1) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.#queueVirtualPopsFrom(selectIndex);
+					this.skip_current_token = true;
+					return;
+				}
+			}
+
+			if (
 				this.current_namespace === "html" &&
 				tagName === "FORM" &&
 				!this.#hasOpenHtmlElement("TEMPLATE") &&
