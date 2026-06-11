@@ -650,6 +650,10 @@ for (const [html, expectedTree] of [
 		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <p>\n      <button>\n        <p>\n\n",
 	],
 	[
+		"<p><xmp></xmp>",
+		"<html>\n  <head>\n  <body>\n    <p>\n    <xmp>\n\n",
+	],
+	[
 		"<!DOCTYPE html><table><caption><svg>foo</table>bar",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <caption>\n        <svg svg>\n          "foo"\n    "bar"\n\n',
 	],

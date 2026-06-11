@@ -430,6 +430,7 @@ const P_CLOSING_START_TAGS = new Set([
 	"SUMMARY",
 	"TABLE",
 	"UL",
+	"XMP",
 	...HEADING_ELEMENTS,
 ]);
 
