@@ -3955,7 +3955,8 @@ export function createHtmlApi(wasm) {
 
 						if (isCloser && tagName === "HTML") {
 							this.full_parser_insertion_mode = "after_after_frameset";
-							return false;
+							this.skip_current_token = true;
+							return true;
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {

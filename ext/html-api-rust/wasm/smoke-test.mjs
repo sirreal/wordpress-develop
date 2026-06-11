@@ -586,6 +586,10 @@ for (const [html, expectedTree] of [
 		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n  <!-- do -->\n\n",
 	],
 	[
+		"<html><frameset></frameset></html> ",
+		'<html>\n  <head>\n  <frameset>\n  " "\n\n',
+	],
+	[
 		"<!DOCTYPE html><select><optgroup><option></optgroup><option><select><option>",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <select>\n      <optgroup>\n        <option>\n      <option>\n    <option>\n\n',
 	],
