@@ -606,6 +606,26 @@ for (const [html, expectedTree] of [
 		"<html>\n  <head>\n  <body>\n    <svg svg>\n\n",
 	],
 	[
+		"<div><svg></div>a",
+		'<html>\n  <head>\n  <body>\n    <div>\n      <svg svg>\n    "a"\n\n',
+	],
+	[
+		"<div><svg><path><foreignObject><p></div>a",
+		'<html>\n  <head>\n  <body>\n    <div>\n      <svg svg>\n        <svg path>\n          <svg foreignObject>\n            <p>\n              "a"\n\n',
+	],
+	[
+		"<!DOCTYPE html><p><svg><desc><p>",
+		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <p>\n      <svg svg>\n        <svg desc>\n          <p>\n\n",
+	],
+	[
+		"<math><annotation-xml><svg></svg></annotation-xml><mi>",
+		"<html>\n  <head>\n  <body>\n    <math math>\n      <math annotation-xml>\n        <svg svg>\n      <math mi>\n\n",
+	],
+	[
+		"<!doctype html><table><td><span><font></span><span>",
+		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <tbody>\n        <tr>\n          <td>\n            <span>\n              <font>\n            <font>\n              <span>\n\n",
+	],
+	[
 		"<!DOCTYPE html><table><caption><svg>foo</table>bar",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <caption>\n        <svg svg>\n          "foo"\n    "bar"\n\n',
 	],
@@ -2833,6 +2853,7 @@ for (const html of [
 	"<table><tbody><div><tr><td>cell",
 	"<table><tr><div><td>cell",
 	"<table><input><tr><td>cell",
+	"<table><colgroup><svg><g>cell</g>",
 ]) {
 	const tableFosterParentingProcessor = WP_HTML_Processor.create_fragment(html);
 	while (tableFosterParentingProcessor.next_token()) {

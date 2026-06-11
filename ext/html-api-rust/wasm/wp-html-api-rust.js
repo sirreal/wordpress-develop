@@ -183,6 +183,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"MARQUEE",
 	"MENUITEM",
 	"OBJECT",
+	"SPAN",
 ]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
@@ -2814,6 +2815,26 @@ export function createHtmlApi(wasm) {
 				}
 
 				if (
+					closingNamespace === "html" &&
+					tagName !== "TEMPLATE" &&
+					existingIndex !== -1 &&
+					this.#hasForeignIntegrationPointAfter(existingIndex)
+				) {
+					if (
+						this.#hasElementInTableScope("TABLE") &&
+						FORM_TABLE_DESCENDANT_ELEMENTS.has(tagName)
+					) {
+						this.#bailUnsupported("Foster parenting is not supported.");
+						return;
+					}
+
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
+				}
+
+				if (
 					allowVirtualPreclosures &&
 					tagName === "FORM" &&
 					closingNamespace === "html" &&
@@ -4383,18 +4404,16 @@ export function createHtmlApi(wasm) {
 				)
 			) {
 				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
-				if (paragraphIndex !== -1) {
+				if (paragraphIndex !== -1 && !this.#hasForeignIntegrationPointAfter(paragraphIndex)) {
 					this.#queueVirtualPopsFrom(paragraphIndex);
 					return true;
 				}
 			}
 
-			if (this.#shouldClosePForStartTag(tagName)) {
-				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
-				if (paragraphIndex !== -1) {
-					this.#queueVirtualPopsFrom(paragraphIndex);
-					return true;
-				}
+			const paragraphIndex = this.#findClosablePInButtonScopeForStartTag(tagName);
+			if (paragraphIndex !== -1) {
+				this.#queueVirtualPopsFrom(paragraphIndex);
+				return true;
 			}
 
 			if (
@@ -4555,7 +4574,14 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForEndTag(tagName) {
-			if ((tagName === "BR" || tagName === "P") && this.#queueForeignContentBreakoutForEndTag()) {
+			if (
+				(
+					tagName === "BR" ||
+					tagName === "P" ||
+					this.#hasOpenHtmlElementBeforeForeignBreakout(tagName)
+				) &&
+				this.#queueForeignContentBreakoutForEndTag()
+			) {
 				return true;
 			}
 
@@ -4636,6 +4662,20 @@ export function createHtmlApi(wasm) {
 
 			this.#queueVirtualPopsFrom(firstForeignIndex);
 			return true;
+		}
+
+		#hasOpenHtmlElementBeforeForeignBreakout(tagName) {
+			if (this.current_namespace === "html") {
+				return false;
+			}
+
+			const firstForeignIndex = this.#firstForeignElementToPopForHtmlBreakout();
+			const parentIndex = firstForeignIndex - 1;
+			return (
+				parentIndex >= 0 &&
+				this.open_elements[parentIndex] === tagName &&
+				this.open_element_namespaces[parentIndex] === "html"
+			);
 		}
 
 		#queueVirtualOpenersForStartTag(tagName) {
@@ -5024,7 +5064,7 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
-			if (this.#shouldClosePForStartTag(tagName)) {
+			if (this.#findClosablePInButtonScopeForStartTag(tagName) !== -1) {
 				this.#closePInButtonScope();
 			}
 
@@ -5082,6 +5122,17 @@ export function createHtmlApi(wasm) {
 				P_CLOSING_START_TAGS.has(tagName) &&
 				(tagName !== "TABLE" || this.compat_mode !== WP_HTML_Tag_Processor.QUIRKS_MODE)
 			);
+		}
+
+		#findClosablePInButtonScopeForStartTag(tagName) {
+			if (!this.#shouldClosePForStartTag(tagName)) {
+				return -1;
+			}
+
+			const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+			return paragraphIndex !== -1 && !this.#hasForeignIntegrationPointAfter(paragraphIndex)
+				? paragraphIndex
+				: -1;
 		}
 
 		#currentHtmlElementHasImpliedEndTag() {
@@ -5150,6 +5201,19 @@ export function createHtmlApi(wasm) {
 
 			const templateIndex = this.#lastOpenElementIndex("TEMPLATE", "html");
 			return templateIndex !== -1 && existingIndex !== -1 && existingIndex < templateIndex;
+		}
+
+		#hasForeignIntegrationPointAfter(index) {
+			for (let i = index + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" &&
+					this.open_element_integration_node_types[i] !== null
+				) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#popLastMatchingBeforeBoundary(match, boundaries) {
@@ -5328,6 +5392,13 @@ export function createHtmlApi(wasm) {
 			const currentNode = this.open_elements[topIndex];
 			if (currentNode === "TABLE") {
 				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
+			}
+
+			if (currentNode === "COLGROUP") {
+				return (
+					!(tagName === "COL" || tagName === "COLGROUP") &&
+					this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser)
+				);
 			}
 
 			if (TABLE_SECTION_ELEMENTS.has(currentNode)) {
@@ -6128,13 +6199,14 @@ function contextNamespace(nodeName) {
 }
 
 function namespaceForTag(tagName, currentNamespace) {
+	if (tagName === "SVG") {
+		return "svg";
+	}
+	if (tagName === "MATH") {
+		return "math";
+	}
+
 	if (currentNamespace === "html") {
-		if (tagName === "SVG") {
-			return "svg";
-		}
-		if (tagName === "MATH") {
-			return "math";
-		}
 		return "html";
 	}
 
