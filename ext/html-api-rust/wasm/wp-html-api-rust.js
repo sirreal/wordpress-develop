@@ -3424,12 +3424,14 @@ export function createHtmlApi(wasm) {
 
 						if (isCloser && tagName === "BODY") {
 							this.full_parser_insertion_mode = "after_body";
-							return false;
+							this.skip_current_token = true;
+							return true;
 						}
 
 						if (isCloser && tagName === "HTML") {
-							this.full_parser_insertion_mode = "after_body";
-							continue;
+							this.full_parser_insertion_mode = "after_after_body";
+							this.skip_current_token = true;
+							return true;
 						}
 
 						if (tokenType === "#text" && !isWhitespaceText && !isNullText) {
@@ -3462,7 +3464,8 @@ export function createHtmlApi(wasm) {
 
 						if (isCloser && tagName === "HTML") {
 							this.full_parser_insertion_mode = "after_after_body";
-							return false;
+							this.skip_current_token = true;
+							return true;
 						}
 
 						if (isWhitespaceText) {
