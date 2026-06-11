@@ -283,6 +283,7 @@ assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.normalize(null), null);
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
+assert.equal(WP_HTML_Processor.is_special("dialog"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
 

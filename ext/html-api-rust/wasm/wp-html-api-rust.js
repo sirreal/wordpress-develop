@@ -430,7 +430,6 @@ const END_TAG_SPECIAL_BOUNDARIES = new Set([
 	"COLGROUP",
 	"DD",
 	"DETAILS",
-	"DIALOG",
 	"DIR",
 	"DIV",
 	"DL",
