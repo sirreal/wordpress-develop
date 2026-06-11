@@ -471,6 +471,36 @@ assert.equal(processorFunkyComment.get_comment_type(), null);
 assert.equal(processorFunkyComment.get_full_comment_text(), "%url");
 processorFunkyComment.destroy();
 
+for (const [html, expectedType, expectedText, expectedTag] of [
+	["<!-- A comment. -->", WP_HTML_Processor.COMMENT_AS_HTML_COMMENT, " A comment. ", null],
+	["<!-->", WP_HTML_Processor.COMMENT_AS_ABRUPTLY_CLOSED_COMMENT, "", null],
+	["<! Bang opener >", WP_HTML_Processor.COMMENT_AS_INVALID_HTML, " Bang opener ", null],
+	["<? Question opener >", WP_HTML_Processor.COMMENT_AS_INVALID_HTML, " Question opener ", null],
+	["<![CDATA[ cdata body ]]>", WP_HTML_Processor.COMMENT_AS_CDATA_LOOKALIKE, " cdata body ", null],
+	["<?pi-target Instruction body. ?>", WP_HTML_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, " Instruction body. ", "pi-target"],
+	["<?php const HTML_COMMENT = true; ?>", WP_HTML_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, " const HTML_COMMENT = true; ", "php"],
+]) {
+	const processorComment = WP_HTML_Processor.create_fragment(html);
+	assert.equal(processorComment.next_token(), true);
+	assert.equal(processorComment.get_token_name(), "#comment");
+	assert.equal(processorComment.get_comment_type(), expectedType);
+	assert.equal(processorComment.get_modifiable_text(), expectedText);
+	assert.equal(processorComment.get_tag(), expectedTag);
+	processorComment.destroy();
+}
+
+for (const [html, expectedText] of [
+	["</#>", "#"],
+	["</# foo>", "# foo"],
+	["</• bar>", "• bar"],
+]) {
+	const processorFunkyCommentCase = WP_HTML_Processor.create_fragment(html);
+	assert.equal(processorFunkyCommentCase.next_token(), true);
+	assert.equal(processorFunkyCommentCase.get_token_name(), "#funky-comment");
+	assert.equal(processorFunkyCommentCase.get_modifiable_text(), expectedText);
+	processorFunkyCommentCase.destroy();
+}
+
 const incompleteComment = new WP_HTML_Tag_Processor("FOO<!-- BAR --! >BAZ");
 assert.equal(incompleteComment.next_token(), true);
 assert.equal(incompleteComment.get_token_type(), "#text");
