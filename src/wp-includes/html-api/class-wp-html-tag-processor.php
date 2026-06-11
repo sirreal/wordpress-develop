@@ -1357,7 +1357,10 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * Bookmarks provide the ability to seek to a previously-scanned
 	 * place in the HTML document. This avoids the need to re-scan
-	 * the entire document.
+	 * the entire document. A common use: to remember "the last
+	 * matching tag" in a single pass, re-set the same bookmark name
+	 * on every match, then seek to it once after the scan completes
+	 * (re-setting a name moves the bookmark, as described below).
 	 *
 	 * Example:
 	 *
