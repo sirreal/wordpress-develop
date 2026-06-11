@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::normalize() to convert both HTML fragments into canonical form. The normalize method handles all the documented differences: it lowercases tag and attribute names, double-quotes attributes, adds implied/optional closing tags, decodes character references, and handles invalid UTF-8. If either fragment fails to parse (returns null), we return false as specified. Otherwise, we compare the normalized strings for equality.",
+  "confidence": 75
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML fragment processor using WP_HTML_Processor::create_fragment(), which parses the HTML according to the HTML5 specification. It then calls serialize() to attempt to produce a normalized serialization. According to the documentation, serialize() returns null if the processor encounters unsupported markup (such as misnested formatting elements), and returns a normalized string otherwise. The function returns true if serialization succeeds and false if it fails.",
+  "confidence": 92
+}

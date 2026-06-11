@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then walks through every token with next_token(). For each token, it checks if the tag is SPAN using get_tag(). When a SPAN is encountered (whether opener or closer), it skips that token via continue. All other tokens are serialized and accumulated into the output string, which returns normalized HTML with SPAN elements removed but their contents preserved.",
+  "confidence": 75
+}

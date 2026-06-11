@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment for structural fragment parsing). All four called methods are documented: create_fragment, next_token, get_tag, serialize_token. Reproduces the documented serialize_token() rewriting-loop pattern (html-processor.md L1057-1065) almost verbatim, including the 'continue skips both opener and closer' insight. Omits the reference's get_token_type()==='#tag' guard, but that is idiomatic here: get_tag() is documented to return null for non-tag tokens (L1767), so 'SPAN' === get_tag() is safe. Returns '' on the create_fragment null branch, matching the reference. Passed 7/7. Only nit: edge handling beyond what the docs demand is minimal, but every documented edge case (unclosed input, &AMP; re-encoding, attribute discarding) is handled by relying on serialize_token normalization."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Identical core to trial-1 and equally idiomatic: correct processor, all methods documented, canonical serialize_token loop. Passed 7/7. Differs only in the failure branch: returns $html (raw, unnormalized input) instead of '' when create_fragment returns null. This violates the 'return a normalized serialization' contract on failure and is a latent semantic bug, but it is never exercised (no test input yields null) and the docs give no guidance on what to return when create_fragment fails. Minor deduction for the unidiomatic failure return; otherwise clean."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Same as trial-2: correct processor, all methods documented, canonical documented loop, passed 7/7. Also returns $html on the create_fragment null branch rather than a normalized/empty string, the same latent-but-untested contract violation. Hoists get_tag() into a local $tag variable, which is fine. Lowest self-reported confidence (72) despite a correct solution, suggesting the docs left the author unsure whether get_tag() alone (without a token-type check) reliably matches both opener and closer."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 across every case (simple, nested-spans, no-spans-normalized-passthrough, attributes-discarded, adjacent-spans, span-with-block-content, unclosed-span). There were no _doing_it_wrong or trigger_error records.\n\nWhy the docs succeeded: this task maps directly onto the worked example in serialize_token()'s docblock (html-processor.md L1057-1065), which removes every SUP element while keeping its contents using exactly the create_fragment -> while next_token -> skip-tag-via-continue -> else serialize_token loop. The task is the same pattern with SPAN. The crucial enabling facts were all present:\n- L1052 states that walking next_token and concatenating serialize_token reconstructs the normalized serialization, and explicitly warns 'Closing tokens of skipped elements must be skipped too.' This is what makes skipping by get_tag() (which matches both opener and closer) correct, and it is why nested-spans and adjacent-spans pass.\n- The inline comment 'continue; // Skips both the opener and the closer.' (L1062) directly answers the most likely point of doubt.\n- get_tag()'s Returns clause (L1767, 'or null if none found') guarantees 'SPAN' === get_tag() is false on text/comment/non-tag tokens, so omitting a get_token_type() guard is safe — none of the trials needed it.\n- Normalization behavior (re-encoding &AMP; to &amp;, closing optional <p>/<div>, double-quoting, img void handling) is produced automatically by serialize_token and is asserted by serialize/normalize prose, covering no-spans-normalized-passthrough, span-with-block-content, attributes-discarded, and unclosed-span without the author doing anything special.\n\nNear-misses in the explanations: trials 2 and 3 return the raw $html on the create_fragment-null branch instead of a normalized or empty string. Had any input failed to parse (none did), this would have returned unnormalized HTML and broken the 'normalized serialization' contract. The docblock for create_fragment documents that it can return null but never states what a caller-side normalization function should return on that path, leaving the failure contract underspecified. The two lower-confidence explanations (72, 75) also reveal residual uncertainty about whether get_tag() alone, without a token-type check, reliably distinguishes SPAN tokens — confidence the docs could have shored up by stating outright that get_tag() returns null on non-tag tokens within the serialize_token example itself.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() — worked example (html-processor.md ~L1057-1065)",
+      "problem": "The skip-by-tag-name example relies on 'SPAN' === get_tag() correctly returning false for text, comment, and other non-tag tokens, but the example never states why get_tag() is safe to test without first checking get_token_type(). Two of three authors reported low confidence, indicating the implicit dependency was not obvious from the example alone.",
+      "suggestion": "Add one sentence to the example noting that get_tag() returns null for any non-element token, so comparing it against a tag name is sufficient to select element tokens (both openers and closers) without a separate get_token_type() === '#tag' check."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() — Returns section (html-processor.md ~L348-431)",
+      "problem": "create_fragment() is documented as returning static|null, but nothing tells a caller what to return or do on the null branch when the function's job is to produce normalized output. Two trials returned the raw, unnormalized input on failure, silently violating a normalization contract. This is a latent bug the docs neither prevent nor warn against.",
+      "suggestion": "In the Returns/description, state when null can occur (e.g. unsupported context or encoding) and advise that on null the caller cannot produce normalized output, so it should fail explicitly (return '' or throw) rather than pass through the unparsed input."
+    },
+    {
+      "location": "Token-walking / serialize_token normalization prose (html-processor.md ~L1052, L1068-1071)",
+      "problem": "The docs say concatenating serialize_token reproduces 'the normalized serialization' but do not concretely enumerate what normalization changes, so authors must trust it blindly to know that &AMP; becomes &amp;, optional </p>/</div> are emitted, attributes are double-quoted, and void elements like <img> are handled. The trials succeeded by trusting this, but the guarantee is asserted rather than illustrated.",
+      "suggestion": "Add a brief before/after normalization example (e.g. an input with an uppercase entity, an unclosed optional tag, and a single-quoted attribute) showing the exact normalized output, so authors can verify their mental model rather than rely on faith that serialize_token 'just normalizes'."
+    }
+  ]
+}

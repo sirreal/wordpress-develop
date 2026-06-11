@@ -1,0 +1,13 @@
+<?php
+
+function has_incomplete_html_tail( string $html ): bool {
+	$processor = new WP_HTML_Tag_Processor( $html );
+	
+	// Drain all tokens to scan the entire document
+	while ( $processor->next_token() ) {
+		continue;
+	}
+	
+	// Check if parser paused at an incomplete token
+	return $processor->paused_at_incomplete_token();
+}

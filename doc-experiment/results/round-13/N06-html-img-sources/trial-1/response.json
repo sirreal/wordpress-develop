@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to properly parse HTML fragments with awareness of namespaces. It creates a fragment processor in the default body context, iterates through all IMG tags, checks that each IMG is in the HTML namespace (not SVG), and collects non-empty src attribute values. The API automatically decodes attribute values, so no additional decoding is needed. SVG <image> elements are excluded because they're in the 'svg' namespace.",
+  "confidence": 85
+}

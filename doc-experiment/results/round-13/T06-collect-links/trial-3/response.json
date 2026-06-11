@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment safely. It iterates through A tags using next_tag() with a tag_name query, checking that each has an href attribute via get_attribute(). For text collection, it walks tokens inside each A element while maintaining depth >= the element's opening depth, concatenating any #text tokens found via get_modifiable_text(). The href value is already decoded by the API, and the function returns early when encounters an A tag without href.",
+  "confidence": 82
+}

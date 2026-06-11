@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to iterate through all IMG tags (case-insensitive matching), adding the class \"wp-image\" to each one via add_class(). The processor automatically handles comments (ignoring tag-like content inside them), preserves byte-for-byte fidelity for unmodified parts, and manages class attribute updates efficiently. The get_updated_html() method returns the modified document with all queued class additions applied.",
+  "confidence": 92
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses static WP_HTML_Processor::normalize($html) and returns null !== $result — byte-for-byte the reference approach. Correct processor (HTML Processor) for a normalization task (30/30). Only documented API; normalize() is documented at the heading 'normalize()' with signature 'string|null' and 'null if unable to normalize' (30/30). Most idiomatic single-call form for a BODY-context fragment, exactly what the normalize() docblock recommends (25/25). Edge handling: relies on documented null-on-unsupported contract, which covers the adoption-agency case; empty/plain-text/unclosed/table all normalize per the docs' malformed-but-supported examples (14/15). Passed 7/7. The serialize-level E_USER_NOTICE recorded on the adoption-agency case is inherent to the API's abort-on-unsupported behavior (appears identically in all three trials and is not surfaced by direct probing of normalize()), so it is not a misuse."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Uses create_fragment() then serialize(), guarding the null return from create_fragment. Correct processor choice (30/30). Only documented API: create_fragment() and serialize() both have dedicated doc headings; serialize() doc explicitly returns 'string|null ... null if unable to generate serialization' and the class overview lists this create_fragment+serialize path as the equivalent of normalize() (30/30). Idiomatic but slightly heavier than needed for a default BODY fragment where the static normalize() helper exists; the docs present this two-step form as the path 'for fragments found in other contexts' (22/25). Edge cases handled via documented null contract; never scans before serialize so the 'returns null once next_token/next_tag called' caveat doesn't bite (13/15). Passed 7/7."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Same create_fragment()+serialize() core as trial-2, plus a get_last_error() fallback branch. Correct processor (30/30). All three methods documented; get_last_error() has a dedicated heading and the candidate correctly checks 'null !== get_last_error()' against its 'string|null' signature, navigating the doc's contradictory prose that says it 'will return false in all those cases' (30/30). Slightly less idiomatic: the get_last_error() branch is effectively dead logic — both the null-with-error and null-without-error paths return false, so the extra check adds no behavior and signals mild uncertainty about why serialize() returns null (20/25). Edge handling correct via the documented null contract (12/15). Passed 7/7. The extra defensiveness traces to the docs not stating plainly that a non-null serialize() return already means normalization succeeded and null already means it failed."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 7/7. The documentation was highly effective for this task. The decisive passage is the class overview at html-processor.md line 84 ('When this happens, get_last_error() returns a non-null value ... methods which produce output (such as serialize() and normalize()) return null'), reinforced by the lines 83/86-88 'abort early and stop all processing' description of unsupported markup. This directly mapped the task's 'return false for unsupported misnesting' to the null return of normalize()/serialize(). The normalize() and serialize() method docblocks (lines 940-990, 992-1040) seal it with explicit 'string|null - ... null if unable to normalize' Returns lines, and the malformed-but-supported normalize() examples ('<div></p>fun<table><td>cell</div>' normalizing successfully, lines 971-972) told subjects that unclosed tags and ad-hoc tables normalize fine, matching the task's unclosed-true and well-formed-table-true cases. All three subjects converged on a correct mental model; none hallucinated.\\n\\nNear-misses in the explanations: (1) Trial-3's explanation claims get_last_error() must be consulted to distinguish unsupported markup, but in practice the null return alone is sufficient — its own code proves this since both null branches return false. This reflects the get_last_error() docblock's confusing line 530 ('this class will return false in all those cases'), which conflicts with the actual 'string|null' signature and could have misled a weaker subject into checking '=== false' and breaking the function. (2) Trials 2 and 3 reached for the two-step create_fragment()+serialize() form when the single static normalize() helper is the documented idiom for a default BODY-context fragment; the normalize() docblock frames the two-step path as being for 'full documents or fragments found in other contexts' (line 949), so subjects slightly over-engineered, though without harm. (3) None of the explanations mentioned that the empty-string input ('' -> true) is handled — an edge the docs never explicitly address; all subjects got it right by trusting the null contract rather than by documented evidence.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error()",
+      "problem": "The description (html-processor.md ~line 530) states 'this class will return false in all those cases,' but the method signature is 'string|null' and the example checks 'WP_HTML_Processor::ERROR_UNSUPPORTED === $processor->get_last_error()'. The 'return false' prose contradicts the actual return type and risks a subject writing 'false === get_last_error()' or treating a falsy check as the success signal. Trial-3 navigated this only by checking 'null !==', which the prose does not justify.",
+      "suggestion": "Fix the prose to match the signature: state that get_last_error() returns null when there is no error and a non-null error string (e.g. self::ERROR_UNSUPPORTED) when the processor has aborted. Remove or correct the 'will return false in all those cases' sentence, which appears to be copied from a boolean-returning method."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() / normalize() (Returns section)",
+      "problem": "The Returns lines say 'null if unable to normalize/generate serialization,' but never state plainly the contrapositive that subjects need: a non-null string return means normalization fully succeeded, so a simple 'null === serialize()' (or 'null !== normalize()') test is the complete and sufficient way to detect failure. The omission led trials 2 and 3 to add extra create_fragment null-guards and a redundant get_last_error() branch out of uncertainty.",
+      "suggestion": "Add one sentence to both Returns/Description blocks: 'A non-null return indicates normalization completed; null is returned only when the processor encountered unsupported markup (see get_last_error()). Testing the return value against null is sufficient to detect whether normalization is possible.'"
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() vs serialize() (when to use which)",
+      "problem": "Three subjects split between the static normalize($html) one-liner and the create_fragment()+serialize() two-step form for the identical default-BODY-context task. The normalize() docblock frames the two-step path as being for 'full documents or fragments found in other contexts,' but does not explicitly say that for a plain BODY-context fragment normalize() is the preferred shorthand, so subjects over-engineered without a clear steer.",
+      "suggestion": "In the normalize() docblock, add an explicit one-liner steer: 'For a fragment in the default BODY context, prefer this static helper; use create_fragment()+serialize() only when you need a non-default context, a full-document parser, or to inspect/transform tokens before serializing.'"
+    },
+    {
+      "location": "WP_HTML_Processor class overview (Supported elements / abort behavior, ~lines 83-90)",
+      "problem": "The overview lists which constructs cause an abort (foster parenting, etc.) but does not explicitly name misnested/overlapping formatting elements (the 'adoption agency' algorithm, e.g. '<b>one<i>two</b>three</i>') as a currently-unsupported case, even though it is the canonical example used in the task and a very common real-world malformation. Subjects inferred it correctly from the general null contract, but a concrete entry would make the failure boundary unambiguous.",
+      "suggestion": "Add a bullet to the 'Only specific constructs cause it to abort' list naming misnested/overlapping formatting elements that would require the HTML adoption-agency algorithm, with a short example, so readers know this class of malformed-but-recoverable-by-browsers markup returns null rather than normalizing."
+    }
+  ]
+}

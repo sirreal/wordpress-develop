@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in a BODY context, finds the first TABLE element with next_tag(), then uses next_token() to walk through all tokens. It tracks row and cell boundaries using depth comparison (comparing current_depth to the recorded table depth). For each TD/TH cell, it collects all #text token content by recursively reading tokens while staying within the cell's depth. Rows are saved when TR closers are encountered. The processor's built-in semantic handling correctly manages missing closing tags and tbody/thead elements per HTML5 rules.",
+  "confidence": 72
+}

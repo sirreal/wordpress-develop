@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to scan linearly through the HTML, finding IMG tags (case-insensitive matching is automatic in next_tag). For each IMG tag found, add_class() is called to append the \"wp-image\" class. The Tag Processor's add_class() method automatically handles the case where classes already exist by appending without duplication or reordering. Tags inside HTML comments are never matched because the processor only recognizes real HTML tags. Finally, get_updated_html() returns the modified document with byte-exact preservation of everything except the added classes.",
+  "confidence": 92
+}

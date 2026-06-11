@@ -1,0 +1,20 @@
+<?php
+
+function add_link_targets( string $html ): string {
+	$processor = new WP_HTML_Tag_Processor( $html );
+	
+	while ( $processor->next_tag( 'a' ) ) {
+		// Check if the A tag has an href attribute
+		// get_attribute returns null if attribute doesn't exist,
+		// true if it's a boolean/valueless attribute (like <a href>),
+		// or a string value (including empty string for href="")
+		$href = $processor->get_attribute( 'href' );
+		
+		// If href exists (not null), set target to _blank
+		if ( null !== $href ) {
+			$processor->set_attribute( 'target', '_blank' );
+		}
+	}
+	
+	return $processor->get_updated_html();
+}

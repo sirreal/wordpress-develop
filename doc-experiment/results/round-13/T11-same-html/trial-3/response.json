@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize(), a documented static method that normalizes HTML fragments by serializing them according to the HTML5 specification. This single method handles all the requirements: optional/implied closing tags, attribute quoting style differences, tag-name case variations, and equivalent character references. It returns null if the input cannot be fully parsed, allowing us to detect unparseable input. Two HTML fragments have the same parsed structure if their normalized representations are identical.",
+  "confidence": 92
+}

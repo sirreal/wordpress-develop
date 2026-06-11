@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's full structural awareness to navigate the table while respecting browser HTML parsing rules (like implicit TBODY creation). It creates a fragment parser, finds the first TABLE, then walks through all tokens within the table using nested loops: an outer loop processes rows (TR), an inner loop collects cells (TD/TH) within each row, and an innermost operation collects text from #text tokens within each cell. The depth-based approach ensures we capture exactly the tokens we need and stop at the right boundaries, handling both closing tags and nested elements correctly.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor with the template pattern documented in the HTML Tag Processor documentation. A template string with placeholder attributes (empty src/alt) and placeholder text (a dot in figcaption) is created, then processed using set_attribute() for safe encoding of the URL and alt text, and set_modifiable_text() for the caption text. The processor handles all HTML encoding automatically, then get_updated_html() returns the final HTML fragment.",
+  "confidence": 85
+}

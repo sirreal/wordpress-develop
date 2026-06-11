@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to build HTML safely. It creates a template with the exact figure structure including placeholder values for attributes and text, then uses the Tag Processor API to populate the attributes (src, alt) and text content (figcaption). The set_attribute() method handles proper HTML encoding of the url and alt values, and set_modifiable_text() encodes the caption text. Attribute order is preserved from the template, and get_updated_html() returns the properly encoded final result.",
+  "confidence": 75
+}

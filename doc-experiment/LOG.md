@@ -2,6 +2,18 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 13 — Haiku, first 100% functional sweep
+
+**Train 98.54; 45/45 trials passed 343/343 hidden cases — first fully
+clean round of the campaign.** T08 +20.7 → 96.9 (implied-structure
+rule), T06 +5.9 → 99.6. All remaining score variance is
+adherence-judge prose assessment; judges' gap lists are now
+second-order discoverability nits (the chooser is abstract; the
+recipe lacks a measurement example).
+
+Round-14 hypothesis (committed): decoded-UTF-8/mb_substr measurement
+note at the recipe's accumulation point (flagged twice by T05).
+
 ## Round 12 — Haiku, checkpoint: held-out at new high
 
 **All-19 96.05 / train 97.39 / held-out 91.04 (new high; was 88.79 at

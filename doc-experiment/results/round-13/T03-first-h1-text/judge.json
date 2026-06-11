@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor — required for depth awareness; Tag Processor explicitly lacks get_current_depth). All methods documented (create_fragment, next_tag, next_token, get_current_depth, get_token_type, get_modifiable_text); no hallucinations, no _doing_it_wrong. Idiomatic depth-bounded token walk: anchors on get_current_depth() at the matched H1 and breaks on strict `<` (the correct complement of the documented `>=` guard), so it doesn't drop trailing text after nested closers — passed unclosed-h1 and nested-in-div. Relies on documented automatic entity decoding and the empty-walk-returns-'' behavior. Only shortfall: omits the `null === $processor` guard after create_fragment, a documented null-return failure mode (create_fragment signature is `static|null`). Harmless for these inputs but a missed documented edge case. 8/8 passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same correct structure as trial-1 plus the create_fragment null guard, covering the documented `static|null` return. All six methods documented; no hallucinations or _doing_it_wrong. Uses the documented depth idiom via strict `<` break (correct complement of `>=`). Explanation correctly attributes automatic character-reference decoding to get_modifiable_text and notes empty string for image-only H1. Edge cases all handled: entities, image-only empty string, unclosed input, nested markup, first-of-two. 8/8 passed. Near-textbook reproduction of the documented LI/UL recipe applied to H1."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Uses the exact documented idiom inline: `while ( next_token() && get_current_depth() >= $depth_inside_h1 )` — the precise `>=` form the docs warn must not be `>`. Includes create_fragment null guard. All methods documented; no hallucinations or _doing_it_wrong. Comment explicitly notes get_modifiable_text returns decoded text, matching the docs. Handles all edge cases (entities, image-only '', unclosed h1, nested div, first-of-two). 8/8 passed. Most directly faithful to the documented recipe of the three."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 across every case (simple, nested-markup, entities-decoded, no-h1-null, image-only-empty-string, first-of-two, nested-in-div, unclosed-h1). This is a clean success driven almost entirely by the documentation already containing the exact pattern this task requires.\n\nWhat the docs did well (html-processor.md, next_token() section, lines 606-676):\n- The depth-bounded text-collection recipe is presented as a complete worked example (collect first LI's text, lines 651-671) that maps one-to-one onto get_first_h1_text. All three subjects transplanted it from LI to H1.\n- The `>=` vs `>` subtlety (lines 668-670) is called out explicitly with the failure it prevents (dropping trailing text after a nested closer like </strong>). This directly protects nested-markup and nested-in-div. Trial-3 used `>=` verbatim; trials 1/2 independently used the strict `<` break, which is the correct complement.\n- The unclosed-input guarantee (line 616: \\\"Walking code can rely on seeing a closer for every opener even in malformed input\\\") and the example comment (lines 664-666) cover the unclosed-h1 case — the parser synthesizes the closing tokens so the depth guard still terminates correctly.\n- The empty-region note (line 647: an empty element produces opener and closer back-to-back with no #text, recording an empty string) plus the function's `$text = ''` initialization covers image-only-empty-string and the spec's empty-string-not-null requirement.\n- Entity decoding: get_modifiable_text()'s example in html-tag-processor.md (line 1846: `'Fish & Chips' === get_modifiable_text()`) demonstrates automatic character-reference decoding, covering entities-decoded. Trials 2 and 3 explicitly cited this in their explanations.\n- Processor selection: the Tag Processor doc states plainly (html-tag-processor.md:20) that get_current_depth() and get_breadcrumbs() \\\"do not exist on this class — they belong to WP_HTML_Processor.\\\" This steers all subjects to the correct processor; none attempted the structure-blind Tag Processor.\n\nNear-misses in explanations: none substantive. Trial-1's only gap is the missing create_fragment null-return guard, which the docs do surface (the signature `static|null` at line 351 and the no-h1 example). It did not cause a failure because none of the test inputs trigger a null return, but it is the one documented edge case trial-1 left unhandled. Confidence calibration was reasonable (78/92/92), with trial-1 appropriately lower given the omitted guard.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md, section ~line 348)",
+      "problem": "The signature shows `static|null` and one prose line mentions parsing can fail, but the depth-walk worked examples (LI recipe at ~653, UL recipe at ~917) call methods on the return value of create_fragment() with no null check. Subjects pattern-match on these examples; trial-1 copied the example faithfully and consequently omitted the null guard, leaving an undocumented-in-context crash path on inputs create_fragment cannot parse (e.g. unsupported context).",
+      "suggestion": "Add an explicit `if ( null === $processor ) { return; }` (or early-return) line to at least one of the canonical walk examples, and a one-sentence note in create_fragment() listing concrete conditions that yield null (unsupported encoding, certain context arguments) so the guard reads as load-bearing rather than ceremonial."
+    },
+    {
+      "location": "next_token() depth-walk example (html-processor.md, ~lines 657-670)",
+      "problem": "The example only shows the `>=` form inside the while condition. Two of three subjects instead wrote a separate `if ( depth < anchor ) break;` after next_token(). That strict-`<` break is the correct complement of `>=`, but the docs never state the equivalence, so a subject could plausibly write `if ( depth <= anchor ) break;` (the wrong complement of `>`) and silently truncate — the exact bug the `>=` note warns about, just relocated to the break form.",
+      "suggestion": "Add one sentence noting the two equivalent termination forms: the inline guard `next_token() && get_current_depth() >= $anchor` and the separate `if ( get_current_depth() < $anchor ) break;`, emphasizing that the break must use strict `<` (not `<=`) to mirror the `>=` guard. This generalizes the existing `>=` vs `>` warning to the break-style loop that subjects naturally reach for."
+    }
+  ]
+}

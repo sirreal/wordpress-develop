@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML and next_token() to iterate through all tokens. Collects text only from tokens where get_token_type() returns '#text', using get_modifiable_text() to get decoded text. Counts Unicode codepoints with mb_strlen() and truncates properly to the exact codepoint limit using mb_substr(), never cutting multi-byte characters. Returns empty string for non-positive max_codepoints.",
+  "confidence": 78
+}

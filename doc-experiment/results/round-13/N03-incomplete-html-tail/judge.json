@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the canonical reference. Correct processor choice (Tag Processor, max 30): the task is purely lexical truncation detection, no tree construction needed, and paused_at_incomplete_token lives on the Tag Processor. No hallucinated or undocumented API (max 30): only next_token() and paused_at_incomplete_token() are called, both documented in html-tag-processor.md (next_token sect. line 962, paused_at_incomplete_token sect. line 1015). Idiomatic token walking (max 25): drains all tokens with the exact while(next_token()){continue;} loop the docs prescribe at lines 1033-1039. Edge cases (max 15): relies on documented incomplete-input semantics; passes empty string, trailing lone '<', unclosed-but-complete element, and unterminated SCRIPT. All 9 hidden cases pass, zero _doing_it_wrong. Explanation is accurate and correctly distinguishes lexical completeness from structural unclosedness. Confidence 92, well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and the reference; only the loop-body comment differs (empty body vs continue). Same scoring: correct Tag Processor choice, only documented methods (next_token, paused_at_incomplete_token), idiomatic drain-all-then-check pattern straight from the docblock example, documented edge-case semantics. All 9 cases pass, zero _doing_it_wrong. Explanation is the most thorough of the three and explicitly names the lexical-vs-structural distinction and the EOF-mid-token cases. Self-reported confidence 78 is the lowest despite identical, fully-correct code: mild under-confidence, the only sub-optimal thing about the submission, and it does not affect adherence."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the reference implementation. Correct Tag Processor choice, only documented methods called, idiomatic drain-loop with continue exactly as the paused_at_incomplete_token docblock shows. Documented incomplete-input edge semantics carry empty string, trailing '<', unclosed element, and unterminated SCRIPT. All 9 cases pass, zero _doing_it_wrong. Explanation explicitly credits 'the documented pattern' and names EOF-mid-token cases. Confidence 92, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: 9/9 pass across all three, with zero _doing_it_wrong and zero hallucinated methods. All three subjects converged on code byte-equivalent to reference.php (differing only in comments/whitespace). The documentation was decisive: the `paused_at_incomplete_token()` section in html-tag-processor.md (lines 1015-1047) does three things that made failure nearly impossible. (1) Its one-line summary states the method reports whether \"the input HTML document ended in the middle of a syntax element, such as in the middle of a tag\" — directly matching the task framing. (2) It carries TWO worked examples: a short one showing false===next_tag() paired with true===paused_at_incomplete_token() on a cut-off attribute (line 1026, which is the same shape as the cut-inside-attribute hidden case), and crucially a longer-document example (lines 1031-1039) spelling out the drain-all-tokens-then-check idiom verbatim — `while ($processor->next_token()) { continue; }` followed by `$was_truncated = $processor->paused_at_incomplete_token();`. The prose at line 1031 explicitly warns that the method \"reports the state at the point scanning stopped... only after the processor has scanned to the end of the input,\" which is the single subtlety that could have tripped subjects (calling the check without first draining). All three followed it exactly. (3) The `next_token()` section (line 972) reinforces the model: \"If it starts parsing a token and reaches the end of the document then it will seek to the start of the last token and pause, returning false.\" This correctly led subjects to treat a false return from next_token at EOF as ambiguous (could be normal end OR incomplete token) and to disambiguate with paused_at_incomplete_token rather than inferring truncation from the loop terminating. The task's three tricky distinctions — lone trailing '<' is text (false), unclosed-but-lexically-complete `<div>text` is false, unterminated SCRIPT is true — were all handled correctly without any subject special-casing them, because they emerge naturally from the lexer's behavior that the docs describe. Near-misses in explanations: none substantive. Trial-2's explanation is the strongest; its only blemish is under-confidence (78 vs identical correct code scoring 92 elsewhere), suggesting the docs, while sufficient to produce the right code, did not fully convince the model it had covered every case — a calibration gap rather than a correctness gap.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token()",
+      "problem": "The docblock never states the converse guarantees that distinguish the tricky 'complete by definition' cases: that a lone trailing '<' is lexed as text (returns false), and that a structurally unclosed but lexically complete element such as '<div>text' returns false. Subjects got these right here only because the lexer happens to behave that way; the docs do not promise it, which is reflected in trial-2's lowered confidence (78) on otherwise-perfect code.",
+      "suggestion": "Add one sentence plus a contrasting example clarifying the boundary: this method reports lexical incompleteness, not structural unclosedness. Show that '<div>text' (unclosed element) and a document ending in a bare '<' (treated as text) both yield false, while '<div class=\"x' and '<!-- unfinished' yield true. This generalizes the lexical-vs-structural distinction beyond any single task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token()",
+      "problem": "The drain-loop example (lines 1033-1039) only demonstrates the Tag Processor. It does not mention whether the same incomplete-token semantics apply when walking with WP_HTML_Processor::next_token(), nor whether an unterminated raw-text element (SCRIPT/STYLE/TEXTAREA whose contents run to EOF) counts as incomplete. The unterminated-SCRIPT case passed by luck of correct lexer behavior, undocumented here.",
+      "suggestion": "Note explicitly that raw-text elements (SCRIPT, STYLE, TEXTAREA, TITLE) whose closing tag is missing at EOF cause the processor to pause as an incomplete token, and cross-reference that WP_HTML_Processor inherits this method with identical semantics. A one-line list of which trailing constructs are considered incomplete (open tag, attribute, comment, unterminated raw-text element) versus complete (bare '<', unclosed normal element) would make the method self-contained."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_token() and next_tag()",
+      "problem": "next_token()'s 'Returns' section says only 'Whether a token was parsed.' A reader could conclude that a false return means truncation, conflating normal end-of-document with mid-token pause. The disambiguation (use paused_at_incomplete_token) is described only in the prose at line 972 and in the separate method, not surfaced at the return-value documentation where a reader inspecting the loop condition would look.",
+      "suggestion": "In next_token()'s return documentation, add a cross-reference: a false return can mean either the document was fully consumed or the input ended mid-token; call paused_at_incomplete_token() to distinguish. This prevents the common misconception that loop termination alone signals truncation."
+    }
+  ]
+}

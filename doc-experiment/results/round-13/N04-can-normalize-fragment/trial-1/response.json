@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() which returns either a normalized HTML string or null. According to the documentation, normalize() returns null when unable to normalize due to unsupported markup (such as mis-nested formatting elements like `<b>one<i>two</b>three</i>`), but successfully normalizes well-formed markup including malformed but recoverable HTML like unclosed tags and tables. The function returns true when normalization succeeds and false when it returns null.",
+  "confidence": 92
+}
