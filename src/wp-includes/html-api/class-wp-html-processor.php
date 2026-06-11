@@ -93,6 +93,14 @@
  *
  * ### Supported elements
  *
+ * The HTML Processor builds on {@see WP_HTML_Tag_Processor} and adds full
+ * structural awareness: nesting depth, ancestor breadcrumbs, implied and
+ * virtual closing tags, and normalized serialization. Choose it whenever
+ * document STRUCTURE matters — containment checks, collecting an
+ * element's text, walking subtrees, normalizing markup. For flat
+ * attribute and class edits where byte-exact preservation of the input
+ * is the goal, the lighter Tag Processor suffices.
+ *
  * If any unsupported markup appears in the HTML input the HTML Processor
  * will abort early and stop all processing. This draconian measure ensures
  * that the HTML Processor won't break any HTML it doesn't fully understand.
@@ -810,6 +818,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *         // lower than the LI's contents, so the loop continues through
 	 *         // them; it ends on the LI's own closer. The unclosed LI and UL
 	 *         // still produce closing tokens at the end of the input.
+	 *         //
+	 *         // The `>=` comparison is required: `>` would end this walk at
+	 *         // the first nested closer (`</strong>` reports the same depth
+	 *         // as the LI's contents) and silently drop the trailing text.
 	 *     }
 	 *
 	 *     // The same walk can be guarded with breadcrumbs, which read the

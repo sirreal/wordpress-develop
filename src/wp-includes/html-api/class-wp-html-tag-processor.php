@@ -24,6 +24,24 @@
 /**
  * Core class used to modify attributes in an HTML document for tags matching a query.
  *
+ * ## Which processor should I use?
+ *
+ * The Tag Processor scans a document linearly and has NO awareness of
+ * the document tree: it provides no nesting depth, no ancestor
+ * information, and no guarantee that every opener is paired with a
+ * closer. Methods like `get_current_depth()` and `get_breadcrumbs()`
+ * do not exist on this class — they belong to {@see WP_HTML_Processor},
+ * which builds on this class and adds full structural awareness.
+ *
+ *  - Use the TAG PROCESSOR (this class) for flat, position-based work:
+ *    finding tags by name or class, reading and changing attributes and
+ *    classes, byte-precise edits that preserve the rest of the document
+ *    exactly.
+ *  - Use the HTML PROCESSOR when structure matters: "is this element
+ *    inside that one," collecting an element's text content, walking a
+ *    subtree, handling implied or missing closing tags the way a
+ *    browser would, or producing normalized output.
+ *
  * ## Usage
  *
  * Use of this class requires three steps:
@@ -4768,7 +4786,17 @@ class WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Returns the string representation of the HTML Tag Processor.
+	 * Returns the input document with all queued updates applied.
+	 *
+	 * This is the way to read a document back after modifying it with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::remove_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class},
+	 * {@see WP_HTML_Tag_Processor::remove_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}. Every byte the
+	 * updates did not touch is returned exactly as it appeared in the
+	 * input — no re-encoding, normalization, or reformatting occurs.
+	 * It is safe to call mid-scan and continue processing afterward.
 	 *
 	 * @since 6.2.0
 	 * @since 6.2.1 Shifts the internal cursor corresponding to the applied updates.
