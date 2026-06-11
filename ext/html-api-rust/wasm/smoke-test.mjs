@@ -604,6 +604,23 @@ assert.equal(WP_HTML_Processor.create_fragment("", "<textarea>"), null);
 assert.equal(WP_HTML_Processor.create_full_parser(null), null);
 assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.normalize(null), null);
+
+class Custom_HTML_Processor extends WP_HTML_Processor {
+	custom_method() {
+		return "custom";
+	}
+}
+const customFragmentProcessor = Custom_HTML_Processor.create_fragment("<div>");
+assert.ok(customFragmentProcessor instanceof Custom_HTML_Processor);
+assert.equal(customFragmentProcessor.custom_method(), "custom");
+assert.equal(customFragmentProcessor.next_tag("div"), true);
+customFragmentProcessor.destroy();
+const customFullParser = Custom_HTML_Processor.create_full_parser("<!doctype html><p>");
+assert.ok(customFullParser instanceof Custom_HTML_Processor);
+assert.equal(customFullParser.next_tag("p"), true);
+customFullParser.destroy();
+assert.equal(Custom_HTML_Processor.normalize("<div>"), "<div></div>");
+
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("dialog"), false);
