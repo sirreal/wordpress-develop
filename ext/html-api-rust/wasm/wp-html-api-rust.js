@@ -1178,7 +1178,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		next_tag(query = null) {
-			const visitClosers = Boolean(query && typeof query === "object" && query.tag_closers === "visit");
+			const visitClosers = Boolean(
+				query &&
+				typeof query === "object" &&
+				(query.tag_closers === "visit" || query.visit_closers === true)
+			);
 
 			if (query === null) {
 				while (this.next_token()) {

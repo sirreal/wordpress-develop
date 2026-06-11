@@ -525,6 +525,13 @@ assert.equal(stepProcessor.get_tag(), "DIV");
 assert.equal(stepProcessor.is_tag_closer(), true);
 stepProcessor.destroy();
 
+const processorVisitClosersAlias = WP_HTML_Processor.create_fragment("<div></div>");
+assert.equal(processorVisitClosersAlias.next_tag({ tag_name: "div" }), true);
+assert.equal(processorVisitClosersAlias.is_tag_closer(), false);
+assert.equal(processorVisitClosersAlias.next_tag({ tag_name: "div", visit_closers: true }), true);
+assert.equal(processorVisitClosersAlias.is_tag_closer(), true);
+processorVisitClosersAlias.destroy();
+
 const virtualPOpenerProcessor = WP_HTML_Processor.create_fragment("</p>");
 assert.equal(virtualPOpenerProcessor.next_token(), true);
 assert.equal(virtualPOpenerProcessor.get_tag(), "P");
