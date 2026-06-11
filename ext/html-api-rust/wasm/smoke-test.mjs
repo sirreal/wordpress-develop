@@ -428,6 +428,28 @@ assert.equal(tableFormProcessor.get_token_name(), "#comment");
 assert.deepEqual(tableFormProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "#comment"]);
 tableFormProcessor.destroy();
 
+const tableCellProcessor = WP_HTML_Processor.create_fragment("<table><td>cell");
+assert.equal(tableCellProcessor.next_token(), true);
+assert.equal(tableCellProcessor.get_tag(), "TABLE");
+assert.equal(tableCellProcessor.is_virtual(), false);
+assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCellProcessor.next_token(), true);
+assert.equal(tableCellProcessor.get_tag(), "TBODY");
+assert.equal(tableCellProcessor.is_virtual(), true);
+assert.equal(tableCellProcessor.is_tag_closer(), false);
+assert.equal(tableCellProcessor.set_bookmark("tbody"), false);
+assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY"]);
+assert.equal(tableCellProcessor.next_token(), true);
+assert.equal(tableCellProcessor.get_tag(), "TR");
+assert.equal(tableCellProcessor.is_virtual(), true);
+assert.equal(tableCellProcessor.is_tag_closer(), false);
+assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+assert.equal(tableCellProcessor.next_token(), true);
+assert.equal(tableCellProcessor.get_tag(), "TD");
+assert.equal(tableCellProcessor.is_virtual(), false);
+assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+tableCellProcessor.destroy();
+
 const unexpectedCloserProcessor = WP_HTML_Processor.create_fragment("<div>Test</button></div>");
 assert.equal(unexpectedCloserProcessor.next_token(), true);
 assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
@@ -546,6 +568,8 @@ assert.equal(
 	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',
 );
 assert.equal(WP_HTML_Processor.normalize("<div><p>One"), "<div><p>One</p></div>");
+assert.equal(WP_HTML_Processor.normalize("<table><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
+assert.equal(WP_HTML_Processor.normalize("<table><tr><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
 
 const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
 assert.equal(serializationProcessor.next_token(), true);

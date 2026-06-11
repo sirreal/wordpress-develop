@@ -77,6 +77,8 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 ]);
 
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
+const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
+const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -1553,7 +1555,13 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
-			if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForStartTag(tagName)) {
+			if (
+				allowVirtualPreclosures &&
+				(
+					this.#queueVirtualPreclosuresForStartTag(tagName) ||
+					this.#queueVirtualOpenersForStartTag(tagName)
+				)
+			) {
 				this.pending_real_token = true;
 				this.pending_real_parser_state = this.parser_state;
 				return;
@@ -1667,6 +1675,39 @@ export function createHtmlApi(wasm) {
 			return false;
 		}
 
+		#queueVirtualOpenersForStartTag(tagName) {
+			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
+				return false;
+			}
+
+			const queued = [];
+			if (
+				tagName === "TR" &&
+				!this.#hasElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName))
+			) {
+				queued.push("TBODY");
+			}
+
+			if (TABLE_CELL_ELEMENTS.has(tagName)) {
+				if (!this.#hasElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName))) {
+					queued.push("TBODY");
+				}
+				if (!this.#hasElementInTableScope("TR")) {
+					queued.push("TR");
+				}
+			}
+
+			for (const queuedTagName of queued) {
+				this.virtual_tokens.push({
+					operation: "push",
+					tagName: queuedTagName,
+					namespaceName: "html",
+				});
+			}
+
+			return queued.length > 0;
+		}
+
 		#queueFullParserScaffold() {
 			this.virtual_tokens.push(
 				{
@@ -1733,6 +1774,25 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return -1;
+		}
+
+		#hasElementInTableScope(match) {
+			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				const nodeName = this.open_elements[i];
+				const namespaceName = this.open_element_namespaces[i];
+				if (namespaceName === "html" && predicate(nodeName)) {
+					return true;
+				}
+
+				if (
+					namespaceName === "html" &&
+					(nodeName === "HTML" || nodeName === "TABLE" || nodeName === "TEMPLATE")
+				) {
+					return false;
+				}
+			}
+			return false;
 		}
 
 		#shouldPopTableFormImmediately(tagName, namespaceName) {
