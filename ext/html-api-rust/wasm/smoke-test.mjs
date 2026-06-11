@@ -580,6 +580,10 @@ for (const [html, expectedTree] of [
 		"<html>\n  <head>\n  <body>\n    <svg svg>\n\n",
 	],
 	[
+		"<!DOCTYPE html><table><caption><svg>foo</table>bar",
+		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <table>\n      <caption>\n        <svg svg>\n          "foo"\n    "bar"\n\n',
+	],
+	[
 		"<div a=1 b><span>Hi</span></div>",
 		'<html>\n  <head>\n  <body>\n    <div>\n      a="1"\n      b=""\n      <span>\n        "Hi"\n\n',
 	],

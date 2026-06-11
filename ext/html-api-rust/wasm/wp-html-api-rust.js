@@ -4451,7 +4451,7 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
-			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
+			if (!this.#hasElementInTableScope("TABLE")) {
 				return false;
 			}
 
