@@ -116,6 +116,10 @@ covering multibyte lead and continuation byte values.
 families such as `&not`/`&notin;`/`&notinva;` and `&nGt;`/`&ngt;`, truncating
 each reference at every byte split and appending ambiguous followers.
 
+`numeric-boundaries` mode deterministically sweeps decimal and hex numeric
+references at the decoder's maximum significant-digit count and one digit past
+it, with and without leading zeros, semicolons, and mixed-case hex digits.
+
 ## Common Commands
 
 Run the smoke test:
@@ -152,6 +156,12 @@ Run one deterministic prefix-family sweep batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --cases 5000
+```
+
+Run one deterministic numeric-boundary sweep batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:

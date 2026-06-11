@@ -183,6 +183,24 @@ class Generator {
 		return count( $this->prefix_family_sweep_cases() );
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_numeric_boundary_sweep( int $case_index ): array {
+		$cases      = self::numeric_boundary_sweep_cases();
+		$case_index = max( 0, $case_index ) % count( $cases );
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'numeric-boundary-sweep',
+			'payload'  => self::trim_to_safe_max( $cases[ $case_index ], $this->max_bytes ),
+		);
+	}
+
+	public function numeric_boundary_sweep_period(): int {
+		return count( self::numeric_boundary_sweep_cases() );
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -657,6 +675,58 @@ class Generator {
 	 */
 	private static function prefix_family_sweep_followers(): array {
 		return array( '', 'x', 'X', '0', '=', "\u{00E9}" );
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function numeric_boundary_sweep_cases(): array {
+		static $cases = null;
+		if ( null !== $cases ) {
+			return $cases;
+		}
+
+		$cases = array();
+		foreach ( array( 'decimal', 'hex-lower', 'hex-upper', 'hex-mixed' ) as $kind ) {
+			$is_decimal = 'decimal' === $kind;
+			$max_digits = $is_decimal ? 7 : 6;
+			foreach ( array( $max_digits, $max_digits + 1 ) as $digit_count ) {
+				foreach ( array( false, true ) as $leading_zero ) {
+					foreach ( array( false, true ) as $semicolon ) {
+						$cases[] = self::numeric_boundary_reference( $kind, $digit_count, $leading_zero, $semicolon );
+					}
+				}
+			}
+		}
+
+		return array_values( array_unique( $cases ) );
+	}
+
+	private static function numeric_boundary_reference( string $kind, int $digit_count, bool $leading_zero, bool $semicolon ): string {
+		if ( 'decimal' === $kind ) {
+			$prefix = '&#';
+			$digits = 7 === $digit_count ? '1114111' : substr( str_repeat( '9', $digit_count ), 0, $digit_count );
+		} else {
+			$prefix = 'hex-upper' === $kind ? '&#X' : '&#x';
+			$digits = 6 === $digit_count ? '10ffee' : substr( str_repeat( 'abcdef', (int) ceil( $digit_count / 6 ) ), 0, $digit_count );
+			if ( 'hex-upper' === $kind ) {
+				$digits = strtoupper( $digits );
+			} elseif ( 'hex-mixed' === $kind ) {
+				$chars = str_split( $digits );
+				foreach ( $chars as $i => $char ) {
+					if ( 0 === $i % 2 ) {
+						$chars[ $i ] = strtoupper( $char );
+					}
+				}
+				$digits = implode( '', $chars );
+			}
+		}
+
+		if ( $leading_zero ) {
+			$digits = '0' . $digits;
+		}
+
+		return $prefix . $digits . ( $semicolon ? ';' : '' );
 	}
 
 	private function numeric_reference( bool $allow_missing_digits = false ): string {

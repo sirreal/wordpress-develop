@@ -75,6 +75,8 @@ if ( '' !== $options['failure'] ) {
 		$generated = $generator->generate_legacy_follower_sweep( $options['case'] );
 	} elseif ( 'prefix-families' === $mode ) {
 		$generated = $generator->generate_prefix_family_sweep( $options['case'] );
+	} elseif ( 'numeric-boundaries' === $mode ) {
+		$generated = $generator->generate_numeric_boundary_sweep( $options['case'] );
 	} else {
 		$generated = $generator->generate();
 	}

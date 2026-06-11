@@ -395,6 +395,81 @@ function prefix_family_sweep_cases( array $base_names ): array {
 }
 
 /**
+ * @return string[]
+ */
+function numeric_boundary_sweep_cases(): array {
+	$cases = array();
+	foreach ( array( 'decimal', 'hex-lower', 'hex-upper', 'hex-mixed' ) as $kind ) {
+		$is_decimal = 'decimal' === $kind;
+		$max_digits = $is_decimal ? 7 : 6;
+		foreach ( array( $max_digits, $max_digits + 1 ) as $digit_count ) {
+			foreach ( array( false, true ) as $leading_zero ) {
+				foreach ( array( false, true ) as $semicolon ) {
+					$cases[] = numeric_boundary_reference( $kind, $digit_count, $leading_zero, $semicolon );
+				}
+			}
+		}
+	}
+
+	return array_values( array_unique( $cases ) );
+}
+
+function numeric_boundary_reference( string $kind, int $digit_count, bool $leading_zero, bool $semicolon ): string {
+	if ( 'decimal' === $kind ) {
+		$prefix = '&#';
+		$digits = 7 === $digit_count ? '1114111' : substr( str_repeat( '9', $digit_count ), 0, $digit_count );
+	} else {
+		$prefix = 'hex-upper' === $kind ? '&#X' : '&#x';
+		$digits = 6 === $digit_count ? '10ffee' : substr( str_repeat( 'abcdef', (int) ceil( $digit_count / 6 ) ), 0, $digit_count );
+		if ( 'hex-upper' === $kind ) {
+			$digits = strtoupper( $digits );
+		} elseif ( 'hex-mixed' === $kind ) {
+			$chars = str_split( $digits );
+			foreach ( $chars as $i => $char ) {
+				if ( 0 === $i % 2 ) {
+					$chars[ $i ] = strtoupper( $char );
+				}
+			}
+			$digits = implode( '', $chars );
+		}
+	}
+
+	if ( $leading_zero ) {
+		$digits = '0' . $digits;
+	}
+
+	return $prefix . $digits . ( $semicolon ? ';' : '' );
+}
+
+/**
+ * @return array{base: string, significant_digits: int, leading_zero: bool, semicolon: bool, mixed_hex: bool}
+ */
+function numeric_boundary_shape( string $payload ): array {
+	if ( 1 !== preg_match( '/^&#(?:(x|X)([0-9A-Fa-f]+)|([0-9]+))(;?)$/', $payload, $match ) ) {
+		return array(
+			'base'               => 'invalid',
+			'significant_digits' => 0,
+			'leading_zero'       => false,
+			'semicolon'          => false,
+			'mixed_hex'          => false,
+		);
+	}
+
+	$is_hex = '' !== ( $match[1] ?? '' );
+	$digits = $is_hex ? $match[2] : $match[3];
+	$significant = substr( $digits, strspn( $digits, '0' ) );
+	$letters = preg_replace( '/[^A-Fa-f]/', '', $digits );
+
+	return array(
+		'base'               => $is_hex ? 'hex' : 'decimal',
+		'significant_digits' => strlen( $significant ),
+		'leading_zero'       => strlen( $digits ) > strlen( $significant ),
+		'semicolon'          => ';' === ( $match[4] ?? '' ),
+		'mixed_hex'          => $is_hex && '' !== $letters && strtolower( $letters ) !== $letters && strtoupper( $letters ) !== $letters,
+	);
+}
+
+/**
  * @param string[] $base_names
  * @return array{base_set: array<string, true>, delete: array<string, true>, substitution: array<int, array<string, true>>, transpose: array<string, true>}
  */
@@ -798,6 +873,62 @@ check( 'prefix-family uses one strategy label', array( 'prefix-family-sweep' ) =
 check( 'prefix-family payloads are oracle-safe', 0 === $prefix_family_unsafe, (string) $prefix_family_unsafe );
 check( 'prefix-family covers expected ambiguous followers', array() === array_diff( prefix_family_sweep_followers(), array_keys( $prefix_family_followers ) ), implode( ',', array_keys( $prefix_family_followers ) ) );
 
+$numeric_boundary_generator = new Generator( new Prng( 'numeric-boundary-sweep' ), 4096, $names );
+$numeric_boundary_cases = numeric_boundary_sweep_cases();
+$numeric_boundary_mismatch = '';
+$numeric_boundary_contexts = array();
+$numeric_boundary_strategies = array();
+$numeric_boundary_unsafe = 0;
+$numeric_boundary_shapes = array();
+$numeric_boundary_mixed_hex = false;
+$numeric_boundary_exact_max_replacements = array();
+$numeric_boundary_overflow_non_replacements = array();
+for ( $i = 0; $i < count( $numeric_boundary_cases ); $i++ ) {
+	$generated = $numeric_boundary_generator->generate_numeric_boundary_sweep( $i );
+	$expected  = $numeric_boundary_cases[ $i ];
+	$shape     = numeric_boundary_shape( $generated['payload'] );
+	$decoded   = \WP_HTML_Decoder::decode_text_node( $generated['payload'] );
+
+	$numeric_boundary_contexts[ $generated['context'] ] = true;
+	$numeric_boundary_strategies[ $generated['strategy'] ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$numeric_boundary_unsafe;
+	}
+	if ( '' === $numeric_boundary_mismatch && $expected !== $generated['payload'] ) {
+		$numeric_boundary_mismatch = "case {$i}: expected {$expected} got {$generated['payload']}";
+	}
+	$numeric_boundary_shapes[] = $shape['base'] . ':' . $shape['significant_digits'] . ':' . ( $shape['leading_zero'] ? 'zero' : 'plain' ) . ':' . ( $shape['semicolon'] ? 'semi' : 'nosemi' );
+	$numeric_boundary_mixed_hex = $numeric_boundary_mixed_hex || $shape['mixed_hex'];
+	if ( ( 'decimal' === $shape['base'] && 7 === $shape['significant_digits'] ) || ( 'hex' === $shape['base'] && 6 === $shape['significant_digits'] ) ) {
+		if ( "\u{FFFD}" === $decoded ) {
+			$numeric_boundary_exact_max_replacements[] = $generated['payload'];
+		}
+	} elseif ( ( 'decimal' === $shape['base'] && 8 === $shape['significant_digits'] ) || ( 'hex' === $shape['base'] && 7 === $shape['significant_digits'] ) ) {
+		if ( "\u{FFFD}" !== $decoded ) {
+			$numeric_boundary_overflow_non_replacements[] = $generated['payload'] . ':' . bin2hex( $decoded );
+		}
+	}
+}
+$expected_numeric_boundary_shapes = array();
+foreach ( array( 'decimal' => 7, 'hex' => 6 ) as $base => $max_digits ) {
+	foreach ( array( $max_digits, $max_digits + 1 ) as $digit_count ) {
+		foreach ( array( 'plain', 'zero' ) as $zero ) {
+			foreach ( array( 'nosemi', 'semi' ) as $semicolon ) {
+				$expected_numeric_boundary_shapes[] = "{$base}:{$digit_count}:{$zero}:{$semicolon}";
+			}
+		}
+	}
+}
+check( 'numeric-boundary period covers digit count, leading zero, and semicolon variants', $numeric_boundary_generator->numeric_boundary_sweep_period() === count( $numeric_boundary_cases ) && array() === array_diff( $expected_numeric_boundary_shapes, array_unique( $numeric_boundary_shapes ) ), implode( ',', array_unique( $numeric_boundary_shapes ) ) );
+check( 'numeric-boundary period keeps decimal and hex casing variants distinct', 32 === count( $numeric_boundary_cases ), (string) count( $numeric_boundary_cases ) );
+check( 'numeric-boundary exact-max digit cases stay in Unicode range', array() === $numeric_boundary_exact_max_replacements, implode( ',', $numeric_boundary_exact_max_replacements ) );
+check( 'numeric-boundary max-plus-one digit cases decode as invalid', array() === $numeric_boundary_overflow_non_replacements, implode( ',', $numeric_boundary_overflow_non_replacements ) );
+check( 'numeric-boundary generator maps cases deterministically', '' === $numeric_boundary_mismatch, $numeric_boundary_mismatch );
+check( 'numeric-boundary cases run both contexts', array( 'both' ) === array_keys( $numeric_boundary_contexts ), implode( ',', array_keys( $numeric_boundary_contexts ) ) );
+check( 'numeric-boundary uses one strategy label', array( 'numeric-boundary-sweep' ) === array_keys( $numeric_boundary_strategies ), implode( ',', array_keys( $numeric_boundary_strategies ) ) );
+check( 'numeric-boundary payloads are oracle-safe', 0 === $numeric_boundary_unsafe, (string) $numeric_boundary_unsafe );
+check( 'numeric-boundary emits mixed-case hex digits', $numeric_boundary_mixed_hex, implode( ',', $numeric_boundary_cases ) );
+
 $lookalike_indexes    = lookalike_mutation_indexes( $name_sweep_base_names );
 $lookalike_candidates = array();
 for ( $i = 0; $i < 6000; $i++ ) {
@@ -1051,6 +1182,13 @@ check(
 	$prefix_family_worker['stdout'] . $prefix_family_worker['stderr']
 );
 
+$numeric_boundary_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'numeric-boundaries', '--seed', '1', '--cases', '64', '--progress-every', '64' ) );
+check(
+	'64-case numeric-boundary worker clean',
+	0 === $numeric_boundary_worker['code'] && str_contains( $numeric_boundary_worker['stdout'], '"numeric-boundary-sweep":64' ),
+	$numeric_boundary_worker['stdout'] . $numeric_boundary_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -1208,6 +1346,47 @@ check(
 );
 remove_tree( $prefix_runner_dir );
 
+$numeric_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-numeric-boundary-runner-' . getmypid();
+remove_tree( $numeric_runner_dir );
+$numeric_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'numeric-boundaries',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$numeric_runner_dir,
+	)
+);
+$numeric_runner_state = is_file( $numeric_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $numeric_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'numeric-boundary runner clean',
+	0 === $numeric_runner['code'] &&
+		( $numeric_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $numeric_runner_state['cases'] ?? null ) === ( $numeric_runner_state['by_strategy']['numeric-boundary-sweep'] ?? null ) &&
+		( $numeric_runner_state['cases'] ?? null ) === ( $numeric_runner_state['by_context']['both'] ?? null ),
+	$numeric_runner['stdout'] . $numeric_runner['stderr'] . json_encode( $numeric_runner_state )
+);
+$numeric_runner_windows = summary_start_windows( $numeric_runner_dir, 'numeric-boundaries' );
+check(
+	'numeric-boundary runner uses distinct start-case windows',
+	start_windows_are_distinct( $numeric_runner_windows, 100 ),
+	json_encode( $numeric_runner_windows )
+);
+remove_tree( $numeric_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
 
@@ -1228,6 +1407,21 @@ $prefix_fault_seed_replay = run_process(
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
 );
 check( 'faulted prefix-family seed replay reproduces generated case', 1 === $prefix_fault_seed_replay['code'], $prefix_fault_seed_replay['stdout'] . $prefix_fault_seed_replay['stderr'] );
+
+$numeric_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'numeric-boundaries', '--seed', '1', '--case', '25' ) );
+check(
+	'numeric-boundary replay regenerates mixed-case hex case',
+	0 === $numeric_replay['code'] &&
+		str_contains( $numeric_replay['stdout'], 'mode numeric-boundaries, strategy numeric-boundary-sweep' ) &&
+		str_contains( $numeric_replay['stdout'], 'Hex preview: 2623783130466645653b' ),
+	$numeric_replay['stdout'] . $numeric_replay['stderr']
+);
+
+$numeric_fault_seed_replay = run_process(
+	array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'numeric-boundaries', '--seed', '1', '--case', '0' ),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+check( 'faulted numeric-boundary seed replay reproduces generated case', 1 === $numeric_fault_seed_replay['code'], $numeric_fault_seed_replay['stdout'] . $numeric_fault_seed_replay['stderr'] );
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -1383,6 +1577,58 @@ if ( null !== $prefix_failure_file ) {
 	check( 'faulted prefix-family minimizer preserves signature', 0 === $prefix_fault_minimize['code'], $prefix_fault_minimize['stdout'] . $prefix_fault_minimize['stderr'] );
 }
 remove_tree( $prefix_pipeline_dir );
+
+$numeric_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-numeric-boundary-fault-' . getmypid();
+remove_tree( $numeric_pipeline_dir );
+$faulted_numeric_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'numeric-boundaries',
+		'--seed',
+		'1',
+		'--start-case',
+		'0',
+		'--cases',
+		'1',
+		'--output-dir',
+		$numeric_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+check( 'faulted numeric-boundary worker reports findings', 1 === $faulted_numeric_worker['code'], $faulted_numeric_worker['stdout'] . $faulted_numeric_worker['stderr'] );
+
+$numeric_failure_files = glob( $numeric_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted numeric-boundary worker writes failure artifact', is_array( $numeric_failure_files ) && array() !== $numeric_failure_files );
+
+$numeric_failure_file = is_array( $numeric_failure_files ) && array() !== $numeric_failure_files ? $numeric_failure_files[0] : null;
+if ( null !== $numeric_failure_file ) {
+	$numeric_manifest = json_decode( (string) file_get_contents( $numeric_failure_file ), true );
+	check(
+		'numeric-boundary failure artifact records mode and signature',
+		'numeric-boundaries' === ( $numeric_manifest['mode'] ?? null ) &&
+			'numeric-boundary-sweep' === ( $numeric_manifest['strategy'] ?? null ) &&
+			0 === ( $numeric_manifest['case'] ?? null ) &&
+			in_array( 'reader-overran-input:text', $numeric_manifest['signatures'] ?? array(), true ),
+		json_encode( $numeric_manifest )
+	);
+
+	$numeric_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $numeric_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+	);
+	check( 'faulted numeric-boundary replay reproduces finding', 1 === $numeric_fault_replay['code'], $numeric_fault_replay['stdout'] . $numeric_fault_replay['stderr'] );
+
+	$numeric_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $numeric_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+	);
+	check( 'faulted numeric-boundary minimizer preserves signature', 0 === $numeric_fault_minimize['code'], $numeric_fault_minimize['stdout'] . $numeric_fault_minimize['stderr'] );
+}
+remove_tree( $numeric_pipeline_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );

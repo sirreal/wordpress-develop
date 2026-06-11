@@ -104,6 +104,8 @@ for ( $case = $start; $case < $end; $case++ ) {
 		$generated = $generator->generate_legacy_follower_sweep( $case );
 	} elseif ( 'prefix-families' === $options['mode'] ) {
 		$generated = $generator->generate_prefix_family_sweep( $case );
+	} elseif ( 'numeric-boundaries' === $options['mode'] ) {
+		$generated = $generator->generate_numeric_boundary_sweep( $case );
 	} else {
 		$generated = $generator->generate();
 	}
