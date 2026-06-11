@@ -19,6 +19,17 @@ $db_path = $work_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME;
 
 $store = new \HtmlApiFuzz\ResultStore( $db_path );
 
+$php_oracle = array(
+	'kind'       => 'php-dom',
+	'phpVersion' => PHP_VERSION,
+);
+$lexbor_oracle = array(
+	'kind'          => 'lexbor-source',
+	'lexborVersion' => '2.10.0',
+	'lexborCommit'  => '481c444261a132190a3fb746d6d2f60824af3717',
+	'binary'        => '/tmp/lexbor-tree-oracle',
+);
+
 $pass_summary = array(
 	'kind'              => 'attempt',
 	'ok'                => true,
@@ -32,6 +43,7 @@ $pass_summary = array(
 	'inputSha1'         => sha1( 'pass' ),
 	'inputLength'       => 4,
 	'signature'         => null,
+	'oracle'            => $php_oracle,
 	'artifactsRetained' => false,
 	'resultPath'        => null,
 	'replayPath'        => null,
@@ -58,6 +70,7 @@ $failure_summary = array(
 		'hash'      => 'abc123def456',
 		'familyKey' => 'fam456789abc',
 	),
+	'oracle'            => $lexbor_oracle,
 	'artifactsRetained' => true,
 	'resultPath'        => $work_dir . '/seed-12/primary/result.json',
 	'replayPath'        => $work_dir . '/seed-12/primary/replay.json',
@@ -121,6 +134,7 @@ $oracle_summary = array(
 	'inputSha1'         => sha1( 'oracle' ),
 	'inputLength'       => 12,
 	'signature'         => null,
+	'oracle'            => $php_oracle,
 	'oracleFinding'     => array(
 		'classification' => 'oracle-bug',
 		'type'           => 'dom-xlink-dropped-local-name-after-xlink',
@@ -199,6 +213,9 @@ html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_signature_hash = 'oracle-abc123'" ), 'Expected oracle_signature_hash to be queryable.' );
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE signature_hash = 'abc123def456' AND failure_artifacts_retained = 1" ), 'Expected failure retention to use its own budget flag.' );
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_signature_hash = 'oracle-abc123' AND oracle_artifacts_retained = 1" ), 'Expected oracle retention to use its own budget flag.' );
+html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 11 AND oracle_kind = 'php-dom' AND oracle_version = '" . SQLite3::escapeString( PHP_VERSION ) . "'" ), 'Expected passing rows to keep PHP DOM oracle metadata in scalar columns.' );
+html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_kind = 'lexbor-source' AND oracle_version = '2.10.0' AND oracle_commit = '481c444261a132190a3fb746d6d2f60824af3717'" ), 'Expected Lexbor oracle metadata to be queryable for failure rows.' );
+html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_binary = '/tmp/lexbor-tree-oracle'" ), 'Expected Lexbor oracle binary to be stored in a scalar column.' );
 $raw->close();
 
 $future_db_path = $work_dir . '/future.sqlite';
