@@ -96,11 +96,17 @@ assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" dat
 tags.destroy();
 
 const text = new WP_HTML_Tag_Processor(" \0<p>Hi</p>");
+assert.equal(text.get_modifiable_text(), "");
 assert.equal(text.next_token(), true);
 assert.equal(text.get_token_type(), "#text");
 assert.equal(text.subdivide_text_appropriately(), true);
 assert.equal(text.text_node_classification, WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE);
 text.destroy();
+
+const nonText = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(nonText.next_tag("div"), true);
+assert.equal(nonText.get_modifiable_text(), "");
+nonText.destroy();
 
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
 assert.equal(textarea.next_token(), true);
@@ -281,6 +287,7 @@ assert.equal(virtualHeadingCloserProcessor.next_token(), true);
 assert.equal(virtualHeadingCloserProcessor.get_tag(), "H1");
 assert.equal(virtualHeadingCloserProcessor.is_virtual(), true);
 assert.equal(virtualHeadingCloserProcessor.is_tag_closer(), true);
+assert.equal(virtualHeadingCloserProcessor.get_modifiable_text(), "");
 assert.deepEqual(virtualHeadingCloserProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
 assert.equal(virtualHeadingCloserProcessor.next_token(), true);
 assert.equal(virtualHeadingCloserProcessor.get_tag(), "H2");

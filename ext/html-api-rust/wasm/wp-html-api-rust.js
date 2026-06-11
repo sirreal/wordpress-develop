@@ -774,7 +774,7 @@ export function createHtmlApi(wasm) {
 			this.#ensureLive();
 			return runtime.readOutputString((out) => (
 				wasm.wp_html_api_rust_tag_processor_get_modifiable_text(this.pointer, out)
-			));
+			)) ?? "";
 		}
 
 		set_modifiable_text(text) {
@@ -1317,7 +1317,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		get_modifiable_text() {
-			return this.is_virtual() ? null : super.get_modifiable_text();
+			return this.is_virtual() ? "" : super.get_modifiable_text();
 		}
 
 		set_modifiable_text(text) {
