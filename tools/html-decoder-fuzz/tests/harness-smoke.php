@@ -1197,6 +1197,19 @@ check(
 	implode( ',', array_slice( $case_mangle_direct_errors, 0, 20 ) )
 );
 
+$generator_reflection = new \ReflectionClass( Generator::class );
+$alphabet_constant    = $generator_reflection->getReflectionConstant( 'ASCII_ALPHABET' );
+$ascii_alphabet       = null === $alphabet_constant ? '' : (string) $alphabet_constant->getValue();
+check(
+	'oracle-safe generator alphabet includes space, tab, LF, and FF followers',
+	str_contains( $ascii_alphabet, ' ' ) &&
+		str_contains( $ascii_alphabet, "\t" ) &&
+		str_contains( $ascii_alphabet, "\n" ) &&
+		str_contains( $ascii_alphabet, "\f" ) &&
+		Generator::is_oracle_safe_payload( $ascii_alphabet ),
+	bin2hex( $ascii_alphabet )
+);
+
 $strategies            = array();
 $contexts              = array();
 $unsafe                = 0;
@@ -1802,7 +1815,7 @@ check(
 	'corpus mutation replay regenerates clean case',
 	0 === $corpus_replay['code'] &&
 		str_contains( $corpus_replay['stdout'], 'mode corpus, strategy corpus-byte-perturb' ) &&
-		str_contains( $corpus_replay['stdout'], 'Hex preview: 67262335383b' ),
+		str_contains( $corpus_replay['stdout'], 'Hex preview: 64262335383b' ),
 	$corpus_replay['stdout'] . $corpus_replay['stderr']
 );
 

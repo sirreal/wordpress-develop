@@ -104,7 +104,8 @@ strategies for:
 - valid named-reference names with letter case mangled into case-sensitive
   near-misses
 - composed cases that splice two or three generated strategy outputs
-- plain no-ampersand text
+- plain no-ampersand text from an oracle-safe alphabet that includes space, tab,
+  LF, and FF
 
 `bytes` mode uses separate weighted strategies for uniform random bytes,
 no-ampersand byte strings, arbitrary bytes around `&` boundaries, invalid UTF-8
@@ -128,8 +129,9 @@ it, with and without leading zeros, semicolons, and mixed-case hex digits.
 
 `corpus` mode mutates a seed corpus built from retained decoder payloads, the
 oracle battery, and html5lib entity vectors. Mutations splice corpus fragments,
-perturb bytes within the oracle-safe alphabet, add or remove semicolons, and
-duplicate references to diversify structure beyond the grammar.
+perturb bytes within the oracle-safe alphabet, including space, tab, LF, and FF,
+add or remove semicolons, and duplicate references to diversify structure beyond
+the grammar.
 
 ## Common Commands
 

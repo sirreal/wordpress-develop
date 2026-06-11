@@ -15,7 +15,7 @@ class Generator {
 		'amp', 'AMP', 'lt', 'LT', 'gt', 'GT', 'quot', 'QUOT', 'nbsp', 'copy', 'COPY', 'reg', 'not', 'AElig',
 	);
 
-	private const ASCII_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_:/.,;#[](){}\'=+!?*';
+	private const ASCII_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \t\n\f-_:/.,;#[](){}'=+!?*";
 	private const NAME_MUTATION_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 	private const COMPOSITION_SEPARATOR = '|';
 	private const ATTRIBUTE_PREFIX_TARGETS = array(
