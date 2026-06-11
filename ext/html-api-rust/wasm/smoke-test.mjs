@@ -542,6 +542,65 @@ for (const html of [
 	seekAfterEnd.destroy();
 }
 
+const longAttributeRemovalSeek = new WP_HTML_Tag_Processor("<button twenty_one_characters 7_chars></button><button></button>");
+assert.equal(longAttributeRemovalSeek.next_tag("button"), true);
+assert.equal(longAttributeRemovalSeek.set_bookmark("first"), true);
+assert.equal(longAttributeRemovalSeek.next_tag("button"), true);
+assert.equal(longAttributeRemovalSeek.set_bookmark("second"), true);
+assert.equal(longAttributeRemovalSeek.seek("first"), true);
+assert.equal(longAttributeRemovalSeek.remove_attribute("twenty_one_characters"), true);
+assert.equal(longAttributeRemovalSeek.remove_attribute("7_chars"), true);
+assert.equal(longAttributeRemovalSeek.seek("second"), true);
+assert.equal(longAttributeRemovalSeek.get_tag(), "BUTTON");
+longAttributeRemovalSeek.destroy();
+
+const bookmarkAdditionsAfterBothSides = new WP_HTML_Tag_Processor("<div>First</div><div>Second</div>");
+assert.equal(bookmarkAdditionsAfterBothSides.next_tag(), true);
+assert.equal(bookmarkAdditionsAfterBothSides.set_attribute("id", "one"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.set_bookmark("first"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.next_tag(), true);
+assert.equal(bookmarkAdditionsAfterBothSides.set_attribute("id", "two"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.add_class("second"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.seek("first"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.add_class("first"), true);
+assert.equal(bookmarkAdditionsAfterBothSides.get_attribute("id"), "one");
+assert.equal(bookmarkAdditionsAfterBothSides.get_updated_html(), '<div class="first" id="one">First</div><div class="second" id="two">Second</div>');
+bookmarkAdditionsAfterBothSides.destroy();
+
+const bookmarkAdditionsBeforeBothSides = new WP_HTML_Tag_Processor("<div>First</div><div>Second</div>");
+assert.equal(bookmarkAdditionsBeforeBothSides.next_tag(), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.set_bookmark("first"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.next_tag(), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.set_bookmark("second"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.seek("first"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.add_class("first"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.seek("second"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.add_class("second"), true);
+assert.equal(bookmarkAdditionsBeforeBothSides.get_updated_html(), '<div class="first">First</div><div class="second">Second</div>');
+bookmarkAdditionsBeforeBothSides.destroy();
+
+const bookmarkDeletionsAfterBothSides = new WP_HTML_Tag_Processor("<div>First</div><div disabled>Second</div>");
+assert.equal(bookmarkDeletionsAfterBothSides.next_tag(), true);
+assert.equal(bookmarkDeletionsAfterBothSides.set_bookmark("first"), true);
+assert.equal(bookmarkDeletionsAfterBothSides.next_tag(), true);
+assert.equal(bookmarkDeletionsAfterBothSides.remove_attribute("disabled"), true);
+assert.equal(bookmarkDeletionsAfterBothSides.seek("first"), true);
+assert.equal(bookmarkDeletionsAfterBothSides.set_attribute("untouched", true), true);
+assert.equal(bookmarkDeletionsAfterBothSides.get_updated_html(), "<div untouched>First</div><div >Second</div>");
+bookmarkDeletionsAfterBothSides.destroy();
+
+const bookmarkDeletionsBeforeBothSides = new WP_HTML_Tag_Processor("<div disabled>First</div><div>Second</div>");
+assert.equal(bookmarkDeletionsBeforeBothSides.next_tag(), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.set_bookmark("first"), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.next_tag(), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.set_bookmark("second"), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.seek("first"), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.remove_attribute("disabled"), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.seek("second"), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.set_attribute("safe", true), true);
+assert.equal(bookmarkDeletionsBeforeBothSides.get_updated_html(), "<div >First</div><div safe>Second</div>");
+bookmarkDeletionsBeforeBothSides.destroy();
+
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
