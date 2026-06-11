@@ -801,6 +801,38 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * `#text` tokens: accumulate text while walking rather than assuming
 	 * one token carries all of an element's text.
 	 *
+	 * There is only ONE cursor. Every call to `next_token()` advances the
+	 * same shared position, so nested walk loops interfere with each
+	 * other: when an inner "collect until this element closes" loop
+	 * exits, the processor is already matched on the token that ended
+	 * that loop — an outer loop calling `next_token()` again skips past
+	 * it, silently dropping whatever it was (often the opener of the next
+	 * region of interest). To extract repeated regions (the items of a
+	 * list, the cells of each row), do not nest walk loops; use a single
+	 * loop that dispatches on the current token and tracks where it is
+	 * with a couple of state variables:
+	 *
+	 *     // Collect each DT term's text from a definition list, one
+	 *     // pass, no nested loops.
+	 *     $terms   = array();
+	 *     $current = null;
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'DT' === $processor->get_token_name() ) {
+	 *             if ( $processor->is_tag_closer() ) {
+	 *                 $terms[] = $current;
+	 *                 $current = null;
+	 *             } else {
+	 *                 $current = '';
+	 *             }
+	 *         } elseif ( null !== $current && '#text' === $processor->get_token_type() ) {
+	 *             $current .= $processor->get_modifiable_text();
+	 *         }
+	 *     }
+	 *
+	 * Because a closing token is visited for every opener (implicit and
+	 * end-of-input closes included), the closer-driven flush in this
+	 * shape is reliable even for malformed input.
+	 *
 	 * Example:
 	 *
 	 *     // Collect the text content of the first LI element.
