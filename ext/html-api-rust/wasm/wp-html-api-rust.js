@@ -1537,6 +1537,13 @@ export function createHtmlApi(wasm) {
 
 			if (this.is_tag_closer()) {
 				const closingNamespace = this.current_namespace;
+
+				if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForEndTag(tagName)) {
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
@@ -1720,6 +1727,46 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (TABLE_SECTION_BOUNDARY_START_TAGS.has(tagName)) {
+				const sectionIndex = this.#findElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName));
+				if (sectionIndex !== -1) {
+					this.#queueVirtualPopsFrom(sectionIndex);
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#queueVirtualPreclosuresForEndTag(tagName) {
+			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
+				return false;
+			}
+
+			if (tagName === "TR" && !this.#hasElementInTableScope("TR")) {
+				return false;
+			}
+
+			if (TABLE_SECTION_ELEMENTS.has(tagName) && !this.#hasElementInTableScope(tagName)) {
+				return false;
+			}
+
+			if (tagName === "TABLE" || tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName)) {
+				const cellIndex = this.#findElementInTableScope((nodeName) => TABLE_CELL_ELEMENTS.has(nodeName));
+				if (cellIndex !== -1) {
+					this.#queueVirtualPopsFrom(cellIndex);
+					return true;
+				}
+			}
+
+			if (tagName === "TABLE" || TABLE_SECTION_ELEMENTS.has(tagName)) {
+				const rowIndex = this.#findElementInTableScope("TR");
+				if (rowIndex !== -1) {
+					this.#queueVirtualPopsFrom(rowIndex);
+					return true;
+				}
+			}
+
+			if (tagName === "TABLE") {
 				const sectionIndex = this.#findElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName));
 				if (sectionIndex !== -1) {
 					this.#queueVirtualPopsFrom(sectionIndex);
