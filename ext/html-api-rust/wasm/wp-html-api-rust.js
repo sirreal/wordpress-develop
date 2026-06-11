@@ -2864,6 +2864,7 @@ export function createHtmlApi(wasm) {
 					existingIndex < this.open_elements.length - 1 &&
 					tagName !== "HTML" &&
 					tagName !== "BODY" &&
+					tagName !== "TEMPLATE" &&
 					MODELED_SCOPED_END_TAGS.has(tagName) &&
 					this.#hasHtmlScopeBoundaryAfter(existingIndex, DEFAULT_SCOPE_BOUNDARIES)
 				) {
