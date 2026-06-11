@@ -75,6 +75,7 @@ extern bool wp_html_api_rust_tag_processor_current_span(
 );
 extern unsigned char wp_html_api_rust_tag_processor_current_token_type(const void *processor);
 extern bool wp_html_api_rust_tag_processor_paused_at_incomplete(const void *processor);
+extern unsigned char wp_html_api_rust_tag_processor_subdivide_text_appropriately(void *processor);
 extern bool wp_html_api_rust_tag_processor_get_modifiable_text(
 	void *processor,
 	wp_html_api_rust_byte_slice *out
@@ -1839,11 +1840,9 @@ PHP_METHOD(WP_HTML_Tag_Processor, paused_at_incomplete_token)
 PHP_METHOD(WP_HTML_Tag_Processor, subdivide_text_appropriately)
 {
 	wp_html_tag_processor_object *intern;
-	wp_html_api_rust_byte_slice text;
 	zval rv;
 	zval *parser_state;
-	bool is_whitespace = true;
-	size_t at;
+	unsigned char classification;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 
@@ -1877,18 +1876,19 @@ PHP_METHOD(WP_HTML_Tag_Processor, subdivide_text_appropriately)
 		RETURN_THROWS();
 	}
 
-	if (!wp_html_api_rust_tag_processor_get_modifiable_text(intern->native, &text) || 0 == text.len) {
-		RETURN_FALSE;
+	classification = wp_html_api_rust_tag_processor_subdivide_text_appropriately(intern->native);
+	if (1 == classification) {
+		zend_update_property_string(
+			wp_html_tag_processor_ce,
+			Z_OBJ_P(ZEND_THIS),
+			"text_node_classification",
+			sizeof("text_node_classification") - 1,
+			"TEXT_IS_NULL_SEQUENCE"
+		);
+		RETURN_TRUE;
 	}
 
-	for (at = 0; at < text.len; ++at) {
-		if (!wp_html_api_rust_is_html_whitespace(text.ptr[at])) {
-			is_whitespace = false;
-			break;
-		}
-	}
-
-	if (is_whitespace) {
+	if (2 == classification) {
 		zend_update_property_string(
 			wp_html_tag_processor_ce,
 			Z_OBJ_P(ZEND_THIS),

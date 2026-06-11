@@ -317,6 +317,17 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_paused_at_incomplete(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_tag_processor_subdivide_text_appropriately(
+    processor: *mut TagProcessor,
+) -> u8 {
+    let Some(processor) = processor.as_mut() else {
+        return 0;
+    };
+
+    processor.subdivide_current_text()
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn wp_html_api_rust_tag_processor_get_modifiable_text(
     processor: *mut TagProcessor,
     out: *mut ByteSlice,
@@ -874,6 +885,64 @@ impl TagProcessor {
             &self.html[scan.name_start..scan.name_start + scan.name_len],
             &[&b"PRE"[..], &b"LISTING"[..]],
         )
+    }
+
+    fn subdivide_current_text(&mut self) -> u8 {
+        const TEXT_IS_GENERIC: u8 = 0;
+        const TEXT_IS_NULL_SEQUENCE: u8 = 1;
+        const TEXT_IS_WHITESPACE: u8 = 2;
+
+        let Some(scan) = self.current else {
+            return TEXT_IS_GENERIC;
+        };
+
+        if scan.token_type != TOKEN_TYPE_TEXT || scan.tag_start >= scan.token_end {
+            return TEXT_IS_GENERIC;
+        }
+
+        let mut at = scan.tag_start;
+        while at < scan.token_end && self.html[at] == 0 {
+            at += 1;
+        }
+
+        if at > scan.tag_start {
+            self.truncate_current_text(at);
+            return TEXT_IS_NULL_SEQUENCE;
+        }
+
+        while at < scan.token_end {
+            while at < scan.token_end && is_html_whitespace(self.html[at]) {
+                at += 1;
+            }
+
+            if at < scan.token_end && self.html[at] == b'&' {
+                if let Some((decoded, consumed)) =
+                    decode_character_reference(DecodeContext::Data, &self.html[at..scan.token_end])
+                {
+                    if decoded.is_html_whitespace() {
+                        at += consumed;
+                        continue;
+                    }
+                }
+            }
+
+            break;
+        }
+
+        if at > scan.tag_start {
+            self.truncate_current_text(at);
+            return TEXT_IS_WHITESPACE;
+        }
+
+        TEXT_IS_GENERIC
+    }
+
+    fn truncate_current_text(&mut self, end: usize) {
+        if let Some(scan) = self.current.as_mut() {
+            scan.tag_end = end;
+            scan.token_end = end;
+        }
+        self.offset = end;
     }
 
     fn set_modifiable_text(&mut self, plaintext: &[u8]) -> bool {
@@ -1551,6 +1620,17 @@ impl CharacterReference {
 
     fn is_null(self) -> bool {
         matches!(self, CharacterReference::Scalar('\0'))
+    }
+
+    fn is_html_whitespace(self) -> bool {
+        matches!(
+            self,
+            CharacterReference::Scalar(' ')
+                | CharacterReference::Scalar('\t')
+                | CharacterReference::Scalar('\n')
+                | CharacterReference::Scalar('\u{000C}')
+                | CharacterReference::Scalar('\r')
+        )
     }
 }
 
@@ -2952,6 +3032,55 @@ mod tests {
             processor.current_modifiable_text(scan).unwrap(),
             "one\u{FFFD}two".as_bytes()
         );
+    }
+
+    #[test]
+    fn text_subdivision_splits_leading_whitespace_from_mixed_text() {
+        let mut processor = TagProcessor {
+            html: b" a <frameset>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        assert_eq!(
+            unsafe { super::wp_html_api_rust_tag_processor_subdivide_text_appropriately(&mut processor) },
+            2
+        );
+        let scan = processor.current.unwrap();
+        assert_eq!(scan.token_end, 1);
+        assert_eq!(processor.offset, 1);
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b" ");
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        let scan = processor.current.unwrap();
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"a ");
+    }
+
+    #[test]
+    fn text_subdivision_splits_leading_null_sequence() {
+        let mut processor = TagProcessor {
+            html: b"\0\0<frameset>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        assert_eq!(
+            unsafe { super::wp_html_api_rust_tag_processor_subdivide_text_appropriately(&mut processor) },
+            1
+        );
+        let scan = processor.current.unwrap();
+        assert_eq!(scan.token_end, 2);
+        assert_eq!(processor.offset, 2);
     }
 
     #[test]
