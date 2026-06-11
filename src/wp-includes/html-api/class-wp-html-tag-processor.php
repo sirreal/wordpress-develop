@@ -898,6 +898,20 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next tag matching the $query.
 	 *
+	 * What this matches:
+	 *
+	 *  - Tag-name matching is ASCII case-insensitive: a query of `img`
+	 *    matches `<IMG>`, `<Img>`, and `<img>` alike, and the source
+	 *    document's original casing is preserved in the output.
+	 *  - Only real HTML tags can match. Tag-like text inside comments,
+	 *    CDATA-like sections, and the raw text contents of elements such
+	 *    as SCRIPT, STYLE, TITLE, and TEXTAREA is text, not tags, and is
+	 *    never matched or modified.
+	 *  - A document that ends in the middle of a tag (truncated input)
+	 *    pauses the processor: the incomplete tag is never matched, so it
+	 *    is never modified. See
+	 *    {@see WP_HTML_Tag_Processor::paused_at_incomplete_token}.
+	 *
 	 * @since 6.2.0
 	 * @since 6.5.0 No longer processes incomplete tokens at end of document; pauses the processor at start of token.
 	 *
@@ -905,6 +919,7 @@ class WP_HTML_Tag_Processor {
 	 *     Optional. Which tag name to find, having which class, etc. Default is to find any tag.
 	 *
 	 *     @type string|null $tag_name     Which tag to find, or `null` for "any tag."
+	 *                                     Matching is ASCII case-insensitive.
 	 *     @type int|null    $match_offset Find the Nth tag matching all search criteria.
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
@@ -2810,6 +2825,13 @@ class WP_HTML_Tag_Processor {
 	 *     $p->next_tag() === false;
 	 *     $p->get_attribute( 'class' ) === null;
 	 *
+	 * String values are returned DECODED: character references in the
+	 * attribute value have already been replaced with the characters they
+	 * represent, so `href="/x?a=1&amp;b=2"` is returned as `/x?a=1&b=2`.
+	 * Do not decode the returned value again. The inverse holds for
+	 * {@see WP_HTML_Tag_Processor::set_attribute}, which accepts plain,
+	 * unescaped values and encodes them as needed.
+	 *
 	 * @since 6.2.0
 	 *
 	 * @param string $name Name of attribute whose value is requested.
@@ -4642,6 +4664,14 @@ class WP_HTML_Tag_Processor {
 
 	/**
 	 * Adds a new class name to the currently matched tag.
+	 *
+	 * If the tag has no `class` attribute, one is created. If it already
+	 * has classes, the new name is appended after them; existing classes
+	 * are never removed, reordered, or re-spaced. Adding a class name the
+	 * tag already has is a no-op — no duplicate is appended. The
+	 * already-present check compares class names exactly, byte for byte:
+	 * adding `NOTE` to `class="note"` appends it, since those are
+	 * different class names in CSS terms.
 	 *
 	 * @since 6.2.0
 	 *
