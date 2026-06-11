@@ -1,0 +1,101 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-11/N06-html-img-sources/trial-1/candidate.php",
+    "function": "collect_html_img_sources",
+    "passed": 7,
+    "total": 7,
+    "cases": [
+        {
+            "id": "html-only",
+            "status": "pass",
+            "expected": [
+                "a.jpg",
+                "b.png"
+            ],
+            "actual": [
+                "a.jpg",
+                "b.png"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "svg-image-excluded",
+            "status": "pass",
+            "expected": [
+                "real.jpg"
+            ],
+            "actual": [
+                "real.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "image-tag-becomes-img",
+            "status": "pass",
+            "expected": [
+                "converted.jpg"
+            ],
+            "actual": [
+                "converted.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "img-inside-svg-breaks-out",
+            "status": "pass",
+            "expected": [
+                "breaks-out.jpg"
+            ],
+            "actual": [
+                "breaks-out.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "mixed-document",
+            "status": "pass",
+            "expected": [
+                "1.jpg",
+                "2.jpg",
+                "3.jpg"
+            ],
+            "actual": [
+                "1.jpg",
+                "2.jpg",
+                "3.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-src-skipped",
+            "status": "pass",
+            "expected": [
+                "yes.jpg"
+            ],
+            "actual": [
+                "yes.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-images",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

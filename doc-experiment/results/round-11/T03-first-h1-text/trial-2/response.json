@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Processor::create_fragment() to parse the HTML, next_tag() to find the first H1 element, and next_token() with get_token_type() and get_modifiable_text() to accumulate all text nodes inside the H1, including text in nested elements. Character reference decoding happens automatically via get_modifiable_text(). The depth-based loop ensures we only collect text within the H1 element itself, exiting when we reach the H1's closing tag.",
+  "confidence": 92
+}

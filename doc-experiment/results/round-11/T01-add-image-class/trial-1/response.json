@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to scan through the HTML document linearly, finding all tags and checking if they are IMG tags (case-insensitive via get_tag()). For each IMG tag found, it adds the 'wp-image' class using add_class(), which safely handles both tags that already have classes and those that don't. The Tag Processor automatically skips tag-like content in comments and other non-tag contexts, and returns all modifications in byte-preserved format via get_updated_html(). This approach implements flat, position-based text modification exactly as documented.",
+  "confidence": 92
+}

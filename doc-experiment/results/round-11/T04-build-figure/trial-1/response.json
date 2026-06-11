@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely build an HTML figure fragment. It starts with a template containing all required elements (figure, img, figcaption with placeholder text), then uses set_attribute() to update the img's src and alt attributes with the provided values, and set_modifiable_text() to replace the figcaption's placeholder text with the caption. The API handles all HTML encoding automatically, ensuring that special characters in the inputs are properly escaped. Finally, get_updated_html() returns the complete, properly formatted HTML fragment.",
+  "confidence": 75
+}

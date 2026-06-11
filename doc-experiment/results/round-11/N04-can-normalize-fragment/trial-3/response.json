@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context. If the processor creation fails (returns null), the HTML cannot be normalized so we return false. Otherwise, we call serialize() on the processor, which returns null if the processor encounters unsupported HTML markup like mis-nested formatting elements, or a normalized string if successful. We return true only when serialization succeeds (returns non-null).",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and iterates through all A tags with href attributes. For each link, it records the href value (already decoded by get_attribute), then walks through all tokens inside the A element, concatenating text nodes to collect the text content. The loop continues while the depth is greater than the A element's opening depth, ensuring we capture all content inside the A element. Character references are automatically decoded by get_modifiable_text().",
+  "confidence": 75
+}

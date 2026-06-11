@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and scans through all tokens in the document using next_token() in a loop. Once all tokens have been processed and next_token() returns false, the paused_at_incomplete_token() method returns true if the HTML ended in the middle of a syntax element (incomplete tag, unterminated comment, unclosed SCRIPT without closing tag, etc.). This approach follows the documented pattern for checking truncation after scanning completes.",
+  "confidence": 92
+}

@@ -2,6 +2,19 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 11 — Haiku, equality-case fix lands; asymptote territory
+
+**Train 98.28 (within noise of round-10's 98.70).** T03 +5.2 → 98.9
+(the stated-causally equality rule); T09 100.0; remaining misses are
+single hidden cases (T06 ×2, T08 ×1). Judge findings are now
+prose-bleed nits: a trial attributed remove_class's
+attribute-dropping to add_class; the quoting caveat and the
+byte-preservation rule live far apart.
+
+Round-12 hypotheses (committed): add_class add-only scope stated
+contrastively; only-written-attributes-requoted co-located with
+get_updated_html's contract. Round 12 is a held-out checkpoint.
+
 ## Round 10 — Haiku, T08 perfect for the first time
 
 **Train 98.70 — new high.** T08 +10.0 → 96.8 with 8/8 in every trial

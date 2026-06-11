@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor's documented APIs to detect truncated HTML. It creates a processor instance and calls next_token() repeatedly to scan through all tokens in the input. The key documented method is paused_at_incomplete_token(), which returns true when the processor paused because the input ended in the middle of an HTML syntax element (such as an unclosed tag, unterminated comment, or special element without a closing tag). Unclosed elements and trailing `<` characters are lexically complete tokens and won't trigger the incomplete state.",
+  "confidence": 85
+}
