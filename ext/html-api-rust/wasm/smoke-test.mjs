@@ -167,6 +167,17 @@ assert.equal(comment.get_tag(), "xml-stylesheet");
 assert.equal(comment.get_full_comment_text(), "?xml-stylesheet href='x'?");
 comment.destroy();
 
+const eofClosedComment = new WP_HTML_Tag_Processor("FOO<!-- BAR --! >BAZ");
+assert.equal(eofClosedComment.next_token(), true);
+assert.equal(eofClosedComment.get_token_type(), "#text");
+assert.equal(eofClosedComment.get_modifiable_text(), "FOO");
+assert.equal(eofClosedComment.next_token(), true);
+assert.equal(eofClosedComment.get_token_type(), "#comment");
+assert.equal(eofClosedComment.get_full_comment_text(), " BAR --! >BAZ");
+assert.equal(eofClosedComment.next_token(), false);
+assert.equal(eofClosedComment.paused_at_incomplete_token(), false);
+eofClosedComment.destroy();
+
 const tagBookmarkLimit = new WP_HTML_Tag_Processor("<div>");
 assert.equal(tagBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {

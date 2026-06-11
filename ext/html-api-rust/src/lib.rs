@@ -804,8 +804,10 @@ impl TagProcessor {
                 scan.token_end.saturating_sub(4)
             } else if token.ends_with(b"-->") {
                 scan.token_end.saturating_sub(3)
-            } else {
+            } else if token.ends_with(b">") {
                 scan.token_end.saturating_sub(1)
+            } else {
+                scan.token_end
             };
             if end < body_start {
                 end = body_start;
@@ -2165,7 +2167,7 @@ fn scan_comment(html: &[u8], tag_start: usize) -> ScanResult {
     }
 
     let Some(token_end) = find_comment_end(html, tag_start + 4) else {
-        return ScanResult::Incomplete;
+        return ScanResult::Token(non_tag_scan(tag_start, html.len(), TOKEN_TYPE_COMMENT));
     };
 
     ScanResult::Token(non_tag_scan(tag_start, token_end, TOKEN_TYPE_COMMENT))
@@ -2688,8 +2690,8 @@ fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)
 mod tests {
     use super::{
         find_script_closer, scan_next_tag, scan_next_token_in_namespace, AttributeValue,
-        ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
-        NAMESPACE_HTML, TOKEN_TYPE_TAG,
+        ScanResult, TagProcessor, TagScan, COMMENT_TYPE_HTML, COMMENT_TYPE_INVALID,
+        NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
     };
     use std::ptr;
 
@@ -2873,6 +2875,42 @@ mod tests {
         let first = scan_next_tag(html, 0).unwrap();
         let after = scan_next_tag(html, first.token_end).unwrap();
         assert!(html[after.tag_start..after.token_end].starts_with(b"<hr id=after"));
+    }
+
+    #[test]
+    fn scanner_closes_comments_at_eof() {
+        let html = b"FOO<!-- BAR --! >BAZ";
+        let mut processor = TagProcessor {
+            html: html.to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+        assert_eq!(
+            processor.current_modifiable_text(processor.current.unwrap()).unwrap(),
+            b"FOO"
+        );
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+        let scan = processor.current.unwrap();
+        assert_eq!(processor.comment_type(scan), COMMENT_TYPE_HTML);
+        assert_eq!(
+            processor.current_modifiable_text(scan).unwrap(),
+            b" BAR --! >BAZ"
+        );
+        assert!(!unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+        assert!(!processor.paused_at_incomplete);
     }
 
     #[test]
