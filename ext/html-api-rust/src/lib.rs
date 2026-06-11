@@ -963,8 +963,13 @@ impl TagProcessor {
             }
         }
 
+        let text_end = if self.html.get(scan.token_end.saturating_sub(1)) == Some(&b'>') {
+            scan.token_end - 1
+        } else {
+            scan.token_end
+        };
         Some(transform_text(
-            &self.html[scan.tag_start + 2..scan.token_end.saturating_sub(1)],
+            &self.html[scan.tag_start + 2..text_end],
             false,
             NullTransform::Replace,
         ))
@@ -2921,7 +2926,8 @@ mod tests {
     use super::{
         find_script_closer, scan_next_tag, scan_next_token, scan_next_token_in_namespace,
         AttributeValue, ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
-        NAMESPACE_HTML, TOKEN_TYPE_FUNKY_COMMENT, TOKEN_TYPE_TAG, TOKEN_TYPE_TEXT,
+        NAMESPACE_HTML, TOKEN_TYPE_COMMENT, TOKEN_TYPE_FUNKY_COMMENT, TOKEN_TYPE_TAG,
+        TOKEN_TYPE_TEXT,
     };
     use std::ptr;
 
@@ -3190,6 +3196,36 @@ mod tests {
 
         let scan = processor.current.unwrap();
         assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"#");
+        assert!(!processor.paused_at_incomplete);
+    }
+
+    #[test]
+    fn scanner_consumes_eof_terminated_question_comments() {
+        let ScanResult::Token(scan) = scan_next_token(b"<?", 0) else {
+            panic!("Expected an invalid comment token.");
+        };
+
+        assert_eq!(scan.token_type, TOKEN_TYPE_COMMENT);
+        assert_eq!(scan.tag_start, 0);
+        assert_eq!(scan.token_end, 2);
+
+        let mut processor = TagProcessor {
+            html: b"<?".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+
+        let scan = processor.current.unwrap();
+        assert_eq!(processor.comment_type(scan), COMMENT_TYPE_INVALID);
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"");
         assert!(!processor.paused_at_incomplete);
     }
 

@@ -512,6 +512,10 @@ for (const [html, expectedTree] of [
 		"<!-- # -->\n<html>\n  <head>\n  <body>\n\n",
 	],
 	[
+		"<?",
+		"<!-- ? -->\n<html>\n  <head>\n  <body>\n\n",
+	],
+	[
 		"<!DOCTYPEhtml>Hello",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
 	],
@@ -1220,6 +1224,7 @@ for (const [html, expectedType, expectedText, expectedTag] of [
 	["<!-- A comment. -->", WP_HTML_Processor.COMMENT_AS_HTML_COMMENT, " A comment. ", null],
 	["<!-->", WP_HTML_Processor.COMMENT_AS_ABRUPTLY_CLOSED_COMMENT, "", null],
 	["<! Bang opener >", WP_HTML_Processor.COMMENT_AS_INVALID_HTML, " Bang opener ", null],
+	["<?", WP_HTML_Processor.COMMENT_AS_INVALID_HTML, "", null],
 	["<? Question opener >", WP_HTML_Processor.COMMENT_AS_INVALID_HTML, " Question opener ", null],
 	["<![CDATA[ cdata body ]]>", WP_HTML_Processor.COMMENT_AS_CDATA_LOOKALIKE, " cdata body ", null],
 	["<?pi-target Instruction body. ?>", WP_HTML_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, " Instruction body. ", "pi-target"],
