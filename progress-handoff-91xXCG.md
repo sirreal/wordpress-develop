@@ -29,7 +29,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 22: assert C1 remapping applies only to numeric references while raw C1 bytes pass through unchanged.
 - [x] Tier 3 item 23: add `html_entity_decode( ENT_HTML5 | ENT_QUOTES )` as a secondary text-context oracle.
 - [x] Tier 3 item 24: add token-map structure-aware deterministic inputs.
-- [ ] Tier 3 items 25-26.
+- [x] Tier 3 item 25: add pcov-backed coverage-guided lane with new-edge corpus retention.
+- [ ] Tier 3 item 26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -150,6 +151,14 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode token-map --seed 1 --case 0` passed for the deterministic `&AEaQQ;` large-prefix divergent case.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --start-case 631 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-token-map-fault-check` reported the expected `decode-mismatch:attribute` finding; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding the token-map mode, smoke coverage, and docs.
+- 2026-06-11: Local PHP did not have the `pcov` extension installed (`php --ri pcov` reported `Extension 'pcov' not present`), so coverage-mode smoke coverage used the explicit `HTML_DECODER_FUZZ_FAKE_COVERAGE=1` provider while the real mode reports a fatal error when pcov is unavailable.
+- 2026-06-11: `php -l` passed for `CoverageGuidance.php`, `Cli.php`, `worker.php`, `runner.php`, `replay.php`, and `tests/harness-smoke.php` after adding coverage mode.
+- 2026-06-11: `HTML_DECODER_FUZZ_DISABLE_PCOV=1 HTML_DECODER_FUZZ_FAKE_COVERAGE=0 php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --cases 1 --progress-every 1` exited `2` with the expected fatal `coverage mode requires pcov`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --cases 8 --progress-every 8 --output-dir /tmp/html-decoder-fuzz-coverage-worker-check` passed and retained fake new-edge payloads under `coverage-corpus/`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 php tools/html-decoder-fuzz/runner.php --mode coverage --lanes 2 --duration-seconds 0 --max-cases 40 --cases-per-batch 20 --summary-mode failures --output-dir /tmp/html-decoder-fuzz-coverage-runner-check` passed and wrote coverage state with `cases=40`, `edges=76`, `payloads=40`, and `40` coverage corpus manifests.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode coverage --seed 1 --case 0` passed for the deterministic coverage-mode generated case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --start-case 57 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-coverage-fault-check` reported the expected reader findings; replaying and minimizing the resulting coverage-mode failure manifest with `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk` both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding coverage mode, fake-provider smoke coverage, and docs.
 
 ## Review Log
 
@@ -249,3 +258,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Hooke: APPROVE, token-map extraction and generator semantics after verifying name extraction, deterministic coverage, oracle-safety, and default mapping stability.
   - Nash: APPROVE, CLI/worker/replay/runner integration and mode-aware failure artifact behavior.
   - Goodall: APPROVE, smoke/docs/progress coverage and commit scope after full smoke and targeted token-map verification.
+- Tier 3 item 25:
+  - Helmholtz: APPROVE, coverage-guidance and pcov semantics after static pcov-path review plus fake-provider verification on this no-pcov runtime.
+  - Laplace: APPROVE, worker/runner/replay/minimize integration and coverage-corpus artifact safety after duplicate-pruning verification.
+  - Nietzsche: APPROVE, smoke/docs/progress scope with explicit no-pcov residual-risk note and fake-provider coverage checks.

@@ -81,6 +81,8 @@ if ( '' !== $options['failure'] ) {
 		$generated = $generator->generate_corpus_mutation( $options['case'] );
 	} elseif ( 'token-map' === $mode ) {
 		$generated = $generator->generate_token_map_sweep( $options['case'] );
+	} elseif ( 'coverage' === $mode ) {
+		$generated = $generator->generate();
 	} else {
 		$generated = $generator->generate();
 	}

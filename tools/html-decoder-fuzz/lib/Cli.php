@@ -5,7 +5,7 @@ namespace HtmlDecoderFuzz;
  * Shared helpers for command line entry points.
  */
 class Cli {
-	private const VALID_MODES = array( 'oracle', 'bytes', 'names', 'legacy-followers', 'prefix-families', 'numeric-boundaries', 'corpus', 'token-map' );
+	private const VALID_MODES = array( 'oracle', 'bytes', 'names', 'legacy-followers', 'prefix-families', 'numeric-boundaries', 'corpus', 'token-map', 'coverage' );
 
 	/**
 	 * @return string[]

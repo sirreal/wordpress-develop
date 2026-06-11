@@ -1756,6 +1756,50 @@ check(
 	$token_map_worker['stdout'] . $token_map_worker['stderr']
 );
 
+$coverage_unavailable_worker = run_process(
+	array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'coverage', '--seed', '1', '--cases', '1', '--progress-every', '1' ),
+	array(
+		'HTML_DECODER_FUZZ_DISABLE_PCOV'  => '1',
+		'HTML_DECODER_FUZZ_FAKE_COVERAGE' => '0',
+	)
+);
+check(
+	'coverage worker reports unavailable pcov',
+	2 === $coverage_unavailable_worker['code'] && str_contains( $coverage_unavailable_worker['stdout'], 'coverage mode requires pcov' ),
+	$coverage_unavailable_worker['stdout'] . $coverage_unavailable_worker['stderr']
+);
+
+$coverage_worker_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-coverage-worker-' . getmypid();
+remove_tree( $coverage_worker_dir );
+$coverage_worker = run_process(
+	array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'coverage', '--seed', '1', '--cases', '8', '--progress-every', '8', '--output-dir', $coverage_worker_dir ),
+	array( 'HTML_DECODER_FUZZ_FAKE_COVERAGE' => '1' )
+);
+$coverage_worker_manifests = glob( $coverage_worker_dir . '/coverage-corpus/payload-*/coverage.json' );
+$coverage_worker_manifest = is_array( $coverage_worker_manifests ) && array() !== $coverage_worker_manifests
+	? json_decode( (string) file_get_contents( $coverage_worker_manifests[0] ), true )
+	: array();
+check(
+	'coverage worker retains fake new-edge payloads',
+	0 === $coverage_worker['code'] &&
+		str_contains( $coverage_worker['stdout'], '"type":"coverage"' ) &&
+		str_contains( $coverage_worker['stdout'], '"coverage_new_edges"' ) &&
+		is_array( $coverage_worker_manifests ) &&
+		count( $coverage_worker_manifests ) > 0,
+	$coverage_worker['stdout'] . $coverage_worker['stderr']
+);
+check(
+	'coverage corpus manifest records payload and target edges',
+	is_array( $coverage_worker_manifest ) &&
+		'coverage' === ( $coverage_worker_manifest['mode'] ?? null ) &&
+		'fake' === ( $coverage_worker_manifest['coverage_provider'] ?? null ) &&
+		is_string( $coverage_worker_manifest['payload_base64'] ?? null ) &&
+		( $coverage_worker_manifest['new_edge_count'] ?? 0 ) > 0 &&
+		is_array( $coverage_worker_manifest['new_edges'] ?? null ),
+	json_encode( $coverage_worker_manifest )
+);
+remove_tree( $coverage_worker_dir );
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -2039,6 +2083,60 @@ check(
 );
 remove_tree( $token_map_runner_dir );
 
+$coverage_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-coverage-runner-' . getmypid();
+remove_tree( $coverage_runner_dir );
+$coverage_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'coverage',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'40',
+		'--cases-per-batch',
+		'20',
+		'--summary-mode',
+		'failures',
+		'--output-dir',
+		$coverage_runner_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAKE_COVERAGE' => '1' )
+);
+$coverage_runner_state = is_file( $coverage_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $coverage_runner_dir . '/state.json' ), true )
+	: array();
+$coverage_runner_manifests = glob( $coverage_runner_dir . '/coverage-corpus/payload-*/coverage.json' );
+$coverage_summary = is_file( $coverage_runner_dir . '/summary.ndjson' )
+	? file( $coverage_runner_dir . '/summary.ndjson', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES )
+	: array();
+$coverage_summary_retained = 0;
+if ( is_array( $coverage_summary ) ) {
+	foreach ( $coverage_summary as $line ) {
+		$record = json_decode( $line, true );
+		if ( is_array( $record ) && 'coverage' === ( $record['type'] ?? null ) && ! empty( $record['coverage_retained'] ) ) {
+			++$coverage_summary_retained;
+		}
+	}
+}
+check(
+	'coverage runner aggregates fake new-edge corpus',
+	0 === $coverage_runner['code'] &&
+		( $coverage_runner_state['cases'] ?? 0 ) >= 40 &&
+		( $coverage_runner_state['cases'] ?? null ) === ( $coverage_runner_state['by_context']['both'] ?? null ) &&
+		( $coverage_runner_state['cases'] ?? null ) === array_sum( $coverage_runner_state['by_strategy'] ?? array() ) &&
+		( $coverage_runner_state['coverage']['edges'] ?? 0 ) > 0 &&
+		( $coverage_runner_state['coverage']['payloads'] ?? 0 ) > 0 &&
+		is_array( $coverage_runner_manifests ) &&
+		count( $coverage_runner_manifests ) === ( $coverage_runner_state['coverage']['payloads'] ?? -1 ) &&
+		$coverage_summary_retained === ( $coverage_runner_state['coverage']['payloads'] ?? -1 ),
+	$coverage_runner['stdout'] . $coverage_runner['stderr'] . json_encode( $coverage_runner_state )
+);
+remove_tree( $coverage_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
 
@@ -2105,6 +2203,14 @@ if ( null !== $token_map_fault_case_index ) {
 	);
 	check( 'faulted token-map seed replay reproduces generated case', 1 === $token_map_fault_seed_replay['code'], $token_map_fault_seed_replay['stdout'] . $token_map_fault_seed_replay['stderr'] );
 }
+
+$coverage_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'coverage', '--seed', '1', '--case', '0' ) );
+check(
+	'coverage replay regenerates clean generated case',
+	0 === $coverage_replay['code'] &&
+		str_contains( $coverage_replay['stdout'], 'mode coverage, strategy numeric' ),
+	$coverage_replay['stdout'] . $coverage_replay['stderr']
+);
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -2418,6 +2524,60 @@ if ( null !== $token_map_fault_case_index ) {
 	}
 	remove_tree( $token_map_pipeline_dir );
 }
+
+$coverage_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-coverage-fault-' . getmypid();
+remove_tree( $coverage_pipeline_dir );
+$faulted_coverage_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'coverage',
+		'--seed',
+		'1',
+		'--start-case',
+		'57',
+		'--cases',
+		'1',
+		'--output-dir',
+		$coverage_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array(
+		'HTML_DECODER_FUZZ_FAKE_COVERAGE' => '1',
+		'HTML_DECODER_FUZZ_FAULT'         => 'reader-empty-chunk',
+	)
+);
+check( 'faulted coverage worker reports findings', 1 === $faulted_coverage_worker['code'], $faulted_coverage_worker['stdout'] . $faulted_coverage_worker['stderr'] );
+
+$coverage_failure_files = glob( $coverage_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted coverage worker writes failure artifact', is_array( $coverage_failure_files ) && array() !== $coverage_failure_files );
+
+$coverage_failure_file = is_array( $coverage_failure_files ) && array() !== $coverage_failure_files ? $coverage_failure_files[0] : null;
+if ( null !== $coverage_failure_file ) {
+	$coverage_manifest = json_decode( (string) file_get_contents( $coverage_failure_file ), true );
+	check(
+		'coverage failure artifact records mode and signature',
+		'coverage' === ( $coverage_manifest['mode'] ?? null ) &&
+			57 === ( $coverage_manifest['case'] ?? null ) &&
+			in_array( 'reader-returned-empty-chunk:text', $coverage_manifest['signatures'] ?? array(), true ),
+		json_encode( $coverage_manifest )
+	);
+
+	$coverage_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $coverage_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'reader-empty-chunk' )
+	);
+	check( 'faulted coverage replay reproduces finding', 1 === $coverage_fault_replay['code'], $coverage_fault_replay['stdout'] . $coverage_fault_replay['stderr'] );
+
+	$coverage_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $coverage_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'reader-empty-chunk' )
+	);
+	check( 'faulted coverage minimizer preserves signature', 0 === $coverage_fault_minimize['code'], $coverage_fault_minimize['stdout'] . $coverage_fault_minimize['stderr'] );
+}
+remove_tree( $coverage_pipeline_dir );
 
 $reader_fault_pipelines = array(
 	array(

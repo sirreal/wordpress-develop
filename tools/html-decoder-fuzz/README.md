@@ -15,6 +15,7 @@ not bootstrap WordPress, a database, browsers, Node, or `wp-env`.
 
 - PHP 8.4+ with `Dom\HTMLDocument`
 - `mbstring`
+- `pcov` for `coverage` mode
 - Run from the repository root
 
 ## Oracle
@@ -147,6 +148,13 @@ large-word group prefixes with names that diverge immediately after the shared
 two-byte prefix, every small-word boundary name, and every large-word name at
 the small/large length boundary.
 
+`coverage` mode runs the normal oracle-safe generator under pcov and treats each
+new covered executable line in `WP_HTML_Decoder` or `WP_Token_Map` as a coverage
+edge. Workers emit `coverage` events for payloads that discover new edges and
+write those payloads under `coverage-corpus/` when an output directory is
+provided. The runner deduplicates coverage edges across lanes and prunes
+duplicate coverage-corpus artifacts.
+
 ## Common Commands
 
 Run the smoke test:
@@ -201,6 +209,12 @@ Run one token-map structure sweep batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --cases 5000
+```
+
+Run one coverage-guided batch:
+
+```sh
+php -d pcov.enabled=1 -d pcov.directory=src/wp-includes tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --cases 5000 --output-dir /tmp/html-decoder-fuzz-coverage
 ```
 
 Run parallel lanes for one minute:

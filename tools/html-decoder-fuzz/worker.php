@@ -51,6 +51,20 @@ if ( Cli::mode_uses_oracle( $options['mode'] ) && ! $oracles->has_required() ) {
 	exit( 2 );
 }
 
+$coverage = null;
+if ( 'coverage' === $options['mode'] ) {
+	if ( ! CoverageGuidance::available() ) {
+		Cli::emit(
+			array(
+				'type'   => 'fatal',
+				'reason' => CoverageGuidance::unavailable_reason(),
+			)
+		);
+		exit( 2 );
+	}
+	$coverage = new CoverageGuidance();
+}
+
 $output_dir = $options['output-dir'];
 if ( '' !== $output_dir && ! is_dir( $output_dir ) && ! mkdir( $output_dir, 0777, true ) ) {
 	Cli::emit(
@@ -75,6 +89,10 @@ $stats           = array(
 	'by_strategy' => array(),
 	'by_context'  => array(),
 );
+if ( null !== $coverage ) {
+	$stats['coverage_new_edges'] = 0;
+	$stats['coverage_payloads']  = 0;
+}
 $started_at      = microtime( true );
 
 Cli::emit(
@@ -110,6 +128,8 @@ for ( $case = $start; $case < $end; $case++ ) {
 		$generated = $generator->generate_corpus_mutation( $case );
 	} elseif ( 'token-map' === $options['mode'] ) {
 		$generated = $generator->generate_token_map_sweep( $case );
+	} elseif ( 'coverage' === $options['mode'] ) {
+		$generated = $generator->generate();
 	} else {
 		$generated = $generator->generate();
 	}
@@ -117,14 +137,57 @@ for ( $case = $start; $case < $end; $case++ ) {
 	$context   = $generated['context'];
 	$strategy  = $generated['strategy'];
 
+	if ( null !== $coverage ) {
+		$coverage->begin_case();
+	}
 	$failures = 'bytes' === $options['mode']
 		? $checks->run_without_oracle( $context, $payload )
 		: $checks->run( $context, $payload );
+	$coverage_edges = null === $coverage ? array() : $coverage->finish_case( $payload, $context, $strategy );
 
 	++$stats['cases'];
 	$stats['bytes']                     += strlen( $payload );
 	$stats['by_strategy'][ $strategy ]   = ( $stats['by_strategy'][ $strategy ] ?? 0 ) + 1;
 	$stats['by_context'][ $context ]     = ( $stats['by_context'][ $context ] ?? 0 ) + 1;
+
+	if ( null !== $coverage ) {
+		$new_edges = $coverage->new_edges( $coverage_edges );
+		if ( array() !== $new_edges ) {
+			$stats['coverage_new_edges'] += count( $new_edges );
+			++$stats['coverage_payloads'];
+
+			try {
+				$coverage_artifact = $coverage->retain_payload( $output_dir, $seed, $case, $generated, $payload, $new_edges );
+			} catch ( \RuntimeException $exception ) {
+				Cli::emit(
+					array(
+						'type'   => 'fatal',
+						'reason' => $exception->getMessage(),
+					)
+				);
+				exit( 2 );
+			}
+
+			$coverage_record = array(
+				'type'              => 'coverage',
+				'seed'              => $seed,
+				'case'              => $case,
+				'mode'              => $options['mode'],
+				'context'           => $context,
+				'strategy'          => $strategy,
+				'input_size'        => strlen( $payload ),
+				'coverage_provider' => $coverage->provider(),
+				'edge_count'        => count( $coverage_edges ),
+				'seen_edge_count'   => $coverage->seen_edge_count(),
+				'new_edge_count'    => count( $new_edges ),
+				'new_edges'         => $new_edges,
+			) + $coverage_artifact;
+			if ( strlen( $payload ) <= 4096 ) {
+				$coverage_record['payload_base64'] = base64_encode( $payload );
+			}
+			Cli::emit( $coverage_record );
+		}
+	}
 
 	if ( array() !== $failures ) {
 		$stats['failures'] += count( $failures );

@@ -315,6 +315,14 @@ $state = array(
 	'harness_errors'     => 0,
 	'oracle_events'      => array(),
 	'batches'            => 0,
+	'coverage'           => array(
+		'edges'                    => 0,
+		'payloads'                 => 0,
+		'pruned_duplicate_payloads' => 0,
+		'by_file'                  => array(),
+		'edge_keys'                => array(),
+		'corpus'                   => array(),
+	),
 	'artifact_retention' => array(
 		'mode'                  => $options['artifact-retention'],
 		'max_per_signature'     => $options['max-artifacts-per-signature'],
@@ -444,6 +452,12 @@ $summarize_record = static function ( array $record ) use ( $options, $write_sum
 	$type = $record['type'] ?? '';
 	if ( 'failure' === $type ) {
 		if ( ! empty( $record['artifact_retained'] ) && empty( $record['artifact_reused'] ) ) {
+			return $write_summary_record( $record );
+		}
+		return true;
+	}
+	if ( 'coverage' === $type ) {
+		if ( ! empty( $record['coverage_retained'] ) ) {
 			return $write_summary_record( $record );
 		}
 		return true;
@@ -612,6 +626,95 @@ $handle_line = static function ( string $line, int $lane_id ) use ( &$state, &$s
 				);
 			}
 			return 'failure';
+
+		case 'coverage':
+			if ( ! isset( $record['seed'], $record['case'], $record['context'], $record['strategy'], $record['new_edges'] ) || ! is_array( $record['new_edges'] ) ) {
+				++$state['harness_errors'];
+				$state['stop_reason'] = 'harness-error';
+				$stop_requested       = true;
+				fwrite( STDERR, "malformed coverage record on lane {$lane_id}\n" );
+				$record['type'] = 'malformed-worker-record';
+				$summarize_record( $record );
+				return 'invalid';
+			}
+			$record['mode'] = $record['mode'] ?? 'coverage';
+			if ( 'coverage' !== $record['mode'] ) {
+				++$state['harness_errors'];
+				$state['stop_reason'] = 'harness-error';
+				$stop_requested       = true;
+				fwrite( STDERR, "malformed coverage mode on lane {$lane_id}\n" );
+				$record['type'] = 'malformed-worker-record';
+				$summarize_record( $record );
+				return 'invalid';
+			}
+
+			$global_new_edges = array();
+			foreach ( $record['new_edges'] as $edge ) {
+				if ( ! is_array( $edge ) || ! isset( $edge['key'], $edge['file'], $edge['line'] ) || ! is_string( $edge['key'] ) || ! is_string( $edge['file'] ) || ! is_int( $edge['line'] ) ) {
+					++$state['harness_errors'];
+					$state['stop_reason'] = 'harness-error';
+					$stop_requested       = true;
+					fwrite( STDERR, "malformed coverage edge on lane {$lane_id}\n" );
+					$record['type'] = 'malformed-worker-record';
+					$summarize_record( $record );
+					return 'invalid';
+				}
+				if ( isset( $state['coverage']['edge_keys'][ $edge['key'] ] ) ) {
+					continue;
+				}
+
+				$state['coverage']['edge_keys'][ $edge['key'] ] = true;
+				$state['coverage']['by_file'][ $edge['file'] ] = ( $state['coverage']['by_file'][ $edge['file'] ] ?? 0 ) + 1;
+				$global_new_edges[] = $edge;
+			}
+
+			$artifact_dir = $record['artifact_dir'] ?? null;
+			if ( array() === $global_new_edges ) {
+				$record['new_edges']          = array();
+				$record['new_edge_count']     = 0;
+				$record['coverage_retained']  = false;
+				$record['coverage_duplicate'] = true;
+				$record['coverage_pruned']    = false;
+				if ( is_string( $artifact_dir ) && '' !== $artifact_dir && is_dir( $artifact_dir ) ) {
+					if ( Cli::remove_tree( $artifact_dir, $output_dir ) ) {
+						$record['artifact_dir']      = null;
+						$record['artifact_pruned']   = true;
+						$record['coverage_pruned']   = true;
+						++$state['coverage']['pruned_duplicate_payloads'];
+					} else {
+						++$state['harness_errors'];
+						$state['stop_reason'] = 'harness-error';
+						$stop_requested       = true;
+						fwrite( STDERR, "Cannot prune duplicate coverage artifact {$artifact_dir}\n" );
+					}
+				}
+				$summarize_record( $record );
+				return 'coverage';
+			}
+
+			$record['new_edges']      = $global_new_edges;
+			$record['new_edge_count'] = count( $global_new_edges );
+			$state['coverage']['edges'] += count( $global_new_edges );
+			$record['coverage_duplicate'] = false;
+			$record['coverage_pruned']    = false;
+			$record['coverage_retained']  = is_string( $artifact_dir ) && '' !== $artifact_dir && is_dir( $artifact_dir ) && ! is_link( $artifact_dir );
+			if ( $record['coverage_retained'] ) {
+				$payload = isset( $record['payload_base64'] ) && is_string( $record['payload_base64'] )
+					? base64_decode( $record['payload_base64'], true )
+					: null;
+				++$state['coverage']['payloads'];
+				$state['coverage']['corpus'][] = array(
+					'seed'       => $record['seed'],
+					'case'       => $record['case'],
+					'context'    => $record['context'],
+					'strategy'   => $record['strategy'],
+					'edges'      => count( $global_new_edges ),
+					'artifact'   => $artifact_dir,
+					'sha256'     => is_string( $payload ) ? hash( 'sha256', $payload ) : null,
+				);
+			}
+			$summarize_record( $record );
+			return 'coverage';
 
 		case 'oracle-event':
 			$state['oracle_events'][] = $record;
