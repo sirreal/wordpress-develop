@@ -1884,7 +1884,10 @@ fn scan_next_token_in_namespace(html: &[u8], offset: usize, namespace: u8) -> Sc
         token_type: TOKEN_TYPE_TAG,
     };
 
-    if !is_closing && is_special_atomic_tag(&html[name_start..name_end]) {
+    if namespace == NAMESPACE_HTML
+        && !is_closing
+        && is_special_atomic_tag(&html[name_start..name_end])
+    {
         let Some(closer_end) = find_special_closer(html, tag_end, &html[name_start..name_end]) else {
             return ScanResult::Incomplete;
         };
@@ -2349,7 +2352,10 @@ fn decode_character_reference(input: &[u8]) -> Option<(char, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{scan_next_tag, AttributeValue, TagProcessor, TagScan, NAMESPACE_HTML, TOKEN_TYPE_TAG};
+    use super::{
+        scan_next_tag, scan_next_token_in_namespace, AttributeValue, ScanResult, TagProcessor,
+        TagScan, NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
+    };
     use std::ptr;
 
     #[test]
@@ -2415,6 +2421,27 @@ mod tests {
 
         let div = scan_next_tag(html, script.token_end).unwrap();
         assert_eq!(&html[div.name_start..div.name_start + div.name_len], b"div");
+    }
+
+    #[test]
+    fn scanner_does_not_extend_foreign_script_to_closer() {
+        let html = b"<script /><g>";
+        let ScanResult::Token(script) = scan_next_token_in_namespace(html, 0, NAMESPACE_FOREIGN)
+        else {
+            panic!("Expected foreign script token.");
+        };
+
+        assert_eq!(&html[script.name_start..script.name_start + script.name_len], b"script");
+        assert_eq!(script.token_end, b"<script />".len());
+        assert!(script.has_self_closing_flag);
+
+        let ScanResult::Token(g) =
+            scan_next_token_in_namespace(html, script.token_end, NAMESPACE_FOREIGN)
+        else {
+            panic!("Expected following g token.");
+        };
+
+        assert_eq!(&html[g.name_start..g.name_start + g.name_len], b"g");
     }
 
     #[test]
