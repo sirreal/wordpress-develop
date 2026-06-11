@@ -79,6 +79,17 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
+const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -1672,6 +1683,14 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (TABLE_CELL_BOUNDARY_START_TAGS.has(tagName)) {
+				const cellIndex = this.#findElementInTableScope((nodeName) => TABLE_CELL_ELEMENTS.has(nodeName));
+				if (cellIndex !== -1) {
+					this.#queueVirtualPopsFrom(cellIndex);
+					return true;
+				}
+			}
+
 			return false;
 		}
 
@@ -1777,22 +1796,26 @@ export function createHtmlApi(wasm) {
 		}
 
 		#hasElementInTableScope(match) {
+			return this.#findElementInTableScope(match) !== -1;
+		}
+
+		#findElementInTableScope(match) {
 			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
 			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
 				const nodeName = this.open_elements[i];
 				const namespaceName = this.open_element_namespaces[i];
 				if (namespaceName === "html" && predicate(nodeName)) {
-					return true;
+					return i;
 				}
 
 				if (
 					namespaceName === "html" &&
 					(nodeName === "HTML" || nodeName === "TABLE" || nodeName === "TEMPLATE")
 				) {
-					return false;
+					return -1;
 				}
 			}
-			return false;
+			return -1;
 		}
 
 		#shouldPopTableFormImmediately(tagName, namespaceName) {
