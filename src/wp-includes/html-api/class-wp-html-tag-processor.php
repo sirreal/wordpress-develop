@@ -2922,51 +2922,6 @@ class WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Returns the value of an attribute, applying HTML input stream preprocessing.
-	 *
-	 * This is intended for serialization, where source HTML values have already
-	 * passed through preprocessing before character references decode. Enqueued
-	 * attribute updates are plaintext API values, so they are returned unchanged.
-	 *
-	 * @since 7.1.0
-	 * @ignore
-	 *
-	 * @param string $name Name of attribute whose value is requested.
-	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
-	 */
-	protected function get_attribute_for_serialization( $name ) {
-		if ( self::STATE_MATCHED_TAG !== $this->parser_state ) {
-			return null;
-		}
-
-		$comparable = strtolower( $name );
-
-		if ( 'class' === $comparable ) {
-			$this->class_name_updates_to_attributes_updates();
-		}
-
-		$enqueued_value = $this->get_enqueued_attribute_value( $comparable );
-		if ( false !== $enqueued_value ) {
-			return $enqueued_value;
-		}
-
-		if ( ! isset( $this->attributes[ $comparable ] ) ) {
-			return null;
-		}
-
-		$attribute = $this->attributes[ $comparable ];
-		if ( true === $attribute->is_true ) {
-			return true;
-		}
-
-		$raw_value = substr( $this->html, $attribute->value_starts_at, $attribute->value_length );
-		$raw_value = str_replace( "\r\n", "\n", $raw_value );
-		$raw_value = str_replace( "\r", "\n", $raw_value );
-
-		return WP_HTML_Decoder::decode_attribute( $raw_value );
-	}
-
-	/**
 	 * Gets lowercase names of all attributes matching a given prefix in the current tag.
 	 *
 	 * Note that matching is case-insensitive. This is in accordance with the spec:
