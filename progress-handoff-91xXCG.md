@@ -24,7 +24,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 17: assert non-ampersand reader offsets never match.
 - [x] Tier 3 item 18: assert attribute no-amp identity in oracle mode.
 - [x] Tier 3 item 19: add tab, LF, and FF to the oracle-safe generator alphabet.
-- [ ] Tier 3 items 20-26.
+- [x] Tier 3 item 20: assert reader reconstruction walks input without gaps or overlaps.
+- [ ] Tier 3 items 21-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -126,6 +127,9 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: A reflection probe confirmed the generator alphabet contains space, tab, LF, and FF and remains `Generator::is_oracle_safe_payload()` safe.
 - 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 0` passed with the refreshed deterministic corpus byte-perturb preview `64262335383b`, and `php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 300 --progress-every 300` passed.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after expanding the generator alphabet with tab, LF, and FF.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the gapless reader-walk invariant.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-gapless-drop-span php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-gapless-fault-check` reported `reader-walk-not-gapless` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding gapless reader-walk coverage.
 
 ## Review Log
 
@@ -205,3 +209,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Galileo: APPROVE, generator alphabet semantics and oracle-safety after explicit whitespace wording.
   - Bacon: APPROVE, smoke coverage and docs after replacing broad HTML-whitespace wording.
   - Euclid: APPROVE, integration/progress scope and commit boundaries after explicit tab/LF/FF wording.
+- Tier 3 item 20:
+  - Carson: APPROVE, gapless reader-walk invariant semantics and failure signature stability.
+  - Herschel: APPROVE, span-drop fault target, smoke pipeline, and docs.
+  - Bernoulli: APPROVE, integration/progress scope and commit boundaries.

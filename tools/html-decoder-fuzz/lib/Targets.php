@@ -85,6 +85,18 @@ class Targets {
 				};
 				break;
 
+			case 'reader-gapless-drop-span':
+				$targets['reader_span_filter'] = static function ( array $spans ): array {
+					foreach ( $spans as $index => $span ) {
+						if ( ( $span['end'] ?? 0 ) > ( $span['start'] ?? 0 ) ) {
+							unset( $spans[ $index ] );
+							return array_values( $spans );
+						}
+					}
+					return $spans;
+				};
+				break;
+
 			case 'byte-no-amp-identity':
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );

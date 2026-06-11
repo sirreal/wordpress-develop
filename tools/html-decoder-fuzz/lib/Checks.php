@@ -204,6 +204,8 @@ class Checks {
 		$end             = strlen( $payload );
 		$at              = 0;
 		$was_at          = 0;
+		$walk_at         = 0;
+		$walk_spans      = array();
 
 		$failures = array_merge( $failures, $this->check_reader_non_amp_offsets( $context, $decoder_context, $payload ) );
 
@@ -242,6 +244,14 @@ class Checks {
 						)
 					);
 					break;
+				}
+				if ( $walk_at < $amp_at + 1 ) {
+					$walk_spans[] = array(
+						'type'  => 'literal',
+						'start' => $walk_at,
+						'end'   => $amp_at + 1,
+					);
+					$walk_at      = $amp_at + 1;
 				}
 				$at = $amp_at + 1;
 				continue;
@@ -300,6 +310,20 @@ class Checks {
 				break;
 			}
 
+			if ( $walk_at < $amp_at ) {
+				$walk_spans[] = array(
+					'type'  => 'literal',
+					'start' => $walk_at,
+					'end'   => $amp_at,
+				);
+			}
+			$walk_spans[] = array(
+				'type'  => 'reference',
+				'start' => $amp_at,
+				'end'   => $amp_at + $match_byte_length,
+			);
+			$walk_at      = $amp_at + $match_byte_length;
+
 			$reference = substr( $payload, $amp_at, $match_byte_length );
 			$local_match_byte_length = null;
 			try {
@@ -346,10 +370,97 @@ class Checks {
 			$decoded .= substr( $payload, $was_at );
 		}
 
+		if ( array() === $failures ) {
+			if ( $walk_at < $end ) {
+				$walk_spans[] = array(
+					'type'  => 'literal',
+					'start' => $walk_at,
+					'end'   => $end,
+				);
+			}
+			if ( isset( $this->targets['reader_span_filter'] ) ) {
+				$walk_spans = ( $this->targets['reader_span_filter'] )( $walk_spans );
+			}
+			$failures = array_merge( $failures, $this->validate_reader_walk( $context, $payload, $walk_spans ) );
+		}
+
 		return array(
 			'decoded'  => $decoded,
 			'failures' => $failures,
 		);
+	}
+
+	/**
+	 * @param array<int, array{type: string, start: int, end: int}> $spans
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function validate_reader_walk( string $context, string $payload, array $spans ): array {
+		$cursor         = 0;
+		$consumed_bytes = 0;
+		$input_length   = strlen( $payload );
+
+		foreach ( $spans as $index => $span ) {
+			if ( $span['start'] !== $cursor ) {
+				return array(
+					self::failure(
+						'reader-walk-not-gapless',
+						$context,
+						array(
+							'context'        => $context,
+							'reason'         => $span['start'] < $cursor ? 'overlap' : 'gap',
+							'span_index'     => $index,
+							'expected_start' => $cursor,
+							'actual_start'   => $span['start'],
+							'actual_end'     => $span['end'],
+							'input_length'   => $input_length,
+							'spans'          => self::preview_reader_spans( $spans ),
+						)
+					),
+				);
+			}
+
+			if ( $span['end'] < $span['start'] || $span['end'] > $input_length ) {
+				return array(
+					self::failure(
+						'reader-walk-not-gapless',
+						$context,
+						array(
+							'context'        => $context,
+							'reason'         => $span['end'] < $span['start'] ? 'negative-span' : 'overrun',
+							'span_index'     => $index,
+							'expected_start' => $cursor,
+							'actual_start'   => $span['start'],
+							'actual_end'     => $span['end'],
+							'input_length'   => $input_length,
+							'spans'          => self::preview_reader_spans( $spans ),
+						)
+					),
+				);
+			}
+
+			$consumed_bytes += $span['end'] - $span['start'];
+			$cursor          = $span['end'];
+		}
+
+		if ( $cursor !== $input_length || $consumed_bytes !== $input_length ) {
+			return array(
+				self::failure(
+					'reader-walk-not-gapless',
+					$context,
+					array(
+						'context'        => $context,
+						'reason'         => 'length-mismatch',
+						'covered_until'  => $cursor,
+						'consumed_bytes' => $consumed_bytes,
+						'input_length'   => $input_length,
+						'spans'          => self::preview_reader_spans( $spans ),
+					)
+				),
+			);
+		}
+
+		return array();
 	}
 
 	/**
@@ -660,6 +771,15 @@ class Checks {
 		}
 
 		return $detail;
+	}
+
+	/**
+	 * @param array<int, array{type: string, start: int, end: int}> $spans
+	 *
+	 * @return array<int, array{type: string, start: int, end: int}>
+	 */
+	private static function preview_reader_spans( array $spans ): array {
+		return array_slice( $spans, 0, 16 );
 	}
 
 	private static function failure( string $check, string $party, array $detail ): array {

@@ -736,6 +736,9 @@ check( 'fault target reader-null-mutates-match-length exposes null match-length 
 $seen = fault_run( $oracles, 'reader-non-amp-match', 'a&amp;b' );
 check( 'fault target reader-non-amp-match exposes non-amp reader matches', in_array( 'reader-non-amp-match', $seen, true ), implode( ',', $seen ) );
 
+$seen = fault_run( $oracles, 'reader-gapless-drop-span', 'a&amp;b' );
+check( 'fault target reader-gapless-drop-span exposes non-gapless reader walks', in_array( 'reader-walk-not-gapless', $seen, true ), implode( ',', $seen ) );
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -2109,6 +2112,11 @@ $reader_fault_pipelines = array(
 		'fault'     => 'reader-non-amp-match',
 		'case'      => 0,
 		'signature' => 'reader-non-amp-match:text',
+	),
+	array(
+		'fault'     => 'reader-gapless-drop-span',
+		'case'      => 0,
+		'signature' => 'reader-walk-not-gapless:text',
 	),
 	array(
 		'fault'     => 'attribute-no-amp-identity',
