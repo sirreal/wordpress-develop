@@ -1097,21 +1097,30 @@ export function createHtmlApi(wasm) {
 			super.change_parsing_namespace(this.current_namespace);
 		}
 
-		static create_fragment(html, context = "<body>") {
+		static create_fragment(html, context = "<body>", encoding = "UTF-8") {
+			if (context !== "<body>" || encoding !== "UTF-8" || typeof html !== "string") {
+				return null;
+			}
+
 			return new this(html, {
 				contextNode: contextNodeName(context),
 				fullParser: false,
 			});
 		}
 
-		static create_full_parser(html) {
+		static create_full_parser(html, encoding = "UTF-8") {
+			if (encoding !== "UTF-8" || typeof html !== "string") {
+				return null;
+			}
+
 			return new this(html, {
 				fullParser: true,
 			});
 		}
 
 		static normalize(html) {
-			return this.create_fragment(html).serialize();
+			const processor = this.create_fragment(html);
+			return processor === null ? null : processor.serialize();
 		}
 
 		static is_void(tagName) {
