@@ -2610,6 +2610,12 @@ export function createHtmlApi(wasm) {
 							return false;
 						}
 
+						if (tokenType === "#tag" && !isCloser && tagName === "TEMPLATE") {
+							this.full_parser_insertion_mode = "in_head";
+							this.#silentlyReopenFullParserElement("HEAD");
+							return false;
+						}
+
 						if (tokenType === "#tag" && !isCloser && HEAD_CONTENT_ELEMENTS.has(tagName)) {
 							this.#bailUnsupported("Cannot process elements after HEAD which reopen the HEAD element.");
 							return true;
@@ -2697,6 +2703,12 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (isWhitespaceText) {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "TEMPLATE") {
+							this.full_parser_insertion_mode = "in_body";
+							this.#silentlyReopenFullParserElement("BODY");
 							return false;
 						}
 
@@ -3780,6 +3792,23 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return count;
+		}
+
+		#silentlyReopenFullParserElement(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			if (
+				!this.is_full_parser ||
+				topIndex < 0 ||
+				this.open_elements[topIndex] !== "HTML" ||
+				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				return false;
+			}
+
+			this.open_elements.push(tagName);
+			this.open_element_namespaces.push("html");
+			this.#setCurrentNamespace(childNamespaceForTag(tagName, "html"));
+			return true;
 		}
 
 		#isInHeadTemplateContent() {

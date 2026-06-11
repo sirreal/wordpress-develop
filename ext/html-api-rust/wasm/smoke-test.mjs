@@ -528,6 +528,22 @@ assert.equal(fullParserExplicitHeadTemplate.next_tag("body"), true);
 assert.deepEqual(fullParserExplicitHeadTemplate.get_breadcrumbs(), ["HTML", "BODY"]);
 fullParserExplicitHeadTemplate.destroy();
 
+const fullParserTemplateAfterHead = WP_HTML_Processor.create_full_parser("<head></head><template>Foo</template>");
+assert.equal(fullParserTemplateAfterHead.next_tag("template"), true);
+assert.deepEqual(fullParserTemplateAfterHead.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE"]);
+assert.equal(fullParserTemplateAfterHead.next_token(), true);
+assert.equal(fullParserTemplateAfterHead.get_token_type(), "#text");
+assert.equal(fullParserTemplateAfterHead.get_modifiable_text(), "Foo");
+assert.deepEqual(fullParserTemplateAfterHead.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE", "#text"]);
+assert.equal(fullParserTemplateAfterHead.next_tag("body"), true);
+assert.deepEqual(fullParserTemplateAfterHead.get_breadcrumbs(), ["HTML", "BODY"]);
+fullParserTemplateAfterHead.destroy();
+
+const fullParserTemplateAfterBody = WP_HTML_Processor.create_full_parser("<body></body><template>");
+assert.equal(fullParserTemplateAfterBody.next_tag("template"), true);
+assert.deepEqual(fullParserTemplateAfterBody.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE"]);
+fullParserTemplateAfterBody.destroy();
+
 const fullParserBodyTemplateOuterCloser = WP_HTML_Processor.create_full_parser("<div><template></div>Hello");
 assert.equal(fullParserBodyTemplateOuterCloser.next_tag("template"), true);
 assert.deepEqual(fullParserBodyTemplateOuterCloser.get_breadcrumbs(), ["HTML", "BODY", "DIV", "TEMPLATE"]);
