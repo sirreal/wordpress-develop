@@ -4861,11 +4861,16 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			let commentText = this.html.slice(commentStart + 4);
+			if (commentText.endsWith("--")) {
+				commentText = commentText.slice(0, -2);
+			}
+
 			this.synthetic_eof_comment_consumed = true;
 			this.current_synthetic_token = {
 				tokenType: "#comment",
 				tokenName: "#comment",
-				commentText: this.html.slice(commentStart + 4),
+				commentText,
 			};
 			this.parser_state = STATE_COMMENT;
 			this.current_token_namespace = this.current_namespace;
