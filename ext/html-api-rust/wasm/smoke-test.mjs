@@ -137,6 +137,12 @@ assert.equal(unicodeAttributeNameTags.set_attribute("data-\u00E9", "ok"), true);
 assert.equal(unicodeAttributeNameTags.get_attribute("data-\u00E9"), "ok");
 unicodeAttributeNameTags.destroy();
 
+const duplicateAttributeNameTags = new WP_HTML_Tag_Processor("<div DATA-x=1 data-x=2 data-y=3>");
+assert.equal(duplicateAttributeNameTags.next_tag("div"), true);
+assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("data-"), ["data-x", "data-y"]);
+assert.equal(duplicateAttributeNameTags.get_attribute("data-x"), "1");
+duplicateAttributeNameTags.destroy();
+
 const tagMatchOffset = new WP_HTML_Tag_Processor("<div one></div><div two></div>");
 assert.equal(tagMatchOffset.next_tag({ tag_name: "div", match_offset: 2 }), true);
 assert.equal(tagMatchOffset.get_attribute("two"), true);

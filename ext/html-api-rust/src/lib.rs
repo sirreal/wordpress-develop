@@ -1364,6 +1364,7 @@ impl TagProcessor {
         let mut at = scan.name_start + scan.name_len;
         let mut end = scan.tag_end.saturating_sub(1);
         let comparable_prefix = comparable_attribute_name(prefix);
+        let mut seen_attribute_names: Vec<Vec<u8>> = Vec::new();
 
         if tag_ends_with_syntactic_self_closing_flag(
             &self.html,
@@ -1394,11 +1395,16 @@ impl TagProcessor {
 
             let name_end = at;
             let comparable_name = comparable_attribute_name(&self.html[name_start..name_end]);
-            if comparable_name.starts_with(&comparable_prefix) {
+            if comparable_name.starts_with(&comparable_prefix)
+                && !seen_attribute_names
+                    .iter()
+                    .any(|seen| seen.as_slice() == comparable_name.as_slice())
+            {
                 if !self.scratch.is_empty() {
                     self.scratch.push(0);
                 }
-                self.scratch.extend(comparable_name);
+                self.scratch.extend_from_slice(&comparable_name);
+                seen_attribute_names.push(comparable_name);
             }
 
             while at < end && is_html_whitespace(self.html[at]) {
@@ -3402,7 +3408,7 @@ mod tests {
     #[test]
     fn tag_processor_lists_attribute_names_with_prefix() {
         let mut processor = TagProcessor {
-            html: br#"<div data-ENABLED data-test-id="14" id="first">"#.to_vec(),
+            html: br#"<div data-ENABLED data-enabled="ignored" data-test-id="14" id="first">"#.to_vec(),
             offset: 0,
             current: None,
             scratch: Vec::new(),
