@@ -1555,6 +1555,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		step(nodeToProcess = WP_HTML_Processor.PROCESS_NEXT_NODE) {
+			if (this.last_error !== null) {
+				return false;
+			}
+
 			if (nodeToProcess === WP_HTML_Processor.PROCESS_NEXT_NODE) {
 				return this.next_token();
 			}
@@ -1563,7 +1567,11 @@ export function createHtmlApi(wasm) {
 				nodeToProcess === WP_HTML_Processor.REPROCESS_CURRENT_NODE ||
 				nodeToProcess === WP_HTML_Processor.PROCESS_CURRENT_NODE
 			) {
-				return this.parser_state !== STATE_READY && this.parser_state !== STATE_COMPLETE;
+				return (
+					this.parser_state !== STATE_READY &&
+					this.parser_state !== STATE_COMPLETE &&
+					this.parser_state !== STATE_INCOMPLETE_INPUT
+				);
 			}
 
 			return false;

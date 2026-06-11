@@ -663,7 +663,17 @@ const plaintextProcessor = WP_HTML_Processor.create_fragment("<plaintext>raw <b>
 assert.equal(plaintextProcessor.next_tag("plaintext"), false);
 assert.equal(plaintextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
 assert.equal(plaintextProcessor.get_unsupported_exception().message, "Cannot process PLAINTEXT elements.");
+assert.equal(plaintextProcessor.step(WP_HTML_Processor.PROCESS_CURRENT_NODE), false);
+assert.equal(plaintextProcessor.step(WP_HTML_Processor.REPROCESS_CURRENT_NODE), false);
+assert.equal(plaintextProcessor.step(), false);
 plaintextProcessor.destroy();
+
+const incompleteStepProcessor = WP_HTML_Processor.create_fragment("<div");
+assert.equal(incompleteStepProcessor.next_token(), false);
+assert.equal(incompleteStepProcessor.paused_at_incomplete_token(), true);
+assert.equal(incompleteStepProcessor.step(WP_HTML_Processor.PROCESS_CURRENT_NODE), false);
+assert.equal(incompleteStepProcessor.step(WP_HTML_Processor.REPROCESS_CURRENT_NODE), false);
+incompleteStepProcessor.destroy();
 
 const fragmentDoctypeProcessor = WP_HTML_Processor.create_fragment("<!doctype html><p>x");
 assert.equal(fragmentDoctypeProcessor.next_token(), true);
