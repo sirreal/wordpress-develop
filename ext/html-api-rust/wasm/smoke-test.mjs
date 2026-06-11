@@ -6,6 +6,7 @@ import {
 	WP_HTML_Attribute_Token as Exported_WP_HTML_Attribute_Token,
 	WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info,
 	WP_HTML_Open_Elements as Exported_WP_HTML_Open_Elements,
+	WP_HTML_Processor_State as Exported_WP_HTML_Processor_State,
 	WP_HTML_Span as Exported_WP_HTML_Span,
 	WP_HTML_Stack_Event as Exported_WP_HTML_Stack_Event,
 	WP_HTML_Text_Replacement as Exported_WP_HTML_Text_Replacement,
@@ -21,6 +22,7 @@ const {
 	WP_HTML_Stack_Event,
 	WP_HTML_Active_Formatting_Elements,
 	WP_HTML_Open_Elements,
+	WP_HTML_Processor_State,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -38,6 +40,7 @@ assert.equal(Exported_WP_HTML_Attribute_Token, WP_HTML_Attribute_Token);
 assert.equal(Exported_WP_HTML_Stack_Event, WP_HTML_Stack_Event);
 assert.equal(Exported_WP_HTML_Active_Formatting_Elements, WP_HTML_Active_Formatting_Elements);
 assert.equal(Exported_WP_HTML_Open_Elements, WP_HTML_Open_Elements);
+assert.equal(Exported_WP_HTML_Processor_State, WP_HTML_Processor_State);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
 assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
 assert.equal(typeof WP_HTML_Span, "function");
@@ -47,6 +50,7 @@ assert.equal(typeof WP_HTML_Token, "function");
 assert.equal(typeof WP_HTML_Stack_Event, "function");
 assert.equal(typeof WP_HTML_Active_Formatting_Elements, "function");
 assert.equal(typeof WP_HTML_Open_Elements, "function");
+assert.equal(typeof WP_HTML_Processor_State, "function");
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -241,6 +245,21 @@ for (const nodeName of ["TR", "TD"]) {
 }
 tableContextOpenElements.clear_to_table_row_context();
 assert.deepEqual(tableContextOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "TABLE", "TBODY", "TR"]);
+
+const processorState = new WP_HTML_Processor_State();
+assert.ok(processorState.stack_of_open_elements instanceof WP_HTML_Open_Elements);
+assert.ok(processorState.active_formatting_elements instanceof WP_HTML_Active_Formatting_Elements);
+assert.deepEqual(processorState.stack_of_template_insertion_modes, []);
+assert.equal(processorState.current_token, null);
+assert.equal(processorState.insertion_mode, WP_HTML_Processor_State.INSERTION_MODE_INITIAL);
+assert.equal(WP_HTML_Processor_State.INSERTION_MODE_IN_TEMPLATE, "insertion-mode-in-template");
+assert.equal(WP_HTML_Processor_State.INSERTION_MODE_AFTER_AFTER_FRAMESET, "insertion-mode-after-after-frameset");
+assert.equal(processorState.context_node, null);
+assert.equal(processorState.encoding, null);
+assert.equal(processorState.encoding_confidence, "tentative");
+assert.equal(processorState.head_element, null);
+assert.equal(processorState.form_element, null);
+assert.equal(processorState.frameset_ok, true);
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));

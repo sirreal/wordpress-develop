@@ -275,6 +275,48 @@ export interface WP_HTML_Open_Elements_Constructor {
 
 export const WP_HTML_Open_Elements: WP_HTML_Open_Elements_Constructor;
 
+export interface WP_HTML_Processor_State {
+	stack_of_template_insertion_modes: string[];
+	stack_of_open_elements: WP_HTML_Open_Elements;
+	active_formatting_elements: WP_HTML_Active_Formatting_Elements;
+	current_token: WP_HTML_Token | null;
+	insertion_mode: string;
+	context_node: null;
+	encoding: string | null;
+	encoding_confidence: "tentative" | "certain" | "irrelevant" | string;
+	head_element: WP_HTML_Token | null;
+	form_element: WP_HTML_Token | null;
+	frameset_ok: boolean;
+}
+
+export interface WP_HTML_Processor_State_Constructor {
+	readonly INSERTION_MODE_INITIAL: "insertion-mode-initial";
+	readonly INSERTION_MODE_BEFORE_HTML: "insertion-mode-before-html";
+	readonly INSERTION_MODE_BEFORE_HEAD: "insertion-mode-before-head";
+	readonly INSERTION_MODE_IN_HEAD: "insertion-mode-in-head";
+	readonly INSERTION_MODE_IN_HEAD_NOSCRIPT: "insertion-mode-in-head-noscript";
+	readonly INSERTION_MODE_AFTER_HEAD: "insertion-mode-after-head";
+	readonly INSERTION_MODE_IN_BODY: "insertion-mode-in-body";
+	readonly INSERTION_MODE_IN_TABLE: "insertion-mode-in-table";
+	readonly INSERTION_MODE_IN_TABLE_TEXT: "insertion-mode-in-table-text";
+	readonly INSERTION_MODE_IN_CAPTION: "insertion-mode-in-caption";
+	readonly INSERTION_MODE_IN_COLUMN_GROUP: "insertion-mode-in-column-group";
+	readonly INSERTION_MODE_IN_TABLE_BODY: "insertion-mode-in-table-body";
+	readonly INSERTION_MODE_IN_ROW: "insertion-mode-in-row";
+	readonly INSERTION_MODE_IN_CELL: "insertion-mode-in-cell";
+	readonly INSERTION_MODE_IN_SELECT: "insertion-mode-in-select";
+	readonly INSERTION_MODE_IN_SELECT_IN_TABLE: "insertion-mode-in-select-in-table";
+	readonly INSERTION_MODE_IN_TEMPLATE: "insertion-mode-in-template";
+	readonly INSERTION_MODE_AFTER_BODY: "insertion-mode-after-body";
+	readonly INSERTION_MODE_IN_FRAMESET: "insertion-mode-in-frameset";
+	readonly INSERTION_MODE_AFTER_FRAMESET: "insertion-mode-after-frameset";
+	readonly INSERTION_MODE_AFTER_AFTER_BODY: "insertion-mode-after-after-body";
+	readonly INSERTION_MODE_AFTER_AFTER_FRAMESET: "insertion-mode-after-after-frameset";
+	new (): WP_HTML_Processor_State;
+}
+
+export const WP_HTML_Processor_State: WP_HTML_Processor_State_Constructor;
+
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
 	compat_mode: "no-quirks-mode" | "quirks-mode";
@@ -419,6 +461,7 @@ export interface HtmlApi {
 	WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
 	WP_HTML_Active_Formatting_Elements: WP_HTML_Active_Formatting_Elements_Constructor;
 	WP_HTML_Open_Elements: WP_HTML_Open_Elements_Constructor;
+	WP_HTML_Processor_State: WP_HTML_Processor_State_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

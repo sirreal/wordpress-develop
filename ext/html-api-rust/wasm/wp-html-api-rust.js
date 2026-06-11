@@ -1087,6 +1087,45 @@ function openElementNamespacedName(token) {
 	return token.namespace === "html" ? token.node_name : `${token.namespace} ${token.node_name}`;
 }
 
+export class WP_HTML_Processor_State {
+	static INSERTION_MODE_INITIAL = "insertion-mode-initial";
+	static INSERTION_MODE_BEFORE_HTML = "insertion-mode-before-html";
+	static INSERTION_MODE_BEFORE_HEAD = "insertion-mode-before-head";
+	static INSERTION_MODE_IN_HEAD = "insertion-mode-in-head";
+	static INSERTION_MODE_IN_HEAD_NOSCRIPT = "insertion-mode-in-head-noscript";
+	static INSERTION_MODE_AFTER_HEAD = "insertion-mode-after-head";
+	static INSERTION_MODE_IN_BODY = "insertion-mode-in-body";
+	static INSERTION_MODE_IN_TABLE = "insertion-mode-in-table";
+	static INSERTION_MODE_IN_TABLE_TEXT = "insertion-mode-in-table-text";
+	static INSERTION_MODE_IN_CAPTION = "insertion-mode-in-caption";
+	static INSERTION_MODE_IN_COLUMN_GROUP = "insertion-mode-in-column-group";
+	static INSERTION_MODE_IN_TABLE_BODY = "insertion-mode-in-table-body";
+	static INSERTION_MODE_IN_ROW = "insertion-mode-in-row";
+	static INSERTION_MODE_IN_CELL = "insertion-mode-in-cell";
+	static INSERTION_MODE_IN_SELECT = "insertion-mode-in-select";
+	static INSERTION_MODE_IN_SELECT_IN_TABLE = "insertion-mode-in-select-in-table";
+	static INSERTION_MODE_IN_TEMPLATE = "insertion-mode-in-template";
+	static INSERTION_MODE_AFTER_BODY = "insertion-mode-after-body";
+	static INSERTION_MODE_IN_FRAMESET = "insertion-mode-in-frameset";
+	static INSERTION_MODE_AFTER_FRAMESET = "insertion-mode-after-frameset";
+	static INSERTION_MODE_AFTER_AFTER_BODY = "insertion-mode-after-after-body";
+	static INSERTION_MODE_AFTER_AFTER_FRAMESET = "insertion-mode-after-after-frameset";
+
+	constructor() {
+		this.stack_of_template_insertion_modes = [];
+		this.stack_of_open_elements = new WP_HTML_Open_Elements();
+		this.active_formatting_elements = new WP_HTML_Active_Formatting_Elements();
+		this.current_token = null;
+		this.insertion_mode = WP_HTML_Processor_State.INSERTION_MODE_INITIAL;
+		this.context_node = null;
+		this.encoding = null;
+		this.encoding_confidence = "tentative";
+		this.head_element = null;
+		this.form_element = null;
+		this.frameset_ok = true;
+	}
+}
+
 export class WP_HTML_Doctype_Info {
 	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
 		this.name = name;
@@ -4920,6 +4959,7 @@ export function createHtmlApi(wasm) {
 		WP_HTML_Stack_Event,
 		WP_HTML_Active_Formatting_Elements,
 		WP_HTML_Open_Elements,
+		WP_HTML_Processor_State,
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
 		WP_HTML_Doctype_Info,
