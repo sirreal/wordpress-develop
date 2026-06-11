@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML and find all A tags. For each A tag found, it calls remove_class('external') which safely removes the 'external' class if present, or does nothing if not present. The documented API guarantees that removing the only class removes the entire class attribute, and removes_class preserves whitespace. Finally, get_updated_html() returns the modified HTML string.",
+  "confidence": 92
+}

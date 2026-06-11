@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to iterate through all tokens via next_token(). It identifies text nodes by checking if get_token_type() returns '#text', then collects their decoded text via get_modifiable_text(). The function counts UTF-8 code points using mb_strlen and mb_substr to safely truncate at multi-byte character boundaries without cutting characters. Text from script and style elements are automatically excluded since their contents aren't parsed as text nodes.",
+  "confidence": 72
+}

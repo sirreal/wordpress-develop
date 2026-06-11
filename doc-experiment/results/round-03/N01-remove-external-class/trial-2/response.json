@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML for all A tags. For each A tag, it retrieves the class attribute using get_attribute(), manually filters the class list to remove only the exact case-sensitive match of \"external\", and then either removes the class attribute entirely (if no classes remain) or updates it with the filtered class list using set_attribute(). Finally, it returns the modified HTML using get_updated_html(). This approach handles case-sensitive class matching as required, since WP_HTML_Tag_Processor's has_class() method is documented as case-insensitive.",
+  "confidence": 72
+}

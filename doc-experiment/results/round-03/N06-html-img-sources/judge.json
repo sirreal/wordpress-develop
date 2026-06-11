@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor create_fragment) for namespace-aware parsing. All methods documented: next_tag IMG, get_namespace, get_attribute. Idiomatic query loop with null, true, and empty-string guards. Defect: wraps get_attribute src in html_entity_decode. A probe confirms get_attribute already returns decoded values, so the extra decode double-decodes any entity-bearing src. Passed 7 of 7 only because no hidden case has an entity in src. The get_namespace filter is redundant for an IMG tag-name query but harmless."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. Walks every tag with bare next_tag then filters by get_tag equals IMG and get_namespace equals html, the documented custom-query inspection pattern. get_tag returns uppercase IMG, verified. Correctly treats get_attribute output as final with is_string and non-empty check, no spurious decoding. Handles null processor and null, true, empty src. Slightly less direct than a tag_name query but fully idiomatic. Cleanest of the three."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. Uses next_tag with array tag_name img, a documented query form; lowercase tag_name accepted. Correctly treats get_attribute output as already decoded, no extra decode. The guard combining truthiness with is_string and non-empty is mildly redundant and would also reject the string zero, a latent edge bug irrelevant to real URLs. get_namespace filter redundant but harmless. Solid and idiomatic."
+    }
+  ],
+  "failure_analysis": "No hidden case failed; all three trials passed all 7 cases. The core difficulty (exclude SVG image but include HTML img, including image reparsed to IMG and img that breaks out of svg) is handled by WP_HTML_Processor automatically via HTML5 tree construction. A probe confirms SVG image is named IMAGE in the svg namespace, so a tag_name query of IMG never matches it, and an img inside svg breaks out to the html namespace and is reported as IMG. All three subjects also added an explicit get_namespace equals html guard, which is redundant given the IMG tag-name query but harmless, and shows the namespace concept landed. The one genuine defect is in trial-1 and is masked by the corpus rather than caught by it: it calls html_entity_decode on get_attribute src. A probe confirms get_attribute already returns decoded values, so the redundant decode double-decodes any entity-bearing src. No hidden case includes an entity in a src value, so it passed despite being wrong. Root cause is documentation absence: the get_attribute docblock in both html-processor.md near line 1806 and html-tag-processor.md near line 1415 describes the return value and the null and true cases but never states the value is returned decoded with character references resolved, the as-a-browser-understands-it guarantee the task relied on. The only decoding language in either file is on modifiable text of TITLE and TEXTAREA and on set_attribute output encoding. A reader who internalized the Tag Processor garbage-in-garbage-out lexical framing could reasonably conclude attribute values come back raw and need manual decoding. Trials 2 and 3 assumed the correct behavior but had no firm basis in the docs.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor get_attribute and WP_HTML_Processor get_attribute",
+      "problem": "Neither docblock states the returned attribute value is already decoded with HTML character references resolved. The task asked for the decoded src as a browser understands it, and trial-1 wrapped the result in html_entity_decode, double-decoding entity-bearing values. The only decoding language in the docs is on modifiable text of TITLE and TEXTAREA; set_attribute only documents output encoding, leaving the read path ambiguous against the garbage-in-garbage-out lexical framing.",
+      "suggestion": "Add a sentence to get_attribute stating returned values are fully decoded with character references resolved, matching what a browser exposes via the DOM, and that callers should not decode the result again. Include a short example of an href value containing an ampersand entity that is returned as a literal ampersand. Mirror the note in both classes since both expose get_attribute."
+    },
+    {
+      "location": "WP_HTML_Processor get_namespace and the foreign-content note in the class overview",
+      "problem": "get_namespace is documented as a single line. There is no explanation that HTML5 parsing gives foreign elements distinct tag names and namespaces: the SVG image element is tag IMAGE in the svg namespace, and an img written inside svg is reparsed into the html namespace. All three subjects added a defensive namespace filter that is actually redundant for a tag-name query, showing the interaction between a tag-name query and namespaces was unclear.",
+      "suggestion": "In get_namespace or the foreign-content overview, add a worked example showing that a next_tag IMG query only matches html-namespace IMG elements, that the SVG image element is reported as get_tag IMAGE with get_namespace svg, and that an img inside svg breaks out to the html namespace. This clarifies when a get_namespace check is needed versus already implied by the tag-name query."
+    },
+    {
+      "location": "WP_HTML_Processor next_tag query parameter and the shared Finding tags section",
+      "problem": "The query docblock lists tag_name but never states that tag-name matching is ASCII case-insensitive, nor reiterates that get_tag always returns the uppercase name. Subjects used IMG, img, and the array form with tag_name img; all worked, and trial-2 compared the uppercase IMG against get_tag, but the docs do not make these guarantees explicit.",
+      "suggestion": "State in next_tag and the Finding tags table that tag_name is matched ASCII case-insensitively and that get_tag always returns the uppercase tag name, so equality comparisons must use the uppercase form. A one-line note prevents brittle case-sensitive comparisons."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "\nThe function uses WP_HTML_Processor to parse the HTML fragment and leverages the breadcrumbs query feature to match IMG elements that are nested within FIGURE elements at any depth. The processor's get_attribute() method automatically handles decoding of attribute values. The function iterates through all matching IMG tags, collects their src attribute values if they are non-empty strings, and returns them in document order (which is the natural order of iteration).\n",
+  "confidence": 72
+}

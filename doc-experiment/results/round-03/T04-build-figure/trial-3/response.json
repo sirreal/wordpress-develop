@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates an HTML template with figure, img, and figcaption elements where the img tag already has src and alt attributes in the correct order. Using WP_HTML_Tag_Processor, we find the img tag and set its src and alt attributes (preserving order since they already exist), then find the text node inside figcaption and set its content using set_modifiable_text(), which properly handles HTML encoding of the caption string. Finally, we return the updated HTML string.",
+  "confidence": 82
+}

@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 3 — Haiku, first edits under test on revised corpus (checkpoint)
+
+**All-19 87.41 / core 85.92 / train 90.66 (−1.9) / held-out 75.22.**
+Mixed: round-3 edits helped their targets — T09 +8.6, T12 +2.2, N06
++10.7 (support-claims rewrite), N04 at 100 — but the serialize_token()
+idiom INDUCED a T07 regression (−33.7): two trials called serialize()
+after add_class(), got null (scanning had begun), and fell back to the
+unmodified input. Decision: refine, not revert, disclosed here — the
+edit measurably helped its targets; the harm is one missing boundary
+statement (get_updated_html() vs serialize()). T04 unchanged (45.1):
+trials missed the placement note AND hit a new gap — calling
+set_modifiable_text() on an empty FIGCAPTION is a silent no-op (no
+#text token exists). Held-out N05 fell further (RCDATA text location;
+still no edit — held-out must not drive edits, but the T04-driven
+modifiable-text inventory edit covers the same general fact).
+
+Round-4 hypotheses (committed):
+1. Serialization is not how you read edits — boundary stated on
+   serialize() and serialize_token(); get_updated_html() is the
+   post-edit read path (T07).
+2. Which tokens carry modifiable text: container elements carry none,
+   empty elements cannot receive text, placeholder-template idiom,
+   check the return value (T04).
+3. Bookmark same-name re-set MOVES the bookmark — the last-X idiom
+   (T10 adherence); also stated tag_closers default ('skip').
+
+Train gap backlog (not yet acted on): tag-name query case-insensitivity;
+comment/rawtext can't match next_tag(); add_class idempotency at the
+method heading; get_attribute returns decoded values; get_namespace and
+foreign-content naming; Tag-vs-HTML-Processor chooser note; multi-cell
+subtree text-collection example; get_updated_html prominence in the
+HTML Processor method index.
+
 ## Round 2 — Haiku re-baseline on the revised corpus
 
 All 19 tasks × 3 Haiku trials against the round-1 docs. **All-19 91.47,

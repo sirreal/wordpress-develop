@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function builds a figure fragment by creating a template with src and alt attributes in the correct order and a space placeholder in figcaption. WP_HTML_Processor updates both attributes in place via set_attribute() (which automatically encodes values), preserving their original order. After finding the figcaption, next_token() navigates to its text node which is replaced with the caption text using set_modifiable_text() (which handles encoding). get_updated_html() returns the complete HTML with all modifications applied.",
+  "confidence": 72
+}

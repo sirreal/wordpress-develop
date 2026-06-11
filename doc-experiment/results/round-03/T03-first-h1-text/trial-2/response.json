@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element. It captures the depth of the H1 tag, then iterates through subsequent tokens. For each #text token found at a depth greater than or equal to the H1's depth, it accumulates the text using get_modifiable_text() which automatically decodes character references like &amp; to &. The loop terminates when the depth drops below the H1's level, indicating we've exited the H1 element. Character reference decoding is handled by the API, and an empty H1 returns an empty string rather than null.",
+  "confidence": 75
+}

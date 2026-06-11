@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all A tags. For each A tag with an href attribute, it records the depth, then walks through all tokens inside the A element, collecting text from #text tokens (which automatically handles character reference decoding via get_modifiable_text()). The processor's next_token() method ensures proper handling of nested elements by tracking depth.",
+  "confidence": 75
+}

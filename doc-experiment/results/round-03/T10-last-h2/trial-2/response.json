@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function scans through the HTML document using WP_HTML_Tag_Processor, tracking each H2 tag found by setting and updating a bookmark at the most recent H2 location. After scanning the entire document, it seeks back to the last H2 tag and adds the \"final-section\" class using the add_class() method. The documented APIs used are: next_tag() to find H2 elements, set_bookmark() and release_bookmark() to manage position tracking, seek() to return to the last H2, and add_class() to modify the class attribute. The approach efficiently handles large documents by processing sequentially and only modifying the final H2 tag found.",
+  "confidence": 75
+}

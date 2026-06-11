@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_full_parser() to parse the complete HTML document, then iterates through tokens using next_token() until finding a TITLE token. When the TITLE element is found, get_modifiable_text() returns its content with character references already decoded by the parser, as documented for TITLE elements. Returns null if no processor is created or if no TITLE element is found.",
+  "confidence": 78
+}
