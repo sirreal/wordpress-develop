@@ -3636,6 +3636,25 @@ class WP_HTML_Tag_Processor {
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
 	 *
+	 * The returned text is already decoded where HTML decodes it: for
+	 * `#text` nodes and for elements whose contents allow character
+	 * references (TEXTAREA, TITLE), character references have been replaced
+	 * by the characters they represent — `&amp;` is returned as `&`. Do not
+	 * decode the returned string again. Contents which HTML treats as raw
+	 * text (SCRIPT, STYLE) and the interiors of comments are returned
+	 * verbatim, as no decoding occurs in those sections of a document.
+	 *
+	 * Example:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<p>Fish &amp; Chips</p>' );
+	 *     $processor->next_token(); // The P opening tag.
+	 *     $processor->next_token(); // The text node inside it.
+	 *     'Fish & Chips' === $processor->get_modifiable_text();
+	 *
+	 * The inverse applies when writing: {@see WP_HTML_Tag_Processor::set_modifiable_text}
+	 * accepts a plain, unescaped string and encodes it as needed, so the
+	 * decoded form is the only form application code should handle.
+	 *
 	 * Limitations:
 	 *
 	 *  - This function will not strip the leading newline appropriately
