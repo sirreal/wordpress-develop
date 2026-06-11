@@ -1149,7 +1149,7 @@ class WP_HTML_Tag_Processor {
 	 * Example:
 	 *
 	 *     $processor = new WP_HTML_Tag_Processor( '<input type="text" value="Th' );
-	 *     false      === $processor->get_next_tag();
+	 *     false      === $processor->next_tag();
 	 *     true       === $processor->paused_at_incomplete_token();
 	 *
 	 * @since 6.5.0
@@ -4323,6 +4323,31 @@ class WP_HTML_Tag_Processor {
 	 * Special handling is provided for boolean attribute values:
 	 *  - When `true` is passed as the value, then only the attribute name is added to the tag.
 	 *  - When `false` is passed, the attribute gets removed if it existed before.
+	 *
+	 * Attribute placement:
+	 *  - Updating an attribute the tag already has replaces its value in
+	 *    place; the attribute keeps its position within the tag.
+	 *  - A NEW attribute is inserted immediately after the tag name,
+	 *    before any existing attributes.
+	 *  - When several new attributes are added to the same tag, they
+	 *    appear sorted by attribute name — not in the order the calls
+	 *    were made.
+	 *
+	 * When the exact attribute order of the output matters, start from
+	 * markup in which the attributes already exist (even with empty
+	 * values) and update them in place:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<img src="" alt="">' );
+	 *     $processor->next_tag();
+	 *     $processor->set_attribute( 'src', '/dog.jpg' );
+	 *     $processor->set_attribute( 'alt', 'A dog' );
+	 *     // <img src="/dog.jpg" alt="A dog"> — positions preserved.
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<img>' );
+	 *     $processor->next_tag();
+	 *     $processor->set_attribute( 'src', '/dog.jpg' );
+	 *     $processor->set_attribute( 'alt', 'A dog' );
+	 *     // <img alt="A dog" src="/dog.jpg"> — new attributes sort by name.
 	 *
 	 * @since 6.2.0
 	 * @since 6.2.1 Fix: Only create a single update for multiple calls with case-variant attribute names.
