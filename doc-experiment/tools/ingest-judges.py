@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Ingests a judge-workflow output file: writes per-task judge.json,
+aggregates the round, and prints a compact comparison digest.
+
+Usage: python3 ingest-judges.py <workflow-output-file> <round-NN> [<baseline-round-NN>]
+
+Digest: round/core/split/concept scores, per-task deltas vs baseline,
+and doc-gap one-liners for tasks scoring below 97 (train only —
+held-out gaps are listed separately, marked DO-NOT-ACT.)
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+EXPERIMENT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    output_file, round_name = sys.argv[1], sys.argv[2]
+    baseline = sys.argv[3] if len(sys.argv) > 3 else None
+    results_dir = EXPERIMENT_ROOT / "results" / round_name
+
+    verdicts = json.load(open(output_file))["result"]
+    for entry in verdicts:
+        tid, v = entry["id"], entry["verdict"]
+        (results_dir / tid / "judge.json").write_text(
+            json.dumps(v, indent=2, ensure_ascii=False) + "\n"
+        )
+    print(f"{len(verdicts)} verdicts persisted")
+
+    proc = subprocess.run(
+        ["python3", str(EXPERIMENT_ROOT / "tools" / "aggregate-round.py"), str(results_dir)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print(proc.stderr, file=sys.stderr)
+        return proc.returncode
+    summary = json.loads(proc.stdout)
+    (results_dir / "round-summary.json").write_text(proc.stdout)
+
+    base_tasks = {}
+    if baseline:
+        base_file = EXPERIMENT_ROOT / "results" / baseline / "round-summary.json"
+        if base_file.exists():
+            base_tasks = {
+                k: v["score"] for k, v in json.loads(base_file.read_text())["tasks"].items()
+            }
+
+    print(f"ROUND {summary['round_score']}  core {summary['core_score']}")
+    print("split:  ", summary["by_split"])
+    print("concept:", summary["by_concept"])
+    for k, v in sorted(summary["tasks"].items(), key=lambda kv: kv[1]["score"]):
+        delta = f" ({v['score'] - base_tasks[k]:+.1f})" if k in base_tasks else ""
+        if v["score"] < 100 or (k in base_tasks and abs(v["score"] - base_tasks[k]) > 0.5):
+            trials = "  ".join(
+                f"{t['passed']}/{t['total']}a{t['adherence']}" for t in v["trials"]
+            )
+            print(f"  {k}: {v['score']:.2f}{delta}  {trials}")
+
+    # Doc gaps for weak tasks, train/holdout separated.
+    for entry in verdicts:
+        tid, v = entry["id"], entry["verdict"]
+        score = summary["tasks"].get(tid, {}).get("score", 100)
+        if score >= 97:
+            continue
+        split = summary["tasks"][tid].get("labels", {}).get("split", "?")
+        tag = "DO-NOT-ACT(holdout)" if split == "holdout" else "train"
+        for g in v.get("doc_gaps", []):
+            print(f"  GAP[{tag}] {tid}: {g['location'][:70]} :: {g['problem'][:130]}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
