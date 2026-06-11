@@ -2635,6 +2635,8 @@ fn character_reference_code_point(code_point: u32) -> char {
 
 fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)> {
     const NAMED: &[(&[u8], CharacterReference)] = &[
+        (b"AElig;", CharacterReference::Scalar('Æ')),
+        (b"AElig", CharacterReference::Scalar('Æ')),
         (b"amp;", CharacterReference::Scalar('&')),
         (b"amp", CharacterReference::Scalar('&')),
         (b"AMP;", CharacterReference::Scalar('&')),
@@ -2941,6 +2943,15 @@ mod tests {
         assert_eq!(
             super::transform_text(b"ZZ&pound=23", true, super::NullTransform::Replace),
             "ZZ£=23".as_bytes()
+        );
+        assert_eq!(
+            super::transform_text(b"ZZ&AElig=", true, super::NullTransform::Replace),
+            "ZZÆ=".as_bytes()
+        );
+        assert_eq!(super::decode_html_attribute(b"ZZ&AElig="), b"ZZ&AElig=");
+        assert_eq!(
+            super::decode_html_attribute(b"ZZ&AElig;"),
+            "ZZÆ".as_bytes()
         );
     }
 

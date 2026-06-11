@@ -143,6 +143,14 @@ assert.equal(textarea.set_modifiable_text("Two"), true);
 assert.equal(textarea.get_updated_html(), "<textarea>Two</textarea>");
 textarea.destroy();
 
+const legacyNamedCharacterReference = new WP_HTML_Tag_Processor("<div>ZZ&AElig=</div>");
+assert.equal(legacyNamedCharacterReference.next_token(), true);
+assert.equal(legacyNamedCharacterReference.get_token_type(), "#tag");
+assert.equal(legacyNamedCharacterReference.next_token(), true);
+assert.equal(legacyNamedCharacterReference.get_token_type(), "#text");
+assert.equal(legacyNamedCharacterReference.get_modifiable_text(), "ZZÆ=");
+legacyNamedCharacterReference.destroy();
+
 const doctype = new WP_HTML_Tag_Processor('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd"><p>');
 assert.equal(doctype.next_token(), true);
 const doctypeInfo = doctype.get_doctype_info();
