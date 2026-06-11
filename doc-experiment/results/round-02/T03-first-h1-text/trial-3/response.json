@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML, then next_tag('H1') to find the first H1 element. It records the depth of the H1 opening tag, then iterates through tokens with next_token() collecting text from all #text nodes that occur at or deeper than the H1 depth. The loop terminates when encountering a token at a shallower depth, indicating the H1 has closed. Text is already decoded by get_modifiable_text(). Returns null if no H1 is found, or the accumulated text (possibly empty string) if H1 is found.",
+  "confidence": 88
+}

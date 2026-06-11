@@ -1,0 +1,71 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-02/N05-document-title/trial-3/candidate.php",
+    "function": "get_document_title",
+    "passed": 7,
+    "total": 7,
+    "cases": [
+        {
+            "id": "standard-document",
+            "status": "pass",
+            "expected": "My Site — Home",
+            "actual": "My Site — Home",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-decoded",
+            "status": "pass",
+            "expected": "Fish & Chips",
+            "actual": "Fish & Chips",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-title-null",
+            "status": "pass",
+            "expected": null,
+            "actual": null,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-title",
+            "status": "pass",
+            "expected": "",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-doctype",
+            "status": "pass",
+            "expected": "Bare",
+            "actual": "Bare",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "attributes-on-elements",
+            "status": "pass",
+            "expected": "With Attrs",
+            "actual": "With Attrs",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "minimal-document",
+            "status": "pass",
+            "expected": "Implied structure",
+            "actual": "Implied structure",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

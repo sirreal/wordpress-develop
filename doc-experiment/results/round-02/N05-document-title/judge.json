@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 60,
+      "hallucinated_methods": [],
+      "notes": "Chose WP_HTML_Tag_Processor, a choice the docs explicitly endorse for TITLE. No hallucinated methods; every call (next_tag, next_token, get_modifiable_text) is documented. Fatal idiomatic error: treated TITLE as a normal container and advanced an EXTRA next_token() to 'get the text inside,' which lands on the HEAD closer whose modifiable text is empty. Probe confirms next_tag('TITLE') already exposes the full decoded title 'My Site — Home' on the opener token itself. So every non-empty title returned ''. The empty-title and no-title cases passed only by coincidence (the wrong token's empty string vs the null path). Processor choice mostly fine; idiomatic token-model use is fundamentally wrong, which is the core failure."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Best processor fit: create_full_parser for a 'complete HTML document'. Null-checks the create result, walks tokens, returns get_modifiable_text on first TITLE. 7/7. Only nit vs reference: omits the is_tag_closer() guard. Harmless because the full parser yields the TITLE opener first and the code returns immediately, but slightly less defensive/idiomatic than trial 3. Correct reliance on documented atomic-decoding behavior; no second-decode."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Tag Processor with a textbook token walk plus an explicit is_tag_closer() filter; reads the atomic TITLE token's modifiable text directly without over-advancing. 7/7, verified across all cases by probe. Marginally less ideal processor choice than the full parser for an explicitly 'complete document' task (Tag Processor has no document-structure awareness), but the docs sanction it for TITLE and it is fully idiomatic and robust to the 'looks-like-a-tag-inside-title' edge."
+    }
+  ],
+  "failure_analysis": "All five failed hidden cases belong to trial-1 (standard-document, entities-decoded, no-doctype, attributes-on-elements, minimal-document — every case with a NON-EMPTY title). Single root misconception: the candidate modeled TITLE as an ordinary element whose text lives in a child #text node reached by a further next_token(). In the HTML API's Tag Processor, TITLE is an 'atomic' element: the opener token spans opener-through-closer and the inner plaintext IS that opener token's modifiable text. Probe: after next_tag('TITLE'), get_modifiable_text() returns 'My Site — Home'; the extra next_token() moves to the HEAD closer (modifiable text ''), so the function returned '' for every populated title. empty-title and no-title-null passed accidentally — the empty title yields '' from the wrong token, and no-title falls through to the early-return path.\\n\\nResponsible documentation: the misconception is at odds with the Tag Processor 'Special \\\"atomic\\\" HTML elements' section (html-tag-processor.md lines 243-259), which states the Tag Processor 'treats the entire sequence as one, from the opening tag, including its contents, through its closing tag' and 'The inner contents of these elements are that element's modifiable text.' The get_modifiable_text() method docs (lines 1769-1792) reinforce that the value is decoded and read directly on the matched token. The docs are CORRECT but the failure shows they did not make the consequence operationally obvious: the canonical 'Tokens and finer-grained processing' example (lines 220-238) reads TITLE via get_modifiable_text() inside the SAME switch arm as the token match, never advancing afterward — but it never explicitly warns 'do not call next_token() again to reach the text,' and it never shows the next_tag('TITLE') then read pattern. A reader who pattern-matches TITLE to a normal parent (DIV-style, where you DO walk into a child #text node, as shown in html-processor.md next_token examples at lines 624-642) naturally inserts the extra advance. The atomicity note and the modifiable-text note are in different sections from the worked example, so the 'one token, read it in place' rule was easy to miss.\\n\\nTrials 2 and 3 confirm the docs were sufficient to succeed: both relied on the documented atomic decoding and passed 7/7. Near-misses in their explanations: trial-2 claims the decode is 'per HTML5 spec' (fine) but omits any mention of TITLE atomicity, so it 'got it right' without articulating why a single read suffices; trial-3 wrote the decoded example as '\\\\u2014' which is a cosmetic JSON/escaping slip, not a behavioral error. Neither flagged the missing is_tag_closer() consideration that trial-1 stumbled over.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Special \"atomic\" HTML elements' section (and the parallel concept in WP_HTML_Processor)",
+      "problem": "The section correctly states that for atomic elements (TITLE, TEXTAREA, SCRIPT, STYLE) the opener token's modifiable text contains the full inner contents, but it never warns against the most natural mistake: advancing to a child #text node to read the contents. Because normal elements DO require walking into a #text child (shown in WP_HTML_Processor::next_token examples), readers transfer that habit and over-advance, reading an empty/adjacent token instead. This caused every non-empty-title failure in trial-1.",
+      "suggestion": "Add an explicit contrast and a short anti-pattern note: 'These atomic elements have NO separate child text token. Read get_modifiable_text() directly on the matched opening tag — do NOT call next_token()/next_tag() again to step into the element, or you will land on the following token (e.g. a sibling or parent closer) and read empty text.' A two-line before/after snippet (correct: match TITLE then read; wrong: match TITLE, advance, read) would inoculate the failure."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and the 'Tokens and finer-grained processing' example",
+      "problem": "The canonical TITLE example reads the text in the same switch arm as the match but does not call out WHY no further advance is needed, so the 'read in place' invariant for atomic elements is implicit. A learner copying a DIV-style 'enter the element, read its #text children' loop will misuse it.",
+      "suggestion": "Annotate the TITLE arm of the example with a one-line comment such as '// TITLE is atomic: its decoded inner text is available here on the TITLE token itself — no need to advance into it.' Cross-link this example from the atomic-elements section so the rule and the example are co-located."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() / token-walk guidance (tag-closer semantics)",
+      "problem": "Examples mix next_tag('TITLE') (which can match openers and, when configured, closers) with token walks, but the guidance on when get_token_name() can match a CLOSER and why you must filter with is_tag_closer() before reading text is scattered. Trial-2 succeeded without the guard only by luck of token ordering; trial-1's confusion partly stems from unclear closer-vs-opener token identity.",
+      "suggestion": "In the token-walking guidance, state plainly that when iterating with next_token(), get_token_name() returns the same name for a tag's opener and its closer, so code that reads text or attributes should guard with `! $processor->is_tag_closer()` to ensure it is on the opener. Reinforce that for atomic elements no closer token is emitted at all (the opener subsumes it), so the guard is both safe and recommended as the idiomatic pattern."
+    }
+  ]
+}

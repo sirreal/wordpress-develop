@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment). Every method documented; no hallucinations, no _doing_it_wrong. Reproduces the canonical depth-walking idiom from html-processor.md:624-638 exactly, including fusing the `get_current_depth() >= $depth` guard into the while condition. Correctly filters with `null === $href` (preserving `true` for valueless href per get_attribute docs) and accumulates only `#text` via get_modifiable_text (documented as pre-decoded). Edge cases (nested markup, image-only link, unclosed input) all handled per the documented token-walking guarantees. 8/8. Cleanest of the three; minor deduction only because nothing distinguishes a perfect score and the solution is essentially the doc example."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and API; all methods documented, no _doing_it_wrong, 8/8. Uses the same depth idiom but factored as an explicit `if ($current_depth < $depth) break;` plus a `#text` check — equivalent and correct. Deduction is for the explanation, not the code: it claims 'Text nodes at the immediate depth are concatenated, while nested elements text nodes are skipped,' which misdescribes its own behavior — the loop collects nested #text too (it only skips non-#text tokens), and the `<em>second</em> link` case passes precisely because nested text is included. Code is idiomatic; the self-report reveals a shaky mental model of why it works (also reflected in the low 45 confidence)."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and API; uses next_tag(array('tag_name'=>'A')) array form (documented at html-tag-processor.md:50). All methods documented, no _doing_it_wrong, 8/8. Same break-on-`< depth` idiom as trial-2, with an accurate explanation. Minor non-idiomatic noise: a redundant `$current_depth >= $a_depth &&` guard inside the loop body that is already guaranteed by the preceding `if ($current_depth < $a_depth) break;` — dead condition, harmless. Otherwise faithful to the documented pattern."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials pass 8/8 with zero _doing_it_wrong and zero trigger_error records. The documentation was decisive here because it contains the exact pattern this task requires, so the analysis focuses on what the docs did well and the one near-miss in the explanations.\n\nWhat the docs did well, mapped to each test case:\n\n- simple / image-link-empty-text / unclosed-link (nested markup and incomplete input): html-processor.md `next_token()` (lines 606-643) ships a near-verbatim solution — the `<ul><li>Buy <strong>milk</strong> today.` example that records `get_current_depth()`, loops `while next_token() && get_current_depth() >= $depth`, and accumulates `#text`. The accompanying prose explicitly explains the two non-obvious facts that make the boundary correct: nested closers (`</strong>`) report a depth no lower than the element's contents so the loop continues through them, and 'elements left unclosed at the end of the input' still produce closing tokens (line 616). This is exactly why the unclosed-link case works without special handling. The `<img>` inside `<a>` produces no `#text`, so image-link-empty-text yields '' naturally. All three trials transcribed this idiom.\n\n- valueless-href / no-href-excluded: get_attribute (html-tag-processor.md:1415-1448, mirrored in html-processor.md) documents the `string|true|null` signature with examples — `enabled` (valueless) returns `true`, missing returns `null`, plus the return note 'Boolean attributes return `true`.' All trials filter on `null === $href` and pass `true` straight through, so a bare `<a href>` correctly yields `['href' => true]` rather than being dropped or coerced.\n\n- entity-in-href-decoded / entities-in-text: get_modifiable_text (html-tag-processor.md:1769-1792) states '#text nodes ... character references have been replaced ... `&amp;` is returned as `&`. Do not decode the returned string again,' with a `Fish & Chips` example identical to the entities-in-text expectation. get_attribute returning decoded `/search?q=a&b` is what made the href case pass. No trial double-decoded.\n\nOnly near-miss: trial-2's natural-language explanation asserts nested elements' text nodes are skipped, which contradicts both the requirement and its own passing code (it collects nested #text; only non-#text tokens are skipped). The code is correct; the rationale is wrong. This suggests a reader can copy the doc idiom successfully while still misunderstanding why the depth guard admits nested text — the docs explain why nested *closers* don't end the loop but never state plainly that nested *text* is intentionally included. A one-line statement to that effect would have aligned the explanation with the behavior.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() — token-walking example (html-processor.md ~lines 614-638)",
+      "problem": "The example explains why nested *closers* (e.g. </strong>) do not terminate the depth-bounded loop, but never states the corresponding positive fact: text inside nested descendant elements IS collected by this walk because those #text tokens sit at a depth >= the start depth. Trial-2 copied the idiom correctly yet its written explanation claimed nested text is skipped, revealing the gap. A reader could wrongly believe the loop captures only the element's direct children.",
+      "suggestion": "Add one sentence to the example's commentary, e.g.: 'Because descendant #text tokens report a depth no lower than the start depth, this walk concatenates the element's entire text content, including text inside nested children such as <strong>.' This generalizes the milk example without encoding any specific task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / next_token() (decoding note)",
+      "problem": "The decoding guarantee ('#text returned already decoded, do not decode again') lives only on get_modifiable_text in the Tag Processor doc. A developer reading the HTML Processor token-walking example for text extraction sees get_modifiable_text used but no inline reminder that the accumulated string is already decoded, so they may post-process with html_entity_decode. None of the trials made this error, but the safeguard depends on the reader cross-referencing two methods.",
+      "suggestion": "In the next_token() text-collection example comment, add a short note that get_modifiable_text() returns decoded text (character references already resolved), linking to {@see get_modifiable_text}. Keeps the decode-once contract visible at the point of use."
+    },
+    {
+      "location": "WP_HTML_Processor get_attribute() return documentation (html-processor.md ~line 1790)",
+      "problem": "The HTML Processor's get_attribute section reuses the `string|true|null` signature but the surrounding prose/examples emphasizing the three-way distinction (present-with-value => string, present-valueless/boolean => true, absent => null, present-but-empty => '') is fullest in the Tag Processor doc. A reader working solely in html-processor.md gets a thinner treatment of the `true` vs `''` vs `null` distinction that is exactly what separates valueless-href from no-href-excluded.",
+      "suggestion": "Mirror the Tag Processor's worked example (enabled => true, missing => null, empty value => '') directly in the HTML Processor get_attribute section, or add an explicit cross-reference, so the null/true/'' semantics are unambiguous for anyone filtering attributes from the HTML Processor alone."
+    }
+  ]
+}

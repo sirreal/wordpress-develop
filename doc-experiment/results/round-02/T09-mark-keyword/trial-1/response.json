@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a fragment processor and iterates through all tokens using next_token(). For text nodes (#text), it retrieves the decoded text via get_modifiable_text() and checks for case-sensitive keyword substring match. Matching text nodes are wrapped entirely with <mark> tags. Non-text tokens are serialized using serialize_token(). The reconstructed HTML is then normalized with WP_HTML_Processor::normalize(), which properly encodes text, closes optional tags, and formats attributes.",
+  "confidence": 72
+}

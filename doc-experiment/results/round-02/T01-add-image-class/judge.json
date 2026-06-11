@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the reference solution. Uses WP_HTML_Tag_Processor (correct processor for a flat attribute/class mutation; no tree traversal needed), the documented string form next_tag('img') (doc line 51), add_class('wp-image') (line 365/2128), and get_updated_html() (line 368/2192). All three methods exist in html-tag-processor.md. Idiomatic token-walking via while(next_tag()) loop, matching the documented pattern at lines 70-75. Edge cases handled implicitly but correctly: case-insensitive tag match (uppercase-tag case passes, casing preserved), comments not matched as tags (inside-comment-ignored passes), unquoted attributes preserved, incomplete trailing tag left untouched (next_tag returns false on incomplete token per line 904). Explanation is accurate, including the claim that add_class preserves existing class order (doc line 294) and that comment images are never matched. 8/8 hidden cases pass, zero _doing_it_wrong records. Confidence 92, well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and the reference, differing only in using the explicit array query form next_tag(array('tag_name' => 'img')) instead of the string shorthand. Both forms are documented (array form at line 50, string form at line 51), so this is equally idiomatic. Same correct processor choice, same documented methods (next_tag/add_class/get_updated_html), same correct token-walking loop. 8/8 pass, no _doing_it_wrong. Explanation accurately cites the 'documented tag_name query parameter' and case-insensitive matching. Confidence 95, well-calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trial-2's candidate.php. Array query form next_tag(array('tag_name' => 'img')), add_class, get_updated_html, all documented. Correct processor choice and idiomatic while-loop token walk. 8/8 pass, no _doing_it_wrong records. Explanation is the most thorough of the three, correctly asserting byte-for-byte preservation outside modified tags and that HTML comments are not processed. Confidence 95, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials passed all 8 hidden cases (simple, multiple, existing-classes, uppercase-tag, inside-comment-ignored, no-images, unquoted-attributes, incomplete-tag-at-end) with zero _doing_it_wrong or trigger_error records, and all three are functionally equivalent to reference.php.\n\nWhat the docs did well: The two complementary next_tag() examples (array form line 50, string form line 51) gave subjects a clear, copyable pattern; trial-1 used the shorthand and trials 2-3 used the array form, both correct. The 'Replacing CSS classes' / add_class section plus the explicit guarantee at line 294 ('add_class and remove_class methods preserve whitespace and the class ordering') directly underwrote the existing-classes case and gave subjects confidence to assert order preservation. The worked while(next_tag()) loop at lines 70-75 modeled the exact token-walking idiom all three reproduced. The 6.5.0 changelog note on next_tag() (line 904: 'No longer processes incomplete tokens at end of document; pauses the processor') is what makes the incomplete-tag-at-end case pass for free, though no subject explicitly reasoned about it.\n\nNear-misses in the explanations: All three subjects correctly asserted case-insensitive tag matching, which was load-bearing for the uppercase-tag case, but the docs do not state this explicitly in the next_tag() parameter table (line 910 just says 'Which tag to find'). The string-form example next_tag('img') at line 51 only implies it. The subjects got it right, but this was inference rather than a documented guarantee, the single weakest link in an otherwise fully-supported solution. Subjects also asserted comment images 'are never matched because they don't form real tags' / 'not parsed as real tags', which is correct, but the docs never explicitly state that next_tag() skips comment contents; this too was correct inference rather than documented fact (the Tag Processor 'currently only supports the tag token' at line 944 hints at it but does not address comment-internal text).\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — $query / $tag_name parameter description",
+      "problem": "The parameter table (line 910) describes tag_name only as 'Which tag to find, or null for any tag' and never states that tag-name matching is ASCII case-insensitive. Subjects had to infer this from the next_tag('img') example to handle uppercase <IMG> tags. The docs are meticulous about documenting case-insensitivity for attribute names and class names (lines 330, 1032, 1042, 1458-1460) but conspicuously silent for tag names.",
+      "suggestion": "Add a sentence to the tag_name description: 'Tag-name matching is ASCII case-insensitive, so \"img\" matches <IMG>, <Img>, and <img>. The original casing in the source document is preserved in the output.' This generalizes to all tag-matching tasks and removes the need for inference."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — return semantics on incomplete input",
+      "problem": "The 6.5.0 changelog note ('No longer processes incomplete tokens at end of document; pauses the processor at start of token') is the behavior that makes a trailing truncated tag like '<img src=\"a.jpg' be left unmodified, but this safety guarantee is buried in a changelog line and not stated as a behavioral contract. A subject reasoning about partial/streaming input would not reliably find it.",
+      "suggestion": "In the next_tag() Returns section, add: 'If the document ends in the middle of a tag (an incomplete token), next_tag() returns false and does not match that partial tag, so it is never modified. Use paused_at_incomplete_token() to detect this case.' This cross-references an existing documented method and states the guarantee as contract rather than history."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — overview / next_tag() description (token vs. comment scope)",
+      "problem": "All subjects correctly assumed that text inside HTML comments (e.g. <!-- <img> -->) is not matched by next_tag(), but the docs never state this. Line 944 says the Tag Processor 'currently only supports the tag token' and next_token() lists comments as a separate token type, but nothing explicitly says comment-internal markup is treated as opaque text and will not be matched as a tag.",
+      "suggestion": "Add a short note near the next_tag() description or in the overview: 'next_tag() only matches real HTML tags. Markup that appears inside comments, CDATA, or raw-text elements (e.g. <script>, <style>) is treated as text and is never matched.' This prevents a whole class of false-positive-modification bugs across many tasks."
+    }
+  ]
+}

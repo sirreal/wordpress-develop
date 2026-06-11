@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse each HTML fragment into a processor instance, returning false if parsing fails. It then calls serialize() on each processor to normalize both fragments (which handles attribute quoting, tag case, omitted tags, and character references), returning false if serialization fails. Finally, it compares the normalized strings for equality.",
+  "confidence": 85
+}

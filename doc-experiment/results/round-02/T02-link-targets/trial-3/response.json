@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to linearly scan through the HTML document. For each A tag found via next_tag('A'), it calls get_attribute('href') which returns: a string value if href has content, an empty string if href=\"\" or href is empty, true if written as `<a href>` without a value, or null if the attribute is absent. When href is not null (meaning the attribute exists in any form), set_attribute('target', '_blank') is called to set or overwrite the target attribute. The updated HTML is returned via get_updated_html().",
+  "confidence": 92
+}

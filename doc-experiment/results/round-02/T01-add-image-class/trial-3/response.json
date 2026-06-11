@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely scan and modify the HTML document. It creates a processor instance with the input HTML, then loops through each IMG tag (matched case-insensitively by tag name) using next_tag() with a query for 'img' tags. For each matched tag, add_class('wp-image') appends the class while preserving existing classes and HTML structure. Finally, get_updated_html() returns the modified HTML with all changes applied, ensuring everything outside the modified tags is preserved byte-for-byte and HTML comments are not processed.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to create a fragment containing the required figure structure, then uses set_attribute() to set the img src and alt attributes (with automatic HTML encoding), and set_modifiable_text() to set the figcaption text content. The serialize() method returns the fully-formed HTML with all special characters properly encoded. This approach ensures proper escaping of all input values while constructing valid HTML using the documented API.",
+  "confidence": 42
+}

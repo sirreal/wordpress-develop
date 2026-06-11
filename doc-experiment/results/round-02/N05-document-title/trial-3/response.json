@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan tokens in the HTML document. It iterates through all tokens using next_token() and checks for a TITLE tag opener (is_tag_closer() returns false for opening tags). When found, it calls get_modifiable_text(), which according to the documentation returns the TITLE element's content with character references already decoded (e.g., &mdash; becomes \u2014). If no TITLE element exists, it returns null.",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor's next_token() method to scan through every lexical token in the document, then checks paused_at_incomplete_token() to determine if the parser stopped due to incomplete input. When the parser encounters incomplete syntax (like an unfinished tag opener `<div class=\"x`, an unterminated comment `<!-- text`, or a special element like SCRIPT without a closing tag), it pauses and reports incomplete state. A lone `<` at end is not incomplete (treated as text), and unclosed elements like `<div>text` are lexically complete so paused_at_incomplete_token() returns false.",
+  "confidence": 75
+}

@@ -2,6 +2,40 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 2 — Haiku re-baseline on the revised corpus
+
+All 19 tasks × 3 Haiku trials against the round-1 docs. **All-19 91.47,
+core 90.47, train 92.56, held-out 87.38.** Round-1 doc edits transfer
+to Haiku: T03 and T06 (round-0's worst) are perfect.
+
+Per-concept means (the new labels paying off — the aggregate hides
+these): attributes 72.2, full-document 78.0, namespace 85.9,
+traversal 91.6, vs classes/failure-handling ~99.
+
+Diagnosed causes:
+- T04 build-figure 44.3 (two 0/6 trials): output correct except src/alt
+  order — set_attribute() placement rules are undocumented (verified:
+  in-place update keeps position; new attributes insert after the tag
+  name sorted by NAME, not call order).
+- N05 document-title (held-out) one 2/7 trial: subject walked TITLE
+  looking for #text children; RCDATA text lives on the tag token. No
+  doc edit made — held-out must not drive edits; noted for monitoring.
+- T08 adherence 55-72: the false class-docblock claims (tables/foreign
+  content/head unsupported) still driving defensive fallback code.
+- T09 adherence 52-76: serialize_token() purpose/idiom undocumented.
+
+Round-3 hypotheses (committed before round 3 trials):
+1. set_attribute() placement rules + order-control idiom (also fixes
+   the judge-found get_next_tag() typo).
+2. Correct class-level support claims with verified abort conditions
+   (foster parenting, advance-rewind formatting reconstruction) and how
+   aborts surface (get_last_error/get_unsupported_exception/null).
+3. serialize_token() rewrite idiom with verified example.
+
+Operational note: first judge attempt hit the account session limit and
+returned zero verdicts; retried clean after reset. Isolation: trial
+transcripts spot-checked, zero external reads.
+
 ## Corpus revision (after Jon's review)
 
 Per the review: stay task-first; train was saturated for Sonnet and
