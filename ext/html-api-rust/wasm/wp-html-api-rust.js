@@ -2250,6 +2250,11 @@ export function createHtmlApi(wasm) {
 				this.current_virtual = null;
 			}
 
+			if (super.paused_at_incomplete_token() && !this.#incompleteTokenIsEofComment()) {
+				this.breadcrumbs = [...this.open_elements];
+				return false;
+			}
+
 			if (this.is_full_parser && !this.full_parser_scaffolded) {
 				this.full_parser_scaffolded = true;
 				if (!this.full_parser_seen_doctype) {
@@ -4650,10 +4655,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const span = this.#nativeCurrentSpan();
-			const searchStart = span === null ? 0 : span.start + span.length;
-			const commentStart = this.html.indexOf("<!--", searchStart);
-			if (commentStart === -1) {
+			const commentStart = this.#incompleteTokenStart();
+			if (commentStart === null || !this.html.startsWith("<!--", commentStart)) {
 				return false;
 			}
 
@@ -4667,6 +4670,20 @@ export function createHtmlApi(wasm) {
 			this.current_token_namespace = this.current_namespace;
 			this.breadcrumbs = [...this.open_elements, "#comment"];
 			return true;
+		}
+
+		#incompleteTokenIsEofComment() {
+			const tokenStart = this.#incompleteTokenStart();
+			return tokenStart !== null && this.html.startsWith("<!--", tokenStart);
+		}
+
+		#incompleteTokenStart() {
+			if (!super.paused_at_incomplete_token()) {
+				return null;
+			}
+
+			const span = this.#nativeCurrentSpan();
+			return span === null ? 0 : span.start + span.length;
 		}
 
 		#nativeCurrentSpan() {
