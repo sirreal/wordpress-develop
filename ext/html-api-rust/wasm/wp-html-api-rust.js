@@ -76,6 +76,20 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 	"XMP",
 ]);
 
+const HEAD_CONTENT_ELEMENTS = new Set([
+	"BASE",
+	"BASEFONT",
+	"BGSOUND",
+	"LINK",
+	"META",
+	"NOFRAMES",
+	"NOSCRIPT",
+	"SCRIPT",
+	"STYLE",
+	"TEMPLATE",
+	"TITLE",
+]);
+
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 const FORMATTING_ELEMENTS = new Set([
 	"A",
@@ -1110,6 +1124,7 @@ export function createHtmlApi(wasm) {
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
 			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
+			this.full_parser_insertion_mode = this.is_full_parser ? "initial" : "in_body";
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
 			this.context_node = options.contextNode ?? "BODY";
@@ -1277,6 +1292,7 @@ export function createHtmlApi(wasm) {
 					this.pending_real_parser_state = null;
 				}
 				this.skip_current_token = false;
+				this.#subdivideCurrentTextToken();
 				this.#updateTreeStateForCurrentToken(true);
 				if (this.last_error !== null) {
 					return false;
@@ -1284,36 +1300,16 @@ export function createHtmlApi(wasm) {
 				if (this.pending_real_token && this.virtual_tokens.length > 0) {
 					return this.#consumeVirtualToken();
 				}
-				return !this.skip_current_token;
+				if (this.skip_current_token) {
+					return this.next_token();
+				}
+				return true;
 			}
 
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
-				if (
-					this.is_full_parser &&
-					!this.full_parser_scaffolded &&
-					this.get_token_type() === "#doctype"
-				) {
-					this.full_parser_seen_doctype = true;
-					this.#setCompatModeFromCurrentDoctype();
-				}
-
-				if (
-					this.is_full_parser &&
-					!this.full_parser_scaffolded &&
-					this.get_token_type() !== "#doctype"
-				) {
-					this.full_parser_scaffolded = true;
-					if (!this.full_parser_seen_doctype) {
-						this.compat_mode = WP_HTML_Tag_Processor.QUIRKS_MODE;
-					}
-					this.pending_real_token = true;
-					this.pending_real_parser_state = this.parser_state;
-					this.#queueFullParserScaffold();
-					return this.#consumeVirtualToken();
-				}
-
+				this.#subdivideCurrentTextToken();
 				this.#updateTreeStateForCurrentToken(true);
 				if (this.last_error !== null) {
 					return false;
@@ -1595,6 +1591,10 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#applyFullParserInsertionMode(tokenType, tokenName)) {
+				return;
+			}
+
 			if (tokenType !== "#tag") {
 				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements, tokenName];
@@ -1785,6 +1785,7 @@ export function createHtmlApi(wasm) {
 				activeFormattingElements: [...this.active_formatting_elements],
 				encodingConfidence: this.encoding_confidence,
 				baseOpenElementCount: this.base_open_element_count,
+				fullParserInsertionMode: this.full_parser_insertion_mode,
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
 			};
@@ -1796,6 +1797,7 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
+			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.open_elements = [...state.openElements];
@@ -1814,6 +1816,226 @@ export function createHtmlApi(wasm) {
 			this.compat_mode = doctype?.indicated_compatibility_mode === "quirks"
 				? WP_HTML_Tag_Processor.QUIRKS_MODE
 				: WP_HTML_Tag_Processor.NO_QUIRKS_MODE;
+		}
+
+		#subdivideCurrentTextToken() {
+			if (!this.is_virtual() && this.parser_state === STATE_TEXT_NODE) {
+				super.subdivide_text_appropriately();
+			}
+		}
+
+		#applyFullParserInsertionMode(tokenType, tokenName) {
+			if (!this.is_full_parser) {
+				return false;
+			}
+
+			const tagName = tokenType === "#tag" ? this.#getCurrentTreeTagName() : tokenName;
+			if (tagName === null) {
+				return false;
+			}
+
+			const isCloser = tokenType === "#tag" && this.is_tag_closer();
+			const isWhitespaceText = (
+				tokenType === "#text" &&
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
+			);
+
+			while (true) {
+				switch (this.full_parser_insertion_mode) {
+					case "initial":
+						if (tokenType === "#doctype") {
+							this.full_parser_seen_doctype = true;
+							this.#setCompatModeFromCurrentDoctype();
+							this.full_parser_insertion_mode = "before_html";
+							return false;
+						}
+
+						if (isWhitespaceText) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#comment" || tokenType === "#funky-comment" || tokenType === "#presumptuous-tag") {
+							return false;
+						}
+
+						this.compat_mode = WP_HTML_Tag_Processor.QUIRKS_MODE;
+						this.full_parser_insertion_mode = "before_html";
+						continue;
+
+					case "before_html":
+						if (tokenType === "#doctype" || isWhitespaceText) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#comment" || tokenType === "#funky-comment" || tokenType === "#presumptuous-tag") {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.full_parser_scaffolded = true;
+							this.full_parser_insertion_mode = "before_head";
+							return false;
+						}
+
+						if (isCloser && tagName !== "HEAD" && tagName !== "BODY" && tagName !== "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						this.full_parser_scaffolded = true;
+						this.full_parser_insertion_mode = "before_head";
+						this.#queueVirtualPush("HTML");
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+
+					case "before_head":
+						if (tokenType === "#doctype" || isWhitespaceText) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#comment" || tokenType === "#funky-comment" || tokenType === "#presumptuous-tag") {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HEAD") {
+							this.full_parser_insertion_mode = "in_head";
+							return false;
+						}
+
+						if (isCloser && tagName !== "HEAD" && tagName !== "BODY" && tagName !== "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						this.full_parser_insertion_mode = "in_head";
+						this.#queueVirtualPush("HEAD");
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+
+					case "in_head":
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (
+							isWhitespaceText ||
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag" ||
+							(tokenType === "#tag" && !isCloser && HEAD_CONTENT_ELEMENTS.has(tagName))
+						) {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (isCloser && tagName === "HEAD") {
+							this.full_parser_insertion_mode = "after_head";
+							return false;
+						}
+
+						if ((tokenType === "#tag" && !isCloser && tagName === "HEAD") || (isCloser && tagName !== "BODY" && tagName !== "HTML")) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						this.full_parser_insertion_mode = "after_head";
+						this.#queueVirtualPop("HEAD");
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+
+					case "after_head":
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (
+							isWhitespaceText ||
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "BODY") {
+							this.full_parser_insertion_mode = "in_body";
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && HEAD_CONTENT_ELEMENTS.has(tagName)) {
+							this.#bailUnsupported("Cannot process elements after HEAD which reopen the HEAD element.");
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HEAD") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (isCloser && tagName !== "BODY" && tagName !== "HTML") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						this.full_parser_insertion_mode = "in_body";
+						this.#queueVirtualPush("BODY");
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+
+					case "in_body":
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && (tagName === "HTML" || tagName === "BODY")) {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						return false;
+
+					default:
+						return false;
+				}
+			}
+		}
+
+		#queueVirtualPush(tagName, namespaceName = "html") {
+			this.virtual_tokens.push({
+				operation: "push",
+				tagName,
+				namespaceName,
+			});
+		}
+
+		#queueVirtualPop(tagName, namespaceName = "html") {
+			this.virtual_tokens.push({
+				operation: "pop",
+				tagName,
+				namespaceName,
+			});
+		}
+
+		#reprocessCurrentTokenAfterVirtualTokens() {
+			this.pending_real_token = true;
+			this.pending_real_parser_state = this.parser_state;
+			return true;
 		}
 
 		#removeActiveFormattingElement(tagName) {
@@ -1874,6 +2096,33 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (P_CLOSING_START_TAGS.has(tagName)) {
+				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+				if (paragraphIndex !== -1) {
+					this.#queueVirtualPopsFrom(paragraphIndex);
+					return true;
+				}
+			}
+
+			if (tagName === "LI") {
+				const listItemIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
+				if (listItemIndex !== -1) {
+					this.#queueVirtualPopsFrom(listItemIndex);
+					return true;
+				}
+			}
+
+			if (tagName === "DD" || tagName === "DT") {
+				const descriptionIndex = this.#findOpenElementBeforeBoundary(
+					(nodeName) => nodeName === "DD" || nodeName === "DT",
+					LIST_ITEM_SCOPE_BOUNDARIES,
+				);
+				if (descriptionIndex !== -1) {
+					this.#queueVirtualPopsFrom(descriptionIndex);
+					return true;
+				}
+			}
+
 			if (HEADING_ELEMENTS.has(tagName)) {
 				const topIndex = this.open_elements.length - 1;
 				if (

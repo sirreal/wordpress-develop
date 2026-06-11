@@ -324,6 +324,42 @@ assert.equal(fullParserDoctype.get_tag(), "P");
 assert.deepEqual(fullParserDoctype.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 fullParserDoctype.destroy();
 
+const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
+	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
+);
+const fullParserExplicitShellTokens = [];
+while (fullParserExplicitShell.next_token()) {
+	fullParserExplicitShellTokens.push(
+		fullParserExplicitShell.get_token_type() === "#tag"
+			? `${fullParserExplicitShell.is_tag_closer() ? "-" : "+"}${fullParserExplicitShell.get_tag()}`
+			: fullParserExplicitShell.get_token_name(),
+	);
+}
+assert.deepEqual(fullParserExplicitShellTokens, [
+	"+HTML",
+	"+HEAD",
+	"+TITLE",
+	"-HEAD",
+	"+BODY",
+	"+P",
+	"#text",
+	"-P",
+	"+FOOTER",
+	"#text",
+	"-FOOTER",
+	"+UL",
+	"+LI",
+	"#text",
+	"-LI",
+	"+LI",
+	"#text",
+	"-LI",
+	"-UL",
+	"-BODY",
+	"-HTML",
+]);
+fullParserExplicitShell.destroy();
+
 const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
 assert.equal(noQuirksClasses.next_tag("span"), true);
 assert.equal(noQuirksClasses.compat_mode, WP_HTML_Tag_Processor.NO_QUIRKS_MODE);
