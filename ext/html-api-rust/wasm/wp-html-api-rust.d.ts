@@ -62,6 +62,8 @@ export type TextNodeClassification =
 
 export type HtmlNamespace = "html" | "math" | "svg";
 
+export type EncodingConfidence = "tentative" | "certain" | "irrelevant";
+
 export interface WP_HTML_Doctype_Info {
 	name: string | null;
 	public_identifier: string | null;
@@ -162,6 +164,12 @@ export interface SpecialTagInput {
 	namespaceName?: HtmlNamespace;
 }
 
+export interface WP_HTML_Processor_Options {
+	contextNode?: string;
+	fullParser?: boolean;
+	encodingConfidence?: EncodingConfidence;
+}
+
 export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	next_tag(query?: string | NextTagQuery | null): boolean;
 	next_token(): boolean;
@@ -180,7 +188,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 }
 
 export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Constructor {
-	new (html: string, options?: { contextNode?: string; fullParser?: boolean }): WP_HTML_Processor;
+	new (html: string, options?: WP_HTML_Processor_Options): WP_HTML_Processor;
 	readonly MAX_BOOKMARKS: 10000;
 	readonly PROCESS_NEXT_NODE: "process-next-node";
 	readonly REPROCESS_CURRENT_NODE: "reprocess-current-node";
