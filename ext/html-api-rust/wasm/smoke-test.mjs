@@ -489,6 +489,13 @@ assert.equal(fullParserNestedHeadNoscript.next_tag("noscript"), false);
 assert.equal(fullParserNestedHeadNoscript.get_last_error(), null);
 fullParserNestedHeadNoscript.destroy();
 
+const fullParserOpenHeadNoscript = WP_HTML_Processor.create_full_parser("<head><noscript>");
+assert.equal(fullParserOpenHeadNoscript.next_tag("noscript"), true);
+assert.deepEqual(fullParserOpenHeadNoscript.get_breadcrumbs(), ["HTML", "HEAD", "NOSCRIPT"]);
+assert.equal(fullParserOpenHeadNoscript.next_tag("body"), true);
+assert.deepEqual(fullParserOpenHeadNoscript.get_breadcrumbs(), ["HTML", "BODY"]);
+fullParserOpenHeadNoscript.destroy();
+
 const fullParserHeadTemplateText = WP_HTML_Processor.create_full_parser("<template>Hello</template>");
 assert.equal(fullParserHeadTemplateText.next_tag("template"), true);
 assert.deepEqual(fullParserHeadTemplateText.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE"]);

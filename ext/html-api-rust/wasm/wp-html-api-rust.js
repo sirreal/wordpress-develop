@@ -3261,7 +3261,7 @@ export function createHtmlApi(wasm) {
 		#queueFullParserMissingBodyAtEof() {
 			if (
 				!this.is_full_parser ||
-				!["before_head", "in_head", "after_head"].includes(this.full_parser_insertion_mode) ||
+				!["before_head", "in_head", "in_head_noscript", "after_head"].includes(this.full_parser_insertion_mode) ||
 				this.#hasOpenHtmlElement("BODY") ||
 				this.#hasOpenHtmlElement("FRAMESET")
 			) {
@@ -3279,6 +3279,19 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.#queueVirtualPush("HEAD");
+				this.#queueVirtualPop("HEAD");
+			} else if (this.full_parser_insertion_mode === "in_head_noscript") {
+				if (
+					topIndex < 1 ||
+					this.open_elements[topIndex] !== "NOSCRIPT" ||
+					this.open_element_namespaces[topIndex] !== "html" ||
+					this.open_elements[topIndex - 1] !== "HEAD" ||
+					this.open_element_namespaces[topIndex - 1] !== "html"
+				) {
+					return false;
+				}
+
+				this.#queueVirtualPop("NOSCRIPT");
 				this.#queueVirtualPop("HEAD");
 			} else {
 				if (
