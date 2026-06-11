@@ -1742,6 +1742,8 @@ export function createHtmlApi(wasm) {
 					});
 				}
 			}
+
+			this.#bailIfExceededMaxBookmarks();
 		}
 
 		#consumeVirtualToken() {
@@ -1756,6 +1758,7 @@ export function createHtmlApi(wasm) {
 				this.open_element_namespaces.push(token.namespaceName);
 				this.breadcrumbs = [...this.open_elements];
 				this.#setCurrentNamespace(childNamespaceForTag(token.tagName, token.namespaceName));
+				this.#bailIfExceededMaxBookmarks();
 			} else if (token.operation === "pop") {
 				const existingIndex = this.#lastOpenElementIndex(token.tagName, token.namespaceName);
 				if (existingIndex !== -1) {
@@ -1766,7 +1769,7 @@ export function createHtmlApi(wasm) {
 				this.breadcrumbs = [...this.open_elements];
 			}
 
-			return true;
+			return this.last_error === null;
 		}
 
 		#snapshotProcessorState() {
@@ -1834,6 +1837,21 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = true;
+		}
+
+		#bailIfExceededMaxBookmarks() {
+			const maxBookmarks = this.constructor.MAX_BOOKMARKS ?? WP_HTML_Processor.MAX_BOOKMARKS;
+			if (this.open_elements.length <= maxBookmarks) {
+				return false;
+			}
+
+			this.last_error = WP_HTML_Processor.ERROR_EXCEEDED_MAX_BOOKMARKS;
+			this.unsupported_exception = null;
+			this.virtual_tokens = [];
+			this.pending_real_token = false;
+			this.pending_real_parser_state = null;
+			this.skip_current_token = true;
+			return true;
 		}
 
 		#isUnsupportedEncodingMeta() {

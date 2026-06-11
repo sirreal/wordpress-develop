@@ -236,6 +236,17 @@ for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 }
 processorBookmarkLimit.destroy();
 
+for (const html of [
+	"<i>".repeat(WP_HTML_Processor.MAX_BOOKMARKS + 1),
+	"<table><td>".repeat(Math.ceil(WP_HTML_Processor.MAX_BOOKMARKS / 4) + 1),
+]) {
+	const deepNestingProcessor = WP_HTML_Processor.create_fragment(html);
+	while (deepNestingProcessor.next_token()) {
+	}
+	assert.equal(deepNestingProcessor.get_last_error(), WP_HTML_Processor.ERROR_EXCEEDED_MAX_BOOKMARKS);
+	deepNestingProcessor.destroy();
+}
+
 const processorSeekBreadcrumbs = WP_HTML_Processor.create_fragment("<div><img></div><div><hr></div>");
 assert.equal(processorSeekBreadcrumbs.next_tag("img"), true);
 assert.deepEqual(processorSeekBreadcrumbs.get_breadcrumbs(), ["HTML", "BODY", "DIV", "IMG"]);
