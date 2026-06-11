@@ -471,6 +471,11 @@ export function createHtmlApi(wasm) {
 		static TEXT_IS_WHITESPACE = "TEXT_IS_WHITESPACE";
 		static NO_QUIRKS_MODE = "no-quirks-mode";
 		static QUIRKS_MODE = "quirks-mode";
+		static COMMENT_AS_ABRUPTLY_CLOSED_COMMENT = "COMMENT_AS_ABRUPTLY_CLOSED_COMMENT";
+		static COMMENT_AS_CDATA_LOOKALIKE = "COMMENT_AS_CDATA_LOOKALIKE";
+		static COMMENT_AS_HTML_COMMENT = "COMMENT_AS_HTML_COMMENT";
+		static COMMENT_AS_PI_NODE_LOOKALIKE = "COMMENT_AS_PI_NODE_LOOKALIKE";
+		static COMMENT_AS_INVALID_HTML = "COMMENT_AS_INVALID_HTML";
 
 		constructor(html) {
 			this.parser_state = STATE_READY;
@@ -791,7 +796,8 @@ export function createHtmlApi(wasm) {
 
 		set_bookmark(name) {
 			this.#ensureLive();
-			if (this.bookmarks.size >= WP_HTML_Tag_Processor.MAX_BOOKMARKS && !this.bookmarks.has(name)) {
+			const maxBookmarks = this.constructor.MAX_BOOKMARKS ?? WP_HTML_Tag_Processor.MAX_BOOKMARKS;
+			if (this.bookmarks.size >= maxBookmarks && !this.bookmarks.has(name)) {
 				return false;
 			}
 
@@ -1023,6 +1029,7 @@ export function createHtmlApi(wasm) {
 	}
 
 	class WP_HTML_Processor extends WP_HTML_Tag_Processor {
+		static MAX_BOOKMARKS = 10000;
 		static PROCESS_NEXT_NODE = "process-next-node";
 		static REPROCESS_CURRENT_NODE = "reprocess-current-node";
 		static PROCESS_CURRENT_NODE = "process-current-node";

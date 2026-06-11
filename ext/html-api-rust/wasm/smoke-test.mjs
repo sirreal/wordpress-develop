@@ -10,6 +10,8 @@ const {
 } = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 
 assert.equal(version(), "0.1.0");
+assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT, "COMMENT_AS_HTML_COMMENT");
+assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, "COMMENT_AS_PI_NODE_LOOKALIKE");
 
 assert.deepEqual(
 	scanNextTag('<p class="intro">Hi</p>'),
@@ -67,6 +69,14 @@ assert.equal(comment.get_tag(), "xml-stylesheet");
 assert.equal(comment.get_full_comment_text(), "?xml-stylesheet href='x'?");
 comment.destroy();
 
+const tagBookmarkLimit = new WP_HTML_Tag_Processor("<div>");
+assert.equal(tagBookmarkLimit.next_tag("div"), true);
+for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
+	assert.equal(tagBookmarkLimit.set_bookmark(`tag-${i}`), true);
+}
+assert.equal(tagBookmarkLimit.set_bookmark("tag-over-limit"), false);
+tagBookmarkLimit.destroy();
+
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
@@ -78,10 +88,18 @@ assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node")
 assert.equal(WP_HTML_Processor.PROCESS_CURRENT_NODE, "process-current-node");
 assert.equal(WP_HTML_Processor.ERROR_UNSUPPORTED, "unsupported");
 assert.equal(WP_HTML_Processor.ERROR_EXCEEDED_MAX_BOOKMARKS, "exceeded-max-bookmarks");
+assert.equal(WP_HTML_Processor.MAX_BOOKMARKS, 10000);
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
+
+const processorBookmarkLimit = WP_HTML_Processor.create_fragment("<div>");
+assert.equal(processorBookmarkLimit.next_tag("div"), true);
+for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
+	assert.equal(processorBookmarkLimit.set_bookmark(`processor-${i}`), true);
+}
+processorBookmarkLimit.destroy();
 
 const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
 assert.equal(stepProcessor.step(), true);
