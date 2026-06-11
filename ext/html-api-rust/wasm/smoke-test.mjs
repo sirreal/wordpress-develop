@@ -508,6 +508,10 @@ for (const [html, expectedTree] of [
 		'<html>\n  <head>\n  <body>\n    "<"\n\n',
 	],
 	[
+		"</#",
+		"<!-- # -->\n<html>\n  <head>\n  <body>\n\n",
+	],
+	[
 		"<!DOCTYPEhtml>Hello",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
 	],
@@ -1231,6 +1235,7 @@ for (const [html, expectedType, expectedText, expectedTag] of [
 }
 
 for (const [html, expectedText] of [
+	["</#", "#"],
 	["</#>", "#"],
 	["</# foo>", "# foo"],
 	["</• bar>", "• bar"],

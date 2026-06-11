@@ -885,11 +885,18 @@ impl TagProcessor {
                 Some(self.html[scan.tag_start + 9..scan.token_end - 1].to_vec())
             }
             TOKEN_TYPE_COMMENT => self.comment_modifiable_text(scan),
-            TOKEN_TYPE_FUNKY_COMMENT => Some(transform_text(
-                &self.html[scan.tag_start + 2..scan.token_end.saturating_sub(1)],
-                false,
-                NullTransform::Replace,
-            )),
+            TOKEN_TYPE_FUNKY_COMMENT => {
+                let text_end = if self.html.get(scan.token_end.saturating_sub(1)) == Some(&b'>') {
+                    scan.token_end - 1
+                } else {
+                    scan.token_end
+                };
+                Some(transform_text(
+                    &self.html[scan.tag_start + 2..text_end],
+                    false,
+                    NullTransform::Replace,
+                ))
+            }
             TOKEN_TYPE_TAG if scan.token_end > scan.tag_end => {
                 let inner = &self.html[scan.tag_end..scan.token_end];
                 let relative = find_last_subslice(inner, b"</")?;
@@ -2362,7 +2369,12 @@ fn scan_cdata(html: &[u8], tag_start: usize, namespace: u8) -> ScanResult {
 
 fn scan_markup_declaration(html: &[u8], tag_start: usize, token_type: u8) -> ScanResult {
     let Some(relative_end) = html[tag_start + 2..].iter().position(|&byte| byte == b'>') else {
-        return ScanResult::Incomplete;
+        return match token_type {
+            TOKEN_TYPE_COMMENT | TOKEN_TYPE_FUNKY_COMMENT => {
+                ScanResult::Token(non_tag_scan(tag_start, html.len(), token_type))
+            }
+            _ => ScanResult::Incomplete,
+        };
     };
 
     let token_end = tag_start + 2 + relative_end + 1;
@@ -2909,7 +2921,7 @@ mod tests {
     use super::{
         find_script_closer, scan_next_tag, scan_next_token, scan_next_token_in_namespace,
         AttributeValue, ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
-        NAMESPACE_HTML, TOKEN_TYPE_TAG, TOKEN_TYPE_TEXT,
+        NAMESPACE_HTML, TOKEN_TYPE_FUNKY_COMMENT, TOKEN_TYPE_TAG, TOKEN_TYPE_TEXT,
     };
     use std::ptr;
 
@@ -3150,6 +3162,35 @@ mod tests {
         ] {
             assert!(matches!(scan_next_token(html, 0), ScanResult::Incomplete));
         }
+    }
+
+    #[test]
+    fn scanner_consumes_eof_terminated_bogus_comments() {
+        let ScanResult::Token(scan) = scan_next_token(b"</#", 0) else {
+            panic!("Expected a funky comment token.");
+        };
+
+        assert_eq!(scan.token_type, TOKEN_TYPE_FUNKY_COMMENT);
+        assert_eq!(scan.tag_start, 0);
+        assert_eq!(scan.token_end, 3);
+
+        let mut processor = TagProcessor {
+            html: b"</#".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+
+        let scan = processor.current.unwrap();
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"#");
+        assert!(!processor.paused_at_incomplete);
     }
 
     #[test]
