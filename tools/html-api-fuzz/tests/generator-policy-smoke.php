@@ -21,6 +21,14 @@ function html_api_fuzz_smoke_has_non_whitespace_c0_control( string $bytes ): boo
 	return 1 === preg_match( '/[\x01-\x08\x0b\x0e-\x1f]/', $bytes );
 }
 
+function html_api_fuzz_smoke_note_syntax_chars( string $bytes, array &$found ): void {
+	foreach ( array_keys( $found ) as $char ) {
+		if ( false !== strpos( $bytes, $char ) ) {
+			$found[ $char ] = true;
+		}
+	}
+}
+
 function html_api_fuzz_smoke_expect_invalid_argument( callable $callback, string $message ): void {
 	try {
 		$callback();
@@ -166,6 +174,27 @@ $required_generator_features = array(
 	'attr:weird-name',
 	'attr:weird-spacing',
 	'attr:malformed',
+	'ascii:syntax-char',
+	'ascii:syntax-ampersand',
+	'ascii:syntax-less-than',
+	'ascii:syntax-greater-than',
+	'ascii:syntax-double-quote',
+	'ascii:syntax-single-quote',
+	'ascii:syntax-equals',
+	'payload:short-ascii',
+	'payload:empty-ascii',
+	'payload:medium-ascii',
+	'payload:ascii-length-0',
+	'payload:ascii-length-1',
+	'payload:ascii-length-2',
+	'payload:ascii-length-3',
+	'payload:ascii-length-4',
+	'payload:ascii-length-5',
+	'payload:ascii-length-6',
+	'payload:ascii-length-7',
+	'payload:ascii-length-8',
+	'payload:ascii-length-9',
+	'payload:ascii-length-10',
 	'tag:unusual-name',
 	'tag:invalid-name',
 	'tag:alpha-invalid-name',
@@ -192,7 +221,7 @@ $required_generator_features = array(
 );
 $found_generator_features = array_fill_keys( $required_generator_features, false );
 $all_generator_features_found = false;
-foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'incomplete-malformed', 'balanced', 'select', 'formatting-adoption', 'foreign-content' ) as $feature_profile ) {
+foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'text-fragment', 'incomplete-malformed', 'balanced', 'select', 'formatting-adoption', 'foreign-content' ) as $feature_profile ) {
 	for ( $seed = 1; $seed <= 128; ++$seed ) {
 		$generated = \HtmlApiFuzz\Generator::generate( $seed, $feature_profile, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
 		html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "{$feature_profile}/{$seed} feature-coverage sample should produce valid UTF-8 bytes." );
@@ -214,6 +243,61 @@ foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'incomplete-malformed'
 html_api_fuzz_smoke_assert( $all_generator_features_found, 'generated samples should cover all required generator features before exhausting the smoke seed budget.' );
 foreach ( $found_generator_features as $feature => $found ) {
 	html_api_fuzz_smoke_assert( $found, "generated samples should cover {$feature}." );
+}
+
+$syntax_chars = array( '&', '<', '>', '"', "'", '=' );
+$found_syntax_contexts = array(
+	'standalone input'        => array_fill_keys( $syntax_chars, false ),
+	'quoted attribute value'  => array_fill_keys( $syntax_chars, false ),
+	'rawtext element content' => array_fill_keys( $syntax_chars, false ),
+	'comment content'         => array_fill_keys( $syntax_chars, false ),
+);
+$found_text_fragment_lengths = array_fill_keys( range( 0, 10 ), false );
+$found_medium_text_fragment  = false;
+for ( $seed = 1; $seed <= 512; ++$seed ) {
+	$text_fragment = \HtmlApiFuzz\Generator::generate( $seed, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
+	$input_length  = strlen( $text_fragment['input'] );
+	if ( $input_length <= 10 ) {
+		$found_text_fragment_lengths[ $input_length ] = true;
+	} else {
+		$found_medium_text_fragment = true;
+	}
+	html_api_fuzz_smoke_note_syntax_chars( $text_fragment['input'], $found_syntax_contexts['standalone input'] );
+
+	foreach ( array( 'rawtext-rcdata', 'attributes-entities', 'comments-doctype-bogus' ) as $profile ) {
+		$generated = \HtmlApiFuzz\Generator::generate( $seed, $profile, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
+		if ( preg_match_all( '~<(script|style|iframe|noembed|noframes|xmp|noscript)\b(?:[^"\'<>]|"[^"]*"|\'[^\']*\')*>(.*?)</\1>~is', $generated['input'], $matches ) ) {
+			foreach ( $matches[2] as $rawtext ) {
+				html_api_fuzz_smoke_note_syntax_chars( $rawtext, $found_syntax_contexts['rawtext element content'] );
+			}
+		}
+		if ( preg_match_all( '/<!--(.*?)-->/s', $generated['input'], $matches ) ) {
+			foreach ( $matches[1] as $comment ) {
+				html_api_fuzz_smoke_note_syntax_chars( $comment, $found_syntax_contexts['comment content'] );
+			}
+		}
+		if ( preg_match_all( '~\s[-A-Za-z0-9_:.]+\s*=\s*(?:"([^"]*)"|\'([^\']*)\')~', $generated['input'], $matches, PREG_SET_ORDER ) ) {
+			foreach ( $matches as $attribute ) {
+				html_api_fuzz_smoke_note_syntax_chars( ( $attribute[1] ?? '' ) . ( $attribute[2] ?? '' ), $found_syntax_contexts['quoted attribute value'] );
+			}
+		}
+	}
+}
+foreach ( $found_text_fragment_lengths as $length => $found ) {
+	html_api_fuzz_smoke_assert( $found, "text-fragment generation should cover exact {$length}-byte inputs." );
+}
+html_api_fuzz_smoke_assert( $found_medium_text_fragment, 'text-fragment generation should cover medium-sized inputs.' );
+for ( $seed = 1; $seed <= 16; ++$seed ) {
+	$stress_text_fragment = \HtmlApiFuzz\Generator::generate( $seed, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'stress-long', null );
+	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $stress_text_fragment['input'] ), 'text-fragment stress-long generation should produce valid UTF-8 bytes.' );
+	html_api_fuzz_smoke_assert( strlen( $stress_text_fragment['input'] ) >= 64, 'text-fragment stress-long generation should honor the lower long-input bound.' );
+	html_api_fuzz_smoke_assert( strlen( $stress_text_fragment['input'] ) <= 1024, 'text-fragment stress-long generation should honor the upper long-input bound.' );
+	html_api_fuzz_smoke_assert( in_array( 'input:long', $stress_text_fragment['parameters']['features'], true ), 'text-fragment stress-long generation should record the long-input feature.' );
+}
+foreach ( $found_syntax_contexts as $context => $found_chars ) {
+	foreach ( $found_chars as $char => $found ) {
+		html_api_fuzz_smoke_assert( $found, "{$context} should expose syntax character {$char} in final generated HTML." );
+	}
 }
 
 $found_resource_stress = false;

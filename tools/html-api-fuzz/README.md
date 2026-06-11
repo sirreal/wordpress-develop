@@ -306,6 +306,9 @@ The generator uses a structural HTML grammar with weighted profiles:
   variants, CDATA sections in foreign content, case-mangled `foreignObject`)
 - `rawtext-rcdata` (script/style/iframe/noembed/noframes/xmp/noscript,
   title/textarea, occasional `plaintext`)
+- `text-fragment` (standalone terminal payloads, biased toward exact
+  0-10 byte inputs plus medium syntax-heavy text unless `stress-long` is
+  selected explicitly)
 - `formatting-adoption` (random formatting elements plus explicit
   adoption-agency shapes: misnested closers, block-boundary formatting,
   reconstruction across siblings, nested anchors, Noah's Ark overflow,
