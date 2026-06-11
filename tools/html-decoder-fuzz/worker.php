@@ -22,6 +22,7 @@ $options = Cli::parse_args(
 		'cases'          => 1000,
 		'start-case'     => 0,
 		'max-bytes'      => 4096,
+		'mode'           => 'oracle',
 		'output-dir'     => '',
 		'progress-every' => 500,
 	)
@@ -31,6 +32,7 @@ Cli::require_int_at_least( $options, 'cases', 1 );
 Cli::require_int_at_least( $options, 'start-case', 0 );
 Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_int_at_least( $options, 'progress-every', 1 );
+Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
 
 Bootstrap::load_targets();
 
@@ -39,7 +41,7 @@ foreach ( $oracles->drain_events() as $event ) {
 	Cli::emit( array( 'type' => 'oracle-event' ) + $event );
 }
 
-if ( ! $oracles->has_required() ) {
+if ( 'oracle' === $options['mode'] && ! $oracles->has_required() ) {
 	Cli::emit(
 		array(
 			'type'   => 'fatal',
@@ -82,6 +84,7 @@ Cli::emit(
 		'start_case'  => $start,
 		'cases'       => $options['cases'],
 		'max_bytes'   => $options['max-bytes'],
+		'mode'        => $options['mode'],
 		'environment' => Cli::environment_metadata( $oracles ),
 	)
 );
@@ -93,12 +96,14 @@ for ( $case = $start; $case < $end; $case++ ) {
 
 	$prng      = new Prng( "{$seed}:{$case}" );
 	$generator = new Generator( $prng, $options['max-bytes'], $reference_names );
-	$generated = $generator->generate();
+	$generated = 'bytes' === $options['mode'] ? $generator->generate_bytes() : $generator->generate();
 	$payload   = $generated['payload'];
 	$context   = $generated['context'];
 	$strategy  = $generated['strategy'];
 
-	$failures = $checks->run( $context, $payload );
+	$failures = 'bytes' === $options['mode']
+		? $checks->run_without_oracle( $context, $payload )
+		: $checks->run( $context, $payload );
 
 	++$stats['cases'];
 	$stats['bytes']                     += strlen( $payload );
@@ -112,6 +117,7 @@ for ( $case = $start; $case < $end; $case++ ) {
 			'type'       => 'failure',
 			'seed'       => $seed,
 			'case'       => $case,
+			'mode'       => $options['mode'],
 			'context'    => $context,
 			'strategy'   => $strategy,
 			'input_size' => strlen( $payload ),
@@ -124,7 +130,7 @@ for ( $case = $start; $case < $end; $case++ ) {
 		}
 
 		if ( '' !== $output_dir ) {
-			$signature_key = Cli::failure_signature_key( $record['signatures'] );
+			$signature_key = Cli::failure_signature_key( $record['signatures'], $record['mode'] );
 			$base_case_dir = "{$output_dir}/failure-seed{$seed}-case{$case}";
 			$case_dir      = $base_case_dir;
 			$dir_matches_signature = static function ( string $dir ) use ( $signature_key ): bool {
@@ -133,10 +139,13 @@ for ( $case = $start; $case < $end; $case++ ) {
 				}
 
 				$manifest = json_decode( (string) @file_get_contents( "{$dir}/failure.json" ), true );
+				$manifest_mode = $manifest['mode'] ?? 'oracle';
 				return is_array( $manifest ) &&
 					isset( $manifest['signatures'] ) &&
 					is_array( $manifest['signatures'] ) &&
-					$signature_key === Cli::failure_signature_key( $manifest['signatures'] );
+					is_string( $manifest_mode ) &&
+					in_array( $manifest_mode, array( 'oracle', 'bytes' ), true ) &&
+					$signature_key === Cli::failure_signature_key( $manifest['signatures'], $manifest_mode );
 			};
 
 			if ( is_link( $case_dir ) || ( is_dir( $case_dir ) && ! $dir_matches_signature( $case_dir ) ) ) {
@@ -194,6 +203,9 @@ for ( $case = $start; $case < $end; $case++ ) {
 				exit( 2 );
 			}
 		} else {
+			if ( getenv( 'HTML_DECODER_FUZZ_BOGUS_FAILURE_MODE' ) ) {
+				$record['mode'] = 'bogus';
+			}
 			Cli::emit( $record );
 		}
 	}

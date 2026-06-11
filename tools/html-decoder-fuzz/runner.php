@@ -23,6 +23,7 @@ $options = Cli::parse_args(
 		'cases-per-batch'             => 2000,
 		'seed-base'                   => 0,
 		'max-bytes'                   => 4096,
+		'mode'                        => 'oracle',
 		'output-dir'                  => '',
 		'stall-timeout'               => 120,
 		'artifact-retention'          => 'bounded',
@@ -41,6 +42,7 @@ Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_int_at_least( $options, 'stall-timeout', 1 );
 Cli::require_int_at_least( $options, 'max-artifacts-per-signature', 0 );
 Cli::require_int_at_least( $options, 'max-stderr-bytes', 0 );
+Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
 Cli::require_one_of( $options, 'artifact-retention', array( 'bounded', 'all', 'none' ) );
 Cli::require_one_of( $options, 'summary-mode', array( 'all', 'failures', 'none' ) );
 
@@ -144,8 +146,8 @@ $startup_verification_unavailable = false;
 $existing_artifacts_by_signature  = array();
 $unverified_artifact_signatures    = array();
 $partial_artifact_dirs            = array();
-$startup_checks                   = null;
-$startup_checks_available         = null;
+$startup_checks                   = array();
+$startup_checks_available         = array();
 $is_replayable_failure_manifest   = static function ( $manifest ): bool {
 	if ( ! is_array( $manifest ) || ! isset( $manifest['signatures'], $manifest['payload_base64'], $manifest['context'], $manifest['failures'], $manifest['input_size'] ) ) {
 		return false;
@@ -154,6 +156,9 @@ $is_replayable_failure_manifest   = static function ( $manifest ): bool {
 		return false;
 	}
 	if ( ! in_array( $manifest['context'], array( 'text', 'attribute', 'both' ), true ) ) {
+		return false;
+	}
+	if ( isset( $manifest['mode'] ) && ! in_array( $manifest['mode'], array( 'oracle', 'bytes' ), true ) ) {
 		return false;
 	}
 	$payload = base64_decode( $manifest['payload_base64'], true );
@@ -176,18 +181,19 @@ $is_replayable_failure_manifest   = static function ( $manifest ): bool {
 	sort( $actual, SORT_STRING );
 	return $expected === $actual;
 };
-$startup_verifier_available = static function () use ( &$startup_checks, &$startup_checks_available ): bool {
-	if ( null === $startup_checks_available ) {
+$startup_verifier_available = static function ( string $mode ) use ( &$startup_checks, &$startup_checks_available ): bool {
+	if ( ! isset( $startup_checks_available[ $mode ] ) ) {
 		Bootstrap::load_targets();
 		$oracles                  = Oracles::build();
-		$startup_checks_available = $oracles->has_required();
-		$startup_checks           = $startup_checks_available ? new Checks( $oracles ) : null;
+		$startup_checks_available[ $mode ] = 'bytes' === $mode || $oracles->has_required();
+		$startup_checks[ $mode ]           = $startup_checks_available[ $mode ] ? new Checks( $oracles ) : null;
 	}
 
-	return $startup_checks_available && null !== $startup_checks;
+	return $startup_checks_available[ $mode ] && null !== $startup_checks[ $mode ];
 };
 $failure_manifest_reproduces = static function ( array $manifest ) use ( &$startup_checks, $startup_verifier_available ): ?bool {
-	if ( ! $startup_verifier_available() ) {
+	$mode = $manifest['mode'] ?? 'oracle';
+	if ( ! $startup_verifier_available( $mode ) ) {
 		return null;
 	}
 
@@ -200,7 +206,9 @@ $failure_manifest_reproduces = static function ( array $manifest ) use ( &$start
 		array_unique(
 			array_map(
 				static fn( array $failure ): string => $failure['signature'],
-				$startup_checks->run( $manifest['context'], $payload )
+				'bytes' === $mode
+					? $startup_checks[ $mode ]->run_without_oracle( $manifest['context'], $payload )
+					: $startup_checks[ $mode ]->run( $manifest['context'], $payload )
 			)
 		)
 	);
@@ -237,7 +245,7 @@ foreach ( $startup_artifact_dirs as $artifact_dir ) {
 	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
 	if ( $is_replayable_failure_manifest( $manifest ) ) {
 		$reproduces = $failure_manifest_reproduces( $manifest );
-		$signature_key = Cli::failure_signature_key( $manifest['signatures'] );
+		$signature_key = Cli::failure_signature_key( $manifest['signatures'], $manifest['mode'] ?? 'oracle' );
 		if ( null === $reproduces ) {
 			$startup_verification_unavailable = true;
 			$unverified_artifact_signatures[ $signature_key ] = true;
@@ -333,6 +341,8 @@ $spawn_lane = static function ( int $lane_id ) use ( &$next_seed, &$stderr_bytes
 		(string) $options['cases-per-batch'],
 		'--max-bytes',
 		(string) $options['max-bytes'],
+		'--mode',
+		$options['mode'],
 		'--output-dir',
 		$output_dir,
 		'--progress-every',
@@ -464,7 +474,7 @@ $drain_lane_stderr = static function ( array &$lane ) use ( &$state, &$stop_requ
 };
 
 $apply_artifact_retention = static function ( array &$record ) use ( &$state, &$retained_artifact_dirs, $options ): ?string {
-	$signature_key = Cli::failure_signature_key( $record['signatures'] );
+	$signature_key = Cli::failure_signature_key( $record['signatures'], $record['mode'] ?? 'oracle' );
 	$record['signature_key'] = $signature_key;
 
 	$artifact_dir = $record['artifact_dir'] ?? null;
@@ -545,6 +555,16 @@ $handle_line = static function ( string $line, int $lane_id ) use ( &$state, &$s
 				$summarize_record( $record );
 				return 'invalid';
 			}
+			$record['mode'] = $record['mode'] ?? 'oracle';
+			if ( ! in_array( $record['mode'], array( 'oracle', 'bytes' ), true ) ) {
+				++$state['harness_errors'];
+				$state['stop_reason'] = 'harness-error';
+				$stop_requested       = true;
+				fwrite( STDERR, "malformed failure mode on lane {$lane_id}\n" );
+				$record['type'] = 'malformed-worker-record';
+				$summarize_record( $record );
+				return 'invalid';
+			}
 			$prune_artifact_dir = $apply_artifact_retention( $record );
 			++$state['failures'];
 			fwrite( STDERR, "FAILURE lane {$lane_id} seed {$record['seed']} case {$record['case']}: " . implode( ', ', $record['signatures'] ) . "\n" );
@@ -570,6 +590,7 @@ $handle_line = static function ( string $line, int $lane_id ) use ( &$state, &$s
 				$state['failure_seeds'][] = array(
 					'seed'              => $record['seed'],
 					'case'              => $record['case'],
+					'mode'              => $record['mode'],
 					'context'           => $record['context'],
 					'signatures'        => $record['signatures'],
 					'signature_key'     => $record['signature_key'],

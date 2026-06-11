@@ -33,6 +33,11 @@ class Targets {
 					return $result;
 				};
 				break;
+
+			case 'byte-no-amp-identity':
+				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
+				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );
+				break;
 		}
 
 		return $targets;

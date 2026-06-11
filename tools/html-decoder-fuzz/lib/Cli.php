@@ -112,10 +112,10 @@ class Cli {
 		return is_array( $stat ) && isset( $stat['nlink'] ) && $stat['nlink'] > 1;
 	}
 
-	public static function failure_signature_key( array $signatures ): string {
+	public static function failure_signature_key( array $signatures, string $mode = 'oracle' ): string {
 		$normalized = array_map( 'strval', $signatures );
 		sort( $normalized, SORT_STRING );
-		return hash( 'sha256', implode( "\0", $normalized ) );
+		return hash( 'sha256', $mode . "\0" . implode( "\0", $normalized ) );
 	}
 
 	public static function remove_tree( string $path, string $root ): bool {

@@ -84,6 +84,30 @@ class Generator {
 		);
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_bytes(): array {
+		$strategy = $this->prng->weighted(
+			array(
+				'bytes-uniform'      => 35,
+				'bytes-no-amp'       => 20,
+				'bytes-with-amp'     => 20,
+				'bytes-invalid-utf8' => 15,
+				'bytes-delimiters'   => 10,
+			)
+		);
+
+		$method  = 'gen_' . str_replace( '-', '_', $strategy );
+		$payload = $this->$method();
+
+		return array(
+			'context'  => 'both',
+			'strategy' => $strategy,
+			'payload'  => substr( $payload, 0, $this->max_bytes ),
+		);
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -205,6 +229,67 @@ class Generator {
 		);
 
 		return $this->plain_text() . $this->prng->choice( $lookalikes ) . $this->plain_text();
+	}
+
+	private function gen_bytes_uniform(): string {
+		$length = max( 1, $this->prng->biased_length( $this->max_bytes ) );
+		return $this->prng->bytes( $length );
+	}
+
+	private function gen_bytes_no_amp(): string {
+		$length = max( 1, $this->prng->biased_length( $this->max_bytes ) );
+		$out    = '';
+		while ( strlen( $out ) < $length ) {
+			$byte = $this->prng->int( 0, 255 );
+			if ( 0x26 === $byte ) {
+				$byte = 0x00;
+			}
+			$out .= chr( $byte );
+		}
+		return $out;
+	}
+
+	private function gen_bytes_with_amp(): string {
+		$prefixes = array( '&', '&#', '&#x', '&#X', '&amp', '&not', '&copy', '&NoSuchEntity;' );
+		$payload  = $this->prng->bytes( $this->prng->int( 0, min( 32, $this->max_bytes ) ) );
+		$payload .= $this->prng->choice( $prefixes );
+		$payload .= $this->prng->bytes( $this->prng->int( 0, min( 64, $this->max_bytes ) ) );
+		return $payload;
+	}
+
+	private function gen_bytes_invalid_utf8(): string {
+		$atoms = array(
+			"\x80",
+			"\xBF",
+			"\xC0\xAF",
+			"\xE0\x80\x80",
+			"\xF0\x80\x80\x80",
+			"\xF5\x80\x80\x80",
+			"\xED\xA0\x80",
+			"\xFE",
+			"\xFF",
+		);
+
+		$out   = '';
+		$count = $this->prng->int( 1, 12 );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$out .= $this->prng->bytes( $this->prng->int( 0, 4 ) );
+			$out .= $this->prng->choice( $atoms );
+		}
+		return $out;
+	}
+
+	private function gen_bytes_delimiters(): string {
+		$delimiters = array( "\x00", "\r", '<', '"', '&', '=', "\n", "\t", "\f" );
+		$out        = '';
+		$count      = $this->prng->int( 1, 24 );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$out .= $this->prng->choice( $delimiters );
+			if ( $this->prng->chance( 35 ) ) {
+				$out .= $this->prng->bytes( $this->prng->int( 1, 4 ) );
+			}
+		}
+		return $out;
 	}
 
 	private function named_exact(): string {

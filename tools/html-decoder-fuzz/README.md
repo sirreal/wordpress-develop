@@ -30,12 +30,15 @@ The primary oracle is PHP's HTML5 parser:
 oracle because it does not implement the HTML attribute-context rule for
 semicolonless named references followed by `=` or an alphanumeric byte.
 
-The generator neutralizes parser-vs-decoder confounders by producing valid
-UTF-8 payloads with no raw `<`, no raw double quote, no CR, and no NUL. This
-keeps the DOM parser focused on character-reference decoding instead of tag
-structure, attribute termination, input-preprocessing newline normalization, or
-NUL substitution. Raw invalid UTF-8 inside or around references is left for a
-later extension.
+In the default `oracle` mode, the generator neutralizes parser-vs-decoder
+confounders by producing valid UTF-8 payloads with no raw `<`, no raw double
+quote, no CR, and no NUL. This keeps the DOM parser focused on
+character-reference decoding instead of tag structure, attribute termination,
+input-preprocessing newline normalization, or NUL substitution.
+
+The separate `bytes` mode deliberately generates arbitrary byte payloads,
+including invalid UTF-8, NUL, raw `<`, raw double quote, and CR. These payloads
+never go to the DOM oracle. They run only oracle-free decoder invariants.
 
 ## Checks
 
@@ -50,6 +53,11 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
    ASCII search strings in both case-sensitive and ASCII-case-insensitive modes.
 5. Assert decoded output is valid UTF-8.
 6. Assert text without `&` is an identity decode.
+
+In `bytes` mode, checks 1, 4, and 5 are skipped because they depend on
+DOM-safe UTF-8 payloads or a DOM-derived decoded attribute value. The lane keeps
+the reader rebuild, advance/overrun, and no-`&` identity checks for both text
+and attribute contexts.
 
 Decoding is not treated as idempotent; `&amp;amp;` should decode only one level
 to `&amp;`.
@@ -76,6 +84,10 @@ strategies for:
 - nonexistent lookalikes and ampersand boundaries
 - plain no-ampersand text
 
+`bytes` mode uses separate weighted strategies for uniform random bytes,
+no-ampersand byte strings, arbitrary bytes around `&` boundaries, invalid UTF-8
+sequences, and raw HTML delimiters/control bytes.
+
 ## Common Commands
 
 Run the smoke test:
@@ -88,6 +100,12 @@ Run one worker batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --seed 1 --cases 5000
+```
+
+Run one oracle-free arbitrary-byte worker batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:
@@ -141,6 +159,7 @@ Replay a failure, an input file, or a generated case:
 php tools/html-decoder-fuzz/replay.php --failure artifacts/html-decoder-fuzz/run-.../failure-seedS-caseN/failure.json
 php tools/html-decoder-fuzz/replay.php --input payload.txt --context attribute
 php tools/html-decoder-fuzz/replay.php --seed 123 --case 45
+php tools/html-decoder-fuzz/replay.php --mode bytes --seed 123 --case 45
 ```
 
 Minimize a failure while preserving its signature:
@@ -179,7 +198,9 @@ mutation-tested broken targets:
   followers
 - off-by-one `read_character_reference()` match lengths
 - partial-prefix `attribute_starts_with()` matches
+- raw byte payloads without `&` not decoding identically
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
-`skip-c1-remap`, `attribute-semicolonless`, or `match-length-off-by-one` before
-running `worker.php`, `runner.php`, `replay.php`, or `minimize.php`.
+`skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`, or
+`byte-no-amp-identity` before running `worker.php`, `runner.php`, `replay.php`,
+or `minimize.php`.

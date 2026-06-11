@@ -21,17 +21,20 @@ $options = Cli::parse_args(
 		'failure'    => '',
 		'input'      => '',
 		'context'    => 'both',
+		'mode'       => 'oracle',
 		'signature'  => '',
 		'output-dir' => '',
 	)
 );
 
 Cli::require_one_of( $options, 'context', array( 'text', 'attribute', 'both' ) );
+Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
 
 Bootstrap::load_targets();
 
 $payload    = null;
 $context    = $options['context'];
+$mode       = $options['mode'];
 $signature  = $options['signature'];
 $source_dir = $options['output-dir'];
 
@@ -43,8 +46,13 @@ if ( '' !== $options['failure'] ) {
 	}
 	$payload = base64_decode( $manifest['payload_base64'], true );
 	$context = $manifest['context'] ?? $context;
+	$mode    = $manifest['mode'] ?? 'oracle';
 	if ( ! in_array( $context, array( 'text', 'attribute', 'both' ), true ) ) {
 		fwrite( STDERR, "Invalid context in failure manifest: {$context}\n" );
+		exit( 2 );
+	}
+	if ( ! in_array( $mode, array( 'oracle', 'bytes' ), true ) ) {
+		fwrite( STDERR, "Invalid mode in failure manifest: {$mode}\n" );
 		exit( 2 );
 	}
 	if ( '' === $signature ) {
@@ -78,15 +86,16 @@ if ( '' === $signature ) {
 }
 
 $oracles = Oracles::build();
-if ( ! $oracles->has_required() ) {
+if ( 'oracle' === $mode && ! $oracles->has_required() ) {
 	fwrite( STDERR, "Required oracle unavailable; cannot minimize.\n" );
 	exit( 2 );
 }
 
 $checks = new Checks( $oracles );
 
-$reproduces = static function ( string $candidate ) use ( $checks, $context, $signature ): bool {
-	foreach ( $checks->run( $context, $candidate ) as $failure ) {
+$reproduces = static function ( string $candidate ) use ( $checks, $context, $mode, $signature ): bool {
+	$failures = 'bytes' === $mode ? $checks->run_without_oracle( $context, $candidate ) : $checks->run( $context, $candidate );
+	foreach ( $failures as $failure ) {
 		if ( $failure['signature'] === $signature ) {
 			return true;
 		}
@@ -149,6 +158,7 @@ $payload_path  = "{$out_dir}/minimized-payload.txt";
 $manifest_path = "{$out_dir}/minimized.json";
 $manifest      = json_encode(
 	array(
+		'mode'            => $mode,
 		'context'         => $context,
 		'signature'       => $signature,
 		'original_size'   => strlen( $payload ),

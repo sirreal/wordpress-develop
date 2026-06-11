@@ -126,6 +126,27 @@ function broken_run( Oracles $oracles, array $real_targets, array $overrides ): 
 	return array_keys( $seen );
 }
 
+/**
+ * @return string[] Distinct check names observed.
+ */
+function broken_oracle_free_run( Oracles $oracles, array $real_targets, array $overrides ): array {
+	$checks = new Checks( $oracles, array_merge( $real_targets, $overrides ) );
+	$seen   = array();
+	$cases  = array(
+		array( 'both', "raw\x00bytes" ),
+		array( 'both', "\xFF\xFE<\"\r" ),
+		array( 'both', "a&notx\x00z" ),
+	);
+
+	foreach ( $cases as $case ) {
+		foreach ( $checks->run_without_oracle( $case[0], $case[1] ) as $failure ) {
+			$seen[ $failure['check'] ] = true;
+		}
+	}
+
+	return array_keys( $seen );
+}
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -179,6 +200,21 @@ $seen = broken_run(
 );
 check( 'catches partial-prefix attribute matcher', in_array( 'attribute-starts-with-mismatch', $seen, true ), implode( ',', $seen ) );
 
+$seen = broken_oracle_free_run(
+	$oracles,
+	$real_targets,
+	array(
+		'decode_text'      => static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) ),
+		'decode_attribute' => static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) ),
+	)
+);
+check(
+	'catches oracle-free no-amp byte identity violations',
+	in_array( 'text-without-ampersand-not-identity', $seen, true ) &&
+		in_array( 'attribute-without-ampersand-not-identity', $seen, true ),
+	implode( ',', $seen )
+);
+
 $names = Bootstrap::named_reference_names();
 check( 'uses generated named-reference map', count( $names ) > 2000, (string) count( $names ) );
 
@@ -202,6 +238,38 @@ check( 'all 10 strategies appear', 10 === count( $strategies ), implode( ',', ar
 check( 'generated cases run both contexts', array( 'both' ) === array_keys( $contexts ), implode( ',', array_keys( $contexts ) ) );
 check( 'generated payloads are oracle-safe', 0 === $unsafe, (string) $unsafe );
 
+$byte_strategies = array();
+$byte_contexts   = array();
+$byte_unsafe     = 0;
+$byte_nul        = 0;
+for ( $i = 0; $i < $total; $i++ ) {
+	$generated = ( new Generator( new Prng( "byte-smoke:{$i}" ), 4096, $names ) )->generate_bytes();
+	$byte_strategies[ $generated['strategy'] ] = true;
+	$byte_contexts[ $generated['context'] ]    = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$byte_unsafe;
+	}
+	if ( str_contains( $generated['payload'], "\x00" ) ) {
+		++$byte_nul;
+	}
+}
+check( 'all 5 byte-space strategies appear', 5 === count( $byte_strategies ), implode( ',', array_keys( $byte_strategies ) ) );
+check( 'byte-space cases run both contexts', array( 'both' ) === array_keys( $byte_contexts ), implode( ',', array_keys( $byte_contexts ) ) );
+check( 'byte-space generator emits unsafe payloads', $byte_unsafe > 0, (string) $byte_unsafe );
+check( 'byte-space generator emits NUL bytes', $byte_nul > 0, (string) $byte_nul );
+
+$trap_oracles = new class() extends Oracles {
+	public function decode( string $context, string $payload ): string {
+		throw new \RuntimeException( "oracle trap called for {$context} " . bin2hex( $payload ) );
+	}
+};
+$unsafe_byte_failures = ( new Checks( $trap_oracles ) )->run_without_oracle( 'both', "\xFF\x00<\"\r" );
+check(
+	'oracle-free byte checks accept unsafe payloads',
+	array() === $unsafe_byte_failures,
+	json_encode( $unsafe_byte_failures )
+);
+
 $fuzz_failures = 0;
 for ( $i = 0; $i < 300; $i++ ) {
 	$generated = ( new Generator( new Prng( "smoke-run:{$i}" ), 4096, $names ) )->generate();
@@ -212,6 +280,43 @@ for ( $i = 0; $i < 300; $i++ ) {
 	}
 }
 check( '300-case fuzz run clean', 0 === $fuzz_failures );
+
+$byte_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'bytes', '--seed', '1', '--cases', '200', '--progress-every', '200' ) );
+check( '200-case byte-space worker clean', 0 === $byte_worker['code'], $byte_worker['stdout'] . $byte_worker['stderr'] );
+
+$byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
+remove_tree( $byte_runner_dir );
+$byte_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'bytes',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'200',
+		'--summary-mode',
+		'none',
+		'--output-dir',
+		$byte_runner_dir,
+	)
+);
+$byte_runner_state = is_file( $byte_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $byte_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'200-case byte-space runner clean',
+	0 === $byte_runner['code'] &&
+		200 === ( $byte_runner_state['cases'] ?? 0 ) &&
+		200 === ( $byte_runner_state['by_context']['both'] ?? 0 ),
+	$byte_runner['stdout'] . $byte_runner['stderr'] . json_encode( $byte_runner_state )
+);
+remove_tree( $byte_runner_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );
@@ -1113,6 +1218,188 @@ check( 'worker rejects non-numeric integer options', 2 === $bad_integer['code'],
 $huge_integer = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '999999999999999999999999999999999999999' ) );
 check( 'worker rejects out-of-range integer options', 2 === $huge_integer['code'], $huge_integer['stdout'] . $huge_integer['stderr'] );
 
+$byte_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-' . getmypid();
+remove_tree( $byte_pipeline_dir );
+$faulted_byte_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'bytes',
+		'--seed',
+		'1',
+		'--cases',
+		'200',
+		'--output-dir',
+		$byte_pipeline_dir,
+		'--progress-every',
+		'200',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'byte-no-amp-identity' )
+);
+check( 'faulted byte-space worker reports findings', 1 === $faulted_byte_worker['code'], $faulted_byte_worker['stdout'] . $faulted_byte_worker['stderr'] );
+
+$byte_failure_files = glob( $byte_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted byte-space worker writes failure artifact', is_array( $byte_failure_files ) && array() !== $byte_failure_files );
+
+$byte_failure_file = is_array( $byte_failure_files ) && array() !== $byte_failure_files ? $byte_failure_files[0] : null;
+if ( null !== $byte_failure_file ) {
+	$byte_manifest = json_decode( (string) file_get_contents( $byte_failure_file ), true );
+	check( 'byte-space failure artifact records mode', 'bytes' === ( $byte_manifest['mode'] ?? null ) );
+
+	$byte_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $byte_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'byte-no-amp-identity' )
+	);
+	check( 'faulted byte-space replay reproduces finding', 1 === $byte_replay['code'], $byte_replay['stdout'] . $byte_replay['stderr'] );
+
+	$byte_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $byte_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'byte-no-amp-identity' )
+	);
+	check( 'faulted byte-space minimizer preserves signature', 0 === $byte_minimize['code'], $byte_minimize['stdout'] . $byte_minimize['stderr'] );
+}
+remove_tree( $byte_pipeline_dir );
+
+$byte_mode_collision_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-mode-collision-' . getmypid();
+remove_tree( $byte_mode_collision_dir );
+mkdir( $byte_mode_collision_dir . '/failure-seed1-case3', 0777, true );
+file_put_contents(
+	$byte_mode_collision_dir . '/failure-seed1-case3/failure.json',
+	json_encode(
+		array(
+			'signatures' => array(
+				'text-without-ampersand-not-identity:text',
+				'reader-decode-mismatch:text',
+				'attribute-without-ampersand-not-identity:attribute',
+				'reader-decode-mismatch:attribute',
+			),
+		)
+	)
+);
+$byte_mode_collision_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'bytes',
+		'--seed',
+		'1',
+		'--cases',
+		'4',
+		'--output-dir',
+		$byte_mode_collision_dir,
+		'--progress-every',
+		'4',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'byte-no-amp-identity' )
+);
+$byte_mode_collision_suffixed = glob( $byte_mode_collision_dir . '/failure-seed1-case3-sig*/failure.json' );
+check(
+	'worker separates same-signature artifacts by mode',
+	1 === $byte_mode_collision_worker['code'] &&
+		is_file( $byte_mode_collision_dir . '/failure-seed1-case3/failure.json' ) &&
+		is_array( $byte_mode_collision_suffixed ) &&
+		array() !== $byte_mode_collision_suffixed,
+	$byte_mode_collision_worker['stdout'] . $byte_mode_collision_worker['stderr']
+);
+remove_tree( $byte_mode_collision_dir );
+
+$byte_runner_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-fault-' . getmypid();
+remove_tree( $byte_runner_pipeline_dir );
+$faulted_byte_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'bytes',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'200',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$byte_runner_pipeline_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'byte-no-amp-identity' )
+);
+$faulted_byte_runner_state = is_file( $byte_runner_pipeline_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $byte_runner_pipeline_dir . '/state.json' ), true )
+	: array();
+$faulted_byte_runner_modes = array_unique( array_map( static fn( $seed ): string => $seed['mode'] ?? '', $faulted_byte_runner_state['failure_seeds'] ?? array() ) );
+check(
+	'faulted byte-space runner reports findings',
+	1 === $faulted_byte_runner['code'] &&
+		( $faulted_byte_runner_state['failures'] ?? 0 ) > 0 &&
+		array( 'bytes' ) === array_values( $faulted_byte_runner_modes ),
+	$faulted_byte_runner['stdout'] . $faulted_byte_runner['stderr'] . json_encode( $faulted_byte_runner_state )
+);
+remove_tree( $byte_runner_pipeline_dir );
+
+$mixed_mode_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-mixed-mode-runner-' . getmypid();
+remove_tree( $mixed_mode_runner_dir );
+$mixed_mode_oracle_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$mixed_mode_runner_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+$mixed_mode_byte_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'bytes',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--max-artifacts-per-signature',
+		'1',
+		'--output-dir',
+		$mixed_mode_runner_dir,
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+$mixed_mode_state = is_file( $mixed_mode_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $mixed_mode_runner_dir . '/state.json' ), true )
+	: array();
+$mixed_mode_failure_modes = array_unique( array_map( static fn( $seed ): string => $seed['mode'] ?? '', $mixed_mode_state['failure_seeds'] ?? array() ) );
+check(
+	'runner separates retained same-signature artifacts by mode',
+	1 === $mixed_mode_oracle_runner['code'] &&
+		1 === $mixed_mode_byte_runner['code'] &&
+		in_array( 'bytes', $mixed_mode_failure_modes, true ),
+	$mixed_mode_oracle_runner['stdout'] . $mixed_mode_oracle_runner['stderr'] . $mixed_mode_byte_runner['stdout'] . $mixed_mode_byte_runner['stderr'] . json_encode( $mixed_mode_state['artifact_retention'] ?? null )
+);
+remove_tree( $mixed_mode_runner_dir );
+
 $pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-' . getmypid();
 remove_tree( $pipeline_dir );
 $faulted_worker = run_process(
@@ -1472,6 +1759,40 @@ check(
 	$corrupt_runner['stdout'] . $corrupt_runner['stderr']
 );
 remove_tree( $corrupt_runner_dir );
+
+$bogus_mode_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-bogus-mode-' . getmypid();
+remove_tree( $bogus_mode_dir );
+$bogus_mode_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--lanes',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'100',
+		'--seed-base',
+		'1',
+		'--cases-per-batch',
+		'100',
+		'--output-dir',
+		$bogus_mode_dir,
+	),
+	array(
+		'HTML_DECODER_FUZZ_FAULT'              => 'skip-c1-remap',
+		'HTML_DECODER_FUZZ_BOGUS_FAILURE_MODE' => '1',
+	)
+);
+$bogus_mode_state = is_file( $bogus_mode_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $bogus_mode_dir . '/state.json' ), true )
+	: array();
+check(
+	'runner treats bogus failure modes as harness errors',
+	2 === $bogus_mode_runner['code'] && ( $bogus_mode_state['harness_errors'] ?? 0 ) > 0,
+	$bogus_mode_runner['stdout'] . $bogus_mode_runner['stderr']
+);
+remove_tree( $bogus_mode_dir );
 
 echo $failed > 0 ? "\n{$failed} smoke check(s) FAILED\n" : "\nAll smoke checks passed\n";
 exit( $failed > 0 ? 1 : 0 );

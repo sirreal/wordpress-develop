@@ -24,17 +24,20 @@ $options = Cli::parse_args(
 		'seed'      => -1,
 		'case'      => -1,
 		'context'   => 'both',
+		'mode'      => 'oracle',
 		'max-bytes' => 4096,
 	)
 );
 
 Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_one_of( $options, 'context', array( 'text', 'attribute', 'both' ) );
+Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
 
 Bootstrap::load_targets();
 
 $payload = null;
 $context = $options['context'];
+$mode    = $options['mode'];
 $source  = null;
 
 if ( '' !== $options['failure'] ) {
@@ -45,8 +48,13 @@ if ( '' !== $options['failure'] ) {
 	}
 	$payload = base64_decode( $manifest['payload_base64'], true );
 	$context = $manifest['context'] ?? $context;
+	$mode    = $manifest['mode'] ?? 'oracle';
 	if ( ! in_array( $context, array( 'text', 'attribute', 'both' ), true ) ) {
 		fwrite( STDERR, "Invalid context in failure manifest: {$context}\n" );
+		exit( 2 );
+	}
+	if ( ! in_array( $mode, array( 'oracle', 'bytes' ), true ) ) {
+		fwrite( STDERR, "Invalid mode in failure manifest: {$mode}\n" );
 		exit( 2 );
 	}
 	$source  = "failure manifest {$options['failure']}";
@@ -58,10 +66,11 @@ if ( '' !== $options['failure'] ) {
 	}
 	$source = "input file {$options['input']}";
 } elseif ( $options['seed'] >= 0 && $options['case'] >= 0 ) {
-	$generated = ( new Generator( new Prng( "{$options['seed']}:{$options['case']}" ), $options['max-bytes'], Bootstrap::named_reference_names() ) )->generate();
+	$generator = new Generator( new Prng( "{$options['seed']}:{$options['case']}" ), $options['max-bytes'], Bootstrap::named_reference_names() );
+	$generated = 'bytes' === $mode ? $generator->generate_bytes() : $generator->generate();
 	$payload   = $generated['payload'];
 	$context   = $generated['context'];
-	$source    = "seed {$options['seed']} case {$options['case']} (strategy {$generated['strategy']}, context {$context})";
+	$source    = "seed {$options['seed']} case {$options['case']} (mode {$mode}, strategy {$generated['strategy']}, context {$context})";
 } else {
 	fwrite( STDERR, "Provide --failure, --input, or --seed with --case.\n" );
 	exit( 2 );
@@ -76,15 +85,16 @@ $oracles = Oracles::build();
 foreach ( $oracles->drain_events() as $event ) {
 	fwrite( STDERR, "oracle event: {$event['oracle']}: {$event['detail']}\n" );
 }
-if ( ! $oracles->has_required() ) {
+if ( 'oracle' === $mode && ! $oracles->has_required() ) {
 	fwrite( STDERR, "Required oracle unavailable; cannot replay.\n" );
 	exit( 2 );
 }
 
 $checks   = new Checks( $oracles );
-$failures = $checks->run( $context, $payload );
+$failures = 'bytes' === $mode ? $checks->run_without_oracle( $context, $payload ) : $checks->run( $context, $payload );
 
 echo "Replaying {$source}\n";
+echo "Mode: {$mode}\n";
 echo "Context: {$context}\n";
 echo 'Payload: ' . strlen( $payload ) . ' bytes, sha256 ' . hash( 'sha256', $payload ) . "\n";
 echo 'Hex preview: ' . bin2hex( substr( $payload, 0, 96 ) ) . ( strlen( $payload ) > 96 ? '...' : '' ) . "\n";

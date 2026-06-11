@@ -50,6 +50,20 @@ class Checks {
 	/**
 	 * @return array<int, array{check: string, signature: string, detail: array}>
 	 */
+	public function run_without_oracle( string $context, string $payload ): array {
+		$failures = array();
+		$contexts = 'both' === $context ? array( 'text', 'attribute' ) : array( $context );
+
+		foreach ( $contexts as $one_context ) {
+			$failures = array_merge( $failures, $this->check_decode_context_without_oracle( $one_context, $payload ) );
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
 	private function check_decode_context( string $context, string $payload ): array {
 		$failures = array();
 
@@ -109,6 +123,54 @@ class Checks {
 		if ( 'text' === $context && ! str_contains( $payload, '&' ) && $got !== $payload ) {
 			$failures[] = self::failure(
 				'text-without-ampersand-not-identity',
+				$context,
+				self::diff_detail( $context, $payload, $got )
+			);
+		}
+
+		$reader = $this->decode_with_reader( $context, $payload );
+		foreach ( $reader['failures'] as $failure ) {
+			$failures[] = $failure;
+		}
+
+		if ( $reader['decoded'] !== $got ) {
+			$failures[] = self::failure(
+				'reader-decode-mismatch',
+				$context,
+				self::diff_detail( $context, $got, $reader['decoded'] )
+			);
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_decode_context_without_oracle( string $context, string $payload ): array {
+		$failures   = array();
+		$target_key = 'text' === $context ? 'decode_text' : 'decode_attribute';
+
+		try {
+			$got = ( $this->targets[ $target_key ] )( $payload );
+		} catch ( \Throwable $error ) {
+			return array(
+				self::failure(
+					'target-exception',
+					"{$context}:decode",
+					array(
+						'context' => $context,
+						'target'  => $target_key,
+						'class'   => get_class( $error ),
+						'message' => $error->getMessage(),
+					)
+				),
+			);
+		}
+
+		if ( ! str_contains( $payload, '&' ) && $got !== $payload ) {
+			$failures[] = self::failure(
+				"{$context}-without-ampersand-not-identity",
 				$context,
 				self::diff_detail( $context, $payload, $got )
 			);

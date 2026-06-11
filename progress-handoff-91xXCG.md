@@ -6,7 +6,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 
 - [x] Confirmed no active `html-decoder-fuzz` run before editing.
 - [x] Tier 1 item 1: run both decoder contexts per generated case.
-- [ ] Tier 1 items 2-6.
+- [x] Tier 1 item 2: add oracle-free arbitrary byte-space lane.
+- [ ] Tier 1 items 3-6.
 - [ ] Tier 2 items 7-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
@@ -17,6 +18,15 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 20 --progress-every 20` passed and reported `by_context: {"both":20}`.
+- 2026-06-11: `php -l` passed for `Generator.php`, `Checks.php`, `Targets.php`, `worker.php`, `runner.php`, `replay.php`, `minimize.php`, and `tests/harness-smoke.php`.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200` passed.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=byte-no-amp-identity php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200` reported findings as expected.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode bytes --lanes 1 --duration-seconds 0 --max-cases 200 --cases-per-batch 200 --summary-mode none --output-dir /tmp/html-decoder-fuzz-byte-check` passed.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=byte-no-amp-identity php tools/html-decoder-fuzz/runner.php --mode bytes --lanes 1 --duration-seconds 0 --max-cases 200 --cases-per-batch 200 --max-artifacts-per-signature 1 --output-dir /tmp/html-decoder-fuzz-byte-fault-runner` reported findings as expected.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode bytes --seed 1 --case 0` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after byte-space lane coverage was added.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding mode-aware artifact separation, oracle-trap, and bogus-mode malformed-record coverage.
+- 2026-06-11: `git diff --check` passed.
 
 ## Review Log
 
@@ -24,3 +34,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Curie: APPROVE, determinism/API behavior.
   - Dewey: APPROVE, harness and fault-injection coverage.
   - Mencius: APPROVE, runtime/replay compatibility.
+- Tier 1 item 2:
+  - Jason: APPROVE, byte generator/check semantics.
+  - Rawls: APPROVE, CLI/artifact compatibility after mode-aware artifact keying fix.
+  - Sartre: APPROVE, tests and documentation after oracle-trap and bogus-mode coverage.
