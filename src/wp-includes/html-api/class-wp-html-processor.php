@@ -1370,7 +1370,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * This differs from {@see WP_HTML_Processor::normalize} in that it starts with
 	 * a specific HTML Processor, which _must_ not have already started scanning;
 	 * it must be in the initial ready state and will be in the completed state once
-	 * serialization is complete.
+	 * serialization is complete. Once `next_token()` or `next_tag()` has been
+	 * called, this method returns `null`.
+	 *
+	 * This method is for producing a normalized copy of a document, not for
+	 * retrieving modifications. After changing a document with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}, read the result
+	 * with {@see WP_HTML_Tag_Processor::get_updated_html}, which this
+	 * class inherits — not with `serialize()`.
 	 *
 	 * Many aspects of an input HTML fragment may be changed during normalization.
 	 *
@@ -1461,6 +1470,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Prefer `serialize()` when the whole document is wanted unchanged,
 	 * and `serialize_token()` inside a loop when tokens are dropped,
 	 * altered, or wrapped along the way.
+	 *
+	 * Serialization is NOT the way to retrieve a document after modifying
+	 * it with {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class}, and friends: those queued
+	 * updates are returned by
+	 * {@see WP_HTML_Tag_Processor::get_updated_html}, which this class
+	 * inherits and which is the normal way to read output after edits.
+	 * `serialize()` also requires a processor on which scanning has not
+	 * yet begun — once `next_token()` or `next_tag()` has been called it
+	 * returns `null`. Use serialization for normalizing or rewriting a
+	 * document token-by-token; use `get_updated_html()` after making
+	 * attribute, class, or text modifications.
 	 *
 	 * @see static::serialize()
 	 *
