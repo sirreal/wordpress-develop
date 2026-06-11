@@ -163,8 +163,8 @@ Implemented and validated:
 - **Parser-derived oracle tree** (`TreeCapture`): the processor's own parse is
   ground truth, so **wild / restructured HTML** and **`<body>` fragments** are
   fuzzed, not only clean trees.
-- **Line coverage** measured (93.8%, see `COVERAGE.md`; 96.8% of reachable
-  code, remainder justified).
+- **Line coverage** measured (93.4%, see `COVERAGE.md` — the source of truth
+  for current numbers; 96.2% effective, remainder justified).
 - **Automatic minimizer** (`minimize.php`): delta-debugs selector and HTML to a
   minimal reproducer preserving a chosen signature.
 

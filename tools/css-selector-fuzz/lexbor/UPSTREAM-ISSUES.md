@@ -1,10 +1,12 @@
 # lexbor — draft upstream bug reports
 
-Five spec-conformance bugs in liblexbor's CSS selectors support, found while
+Six spec-conformance bugs in liblexbor's CSS selectors support, found while
 using lexbor as a differential oracle for the WordPress HTML-API CSS selector
 fuzzer (`tools/css-selector-fuzz/`). Issues 1–3 were re-verified directly
 against the harness on 2026-06-10; issues 4–5 surfaced during the WP
-conformance-fix session and were re-verified on 2026-06-11.
+conformance-fix session and were re-verified on 2026-06-11; issue 6 came out
+of the explicit invalid-byte probe for the WP scrub coverage work
+(2026-06-11).
 
 - **Pinned version:** lexbor v3.0.0 (`2ae88a1c6b52`), built by
   `tools/css-selector-fuzz/lexbor/build.sh`.
@@ -217,3 +219,60 @@ a feature request rather than a bug if lexbor considers document-language
 selector rules out of scope for its selectors module — but lexbor is an
 HTML engine and browsers uniformly implement the folding, so matching
 against HTML documents diverges from every browser without it.
+
+## Issue 6 — ill-formed UTF-8 in selectors is not decoded per the Encoding Standard
+
+CSS Syntax Level 3 decodes the input byte stream via the Encoding Standard
+before tokenizing:
+
+> To decode bytes, ... Otherwise, decode bytes with fallback encoding utf-8.
+> — https://www.w3.org/TR/css-syntax-3/#input-byte-stream (§3.2)
+
+The Encoding Standard's UTF-8 decoder replaces each **maximal subpart of an
+ill-formed subsequence** with a single U+FFFD (the boundaries follow the
+decoder's byte-range tables; see also Unicode §3.9 "U+FFFD Substitution of
+Maximal Subparts"):
+
+> https://encoding.spec.whatwg.org/#utf-8-decoder
+
+lexbor accepts raw ill-formed bytes in selectors (no parse error) and
+replaces them with U+FFFD, but with different boundaries: a truncated
+multi-byte sequence yields one U+FFFD **per byte** instead of one per
+maximal subpart, and a UTF-8-encoded surrogate half (`ED A0 80`–`ED BF
+BF`) is decoded permissively as a **single unit** yielding one U+FFFD
+instead of three. Verified at v3.0.0 by matching raw-byte class selectors
+against elements whose class attributes contain literal U+FFFD runs
+(`<div class="a�b">` = 1×U+FFFD ... `<div class="a����b">` = 4×U+FFFD;
+`�` below is U+FFFD, U+FFFD counts in parentheses):
+
+| selector bytes        | WHATWG decode  | lexbor         |
+|-----------------------|----------------|----------------|
+| `.a<E2 8C>b`          | `a�b` (1) ✅   | `a��b` (2) ❌   |
+| `.a<F0 9F 82>b`       | `a�b` (1) ✅   | `a���b` (3) ❌  |
+| `.a<ED A0 80>b`       | `a���b` (3) ✅ | `a�b` (1) ❌    |
+| `.a<ED B0 80>b`       | `a���b` (3) ✅ | `a�b` (1) ❌    |
+| `.a<80>b`             | `a�b` (1)      | `a�b` (1) ✅    |
+| `.a<C3>b`             | `a�b` (1)      | `a�b` (1) ✅    |
+| `.a<C0 80>b`          | `a��b` (2)     | `a��b` (2) ✅   |
+| `.a<E0 80 80>b`       | `a���b` (3)    | `a���b` (3) ✅  |
+| `.a<F4 90 80 80>b`    | `a����b` (4)   | `a����b` (4) ✅ |
+
+The agreeing rows are controls where per-byte replacement coincides with
+the maximal-subpart rule (lone continuation/lead bytes, overlongs whose
+subparts are all single bytes, beyond-U+10FFFF). The same behavior applies
+inside string tokens (`[x="p<80>q"]` matches `x="p�q"`). Two truncated
+sequences are exactly where the algorithms separate: `E2 8C` is **one**
+maximal subpart (E2 accepts two continuations and 8C is a valid first
+continuation), while `ED A0` is **not** a subpart at all (ED restricts its
+first continuation to 80–9F), so `ED A0 80` is three.
+
+Notes for the filing agent: browsers only exercise this decode through the
+stylesheet byte stream (JS `querySelectorAll` strings are already UTF-16),
+so compare against an external stylesheet with raw bytes, or against
+another Encoding Standard implementation (e.g. `TextDecoder('utf-8')`,
+whose output for the byte sequences above shows the maximal-subpart
+boundaries directly). Document-side context: lexbor stores raw ill-formed
+bytes from the HTML byte stream unchanged in the DOM (a raw `<80>` in a
+class attribute is matched by no selector, not even one with the same raw
+bytes), so the repro must put literal U+FFFD characters in the document
+and raw bytes only in the selector.

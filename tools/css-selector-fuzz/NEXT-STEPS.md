@@ -2,7 +2,8 @@
 
 > **Status: all seven work items below are implemented and validated** (see
 > `README.md`, `COVERAGE.md`, `FINDINGS.md`). The acceptance bar is met:
-> coverage measured (93.8%; 96.8% of reachable code, remainder justified);
+> coverage measured (93.4%; 96.2% effective — `COVERAGE.md` is the source
+> of truth for the current numbers, remainder justified);
 > three oracles agree on no-quirks supported cases with every divergence
 > triaged; metamorphic invariants passing; combinator positive-match rate
 > raised from 14.5% to ~68% (path-directed bucket); minimizer working; a clean
@@ -148,15 +149,45 @@
 > its quadratic tail were removed by the scrub implementation — see the
 > invalid-UTF-8 policy entry above.)
 >
+> **Fuzzer coverage for the scrub surface — IMPLEMENTED (2026-06-11):**
+> the deferred coverage work for the invalid-UTF-8 scrub landed in three
+> pieces. (1) A dedicated `invalid-utf8` generator bucket injects raw
+> ill-formed sequences into class/ID/attribute-name idents and quoted
+> string operands and carries the post-scrub AST; the per-class maximal-
+> subpart U+FFFD counts are pinned independently of `wp_scrub_utf8()`
+> (self-check additionally duplicates the class names and byte values, so
+> a deleted or drifted table entry fails instead of shrinking the
+> assertion). (2) A `mutated`-bucket splice kind inserts raw ill-formed
+> sequences at arbitrary byte offsets — no expectations, but it makes the
+> worker's invalid-UTF-8 rejection branch hot (scrub + two `select()`
+> notices), which no other bucket reached. (3) The explicit lexbor probe:
+> lexbor accepts raw invalid selector bytes and replaces them with U+FFFD,
+> but NOT per the WHATWG maximal-subpart rule — one U+FFFD per byte for
+> truncated sequences (`E2 8C` → 2, spec 1) and one per whole sequence for
+> UTF-8-encoded surrogate halves (`ED A0 80` → 1, spec 3) — drafted as
+> `lexbor/UPSTREAM-ISSUES.md` issue 6. The differential is unaffected and
+> stays live for the bucket: it feeds lexbor the canonical re-render of
+> the post-scrub AST (escaped, pure ASCII), the same mechanism that
+> sidesteps lexbor's other byte-level parsing bugs. Doc-side observation:
+> lexbor keeps raw invalid bytes in the DOM unchanged (same stance as the
+> Tag Processor), so raw doc bytes match nothing in either engine. The
+> handoff's optional metamorphic relation `parse(s) === parse(scrub(s))`
+> was skipped deliberately: it is near-tautological (it could only catch
+> a `from_selectors()` bypass, and no public path bypasses it).
+>
 > **Still open from the original follow-up list:** the tooling items in
 > this file's hardening notes (self-check decoupling, class-NUL injection,
-> vacuous-assertion rate, quirks-mode single-oracle gap), plus deferred
-> fuzzer coverage for the scrub surface (dedicated invalid-UTF-8 generator
-> bucket with maximal-subpart AST expectations, raw-byte mutation class,
-> explicit lexbor invalid-byte probe — handoff drafted 2026-06-11; note
-> the chaos/mutated buckets already produce invalid-UTF-8 selectors
-> organically and lexbor agreed with the scrubbed results across a clean
-> 5000-seed run).
+> vacuous-assertion rate, quirks-mode single-oracle gap). New small item
+> from the 2026-06-11 review: `gen_chaos()`'s whole-codepoint `unicode`
+> branch is dead code — it compares the alphabet *string* against the key
+> `'unicode'` after the value lookup already happened — so the unicode
+> alphabet is byte-sliced by the generic fallback instead. That slicing is
+> what makes chaos emit invalid UTF-8 organically (~15% of chaos cases),
+> so making the branch live is a behavior decision, not just a cleanup:
+> it would remove chaos's organic ill-formed-byte production, leaving the
+> deliberate paths (`invalid-utf8` bucket, `mutated` splice) plus
+> `mutated`'s residual organic corruption of pool multibyte characters
+> (~2% of mutated cases even without the splice).
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` (trunk + merged `html-api/add-css-selector-parser`).
