@@ -189,6 +189,8 @@ const IN_BODY_IGNORED_START_TAGS = new Set([
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", "MTEXT"]);
 const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
+const SVG_HTML_INTEGRATION_POINT_ELEMENTS = new Set(["DESC", "FOREIGNOBJECT", "TITLE"]);
+const MATHML_HTML_INTEGRATION_POINT_ENCODINGS = new Set(["application/xhtml+xml", "text/html"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"COLGROUP",
 	"TABLE",
@@ -1980,14 +1982,20 @@ export function createHtmlApi(wasm) {
 			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
+			this.context_integration_node_type = options.contextIntegrationNodeType ?? null;
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.is_full_parser ? [] : ["html", this.context_namespace];
+			this.open_element_integration_node_types = this.is_full_parser ? [] : [null, this.context_integration_node_type];
 			this.active_formatting_elements = [];
 			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
-			this.current_namespace = childNamespaceForTag(this.context_node, this.context_namespace);
+			this.current_namespace = this.#childNamespaceForStackEntry(
+				this.context_node,
+				this.context_namespace,
+				this.context_integration_node_type,
+			);
 			this.current_token_namespace = this.current_namespace;
 			this.compat_mode = options.compatMode ?? this.compat_mode;
 			super.change_parsing_namespace(this.current_namespace);
@@ -2007,10 +2015,15 @@ export function createHtmlApi(wasm) {
 
 			let contextNode = null;
 			let contextNamespaceName = null;
+			let contextIntegrationNodeType = null;
 			while (contextProcessor.next_tag()) {
 				if (!contextProcessor.is_virtual() && !contextProcessor.is_tag_closer()) {
 					contextNode = contextProcessor.get_tag();
 					contextNamespaceName = contextProcessor.get_namespace();
+					contextIntegrationNodeType = contextProcessor.#integrationNodeTypeForCurrentStartTag(
+						contextNode,
+						contextNamespaceName,
+					);
 				}
 			}
 
@@ -2035,6 +2048,7 @@ export function createHtmlApi(wasm) {
 				compatMode,
 				contextNode,
 				contextNamespace: contextNamespaceName,
+				contextIntegrationNodeType,
 				fullParser: false,
 			});
 		}
@@ -2892,6 +2906,7 @@ export function createHtmlApi(wasm) {
 				}
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+				this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
 				if (closingNamespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 					this.#clearActiveFormattingElementsUpToLastMarker();
 				}
@@ -3013,8 +3028,13 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 			this.current_token_namespace = this.#namespaceForCurrentStartTag(super.get_tag());
+			const currentTokenIntegrationNodeType = this.#integrationNodeTypeForCurrentStartTag(
+				tagName,
+				this.current_token_namespace,
+			);
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
+			this.open_element_integration_node_types.push(currentTokenIntegrationNodeType);
 			if (this.current_token_namespace === "html" && tagName === "TEMPLATE") {
 				this.template_insertion_modes.push("in_body");
 			}
@@ -3029,9 +3049,14 @@ export function createHtmlApi(wasm) {
 			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
 				this.open_elements.pop();
 				this.open_element_namespaces.pop();
+				this.open_element_integration_node_types.pop();
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			} else {
-				this.#setCurrentNamespace(childNamespaceForTag(tagName, this.current_token_namespace));
+				this.#setCurrentNamespace(this.#childNamespaceForStackEntry(
+					tagName,
+					this.current_token_namespace,
+					currentTokenIntegrationNodeType,
+				));
 				if (this.#shouldPopTableFormImmediately(tagName, this.current_token_namespace)) {
 					this.virtual_tokens.push({
 						operation: "pop",
@@ -3055,8 +3080,13 @@ export function createHtmlApi(wasm) {
 			if (token.operation === "push") {
 				this.open_elements.push(token.tagName);
 				this.open_element_namespaces.push(token.namespaceName);
+				this.open_element_integration_node_types.push(token.integrationNodeType ?? null);
 				this.breadcrumbs = [...this.open_elements];
-				this.#setCurrentNamespace(childNamespaceForTag(token.tagName, token.namespaceName));
+				this.#setCurrentNamespace(this.#childNamespaceForStackEntry(
+					token.tagName,
+					token.namespaceName,
+					token.integrationNodeType ?? null,
+				));
 				this.#bailIfExceededMaxBookmarks();
 			} else if (token.operation === "pop") {
 				const existingIndex = this.#lastOpenElementIndex(token.tagName, token.namespaceName);
@@ -3069,6 +3099,7 @@ export function createHtmlApi(wasm) {
 					}
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
 					if (token.namespaceName === "html" && TABLE_CELL_ELEMENTS.has(token.tagName)) {
 						this.#clearActiveFormattingElementsUpToLastMarker();
 					}
@@ -3087,6 +3118,7 @@ export function createHtmlApi(wasm) {
 			return {
 				openElements: [...this.open_elements],
 				openElementNamespaces: [...this.open_element_namespaces],
+				openElementIntegrationNodeTypes: [...this.open_element_integration_node_types],
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
@@ -3114,6 +3146,7 @@ export function createHtmlApi(wasm) {
 			this.frameset_ok = state.framesetOk;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
+			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
@@ -3886,11 +3919,12 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		#queueVirtualPush(tagName, namespaceName = "html", attributes = []) {
+		#queueVirtualPush(tagName, namespaceName = "html", attributes = [], integrationNodeType = null) {
 			this.virtual_tokens.push({
 				operation: "push",
 				tagName,
 				namespaceName,
+				integrationNodeType,
 				attributes: attributes.map((attribute) => ({
 					name: attribute.name,
 					value: attribute.value,
@@ -4375,8 +4409,7 @@ export function createHtmlApi(wasm) {
 		#firstForeignElementToPopForHtmlBreakout() {
 			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
 				const namespaceName = this.open_element_namespaces[i];
-				const childNamespace = childNamespaceForTag(this.open_elements[i], namespaceName);
-				if (namespaceName === "html" || childNamespace === "html") {
+				if (namespaceName === "html" || this.open_element_integration_node_types[i] !== null) {
 					return i + 1;
 				}
 			}
@@ -4689,13 +4722,47 @@ export function createHtmlApi(wasm) {
 				if (
 					topIndex >= 0 &&
 					this.open_element_namespaces[topIndex] === "math" &&
-					MATHML_TEXT_INTEGRATION_POINT_ELEMENTS.has(this.open_elements[topIndex])
+					this.open_element_integration_node_types[topIndex] === "math"
 				) {
 					return "math";
 				}
 			}
 
 			return namespaceForTag(tagName, this.current_namespace);
+		}
+
+		#integrationNodeTypeForCurrentStartTag(tagName, namespaceName) {
+			if (namespaceName === "svg") {
+				return SVG_HTML_INTEGRATION_POINT_ELEMENTS.has(tagName) ? "html" : null;
+			}
+
+			if (namespaceName !== "math") {
+				return null;
+			}
+
+			if (MATHML_TEXT_INTEGRATION_POINT_ELEMENTS.has(tagName)) {
+				return "math";
+			}
+
+			if (tagName !== "ANNOTATION-XML") {
+				return null;
+			}
+
+			const encoding = this.get_attribute("encoding");
+			return (
+				typeof encoding === "string" &&
+				MATHML_HTML_INTEGRATION_POINT_ENCODINGS.has(encoding.toLowerCase())
+			)
+				? "html"
+				: null;
+		}
+
+		#childNamespaceForStackEntry(tagName, tokenNamespace, integrationNodeType) {
+			if (integrationNodeType !== null) {
+				return "html";
+			}
+
+			return tokenNamespace;
 		}
 
 		#lastOpenElementIndex(tagName, namespaceName) {
@@ -4716,6 +4783,15 @@ export function createHtmlApi(wasm) {
 				topIndex >= 0 &&
 				this.open_elements[topIndex] === tagName &&
 				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				return this.open_element_namespaces[topIndex];
+			}
+
+			if (
+				topIndex >= 0 &&
+				this.current_namespace === "html" &&
+				this.open_element_namespaces[topIndex] !== "html" &&
+				this.open_element_integration_node_types[topIndex] !== null
 			) {
 				return this.open_element_namespaces[topIndex];
 			}
@@ -4829,6 +4905,7 @@ export function createHtmlApi(wasm) {
 				) {
 					this.open_elements.pop();
 					this.open_element_namespaces.pop();
+					this.open_element_integration_node_types.pop();
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 				}
 				return;
@@ -4854,6 +4931,7 @@ export function createHtmlApi(wasm) {
 				while (this.#currentHtmlElementHasRubyImpliedEndTagForStartTag(tagName)) {
 					this.open_elements.pop();
 					this.open_element_namespaces.pop();
+					this.open_element_integration_node_types.pop();
 				}
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			}
@@ -4945,6 +5023,7 @@ export function createHtmlApi(wasm) {
 				if (predicate(nodeName)) {
 					this.open_elements = this.open_elements.slice(0, i);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
+					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, i);
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 					return true;
 				}
@@ -4962,6 +5041,7 @@ export function createHtmlApi(wasm) {
 				if (predicate(this.open_elements[i])) {
 					this.open_elements = this.open_elements.slice(0, i);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
+					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, i);
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 					return true;
 				}
@@ -4977,6 +5057,7 @@ export function createHtmlApi(wasm) {
 
 			this.open_elements.pop();
 			this.open_element_namespaces.pop();
+			this.open_element_integration_node_types.pop();
 			this.#setCurrentNamespace(this.#namespaceForStackTop());
 			return true;
 		}
@@ -5014,7 +5095,8 @@ export function createHtmlApi(wasm) {
 
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push("html");
-			this.#setCurrentNamespace(childNamespaceForTag(tagName, "html"));
+			this.open_element_integration_node_types.push(null);
+			this.#setCurrentNamespace(this.#childNamespaceForStackEntry(tagName, "html", null));
 			return true;
 		}
 
@@ -5374,9 +5456,10 @@ export function createHtmlApi(wasm) {
 		#namespaceForStackTop() {
 			return this.open_element_namespaces.length === 0
 				? "html"
-				: childNamespaceForTag(
+				: this.#childNamespaceForStackEntry(
 					this.open_elements[this.open_elements.length - 1],
 					this.open_element_namespaces[this.open_element_namespaces.length - 1],
+					this.open_element_integration_node_types[this.open_element_integration_node_types.length - 1],
 				);
 		}
 
@@ -5928,18 +6011,6 @@ function normalizeTagNameForNamespace(tagName, namespaceName) {
 	}
 
 	return namespaceName === "html" && tagName === "IMAGE" ? "IMG" : tagName;
-}
-
-function childNamespaceForTag(tagName, tokenNamespace) {
-	if (tokenNamespace === "svg" && tagName === "FOREIGNOBJECT") {
-		return "html";
-	}
-
-	if (tokenNamespace === "math" && ["ANNOTATION-XML", "MI", "MO", "MN", "MS", "MTEXT"].includes(tagName)) {
-		return "html";
-	}
-
-	return tokenNamespace;
 }
 
 function tokenExpectsCloser(tokenName, namespaceName, hasSelfClosingFlag) {

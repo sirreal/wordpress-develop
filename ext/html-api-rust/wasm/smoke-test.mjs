@@ -3191,6 +3191,27 @@ assert.equal(mathTextIntegrationFragmentProcessor.get_namespace(), "html");
 assert.deepEqual(mathTextIntegrationFragmentProcessor.get_breadcrumbs(), ["HTML", "MS", "MS"]);
 mathTextIntegrationFragmentProcessor.destroy();
 
+const mathAnnotationXmlFragmentProcessor = WP_HTML_Processor.create_fragment("<figure></figure>", "<math><annotation-xml>");
+assert.equal(mathAnnotationXmlFragmentProcessor.next_tag("figure"), true);
+assert.equal(mathAnnotationXmlFragmentProcessor.get_namespace(), "math");
+assert.deepEqual(mathAnnotationXmlFragmentProcessor.get_breadcrumbs(), ["HTML", "ANNOTATION-XML", "FIGURE"]);
+mathAnnotationXmlFragmentProcessor.destroy();
+
+const mathAnnotationXmlBreakoutProcessor = WP_HTML_Processor.create_fragment("<div></div>", "<math><annotation-xml>");
+assert.equal(mathAnnotationXmlBreakoutProcessor.next_tag("div"), true);
+assert.equal(mathAnnotationXmlBreakoutProcessor.get_namespace(), "html");
+assert.deepEqual(mathAnnotationXmlBreakoutProcessor.get_breadcrumbs(), ["HTML", "DIV"]);
+mathAnnotationXmlBreakoutProcessor.destroy();
+
+const mathAnnotationXmlHtmlIntegrationProcessor = WP_HTML_Processor.create_fragment(
+	"<div></div>",
+	'<math><annotation-xml encoding="text/html">',
+);
+assert.equal(mathAnnotationXmlHtmlIntegrationProcessor.next_tag("div"), true);
+assert.equal(mathAnnotationXmlHtmlIntegrationProcessor.get_namespace(), "html");
+assert.deepEqual(mathAnnotationXmlHtmlIntegrationProcessor.get_breadcrumbs(), ["HTML", "ANNOTATION-XML", "DIV"]);
+mathAnnotationXmlHtmlIntegrationProcessor.destroy();
+
 const svgTableNameProcessor = WP_HTML_Processor.create_fragment("<svg><tr><td>cell");
 assert.equal(svgTableNameProcessor.next_tag("tr"), true);
 assert.equal(svgTableNameProcessor.get_namespace(), "svg");
