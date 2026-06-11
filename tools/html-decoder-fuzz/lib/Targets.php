@@ -90,6 +90,13 @@ class Targets {
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );
 				break;
 
+			case 'attribute-no-amp-identity':
+				$targets['decode_attribute'] = static function ( string $text ): string {
+					$decoded = \WP_HTML_Decoder::decode_attribute( $text );
+					return str_contains( $text, '&' ) ? $decoded : '!' . $decoded;
+				};
+				break;
+
 			case 'attribute-prefix-monotonicity':
 				$attribute_starts_with            = $targets['attribute_starts_with'];
 				$targets['attribute_starts_with'] = static function ( string $haystack, string $search, string $case_sensitivity ) use ( $attribute_starts_with ): bool {

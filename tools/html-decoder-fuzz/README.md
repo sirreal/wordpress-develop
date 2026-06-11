@@ -59,7 +59,7 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
    leading byte-slice prefixes that can end inside UTF-8 replacements, and
    monotonic prefix, extension, and case-sensitivity invariants.
 5. Assert decoded output is valid UTF-8.
-6. Assert text without `&` is an identity decode.
+6. Assert text and attribute payloads without `&` are identity decodes.
 
 In `bytes` mode, checks 1, 4, and 5 are skipped because they depend on
 DOM-safe UTF-8 payloads or a DOM-derived decoded attribute value. The lane keeps
@@ -277,13 +277,14 @@ mutation-tested broken targets:
 - partial multi-code-point `attribute_starts_with()` replacement matches
 - non-monotonic `attribute_starts_with()` prefix, extension, and
   case-sensitivity results
-- raw byte payloads without `&` not decoding identically
+- safe attribute payloads and raw byte payloads without `&` not decoding
+  identically
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`,
 `reader-empty-chunk`, `reader-short-match-length`,
 `reader-substring-composition`, `reader-null-mutates-match-length`,
-`reader-non-amp-match`, `byte-no-amp-identity`,
+`reader-non-amp-match`, `attribute-no-amp-identity`, `byte-no-amp-identity`,
 `attribute-prefix-monotonicity`,
 `attribute-extension-monotonicity`, `attribute-case-monotonicity`, or
 `attribute-multicodepoint-prefix` before running `worker.php`, `runner.php`,

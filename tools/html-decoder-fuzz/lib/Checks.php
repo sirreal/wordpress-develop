@@ -122,9 +122,9 @@ class Checks {
 			);
 		}
 
-		if ( 'text' === $context && ! str_contains( $payload, '&' ) && $got !== $payload ) {
+		if ( ! str_contains( $payload, '&' ) && $got !== $payload ) {
 			$failures[] = self::failure(
-				'text-without-ampersand-not-identity',
+				"{$context}-without-ampersand-not-identity",
 				$context,
 				self::diff_detail( $context, $payload, $got )
 			);

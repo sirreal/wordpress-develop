@@ -740,6 +740,21 @@ $seen = broken_run(
 	$oracles,
 	$real_targets,
 	array(
+		'decode_attribute' => static function ( string $text ): string {
+			$decoded = \WP_HTML_Decoder::decode_attribute( $text );
+			return str_contains( $text, '&' ) ? $decoded : '!' . $decoded;
+		},
+	)
+);
+check( 'catches attribute no-amp identity violations in oracle mode', in_array( 'attribute-without-ampersand-not-identity', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'attribute-no-amp-identity', 'plain' );
+check( 'fault target attribute-no-amp-identity exposes attribute no-amp identity violations', in_array( 'attribute-without-ampersand-not-identity', $seen, true ), implode( ',', $seen ) );
+
+$seen = broken_run(
+	$oracles,
+	$real_targets,
+	array(
 		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ): bool {
 			unset( $case_sensitivity );
 			return '' === $search || strlen( $haystack ) < strlen( $search ) || str_starts_with( \WP_HTML_Decoder::decode_attribute( $haystack ), $search );
@@ -2081,6 +2096,11 @@ $reader_fault_pipelines = array(
 		'fault'     => 'reader-non-amp-match',
 		'case'      => 0,
 		'signature' => 'reader-non-amp-match:text',
+	),
+	array(
+		'fault'     => 'attribute-no-amp-identity',
+		'case'      => 38,
+		'signature' => 'attribute-without-ampersand-not-identity:attribute',
 	),
 );
 foreach ( $reader_fault_pipelines as $reader_pipeline ) {
