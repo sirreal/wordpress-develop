@@ -1368,11 +1368,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		get_attribute(name) {
-			return this.is_virtual() ? null : super.get_attribute(name);
+			return this.is_virtual() ? this.#getVirtualAttribute(name) : super.get_attribute(name);
 		}
 
 		get_attribute_names_with_prefix(prefix) {
-			return this.is_virtual() ? null : super.get_attribute_names_with_prefix(prefix);
+			return this.is_virtual() ? this.#getVirtualAttributeNamesWithPrefix(prefix) : super.get_attribute_names_with_prefix(prefix);
 		}
 
 		set_attribute(name, value) {
@@ -1633,6 +1633,17 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tokenType !== "#tag") {
+				if (
+					allowVirtualPreclosures &&
+					tokenType === "#text" &&
+					this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE &&
+					this.#queueReconstructActiveFormattingElements()
+				) {
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements, tokenName];
 				return;
@@ -1756,15 +1767,20 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.#applySimpleHtmlSemanticClosures(tagName);
-			if (FORMATTING_ELEMENTS.has(tagName) && !this.#canReconstructActiveFormattingElements()) {
-				this.#bailUnsupported("Cannot reconstruct active formatting elements when advancing and rewinding is required.");
+			if (
+				allowVirtualPreclosures &&
+				FORMATTING_ELEMENTS.has(tagName) &&
+				this.#queueReconstructActiveFormattingElements()
+			) {
+				this.pending_real_token = true;
+				this.pending_real_parser_state = this.parser_state;
 				return;
 			}
 			this.current_token_namespace = namespaceForTag(super.get_tag(), this.current_namespace);
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
-				this.active_formatting_elements.push(tagName);
+				this.active_formatting_elements.push(this.#createActiveFormattingElement(tagName));
 			}
 			this.breadcrumbs = [...this.open_elements];
 
@@ -1819,7 +1835,7 @@ export function createHtmlApi(wasm) {
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
-				activeFormattingElements: [...this.active_formatting_elements],
+				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				encodingConfidence: this.encoding_confidence,
 				baseOpenElementCount: this.base_open_element_count,
 				fullParserInsertionMode: this.full_parser_insertion_mode,
@@ -1839,7 +1855,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
-			this.active_formatting_elements = [...state.activeFormattingElements];
+			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.encoding_confidence = state.encodingConfidence;
 			this.base_open_element_count = state.baseOpenElementCount;
 			this.breadcrumbs = [...state.breadcrumbs];
@@ -1859,6 +1875,98 @@ export function createHtmlApi(wasm) {
 			if (!this.is_virtual() && this.parser_state === STATE_TEXT_NODE) {
 				super.subdivide_text_appropriately();
 			}
+		}
+
+		#getVirtualAttribute(name) {
+			const attributes = this.current_virtual?.attributes ?? [];
+			const wantedName = String(name);
+			const normalizedWantedName = this.current_token_namespace === "html" ? asciiLower(wantedName) : wantedName;
+
+			for (const attribute of attributes) {
+				const attributeName = this.current_token_namespace === "html" ? asciiLower(attribute.name) : attribute.name;
+				if (attributeName === normalizedWantedName) {
+					return attribute.value;
+				}
+			}
+
+			return null;
+		}
+
+		#getVirtualAttributeNamesWithPrefix(prefix) {
+			const attributes = this.current_virtual?.attributes ?? [];
+			const wantedPrefix = String(prefix);
+			const normalizedWantedPrefix = this.current_token_namespace === "html" ? asciiLower(wantedPrefix) : wantedPrefix;
+			const names = [];
+
+			for (const attribute of attributes) {
+				const attributeName = this.current_token_namespace === "html" ? asciiLower(attribute.name) : attribute.name;
+				if (attributeName.startsWith(normalizedWantedPrefix)) {
+					names.push(attribute.name);
+				}
+			}
+
+			return names.length === 0 ? null : names;
+		}
+
+		#createActiveFormattingElement(tagName) {
+			return {
+				tagName,
+				namespaceName: this.current_token_namespace,
+				attributes: this.#currentTokenAttributes(),
+			};
+		}
+
+		#cloneActiveFormattingElement(entry) {
+			return {
+				tagName: entry.tagName,
+				namespaceName: entry.namespaceName,
+				attributes: entry.attributes.map((attribute) => ({
+					name: attribute.name,
+					value: attribute.value,
+				})),
+			};
+		}
+
+		#currentTokenAttributes() {
+			const attributeNames = super.get_attribute_names_with_prefix("") ?? [];
+			const attributes = [];
+			const seenAttributeNames = new Set();
+
+			for (const attributeName of attributeNames) {
+				const comparableName = this.current_token_namespace === "html" ? asciiLower(attributeName) : attributeName;
+				if (seenAttributeNames.has(comparableName)) {
+					continue;
+				}
+				seenAttributeNames.add(comparableName);
+				attributes.push({
+					name: attributeName,
+					value: super.get_attribute(attributeName),
+				});
+			}
+
+			return attributes;
+		}
+
+		#queueReconstructActiveFormattingElements() {
+			let firstMissingIndex = this.active_formatting_elements.length;
+			while (firstMissingIndex > 0) {
+				const entry = this.active_formatting_elements[firstMissingIndex - 1];
+				if (this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) !== -1) {
+					break;
+				}
+				firstMissingIndex -= 1;
+			}
+
+			if (firstMissingIndex === this.active_formatting_elements.length) {
+				return false;
+			}
+
+			for (let i = firstMissingIndex; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+			}
+
+			return true;
 		}
 
 		#applyFullParserInsertionMode(tokenType, tokenName) {
@@ -2053,11 +2161,15 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		#queueVirtualPush(tagName, namespaceName = "html") {
+		#queueVirtualPush(tagName, namespaceName = "html", attributes = []) {
 			this.virtual_tokens.push({
 				operation: "push",
 				tagName,
 				namespaceName,
+				attributes: attributes.map((attribute) => ({
+					name: attribute.name,
+					value: attribute.value,
+				})),
 			});
 		}
 
@@ -2077,21 +2189,12 @@ export function createHtmlApi(wasm) {
 
 		#removeActiveFormattingElement(tagName) {
 			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
-				if (this.active_formatting_elements[i] === tagName) {
+				if (this.active_formatting_elements[i].tagName === tagName) {
 					this.active_formatting_elements.splice(i, 1);
 					return true;
 				}
 			}
 			return false;
-		}
-
-		#canReconstructActiveFormattingElements() {
-			if (this.active_formatting_elements.length === 0) {
-				return true;
-			}
-
-			const lastEntry = this.active_formatting_elements[this.active_formatting_elements.length - 1];
-			return this.#lastOpenElementIndex(lastEntry, "html") !== -1;
 		}
 
 		#bailUnsupported(message) {
@@ -2175,7 +2278,7 @@ export function createHtmlApi(wasm) {
 			if (tagName === "A") {
 				const anchorIndex = this.#lastOpenElementIndex("A", "html");
 				if (anchorIndex !== -1) {
-					const activeAnchorIndex = this.active_formatting_elements.lastIndexOf("A");
+					const activeAnchorIndex = this.#lastActiveFormattingElementIndex("A");
 					if (
 						(activeAnchorIndex !== -1 && activeAnchorIndex < this.active_formatting_elements.length - 1) ||
 						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, anchorIndex)
@@ -2215,6 +2318,15 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#lastActiveFormattingElementIndex(tagName) {
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				if (this.active_formatting_elements[i].tagName === tagName) {
+					return i;
+				}
+			}
+			return -1;
 		}
 
 		#queueVirtualPreclosuresForEndTag(tagName) {
