@@ -5303,6 +5303,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Sets the modifiable text for the matched token, if matched.
+	 *
+	 * @since 6.9.0 Subclassed for the HTML Processor.
+	 *
+	 * @param string $plaintext_content New text content to represent in the matched token.
+	 * @return bool Whether the text was able to update.
+	 */
+	public function set_modifiable_text( string $plaintext_content ): bool {
+		if (
+			self::STATE_MATCHED_TAG === $this->parser_state &&
+			'html' !== $this->get_namespace()
+		) {
+			return false;
+		}
+
+		return parent::set_modifiable_text( $plaintext_content );
+	}
+
+	/**
 	 * Returns the node name represented by the token.
 	 *
 	 * This matches the DOM API value `nodeName`. Some values
