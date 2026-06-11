@@ -1113,12 +1113,25 @@ export function createHtmlApi(wasm) {
 
 		seek(name) {
 			this.#ensureLive();
-			if (this.seek_count >= WP_HTML_Tag_Processor.MAX_SEEK_OPS || !this.bookmarks.has(name)) {
+			if (!this.bookmarks.has(name)) {
+				return false;
+			}
+
+			const bookmark = this.bookmarks.get(name);
+			const currentSpan = this.#currentSpan();
+			if (
+				currentSpan &&
+				currentSpan.start === bookmark.start &&
+				currentSpan.length === bookmark.length
+			) {
+				return true;
+			}
+
+			if (this.seek_count >= WP_HTML_Tag_Processor.MAX_SEEK_OPS) {
 				return false;
 			}
 
 			this.seek_count += 1;
-			const bookmark = this.bookmarks.get(name);
 			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, bookmark.start);
 			if (!wasm.wp_html_api_rust_tag_processor_next_token(this.pointer)) {
 				this.parser_state = wasm.wp_html_api_rust_tag_processor_paused_at_incomplete(this.pointer)

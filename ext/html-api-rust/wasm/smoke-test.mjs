@@ -233,6 +233,14 @@ for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 assert.equal(tagBookmarkLimit.set_bookmark("tag-over-limit"), false);
 tagBookmarkLimit.destroy();
 
+const repeatedSameTokenSeek = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(repeatedSameTokenSeek.next_tag("div"), true);
+assert.equal(repeatedSameTokenSeek.set_bookmark("here"), true);
+for (let i = 0; i < WP_HTML_Tag_Processor.MAX_SEEK_OPS + 2; i += 1) {
+	assert.equal(repeatedSameTokenSeek.seek("here"), true);
+}
+repeatedSameTokenSeek.destroy();
+
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
