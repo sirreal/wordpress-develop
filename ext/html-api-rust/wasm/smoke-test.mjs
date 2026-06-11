@@ -1740,6 +1740,9 @@ for (const [html, context, expected] of [
 	["<nobr>X", "<svg><path>", "<nobr>X</nobr>"],
 	["<g></path>X", "<svg><path>", "<g>X</g>"],
 	["</path>X", "<svg><path>", "X"],
+	["<frameset>X", "<svg><desc>", "X"],
+	["<body class='foo'>X", "<svg><desc>", "X"],
+	["<html class='foo'>X", "<svg><desc>", "X"],
 	["<mi>x", "<math>", "<mi>x</mi>"],
 ]) {
 	const contextProcessor = WP_HTML_Processor.create_fragment(html, context);
