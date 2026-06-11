@@ -1721,6 +1721,8 @@ for (const [html, context, expected] of [
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
 	["<option>one", "<select>", "<option>one</option>"],
+	["<input><option>", "<select>", "<option></option>"],
+	["<keygen><option>", "<select>", "<option></option>"],
 	["<rect />", "<svg>", "<rect />"],
 	["<circle />", "<svg><g>", "<circle />"],
 	["<nobr>X", "<svg><path>", "<nobr>X</nobr>"],

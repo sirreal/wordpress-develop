@@ -3083,6 +3083,17 @@ export function createHtmlApi(wasm) {
 
 			if (
 				this.current_namespace === "html" &&
+				SELECT_BREAKOUT_START_TAGS.has(tagName)
+			) {
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (selectIndex !== -1 && selectIndex < this.base_open_element_count) {
+					this.#ignoreCurrentToken();
+					return;
+				}
+			}
+
+			if (
+				this.current_namespace === "html" &&
 				this.#hasOpenHtmlElement("SELECT") &&
 				!SELECT_ALLOWED_START_TAGS.has(tagName)
 			) {
@@ -4431,7 +4442,7 @@ export function createHtmlApi(wasm) {
 
 			if (this.current_namespace === "html" && SELECT_BREAKOUT_START_TAGS.has(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
-				if (selectIndex !== -1) {
+				if (selectIndex !== -1 && selectIndex >= this.base_open_element_count) {
 					this.#queueVirtualPopsFrom(selectIndex);
 					return true;
 				}

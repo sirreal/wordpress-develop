@@ -4,7 +4,7 @@ import { loadWasm } from "./wp-html-api-rust.js";
 
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
-const supportedFragmentContexts = new Set(["body", "div"]);
+const supportedFragmentContexts = new Set(["body", "div", "select"]);
 
 const skippedTests = new Set([
 	"noscript01/line0014",
