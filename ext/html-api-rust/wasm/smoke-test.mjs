@@ -364,6 +364,11 @@ assert.equal(
 	"<p><b><b><b><b></b></b></b></b></p><p><b><b><b>x</b></b></b></p>",
 );
 
+const menuitemReconstructsFormattingProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><b></p><menuitem>");
+assert.equal(menuitemReconstructsFormattingProcessor.next_tag("menuitem"), true);
+assert.deepEqual(menuitemReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "MENUITEM"]);
+menuitemReconstructsFormattingProcessor.destroy();
+
 const closedFormattingProcessor = WP_HTML_Processor.create_fragment("<b>one</b><p>two");
 assert.equal(closedFormattingProcessor.next_tag("b"), true);
 assert.equal(closedFormattingProcessor.next_tag({ tag_name: "b", tag_closers: "visit" }), true);
@@ -704,6 +709,12 @@ assert.equal(buttonProcessor.next_tag("button"), true);
 assert.deepEqual(buttonProcessor.get_breadcrumbs(), ["HTML", "BODY", "BUTTON"]);
 assert.equal(buttonProcessor.get_attribute("three"), true);
 buttonProcessor.destroy();
+
+const selectMenuitemProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><select><menuitem></select>");
+assert.equal(selectMenuitemProcessor.next_tag("select"), true);
+assert.equal(selectMenuitemProcessor.next_tag("menuitem"), false);
+assert.equal(selectMenuitemProcessor.get_last_error(), null);
+selectMenuitemProcessor.destroy();
 
 const listBoundaryProcessor = WP_HTML_Processor.create_fragment("<li><li><blockquote><li target>");
 assert.equal(listBoundaryProcessor.next_tag({ breadcrumbs: ["LI"], match_offset: 3 }), true);

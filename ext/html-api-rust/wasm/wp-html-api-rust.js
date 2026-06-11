@@ -157,6 +157,9 @@ const ADOPTION_AGENCY_END_TAGS = new Set([
 	...FORMATTING_ELEMENTS,
 	"NOBR",
 ]);
+const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
+	"MENUITEM",
+]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"TABLE",
@@ -1993,6 +1996,17 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
+				this.current_namespace === "html" &&
+				tagName === "MENUITEM" &&
+				this.#hasOpenHtmlElement("SELECT")
+			) {
+				this.current_token_namespace = this.current_namespace;
+				this.breadcrumbs = [...this.open_elements];
+				this.skip_current_token = true;
+				return;
+			}
+
+			if (
 				this.is_full_parser &&
 				this.encoding_confidence === "tentative" &&
 				this.current_namespace === "html" &&
@@ -2013,7 +2027,10 @@ export function createHtmlApi(wasm) {
 			this.#applySimpleHtmlSemanticClosures(tagName);
 			if (
 				allowVirtualPreclosures &&
-				FORMATTING_ELEMENTS.has(tagName) &&
+				(
+					FORMATTING_ELEMENTS.has(tagName) ||
+					ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(tagName)
+				) &&
 				this.#queueReconstructActiveFormattingElements()
 			) {
 				this.pending_real_token = true;
