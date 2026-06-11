@@ -3731,7 +3731,9 @@ class WP_HTML_Tag_Processor {
 	 * `#text` nodes and for elements whose contents allow character
 	 * references (TEXTAREA, TITLE), character references have been replaced
 	 * by the characters they represent — `&amp;` is returned as `&`. Do not
-	 * decode the returned string again. Contents which HTML treats as raw
+	 * decode the returned string again. The returned string is UTF-8;
+	 * when measuring or slicing it by code points pass an explicit
+	 * encoding, e.g. `mb_strlen( $text, 'UTF-8' )`. Contents which HTML treats as raw
 	 * text (SCRIPT, STYLE) and the interiors of comments are returned
 	 * verbatim, as no decoding occurs in those sections of a document.
 	 *

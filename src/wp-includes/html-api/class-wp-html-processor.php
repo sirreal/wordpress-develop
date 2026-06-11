@@ -1334,7 +1334,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * than the container's, and the closers of nested elements report a
 	 * depth no less than it; only the container's own closer reports
 	 * less. Writing `>` instead would end the walk early, at the first
-	 * closer of a direct child.
+	 * closer of a direct child. The same rule in break-condition form:
+	 * inside the loop, `break` when the depth drops BELOW the depth
+	 * recorded at the opener (`< $depth`), never at `<= $depth`.
 	 *
 	 * @since 6.6.0
 	 *
@@ -5712,8 +5714,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * For `#text` nodes and for elements whose contents allow character
 	 * references (TEXTAREA, TITLE), the returned text is DECODED: character
 	 * references have been replaced by the characters they represent. Do
-	 * not decode it again. Raw text contents (SCRIPT, STYLE) and comment
-	 * interiors are returned verbatim.
+	 * not decode it again. The returned string is UTF-8; when measuring
+	 * or slicing by code points pass an explicit encoding, e.g.
+	 * `mb_substr( $text, 0, $limit, 'UTF-8' )`. Raw text contents
+	 * (SCRIPT, STYLE) and comment interiors are returned verbatim.
 	 *
 	 * Note that for elements which cannot contain markup (SCRIPT, STYLE,
 	 * TEXTAREA, TITLE), the text is carried by the ELEMENT's own token —
