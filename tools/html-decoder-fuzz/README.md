@@ -69,15 +69,17 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
    leading byte-slice prefixes that can end inside UTF-8 replacements, and
    monotonic prefix, extension, and case-sensitivity invariants.
 5. Assert decoded output is valid UTF-8.
-6. Assert text and attribute payloads without `&` are identity decodes.
+6. Assert known nested ampersand fixtures decode exactly one level, so
+   `&amp;amp;` decodes to `&amp;` rather than `&`.
+7. Assert text and attribute payloads without `&` are identity decodes.
 
 In `bytes` mode, checks 1, 4, and 5 are skipped because they depend on
 DOM-safe UTF-8 payloads or a DOM-derived decoded attribute value. The lane keeps
-the reader rebuild, advance/overrun, and no-`&` identity checks for both text
-and attribute contexts.
+the reader rebuild, advance/overrun, single-level decode, and no-`&` identity
+checks for both text and attribute contexts.
 
-Decoding is not treated as idempotent; `&amp;amp;` should decode only one level
-to `&amp;`.
+Decoding is not treated as idempotent. The checks and smoke suite explicitly
+verify this with nested ampersand-reference fixtures.
 
 ## Generator
 
@@ -306,6 +308,7 @@ mutation-tested broken targets:
   C1 bytes not passing through unchanged
 - supported text payloads disagreeing with the secondary `html_entity_decode()`
   oracle
+- nested ampersand references being decoded more than one level
 - zero, surrogate, and above-Unicode numeric references not decoding to exactly
   U+FFFD
 - semicolonless named references decoded in attributes despite ambiguous
@@ -329,6 +332,7 @@ For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `reader-substring-composition`, `reader-null-mutates-match-length`,
 `reader-non-amp-match`, `reader-gapless-drop-span`,
 `attribute-no-amp-identity`, `byte-no-amp-identity`,
+`single-level-overdecode`,
 `attribute-prefix-monotonicity`,
 `attribute-extension-monotonicity`, `attribute-case-monotonicity`, or
 `attribute-multicodepoint-prefix` before running `worker.php`, `runner.php`,

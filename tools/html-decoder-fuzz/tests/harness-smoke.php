@@ -792,6 +792,15 @@ check( 'secondary text oracle skips numeric references unsupported by html_entit
 $seen = fault_run( $oracles, 'text-secondary-oracle', 'a&AEliglater;b', 'text' );
 check( 'secondary text oracle skips unknown names with legacy prefixes', ! in_array( 'text-secondary-oracle-mismatch', $seen, true ), implode( ',', $seen ) );
 
+$single_level_failures = $checks->run( 'both', '&amp;amp;' );
+check( 'single-level decode keeps nested ampersand reference literal', array() === $single_level_failures, json_encode( $single_level_failures ) );
+
+$seen = fault_run( $oracles, 'single-level-overdecode', '&amp;amp;', 'text' );
+check( 'fault target single-level-overdecode exposes text double decodes', in_array( 'single-level-decode-overdecoded', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'single-level-overdecode', '&amp;amp;', 'attribute' );
+check( 'fault target single-level-overdecode exposes attribute double decodes', in_array( 'single-level-decode-overdecoded', $seen, true ), implode( ',', $seen ) );
+
 $wrong_text = '!a&b';
 $wrong_primary_oracles = new class( $wrong_text ) extends Oracles {
 	private string $wrong_text;
@@ -2182,6 +2191,15 @@ check(
 	$corpus_replay['stdout'] . $corpus_replay['stderr']
 );
 
+$single_level_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'corpus', '--seed', '1', '--case', '11875' ) );
+check(
+	'corpus replay regenerates single-level decode fixture',
+	0 === $single_level_replay['code'] &&
+		str_contains( $single_level_replay['stdout'], 'mode corpus, strategy corpus-splice' ) &&
+		str_contains( $single_level_replay['stdout'], 'Hex preview: 26616d703b616d703b5a' ),
+	$single_level_replay['stdout'] . $single_level_replay['stderr']
+);
+
 $corpus_fault_seed_replay = run_process(
 	array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'corpus', '--seed', '1', '--case', '0' ),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
@@ -2470,6 +2488,59 @@ if ( null !== $corpus_failure_file ) {
 	check( 'faulted corpus mutation minimizer preserves signature', 0 === $corpus_fault_minimize['code'], $corpus_fault_minimize['stdout'] . $corpus_fault_minimize['stderr'] );
 }
 remove_tree( $corpus_pipeline_dir );
+
+$single_level_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-single-level-fault-' . getmypid();
+remove_tree( $single_level_pipeline_dir );
+$faulted_single_level_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'corpus',
+		'--seed',
+		'1',
+		'--start-case',
+		'11875',
+		'--cases',
+		'1',
+		'--output-dir',
+		$single_level_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'single-level-overdecode' )
+);
+check( 'faulted single-level corpus worker reports findings', 1 === $faulted_single_level_worker['code'], $faulted_single_level_worker['stdout'] . $faulted_single_level_worker['stderr'] );
+
+$single_level_failure_files = glob( $single_level_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted single-level corpus worker writes failure artifact', is_array( $single_level_failure_files ) && array() !== $single_level_failure_files );
+
+$single_level_failure_file = is_array( $single_level_failure_files ) && array() !== $single_level_failure_files ? $single_level_failure_files[0] : null;
+if ( null !== $single_level_failure_file ) {
+	$single_level_manifest = json_decode( (string) file_get_contents( $single_level_failure_file ), true );
+	check(
+		'single-level corpus failure artifact records mode and signature',
+		'corpus' === ( $single_level_manifest['mode'] ?? null ) &&
+			'corpus-splice' === ( $single_level_manifest['strategy'] ?? null ) &&
+			11875 === ( $single_level_manifest['case'] ?? null ) &&
+			in_array( 'single-level-decode-overdecoded:text', $single_level_manifest['signatures'] ?? array(), true ) &&
+			in_array( 'single-level-decode-overdecoded:attribute', $single_level_manifest['signatures'] ?? array(), true ),
+		json_encode( $single_level_manifest )
+	);
+
+	$single_level_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $single_level_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'single-level-overdecode' )
+	);
+	check( 'faulted single-level corpus replay reproduces finding', 1 === $single_level_fault_replay['code'], $single_level_fault_replay['stdout'] . $single_level_fault_replay['stderr'] );
+
+	$single_level_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $single_level_failure_file, '--signature', 'single-level-decode-overdecoded:text' ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'single-level-overdecode' )
+	);
+	check( 'faulted single-level corpus minimizer preserves signature', 0 === $single_level_fault_minimize['code'], $single_level_fault_minimize['stdout'] . $single_level_fault_minimize['stderr'] );
+}
+remove_tree( $single_level_pipeline_dir );
 
 if ( null !== $token_map_fault_case_index ) {
 	$token_map_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-token-map-fault-' . getmypid();

@@ -15,6 +15,12 @@ class Checks {
 		0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
 		0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
 	);
+	private const SINGLE_LEVEL_DECODE_FIXTURES = array(
+		'&amp;amp;'  => '&amp;',
+		'&amp;lt;'   => '&lt;',
+		'&amp;#58;'  => '&#58;',
+		'&amp;#x3a;' => '&#x3a;',
+	);
 
 	private Oracles $oracles;
 
@@ -115,6 +121,18 @@ class Checks {
 				'decode-mismatch',
 				$context,
 				self::diff_detail( $context, $expected, $got )
+			);
+		}
+
+		$single_level_expected = self::single_level_decode_expected( $payload );
+		if ( null !== $single_level_expected && $got !== $single_level_expected ) {
+			$failures[] = self::failure(
+				'single-level-decode-overdecoded',
+				$context,
+				array_merge(
+					self::diff_detail( $context, $single_level_expected, $got ),
+					self::byte_detail( 'payload', $payload )
+				)
 			);
 		}
 
@@ -222,6 +240,18 @@ class Checks {
 				'raw-c1-not-pass-through',
 				$context,
 				self::diff_detail( $context, $payload, $got )
+			);
+		}
+
+		$single_level_expected = self::single_level_decode_expected( $payload );
+		if ( null !== $single_level_expected && $got !== $single_level_expected ) {
+			$failures[] = self::failure(
+				'single-level-decode-overdecoded',
+				$context,
+				array_merge(
+					self::diff_detail( $context, $single_level_expected, $got ),
+					self::byte_detail( 'payload', $payload )
+				)
 			);
 		}
 
@@ -898,6 +928,29 @@ class Checks {
 
 	private static function contains_raw_c1_byte( string $bytes ): bool {
 		return 1 === preg_match( '/[\x80-\x9F]/', $bytes );
+	}
+
+	private static function single_level_decode_expected( string $payload ): ?string {
+		$expected = '';
+		$offset   = 0;
+		$matched  = false;
+
+		while ( false !== ( $amp_at = strpos( $payload, '&', $offset ) ) ) {
+			$expected .= substr( $payload, $offset, $amp_at - $offset );
+
+			foreach ( self::SINGLE_LEVEL_DECODE_FIXTURES as $fixture => $decoded ) {
+				if ( str_starts_with( substr( $payload, $amp_at ), $fixture ) ) {
+					$expected .= $decoded;
+					$offset    = $amp_at + strlen( $fixture );
+					$matched   = true;
+					continue 2;
+				}
+			}
+
+			return null;
+		}
+
+		return $matched ? $expected . substr( $payload, $offset ) : null;
 	}
 
 	private static function byte_detail( string $name, string $bytes ): array {

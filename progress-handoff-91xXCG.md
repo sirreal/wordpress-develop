@@ -30,7 +30,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 23: add `html_entity_decode( ENT_HTML5 | ENT_QUOTES )` as a secondary text-context oracle.
 - [x] Tier 3 item 24: add token-map structure-aware deterministic inputs.
 - [x] Tier 3 item 25: add pcov-backed coverage-guided lane with new-edge corpus retention.
-- [ ] Tier 3 item 26.
+- [x] Tier 3 item 26: assert documented single-level decoding for nested ampersand references.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -159,6 +159,10 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode coverage --seed 1 --case 0` passed for the deterministic coverage-mode generated case.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --start-case 57 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-coverage-fault-check` reported the expected reader findings; replaying and minimizing the resulting coverage-mode failure manifest with `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk` both succeeded.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding coverage mode, fake-provider smoke coverage, and docs.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Oracles.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the single-level decode invariant and `single-level-overdecode` fault target.
+- 2026-06-11: A direct real-target probe over `pre&amp;amp;post` returned no failures, and `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 11875` passed for the deterministic `&amp;amp;Z` corpus-splice fixture.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=single-level-overdecode php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 11875 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-single-level-fault-check` reported `single-level-decode-overdecoded` findings in text and attribute contexts; replaying the manifest reproduced the findings and minimizing it with `--signature single-level-decode-overdecoded:text` reduced the payload to `&amp;amp;`.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding single-level decode checks, smoke coverage, and docs.
 
 ## Review Log
 
@@ -262,3 +266,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Helmholtz: APPROVE, coverage-guidance and pcov semantics after static pcov-path review plus fake-provider verification on this no-pcov runtime.
   - Laplace: APPROVE, worker/runner/replay/minimize integration and coverage-corpus artifact safety after duplicate-pruning verification.
   - Nietzsche: APPROVE, smoke/docs/progress scope with explicit no-pcov residual-risk note and fake-provider coverage checks.
+- Tier 3 item 26:
+  - Fermat: APPROVE, single-level decode invariant semantics and oracle-free byte-mode narrowness.
+  - Newton: APPROVE, fault target and worker/replay/minimize integration after README fault-target docs fix.
+  - Euler: APPROVE, docs/progress scope after README self-test and fault-target list updates.

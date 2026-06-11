@@ -65,6 +65,8 @@ class Oracles {
 			array( 'attribute', 'plain text', 'plain text' ),
 			array( 'text', '&amp;', '&' ),
 			array( 'attribute', '&amp;', '&' ),
+			array( 'text', '&amp;amp;', '&amp;' ),
+			array( 'attribute', '&amp;amp;', '&amp;' ),
 			array( 'text', '&amp', '&' ),
 			array( 'attribute', '&amp', '&' ),
 			array( 'text', '&ampx', '&x' ),
