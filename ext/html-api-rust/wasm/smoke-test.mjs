@@ -111,4 +111,15 @@ assert.equal(foreignObjectProcessor.get_namespace(), "html");
 assert.deepEqual(foreignObjectProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "FOREIGNOBJECT", "DIV"]);
 foreignObjectProcessor.destroy();
 
+assert.equal(
+	WP_HTML_Processor.normalize('<a href=#anchor enabled>Tom & Jerry</a>'),
+	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',
+);
+
+const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
+assert.equal(serializationProcessor.next_token(), true);
+assert.equal(serializationProcessor.serialize(), null);
+assert.equal(serializationProcessor.serialize_token(), "<textarea>\nOne &amp; Two</textarea>");
+serializationProcessor.destroy();
+
 console.log("WASM smoke tests passed.");

@@ -865,6 +865,10 @@ export function createHtmlApi(wasm) {
 			});
 		}
 
+		static normalize(html) {
+			return this.create_fragment(html).serialize();
+		}
+
 		static is_void(tagName) {
 			return VOID_ELEMENTS.has(asciiUpper(String(tagName)));
 		}
@@ -1011,6 +1015,41 @@ export function createHtmlApi(wasm) {
 			return false;
 		}
 
+		serialize() {
+			if (this.parser_state !== STATE_READY) {
+				return null;
+			}
+
+			let html = "";
+			while (this.next_token()) {
+				html += this.serialize_token();
+			}
+
+			return this.get_last_error() === null ? html : null;
+		}
+
+		serialize_token() {
+			const tokenType = this.get_token_type();
+
+			switch (tokenType) {
+				case "#doctype":
+					return serializeDoctype(this.get_doctype_info());
+				case "#text":
+					return htmlEscape(this.get_modifiable_text() ?? "");
+				case "#presumptuous-tag":
+					return "";
+				case "#funky-comment":
+				case "#comment":
+					return `<!--${this.get_full_comment_text() ?? ""}-->`;
+				case "#cdata-section":
+					return `<![CDATA[${this.get_modifiable_text() ?? ""}]]>`;
+				case "#tag":
+					return this.#serializeCurrentTag();
+				default:
+					return "";
+			}
+		}
+
 		#updateTreeStateForCurrentToken() {
 			const tokenType = this.get_token_type();
 			const tokenName = this.get_token_name();
@@ -1098,6 +1137,66 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return false;
+		}
+
+		#serializeCurrentTag() {
+			const tagName = replaceNulls(this.get_tag() ?? "");
+			if (tagName === "") {
+				return "";
+			}
+
+			const inHtml = this.get_namespace() === "html";
+			const qualifiedName = replaceNulls(inHtml ? tagName.toLowerCase() : this.get_qualified_tag_name());
+
+			if (this.is_tag_closer()) {
+				return `</${qualifiedName}>`;
+			}
+
+			let html = `<${qualifiedName}`;
+			const attributeNames = this.get_attribute_names_with_prefix("") ?? [];
+			const seenAttributeNames = new Set();
+			let previousAttributeWasTrue = false;
+
+			for (const attributeName of attributeNames) {
+				const qualifiedAttributeName = replaceNulls(this.get_qualified_attribute_name(attributeName));
+				if (seenAttributeNames.has(qualifiedAttributeName)) {
+					continue;
+				}
+				seenAttributeNames.add(qualifiedAttributeName);
+
+				if (previousAttributeWasTrue && qualifiedAttributeName.startsWith("=")) {
+					html += '=""';
+				}
+
+				html += ` ${qualifiedAttributeName}`;
+				const value = this.get_attribute(attributeName);
+				if (typeof value === "string") {
+					html += `="${htmlEscape(value)}"`;
+				}
+				previousAttributeWasTrue = value === true;
+			}
+
+			if (!inHtml && this.has_self_closing_flag()) {
+				html += " /";
+			}
+
+			html += ">";
+
+			if (tagName === "TEXTAREA" || tagName === "PRE" || tagName === "LISTING") {
+				html += "\n";
+			}
+
+			if (inHtml && SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				let text = this.get_modifiable_text() ?? "";
+				if (tagName === "IFRAME" || tagName === "NOEMBED" || tagName === "NOFRAMES") {
+					text = "";
+				} else if (tagName !== "SCRIPT" && tagName !== "STYLE") {
+					text = htmlEscape(text);
+				}
+				html += `${text}</${qualifiedName}>`;
+			}
+
+			return html;
 		}
 
 		#namespaceForStackTop() {
@@ -1497,6 +1596,51 @@ function tokenExpectsCloser(tokenName, namespaceName, hasSelfClosingFlag) {
 	}
 
 	return !hasSelfClosingFlag;
+}
+
+function serializeDoctype(doctype) {
+	if (doctype === null) {
+		return "";
+	}
+
+	let html = "<!DOCTYPE";
+	if (doctype.name) {
+		html += ` ${doctype.name}`;
+	}
+
+	if (doctype.public_identifier !== null) {
+		const quote = doctype.public_identifier.includes('"') ? "'" : '"';
+		html += ` PUBLIC ${quote}${doctype.public_identifier}${quote}`;
+	}
+
+	if (doctype.system_identifier !== null) {
+		if (doctype.public_identifier === null) {
+			html += " SYSTEM";
+		}
+		const quote = doctype.system_identifier.includes('"') ? "'" : '"';
+		html += ` ${quote}${doctype.system_identifier}${quote}`;
+	}
+
+	return `${html}>`;
+}
+
+function htmlEscape(value) {
+	return String(value).replace(/[&"'<>]/g, (char) => {
+		switch (char) {
+			case "&":
+				return "&amp;";
+			case '"':
+				return "&quot;";
+			case "'":
+				return "&apos;";
+			case "<":
+				return "&lt;";
+			case ">":
+				return "&gt;";
+			default:
+				return char;
+		}
+	});
 }
 
 function qualifySvgTagName(lowerTagName) {
