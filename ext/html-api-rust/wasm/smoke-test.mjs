@@ -2085,6 +2085,20 @@ assert.equal(
 	WP_HTML_Processor.normalize('<a href=#anchor enabled>Tom & Jerry</a>'),
 	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',
 );
+assert.equal(WP_HTML_Processor.normalize("apples > or\0anges"), "apples &gt; oranges");
+assert.equal(WP_HTML_Processor.normalize("<>"), "&lt;&gt;");
+assert.equal(WP_HTML_Processor.normalize("</>"), "");
+assert.equal(
+	WP_HTML_Processor.normalize('<![CDATA[invalid comment]]> syntax < <> "oddities" \'apostrophe\''),
+	"<!--[CDATA[invalid comment]]--> syntax &lt; &lt;&gt; &quot;oddities&quot; &apos;apostrophe&apos;",
+);
+assert.equal(WP_HTML_Processor.normalize("<input disabled>"), "<input disabled>");
+assert.equal(WP_HTML_Processor.normalize("<p id=3></p>"), '<p id="3"></p>');
+assert.equal(WP_HTML_Processor.normalize('<br class="clear"/>'), '<br class="clear">');
+assert.equal(WP_HTML_Processor.normalize('<div one=1 one="one" one=\'won\' one>'), '<div one="1"></div>');
+assert.equal(WP_HTML_Processor.normalize("<script>apples > or\0anges</script>"), "<script>apples > or\uFFFDanges</script>");
+assert.equal(WP_HTML_Processor.normalize("<style>apples > or\0anges</style>"), "<style>apples > or\uFFFDanges</style>");
+assert.equal(WP_HTML_Processor.normalize("one</div>two</span>three"), "onetwothree");
 assert.equal(WP_HTML_Processor.normalize("<div><p>One"), "<div><p>One</p></div>");
 assert.equal(WP_HTML_Processor.normalize("<table><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><tr><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
@@ -2096,6 +2110,26 @@ assert.equal(WP_HTML_Processor.normalize("<div></p>fun<table><td>cell</div>"), "
 assert.equal(WP_HTML_Processor.normalize("<img id='5\0'>"), '<img id="5\uFFFD">');
 assert.equal(WP_HTML_Processor.normalize("<div><span></div>"), "<div><span></span></div>");
 assert.equal(WP_HTML_Processor.normalize("<svg><g><g /></svg>"), "<svg><g><g /></g></svg>");
+
+for (const [doctypeInput, doctypeOutput] of [
+	["", ""],
+	["<!DOCTYPE>", "<!DOCTYPE>"],
+	["<!DOCTYPE html>", "<!DOCTYPE html>"],
+	["<!DOCTYPE WordPress>", "<!DOCTYPE wordpress>"],
+	['<!DOCTYPE html PUBLIC "x">', '<!DOCTYPE html PUBLIC "x">'],
+	['<!DOCTYPE html SYSTEM "y">', '<!DOCTYPE html SYSTEM "y">'],
+	['<!docType HtmL pubLIc\'xxx\'"yyy" all this is ignored>', '<!DOCTYPE html PUBLIC "xxx" "yyy">'],
+	['<!DOCTYPE html PUBLIC "\'quoted\'">', '<!DOCTYPE html PUBLIC "\'quoted\'">'],
+	['<!DOCTYPE html PUBLIC \'"quoted"\'>', '<!DOCTYPE html PUBLIC \'"quoted"\'>'],
+]) {
+	const fullParserSerializeDoctype = WP_HTML_Processor.create_full_parser(`${doctypeInput}👌`);
+	assert.equal(
+		fullParserSerializeDoctype.serialize(),
+		`${doctypeOutput}<html><head></head><body>👌</body></html>`,
+	);
+	fullParserSerializeDoctype.destroy();
+}
+
 for (const incompleteToken of ["<!--", "<!--x", "<!--x--", "<!--x--!", "<!--x--! >"]) {
 	assert.equal(WP_HTML_Processor.normalize(`content${incompleteToken}`), "content");
 }
