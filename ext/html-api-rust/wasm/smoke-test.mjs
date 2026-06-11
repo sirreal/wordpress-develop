@@ -1474,6 +1474,11 @@ assert.equal(noQuirksClasses.add_class("upper"), true);
 assert.equal(noQuirksClasses.get_updated_html(), '<!DOCTYPE html><span class="UPPER upper">');
 noQuirksClasses.destroy();
 
+const noQuirksClassList = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><span class='A A a B b \u00C9 \u0045\u0301 \u00C9 é'>");
+assert.equal(noQuirksClassList.next_tag("span"), true);
+assert.deepEqual(noQuirksClassList.class_list(), ["A", "a", "B", "b", "É", "E\u0301", "é"]);
+noQuirksClassList.destroy();
+
 const quirksClasses = WP_HTML_Processor.create_full_parser('<span class="UPPER">');
 assert.equal(quirksClasses.next_tag("span"), true);
 assert.equal(quirksClasses.compat_mode, WP_HTML_Tag_Processor.QUIRKS_MODE);
@@ -1484,6 +1489,11 @@ assert.equal(quirksClasses.get_updated_html(), '<span class="UPPER">');
 assert.equal(quirksClasses.remove_class("upPer"), true);
 assert.equal(quirksClasses.get_updated_html(), "<span >");
 quirksClasses.destroy();
+
+const quirksClassList = WP_HTML_Processor.create_full_parser("<span class='A A a B b \u00C9 \u0045\u0301 \u00C9 é \u0065\u0301'>");
+assert.equal(quirksClassList.next_tag("span"), true);
+assert.deepEqual(quirksClassList.class_list(), ["a", "b", "É", "e\u0301", "é"]);
+quirksClassList.destroy();
 
 const noQuirksParagraphTable = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><table>");
 assert.equal(noQuirksParagraphTable.next_tag("table"), true);
