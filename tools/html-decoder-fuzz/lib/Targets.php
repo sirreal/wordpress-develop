@@ -126,6 +126,13 @@ class Targets {
 				$targets['decode_attribute'] = static fn( string $text ): string => self::rewrite_raw_c1_bytes( \WP_HTML_Decoder::decode_attribute( $text ) );
 				break;
 
+			case 'text-secondary-oracle':
+				$targets['decode_text'] = static function ( string $text ): string {
+					$decoded = \WP_HTML_Decoder::decode_text_node( $text );
+					return str_contains( $text, '&' ) ? '!' . $decoded : $decoded;
+				};
+				break;
+
 			case 'byte-no-amp-identity':
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );

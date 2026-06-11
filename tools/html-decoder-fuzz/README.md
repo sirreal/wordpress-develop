@@ -26,9 +26,16 @@ The primary oracle is PHP's HTML5 parser:
 - Attribute context: parse `<div title="PAYLOAD">` and read
   `getAttribute( 'title' )`.
 
-`html_entity_decode( ENT_HTML5 )` is deliberately not used as the primary
-oracle because it does not implement the HTML attribute-context rule for
-semicolonless named references followed by `=` or an alphanumeric byte.
+For text context, `html_entity_decode( ENT_HTML5 | ENT_QUOTES, 'UTF-8' )` also
+runs as a secondary oracle on payloads whose references it supports:
+known semicolon-terminated named references and literal text. Numeric
+references, unknown named-looking references, and semicolonless named-looking
+references stay with the DOM oracle and fuzzer
+invariants, because `html_entity_decode()` does not implement those parser
+states. `html_entity_decode()` is deliberately not used as the primary oracle or
+as an attribute-context oracle because it does not implement the HTML
+attribute-context rule for semicolonless named references followed by `=` or an
+alphanumeric byte.
 
 In the default `oracle` mode, the generator neutralizes parser-vs-decoder
 confounders by producing valid UTF-8 payloads with no raw `<`, no raw double
@@ -48,7 +55,9 @@ end, alphanumeric, equals, punctuation, whitespace, and multibyte followers.
 
 For each generated payload, the fuzzer runs both text and attribute contexts:
 
-1. Compare `decode_text_node()` or `decode_attribute()` to the DOM oracle.
+1. Compare `decode_text_node()` or `decode_attribute()` to the DOM oracle, and
+   compare supported text payloads to the secondary `html_entity_decode()`
+   oracle.
 2. Rebuild the decoded string with repeated `read_character_reference()` calls
    plus literal spans, then compare it to the high-level decoder.
 3. Assert every matched character reference reports a nonempty chunk, a byte
@@ -270,6 +279,8 @@ mutation-tested broken targets:
 
 - C1 numeric references not remapped through the Windows-1252 table, and raw
   C1 bytes not passing through unchanged
+- supported text payloads disagreeing with the secondary `html_entity_decode()`
+  oracle
 - zero, surrogate, and above-Unicode numeric references not decoding to exactly
   U+FFFD
 - semicolonless named references decoded in attributes despite ambiguous
@@ -287,7 +298,7 @@ mutation-tested broken targets:
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `skip-c1-remap`, `numeric-c1-not-remapped`, `raw-c1-not-pass-through`,
-`numeric-invalid-not-replacement`,
+`text-secondary-oracle`, `numeric-invalid-not-replacement`,
 `attribute-semicolonless`, `match-length-off-by-one`,
 `reader-empty-chunk`, `reader-short-match-length`,
 `reader-substring-composition`, `reader-null-mutates-match-length`,

@@ -118,6 +118,38 @@ class Checks {
 			);
 		}
 
+		if ( 'text' === $context ) {
+			try {
+				$entity_decode_expected = $this->oracles->decode_text_with_entity_decode( $payload );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'oracle-exception',
+					'text:entity-decode',
+					array(
+						'context' => $context,
+						'oracle'  => 'entity-decode',
+						'class'   => get_class( $error ),
+						'message' => $error->getMessage(),
+					)
+				);
+				$entity_decode_expected = null;
+			}
+
+			if ( null !== $entity_decode_expected && $got !== $entity_decode_expected ) {
+				$failures[] = self::failure(
+					'text-secondary-oracle-mismatch',
+					$context,
+					array_merge(
+						self::diff_detail( $context, $entity_decode_expected, $got ),
+						array(
+							'secondary_oracle'    => 'html_entity_decode',
+							'dom_expected_base64' => base64_encode( $expected ),
+						)
+					)
+				);
+			}
+		}
+
 		if ( ! mb_check_encoding( $got, 'UTF-8' ) ) {
 			$failures[] = self::failure(
 				'decoded-not-valid-utf8',

@@ -129,6 +129,7 @@ $skip_c1_fault_seed = 2;
 $skip_c1_fault_case = 36;
 
 check( 'required oracles available', $oracles->has_required(), json_encode( $events ) );
+check( 'secondary entity-decode oracle available', in_array( 'entity-decode', $oracles->names(), true ), implode( ',', $oracles->names() ) );
 check(
 	'no oracle disabled by battery',
 	array() === array_filter( $events, static fn( $e ) => 'oracle-disabled' === $e['type'] ),
@@ -177,7 +178,7 @@ function broken_run( Oracles $oracles, array $real_targets, array $overrides ): 
 /**
  * @return string[] Distinct check names observed.
  */
-function fault_run( Oracles $oracles, string $fault, string $payload = 'javascript&colon;alert(1)' ): array {
+function fault_run( Oracles $oracles, string $fault, string $payload = 'javascript&colon;alert(1)', string $context = 'attribute' ): array {
 	$old_fault = getenv( 'HTML_DECODER_FUZZ_FAULT' );
 	putenv( "HTML_DECODER_FUZZ_FAULT={$fault}" );
 
@@ -185,7 +186,7 @@ function fault_run( Oracles $oracles, string $fault, string $payload = 'javascri
 		$checks = new Checks( $oracles, Targets::resolve() );
 		$seen   = array();
 
-		foreach ( $checks->run( 'attribute', $payload ) as $failure ) {
+		foreach ( $checks->run( $context, $payload ) as $failure ) {
 			$seen[ $failure['check'] ] = true;
 		}
 
@@ -772,6 +773,51 @@ check( 'fault target numeric-c1-not-remapped exposes skipped numeric C1 remaps',
 
 $seen = fault_run_without_oracle( $oracles, 'raw-c1-not-pass-through', "\x80\x9F" );
 check( 'fault target raw-c1-not-pass-through exposes raw C1 byte rewrites', in_array( 'raw-c1-not-pass-through', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'text-secondary-oracle', 'a&amp;b', 'text' );
+check( 'fault target text-secondary-oracle exposes secondary text-oracle mismatches', in_array( 'text-secondary-oracle-mismatch', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'text-secondary-oracle', 'a&#x80;b', 'text' );
+check( 'secondary text oracle skips numeric references unsupported by html_entity_decode', ! in_array( 'text-secondary-oracle-mismatch', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'text-secondary-oracle', 'a&AEliglater;b', 'text' );
+check( 'secondary text oracle skips unknown names with legacy prefixes', ! in_array( 'text-secondary-oracle-mismatch', $seen, true ), implode( ',', $seen ) );
+
+$wrong_text = '!a&b';
+$wrong_primary_oracles = new class( $wrong_text ) extends Oracles {
+	private string $wrong_text;
+
+	public function __construct( string $wrong_text ) {
+		$this->wrong_text = $wrong_text;
+	}
+
+	public function decode( string $context, string $payload ): string {
+		if ( 'text' === $context ) {
+			return $this->wrong_text;
+		}
+
+		return parent::decode( $context, $payload );
+	}
+};
+$wrong_agreement_checks = new Checks(
+	$wrong_primary_oracles,
+	array_merge(
+		$real_targets,
+		array(
+			'decode_text' => static fn( string $text ): string => $wrong_text,
+		)
+	)
+);
+$wrong_agreement_seen = array();
+foreach ( $wrong_agreement_checks->run( 'text', 'a&amp;b' ) as $failure ) {
+	$wrong_agreement_seen[ $failure['check'] ] = true;
+}
+check(
+	'secondary text oracle catches primary and target agreement on wrong text',
+	isset( $wrong_agreement_seen['text-secondary-oracle-mismatch'] ) &&
+		! isset( $wrong_agreement_seen['decode-mismatch'] ),
+	implode( ',', array_keys( $wrong_agreement_seen ) )
+);
 
 $seen = broken_run(
 	$oracles,
@@ -2169,6 +2215,12 @@ $reader_fault_pipelines = array(
 		'signature' => 'numeric-c1-not-remapped:text',
 	),
 	array(
+		'fault'              => 'text-secondary-oracle',
+		'case'               => 4,
+		'signature'          => 'text-secondary-oracle-mismatch:text',
+		'minimize_signature' => 'text-secondary-oracle-mismatch:text',
+	),
+	array(
 		'fault'     => 'attribute-no-amp-identity',
 		'case'      => 38,
 		'signature' => 'attribute-without-ampersand-not-identity:attribute',
@@ -2216,8 +2268,13 @@ foreach ( $reader_fault_pipelines as $reader_pipeline ) {
 		);
 		check( "faulted {$reader_pipeline['fault']} replay reproduces finding", 1 === $reader_fault_replay['code'], $reader_fault_replay['stdout'] . $reader_fault_replay['stderr'] );
 
+		$reader_fault_minimize_command = array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $reader_failure_file );
+		if ( isset( $reader_pipeline['minimize_signature'] ) ) {
+			$reader_fault_minimize_command[] = '--signature';
+			$reader_fault_minimize_command[] = $reader_pipeline['minimize_signature'];
+		}
 		$reader_fault_minimize = run_process(
-			array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $reader_failure_file ),
+			$reader_fault_minimize_command,
 			array( 'HTML_DECODER_FUZZ_FAULT' => $reader_pipeline['fault'] )
 		);
 		check( "faulted {$reader_pipeline['fault']} minimizer preserves signature", 0 === $reader_fault_minimize['code'], $reader_fault_minimize['stdout'] . $reader_fault_minimize['stderr'] );

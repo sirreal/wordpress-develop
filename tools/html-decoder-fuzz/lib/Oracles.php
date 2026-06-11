@@ -2,26 +2,36 @@
 namespace HtmlDecoderFuzz;
 
 /**
- * DOM-backed HTML entity decoding oracle.
+ * HTML entity decoding oracles.
  */
 class Oracles {
 	/** @var array<int, array{type: string, oracle: string, detail: string}> */
 	private array $events = array();
 
 	private bool $dom_available = false;
+	private bool $entity_decode_available = true;
 	private bool $mb_available = false;
 
 	public static function build(): self {
 		$oracles = new self();
 
-		$oracles->dom_available = class_exists( \Dom\HTMLDocument::class );
-		$oracles->mb_available  = function_exists( 'mb_check_encoding' );
+		$oracles->dom_available           = class_exists( \Dom\HTMLDocument::class );
+		$oracles->entity_decode_available = function_exists( 'html_entity_decode' ) && defined( 'ENT_HTML5' ) && defined( 'ENT_QUOTES' );
+		$oracles->mb_available            = function_exists( 'mb_check_encoding' );
 
 		if ( ! $oracles->dom_available ) {
 			$oracles->events[] = array(
 				'type'   => 'oracle-unavailable',
 				'oracle' => 'dom',
 				'detail' => 'PHP 8.4 Dom\\HTMLDocument is required',
+			);
+		}
+
+		if ( ! $oracles->entity_decode_available ) {
+			$oracles->events[] = array(
+				'type'   => 'oracle-unavailable',
+				'oracle' => 'entity-decode',
+				'detail' => 'html_entity_decode with ENT_HTML5 and ENT_QUOTES is required',
 			);
 		}
 
@@ -35,6 +45,10 @@ class Oracles {
 
 		if ( $oracles->dom_available ) {
 			$oracles->verify_battery();
+		}
+
+		if ( $oracles->entity_decode_available ) {
+			$oracles->verify_entity_decode_battery();
 		}
 
 		return $oracles;
@@ -81,13 +95,16 @@ class Oracles {
 	}
 
 	public function has_required(): bool {
-		return $this->dom_available && $this->mb_available;
+		return $this->dom_available && $this->entity_decode_available && $this->mb_available;
 	}
 
 	public function names(): array {
 		$names = array();
 		if ( $this->dom_available ) {
 			$names[] = 'dom';
+		}
+		if ( $this->entity_decode_available ) {
+			$names[] = 'entity-decode';
 		}
 		if ( $this->mb_available ) {
 			$names[] = 'mb';
@@ -112,6 +129,14 @@ class Oracles {
 		}
 
 		throw new \InvalidArgumentException( "Unknown context {$context}" );
+	}
+
+	public function decode_text_with_entity_decode( string $payload ): ?string {
+		if ( ! $this->entity_decode_available || ! self::supports_entity_decode_text_payload( $payload ) ) {
+			return null;
+		}
+
+		return html_entity_decode( $payload, ENT_HTML5 | ENT_QUOTES, 'UTF-8' );
 	}
 
 	private function decode_text( string $payload ): string {
@@ -143,6 +168,61 @@ class Oracles {
 		return $document;
 	}
 
+	private static function supports_entity_decode_text_payload( string $payload ): bool {
+		$length = strlen( $payload );
+		$offset = 0;
+
+		while ( false !== ( $amp_at = strpos( $payload, '&', $offset ) ) ) {
+			$name_at = $amp_at + 1;
+			if ( $name_at >= $length ) {
+				return true;
+			}
+
+			if ( '#' === $payload[ $name_at ] ) {
+				return false;
+			}
+
+			$name_length = strspn( $payload, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', $name_at );
+			if ( 0 === $name_length ) {
+				$offset = $name_at;
+				continue;
+			}
+
+			$after_name = $name_at + $name_length;
+			if ( $after_name >= $length || ';' !== $payload[ $after_name ] ) {
+				return false;
+			}
+
+			$reference_name = substr( $payload, $name_at, $name_length + 1 );
+			if ( ! isset( self::entity_decode_named_reference_set()[ $reference_name ] ) ) {
+				return false;
+			}
+
+			$offset = $after_name + 1;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @return array<string, true>
+	 */
+	private static function entity_decode_named_reference_set(): array {
+		static $names = null;
+		if ( null !== $names ) {
+			return $names;
+		}
+
+		$names = array();
+		foreach ( Bootstrap::named_reference_names() as $name ) {
+			if ( str_ends_with( $name, ';' ) ) {
+				$names[ $name ] = true;
+			}
+		}
+
+		return $names;
+	}
+
 	private function verify_battery(): void {
 		foreach ( self::battery() as $i => $vector ) {
 			list( $context, $payload, $expected ) = $vector;
@@ -170,6 +250,49 @@ class Oracles {
 						bin2hex( $payload ),
 						bin2hex( $expected ),
 						bin2hex( $got )
+					),
+				);
+				return;
+			}
+		}
+	}
+
+	private function verify_entity_decode_battery(): void {
+		$battery = array(
+			array( '', '' ),
+			array( 'plain text', 'plain text' ),
+			array( 'a&amp;b', 'a&b' ),
+			array( '&quot;&apos;', "\"'" ),
+			array( '&notin;', "\u{2209}" ),
+			array( '&nvlt;', "<\u{20D2}" ),
+			array( '&NewLine;', "\n" ),
+		);
+
+		foreach ( $battery as $i => $vector ) {
+			list( $payload, $expected ) = $vector;
+			try {
+				$got = $this->decode_text_with_entity_decode( $payload );
+			} catch ( \Throwable $error ) {
+				$this->entity_decode_available = false;
+				$this->events[]                = array(
+					'type'   => 'oracle-disabled',
+					'oracle' => 'entity-decode',
+					'detail' => "battery vector {$i} threw " . get_class( $error ) . ': ' . $error->getMessage(),
+				);
+				return;
+			}
+
+			if ( $got !== $expected ) {
+				$this->entity_decode_available = false;
+				$this->events[]                = array(
+					'type'   => 'oracle-disabled',
+					'oracle' => 'entity-decode',
+					'detail' => sprintf(
+						'battery vector %d (%s): expected %s, got %s',
+						$i,
+						bin2hex( $payload ),
+						bin2hex( $expected ),
+						bin2hex( is_string( $got ) ? $got : '' )
 					),
 				);
 				return;

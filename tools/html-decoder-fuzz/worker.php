@@ -45,7 +45,7 @@ if ( Cli::mode_uses_oracle( $options['mode'] ) && ! $oracles->has_required() ) {
 	Cli::emit(
 		array(
 			'type'   => 'fatal',
-			'reason' => 'required DOM or mbstring oracle unavailable or failed the battery',
+			'reason' => 'required oracle unavailable or failed the battery',
 		)
 	);
 	exit( 2 );
