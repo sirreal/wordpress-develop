@@ -295,23 +295,38 @@ class Checks {
 			);
 		}
 
-		foreach ( $this->attribute_searches( $decoded ) as $search ) {
+		$searches   = $this->attribute_searches( $decoded );
+		$results    = array();
+		$get_result = function ( string $search, string $case_sensitivity ) use ( $payload, &$failures, &$results ): ?bool {
+			$result_key = $case_sensitivity . "\0" . $search;
+			if ( array_key_exists( $result_key, $results ) ) {
+				return $results[ $result_key ];
+			}
+
+			try {
+				$results[ $result_key ] = ( $this->targets['attribute_starts_with'] )( $payload, $search, $case_sensitivity );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					"attribute-starts-with:{$case_sensitivity}",
+					array(
+						'target'           => 'attribute_starts_with',
+						'case_sensitivity' => $case_sensitivity,
+						'class'            => get_class( $error ),
+						'message'          => $error->getMessage(),
+					)
+				);
+				$results[ $result_key ] = null;
+			}
+
+			return $results[ $result_key ];
+		};
+
+		foreach ( $searches as $search ) {
 			foreach ( array( 'case-sensitive', 'ascii-case-insensitive' ) as $case_sensitivity ) {
 				$expected = $this->expected_prefix_match( $decoded, $search, $case_sensitivity );
-
-				try {
-					$got = ( $this->targets['attribute_starts_with'] )( $payload, $search, $case_sensitivity );
-				} catch ( \Throwable $error ) {
-					$failures[] = self::failure(
-						'target-exception',
-						"attribute-starts-with:{$case_sensitivity}",
-						array(
-							'target'           => 'attribute_starts_with',
-							'case_sensitivity' => $case_sensitivity,
-							'class'            => get_class( $error ),
-							'message'          => $error->getMessage(),
-						)
-					);
+				$got      = $get_result( $search, $case_sensitivity );
+				if ( null === $got ) {
 					continue;
 				}
 
@@ -325,6 +340,83 @@ class Checks {
 							'expected'         => $expected,
 							'got'              => $got,
 							'decoded'          => self::preview( $decoded ),
+						)
+					);
+				}
+			}
+		}
+
+		$monotonicity_failures = $this->check_attribute_starts_with_monotonicity( $searches, $get_result );
+		$failures              = array_merge( $failures, $monotonicity_failures );
+
+		return $failures;
+	}
+
+	/**
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_attribute_starts_with_monotonicity( array $searches, callable $get_result ): array {
+		$failures   = array();
+		$candidates = array();
+
+		foreach ( $searches as $search ) {
+			$candidates[ $search ] = true;
+			foreach ( self::byte_prefixes( $search ) as $prefix ) {
+				$candidates[ $prefix ] = true;
+			}
+		}
+
+		$case_sensitivities = array( 'case-sensitive', 'ascii-case-insensitive' );
+		foreach ( array_keys( $candidates ) as $search ) {
+			foreach ( $case_sensitivities as $case_sensitivity ) {
+				$got = $get_result( $search, $case_sensitivity );
+				if ( true === $got ) {
+					foreach ( self::byte_prefixes( $search ) as $prefix ) {
+						$prefix_got = $get_result( $prefix, $case_sensitivity );
+						if ( false === $prefix_got ) {
+							$failures[] = self::failure(
+								'attribute-starts-with-prefix-monotonicity',
+								$case_sensitivity,
+								array(
+									'case_sensitivity' => $case_sensitivity,
+									'search'           => $search,
+									'prefix'           => $prefix,
+								)
+							);
+							break;
+						}
+					}
+				}
+
+				if ( false === $got ) {
+					foreach ( self::attribute_search_extensions() as $suffix ) {
+						$extension     = $search . $suffix;
+						$extension_got = $get_result( $extension, $case_sensitivity );
+						if ( true === $extension_got ) {
+							$failures[] = self::failure(
+								'attribute-starts-with-extension-monotonicity',
+								$case_sensitivity,
+								array(
+									'case_sensitivity' => $case_sensitivity,
+									'search'           => $search,
+									'extension'        => $extension,
+								)
+							);
+							break;
+						}
+					}
+				}
+			}
+
+			$case_sensitive = $get_result( $search, 'case-sensitive' );
+			if ( true === $case_sensitive ) {
+				$case_insensitive = $get_result( $search, 'ascii-case-insensitive' );
+				if ( false === $case_insensitive ) {
+					$failures[] = self::failure(
+						'attribute-starts-with-case-monotonicity',
+						'case-sensitive',
+						array(
+							'search' => $search,
 						)
 					);
 				}
@@ -375,6 +467,24 @@ class Checks {
 
 	private static function ascii_lower( string $text ): string {
 		return strtr( $text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function byte_prefixes( string $text ): array {
+		$prefixes = array();
+		for ( $length = 0; $length < strlen( $text ); $length++ ) {
+			$prefixes[] = substr( $text, 0, $length );
+		}
+		return $prefixes;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function attribute_search_extensions(): array {
+		return array( "\x7F", 'x', 'A', '0', ':' );
 	}
 
 	private static function failure( string $check, string $party, array $detail ): array {

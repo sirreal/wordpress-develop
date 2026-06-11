@@ -38,6 +38,36 @@ class Targets {
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );
 				break;
+
+			case 'attribute-prefix-monotonicity':
+				$attribute_starts_with            = $targets['attribute_starts_with'];
+				$targets['attribute_starts_with'] = static function ( string $haystack, string $search, string $case_sensitivity ) use ( $attribute_starts_with ): bool {
+					if ( 'jav' === $search ) {
+						return false;
+					}
+					return $attribute_starts_with( $haystack, $search, $case_sensitivity );
+				};
+				break;
+
+			case 'attribute-extension-monotonicity':
+				$attribute_starts_with            = $targets['attribute_starts_with'];
+				$targets['attribute_starts_with'] = static function ( string $haystack, string $search, string $case_sensitivity ) use ( $attribute_starts_with ): bool {
+					if ( str_ends_with( $search, "\x7F" ) ) {
+						return true;
+					}
+					return $attribute_starts_with( $haystack, $search, $case_sensitivity );
+				};
+				break;
+
+			case 'attribute-case-monotonicity':
+				$attribute_starts_with            = $targets['attribute_starts_with'];
+				$targets['attribute_starts_with'] = static function ( string $haystack, string $search, string $case_sensitivity ) use ( $attribute_starts_with ): bool {
+					if ( 'ascii-case-insensitive' === $case_sensitivity && 'jav' === $search ) {
+						return false;
+					}
+					return $attribute_starts_with( $haystack, $search, $case_sensitivity );
+				};
+				break;
 		}
 
 		return $targets;

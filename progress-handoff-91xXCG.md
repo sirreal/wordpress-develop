@@ -8,7 +8,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 1 item 1: run both decoder contexts per generated case.
 - [x] Tier 1 item 2: add oracle-free arbitrary byte-space lane.
 - [x] Tier 1 item 3: add reference-at-EOF generation strategy.
-- [ ] Tier 1 items 4-6.
+- [x] Tier 1 item 4: add `attribute_starts_with()` monotonicity invariants.
+- [ ] Tier 1 items 5-6.
 - [ ] Tier 2 items 7-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
@@ -34,6 +35,10 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: Documented that adding the new weighted strategy intentionally changes generated-case `--seed --case` payload mapping; failure-manifest replay remains payload-stable.
 - 2026-06-11: Verified `reference-at-eof` still ends in a reference for `max-bytes` 1, 2, 3, 4, 5, and 8 after reserving suffix space.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after tightening EOF suffix-shape coverage.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Checks.php`, `php -l tools/html-decoder-fuzz/lib/Targets.php`, and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding `attribute_starts_with()` prefix, extension, case monotonicity, and fault-target coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `git diff --check` passed after adding `attribute_starts_with()` monotonicity checks.
 
 ## Review Log
 
@@ -49,3 +54,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Hegel: APPROVE, generator semantics after max-bytes suffix reservation fix.
   - Lovelace: APPROVE, smoke coverage after strict EOF suffix-shape checks.
   - Erdos: APPROVE, docs/replay compatibility after documenting generated-case mapping drift.
+- Tier 1 item 4:
+  - Copernicus: APPROVE, invariant semantics and exception handling.
+  - Maxwell: APPROVE, fault-target and smoke coverage.
+  - Poincare: APPROVE, integration/runtime compatibility.

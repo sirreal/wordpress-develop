@@ -129,6 +129,31 @@ function broken_run( Oracles $oracles, array $real_targets, array $overrides ): 
 /**
  * @return string[] Distinct check names observed.
  */
+function fault_run( Oracles $oracles, string $fault ): array {
+	$old_fault = getenv( 'HTML_DECODER_FUZZ_FAULT' );
+	putenv( "HTML_DECODER_FUZZ_FAULT={$fault}" );
+
+	try {
+		$checks = new Checks( $oracles, Targets::resolve() );
+		$seen   = array();
+
+		foreach ( $checks->run( 'attribute', 'javascript&colon;alert(1)' ) as $failure ) {
+			$seen[ $failure['check'] ] = true;
+		}
+
+		return array_keys( $seen );
+	} finally {
+		if ( false === $old_fault ) {
+			putenv( 'HTML_DECODER_FUZZ_FAULT' );
+		} else {
+			putenv( "HTML_DECODER_FUZZ_FAULT={$old_fault}" );
+		}
+	}
+}
+
+/**
+ * @return string[] Distinct check names observed.
+ */
 function broken_oracle_free_run( Oracles $oracles, array $real_targets, array $overrides ): array {
 	$checks = new Checks( $oracles, array_merge( $real_targets, $overrides ) );
 	$seen   = array();
@@ -218,6 +243,58 @@ $seen = broken_run(
 	)
 );
 check( 'catches partial-prefix attribute matcher', in_array( 'attribute-starts-with-mismatch', $seen, true ), implode( ',', $seen ) );
+
+$seen = broken_run(
+	$oracles,
+	$real_targets,
+	array(
+		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ) use ( $real_targets ): bool {
+			if ( 'jav' === $search ) {
+				return false;
+			}
+			return $real_targets['attribute_starts_with']( $haystack, $search, $case_sensitivity );
+		},
+	)
+);
+check( 'catches attribute_starts_with prefix monotonicity violations', in_array( 'attribute-starts-with-prefix-monotonicity', $seen, true ), implode( ',', $seen ) );
+
+$seen = broken_run(
+	$oracles,
+	$real_targets,
+	array(
+		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ) use ( $real_targets ): bool {
+			if ( str_ends_with( $search, "\x7F" ) ) {
+				return true;
+			}
+			return $real_targets['attribute_starts_with']( $haystack, $search, $case_sensitivity );
+		},
+	)
+);
+check( 'catches attribute_starts_with extension monotonicity violations', in_array( 'attribute-starts-with-extension-monotonicity', $seen, true ), implode( ',', $seen ) );
+
+$seen = broken_run(
+	$oracles,
+	$real_targets,
+	array(
+		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ) use ( $real_targets ): bool {
+			if ( 'ascii-case-insensitive' === $case_sensitivity && 'jav' === $search ) {
+				return false;
+			}
+			return $real_targets['attribute_starts_with']( $haystack, $search, $case_sensitivity );
+		},
+	)
+);
+check( 'catches attribute_starts_with case monotonicity violations', in_array( 'attribute-starts-with-case-monotonicity', $seen, true ), implode( ',', $seen ) );
+
+$attribute_faults = array(
+	'attribute-prefix-monotonicity'    => 'attribute-starts-with-prefix-monotonicity',
+	'attribute-extension-monotonicity' => 'attribute-starts-with-extension-monotonicity',
+	'attribute-case-monotonicity'      => 'attribute-starts-with-case-monotonicity',
+);
+foreach ( $attribute_faults as $fault => $expected_check ) {
+	$seen = fault_run( $oracles, $fault );
+	check( "fault target {$fault} exposes {$expected_check}", in_array( $expected_check, $seen, true ), implode( ',', $seen ) );
+}
 
 $seen = broken_oracle_free_run(
 	$oracles,

@@ -50,7 +50,8 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
 3. Assert every matched character reference reports a positive byte length and
    does not overrun the input.
 4. Check `attribute_starts_with()` against the decoded attribute prefix for
-   ASCII search strings in both case-sensitive and ASCII-case-insensitive modes.
+   ASCII search strings in both case-sensitive and ASCII-case-insensitive modes,
+   including monotonic prefix, extension, and case-sensitivity invariants.
 5. Assert decoded output is valid UTF-8.
 6. Assert text without `&` is an identity decode.
 
@@ -204,9 +205,12 @@ mutation-tested broken targets:
   followers
 - off-by-one `read_character_reference()` match lengths
 - partial-prefix `attribute_starts_with()` matches
+- non-monotonic `attribute_starts_with()` prefix, extension, and
+  case-sensitivity results
 - raw byte payloads without `&` not decoding identically
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`, or
-`byte-no-amp-identity` before running `worker.php`, `runner.php`, `replay.php`,
-or `minimize.php`.
+`byte-no-amp-identity`, `attribute-prefix-monotonicity`,
+`attribute-extension-monotonicity`, or `attribute-case-monotonicity` before
+running `worker.php`, `runner.php`, `replay.php`, or `minimize.php`.
