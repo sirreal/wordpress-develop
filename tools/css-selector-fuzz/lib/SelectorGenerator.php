@@ -13,6 +13,11 @@ namespace CssSelectorFuzz;
  *    (pseudo-classes/elements, sibling/column combinators, namespaces,
  *    non-type context selectors). Must not parse in either grammar.
  *  - invalid: not valid CSS selectors at all. Must not parse.
+ *  - invalid-utf8: a supported compound with a raw ill-formed UTF-8 byte
+ *    sequence injected into an ident or string operand. from_selectors()
+ *    scrubs the input before parsing ( one U+FFFD per maximal subpart, CSS
+ *    Syntax §3.2 via the WHATWG decoder ), so the case carries the
+ *    post-scrub AST.
  *  - chaos: arbitrary bytes. No parse expectation.
  *  - mutated: a supported selector with random byte mutations. No parse
  *    expectation.
@@ -29,9 +34,33 @@ class SelectorGenerator {
 		'path-directed',
 		'unsupported',
 		'invalid',
+		'invalid-utf8',
 		'chaos',
 		'mutated',
 		'edge-escape',
+	);
+
+	/**
+	 * Ill-formed UTF-8 byte classes and the number of U+FFFD replacements the
+	 * WHATWG UTF-8 decoder produces for each ( one per maximal subpart ).
+	 * The counts are pinned here as an independent expectation — computing
+	 * them with wp_scrub_utf8() would make the AST check a tautology.
+	 *
+	 * The counts assume the byte after the sequence is not a continuation
+	 * byte ( it could complete a truncated sequence ); the generator always
+	 * follows an injected sequence with ASCII or end of input.
+	 */
+	const INVALID_UTF8_CLASSES = array(
+		'lone-continuation' => array( "\x80", 1 ),
+		'truncated-2-byte'  => array( "\xC3", 1 ),
+		'truncated-3-byte'  => array( "\xE2\x8C", 1 ),
+		'truncated-4-byte'  => array( "\xF0\x9F\x82", 1 ),
+		'invalid-lead-f5'   => array( "\xF5", 1 ),
+		'invalid-lead-ff'   => array( "\xFF", 1 ),
+		'overlong-min'      => array( "\xC0\x80", 2 ),
+		'overlong-max'      => array( "\xC1\xBF", 2 ),
+		'surrogate-half'    => array( "\xED\xA0\x80", 3 ),
+		'beyond-max'        => array( "\xF4\x90\x80\x80", 4 ),
 	);
 
 	/** @var Prng */
@@ -182,6 +211,7 @@ class SelectorGenerator {
 						'supported-complex'  => 24,
 						'unsupported'        => 14,
 						'invalid'            => 11,
+						'invalid-utf8'       => 5,
 						'chaos'              => 8,
 						'mutated'            => 10,
 						'edge-escape'        => 5,
@@ -192,6 +222,7 @@ class SelectorGenerator {
 						'path-directed'      => 21,
 						'unsupported'        => 11,
 						'invalid'            => 9,
+						'invalid-utf8'       => 5,
 						'chaos'              => 6,
 						'mutated'            => 6,
 						'edge-escape'        => 5,
@@ -229,6 +260,9 @@ class SelectorGenerator {
 
 			case 'edge-escape':
 				return $generator->gen_edge_escape();
+
+			case 'invalid-utf8':
+				return $generator->gen_invalid_utf8();
 
 			case 'unsupported':
 				return array(
@@ -759,6 +793,90 @@ class SelectorGenerator {
 				array(
 					'context' => array(),
 					'self'    => $compound,
+				),
+			),
+		);
+	}
+
+	/*
+	 * -----------------------
+	 * Invalid-UTF-8 injection
+	 * -----------------------
+	 *
+	 * Raw ill-formed UTF-8 byte sequences in the selector input, mirroring
+	 * the nul-input pattern: a small fixed simple selector keeps the case
+	 * focused on the normalize_selector_input() scrub. Each maximal subpart
+	 * of the injected sequence decodes to one U+FFFD ( per-class counts
+	 * pinned in INVALID_UTF8_CLASSES ), and U+FFFD is a valid ident
+	 * codepoint — including in start position — so the scrubbed selector
+	 * must parse and the post-scrub AST is known by construction.
+	 */
+	private function gen_invalid_utf8(): array {
+		list( $bytes, $subparts ) = $this->prng->choice( array_values( self::INVALID_UTF8_CLASSES ) );
+
+		$position = $this->prng->choice( array( 'lead', 'mid', 'trail', 'whole' ) );
+		$prefix   = in_array( $position, array( 'lead', 'whole' ), true ) ? '' : 'a' . $this->prng->int( 0, 9 );
+		$suffix   = in_array( $position, array( 'trail', 'whole' ), true ) ? '' : 'z' . $this->prng->int( 0, 9 );
+		$raw      = $prefix . $bytes . $suffix;
+		$decoded  = $prefix . str_repeat( "\u{FFFD}", $subparts ) . $suffix;
+
+		switch ( $this->prng->choice( array( 'class', 'id', 'attr-name', 'attr-value' ) ) ) {
+			case 'class':
+				$rendered = '.' . $raw;
+				$sub      = array(
+					'kind' => 'class',
+					'name' => $decoded,
+				);
+				break;
+
+			case 'id':
+				$rendered = '#' . $raw;
+				$sub      = array(
+					'kind' => 'id',
+					'name' => $decoded,
+				);
+				break;
+
+			case 'attr-name':
+				$rendered = '[' . $raw . ']';
+				$sub      = array(
+					'kind'     => 'attr',
+					'name'     => $decoded,
+					'matcher'  => null,
+					'value'    => null,
+					'modifier' => null,
+				);
+				break;
+
+			case 'attr-value':
+			default:
+				$name     = 'a' . $this->prng->int( 0, 99 );
+				$quote    = $this->prng->chance( 50 ) ? '"' : "'";
+				$rendered = '[' . $name . '=' . $quote . $raw . $quote . ']';
+				$sub      = array(
+					'kind'     => 'attr',
+					'name'     => $name,
+					'matcher'  => 'exact',
+					'value'    => $decoded,
+					'modifier' => null,
+				);
+				break;
+		}
+
+		$type = $this->prng->chance( 40 ) ? 'span' : null;
+
+		return array(
+			'bucket'         => 'invalid-utf8',
+			'selector'       => ( null === $type ? '' : $type ) . $rendered,
+			'expectCompound' => true,
+			'expectComplex'  => true,
+			'ast'            => array(
+				array(
+					'context' => array(),
+					'self'    => array(
+						'type' => $type,
+						'subs' => array( $sub ),
+					),
 				),
 			),
 		);

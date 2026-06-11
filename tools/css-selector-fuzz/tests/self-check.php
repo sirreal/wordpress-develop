@@ -91,6 +91,94 @@ for ( $seed = 1; $seed <= 400; $seed++ ) {
 
 check( count( $by_bucket ) >= 5, 'Bucket variety: saw ' . count( $by_bucket ) . ' buckets.' );
 
+// --- Invalid-UTF-8 bucket: post-scrub AST expectations by construction ------
+// from_selectors() replaces each maximal subpart of an ill-formed UTF-8
+// sequence with one U+FFFD before parsing ( CSS Syntax §3.2 via the WHATWG
+// decoder ). The bucket injects raw ill-formed sequences and carries the
+// post-scrub AST, with the per-class subpart counts hard-coded in the
+// generator — independent of wp_scrub_utf8(), so this loop is a real
+// differential between the generator's WHATWG expectations and the core
+// scrub + parse pipeline.
+
+$fffd_ast_counts = array();
+$injection_sites = array();
+$byte_classes    = array();
+
+// The class names AND byte values are duplicated here on purpose: tallying
+// from the generator's own table would silently shrink the assertion with a
+// deleted entry and self-validate on a drifted byte value.
+$expected_byte_classes = array(
+	'lone-continuation' => "\x80",
+	'truncated-2-byte'  => "\xC3",
+	'truncated-3-byte'  => "\xE2\x8C",
+	'truncated-4-byte'  => "\xF0\x9F\x82",
+	'invalid-lead-f5'   => "\xF5",
+	'invalid-lead-ff'   => "\xFF",
+	'overlong-min'      => "\xC0\x80",
+	'overlong-max'      => "\xC1\xBF",
+	'surrogate-half'    => "\xED\xA0\x80",
+	'beyond-max'        => "\xF4\x90\x80\x80",
+);
+
+$count_fffd = static function ( $node ) use ( &$count_fffd ): int {
+	if ( is_string( $node ) ) {
+		return substr_count( $node, "\u{FFFD}" );
+	}
+	$total = 0;
+	if ( is_array( $node ) ) {
+		foreach ( $node as $child ) {
+			$total += $count_fffd( $child );
+		}
+	}
+	return $total;
+};
+
+for ( $seed = 1; $seed <= 150; $seed++ ) {
+	$prng      = new Prng( (string) $seed, 'self-check-invalid-utf8' );
+	$document  = DocumentGenerator::generate( $prng->fork( 'doc' ) );
+	$case      = SelectorGenerator::generate( $prng->fork( 'sel' ), $document['pools'], null, 'invalid-utf8' );
+	$printable = \CssSelectorFuzz\printable_bytes( $case['selector'] );
+
+	check( 'invalid-utf8' === $case['bucket'], "Seed {$seed}: forced invalid-utf8 bucket, got {$case['bucket']}." );
+	check( ! wp_is_valid_utf8( $case['selector'] ), "Seed {$seed}: selector must contain invalid UTF-8: {$printable}" );
+	check( true === $case['expectCompound'] && true === $case['expectComplex'], "Seed {$seed}: invalid-utf8 cases must expect to parse in both grammars." );
+	check( is_array( $case['ast'] ) && \CssSelectorFuzz\ast_strings_are_utf8( $case['ast'] ), "Seed {$seed}: expected AST must be valid UTF-8." );
+
+	$compound = WP_CSS_Compound_Selector_List::from_selectors( $case['selector'] );
+	$complex  = WP_CSS_Complex_Selector_List::from_selectors( $case['selector'] );
+	check( null !== $compound, "Seed {$seed}: compound parse after scrub for: {$printable}" );
+	check( null !== $complex, "Seed {$seed}: complex parse after scrub for: {$printable}" );
+	if ( null === $complex || ! is_array( $case['ast'] ) ) {
+		continue;
+	}
+
+	$parsed_ast = \CssSelectorFuzz\AstExtractor::from_complex_list( $complex );
+	check( $case['ast'] === $parsed_ast, "Seed {$seed}: parsed AST equals maximal-subpart scrub expectation for: {$printable}" );
+
+	$fffd_ast_counts[ $count_fffd( $case['ast'] ) ] = true;
+	foreach ( (array) $case['ast'][0]['self']['subs'] as $sub ) {
+		$injection_sites[ 'attr' === $sub['kind'] && null !== $sub['matcher'] ? 'attr-value' : $sub['kind'] ] = true;
+	}
+	foreach ( $expected_byte_classes as $class_name => $class_bytes ) {
+		// Substring attribution is ambiguous only for lone-continuation,
+		// whose byte occurs inside three longer classes — good enough for
+		// an at-least-once variety tally.
+		if ( str_contains( $case['selector'], $class_bytes ) ) {
+			$byte_classes[ $class_name ] = true;
+		}
+	}
+}
+
+foreach ( array( 1, 2, 3, 4 ) as $expected_count ) {
+	check( isset( $fffd_ast_counts[ $expected_count ] ), "Invalid-utf8 variety: a {$expected_count}-subpart byte class was generated." );
+}
+foreach ( array( 'class', 'id', 'attr', 'attr-value' ) as $site ) {
+	check( isset( $injection_sites[ $site ] ), "Invalid-utf8 variety: injection site {$site} was generated." );
+}
+foreach ( array_keys( $expected_byte_classes ) as $class_name ) {
+	check( isset( $byte_classes[ $class_name ] ), "Invalid-utf8 variety: byte class {$class_name} was generated." );
+}
+
 // --- Known-answer matching cases -------------------------------------------
 
 $known_html = '<!DOCTYPE html><html data-fid="e0"><head data-fid="e1"></head><body data-fid="e2">'

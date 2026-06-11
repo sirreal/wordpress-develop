@@ -25,7 +25,7 @@ produces the same document, the same selector, and the same verdict.
    capture on wild documents. Wild documents that hit a construct the
    processor bails on (foster parenting, complex adoption-agency runs) are
    deterministically regenerated a bounded number of times.
-3. Generate a selector in one of seven buckets:
+3. Generate a selector in one of nine buckets:
    - `supported-compound` — must parse in both grammars; carries intended AST.
    - `supported-complex` — uses `>`/descendant combinators; must parse only
      in the complex grammar; carries intended AST.
@@ -49,6 +49,13 @@ produces the same document, the same selector, and the same verdict.
      and -elements, `+`/`~`/`||` combinators, namespaces, non-type context
      selectors); must not parse.
    - `invalid` — not valid CSS; must not parse.
+   - `invalid-utf8` — a small supported selector with a raw ill-formed UTF-8
+     byte sequence (lone continuation, truncated 2/3/4-byte, overlong,
+     surrogate half, beyond U+10FFFF) injected into a class/ID/attribute
+     ident or string operand; `from_selectors()` scrubs the input first, so
+     the case must parse and carries the post-scrub AST (one U+FFFD per
+     maximal subpart, with per-class subpart counts pinned independently of
+     `wp_scrub_utf8()`).
    - `chaos` — arbitrary bytes; no parse expectation.
    - `mutated` — a supported selector with random byte mutations; no parse
      expectation.
