@@ -257,6 +257,75 @@ static zend_string *wp_html_api_rust_uppercase_ascii_slice(const unsigned char *
 	return string;
 }
 
+static zend_string *wp_html_api_rust_lowercase_ascii_slice(const unsigned char *ptr, size_t len)
+{
+	zend_string *string = zend_string_alloc(len, 0);
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		unsigned char byte = ptr[i];
+		ZSTR_VAL(string)[i] = (byte >= 'A' && byte <= 'Z') ? (char) (byte + 32) : (char) byte;
+	}
+
+	ZSTR_VAL(string)[len] = '\0';
+	return string;
+}
+
+static bool wp_html_api_rust_zend_string_equals_literal(zend_string *string, const char *literal, size_t literal_len)
+{
+	return ZSTR_LEN(string) == literal_len && 0 == memcmp(ZSTR_VAL(string), literal, literal_len);
+}
+
+static zend_string *wp_html_api_rust_svg_qualified_tag_name(zend_string *lower_tag_name)
+{
+#define WP_HTML_API_RUST_SVG_TAG(adjusted, canonical) \
+	if (wp_html_api_rust_zend_string_equals_literal(lower_tag_name, adjusted, sizeof(adjusted) - 1)) { \
+		return zend_string_init(canonical, sizeof(canonical) - 1, 0); \
+	}
+
+	WP_HTML_API_RUST_SVG_TAG("altglyph", "altGlyph")
+	WP_HTML_API_RUST_SVG_TAG("altglyphdef", "altGlyphDef")
+	WP_HTML_API_RUST_SVG_TAG("altglyphitem", "altGlyphItem")
+	WP_HTML_API_RUST_SVG_TAG("animatecolor", "animateColor")
+	WP_HTML_API_RUST_SVG_TAG("animatemotion", "animateMotion")
+	WP_HTML_API_RUST_SVG_TAG("animatetransform", "animateTransform")
+	WP_HTML_API_RUST_SVG_TAG("clippath", "clipPath")
+	WP_HTML_API_RUST_SVG_TAG("feblend", "feBlend")
+	WP_HTML_API_RUST_SVG_TAG("fecolormatrix", "feColorMatrix")
+	WP_HTML_API_RUST_SVG_TAG("fecomponenttransfer", "feComponentTransfer")
+	WP_HTML_API_RUST_SVG_TAG("fecomposite", "feComposite")
+	WP_HTML_API_RUST_SVG_TAG("feconvolvematrix", "feConvolveMatrix")
+	WP_HTML_API_RUST_SVG_TAG("fediffuselighting", "feDiffuseLighting")
+	WP_HTML_API_RUST_SVG_TAG("fedisplacementmap", "feDisplacementMap")
+	WP_HTML_API_RUST_SVG_TAG("fedistantlight", "feDistantLight")
+	WP_HTML_API_RUST_SVG_TAG("fedropshadow", "feDropShadow")
+	WP_HTML_API_RUST_SVG_TAG("feflood", "feFlood")
+	WP_HTML_API_RUST_SVG_TAG("fefunca", "feFuncA")
+	WP_HTML_API_RUST_SVG_TAG("fefuncb", "feFuncB")
+	WP_HTML_API_RUST_SVG_TAG("fefuncg", "feFuncG")
+	WP_HTML_API_RUST_SVG_TAG("fefuncr", "feFuncR")
+	WP_HTML_API_RUST_SVG_TAG("fegaussianblur", "feGaussianBlur")
+	WP_HTML_API_RUST_SVG_TAG("feimage", "feImage")
+	WP_HTML_API_RUST_SVG_TAG("femerge", "feMerge")
+	WP_HTML_API_RUST_SVG_TAG("femergenode", "feMergeNode")
+	WP_HTML_API_RUST_SVG_TAG("femorphology", "feMorphology")
+	WP_HTML_API_RUST_SVG_TAG("feoffset", "feOffset")
+	WP_HTML_API_RUST_SVG_TAG("fepointlight", "fePointLight")
+	WP_HTML_API_RUST_SVG_TAG("fespecularlighting", "feSpecularLighting")
+	WP_HTML_API_RUST_SVG_TAG("fespotlight", "feSpotLight")
+	WP_HTML_API_RUST_SVG_TAG("fetile", "feTile")
+	WP_HTML_API_RUST_SVG_TAG("feturbulence", "feTurbulence")
+	WP_HTML_API_RUST_SVG_TAG("foreignobject", "foreignObject")
+	WP_HTML_API_RUST_SVG_TAG("glyphref", "glyphRef")
+	WP_HTML_API_RUST_SVG_TAG("lineargradient", "linearGradient")
+	WP_HTML_API_RUST_SVG_TAG("radialgradient", "radialGradient")
+	WP_HTML_API_RUST_SVG_TAG("textpath", "textPath")
+
+#undef WP_HTML_API_RUST_SVG_TAG
+
+	return zend_string_copy(lower_tag_name);
+}
+
 static bool wp_html_api_rust_ascii_eq_ci(const unsigned char *left, size_t left_len, const char *right)
 {
 	size_t i;
@@ -2167,22 +2236,69 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_namespace)
 
 PHP_METHOD(WP_HTML_Tag_Processor, get_qualified_tag_name)
 {
-	wp_html_tag_processor_object *intern;
-	wp_html_api_rust_byte_slice tag_name;
+	zval tag_name;
+	zval namespace_name;
+	zend_string *lower_tag_name;
+	zend_string *qualified_tag_name;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 
-	intern = Z_WP_HTML_TAG_PROCESSOR_P(ZEND_THIS);
-	if (NULL == intern->native) {
-		zend_throw_error(NULL, "WP_HTML_Tag_Processor is not initialized");
-		RETURN_THROWS();
-	}
+	ZVAL_NULL(&tag_name);
+	ZVAL_NULL(&namespace_name);
 
-	if (!wp_html_api_rust_tag_processor_get_tag(intern->native, &tag_name)) {
+	if (NULL == zend_call_method_with_0_params(Z_OBJ_P(ZEND_THIS), Z_OBJCE_P(ZEND_THIS), NULL, "get_tag", &tag_name)) {
 		RETURN_NULL();
 	}
 
-	RETURN_STR(wp_html_api_rust_uppercase_ascii_slice(tag_name.ptr, tag_name.len));
+	if (EG(exception)) {
+		zval_ptr_dtor(&tag_name);
+		RETURN_THROWS();
+	}
+
+	if (IS_STRING != Z_TYPE(tag_name)) {
+		zval_ptr_dtor(&tag_name);
+		RETURN_NULL();
+	}
+
+	if (NULL == zend_call_method_with_0_params(Z_OBJ_P(ZEND_THIS), Z_OBJCE_P(ZEND_THIS), NULL, "get_namespace", &namespace_name)) {
+		zval_ptr_dtor(&tag_name);
+		RETURN_NULL();
+	}
+
+	if (EG(exception)) {
+		zval_ptr_dtor(&namespace_name);
+		zval_ptr_dtor(&tag_name);
+		RETURN_THROWS();
+	}
+
+	if (IS_STRING != Z_TYPE(namespace_name)) {
+		zval_ptr_dtor(&namespace_name);
+		zval_ptr_dtor(&tag_name);
+		RETURN_NULL();
+	}
+
+	if (wp_html_api_rust_zend_string_equals_literal(Z_STR(namespace_name), "html", sizeof("html") - 1)) {
+		RETVAL_STR_COPY(Z_STR(tag_name));
+		zval_ptr_dtor(&namespace_name);
+		zval_ptr_dtor(&tag_name);
+		return;
+	}
+
+	lower_tag_name = wp_html_api_rust_lowercase_ascii_slice(
+		(const unsigned char *) Z_STRVAL(tag_name),
+		Z_STRLEN(tag_name)
+	);
+	zval_ptr_dtor(&tag_name);
+
+	if (wp_html_api_rust_zend_string_equals_literal(Z_STR(namespace_name), "svg", sizeof("svg") - 1)) {
+		qualified_tag_name = wp_html_api_rust_svg_qualified_tag_name(lower_tag_name);
+		zend_string_release(lower_tag_name);
+		zval_ptr_dtor(&namespace_name);
+		RETURN_STR(qualified_tag_name);
+	}
+
+	zval_ptr_dtor(&namespace_name);
+	RETURN_STR(lower_tag_name);
 }
 
 PHP_METHOD(WP_HTML_Tag_Processor, get_qualified_attribute_name)

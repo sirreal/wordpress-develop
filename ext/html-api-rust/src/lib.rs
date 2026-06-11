@@ -719,7 +719,12 @@ impl TagProcessor {
                 if self.text_follows_pre_or_listing(scan.tag_start) {
                     raw = strip_initial_newline(raw);
                 }
-                Some(transform_text(raw, true, NullTransform::Remove))
+                let null_transform = if self.parsing_namespace == NAMESPACE_HTML {
+                    NullTransform::Remove
+                } else {
+                    NullTransform::Replace
+                };
+                Some(transform_text(raw, true, null_transform))
             }
             TOKEN_TYPE_CDATA if scan.token_end >= scan.tag_start + 12 => Some(transform_text(
                 &self.html[scan.tag_start + 9..scan.token_end - 3],
@@ -2548,6 +2553,30 @@ mod tests {
         let scan = processor.current.unwrap();
         assert_eq!(processor.comment_type(scan), COMMENT_TYPE_INVALID);
         assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"xml foo ");
+    }
+
+    #[test]
+    fn foreign_text_replaces_null_bytes() {
+        let processor = TagProcessor {
+            html: b"one\0two".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_FOREIGN,
+        };
+
+        let ScanResult::Token(scan) =
+            scan_next_token_in_namespace(&processor.html, 0, NAMESPACE_FOREIGN)
+        else {
+            panic!("Expected foreign text token.");
+        };
+
+        assert_eq!(
+            processor.current_modifiable_text(scan).unwrap(),
+            "one\u{FFFD}two".as_bytes()
+        );
     }
 
     #[test]
