@@ -155,3 +155,26 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-xZOoEn
   - Reviewer 2: initially found matrix pipe-deadlock, exit-code, and NDJSON-shape issues; satisfied after nonblocking pipe reads, harness-error exit `2`, and stricter record parsing.
   - Reviewer 3: initially found the matrix exit-code contract mismatch; satisfied after preserving exit `2` for harness-error-shaped failures and checking docs/progress accuracy.
 - Commit: this step commit.
+
+### Step 7: invalid-input noncharacter policy
+
+- Status: done; included in the step 7 commit.
+- Prior step commit: `a6d67b18f0`.
+- Scope:
+  - Do not broaden invalid-input noncharacter fuzzing.
+  - Document the currently pinned divergence between the PCRE-u public path and `_wp_has_noncharacters_fallback()` on ill-formed input.
+  - Record that further fuzz expansion is blocked on a Core policy decision: document `wp_has_noncharacters()` as valid-input-only or align public/fallback behavior on ill-formed input.
+- Verification:
+  - `php -l tools/encoding-fuzz/lib/Checks.php`
+  - `php -l tools/encoding-fuzz/lib/Targets.php`
+  - `php -l tools/encoding-fuzz/lib/Bootstrap.php`
+  - `php -l tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/worker.php --seed 1 --cases 200 --external none`
+  - `git diff --cached --check`
+  - Manual probe confirmed `wp_has_noncharacters( "\xC0\xEF\xBF\xBE" ) === false` and `_wp_has_noncharacters_fallback( "\xC0\xEF\xBF\xBE" ) === true` in the current PCRE-u environment.
+- Review gate: satisfied by 3 adversarial reviewers.
+  - Reviewer 1: satisfied after checking the README policy text against current public/fallback behavior and the handoff.
+  - Reviewer 2: satisfied after confirming the diff is docs/progress only and does not broaden invalid-input noncharacter fuzzing.
+  - Reviewer 3: satisfied after checking previous steps are complete, staged scope is limited, and this section is updated before commit.
+- Commit: this step commit.

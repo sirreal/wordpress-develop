@@ -140,6 +140,20 @@ Internal invariants:
   with native `mb_substr()`, and explicit non-UTF-8 encodings fall back to
   byte-level `substr()` semantics
 
+## Invalid-Input Noncharacter Policy
+
+Noncharacter differentials intentionally remain valid-input-only. The
+current invalid-input divergence is pinned by smoke, not fuzz-expanded:
+on hosts using the PCRE-u branch,
+`wp_has_noncharacters( "\xC0\xEF\xBF\xBE" )` returns false because the
+regular expression fails on ill-formed UTF-8, while
+`_wp_has_noncharacters_fallback( "\xC0\xEF\xBF\xBE" )` returns true
+because the fallback scanner skips the invalid byte and finds U+FFFE.
+
+Do not add invalid-input noncharacter fuzzing until Core decides whether
+`wp_has_noncharacters()` is documented as valid-input-only or the public
+and fallback paths are aligned on ill-formed input.
+
 ## Inputs
 
 Random cases are fully determined by `(seed, case index)` **for a given
