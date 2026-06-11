@@ -289,6 +289,16 @@ Each seed checks, in order, stopping at the first failing class:
    `create_full_parser()->serialize()`; non-body fragment contexts use
    `create_fragment(<context>)->serialize()`.
 
+### Known invariant oracle follow-ups
+
+- The simple `set_attribute()` mutation oracle needs to handle inputs that
+  begin with `</br>` using the same tag-selection semantics as the mutator.
+  `next_tag()` skips the raw closing token and mutates the following tag,
+  while a verifier that scans with `next_token()` can see the spec-special
+  `BR` element synthesized from `</br>` first and incorrectly report
+  `mutation-attribute-missing`. Fix the verifier by selecting the first
+  mutable tag through `next_tag()` too.
+
 ## Generator Profiles
 
 The generator uses a structural HTML grammar with weighted profiles:
