@@ -2271,9 +2271,10 @@ fn find_tag_end(html: &[u8], offset: usize) -> Option<usize> {
 }
 
 fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
-    left.iter()
-        .zip(right.iter())
-        .all(|(&left, &right)| left.eq_ignore_ascii_case(&right))
+    left.len() == right.len()
+        && left.iter()
+            .zip(right.iter())
+            .all(|(&left, &right)| left.eq_ignore_ascii_case(&right))
 }
 
 fn starts_with_ignore_ascii_case(value: &[u8], prefix: &[u8]) -> bool {
@@ -2677,6 +2678,29 @@ mod tests {
 
         assert!(unsafe {
             super::wp_html_api_rust_tag_processor_next_tag(&mut processor, b"div".as_ptr(), 3, true)
+        });
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_is_tag_closer(&processor) });
+    }
+
+    #[test]
+    fn tag_processor_reports_single_character_end_tag_as_closer() {
+        let mut processor = TagProcessor {
+            html: b"<b></b>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, b"b".as_ptr(), 1, true)
+        });
+        assert!(!unsafe { super::wp_html_api_rust_tag_processor_is_tag_closer(&processor) });
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, b"b".as_ptr(), 1, true)
         });
         assert!(unsafe { super::wp_html_api_rust_tag_processor_is_tag_closer(&processor) });
     }
