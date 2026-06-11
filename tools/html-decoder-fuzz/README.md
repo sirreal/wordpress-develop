@@ -268,7 +268,8 @@ The runner writes under `artifacts/html-decoder-fuzz/run-*` by default:
 on the battery, generator determinism and safety, a short real fuzz run, and
 mutation-tested broken targets:
 
-- C1 numeric references not remapped through the Windows-1252 table
+- C1 numeric references not remapped through the Windows-1252 table, and raw
+  C1 bytes not passing through unchanged
 - zero, surrogate, and above-Unicode numeric references not decoding to exactly
   U+FFFD
 - semicolonless named references decoded in attributes despite ambiguous
@@ -285,7 +286,8 @@ mutation-tested broken targets:
   identically
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
-`skip-c1-remap`, `numeric-invalid-not-replacement`,
+`skip-c1-remap`, `numeric-c1-not-remapped`, `raw-c1-not-pass-through`,
+`numeric-invalid-not-replacement`,
 `attribute-semicolonless`, `match-length-off-by-one`,
 `reader-empty-chunk`, `reader-short-match-length`,
 `reader-substring-composition`, `reader-null-mutates-match-length`,

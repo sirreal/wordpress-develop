@@ -202,6 +202,31 @@ function fault_run( Oracles $oracles, string $fault, string $payload = 'javascri
 /**
  * @return string[] Distinct check names observed.
  */
+function fault_run_without_oracle( Oracles $oracles, string $fault, string $payload ): array {
+	$old_fault = getenv( 'HTML_DECODER_FUZZ_FAULT' );
+	putenv( "HTML_DECODER_FUZZ_FAULT={$fault}" );
+
+	try {
+		$checks = new Checks( $oracles, Targets::resolve() );
+		$seen   = array();
+
+		foreach ( $checks->run_without_oracle( 'both', $payload ) as $failure ) {
+			$seen[ $failure['check'] ] = true;
+		}
+
+		return array_keys( $seen );
+	} finally {
+		if ( false === $old_fault ) {
+			putenv( 'HTML_DECODER_FUZZ_FAULT' );
+		} else {
+			putenv( "HTML_DECODER_FUZZ_FAULT={$old_fault}" );
+		}
+	}
+}
+
+/**
+ * @return string[] Distinct check names observed.
+ */
 function broken_oracle_free_run( Oracles $oracles, array $real_targets, array $overrides ): array {
 	$checks = new Checks( $oracles, array_merge( $real_targets, $overrides ) );
 	$seen   = array();
@@ -741,6 +766,12 @@ check( 'fault target reader-gapless-drop-span exposes non-gapless reader walks',
 
 $seen = fault_run( $oracles, 'numeric-invalid-not-replacement', 'a&#0;b' );
 check( 'fault target numeric-invalid-not-replacement exposes invalid numeric replacements', in_array( 'numeric-invalid-not-replacement', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'numeric-c1-not-remapped', 'a&#x80;b' );
+check( 'fault target numeric-c1-not-remapped exposes skipped numeric C1 remaps', in_array( 'numeric-c1-not-remapped', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run_without_oracle( $oracles, 'raw-c1-not-pass-through', "\x80\x9F" );
+check( 'fault target raw-c1-not-pass-through exposes raw C1 byte rewrites', in_array( 'raw-c1-not-pass-through', $seen, true ), implode( ',', $seen ) );
 
 $seen = broken_run(
 	$oracles,
@@ -1484,6 +1515,12 @@ check(
 	array() === $unsafe_byte_failures,
 	json_encode( $unsafe_byte_failures )
 );
+$raw_c1_failures = ( new Checks( $trap_oracles ) )->run_without_oracle( 'both', "\x80\x9F" );
+check(
+	'oracle-free byte checks pass raw C1 bytes through unchanged',
+	array() === $raw_c1_failures,
+	json_encode( $raw_c1_failures )
+);
 
 $fuzz_failures = 0;
 for ( $i = 0; $i < 300; $i++ ) {
@@ -2125,6 +2162,11 @@ $reader_fault_pipelines = array(
 		'fault'     => 'numeric-invalid-not-replacement',
 		'case'      => 0,
 		'signature' => 'numeric-invalid-not-replacement:text',
+	),
+	array(
+		'fault'     => 'numeric-c1-not-remapped',
+		'case'      => 2,
+		'signature' => 'numeric-c1-not-remapped:text',
 	),
 	array(
 		'fault'     => 'attribute-no-amp-identity',
@@ -3125,6 +3167,55 @@ if ( null !== $byte_failure_file ) {
 	check( 'faulted byte-space minimizer preserves signature', 0 === $byte_minimize['code'], $byte_minimize['stdout'] . $byte_minimize['stderr'] );
 }
 remove_tree( $byte_pipeline_dir );
+
+$raw_c1_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-raw-c1-' . getmypid();
+remove_tree( $raw_c1_pipeline_dir );
+$faulted_raw_c1_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'bytes',
+		'--seed',
+		'1',
+		'--start-case',
+		'3',
+		'--cases',
+		'1',
+		'--output-dir',
+		$raw_c1_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'raw-c1-not-pass-through' )
+);
+check( 'faulted raw-C1 byte worker reports findings', 1 === $faulted_raw_c1_worker['code'], $faulted_raw_c1_worker['stdout'] . $faulted_raw_c1_worker['stderr'] );
+
+$raw_c1_failure_file = $raw_c1_pipeline_dir . '/failure-seed1-case3/failure.json';
+check( 'faulted raw-C1 byte worker writes failure artifact', is_file( $raw_c1_failure_file ) );
+
+if ( is_file( $raw_c1_failure_file ) ) {
+	$raw_c1_manifest = json_decode( (string) file_get_contents( $raw_c1_failure_file ), true );
+	check(
+		'raw-C1 byte failure artifact records mode and signature',
+		'bytes' === ( $raw_c1_manifest['mode'] ?? null ) &&
+			in_array( 'raw-c1-not-pass-through:text', $raw_c1_manifest['signatures'] ?? array(), true ),
+		json_encode( $raw_c1_manifest )
+	);
+
+	$raw_c1_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $raw_c1_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'raw-c1-not-pass-through' )
+	);
+	check( 'faulted raw-C1 byte replay reproduces finding', 1 === $raw_c1_replay['code'], $raw_c1_replay['stdout'] . $raw_c1_replay['stderr'] );
+
+	$raw_c1_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $raw_c1_failure_file, '--signature', 'raw-c1-not-pass-through:text' ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'raw-c1-not-pass-through' )
+	);
+	check( 'faulted raw-C1 byte minimizer preserves signature', 0 === $raw_c1_minimize['code'], $raw_c1_minimize['stdout'] . $raw_c1_minimize['stderr'] );
+}
+remove_tree( $raw_c1_pipeline_dir );
 
 $byte_mode_collision_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-mode-collision-' . getmypid();
 remove_tree( $byte_mode_collision_dir );

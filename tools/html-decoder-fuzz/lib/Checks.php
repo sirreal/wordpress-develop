@@ -9,6 +9,12 @@ class Checks {
 	private const ATTRIBUTE_SEARCH_PREFIX_BYTES = 32;
 	private const MATCH_BYTE_LENGTH_SENTINEL = '__html_decoder_fuzz_match_length_unset__';
 	private const REPLACEMENT_CHARACTER = "\u{FFFD}";
+	private const C1_NUMERIC_REMAP = array(
+		0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+		0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
+		0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+		0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
+	);
 
 	private Oracles $oracles;
 
@@ -179,6 +185,14 @@ class Checks {
 			);
 		}
 
+		if ( ! str_contains( $payload, '&' ) && self::contains_raw_c1_byte( $payload ) && $got !== $payload ) {
+			$failures[] = self::failure(
+				'raw-c1-not-pass-through',
+				$context,
+				self::diff_detail( $context, $payload, $got )
+			);
+		}
+
 		$reader = $this->decode_with_reader( $context, $payload );
 		foreach ( $reader['failures'] as $failure ) {
 			$failures[] = $failure;
@@ -326,6 +340,24 @@ class Checks {
 			$walk_at      = $amp_at + $match_byte_length;
 
 			$reference = substr( $payload, $amp_at, $match_byte_length );
+			$numeric_c1_replacement = self::numeric_c1_replacement( $reference );
+			if ( null !== $numeric_c1_replacement && $numeric_c1_replacement !== $chunk ) {
+				$failures[] = self::failure(
+					'numeric-c1-not-remapped',
+					$context,
+					array_merge(
+						array(
+							'context'               => $context,
+							'at'                    => $amp_at,
+							'expected_base64'       => base64_encode( $numeric_c1_replacement ),
+							'got_base64'            => base64_encode( $chunk ),
+							'match_byte_length'     => $match_byte_length,
+						),
+						self::byte_detail( 'reference', $reference )
+					)
+				);
+			}
+
 			$invalid_numeric_reason = self::invalid_numeric_replacement_reason( $reference );
 			if ( null !== $invalid_numeric_reason && self::REPLACEMENT_CHARACTER !== $chunk ) {
 				$failures[] = self::failure(
@@ -779,7 +811,38 @@ class Checks {
 		return array( "\x7F", 'x', 'A', '0', ':' );
 	}
 
+	private static function numeric_c1_replacement( string $reference ): ?string {
+		$value = self::numeric_reference_value( $reference );
+		if ( null === $value || $value < 0x80 || $value > 0x9F ) {
+			return null;
+		}
+
+		$replacement = mb_chr( self::C1_NUMERIC_REMAP[ $value - 0x80 ], 'UTF-8' );
+		return false === $replacement ? null : $replacement;
+	}
+
 	private static function invalid_numeric_replacement_reason( string $reference ): ?string {
+		$value = self::numeric_reference_value( $reference );
+		if ( null === $value ) {
+			return null;
+		}
+
+		if ( 0 === $value ) {
+			return 'zero';
+		}
+
+		if ( $value >= 0xD800 && $value <= 0xDFFF ) {
+			return 'surrogate';
+		}
+
+		if ( $value > 0x10FFFF ) {
+			return 'above-unicode';
+		}
+
+		return null;
+	}
+
+	private static function numeric_reference_value( string $reference ): ?int {
 		if ( 1 !== preg_match( '/^&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?$/', $reference, $match ) ) {
 			return null;
 		}
@@ -791,23 +854,18 @@ class Checks {
 		$significant_digits = substr( $digits, strspn( $digits, '0' ) );
 
 		if ( '' === $significant_digits ) {
-			return 'zero';
+			return 0;
 		}
 
 		if ( strlen( $significant_digits ) > $max_digits ) {
 			return null;
 		}
 
-		$value = intval( $significant_digits, $base );
-		if ( $value >= 0xD800 && $value <= 0xDFFF ) {
-			return 'surrogate';
-		}
+		return intval( $significant_digits, $base );
+	}
 
-		if ( $value > 0x10FFFF ) {
-			return 'above-unicode';
-		}
-
-		return null;
+	private static function contains_raw_c1_byte( string $bytes ): bool {
+		return 1 === preg_match( '/[\x80-\x9F]/', $bytes );
 	}
 
 	private static function byte_detail( string $name, string $bytes ): array {

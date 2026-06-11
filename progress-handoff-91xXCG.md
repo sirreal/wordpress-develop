@@ -26,7 +26,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 19: add tab, LF, and FF to the oracle-safe generator alphabet.
 - [x] Tier 3 item 20: assert reader reconstruction walks input without gaps or overlaps.
 - [x] Tier 3 item 21: assert invalid numeric references decode to exactly U+FFFD.
-- [ ] Tier 3 items 22-26.
+- [x] Tier 3 item 22: assert C1 remapping applies only to numeric references while raw C1 bytes pass through unchanged.
+- [ ] Tier 3 items 23-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -134,6 +135,10 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the invalid numeric replacement invariant.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=numeric-invalid-not-replacement php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-invalid-numeric-fault-check` reported `numeric-invalid-not-replacement` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding invalid numeric replacement coverage.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding numeric C1 remap and raw C1 pass-through invariants.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=numeric-c1-not-remapped php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 2 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-c1-fault-check` reported `numeric-c1-not-remapped` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=raw-c1-not-pass-through php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --start-case 3 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-raw-c1-fault-check` reported `raw-c1-not-pass-through` findings; replaying the failure manifest reproduced the findings and minimizing it with `--signature raw-c1-not-pass-through:text` preserved the raw-C1-specific signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding C1 remap-only-for-numeric coverage.
 
 ## Review Log
 
@@ -221,3 +226,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Einstein: APPROVE, invalid numeric replacement invariant semantics and signature stability.
   - Confucius: APPROVE, invalid numeric fault target, smoke pipeline, and docs.
   - Aristotle: APPROVE, integration/progress scope and commit boundaries.
+- Tier 3 item 22:
+  - McClintock: APPROVE, numeric C1 remap and raw C1 pass-through invariant semantics.
+  - Averroes: APPROVE, fault targets and smoke coverage after adding raw-C1 byte worker/replay/signature-pinned minimize coverage.
+  - Heisenberg: APPROVE, docs/progress scope and commit boundaries.

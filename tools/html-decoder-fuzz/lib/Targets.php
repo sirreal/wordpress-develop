@@ -107,6 +107,25 @@ class Targets {
 				};
 				break;
 
+			case 'numeric-c1-not-remapped':
+				$targets['read_character_reference'] = static function ( string $context, string $text, int $at, &$match_byte_length = null ): ?string {
+					$result = \WP_HTML_Decoder::read_character_reference( $context, $text, $at, $match_byte_length );
+					if ( null !== $result && is_int( $match_byte_length ) ) {
+						$value = self::numeric_c1_reference_value( substr( $text, $at, $match_byte_length ) );
+						if ( null !== $value ) {
+							$replacement = mb_chr( $value, 'UTF-8' );
+							return false === $replacement ? $result : $replacement;
+						}
+					}
+					return $result;
+				};
+				break;
+
+			case 'raw-c1-not-pass-through':
+				$targets['decode_text']      = static fn( string $text ): string => self::rewrite_raw_c1_bytes( \WP_HTML_Decoder::decode_text_node( $text ) );
+				$targets['decode_attribute'] = static fn( string $text ): string => self::rewrite_raw_c1_bytes( \WP_HTML_Decoder::decode_attribute( $text ) );
+				break;
+
 			case 'byte-no-amp-identity':
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );
@@ -179,9 +198,27 @@ class Targets {
 		return str_replace( "\u{20AC}", "\u{0080}", $decoded );
 	}
 
+	private static function rewrite_raw_c1_bytes( string $decoded ): string {
+		return preg_replace( '/[\x80-\x9F]/', '?', $decoded ) ?? $decoded;
+	}
+
+	private static function numeric_c1_reference_value( string $reference ): ?int {
+		$value = self::numeric_reference_value( $reference );
+		return null !== $value && $value >= 0x80 && $value <= 0x9F ? $value : null;
+	}
+
 	private static function is_invalid_numeric_replacement_reference( string $reference ): bool {
-		if ( 1 !== preg_match( '/^&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?$/', $reference, $match ) ) {
+		$value = self::numeric_reference_value( $reference );
+		if ( null === $value ) {
 			return false;
+		}
+
+		return 0 === $value || ( $value >= 0xD800 && $value <= 0xDFFF ) || $value > 0x10FFFF;
+	}
+
+	private static function numeric_reference_value( string $reference ): ?int {
+		if ( 1 !== preg_match( '/^&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?$/', $reference, $match ) ) {
+			return null;
 		}
 
 		$is_hex             = '' !== ( $match[1] ?? '' );
@@ -191,14 +228,13 @@ class Targets {
 		$significant_digits = substr( $digits, strspn( $digits, '0' ) );
 
 		if ( '' === $significant_digits ) {
-			return true;
+			return 0;
 		}
 
 		if ( strlen( $significant_digits ) > $max_digits ) {
-			return false;
+			return null;
 		}
 
-		$value = intval( $significant_digits, $base );
-		return ( $value >= 0xD800 && $value <= 0xDFFF ) || $value > 0x10FFFF;
+		return intval( $significant_digits, $base );
 	}
 }
