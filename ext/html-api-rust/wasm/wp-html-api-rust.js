@@ -2657,11 +2657,6 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
-				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
-					this.#bailUnsupported("Foster parenting is not supported.");
-					return;
-				}
-
 				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
@@ -2715,6 +2710,11 @@ export function createHtmlApi(wasm) {
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = [...this.open_elements];
 					this.skip_current_token = true;
+					return;
+				}
+
+				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+					this.#bailUnsupported("Foster parenting is not supported.");
 					return;
 				}
 
