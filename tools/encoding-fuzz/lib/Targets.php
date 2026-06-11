@@ -31,6 +31,8 @@ class Targets {
 			'utf8_decode_fb'  => '_wp_utf8_decode_fallback',
 			'has_nonchars'    => 'wp_has_noncharacters',
 			'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
+			'mb_chr'          => '_mb_chr',
+			'mb_ord'          => '_mb_ord',
 		);
 
 		switch ( getenv( 'ENCODING_FUZZ_FAULT' ) ) {

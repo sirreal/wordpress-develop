@@ -36,11 +36,44 @@ namespace EncodingFuzz;
  *  - `decode(encode(s)) === s` for any byte string `s` (encode is total
  *    and injective per byte)
  *
+ * Character/code point polyfills:
+ *  - `_mb_chr()` against the independent arithmetic UTF-8 encoder for
+ *    valid scalar values, and false for invalid code points.
+ *  - `_mb_ord()` against an independent first-code-point decoder on
+ *    arbitrary byte strings.
+ *  - `_mb_ord( _mb_chr( cp ) ) === cp` and
+ *    `_mb_chr( _mb_ord( s ) ) === first UTF-8 character in s` where
+ *    those expressions are defined.
+ *
  * Target callables are injectable so the harness smoke test can verify
  * that deliberately broken implementations are caught.
  */
 class Checks {
 	public const PREVIEW_BYTES = 48;
+
+	private const MB_CHR_CODE_POINT_PROBES = array(
+		-1,
+		0x00,
+		0x01,
+		0x7F,
+		0x80,
+		0x7FF,
+		0x800,
+		0xD7FF,
+		0xD800,
+		0xDFFF,
+		0xE000,
+		0xFDCF,
+		0xFDD0,
+		0xFDEF,
+		0xFDF0,
+		0xFFFD,
+		0xFFFE,
+		0xFFFF,
+		0x10000,
+		0x10FFFF,
+		0x110000,
+	);
 
 	private Oracles $oracles;
 
@@ -262,6 +295,213 @@ class Checks {
 		// 9. Noncharacter detection, on valid input only.
 		foreach ( $this->check_noncharacters( $input, $ref_valid ) as $failure ) {
 			$failures[] = $failure;
+		}
+
+		// 10. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
+		foreach ( $this->check_mb_chr_ord( $input ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * Tests `_mb_chr()` and `_mb_ord()` as partial inverses. The oracle for
+	 * `_mb_chr()` is the fuzzer's arithmetic UTF-8 encoder; the oracle for
+	 * `_mb_ord()` is an independent decoder for the first code point only.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_mb_chr_ord( string $input ): array {
+		$failures = array();
+
+		if ( ! isset( $this->targets['mb_chr'], $this->targets['mb_ord'] ) ) {
+			return $failures;
+		}
+
+		list( $expected_ord, $prefix_length ) = self::first_code_point_or_false( $input );
+
+		try {
+			$actual_ord = ( $this->targets['mb_ord'] )( $input );
+		} catch ( \Throwable $error ) {
+			$failures[] = self::failure(
+				'target-exception',
+				'mb_ord',
+				array(
+					'target'  => 'mb_ord',
+					'message' => $error->getMessage(),
+					'class'   => get_class( $error ),
+				)
+			);
+			$actual_ord = false;
+		}
+
+		if ( ! is_int( $actual_ord ) && false !== $actual_ord ) {
+			$failures[] = self::failure(
+				'mb-ord-bad-return',
+				'mb_ord',
+				array(
+					'type' => get_debug_type( $actual_ord ),
+				)
+			);
+		} elseif ( $actual_ord !== $expected_ord ) {
+			$failures[] = self::failure(
+				'mb-ord-mismatch',
+				'mb_ord',
+				array(
+					'got'           => $actual_ord,
+					'expected'      => $expected_ord,
+					'input_preview' => self::preview( $input ),
+				)
+			);
+		}
+
+		if ( is_int( $expected_ord ) ) {
+			try {
+				$round_trip_chr = ( $this->targets['mb_chr'] )( $expected_ord );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					'mb_chr:from-ord',
+					array(
+						'target'  => 'mb_chr',
+						'message' => $error->getMessage(),
+						'class'   => get_class( $error ),
+					)
+				);
+				$round_trip_chr = false;
+			}
+
+			$expected_prefix = substr( $input, 0, $prefix_length );
+			if ( $round_trip_chr !== $expected_prefix ) {
+				$failures[] = self::failure(
+					'mb-ord-chr-isomorphism',
+					'mb_ord:mb_chr',
+					array(
+						'code_point'      => $expected_ord,
+						'expected_prefix' => self::preview( $expected_prefix ),
+						'got'             => is_string( $round_trip_chr ) ? self::preview( $round_trip_chr ) : $round_trip_chr,
+					)
+				);
+			}
+		}
+
+		foreach ( self::mb_chr_code_point_probes( $input ) as $code_point ) {
+			$expected_chr = self::expected_mb_chr( $code_point );
+
+			try {
+				$actual_chr = ( $this->targets['mb_chr'] )( $code_point );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					'mb_chr',
+					array(
+						'target'     => 'mb_chr',
+						'code_point' => $code_point,
+						'message'    => $error->getMessage(),
+						'class'      => get_class( $error ),
+					)
+				);
+				$actual_chr = false;
+			}
+
+			if ( ! is_string( $actual_chr ) && false !== $actual_chr ) {
+				$failures[] = self::failure(
+					'mb-chr-bad-return',
+					'mb_chr',
+					array(
+						'code_point' => $code_point,
+						'type'       => get_debug_type( $actual_chr ),
+					)
+				);
+				continue;
+			}
+
+			if ( $actual_chr !== $expected_chr ) {
+				$failures[] = self::failure(
+					'mb-chr-mismatch',
+					'mb_chr',
+					array(
+						'code_point' => $code_point,
+						'expected'   => is_string( $expected_chr ) ? self::preview( $expected_chr ) : $expected_chr,
+						'got'        => is_string( $actual_chr ) ? self::preview( $actual_chr ) : $actual_chr,
+					)
+				);
+				continue;
+			}
+
+			if ( is_string( $actual_chr ) ) {
+				try {
+					$round_trip_ord = ( $this->targets['mb_ord'] )( $actual_chr );
+				} catch ( \Throwable $error ) {
+					$failures[] = self::failure(
+						'target-exception',
+						'mb_ord:from-chr',
+						array(
+							'target'     => 'mb_ord',
+							'code_point' => $code_point,
+							'message'    => $error->getMessage(),
+							'class'      => get_class( $error ),
+						)
+					);
+					$round_trip_ord = false;
+				}
+
+				if ( $round_trip_ord !== $code_point ) {
+					$failures[] = self::failure(
+						'mb-chr-ord-isomorphism',
+						'mb_chr:mb_ord',
+						array(
+							'code_point' => $code_point,
+							'got'        => $round_trip_ord,
+						)
+					);
+				}
+			}
+		}
+
+		$contract_probes = array(
+			array( 'mb_chr', array( 0x41, 'UTF-8' ), 'A' ),
+			array( 'mb_chr', array( 0x41, 'latin1' ), false ),
+			array( 'mb_chr', array( 0x41, 'utf8' ), false ),
+			array( 'mb_chr', array( '65' ), false ),
+			array( 'mb_ord', array( 'A', 'UTF-8' ), 0x41 ),
+			array( 'mb_ord', array( 'A', 'latin1' ), false ),
+			array( 'mb_ord', array( 'A', 'utf8' ), false ),
+			array( 'mb_ord', array( '' ), false ),
+			array( 'mb_ord', array( 0x41 ), false ),
+		);
+
+		foreach ( $contract_probes as $probe ) {
+			list( $target, $args, $expected ) = $probe;
+
+			try {
+				$actual = ( $this->targets[ $target ] )( ...$args );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					"{$target}:contract",
+					array(
+						'target'  => $target,
+						'args'    => array_map( static fn( $arg ) => is_string( $arg ) ? self::preview( $arg ) : $arg, $args ),
+						'message' => $error->getMessage(),
+						'class'   => get_class( $error ),
+					)
+				);
+				continue;
+			}
+
+			if ( $actual !== $expected ) {
+				$failures[] = self::failure(
+					"{$target}-contract-mismatch",
+					$target,
+					array(
+						'args'     => array_map( static fn( $arg ) => is_string( $arg ) ? self::preview( $arg ) : $arg, $args ),
+						'expected' => is_string( $expected ) ? self::preview( $expected ) : $expected,
+						'got'      => is_string( $actual ) ? self::preview( $actual ) : $actual,
+					)
+				);
+			}
 		}
 
 		return $failures;
@@ -591,6 +831,105 @@ class Checks {
 		}
 
 		return null;
+	}
+
+	private static function expected_mb_chr( int $code_point ) {
+		if (
+			$code_point < 0 ||
+			( $code_point >= 0xD800 && $code_point <= 0xDFFF ) ||
+			$code_point > 0x10FFFF
+		) {
+			return false;
+		}
+
+		return Generator::encode_code_point( $code_point );
+	}
+
+	private static function mb_chr_code_point_probes( string $input ): array {
+		$probes = self::MB_CHR_CODE_POINT_PROBES;
+		$hash   = hash( 'sha256', $input, true );
+
+		for ( $i = 0; $i < 4; $i++ ) {
+			$raw      = unpack( 'N', substr( $hash, 4 * $i, 4 ) )[1];
+			$probes[] = ( $raw % 0x120000 ) - 0x800;
+		}
+
+		return array_values( array_unique( $probes ) );
+	}
+
+	/**
+	 * @return array{0: int|false, 1: int} First code point and byte length.
+	 */
+	private static function first_code_point_or_false( string $bytes ): array {
+		$length = strlen( $bytes );
+		if ( 0 === $length ) {
+			return array( false, 0 );
+		}
+
+		$b1 = ord( $bytes[0] );
+		if ( $b1 <= 0x7F ) {
+			return array( $b1, 1 );
+		}
+
+		if ( $length < 2 ) {
+			return array( false, 0 );
+		}
+
+		$b2 = ord( $bytes[1] );
+		if ( $b1 >= 0xC2 && $b1 <= 0xDF && $b2 >= 0x80 && $b2 <= 0xBF ) {
+			return array(
+				( ( $b1 & 0x1F ) << 6 ) | ( $b2 & 0x3F ),
+				2,
+			);
+		}
+
+		if ( $length < 3 ) {
+			return array( false, 0 );
+		}
+
+		$b3 = ord( $bytes[2] );
+		if (
+			$b3 >= 0x80 &&
+			$b3 <= 0xBF &&
+			(
+				( 0xE0 === $b1 && $b2 >= 0xA0 && $b2 <= 0xBF ) ||
+				( $b1 >= 0xE1 && $b1 <= 0xEC && $b2 >= 0x80 && $b2 <= 0xBF ) ||
+				( 0xED === $b1 && $b2 >= 0x80 && $b2 <= 0x9F ) ||
+				( $b1 >= 0xEE && $b1 <= 0xEF && $b2 >= 0x80 && $b2 <= 0xBF )
+			)
+		) {
+			return array(
+				( ( $b1 & 0x0F ) << 12 ) | ( ( $b2 & 0x3F ) << 6 ) | ( $b3 & 0x3F ),
+				3,
+			);
+		}
+
+		if ( $length < 4 ) {
+			return array( false, 0 );
+		}
+
+		$b4 = ord( $bytes[3] );
+		if (
+			$b3 >= 0x80 &&
+			$b3 <= 0xBF &&
+			$b4 >= 0x80 &&
+			$b4 <= 0xBF &&
+			(
+				( 0xF0 === $b1 && $b2 >= 0x90 && $b2 <= 0xBF ) ||
+				( $b1 >= 0xF1 && $b1 <= 0xF3 && $b2 >= 0x80 && $b2 <= 0xBF ) ||
+				( 0xF4 === $b1 && $b2 >= 0x80 && $b2 <= 0x8F )
+			)
+		) {
+			return array(
+				( ( $b1 & 0x07 ) << 18 ) |
+				( ( $b2 & 0x3F ) << 12 ) |
+				( ( $b3 & 0x3F ) << 6 ) |
+				( $b4 & 0x3F ),
+				4,
+			);
+		}
+
+		return array( false, 0 );
 	}
 
 	private static function failure( string $check, string $party, array $detail ): array {

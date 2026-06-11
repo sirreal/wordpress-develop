@@ -116,16 +116,20 @@ class Oracles {
 			};
 		}
 
-		if ( function_exists( 'mb_str_split' ) && function_exists( 'mb_ord' ) ) {
+		$mb_ord = function_exists( 'mb_ord' )
+			? 'mb_ord'
+			: ( function_exists( '_mb_ord' ) ? '_mb_ord' : null );
+
+		if ( function_exists( 'mb_str_split' ) && null !== $mb_ord ) {
 			/*
 			 * Trivial decode-and-test reference for noncharacter detection,
 			 * independent of both implementations under test (the PCRE
 			 * character-class regex and the `_wp_scan_utf8()`-based scan).
 			 * Callers must pass valid UTF-8.
 			 */
-			$oracles->noncharacters['mb'] = static function ( string $valid_utf8 ): bool {
+			$oracles->noncharacters['mb'] = static function ( string $valid_utf8 ) use ( $mb_ord ): bool {
 				foreach ( mb_str_split( $valid_utf8, 1, 'UTF-8' ) as $character ) {
-					$code_point = mb_ord( $character, 'UTF-8' );
+					$code_point = $mb_ord( $character, 'UTF-8' );
 
 					// Fail loudly on contract violations: on ill-formed
 					// input `mb_ord()` returns false, which would otherwise

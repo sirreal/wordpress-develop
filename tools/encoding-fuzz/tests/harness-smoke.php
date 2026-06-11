@@ -104,6 +104,8 @@ $real_targets = array(
 	'utf8_decode_fb'  => '_wp_utf8_decode_fallback',
 	'has_nonchars'    => 'wp_has_noncharacters',
 	'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
+	'mb_chr'          => '_mb_chr',
+	'mb_ord'          => '_mb_ord',
 );
 
 /**
@@ -241,6 +243,18 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'has_nonchars' => Targets::nonchars_overeager( ... ),
 ) );
 check( 'catches over-eager noncharacter detector', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3r. Character encoder that confuses U+0080 with Windows-1252's euro sign.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_chr' => static fn( int $code_point ) => 0x80 === $code_point ? "\xE2\x82\xAC" : _mb_chr( $code_point ),
+) );
+check( 'catches cp1252-confused _mb_chr', in_array( 'mb-chr-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3s. Character decoder that accepts an invalid leading C0 byte.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'mb_ord' => static fn( string $bytes ) => str_starts_with( $bytes, "\xC0" ) ? 0 : _mb_ord( $bytes ),
+) );
+check( 'catches invalid-accepting _mb_ord', in_array( 'mb-ord-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.

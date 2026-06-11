@@ -6,6 +6,7 @@ Differential fuzzer for the WordPress UTF-8 functions:
 - `wp_scrub_utf8()` / `_wp_scrub_utf8_fallback()`
 - `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
 - `wp_has_noncharacters()` / `_wp_has_noncharacters_fallback()` (valid input only)
+- `_mb_chr()` / `_mb_ord()`
 - `_wp_utf8_codepoint_count()` and the resumable `_wp_scan_utf8()` paths (secondary)
 
 The pure-PHP fallbacks in `src/wp-includes/compat-utf8.php` are the main
@@ -112,6 +113,13 @@ Internal invariants:
 - `_wp_utf8_encode_fallback()` output is always valid UTF-8
 - `_wp_utf8_decode_fallback( _wp_utf8_encode_fallback( $s ) ) === $s`
   for any byte string `$s` (encode is total and injective per byte)
+- `_mb_chr()` matches the fuzzer's independent arithmetic UTF-8 encoder
+  for valid scalar values and returns false for invalid code points
+- `_mb_ord()` matches an independent first-code-point decoder on arbitrary
+  byte strings and returns false when the first code point is ill-formed
+- `_mb_ord( _mb_chr( $cp ) ) === $cp` for valid scalar values, and
+  `_mb_chr( _mb_ord( $s ) )` reconstructs the first UTF-8 character in
+  `$s` when it is well-formed
 
 ## Inputs
 
@@ -185,7 +193,7 @@ php tools/encoding-fuzz/tests/harness-smoke.php
 ```
 
 Verifies the oracle battery, runs the real targets over the battery
-vectors, and — most importantly — mutation-tests the harness: seventeen
+vectors, and — most importantly — mutation-tests the harness: nineteen
 classes of deliberately broken implementations (validator accepting
 0xC0, validator rejecting noncharacters, non-maximal-subpart scrubber,
 identity scrubber, byte-dropping scrubber, off-by-one code point count,
@@ -193,8 +201,9 @@ throwing target, cp1252-confused encoder, identity encoder, per-byte
 decoder, valid-input-mangling decoder, round-trip-violating decoder,
 null-returning encoder, sometimes-null decoder, blind noncharacter
 detector, U+FDD0-block-missing detector, over-eager noncharacter
-detector) must all be caught. It also asserts generator determinism,
-the valid/invalid input mix, and the documented
+detector, cp1252-confused `_mb_chr()`, invalid-accepting `_mb_ord()`)
+must all be caught. It also asserts generator determinism, the
+valid/invalid input mix, and the documented
 `wp_has_noncharacters()` divergence stance on ill-formed input.
 
 For end-to-end pipeline testing while the real implementations are
