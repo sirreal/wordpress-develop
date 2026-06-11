@@ -158,6 +158,23 @@ assert.equal(completedProcessor.next_tag(), false);
 assert.equal(completedProcessor.get_tag(), null);
 completedProcessor.destroy();
 
+const processorMatchOffsetWithoutBreadcrumbs = WP_HTML_Processor.create_fragment("<div one></div><div two></div>");
+assert.equal(processorMatchOffsetWithoutBreadcrumbs.next_tag({ tag_name: "div", match_offset: 2 }), true);
+assert.equal(processorMatchOffsetWithoutBreadcrumbs.get_attribute("one"), true);
+assert.equal(processorMatchOffsetWithoutBreadcrumbs.get_attribute("two"), null);
+processorMatchOffsetWithoutBreadcrumbs.destroy();
+
+const processorBreadcrumbMatchOffset = WP_HTML_Processor.create_fragment("<div><span one></span><span two></span></div>");
+assert.equal(processorBreadcrumbMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPAN"], match_offset: "2nd" }), true);
+assert.equal(processorBreadcrumbMatchOffset.get_attribute("one"), null);
+assert.equal(processorBreadcrumbMatchOffset.get_attribute("two"), true);
+processorBreadcrumbMatchOffset.destroy();
+
+const processorZeroBreadcrumbMatchOffset = WP_HTML_Processor.create_fragment("<div><span></span></div>");
+assert.equal(processorZeroBreadcrumbMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPAN"], match_offset: 0 }), false);
+assert.equal(processorZeroBreadcrumbMatchOffset.get_tag(), null);
+processorZeroBreadcrumbMatchOffset.destroy();
+
 const imageNamespaceProcessor = WP_HTML_Processor.create_fragment("<image/><svg><image/></svg>");
 assert.equal(imageNamespaceProcessor.next_tag(), true);
 assert.equal(imageNamespaceProcessor.get_tag(), "IMG");
@@ -347,7 +364,7 @@ assert.deepEqual(voidProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
 voidProcessor.destroy();
 
 const paragraphProcessor = WP_HTML_Processor.create_fragment("<p><p target>");
-assert.equal(paragraphProcessor.next_tag({ tag_name: "p", match_offset: 2 }), true);
+assert.equal(paragraphProcessor.next_tag({ breadcrumbs: ["P"], match_offset: 2 }), true);
 assert.deepEqual(paragraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 assert.equal(paragraphProcessor.get_attribute("target"), true);
 paragraphProcessor.destroy();
@@ -371,37 +388,37 @@ assert.equal(buttonProcessor.get_attribute("three"), true);
 buttonProcessor.destroy();
 
 const listBoundaryProcessor = WP_HTML_Processor.create_fragment("<li><li><blockquote><li target>");
-assert.equal(listBoundaryProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.equal(listBoundaryProcessor.next_tag({ breadcrumbs: ["LI"], match_offset: 3 }), true);
 assert.deepEqual(listBoundaryProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI", "BLOCKQUOTE", "LI"]);
 assert.equal(listBoundaryProcessor.get_attribute("target"), true);
 listBoundaryProcessor.destroy();
 
 const listImpliedProcessor = WP_HTML_Processor.create_fragment("<li><li><div><li target>");
-assert.equal(listImpliedProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.equal(listImpliedProcessor.next_tag({ breadcrumbs: ["LI"], match_offset: 3 }), true);
 assert.deepEqual(listImpliedProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI"]);
 assert.equal(listImpliedProcessor.get_attribute("target"), true);
 listImpliedProcessor.destroy();
 
 const listPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<li><li><p><button><p><li target>");
-assert.equal(listPInButtonScopeProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.equal(listPInButtonScopeProcessor.next_tag({ breadcrumbs: ["LI"], match_offset: 3 }), true);
 assert.deepEqual(listPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI", "P", "BUTTON", "LI"]);
 assert.equal(listPInButtonScopeProcessor.get_attribute("target"), true);
 listPInButtonScopeProcessor.destroy();
 
 const ddPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<dd><dd><p><button><p><dd target>");
-assert.equal(ddPInButtonScopeProcessor.next_tag({ tag_name: "dd", match_offset: 3 }), true);
+assert.equal(ddPInButtonScopeProcessor.next_tag({ breadcrumbs: ["DD"], match_offset: 3 }), true);
 assert.deepEqual(ddPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "DD", "P", "BUTTON", "DD"]);
 assert.equal(ddPInButtonScopeProcessor.get_attribute("target"), true);
 ddPInButtonScopeProcessor.destroy();
 
 const dtPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<dt><dt><p><button><p><dt target>");
-assert.equal(dtPInButtonScopeProcessor.next_tag({ tag_name: "dt", match_offset: 3 }), true);
+assert.equal(dtPInButtonScopeProcessor.next_tag({ breadcrumbs: ["DT"], match_offset: 3 }), true);
 assert.deepEqual(dtPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "DT", "P", "BUTTON", "DT"]);
 assert.equal(dtPInButtonScopeProcessor.get_attribute("target"), true);
 dtPInButtonScopeProcessor.destroy();
 
 const unexpectedListCloserProcessor = WP_HTML_Processor.create_fragment("<ul><li><ul></li><li target>a</li></ul></li></ul>");
-assert.equal(unexpectedListCloserProcessor.next_tag({ tag_name: "li", match_offset: 2 }), true);
+assert.equal(unexpectedListCloserProcessor.next_tag({ breadcrumbs: ["LI"], match_offset: 2 }), true);
 assert.deepEqual(unexpectedListCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "UL", "LI", "UL", "LI"]);
 assert.equal(unexpectedListCloserProcessor.get_attribute("target"), true);
 unexpectedListCloserProcessor.destroy();

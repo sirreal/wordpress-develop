@@ -1162,10 +1162,37 @@ export function createHtmlApi(wasm) {
 
 			const needsTag = typeof query.tag_name === "string" ? asciiUpper(query.tag_name) : null;
 			const needsClass = typeof query.class_name === "string" ? query.class_name : null;
-			const matchOffset = Number.isInteger(query.match_offset) && query.match_offset > 0 ? query.match_offset : 1;
 			const hasBreadcrumbs = Array.isArray(query.breadcrumbs);
 
-			let remaining = matchOffset;
+			if (!hasBreadcrumbs) {
+				while (this.next_token()) {
+					if (this.get_token_type() !== "#tag") {
+						continue;
+					}
+
+					if (this.is_tag_closer() && !visitClosers) {
+						continue;
+					}
+
+					if (needsTag !== null && this.get_token_name() !== needsTag) {
+						continue;
+					}
+
+					if (needsClass !== null && this.has_class(needsClass) !== true) {
+						continue;
+					}
+
+					return true;
+				}
+
+				return false;
+			}
+
+			let remaining = query.match_offset == null ? 1 : phpIntegerCast(query.match_offset);
+			if (remaining < 1) {
+				return false;
+			}
+
 			while (remaining > 0 && this.next_token()) {
 				if (this.get_token_type() !== "#tag") {
 					continue;
@@ -2423,6 +2450,20 @@ function asciiStartsWithAt(value, needle, at) {
 
 function replaceNulls(value) {
 	return value.replace(/\0/g, "\uFFFD");
+}
+
+function phpIntegerCast(value) {
+	if (typeof value === "number") {
+		return Number.isFinite(value) ? Math.trunc(value) : 0;
+	}
+	if (typeof value === "boolean") {
+		return value ? 1 : 0;
+	}
+	if (typeof value === "string") {
+		const match = value.trimStart().match(/^[+-]?\d+/);
+		return match ? Number.parseInt(match[0], 10) : 0;
+	}
+	return 0;
 }
 
 function contextNodeName(context) {
