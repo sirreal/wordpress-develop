@@ -1726,6 +1726,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (!this.is_full_parser && tokenType === "#doctype") {
+				this.skip_current_token = true;
+				return;
+			}
+
 			if (tokenType !== "#tag") {
 				if (tokenType === "#text" && this.#isInTableTextContext()) {
 					if (this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE) {

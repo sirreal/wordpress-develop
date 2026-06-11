@@ -278,6 +278,13 @@ assert.equal(plaintextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPP
 assert.equal(plaintextProcessor.get_unsupported_exception().message, "Cannot process PLAINTEXT elements.");
 plaintextProcessor.destroy();
 
+const fragmentDoctypeProcessor = WP_HTML_Processor.create_fragment("<!doctype html><p>x");
+assert.equal(fragmentDoctypeProcessor.next_token(), true);
+assert.equal(fragmentDoctypeProcessor.get_tag(), "P");
+assert.deepEqual(fragmentDoctypeProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+fragmentDoctypeProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<!doctype html><p>x"), "<p>x</p>");
+
 const processorBookmarkLimit = WP_HTML_Processor.create_fragment("<div>");
 assert.equal(processorBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
@@ -706,6 +713,15 @@ assert.equal(
 	"<select><optgroup><option>one</option></optgroup><hr><option>two</option></select>",
 );
 
+const selectDoctypeProcessor = WP_HTML_Processor.create_fragment("<select><!doctype html><option>one");
+assert.equal(selectDoctypeProcessor.next_tag("option"), true);
+assert.deepEqual(selectDoctypeProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "OPTION"]);
+selectDoctypeProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<select><!doctype html><option>one"),
+	"<select><option>one</option></select>",
+);
+
 const selectInputProcessor = WP_HTML_Processor.create_fragment("<select><option>one<input><p>after");
 assert.equal(selectInputProcessor.next_tag("input"), true);
 assert.deepEqual(selectInputProcessor.get_breadcrumbs(), ["HTML", "BODY", "INPUT"]);
@@ -805,6 +821,15 @@ assert.equal(tableNullTextProcessor.next_tag("tr"), true);
 assert.deepEqual(tableNullTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
 assert.equal(tableNullTextProcessor.get_last_error(), null);
 tableNullTextProcessor.destroy();
+
+const tableDoctypeProcessor = WP_HTML_Processor.create_fragment("<table><!doctype html><tr><td>cell");
+assert.equal(tableDoctypeProcessor.next_tag("td"), true);
+assert.deepEqual(tableDoctypeProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+tableDoctypeProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><!doctype html><tr><td>cell"),
+	"<table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
 
 for (const html of [
 	"<table><div><tr><td>cell",
