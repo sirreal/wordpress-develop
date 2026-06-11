@@ -690,6 +690,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 *     @type string|null $tag_name     Which tag to find, or `null` for "any tag."
 	 *     @type string      $tag_closers  'visit' to pause at tag closers, 'skip' or unset to only visit openers.
+	 *                                     Because 'skip' is the default, code following a plain next_tag() match
+	 *                                     needs no is_tag_closer() guard: only openers are visited.
 	 *     @type int|null    $match_offset Find the Nth tag matching all search criteria.
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
@@ -796,6 +798,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * elements the HTML specification closes implicitly and elements left
 	 * unclosed at the end of the input. Walking code can rely on seeing a
 	 * closer for every opener even in malformed input.
+	 *
+	 * The reverse also holds: a walk visits elements the parser INSERTED
+	 * that never appear in the source text, because HTML defines implied
+	 * structure. For example, the rows of `<table><tr>…` are visited
+	 * inside a synthesized TBODY (TABLE > TBODY > TR), and these implied
+	 * elements add a level to get_current_depth() and appear in
+	 * get_breadcrumbs(). Anchor depth-bounded walks on the depth recorded
+	 * at a matched element rather than on absolute depth numbers, and
+	 * they remain correct regardless of implied structure.
 	 *
 	 * An element's text content may be split across several consecutive
 	 * `#text` tokens: accumulate text while walking rather than assuming
