@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to scan through the HTML document, finding all IMG tags (case-insensitive via next_tag), and calls add_class() to append the 'wp-image' class to each one. The add_class() method safely handles both tags without existing classes and tags with existing classes, preserving all other bytes exactly as specified. HTML comments are automatically ignored since next_tag() only matches real HTML tags, not tag-like content inside comments.",
+  "confidence": 95
+}

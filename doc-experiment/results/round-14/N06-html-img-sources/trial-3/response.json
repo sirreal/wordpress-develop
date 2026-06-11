@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor with namespace-aware parsing to distinguish HTML img elements from SVG image elements. Iterates through matched img tags, filters by HTML namespace, retrieves decoded src values via get_attribute, and collects non-empty sources in document order.",
+  "confidence": 78
+}

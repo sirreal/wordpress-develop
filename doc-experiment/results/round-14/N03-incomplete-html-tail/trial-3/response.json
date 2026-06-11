@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's built-in capability to detect truncated HTML. It creates a processor with the input HTML, then drains all tokens by calling next_token() in a loop. Once all tokens have been scanned, paused_at_incomplete_token() returns true if the input ended mid-token (incomplete tag, unterminated comment, or unclosed special element like SCRIPT), and false if all tokens are lexically complete. This matches the documented behavior and examples.",
+  "confidence": 90
+}

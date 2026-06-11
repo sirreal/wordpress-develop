@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness. It finds the first TABLE element, then walks through all tokens within that table using next_token(). For each TR, it builds a row array. When encountering TD or TH cells, it recursively walks their content collecting all #text tokens while respecting nesting depth (get_current_depth()). This approach correctly handles omitted closing tags because the HTML Processor implicitly closes elements per HTML5 specification, and the depth-based walking ensures we only process tokens directly within each element.",
+  "confidence": 45
+}

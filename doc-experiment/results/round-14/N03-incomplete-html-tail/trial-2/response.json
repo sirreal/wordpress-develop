@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance with the input HTML and iterates through all tokens using next_token() until it reaches the end of the document. After the loop completes, paused_at_incomplete_token() returns true if the parser stopped because it encountered an incomplete syntax token (such as an unclosed tag, unterminated comment, or unclosed special element like SCRIPT), and false if all tokens are lexically complete.",
+  "confidence": 92
+}

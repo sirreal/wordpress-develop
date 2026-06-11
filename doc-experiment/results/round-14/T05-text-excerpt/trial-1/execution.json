@@ -1,0 +1,89 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-14/T05-text-excerpt/trial-1/candidate.php",
+    "function": "html_text_excerpt",
+    "passed": 1,
+    "total": 9,
+    "cases": [
+        {
+            "id": "no-truncation-needed",
+            "status": "error",
+            "expected": "Just a link to content.",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "truncate-mid-link",
+            "status": "error",
+            "expected": "Just a l",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-count-decoded",
+            "status": "error",
+            "expected": "Fish &",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "multibyte-emoji",
+            "status": "error",
+            "expected": "ab🌨️",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "accented",
+            "status": "error",
+            "expected": "cafés",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "script-excluded",
+            "status": "error",
+            "expected": "beforeafter",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "interelement-whitespace",
+            "status": "error",
+            "expected": "a b",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "zero-limit",
+            "status": "pass",
+            "expected": "",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "malformed-nesting",
+            "status": "error",
+            "expected": "onetwotail",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_fragment()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

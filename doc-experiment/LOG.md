@@ -2,6 +2,20 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 14 — Haiku, the construction-asymmetry gap crosses into train
+
+**Train 95.92 (−2.6).** The dip is dominated by one T05 trial (1/9)
+that hallucinated WP_HTML_Tag_Processor::create_fragment() — the exact
+failure held-out N05 has shown since round 12, which the protocol
+correctly refused to act on until train evidence appeared. It now has.
+Remaining wobbles are single-case sampling noise (N06 5/7, T06 7/8,
+T09 7/8).
+
+Round-15 hypothesis (committed BEFORE this entry, after the trials but
+ahead of judging): construction asymmetry stated on both classes —
+new-only for the Tag Processor, factories only on the HTML Processor.
+Round 15 is a held-out checkpoint; N05 should now benefit directly.
+
 ## Round 13 — Haiku, first 100% functional sweep
 
 **Train 98.54; 45/45 trials passed 343/343 hidden cases — first fully

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and walk through all P tags. For each P tag found, get_breadcrumbs() returns the full ancestor stack, and we check if BLOCKQUOTE appears anywhere in it using in_array(). If a BLOCKQUOTE ancestor is found, add_class() adds the \"quoted\" class to the P tag. Finally, get_updated_html() returns the modified HTML with all changes applied.",
+  "confidence": 85
+}

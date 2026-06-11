@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan through the HTML document and collect IMG tag sources. It filters by namespace using get_namespace() to exclude SVG <image> elements (which are in the 'svg' namespace), then uses get_attribute('src') to retrieve decoded attribute values. The function skips IMG elements with missing, empty, or boolean src attributes, collecting results in document order via the processor's natural iteration sequence.",
+  "confidence": 85
+}

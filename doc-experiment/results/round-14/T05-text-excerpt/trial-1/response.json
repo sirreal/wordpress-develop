@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor::create_fragment() to parse the HTML fragment, then iterates through all tokens with next_token(). Collects only #text tokens using get_modifiable_text(), which already returns decoded character references. Counts codepoints using mb_strlen/mb_substr with UTF-8 encoding to handle multi-byte characters correctly, and truncates at the exact codepoint limit without cutting mid-character.",
+  "confidence": 72
+}

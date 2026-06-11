@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical in logic to reference.php. Correct processor choice (Tag Processor, max 30): the task is a pure lexical/truncation question, and incomplete-token detection lives on WP_HTML_Tag_Processor::paused_at_incomplete_token() — the HTML Processor wasn't needed. No hallucinated API (max 30): all three methods (constructor, next_token(), paused_at_incomplete_token()) are documented in html-tag-processor.md (lines 360-362, 962, 1015); execution.json shows zero _doing_it_wrong and zero trigger_error across all 9 cases. Idiomatic (max 25): uses the documented drain-all-tokens idiom `while ($processor->next_token()) { continue; }` verbatim from the paused_at_incomplete_token() example at md lines 1033-1039. Edge cases (max 15): passes empty-string, trailing-lt-is-text (lone < is text, false), unclosed-element-is-complete (structurally unclosed but lexically whole, false), and unterminated-script (special element treated as incomplete, true) — all handled correctly by draining to end then querying. 9/9 pass. Self-confidence 92 was well-calibrated. Minor near-miss in the explanation: it says paused_at_incomplete_token detects 'unclosed tag' generically, eliding that a structurally unclosed element like <div>text returns false; but the code is correct."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and reference.php (only comment text differs). Correct processor (Tag Processor). No hallucinated/undocumented API — same three documented methods, zero _doing_it_wrong in execution.json. Idiomatic drain-loop matching the md example at lines 1033-1039. All documented edge cases pass: empty string (false), lone trailing < as text (false), unclosed-but-complete <div> (false), unterminated SCRIPT special element (true). 9/9 pass, confidence 92, well-calibrated. Explanation accurately distinguishes 'lexically complete' tokens from structural closure, which is the precise mental model the docs intend."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Again logic-identical to reference.php and the other two trials. Correct processor choice, no hallucinated/undocumented methods (all in html-tag-processor.md, zero _doing_it_wrong/trigger_error). Idiomatic use of the documented drain-then-query pattern. All edge cases the docs describe (incomplete input semantics, lone <, special-element truncation, empty string) handled; 9/9 pass. Confidence 90 well-calibrated. Explanation correctly cites 'lexically complete' as the deciding criterion and names the special-element (SCRIPT) case, mirroring md lines 109-118."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 9/9, with zero _doing_it_wrong and zero trigger_error records in execution.json. All three converged on the exact reference solution: construct WP_HTML_Tag_Processor, drain with `while ($processor->next_token()) continue;`, return paused_at_incomplete_token(). A probe of the harness confirmed this produces the expected boolean for every case.\n\nThe documentation is the direct cause of this clean success. The paused_at_incomplete_token() method section (html-tag-processor.md lines 1015-1047) does three things that map exactly onto the task's tricky points:\n1. It states the method 'reports the state at the point scanning stopped' and explicitly instructs 'In a longer document, drain all tokens first' (lines 1031-1032). This pre-empts the single most likely error — calling next_tag()/next_token() once and querying too early, which would mishandle cut-after-complete-content ('<p>fine</p><img src=\\\"a.jpg') where the truncation is not at the first token.\n2. It ships the drain-all-tokens loop as a copyable example (lines 1033-1039), which all three subjects reproduced verbatim.\n3. The class-level 'Streaming Mode' prose (lines 100-118) documents the two non-obvious lexical rules the tests probe: a special element (SCRIPT/STYLE) with no closing tag 'will count as an incomplete tag' (handling unterminated-script => true), and the general rule that a mid-syntax-element end pauses the processor (handling cut-inside-attribute and cut-inside-comment => true).\n\nThe task spec itself also disambiguated the two false-positive traps — lone trailing '<' is text, and '<div>text' is structurally unclosed but lexically complete — and the docs' framing of 'incomplete *token*' / 'mid-token' aligned with that distinction, so subjects correctly returned false for both.\n\nNear-misses in explanations only: trial-1's prose says the method detects an 'unclosed tag' without noting that an unclosed *element* (<div>text) is NOT incomplete; trials 2 and 3 used the sharper phrase 'lexically complete', which is the correct framing. These are wording imprecisions, not behavioral errors — the code was correct in all cases. Self-reported confidence (90-92) was well-calibrated against the perfect pass rate.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() — method section (html-tag-processor.md ~lines 1015-1047)",
+      "problem": "The example and prose explain the truncated-tag and special-element cases (which correctly return true) but do not state the inverse: that a structurally unclosed element whose tokens are all whole (e.g. '<div>text' at end of input, or a lone trailing '<' which lexes as text) returns FALSE. Subjects got this right here because the task spec spelled it out, but the docblock alone leaves the false-cases ambiguous — a reader could plausibly expect '<div>unclosed' to count as 'incomplete'.",
+      "suggestion": "Add one sentence and a contrasting example clarifying that this method reports lexical (token-level) incompleteness, not structural completeness: e.g. note that '<div>text' and a trailing bare '<' return false because every token is whole, even though the div element is never closed. State the distinction explicitly: 'incomplete *token*' (true) vs 'unclosed *element*' (false)."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() — Returns description",
+      "problem": "The Returns line reads 'Whether the parse paused at the start of an incomplete token', but this is only meaningful after the caller has scanned to end-of-input. A caller who never advances the cursor, or stops early, gets a stale/false reading. The drain instruction is present in the example prose but not reflected in the one-line summary or @return, so a skim-reader could query it prematurely.",
+      "suggestion": "In the short description or @return note, add a precondition clause: 'Only meaningful after scanning has reached the end of the input (drain all tokens first); reflects the state at the point scanning stopped.' This generalizes the existing example guidance into the contract."
+    }
+  ]
+}

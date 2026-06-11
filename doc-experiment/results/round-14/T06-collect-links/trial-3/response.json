@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through A tags using next_tag(). For each A tag, it retrieves the decoded href attribute using get_attribute(). It skips tags without href. To collect the link text, it records the depth at the A tag opener, then walks through all tokens inside the element using next_token(), accumulating text from #text tokens (which are automatically decoded by get_modifiable_text()). The loop continues while depth >= the A element's depth, capturing all text including from nested elements like em or strong.",
+  "confidence": 85
+}

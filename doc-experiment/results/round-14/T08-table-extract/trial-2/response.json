@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse the HTML and handle missing closing tags as a browser would. It creates a fragment processor, finds the first TABLE element, then walks through all tokens with proper depth tracking. For each TR element found, it walks through its contents to collect TD and TH cells, accumulating all text nodes within each cell (using get_modifiable_text() which returns decoded character references). The depth-based approach ensures we correctly handle nested structures like TBODY and THEAD, and properly exit from rows, cells, and the table itself.",
+  "confidence": 72
+}

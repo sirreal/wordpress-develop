@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment and WP_HTML_Processor::next_tag() with a tag_name query to find the first H1 element. Once found, it records the element's depth and uses WP_HTML_Processor::next_token() in a loop to iterate through all tokens inside the H1 while the current depth remains at or above the H1's depth. For each #text token encountered, it accumulates the decoded text via WP_HTML_Processor::get_modifiable_text(). The function returns the accumulated text or null if no H1 was found, matching the documented behavior that empty H1 elements return empty string (not null).",
+  "confidence": 85
+}
