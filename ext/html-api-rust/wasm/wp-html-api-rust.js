@@ -229,6 +229,19 @@ const CAPTION_CLOSING_START_TAGS = new Set([
 	"TR",
 ]);
 
+const IMPLIED_END_TAG_ELEMENTS = new Set([
+	"DD",
+	"DT",
+	"LI",
+	"OPTGROUP",
+	"OPTION",
+	"P",
+	"RB",
+	"RP",
+	"RT",
+	"RTC",
+]);
+
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
 	"ARTICLE",
@@ -1786,6 +1799,11 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
+				if (this.#shouldBailUnsupportedFormCloser(tagName, closingNamespace, existingIndex)) {
+					this.#bailUnsupported("Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.");
+					return;
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					existingIndex !== -1 &&
@@ -3228,6 +3246,23 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.#lastOpenElementIndex("TABLE", "html");
+		}
+
+		#shouldBailUnsupportedFormCloser(tagName, namespaceName, formIndex) {
+			if (tagName !== "FORM" || namespaceName !== "html" || formIndex === -1) {
+				return false;
+			}
+
+			for (let i = this.open_elements.length - 1; i > formIndex; i -= 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" ||
+					!IMPLIED_END_TAG_ELEMENTS.has(this.open_elements[i])
+				) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {

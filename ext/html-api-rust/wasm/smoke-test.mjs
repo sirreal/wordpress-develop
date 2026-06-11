@@ -686,6 +686,48 @@ assert.equal(brEndTagProcessor.get_attribute_names_with_prefix(""), null);
 assert.deepEqual(brEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "BR"]);
 brEndTagProcessor.destroy();
 
+const directFormCloserProcessor = WP_HTML_Processor.create_fragment("<form></form><p>x");
+assert.equal(directFormCloserProcessor.next_tag("form"), true);
+assert.equal(directFormCloserProcessor.is_tag_closer(), false);
+assert.equal(directFormCloserProcessor.next_tag({ tag_name: "form", tag_closers: "visit" }), true);
+assert.equal(directFormCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(directFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(directFormCloserProcessor.next_tag("p"), true);
+assert.deepEqual(directFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+directFormCloserProcessor.destroy();
+
+const impliedFormCloserProcessor = WP_HTML_Processor.create_fragment("<form><p></form><span>x");
+assert.equal(impliedFormCloserProcessor.next_tag("p"), true);
+assert.equal(impliedFormCloserProcessor.next_token(), true);
+assert.equal(impliedFormCloserProcessor.get_tag(), "P");
+assert.equal(impliedFormCloserProcessor.is_virtual(), true);
+assert.equal(impliedFormCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(impliedFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "FORM"]);
+assert.equal(impliedFormCloserProcessor.next_token(), true);
+assert.equal(impliedFormCloserProcessor.get_tag(), "FORM");
+assert.equal(impliedFormCloserProcessor.is_virtual(), false);
+assert.equal(impliedFormCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(impliedFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(impliedFormCloserProcessor.next_tag("span"), true);
+assert.deepEqual(impliedFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "SPAN"]);
+impliedFormCloserProcessor.destroy();
+
+for (const html of [
+	"<form><div></form><p>x",
+	"<form><button></form><p>x",
+]) {
+	const unsupportedFormCloserProcessor = WP_HTML_Processor.create_fragment(html);
+	while (unsupportedFormCloserProcessor.next_token()) {
+	}
+	assert.equal(unsupportedFormCloserProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(
+		unsupportedFormCloserProcessor.get_unsupported_exception().message,
+		"Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.",
+	);
+	unsupportedFormCloserProcessor.destroy();
+	assert.equal(WP_HTML_Processor.normalize(html), null);
+}
+
 const selectOptionProcessor = WP_HTML_Processor.create_fragment("<select><option>one<option>two</select>");
 assert.equal(selectOptionProcessor.next_tag({ breadcrumbs: ["SELECT", "OPTION"], match_offset: 2 }), true);
 assert.deepEqual(selectOptionProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "OPTION"]);
