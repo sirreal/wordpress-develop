@@ -801,6 +801,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * `#text` tokens: accumulate text while walking rather than assuming
 	 * one token carries all of an element's text.
 	 *
+	 * One important exception to the collect-`#text`-tokens recipe:
+	 * elements whose contents cannot contain markup (SCRIPT, STYLE,
+	 * TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text
+	 * is carried on the element's own token — walking inside them finds
+	 * nothing, so the recipe silently returns an empty string. Read their
+	 * text with {@see WP_HTML_Tag_Processor::get_modifiable_text} while
+	 * matched on the element's opening tag instead.
+	 *
+	 * Note also that `next_token()` does not stop when the element
+	 * matched by an earlier `next_tag()` call ends: left unguarded, it
+	 * walks to the end of the document. Bound a walk with a depth or
+	 * breadcrumb condition as shown below.
+	 *
 	 * There is only ONE cursor. Every call to `next_token()` advances the
 	 * same shared position, so nested walk loops interfere with each
 	 * other: when an inner "collect until this element closes" loop
