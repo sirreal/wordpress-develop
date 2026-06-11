@@ -6,6 +6,7 @@ function html_api_fuzz_runner_usage(): void {
 	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
 	echo "Create the stop file (default OUTPUT_DIR/STOP) to stop gracefully: the current batch finishes and no new batch starts.\n";
+	echo "Oracle findings are recorded separately from failures; pass --triage-oracle-findings to watcher.php to process them.\n";
 }
 
 function html_api_fuzz_runner_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
@@ -126,6 +127,7 @@ $state = array(
 	'oracleParseErrors' => 0,
 	'oracleUnsupported' => 0,
 	'oracleTolerated'   => 0,
+	'oracleFindings'    => 0,
 	'stopReason'        => null,
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
@@ -298,40 +300,77 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 	}
 
 	$attempt_ok = (bool) ( $result['ok'] ?? false );
+	$has_oracle_finding = is_array( $result['oracleFinding'] ?? null );
 
 	/*
 	 * Artifact retention: every attempt is regenerable from its seed, so seed
-	 * directories are kept only for failures, and only until the failure's
-	 * signature has enough exemplars on disk. Everything else lives in the
-	 * SQLite store (failures include their result and replay JSON there, so a
-	 * pruned failure remains reproducible).
+	 * directories are kept only for failures and oracle findings, and only
+	 * until their signature has enough exemplars on disk. Everything else
+	 * lives in the SQLite store (failures and oracle findings include their
+	 * result and replay JSON there, so a pruned finding remains reproducible).
 	 */
 	$retain_artifacts = $keep_all_artifacts;
+	$retain_failure_artifacts = $keep_all_artifacts && ! $attempt_ok;
+	$retain_oracle_artifacts  = $keep_all_artifacts && $has_oracle_finding;
 	$replay           = null;
-	if ( ! $attempt_ok ) {
+	if ( ! $attempt_ok || $has_oracle_finding ) {
 		$replay_path = $attempt_dir . '/replay.json';
 		$replay      = html_api_fuzz_runner_read_json_or_null( $replay_path );
 
-		if ( ! $retain_artifacts ) {
-			$signature_hash = $result['signature']['hash'] ?? null;
-			if ( null === $signature_hash || ! is_array( $replay ) ) {
-				// Without a signature there is nothing to cap by; without a
-				// replay document the files are the only reproduction.
-				$retain_artifacts = true;
+		if ( ! $keep_all_artifacts ) {
+			$retention_targets = array();
+			if ( ! $attempt_ok ) {
+				$retention_targets[] = array(
+					'hash' => $result['signature']['hash'] ?? null,
+					'kind' => 'failure',
+				);
+			}
+			if ( $has_oracle_finding ) {
+				$retention_targets[] = array(
+					'hash' => $result['oracleFinding']['signature']['hash'] ?? null,
+					'kind' => 'oracle',
+				);
+			}
+
+			if ( ! is_array( $replay ) ) {
+				// Without a replay document the files are the only reproduction.
+				$retain_failure_artifacts = ! $attempt_ok;
+				$retain_oracle_artifacts  = $has_oracle_finding;
 			} else {
 				/*
 				 * Count exemplar directories still on disk rather than rows
 				 * ever written: a restarted runner re-records seeds, and row
 				 * counting would saturate the cap without keeping anything.
 				 */
-				$retained_on_disk = 0;
-				foreach ( $result_store->retained_seeds( $signature_hash ) as $retained_seed ) {
-					if ( is_dir( $output_dir . '/seed-' . $retained_seed ) ) {
-						++$retained_on_disk;
+				foreach ( $retention_targets as $target ) {
+					$signature_hash = $target['hash'];
+					if ( null === $signature_hash ) {
+						if ( 'oracle' === $target['kind'] ) {
+							$retain_oracle_artifacts = true;
+						} else {
+							$retain_failure_artifacts = true;
+						}
+						continue;
+					}
+					$retained_seeds = 'oracle' === $target['kind']
+						? $result_store->oracle_retained_seeds( $signature_hash )
+						: $result_store->retained_seeds( $signature_hash );
+					$retained_on_disk = 0;
+					foreach ( $retained_seeds as $retained_seed ) {
+						if ( is_dir( $output_dir . '/seed-' . $retained_seed ) ) {
+							++$retained_on_disk;
+						}
+					}
+					if ( $retained_on_disk < $max_keep_per_signature ) {
+						if ( 'oracle' === $target['kind'] ) {
+							$retain_oracle_artifacts = true;
+						} else {
+							$retain_failure_artifacts = true;
+						}
 					}
 				}
-				$retain_artifacts = $retained_on_disk < $max_keep_per_signature;
 			}
+			$retain_artifacts = $retain_failure_artifacts || $retain_oracle_artifacts;
 		}
 
 		if ( $retain_artifacts ) {
@@ -346,31 +385,19 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 				'status'       => $result['status'] ?? 'unknown',
 				'failureClass' => $result['failureClass'] ?? null,
 				'signature'    => $result['signature'] ?? null,
+				'oracleFinding' => $result['oracleFinding'] ?? null,
 				'resultPath'   => $retain_artifacts ? $attempt_dir . '/result.json' : null,
 			);
 			$replay['signature'] = $result['signature'] ?? null;
+			$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 			if ( $retain_artifacts ) {
 				\HtmlApiFuzz\write_json_file( $replay_path, $replay );
-			} else {
-				// The stored copy outlives the pruned files; its replay
-				// command must point at the store, not at deleted paths.
-				$replay['command'] = array(
-					'program' => PHP_BINARY,
-					'args'    => array(
-						'tools/html-api-fuzz/replay.php',
-						'--store',
-						$output_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME,
-						'--seed',
-						(string) $current_seed,
-					),
-					'cwd'     => $repo_root,
-				);
 			}
 		}
 	}
 
 	$summary = array(
-		'kind'          => $attempt_ok ? 'attempt' : 'failure',
+		'kind'          => $attempt_ok ? ( $has_oracle_finding ? 'oracle-finding' : 'attempt' ) : 'failure',
 		'ok'            => $attempt_ok,
 		'status'        => $result['status'] ?? 'unknown',
 		'failureClass'  => $result['failureClass'] ?? null,
@@ -383,7 +410,10 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		'inputSha1'     => $result['inputSha1'] ?? null,
 		'inputLength'   => $result['inputLength'] ?? null,
 		'signature'     => $result['signature'] ?? null,
+		'oracleFinding' => $result['oracleFinding'] ?? null,
 		'artifactsRetained' => $retain_artifacts,
+		'failureArtifactsRetained' => $retain_failure_artifacts,
+		'oracleArtifactsRetained'  => $retain_oracle_artifacts,
 		'resultPath'    => $retain_artifacts ? $attempt_dir . '/result.json' : null,
 		'replayPath'    => $retain_artifacts ? $attempt_dir . '/replay.json' : null,
 		// Batch-executed seeds have no per-seed worker.log; point at a log
@@ -393,11 +423,28 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		'workerCode'    => $proc['code'],
 		'workerTimedOut'=> $proc['timedOut'],
 	);
-	$result_store->record_attempt(
+	$attempt_id = $result_store->record_attempt(
 		$summary,
-		$attempt_ok ? null : $result,
-		( $attempt_ok || ! is_array( $replay ) ) ? null : $replay
+		( $attempt_ok && ! $has_oracle_finding ) ? null : $result,
+		( ( $attempt_ok && ! $has_oracle_finding ) || ! is_array( $replay ) ) ? null : $replay
 	);
+	if ( ! $retain_artifacts && is_array( $replay ) && ( ! $attempt_ok || $has_oracle_finding ) ) {
+		// The stored copy outlives the pruned files; its replay command must
+		// point at this exact row, not just at a seed that a later restart may
+		// record again with different input.
+		$replay['command'] = array(
+			'program' => PHP_BINARY,
+			'args'    => array(
+				'tools/html-api-fuzz/replay.php',
+				'--store',
+				$output_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME,
+				'--id',
+				(string) $attempt_id,
+			),
+			'cwd'     => $repo_root,
+		);
+		$result_store->update_replay_for_attempt( $attempt_id, $replay );
+	}
 	if ( ! $retain_artifacts && ! $result_store->seed_artifacts_retained( $current_seed ) ) {
 		// The retained check covers earlier rows: a re-run of a previously
 		// retained seed must not delete the exemplar directory they cite.
@@ -405,6 +452,9 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 	}
 
 	if ( $summary['ok'] ) {
+		if ( $has_oracle_finding ) {
+			++$state['oracleFindings'];
+		}
 		if ( 'unsupported' === $summary['status'] ) {
 			++$state['unsupported'];
 		} elseif ( 'oracle-parse-error' === $summary['status'] ) {

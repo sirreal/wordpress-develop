@@ -166,8 +166,18 @@ class Worker {
 				$comparison = TreeRenderer::compare_trees( $wp_result['tree'], $dom_result['tree'], $dom_oracle_line_tolerances );
 				if ( ! $comparison['ok'] && self::is_oracle_form_feed_quirk( $input, $mode, $limits, $fragment_context, $wp_result['tree'] ?? null, $dom_oracle_line_tolerances ) ) {
 					$comparison = array(
-						'ok'            => true,
-						'formFeedQuirk' => true,
+						'ok'                => true,
+						'formFeedQuirk'     => true,
+						'oracleFindingType' => 'dom-form-feed-pre-body-whitespace',
+					);
+					$result['status']       = 'oracle-tolerated';
+					$result['failureClass'] = 'oracle-tolerated';
+				} elseif ( ! $comparison['ok'] && self::is_dom_mathml_heading_scope_quirk( $input, $mode, $comparison, $wp_result['tree'] ?? null, $dom_result['tree'] ?? null ) ) {
+					$comparison = array(
+						'ok'                => true,
+						'oracleTolerated'   => true,
+						'oracleFindingType' => 'dom-mathml-heading-scope-reparenting',
+						'firstDifference'   => $comparison['firstDifference'] ?? array(),
 					);
 					$result['status']       = 'oracle-tolerated';
 					$result['failureClass'] = 'oracle-tolerated';
@@ -226,6 +236,11 @@ class Worker {
 			$result['failureClass'] = 'normalize-invariant-failed';
 		}
 
+		$oracle_finding = OracleFinding::from_result( $result );
+		if ( null !== $oracle_finding ) {
+			$result['oracleFinding'] = $oracle_finding;
+		}
+
 		$signature = Signature::from_result( $result );
 		if ( null !== $signature ) {
 			$result['signature'] = $signature;
@@ -236,9 +251,11 @@ class Worker {
 			'status'       => $result['status'],
 			'failureClass' => $result['failureClass'] ?? null,
 			'signature'    => $signature,
+			'oracleFinding' => $result['oracleFinding'] ?? null,
 			'resultPath'   => $result_path,
 		);
 		$replay['signature'] = $signature;
+		$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 		write_json_file( $replay_path, $replay );
 		write_json_file( $result_path, $result );
 
@@ -413,6 +430,12 @@ class Worker {
 					'status' => 'skipped-oracle-form-feed-quirk',
 				);
 			}
+			if ( self::is_dom_mathml_heading_scope_quirk( $updated, $mode, $comparison, $wp_updated['tree'] ?? null, $dom_updated['tree'] ?? null ) ) {
+				return array(
+					'ok'     => true,
+					'status' => 'skipped-oracle-mathml-heading-scope-quirk',
+				);
+			}
 			return array(
 				'ok'              => false,
 				'status'          => 'failed',
@@ -555,6 +578,53 @@ class Worker {
 
 		$comparison = TreeRenderer::compare_trees( $wp_tree, $substituted['tree'], $dom_oracle_line_tolerances );
 		return true === $comparison['ok'] && empty( $comparison['scalarToleratedLines'] );
+	}
+
+	private static function is_dom_mathml_heading_scope_quirk( string $input, string $mode, array $comparison, ?string $wp_tree = null, ?string $dom_tree = null ): bool {
+		if ( ! in_array( $mode, array( Generator::MODE_FRAGMENT_BODY, Generator::MODE_FULL_DOCUMENT ), true ) ) {
+			return false;
+		}
+
+		if (
+			! preg_match( '/<math\b/i', $input ) ||
+			! preg_match( '/<annotation-xml\b[^>]*\bencoding\s*=\s*(?:"|\')?\s*(?:text\/html|application\/xhtml\+xml)/i', $input ) ||
+			! preg_match( '/<\/h[1-6]\s*>/i', $input )
+		) {
+			return false;
+		}
+
+		if ( ! is_string( $wp_tree ) || ! is_string( $dom_tree ) || ! self::tree_lines_match_ignoring_indentation( $wp_tree, $dom_tree ) ) {
+			return false;
+		}
+
+		$diff = $comparison['firstDifference'] ?? array();
+		if ( ! is_array( $diff ) || ( $diff['wordpressNorm'] ?? null ) !== ( $diff['domNorm'] ?? null ) ) {
+			return false;
+		}
+
+		$wordpress_path = strtolower( (string) ( $diff['wordpressPath'] ?? '' ) );
+		$dom_path       = strtolower( (string) ( $diff['domPath'] ?? '' ) );
+		if ( '' === $wordpress_path || $wordpress_path === $dom_path ) {
+			return false;
+		}
+
+		return false !== strpos( $wordpress_path, 'math annotation-xml' );
+	}
+
+	private static function tree_lines_match_ignoring_indentation( string $left, string $right ): bool {
+		$left_lines  = explode( "\n", $left );
+		$right_lines = explode( "\n", $right );
+		if ( count( $left_lines ) !== count( $right_lines ) ) {
+			return false;
+		}
+
+		foreach ( $left_lines as $i => $left_line ) {
+			if ( ltrim( $left_line, ' ' ) !== ltrim( $right_lines[ $i ], ' ' ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**

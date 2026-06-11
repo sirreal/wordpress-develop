@@ -7,7 +7,7 @@ $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] 
 $store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
 if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
 	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY]\n";
-	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite --seed N [--output-dir DIR] [--payload-policy POLICY]\n";
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY]\n";
 	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
 	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
 }
@@ -15,24 +15,26 @@ if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bo
 if ( null !== $store_path ) {
 	// Materialize the stored replay as a file and proceed exactly as if it
 	// had been read from a retained seed directory.
+	$store_id   = \HtmlApiFuzz\option_int( $options, 'id', -1 );
 	$store_seed = \HtmlApiFuzz\option_int( $options, 'seed', -1 );
-	if ( $store_seed < 0 ) {
-		fwrite( STDERR, "The --store form requires --seed N.\n" );
+	if ( $store_id < 0 && $store_seed < 0 ) {
+		fwrite( STDERR, "The --store form requires --id N or --seed N.\n" );
 		exit( 1 );
 	}
 	try {
 		$store        = new \HtmlApiFuzz\ResultStore( $store_path, true );
-		$store_replay = $store->replay_for_seed( $store_seed );
+		$store_replay = $store_id >= 0 ? $store->replay_for_attempt_id( $store_id ) : $store->replay_for_seed( $store_seed );
 		$store->close();
 	} catch ( \Throwable $e ) {
 		fwrite( STDERR, "Could not read store {$store_path}: {$e->getMessage()}\n" );
 		exit( 1 );
 	}
 	if ( null === $store_replay ) {
-		fwrite( STDERR, "No stored replay for seed {$store_seed} in {$store_path}.\n" );
+		fwrite( STDERR, ( $store_id >= 0 ? "No stored replay for id {$store_id}" : "No stored replay for seed {$store_seed}" ) . " in {$store_path}.\n" );
 		exit( 1 );
 	}
-	$replay_dir  = \HtmlApiFuzz\option_string( $options, 'output-dir', dirname( $store_path ) . '/replay-seed-' . $store_seed . '-' . \HtmlApiFuzz\timestamp() );
+	$store_label = $store_id >= 0 ? 'id-' . $store_id : 'seed-' . $store_seed;
+	$replay_dir  = \HtmlApiFuzz\option_string( $options, 'output-dir', dirname( $store_path ) . '/replay-' . $store_label . '-' . \HtmlApiFuzz\timestamp() );
 	\HtmlApiFuzz\ensure_dir( $replay_dir );
 	$replay_path = $replay_dir . '/source-replay.json';
 	\HtmlApiFuzz\write_json_file( $replay_path, $store_replay );
@@ -117,7 +119,8 @@ echo \HtmlApiFuzz\json_encode_safe(
 			'durationMs' => $proc['durationMs'],
 			'logPath'    => $proc['logPath'],
 		),
-		'signature' => $result['signature'] ?? null,
+		'signature'     => $result['signature'] ?? null,
+		'oracleFinding' => $result['oracleFinding'] ?? null,
 	)
 ) . "\n";
 exit( ( $result['ok'] ?? false ) ? 0 : 2 );

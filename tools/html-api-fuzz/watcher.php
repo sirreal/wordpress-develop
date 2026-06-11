@@ -3,9 +3,10 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_watcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/watcher.php --run-dir DIR [--state-dir DIR] [--once] [--interval-seconds N] [--stop-stale-seconds N]\n";
+	echo "Usage: php tools/html-api-fuzz/watcher.php --run-dir DIR [--state-dir DIR] [--once] [--interval-seconds N] [--stop-stale-seconds N] [--triage-oracle-findings]\n";
 	echo "When RUN_DIR/STOP exists, the watcher exits after a final scan once every runner reports a stop reason.\n";
 	echo "--stop-stale-seconds (default 120) presumes a non-reporting runner dead; per lane it is floored at twice the lane's advertised batch budget (timeout-ms x batch-size).\n";
+	echo "--triage-oracle-findings scans oracleFinding rows in addition to ok = 0 failures.\n";
 }
 
 function html_api_fuzz_watcher_load_state( string $path ): array {
@@ -23,6 +24,8 @@ function html_api_fuzz_watcher_load_state( string $path ): array {
 		'seenAttempts'  => array(),
 		'summaryOffsets'=> array(),
 		'sqliteOffsets' => array(),
+		'oracleSummaryOffsets' => array(),
+		'oracleSqliteOffsets'  => array(),
 	);
 }
 
@@ -51,6 +54,18 @@ function html_api_fuzz_watcher_status_markdown( array $state ): string {
 		$lines[] = '## ' . $hash;
 		$lines[] = '';
 		$lines[] = '- Class: ' . ( $record['failureClass'] ?? 'unknown' );
+		if ( ! empty( $record['triageKind'] ) ) {
+			$lines[] = '- Kind: ' . $record['triageKind'];
+		}
+		if ( ! empty( $record['oracleFindingType'] ) ) {
+			$lines[] = '- Oracle finding: ' . $record['oracleFindingType'];
+		}
+		if ( ! empty( $record['suspectedOwner'] ) ) {
+			$lines[] = '- Suspected owner: ' . $record['suspectedOwner'];
+		}
+		if ( ! empty( $record['upstreamIssueUrl'] ) ) {
+			$lines[] = '- Upstream: ' . $record['upstreamIssueUrl'];
+		}
 		$lines[] = '- Status: ' . ( $record['status'] ?? 'unknown' );
 		$lines[] = '- First seen: ' . ( $record['firstSeenAt'] ?? 'unknown' );
 		$lines[] = '- Last seen: ' . ( $record['lastSeenAt'] ?? 'unknown' );
@@ -79,7 +94,12 @@ function html_api_fuzz_watcher_record_failure( array $summary, string $state_dir
 		$state['signatures'][ $hash ] = array(
 			'hash'         => $hash,
 			'status'       => 'new',
+			'triageKind'   => $summary['triageKind'] ?? ( ( $summary['ok'] ?? false ) ? 'oracle-finding' : 'failure' ),
 			'failureClass' => $summary['failureClass'] ?? 'unknown',
+			'oracleFindingType' => $summary['oracleFindingType'] ?? null,
+			'classification'    => $summary['classification'] ?? null,
+			'suspectedOwner'    => $summary['suspectedOwner'] ?? null,
+			'upstreamIssueUrl'  => $summary['upstreamIssueUrl'] ?? null,
 			'firstSeenAt'  => $now,
 			'lastSeenAt'   => $now,
 			'seenCount'    => 0,
@@ -112,6 +132,10 @@ function html_api_fuzz_watcher_record_failure( array $summary, string $state_dir
 			'inputSource'   => $summary['inputSource'] ?? null,
 			'features'      => $summary['generator']['features'] ?? array(),
 			'inputSha1'     => $summary['inputSha1'] ?? null,
+			'oracleFindingType' => $summary['oracleFindingType'] ?? null,
+			'classification'    => $summary['classification'] ?? null,
+			'suspectedOwner'    => $summary['suspectedOwner'] ?? null,
+			'upstreamIssueUrl'  => $summary['upstreamIssueUrl'] ?? null,
 			'resultPath'    => $summary['resultPath'] ?? null,
 			'replayPath'    => $summary['replayPath'] ?? null,
 			'logPath'       => $summary['logPath'] ?? null,
@@ -176,7 +200,7 @@ function html_api_fuzz_watcher_read_summary_records( string $summary_path, int $
 		fseek( $handle, $offset );
 	}
 
-	while ( false !== ( $line = fgets( $handle ) ) ) {
+	while ( false !== ( $line_offset = ftell( $handle ) ) && false !== ( $line = fgets( $handle ) ) ) {
 		++$line_no;
 		$line = trim( $line );
 		if ( '' === $line ) {
@@ -187,6 +211,7 @@ function html_api_fuzz_watcher_read_summary_records( string $summary_path, int $
 		if ( JSON_ERROR_NONE === json_last_error() ) {
 			$records[] = array(
 				'line'   => $line_no,
+				'offset' => $line_offset,
 				'record' => $record,
 			);
 		}
@@ -332,6 +357,12 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 	if ( \HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ) {
 		$args[] = '--any-failure';
 	}
+	if ( 'oracle-finding' === ( $record['triageKind'] ?? null ) ) {
+		$args[] = '--target-kind';
+		$args[] = 'oracle-finding';
+		$args[] = '--target-hash';
+		$args[] = $hash;
+	}
 
 	$proc = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), \HtmlApiFuzz\option_int( $options, 'minimize-timeout-ms', 300000 ), $signature_dir . '/minimize.log' );
 	$result_path = $output_dir . '/minimize-result.json';
@@ -371,6 +402,32 @@ function html_api_fuzz_watcher_process_failure_record( array $record, string $fa
 	}
 }
 
+function html_api_fuzz_watcher_process_oracle_finding_record( array $record, string $fallback_key, string $state_dir, array &$state, array &$new_hashes, int &$oracle_findings_seen ): void {
+	$finding = $record['oracleFinding'] ?? null;
+	if ( ! is_array( $finding ) || empty( $finding['signature']['hash'] ) ) {
+		return;
+	}
+
+	$summary = $record;
+	$summary['triageKind']        = 'oracle-finding';
+	$summary['signature']         = $finding['signature'];
+	$summary['failureClass']      = $finding['classification'] ?? 'oracle-finding';
+	$summary['classification']    = $finding['classification'] ?? null;
+	$summary['oracleFindingType'] = $finding['type'] ?? null;
+	$summary['suspectedOwner']    = $finding['suspectedOwner'] ?? null;
+	$summary['upstreamIssueUrl']  = $finding['upstream']['issueUrl'] ?? null;
+
+	$attempt_key = html_api_fuzz_watcher_attempt_key( $record, $fallback_key ) . ':oracle:' . $finding['signature']['hash'];
+	if ( isset( $state['seenAttempts'][ $attempt_key ] ) ) {
+		return;
+	}
+	$state['seenAttempts'][ $attempt_key ] = gmdate( 'c' );
+	++$oracle_findings_seen;
+	if ( html_api_fuzz_watcher_record_failure( $summary, $state_dir, $state ) ) {
+		$new_hashes[] = $finding['signature']['hash'];
+	}
+}
+
 function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, string $state_path, array &$state, array $options ): array {
 	$summary_paths = html_api_fuzz_watcher_summary_paths( $run_dir );
 	if ( ! is_array( $state['summaryOffsets'] ?? null ) ) {
@@ -379,14 +436,32 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 	if ( ! is_array( $state['sqliteOffsets'] ?? null ) ) {
 		$state['sqliteOffsets'] = array();
 	}
+	if ( ! is_array( $state['oracleSummaryOffsets'] ?? null ) ) {
+		$state['oracleSummaryOffsets'] = array();
+	}
+	if ( ! is_array( $state['oracleSqliteOffsets'] ?? null ) ) {
+		$state['oracleSqliteOffsets'] = array();
+	}
 
 	$new_hashes = array();
 	$failures_seen = 0;
+	$oracle_findings_seen = 0;
+	$triage_oracle_findings = \HtmlApiFuzz\option_bool( $options, 'triage-oracle-findings', false );
 	foreach ( $summary_paths as $summary_path ) {
 		$read = html_api_fuzz_watcher_read_summary_records( $summary_path, (int) ( $state['summaryOffsets'][ $summary_path ] ?? 0 ) );
 		$state['summaryOffsets'][ $summary_path ] = $read['offset'];
 		foreach ( $read['records'] as $entry ) {
-			html_api_fuzz_watcher_process_failure_record( $entry['record'], 'summary:' . $summary_path . ':' . $entry['line'], $state_dir, $state, $new_hashes, $failures_seen );
+			html_api_fuzz_watcher_process_failure_record( $entry['record'], 'summary:' . $summary_path . ':offset:' . ( $entry['offset'] ?? $entry['line'] ), $state_dir, $state, $new_hashes, $failures_seen );
+		}
+	}
+
+	if ( $triage_oracle_findings ) {
+		foreach ( $summary_paths as $summary_path ) {
+			$read = html_api_fuzz_watcher_read_summary_records( $summary_path, (int) ( $state['oracleSummaryOffsets'][ $summary_path ] ?? 0 ) );
+			$state['oracleSummaryOffsets'][ $summary_path ] = $read['offset'];
+			foreach ( $read['records'] as $entry ) {
+				html_api_fuzz_watcher_process_oracle_finding_record( $entry['record'], 'summary:' . $summary_path . ':offset:' . ( $entry['offset'] ?? $entry['line'] ), $state_dir, $state, $new_hashes, $oracle_findings_seen );
+			}
 		}
 	}
 
@@ -418,6 +493,18 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 				}
 			}
 			$state['sqliteOffsets'][ $store_path ] = $max_id;
+			if ( $triage_oracle_findings ) {
+				$oracle_after = (int) ( $state['oracleSqliteOffsets'][ $store_path ] ?? 0 );
+				if ( $oracle_after > $max_id ) {
+					$oracle_after = 0;
+				}
+				if ( $max_id > $oracle_after ) {
+					foreach ( $store->oracle_findings_after( $oracle_after, $max_id ) as $row ) {
+						html_api_fuzz_watcher_process_oracle_finding_record( $row['record'], 'sqlite:' . $store_path . ':' . $row['id'], $state_dir, $state, $new_hashes, $oracle_findings_seen );
+					}
+				}
+				$state['oracleSqliteOffsets'][ $store_path ] = $max_id;
+			}
 		} catch ( \Throwable $e ) {
 			fwrite( STDERR, '[' . gmdate( 'c' ) . "] watcher: could not read {$store_path}: {$e->getMessage()}\n" );
 		} finally {
@@ -475,6 +562,8 @@ function html_api_fuzz_watcher_scan_once( string $run_dir, string $state_dir, st
 		'summaryFiles'  => count( $summary_paths ),
 		'sqliteStores'  => count( $sqlite_paths ),
 		'failuresSeen'  => $failures_seen,
+		'oracleFindingsSeen' => $oracle_findings_seen,
+		'triageOracleFindings' => $triage_oracle_findings,
 		'newSignatures' => count( array_unique( $new_hashes ) ),
 	);
 }

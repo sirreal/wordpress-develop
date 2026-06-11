@@ -106,6 +106,10 @@ class Signature {
 		return trim( $message );
 	}
 
+	public static function normalize_message_for_finding( string $message ): string {
+		return self::normalize_message( $message );
+	}
+
 	private static function resource_limit_failures( array $result ): array {
 		$limit_failures = array();
 		foreach ( $result['tagProcessor']['failures'] ?? array() as $failure ) {

@@ -50,6 +50,26 @@ function html_api_fuzz_smoke_dom_drops_bare_xlink_local_name_after_xlink(): bool
 	return $drops;
 }
 
+function html_api_fuzz_smoke_dom_reparents_heading_after_mathml_text_integration_point( string $encoding = 'text/html' ): bool {
+	$fixture = '<h1><math><annotation-xml encoding="' . $encoding . '"><p>x</h1><area data-x>';
+	$wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
+		$fixture,
+		\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		array( 'maxTokens' => 200, 'maxNodes' => 200 )
+	);
+	$dom = \HtmlApiFuzz\TreeRenderer::render_dom(
+		$fixture,
+		\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		array( 'maxTokens' => 200, 'maxNodes' => 200 )
+	);
+	if ( \HtmlApiFuzz\TreeRenderer::STATUS_OK !== ( $wp['status'] ?? null ) || \HtmlApiFuzz\TreeRenderer::STATUS_OK !== ( $dom['status'] ?? null ) ) {
+		return false;
+	}
+	$comparison = \HtmlApiFuzz\TreeRenderer::compare_trees( $wp['tree'], $dom['tree'], $wp['domOracleLineTolerances'] ?? array() );
+
+	return false === ( $comparison['ok'] ?? true );
+}
+
 function html_api_fuzz_smoke_rm_tree( string $path ): void {
 	if ( ! file_exists( $path ) ) {
 		return;
@@ -604,6 +624,33 @@ if ( $git_metadata['available'] ?? false ) {
 	html_api_fuzz_smoke_assert( $metadata_launcher_state['git']['dirty'] === ( $metadata_launcher_replay['repoDirty'] ?? null ), 'launcher worker replay should use launcher-provided dirty metadata.' );
 }
 
+$launcher_oracle_watcher_dir = $tmp . '/launcher-oracle-watcher';
+$launcher_oracle_watcher_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/launcher.php',
+		'--lanes',
+		'1',
+		'--max-seeds',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--watcher',
+		'--no-minimize',
+		'--triage-oracle-findings',
+		'--output-dir',
+		$launcher_oracle_watcher_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	30000,
+	$tmp . '/launcher-oracle-watcher.log'
+);
+html_api_fuzz_smoke_assert( ! $launcher_oracle_watcher_proc['timedOut'] && 0 === $launcher_oracle_watcher_proc['code'], 'launcher oracle watcher passthrough run should complete.' );
+$launcher_oracle_watcher = json_decode( $launcher_oracle_watcher_proc['stdout'], true );
+html_api_fuzz_smoke_assert( 0 === ( $launcher_oracle_watcher['watcherResult']['code'] ?? null ), 'launcher oracle watcher should exit cleanly.' );
+$launcher_oracle_watcher_log = trim( (string) file_get_contents( $launcher_oracle_watcher['watcherResult']['logPath'] ?? '' ) );
+$launcher_oracle_watcher_scan = json_decode( $launcher_oracle_watcher_log, true );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_scan['triageOracleFindings'] ?? null ), 'launcher should pass --triage-oracle-findings through to watcher.' );
+
 $bad_stride_proc = \HtmlApiFuzz\run_php_process(
 	array(
 		dirname( __DIR__ ) . '/runner.php',
@@ -723,6 +770,9 @@ html_api_fuzz_smoke_assert( 'oracle-unsupported' === ( $dom_template_context_res
 html_api_fuzz_smoke_assert( 'unsupported' === ( $dom_template_context_result['dom']['status'] ?? null ), 'DOM template table-sensitive fallback should preserve the DOM unsupported status.' );
 html_api_fuzz_smoke_assert( null === ( $dom_template_context_result['comparison'] ?? null ), 'DOM template table-sensitive fallback should not compare a lossy DOM tree.' );
 html_api_fuzz_smoke_assert( null === ( $dom_template_context_result['signature'] ?? null ), 'DOM template table-sensitive fallback should not produce a fuzz signature.' );
+html_api_fuzz_smoke_assert( 'oracle-limitation' === ( $dom_template_context_result['oracleFinding']['classification'] ?? null ), 'DOM template table-sensitive fallback should produce an oracle-limitation finding.' );
+html_api_fuzz_smoke_assert( 'dom-template-context-unsupported' === ( $dom_template_context_result['oracleFinding']['type'] ?? null ), 'DOM template table-sensitive fallback should identify the oracle finding type.' );
+html_api_fuzz_smoke_assert( str_starts_with( (string) ( $dom_template_context_result['oracleFinding']['signature']['hash'] ?? '' ), 'oracle-' ), 'DOM template table-sensitive fallback should produce an oracle finding signature.' );
 $dom_template_context_wp_tree = file_get_contents( $dom_template_context_result['wordpress']['treePath'] ?? '' );
 html_api_fuzz_smoke_assert( false !== $dom_template_context_wp_tree && false !== strpos( $dom_template_context_wp_tree, "        <col>\n" ), 'DOM template context regression should exercise WordPress <col> preservation.' );
 
@@ -784,6 +834,7 @@ $dom_template_context_quarantine_result = \HtmlApiFuzz\Worker::run(
 );
 html_api_fuzz_smoke_assert( true === ( $dom_template_context_quarantine_result['ok'] ?? null ), 'Non-round-trippable DOM template content should be quarantined, not failed.' );
 html_api_fuzz_smoke_assert( 'oracle-unsupported' === ( $dom_template_context_quarantine_result['status'] ?? null ), 'Non-round-trippable DOM template content should be quarantined as oracle-unsupported.' );
+html_api_fuzz_smoke_assert( 'oracle-limitation' === ( $dom_template_context_quarantine_result['oracleFinding']['classification'] ?? null ), 'Non-round-trippable DOM template content should remain visible as an oracle limitation.' );
 
 $dom_template_table_context_dir = $tmp . '/dom-template-table-context';
 $dom_template_table_context_result = \HtmlApiFuzz\Worker::run(
@@ -868,6 +919,13 @@ $dom_oracle_xlink_worker_result = \HtmlApiFuzz\Worker::run(
 );
 html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_oracle_xlink_worker_result['dom']['status'] ?? null ), 'Worker should still render the DOM oracle when normalize() fails independently.' );
 html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_worker_result['comparison']['ok'] ?? null ), 'Worker should still compare DOM trees when normalize() fails independently.' );
+if ( $dom_oracle_needs_xlink_tolerance ) {
+	html_api_fuzz_smoke_assert( 'oracle-bug' === ( $dom_oracle_xlink_worker_result['oracleFinding']['classification'] ?? null ), 'Worker should preserve the XLink DOM tolerance as an oracle-bug finding.' );
+	html_api_fuzz_smoke_assert( 'dom-xlink-dropped-local-name-after-xlink' === ( $dom_oracle_xlink_worker_result['oracleFinding']['type'] ?? null ), 'Worker should identify the XLink oracle finding type.' );
+	html_api_fuzz_smoke_assert( 'https://github.com/lexbor/lexbor/issues/372' === ( $dom_oracle_xlink_worker_result['oracleFinding']['upstream']['issueUrl'] ?? null ), 'Worker should link the XLink oracle finding to the upstream Lexbor issue.' );
+} else {
+	html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_worker_result['oracleFinding'] ?? null ), 'Fixed DOM runtimes should not produce an XLink oracle finding.' );
+}
 if ( false === ( $normalize_not_idempotent['normalize']['ok'] ?? true ) ) {
 	html_api_fuzz_smoke_assert( false === ( $dom_oracle_xlink_worker_result['ok'] ?? null ), 'Worker should fail when normalize() is non-idempotent.' );
 	html_api_fuzz_smoke_assert( 'normalize-invariant-failed' === ( $dom_oracle_xlink_worker_result['failureClass'] ?? null ), 'Worker should classify normalize() idempotence failures separately.' );
@@ -877,6 +935,105 @@ if ( false === ( $normalize_not_idempotent['normalize']['ok'] ?? true ) ) {
 } else {
 	html_api_fuzz_smoke_assert( true === ( $dom_oracle_xlink_worker_result['ok'] ?? null ), 'Worker should pass the XLink fixture once normalize() is idempotent.' );
 	html_api_fuzz_smoke_assert( ( $dom_oracle_needs_xlink_tolerance ? 'oracle-tolerated' : 'passed' ) === ( $dom_oracle_xlink_worker_result['status'] ?? null ), 'Worker should keep normal DOM oracle status once normalize() is idempotent.' );
+}
+
+$dom_oracle_mathml_heading_fixture = '<h1><math><annotation-xml encoding="text/html"><p>x</h1><area data-x>';
+$dom_oracle_needs_mathml_heading_tolerance = html_api_fuzz_smoke_dom_reparents_heading_after_mathml_text_integration_point();
+$dom_oracle_mathml_heading_dir = $tmp . '/dom-oracle-mathml-heading-worker';
+$dom_oracle_mathml_heading_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( $dom_oracle_mathml_heading_fixture ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $dom_oracle_mathml_heading_dir,
+		'max-tokens'      => '200',
+		'max-nodes'       => '200',
+	)
+);
+if ( $dom_oracle_needs_mathml_heading_tolerance ) {
+	html_api_fuzz_smoke_assert( true === ( $dom_oracle_mathml_heading_result['ok'] ?? null ), 'Known MathML heading DOM oracle bug should not be a WordPress failure.' );
+	html_api_fuzz_smoke_assert( 'oracle-tolerated' === ( $dom_oracle_mathml_heading_result['status'] ?? null ), 'Known MathML heading DOM oracle bug should be reported as oracle-tolerated.' );
+	html_api_fuzz_smoke_assert( null === ( $dom_oracle_mathml_heading_result['signature'] ?? null ), 'Known MathML heading DOM oracle bug should not produce a failure signature.' );
+	html_api_fuzz_smoke_assert( 'oracle-bug' === ( $dom_oracle_mathml_heading_result['oracleFinding']['classification'] ?? null ), 'Known MathML heading DOM oracle bug should produce an oracle-bug finding.' );
+	html_api_fuzz_smoke_assert( 'dom-mathml-heading-scope-reparenting' === ( $dom_oracle_mathml_heading_result['oracleFinding']['type'] ?? null ), 'Known MathML heading DOM oracle bug should identify the oracle finding type.' );
+	html_api_fuzz_smoke_assert( 'https://github.com/lexbor/lexbor/issues/373' === ( $dom_oracle_mathml_heading_result['oracleFinding']['upstream']['issueUrl'] ?? null ), 'Known MathML heading DOM oracle bug should link to the upstream Lexbor issue.' );
+	$dom_oracle_mathml_minimize_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/minimize.php',
+			'--replay',
+			$dom_oracle_mathml_heading_dir . '/replay.json',
+			'--output-dir',
+			$tmp . '/dom-oracle-mathml-heading-minimize',
+			'--max-attempts',
+			'0',
+			'--timeout-ms',
+			'2500',
+			'--any-failure',
+		),
+		\HtmlApiFuzz\repo_root(),
+		30000,
+		$tmp . '/dom-oracle-mathml-heading-minimize.log'
+	);
+	$dom_oracle_mathml_minimize = json_decode( $dom_oracle_mathml_minimize_proc['stdout'], true );
+	html_api_fuzz_smoke_assert( 0 === $dom_oracle_mathml_minimize_proc['code'] && ! $dom_oracle_mathml_minimize_proc['timedOut'], 'Minimizer should accept oracle finding replays as targets.' );
+	html_api_fuzz_smoke_assert( true === ( $dom_oracle_mathml_minimize['ok'] ?? null ), 'Minimizer should reproduce the MathML oracle finding target.' );
+	html_api_fuzz_smoke_assert( 'oracle-finding' === ( $dom_oracle_mathml_minimize['targetKind'] ?? null ), 'Minimizer should mark the MathML target as an oracle finding.' );
+	html_api_fuzz_smoke_assert( ( $dom_oracle_mathml_heading_result['oracleFinding']['signature']['hash'] ?? null ) === ( $dom_oracle_mathml_minimize['finalOracleHash'] ?? null ), 'Minimizer should report the final oracle finding hash.' );
+	$dom_oracle_mathml_mixed_replay = \HtmlApiFuzz\read_json_file( $dom_oracle_mathml_heading_dir . '/replay.json' );
+	$dom_oracle_mathml_mixed_replay['signature'] = array(
+		'hash'      => 'fake-failure-hash',
+		'familyKey' => 'fake-failure-family',
+	);
+	$dom_oracle_mathml_mixed_replay_path = $tmp . '/dom-oracle-mathml-heading-mixed-replay.json';
+	\HtmlApiFuzz\write_json_file( $dom_oracle_mathml_mixed_replay_path, $dom_oracle_mathml_mixed_replay );
+	$dom_oracle_mathml_mixed_minimize_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/minimize.php',
+			'--replay',
+			$dom_oracle_mathml_mixed_replay_path,
+			'--output-dir',
+			$tmp . '/dom-oracle-mathml-heading-mixed-minimize',
+			'--max-attempts',
+			'0',
+			'--timeout-ms',
+			'2500',
+			'--any-failure',
+			'--target-kind',
+			'oracle-finding',
+			'--target-hash',
+			$dom_oracle_mathml_heading_result['oracleFinding']['signature']['hash'],
+		),
+		\HtmlApiFuzz\repo_root(),
+		30000,
+		$tmp . '/dom-oracle-mathml-heading-mixed-minimize.log'
+	);
+	$dom_oracle_mathml_mixed_minimize = json_decode( $dom_oracle_mathml_mixed_minimize_proc['stdout'], true );
+	html_api_fuzz_smoke_assert( 0 === $dom_oracle_mathml_mixed_minimize_proc['code'] && ! $dom_oracle_mathml_mixed_minimize_proc['timedOut'], 'Minimizer should accept explicit oracle targets on mixed replays.' );
+	html_api_fuzz_smoke_assert( true === ( $dom_oracle_mathml_mixed_minimize['ok'] ?? null ), 'Minimizer should reproduce the explicit oracle target on mixed replays.' );
+	html_api_fuzz_smoke_assert( ( $dom_oracle_mathml_heading_result['oracleFinding']['signature']['hash'] ?? null ) === ( $dom_oracle_mathml_mixed_minimize['finalOracleHash'] ?? null ), 'Mixed replay minimization should report the requested oracle finding hash.' );
+} else {
+	html_api_fuzz_smoke_assert( null === ( $dom_oracle_mathml_heading_result['oracleFinding'] ?? null ), 'Fixed DOM runtimes should not produce a MathML heading oracle finding.' );
+}
+
+$dom_oracle_needs_mathml_xhtml_tolerance = html_api_fuzz_smoke_dom_reparents_heading_after_mathml_text_integration_point( 'application/xhtml+xml' );
+$dom_oracle_mathml_xhtml_dir = $tmp . '/dom-oracle-mathml-xhtml-worker';
+$dom_oracle_mathml_xhtml_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<h1><math><annotation-xml encoding="application/xhtml+xml"><p>x</h1><area data-x>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $dom_oracle_mathml_xhtml_dir,
+		'max-tokens'      => '200',
+		'max-nodes'       => '200',
+	)
+);
+if ( $dom_oracle_needs_mathml_xhtml_tolerance ) {
+	html_api_fuzz_smoke_assert( true === ( $dom_oracle_mathml_xhtml_result['ok'] ?? null ), 'MathML application/xhtml+xml DOM oracle bug should not be a WordPress failure.' );
+	html_api_fuzz_smoke_assert( 'dom-mathml-heading-scope-reparenting' === ( $dom_oracle_mathml_xhtml_result['oracleFinding']['type'] ?? null ), 'MathML application/xhtml+xml should use the MathML heading oracle finding type.' );
+} else {
+	html_api_fuzz_smoke_assert( null === ( $dom_oracle_mathml_xhtml_result['oracleFinding'] ?? null ), 'Fixed DOM runtimes should not produce a MathML XHTML oracle finding.' );
 }
 
 $dom_oracle_xlink_full_document_wp = \HtmlApiFuzz\TreeRenderer::render_wordpress(
@@ -948,6 +1105,21 @@ $dom_oracle_xlink_resource_dom = \HtmlApiFuzz\TreeRenderer::render_dom(
 );
 html_api_fuzz_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_ERROR === ( $dom_oracle_xlink_resource_dom['status'] ?? null ), 'DOM XLink node ceiling should fail the DOM renderer.' );
 html_api_fuzz_smoke_assert( 'node-limit-exceeded' === ( $dom_oracle_xlink_resource_dom['failureClass'] ?? null ), 'DOM XLink oracle tolerance should preserve the concrete DOM node limit failure.' );
+$dom_oracle_xlink_resource_worker_dir = $tmp . '/dom-oracle-xlink-resource-worker';
+$dom_oracle_xlink_resource_worker_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'    => base64_encode( '<svg xlink:href href><pass>x</pass></svg>' ),
+		'profile'         => 'replay',
+		'mode'            => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+		'payload-policy'  => 'ascii-structural',
+		'output-dir'      => $dom_oracle_xlink_resource_worker_dir,
+		'max-tokens'      => '100',
+		'max-nodes'       => '1',
+	)
+);
+html_api_fuzz_smoke_assert( false === ( $dom_oracle_xlink_resource_worker_result['ok'] ?? null ), 'DOM XLink node ceiling should remain a failing resource-limit result.' );
+html_api_fuzz_smoke_assert( 'resource-limit' === ( $dom_oracle_xlink_resource_worker_result['failureClass'] ?? null ), 'DOM XLink node ceiling should preserve the resource-limit failure class.' );
+html_api_fuzz_smoke_assert( null === ( $dom_oracle_xlink_resource_worker_result['oracleFinding'] ?? null ), 'DOM XLink tolerance lines should not create an oracle finding when DOM comparison did not succeed.' );
 
 $wp_resource_dir = $tmp . '/wordpress-resource-limit';
 $wp_resource_result = \HtmlApiFuzz\Worker::run(
