@@ -1759,11 +1759,13 @@ export function createHtmlApi(wasm) {
 				this.is_full_parser &&
 				this.encoding_confidence === "tentative" &&
 				this.current_namespace === "html" &&
-				tagName === "META" &&
-				this.#isUnsupportedEncodingMeta()
+				tagName === "META"
 			) {
-				this.#bailUnsupported("Cannot yet process META tags to determine encoding.");
-				return;
+				const unsupportedEncodingMessage = this.#unsupportedEncodingMetaMessage();
+				if (unsupportedEncodingMessage !== null) {
+					this.#bailUnsupported(unsupportedEncodingMessage);
+					return;
+				}
 			}
 
 			if (this.current_namespace === "html" && tagName === "PLAINTEXT") {
@@ -2260,18 +2262,22 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
-		#isUnsupportedEncodingMeta() {
+		#unsupportedEncodingMetaMessage() {
 			if (typeof this.get_attribute("charset") === "string") {
-				return true;
+				return "Cannot yet process META tags with charset to determine encoding.";
 			}
 
 			const httpEquiv = this.get_attribute("http-equiv");
 			const content = this.get_attribute("content");
-			return (
+			if (
 				typeof httpEquiv === "string" &&
 				typeof content === "string" &&
 				httpEquiv.toLowerCase() === "content-type"
-			);
+			) {
+				return "Cannot yet process META tags with http-equiv Content-Type to determine encoding.";
+			}
+
+			return null;
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {

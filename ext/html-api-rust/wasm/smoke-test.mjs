@@ -239,9 +239,9 @@ assert.equal(explicitTokenExpectationsProcessor.expects_closer({
 }), true);
 explicitTokenExpectationsProcessor.destroy();
 
-for (const html of [
-	'<!DOCTYPE html><meta charset="utf8">',
-	'<!DOCTYPE html><meta http-equiv="content-type" content="">',
+for (const [html, message] of [
+	['<!DOCTYPE html><meta charset="utf8">', "Cannot yet process META tags with charset to determine encoding."],
+	['<!DOCTYPE html><meta http-equiv="content-type" content="">', "Cannot yet process META tags with http-equiv Content-Type to determine encoding."],
 ]) {
 	const supportedMetaProcessor = WP_HTML_Processor.create_full_parser(html);
 	assert.equal(supportedMetaProcessor.next_tag("meta"), true);
@@ -251,7 +251,7 @@ for (const html of [
 	const unsupportedMetaProcessor = new WP_HTML_Processor(html, { fullParser: true });
 	assert.equal(unsupportedMetaProcessor.next_tag("meta"), false);
 	assert.equal(unsupportedMetaProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.notEqual(unsupportedMetaProcessor.get_unsupported_exception(), null);
+	assert.equal(unsupportedMetaProcessor.get_unsupported_exception().message, message);
 	unsupportedMetaProcessor.destroy();
 }
 
