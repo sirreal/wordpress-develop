@@ -1648,6 +1648,13 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (allowVirtualPreclosures && existingIndex < this.open_elements.length - 1) {
+					this.#queueVirtualPopsFrom(existingIndex + 1);
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				this.current_token_namespace = this.open_element_namespaces[existingIndex];
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
