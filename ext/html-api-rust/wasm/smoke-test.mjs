@@ -1535,9 +1535,25 @@ for (const [html, expected] of [
 	currentTokenExpectationsProcessor.destroy();
 }
 
+for (const html of [
+	"<!DOCTYPE html><meta>",
+	'<!DOCTYPE html><meta not-charset="OK">',
+	"<!DOCTYPE html><meta charset>",
+	'<!DOCTYPE html><meta http-equiv="accept" content="">',
+	'<!DOCTYPE html><meta http-equiv="content-type">',
+	'<!DOCTYPE html><meta http-equiv content="">',
+]) {
+	const supportedMetaProcessor = new WP_HTML_Processor(html, { fullParser: true });
+	assert.equal(supportedMetaProcessor.next_tag("meta"), true, html);
+	assert.equal(supportedMetaProcessor.get_last_error(), null, html);
+	supportedMetaProcessor.destroy();
+}
+
 for (const [html, message] of [
 	['<!DOCTYPE html><meta charset="utf8">', "Cannot yet process META tags with charset to determine encoding."],
+	['<!DOCTYPE html><meta CHARSET="utf8">', "Cannot yet process META tags with charset to determine encoding."],
 	['<!DOCTYPE html><meta http-equiv="content-type" content="">', "Cannot yet process META tags with http-equiv Content-Type to determine encoding."],
+	['<!DOCTYPE html><meta http-equiv="Content-Type" content="UTF-8">', "Cannot yet process META tags with http-equiv Content-Type to determine encoding."],
 ]) {
 	const supportedMetaProcessor = WP_HTML_Processor.create_full_parser(html);
 	assert.equal(supportedMetaProcessor.next_tag("meta"), true);
