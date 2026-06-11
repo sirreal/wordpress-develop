@@ -1047,8 +1047,10 @@ export function createHtmlApi(wasm) {
 			this.current_virtual = null;
 			this.virtual_tokens = [];
 			this.pending_real_token = false;
+			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
+			this.full_parser_scaffolded = !this.is_full_parser;
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
@@ -1166,6 +1168,10 @@ export function createHtmlApi(wasm) {
 			if (this.pending_real_token) {
 				this.current_virtual = null;
 				this.pending_real_token = false;
+				if (this.pending_real_parser_state !== null) {
+					this.parser_state = this.pending_real_parser_state;
+					this.pending_real_parser_state = null;
+				}
 				this.skip_current_token = false;
 				this.#updateTreeStateForCurrentToken(false);
 				return !this.skip_current_token;
@@ -1174,6 +1180,18 @@ export function createHtmlApi(wasm) {
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
+				if (
+					this.is_full_parser &&
+					!this.full_parser_scaffolded &&
+					this.get_token_type() !== "#doctype"
+				) {
+					this.full_parser_scaffolded = true;
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					this.#queueFullParserScaffold();
+					return this.#consumeVirtualToken();
+				}
+
 				this.#updateTreeStateForCurrentToken(true);
 				if (this.pending_real_token && this.virtual_tokens.length > 0) {
 					return this.#consumeVirtualToken();
@@ -1185,6 +1203,12 @@ export function createHtmlApi(wasm) {
 					return this.#consumeVirtualToken();
 				}
 				this.current_virtual = null;
+			}
+
+			if (this.is_full_parser && !this.full_parser_scaffolded) {
+				this.full_parser_scaffolded = true;
+				this.#queueFullParserScaffold();
+				return this.#consumeVirtualToken();
 			}
 
 			this.breadcrumbs = [...this.open_elements];
@@ -1469,6 +1493,7 @@ export function createHtmlApi(wasm) {
 
 			if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForStartTag(tagName)) {
 				this.pending_real_token = true;
+				this.pending_real_parser_state = this.parser_state;
 				return;
 			}
 
@@ -1526,6 +1551,7 @@ export function createHtmlApi(wasm) {
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
+				fullParserScaffolded: this.full_parser_scaffolded,
 			};
 		}
 
@@ -1533,7 +1559,9 @@ export function createHtmlApi(wasm) {
 			this.current_virtual = null;
 			this.virtual_tokens = [];
 			this.pending_real_token = false;
+			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
+			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.breadcrumbs = [...state.breadcrumbs];
@@ -1564,6 +1592,31 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#queueFullParserScaffold() {
+			this.virtual_tokens.push(
+				{
+					operation: "push",
+					tagName: "HTML",
+					namespaceName: "html",
+				},
+				{
+					operation: "push",
+					tagName: "HEAD",
+					namespaceName: "html",
+				},
+				{
+					operation: "pop",
+					tagName: "HEAD",
+					namespaceName: "html",
+				},
+				{
+					operation: "push",
+					tagName: "BODY",
+					namespaceName: "html",
+				},
+			);
 		}
 
 		#queueVirtualPopsFrom(index) {

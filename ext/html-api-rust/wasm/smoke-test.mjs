@@ -186,6 +186,27 @@ assert.equal(processorSeekNamespace.next_tag("rect"), true);
 assert.deepEqual(processorSeekNamespace.get_breadcrumbs(), ["HTML", "BODY", "CUSTOM-ELEMENT", "SVG", "RECT"]);
 processorSeekNamespace.destroy();
 
+const fullParserText = WP_HTML_Processor.create_full_parser("text");
+assert.equal(fullParserText.next_tag("body"), true);
+assert.equal(fullParserText.get_tag(), "BODY");
+assert.equal(fullParserText.is_virtual(), true);
+assert.equal(fullParserText.is_tag_closer(), false);
+assert.deepEqual(fullParserText.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(fullParserText.set_bookmark("body"), false);
+assert.equal(fullParserText.next_token(), true);
+assert.equal(fullParserText.get_token_name(), "#text");
+assert.deepEqual(fullParserText.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(fullParserText.set_bookmark("text"), true);
+fullParserText.destroy();
+
+const fullParserDoctype = WP_HTML_Processor.create_full_parser("<!doctype html><p>Hi</p>");
+assert.equal(fullParserDoctype.next_token(), true);
+assert.equal(fullParserDoctype.get_token_type(), "#doctype");
+assert.equal(fullParserDoctype.next_tag("p"), true);
+assert.equal(fullParserDoctype.get_tag(), "P");
+assert.deepEqual(fullParserDoctype.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+fullParserDoctype.destroy();
+
 const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
 assert.equal(stepProcessor.step(), true);
 assert.equal(stepProcessor.get_tag(), "DIV");
