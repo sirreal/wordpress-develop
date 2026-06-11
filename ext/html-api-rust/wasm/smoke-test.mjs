@@ -2029,6 +2029,13 @@ assert.equal(fullParserTemplateAfterHead.next_tag("body"), true);
 assert.deepEqual(fullParserTemplateAfterHead.get_breadcrumbs(), ["HTML", "BODY"]);
 fullParserTemplateAfterHead.destroy();
 
+const fullParserLinkAfterHead = WP_HTML_Processor.create_full_parser("<head><meta></head><link><p>");
+assert.equal(fullParserLinkAfterHead.next_tag("link"), true);
+assert.deepEqual(fullParserLinkAfterHead.get_breadcrumbs(), ["HTML", "HEAD", "LINK"]);
+assert.equal(fullParserLinkAfterHead.next_tag("p"), true);
+assert.deepEqual(fullParserLinkAfterHead.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+fullParserLinkAfterHead.destroy();
+
 const fullParserTemplateAfterBody = WP_HTML_Processor.create_full_parser("<body></body><template>");
 assert.equal(fullParserTemplateAfterBody.next_tag("template"), true);
 assert.deepEqual(fullParserTemplateAfterBody.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE"]);

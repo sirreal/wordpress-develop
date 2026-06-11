@@ -3532,8 +3532,9 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && HEAD_CONTENT_ELEMENTS.has(tagName)) {
-							this.#bailUnsupported("Cannot process elements after HEAD which reopen the HEAD element.");
-							return true;
+							this.full_parser_insertion_mode = "in_head";
+							this.#silentlyReopenFullParserElement("HEAD");
+							return false;
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "HEAD") {
