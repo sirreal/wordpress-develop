@@ -166,7 +166,10 @@ const ADOPTION_AGENCY_END_TAGS = new Set([
 	"NOBR",
 ]);
 const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
+	"APPLET",
+	"MARQUEE",
 	"MENUITEM",
+	"OBJECT",
 ]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
@@ -368,6 +371,18 @@ const P_CLOSING_START_TAGS = new Set([
 const BUTTON_SCOPE_BOUNDARIES = new Set([
 	"APPLET",
 	"BUTTON",
+	"CAPTION",
+	"HTML",
+	"MARQUEE",
+	"OBJECT",
+	"TABLE",
+	"TD",
+	"TEMPLATE",
+	"TH",
+]);
+
+const DEFAULT_SCOPE_BOUNDARIES = new Set([
+	"APPLET",
 	"CAPTION",
 	"HTML",
 	"MARQUEE",
@@ -1933,6 +1948,14 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldIgnoreAdoptionAgencyEndTagOutsideScope(tagName, closingNamespace, existingIndex)) {
+					this.#removeActiveFormattingElementsForClose(tagName);
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (this.#shouldBailUnsupportedAdoptionAgency(tagName, closingNamespace, existingIndex)) {
 					this.#bailUnsupported("Cannot extract common ancestor in adoption agency algorithm.");
 					return;
@@ -1940,6 +1963,21 @@ export function createHtmlApi(wasm) {
 
 				if (this.#shouldBailUnsupportedAdoptionAgencyFallback(tagName, closingNamespace)) {
 					this.#bailUnsupported('Cannot run adoption agency when "any other end tag" is required.');
+					return;
+				}
+
+				if (
+					allowVirtualPreclosures &&
+					existingIndex !== -1 &&
+					existingIndex < this.open_elements.length - 1 &&
+					tagName !== "HTML" &&
+					tagName !== "BODY" &&
+					MODELED_SCOPED_END_TAGS.has(tagName) &&
+					this.#hasHtmlScopeBoundaryAfter(existingIndex, DEFAULT_SCOPE_BOUNDARIES)
+				) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
 					return;
 				}
 
@@ -4038,6 +4076,29 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#hasHtmlScopeBoundaryAfter(index, boundaries) {
+			for (let i = index + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] === "html" &&
+					boundaries.has(this.open_elements[i])
+				) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#shouldIgnoreAdoptionAgencyEndTagOutsideScope(tagName, namespaceName, formattingElementIndex) {
+			return (
+				namespaceName === "html" &&
+				formattingElementIndex !== -1 &&
+				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
+				this.#hasHtmlScopeBoundaryAfter(formattingElementIndex, DEFAULT_SCOPE_BOUNDARIES)
+			);
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {

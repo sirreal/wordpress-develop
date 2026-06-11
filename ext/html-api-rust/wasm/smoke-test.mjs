@@ -435,6 +435,27 @@ assert.equal(nestedFormattingCloseProcessor.get_unsupported_exception(), null);
 nestedFormattingCloseProcessor.destroy();
 assert.equal(WP_HTML_Processor.normalize("<b><b></b>X</b>"), "<b><b></b>X</b>");
 
+const marqueeReconstructsFormattingProcessor = WP_HTML_Processor.create_full_parser("<p><b><div><marquee></p></b></div>X");
+assert.equal(marqueeReconstructsFormattingProcessor.next_tag("marquee"), true);
+assert.deepEqual(marqueeReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "B", "MARQUEE"]);
+while (
+	marqueeReconstructsFormattingProcessor.next_token() &&
+	(
+		marqueeReconstructsFormattingProcessor.get_token_type() !== "#text" ||
+		marqueeReconstructsFormattingProcessor.get_modifiable_text() !== "X"
+	)
+) {}
+assert.equal(marqueeReconstructsFormattingProcessor.get_modifiable_text(), "X");
+assert.deepEqual(marqueeReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "B", "MARQUEE", "#text"]);
+while (marqueeReconstructsFormattingProcessor.next_token()) {}
+assert.equal(marqueeReconstructsFormattingProcessor.get_last_error(), null);
+assert.equal(marqueeReconstructsFormattingProcessor.get_unsupported_exception(), null);
+marqueeReconstructsFormattingProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<p><b><div><marquee></p></b></div>X"),
+	"<p><b></b></p><div><b><marquee><p></p>X</marquee></b></div>",
+);
+
 const menuitemReconstructsFormattingProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><b></p><menuitem>");
 assert.equal(menuitemReconstructsFormattingProcessor.next_tag("menuitem"), true);
 assert.deepEqual(menuitemReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "MENUITEM"]);
