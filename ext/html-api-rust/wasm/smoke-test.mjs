@@ -274,8 +274,10 @@ assert.equal(WP_HTML_Processor.ERROR_UNSUPPORTED, "unsupported");
 assert.equal(WP_HTML_Processor.ERROR_EXCEEDED_MAX_BOOKMARKS, "exceeded-max-bookmarks");
 assert.equal(WP_HTML_Processor.MAX_BOOKMARKS, 10000);
 assert.equal(WP_HTML_Processor.create_fragment(null), null);
-assert.equal(WP_HTML_Processor.create_fragment("", "<div>"), null);
 assert.equal(WP_HTML_Processor.create_fragment("", "<body>", "ISO-8859-1"), null);
+assert.equal(WP_HTML_Processor.create_fragment("", ""), null);
+assert.equal(WP_HTML_Processor.create_fragment("", "<br>"), null);
+assert.equal(WP_HTML_Processor.create_fragment("", "<textarea>"), null);
 assert.equal(WP_HTML_Processor.create_full_parser(null), null);
 assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.normalize(null), null);
@@ -283,6 +285,21 @@ assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
+
+for (const [html, context, expected] of [
+	["<span>x", "<div>", "<span>x</span>"],
+	["<td>cell", "<tr>", "<td>cell</td>"],
+	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
+	["<option>one", "<select>", "<option>one</option>"],
+	["<rect />", "<svg>", "<rect />"],
+	["<circle />", "<svg><g>", "<circle />"],
+	["<mi>x", "<math>", "<mi>x</mi>"],
+]) {
+	const contextProcessor = WP_HTML_Processor.create_fragment(html, context);
+	assert.notEqual(contextProcessor, null, `Should create fragment in ${context}`);
+	assert.equal(contextProcessor.serialize(), expected, `Should serialize fragment in ${context}`);
+	contextProcessor.destroy();
+}
 
 const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);

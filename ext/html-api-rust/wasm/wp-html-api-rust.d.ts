@@ -190,6 +190,8 @@ export interface HtmlTokenInput {
 
 export interface WP_HTML_Processor_Options {
 	contextNode?: string;
+	contextNamespace?: HtmlNamespace;
+	compatMode?: "no-quirks-mode" | "quirks-mode";
 	fullParser?: boolean;
 	encodingConfidence?: EncodingConfidence;
 }

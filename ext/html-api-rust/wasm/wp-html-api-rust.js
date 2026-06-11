@@ -1343,24 +1343,59 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
 			this.context_node = options.contextNode ?? "BODY";
+			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
-			this.open_element_namespaces = this.open_elements.map(() => "html");
+			this.open_element_namespaces = this.is_full_parser ? [] : ["html", this.context_namespace];
 			this.active_formatting_elements = [];
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
-			this.current_namespace = contextNamespace(this.context_node);
+			this.current_namespace = childNamespaceForTag(this.context_node, this.context_namespace);
 			this.current_token_namespace = this.current_namespace;
+			this.compat_mode = options.compatMode ?? this.compat_mode;
 			super.change_parsing_namespace(this.current_namespace);
 		}
 
 		static create_fragment(html, context = "<body>", encoding = "UTF-8") {
-			if (context !== "<body>" || encoding !== "UTF-8" || typeof html !== "string") {
+			if (encoding !== "UTF-8" || typeof html !== "string" || typeof context !== "string") {
+				return null;
+			}
+
+			const contextProcessor = this.create_full_parser(`<!DOCTYPE html>${context}`, encoding);
+			if (contextProcessor === null) {
+				return null;
+			}
+
+			let contextNode = null;
+			let contextNamespaceName = null;
+			while (contextProcessor.next_tag()) {
+				if (!contextProcessor.is_virtual() && !contextProcessor.is_tag_closer()) {
+					contextNode = contextProcessor.get_tag();
+					contextNamespaceName = contextProcessor.get_namespace();
+				}
+			}
+
+			const compatMode = contextProcessor.compat_mode;
+			contextProcessor.destroy();
+			if (contextNode === null || contextNamespaceName === null) {
+				return null;
+			}
+
+			if (
+				contextNamespaceName === "html" &&
+				(
+					VOID_ELEMENTS.has(contextNode) ||
+					SPECIAL_ATOMIC_ELEMENTS.has(contextNode) ||
+					contextNode === "PLAINTEXT"
+				)
+			) {
 				return null;
 			}
 
 			return new this(html, {
-				contextNode: contextNodeName(context),
+				compatMode,
+				contextNode,
+				contextNamespace: contextNamespaceName,
 				fullParser: false,
 			});
 		}
@@ -4645,15 +4680,6 @@ function phpIntegerCast(value) {
 		return match ? Number.parseInt(match[0], 10) : 0;
 	}
 	return 0;
-}
-
-function contextNodeName(context) {
-	if (typeof context !== "string") {
-		return "BODY";
-	}
-
-	const match = context.match(/^<\s*([A-Za-z][^\s/>]*)/);
-	return match ? asciiUpper(match[1]) : "BODY";
 }
 
 function contextNamespace(nodeName) {
