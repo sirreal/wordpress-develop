@@ -2292,6 +2292,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#shouldConsumeEofCommentBeforeMissingBody() && this.#consumeFullParserEofComment()) {
+				return true;
+			}
+
 			if (this.is_full_parser && !this.full_parser_scaffolded) {
 				this.full_parser_scaffolded = true;
 				if (!this.full_parser_seen_doctype) {
@@ -4803,6 +4807,20 @@ export function createHtmlApi(wasm) {
 			this.full_parser_insertion_mode = "in_body";
 			this.#queueVirtualPush("BODY");
 			return true;
+		}
+
+		#shouldConsumeEofCommentBeforeMissingBody() {
+			return (
+				this.is_full_parser &&
+				[
+					"initial",
+					"before_html",
+					"before_head",
+					"in_head",
+					"in_head_noscript",
+					"after_head",
+				].includes(this.full_parser_insertion_mode)
+			);
 		}
 
 		#consumeFullParserEofComment() {

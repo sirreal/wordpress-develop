@@ -13,15 +13,13 @@ const skippedTests = new Set([
 	"tests19/line0500",
 	"tests19/line1079",
 	"tests2/line0207",
-	"tests2/line0686",
-	"tests2/line0697",
-	"tests2/line0709",
 	"tests19/line0277",
 	"tests19/line0305",
 	"tests19/line0522",
 	"tests19/line1014",
-	"tests2/line0456",
-	"tests2/line0564",
+	"tests2/line0686",
+	"tests2/line0697",
+	"tests2/line0709",
 	"tests2/line0775",
 	"tests16/line2587",
 	"tests20/line0497",
@@ -40,7 +38,6 @@ const skippedTests = new Set([
 	"tests3/line0256",
 	"tests3/line0271",
 	"tests5/line0131",
-	"tests6/line0061",
 	"tests6/line0593",
 	"tests_innerHTML_1/line0001",
 	"tests_innerHTML_1/line0011",
@@ -293,6 +290,7 @@ const summary = {
 	failed: 0,
 };
 const failures = [];
+const staleSkippedTests = [];
 
 for (const file of files) {
 	const suiteName = file.slice(0, -4);
@@ -310,6 +308,17 @@ for (const file of files) {
 		}
 
 		if (skippedTests.has(test.name)) {
+			const result = buildHtml5libTree(test.fragmentContext, test.html);
+			if (
+				result.unsupported === null &&
+				result.error === null &&
+				!result.incomplete &&
+				result.tree === test.expectedTree
+			) {
+				staleSkippedTests.push(test.name);
+				continue;
+			}
+
 			summary.skippedKnown += 1;
 			continue;
 		}
@@ -335,6 +344,7 @@ for (const file of files) {
 	}
 }
 
+assert.deepEqual(staleSkippedTests, [], "Remove passing tests from skippedTests.");
 assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
 console.log(`WASM html5lib tree tests passed: ${JSON.stringify(summary)}`);

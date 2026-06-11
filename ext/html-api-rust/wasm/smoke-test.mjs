@@ -574,6 +574,14 @@ for (const [html, expectedTree] of [
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "XX"\n\n',
 	],
 	[
+		"<!DOCTYPE html><!-- X",
+		"<!DOCTYPE html>\n<!--  X -->\n<html>\n  <head>\n  <body>\n\n",
+	],
+	[
+		"<!DOCTYPE html><head></head><!-- X",
+		"<!DOCTYPE html>\n<html>\n  <head>\n  <!--  X -->\n  <body>\n\n",
+	],
+	[
 		"<!DOCTYPE html><body></body><!--do-->",
 		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n  <!-- do -->\n\n",
 	],
