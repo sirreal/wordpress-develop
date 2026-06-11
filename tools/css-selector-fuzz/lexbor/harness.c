@@ -21,8 +21,8 @@
  * for elements without one (matching the fuzzer's placeholder convention).
  * Tags are ASCII-uppercased.
  *
- * Build: see build.sh next to this file. Pinned lexbor version recorded
- * there and in the fuzzer README.
+ * Build: see build.sh next to this file. The script builds upstream lexbor
+ * master and prints the exact commit used.
  */
 
 #include <stdio.h>

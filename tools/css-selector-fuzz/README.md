@@ -106,9 +106,9 @@ produces the same document, the same selector, and the same verdict.
 ## lexbor harness
 
 Build with `sh tools/css-selector-fuzz/lexbor/build.sh` (clones and builds
-liblexbor, pinned to v3.0.0 = `2ae88a1c6b52`). The worker auto-detects the
-binary at `tools/css-selector-fuzz/lexbor/harness` and reports per-batch
-tallies, persisted to `state.json` under `lexbor`:
+liblexbor from upstream `master`; the build script prints the exact commit).
+The worker auto-detects the binary at `tools/css-selector-fuzz/lexbor/harness`
+and reports per-batch tallies, persisted to `state.json` under `lexbor`:
 
 - `compared` — the differential ran and matched fid-multisets.
 - `tree-gated` — WP and lexbor built different trees; differential skipped.
@@ -119,9 +119,9 @@ tallies, persisted to `state.json` under `lexbor`:
   a loud warning if these appear after the harness had run, so a third oracle
   that dies mid-run cannot hide behind a green run.
 
-Known lexbor issues compensated for at this pin:
+Known lexbor issues compensated for when present:
 
-- [#368](https://github.com/lexbor/lexbor/issues/368) (open at v3.0.0):
+- [#368](https://github.com/lexbor/lexbor/issues/368):
   class and `#id` selectors match ASCII case-insensitively even in
   no-quirks documents (`[id=…]` attribute matching is correctly
   case-sensitive). Detected by a startup probe; when present, lexbor is

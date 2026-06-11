@@ -8,8 +8,9 @@ conformance-fix session and were re-verified on 2026-06-11; issue 6 came out
 of the explicit invalid-byte probe for the WP scrub coverage work
 (2026-06-11).
 
-- **Pinned version:** lexbor v3.0.0 (`2ae88a1c6b52`), built by
-  `tools/css-selector-fuzz/lexbor/build.sh`.
+- **Default build target:** lexbor upstream `master`, built by
+  `tools/css-selector-fuzz/lexbor/build.sh`. Record the exact commit printed
+  by the build script when verifying any issue.
 - **Upstream repo:** https://github.com/lexbor/lexbor
 - **Already filed upstream — do NOT refile:**
   [#368](https://github.com/lexbor/lexbor/issues/368) (class/`#id` selectors
@@ -17,10 +18,9 @@ of the explicit invalid-byte probe for the WP scrub coverage work
 
 ## Instructions for the filing agent
 
-1. **Re-verify at lexbor master first.** The pin is v3.0.0; any of these may
-   already be fixed. Edit `build.sh` to build master (or clone/build manually)
-   and re-run the repros below. Only file what still reproduces, and say in
-   the report which commit you tested.
+1. **Re-verify at current lexbor master first.** Any of these may already be
+   fixed. Run `build.sh` and re-run the repros below. Only file what still
+   reproduces, and say in the report which commit you tested.
 2. **Search for duplicates** before filing (suggested queries: `~=`,
    `attr-modifier`, `case insensitive modifier`, `ident code point`,
    `U+00B7`, `non-ascii`, `EOF`, `unclosed`, `simple block`,

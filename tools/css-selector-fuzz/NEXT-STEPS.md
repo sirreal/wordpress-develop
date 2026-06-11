@@ -292,9 +292,9 @@ case-sensitively in no-quirks (`WP_HTML_Tag_Processor::is_quirks_mode()`); type
 names are always case-insensitive. Do NOT trust lexbor on quirks-mode case
 behavior. Restrict the lexbor differential to **no-quirks documents** (emit
 `<!DOCTYPE html>`), and keep `ReferenceMatcher` as the authority for the
-quirks-mode path. Pin the exact lexbor version used and note whether #368 is
-fixed in it. Re-evaluate enabling quirks comparison only after verifying lexbor's
-behavior against that issue.
+quirks-mode path. Record the exact lexbor master commit used and note whether
+#368 is fixed in it. Re-evaluate enabling quirks comparison only after verifying
+lexbor's behavior against that issue.
 
 - Also surface (don't auto-fail) **attribute default case-insensitivity**:
   Selectors-4/HTML define a set of attributes matched case-insensitively by

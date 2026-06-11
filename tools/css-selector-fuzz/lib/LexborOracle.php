@@ -19,7 +19,7 @@ namespace CssSelectorFuzz;
  * ASCII case-insensitively even in no-quirks mode ( attribute selectors
  * like [id=x] are correctly case-sensitive ). Detected by probe at startup;
  * when present, lexbor is compared against the reference matcher run with
- * quirks-style class/ID folding. Open at the pinned v3.0.0.
+ * quirks-style class/ID folding.
  */
 class LexborOracle {
 
@@ -62,7 +62,7 @@ class LexborOracle {
 		return true;
 	}
 
-	/** Whether the pinned lexbor exhibits issue #368 ( class/ID case folding ). */
+	/** Whether the built lexbor exhibits issue #368 ( class/ID case folding ). */
 	public static function has_issue_368(): bool {
 		return self::$issue368;
 	}
