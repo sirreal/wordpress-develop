@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_runner_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
+	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
 	echo "Create the stop file (default OUTPUT_DIR/STOP) to stop gracefully: the current batch finishes and no new batch starts.\n";
 	echo "Oracle findings are recorded separately from failures; pass --triage-oracle-findings to watcher.php to process them.\n";
@@ -99,6 +99,9 @@ $git_metadata = null === \HtmlApiFuzz\option_string( $options, 'git-metadata-bas
 	? \HtmlApiFuzz\git_metadata()
 	: \HtmlApiFuzz\git_metadata_from_base64( \HtmlApiFuzz\option_string( $options, 'git-metadata-base64' ) );
 $git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( $git_metadata );
+$oracle_renderer      = \HtmlApiFuzz\OracleRenderer::from_options( $options );
+$oracle_metadata      = $oracle_renderer->metadata();
+$oracle_worker_args   = $oracle_renderer->worker_args();
 
 $state = array(
 	'schemaVersion' => 1,
@@ -115,6 +118,7 @@ $state = array(
 	'payloadPolicy' => $payload_policy,
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
+	'oracle'        => $oracle_metadata,
 	'maxKeepPerSignature' => $max_keep_per_signature,
 	'keepAllArtifacts'    => $keep_all_artifacts,
 	'stopFile'            => $stop_file,
@@ -131,7 +135,7 @@ $state = array(
 	'stopReason'        => null,
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
-\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'runner-start', 'outputDir' => $output_dir, 'git' => $git_metadata ) );
+\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'runner-start', 'outputDir' => $output_dir, 'git' => $git_metadata, 'oracle' => $oracle_metadata ) );
 file_put_contents( $runner_log, '[' . gmdate( 'c' ) . "] runner started outputDir={$output_dir}\n", FILE_APPEND );
 
 $has_deadline = $duration_seconds > 0;
@@ -139,7 +143,7 @@ $deadline     = $has_deadline ? microtime( true ) + $duration_seconds : null;
 $seed         = $start_seed;
 $count        = 0;
 
-function html_api_fuzz_runner_worker_args( int $seed, string $output_dir, string $profile, string $mode, string $payload_policy, int $max_tokens, int $max_nodes, string $git_metadata_base64, bool $fail_unsupported, int $max_input_bytes, int $corpus_percent, int $batch_count, int $seed_stride ): array {
+function html_api_fuzz_runner_worker_args( int $seed, string $output_dir, string $profile, string $mode, string $payload_policy, int $max_tokens, int $max_nodes, string $git_metadata_base64, bool $fail_unsupported, int $max_input_bytes, int $corpus_percent, int $batch_count, int $seed_stride, array $oracle_worker_args ): array {
 	$args = array(
 		__DIR__ . '/worker.php',
 		'--seed',
@@ -174,6 +178,9 @@ function html_api_fuzz_runner_worker_args( int $seed, string $output_dir, string
 	}
 	$args[] = '--corpus-mutate-percent';
 	$args[] = (string) $corpus_percent;
+	foreach ( $oracle_worker_args as $arg ) {
+		$args[] = $arg;
+	}
 	return $args;
 }
 
@@ -234,7 +241,7 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		$batch_keep_log = false;
 		\HtmlApiFuzz\ensure_dir( dirname( $batch_log ) );
 		\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'batch-start', 'seeds' => $batch_seeds, 'logPath' => $batch_log ) );
-		$batch_args = html_api_fuzz_runner_worker_args( $batch_seeds[0], $output_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, $batch_count, $seed_stride );
+		$batch_args = html_api_fuzz_runner_worker_args( $batch_seeds[0], $output_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, $batch_count, $seed_stride, $oracle_worker_args );
 		$batch_proc = \HtmlApiFuzz\run_php_process( $batch_args, $repo_root, $timeout_ms * $batch_count, $batch_log );
 		$pending_batch = $batch_seeds;
 	}
@@ -249,7 +256,7 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 	if ( null === $result ) {
 		// Isolation fallback: re-run this seed in its own process.
 		$batch_keep_log = true;
-		$args = html_api_fuzz_runner_worker_args( $current_seed, $attempt_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, 1, $seed_stride );
+		$args = html_api_fuzz_runner_worker_args( $current_seed, $attempt_dir, $profile, $mode, $payload_policy, $max_tokens, $max_nodes, $git_metadata_base64, $fail_unsupported, $max_input_bytes, $corpus_percent, 1, $seed_stride, $oracle_worker_args );
 		$proc   = \HtmlApiFuzz\run_php_process( $args, $repo_root, $timeout_ms, $log_path );
 		$result = html_api_fuzz_runner_read_json_or_null( $attempt_dir . '/result.json' );
 	}
@@ -269,6 +276,7 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 			'inputSource'    => is_array( $replay ) ? ( $replay['inputSource'] ?? null ) : null,
 			'inputSha1'      => is_array( $replay ) ? ( $replay['inputSha1'] ?? null ) : null,
 			'inputLength'    => is_array( $replay ) ? ( $replay['inputLength'] ?? null ) : null,
+			'oracle'         => is_array( $replay ) ? ( $replay['oracle'] ?? $oracle_metadata ) : $oracle_metadata,
 			'paths'          => array(
 				'outputDir'  => $attempt_dir,
 				'resultPath' => $attempt_dir . '/result.json',
@@ -386,8 +394,10 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 				'failureClass' => $result['failureClass'] ?? null,
 				'signature'    => $result['signature'] ?? null,
 				'oracleFinding' => $result['oracleFinding'] ?? null,
+				'oracle'       => $result['oracle'] ?? $replay['oracle'] ?? $oracle_metadata,
 				'resultPath'   => $retain_artifacts ? $attempt_dir . '/result.json' : null,
 			);
+			$replay['oracle'] = $replay['oracle'] ?? $result['oracle'] ?? $oracle_metadata;
 			$replay['signature'] = $result['signature'] ?? null;
 			$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 			if ( $retain_artifacts ) {
@@ -411,6 +421,7 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		'inputLength'   => $result['inputLength'] ?? null,
 		'signature'     => $result['signature'] ?? null,
 		'oracleFinding' => $result['oracleFinding'] ?? null,
+		'oracle'        => $result['oracle'] ?? $oracle_metadata,
 		'artifactsRetained' => $retain_artifacts,
 		'failureArtifactsRetained' => $retain_failure_artifacts,
 		'oracleArtifactsRetained'  => $retain_oracle_artifacts,
@@ -458,7 +469,7 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 		if ( 'unsupported' === $summary['status'] ) {
 			++$state['unsupported'];
 		} elseif ( 'oracle-parse-error' === $summary['status'] ) {
-			// Inputs the DOM oracle cannot parse receive no differential
+			// Inputs the selected oracle cannot parse receive no differential
 			// coverage; track the loss per class so long runs surface how
 			// much of the input space the oracle gives up on.
 			++$state['oracleParseErrors'];

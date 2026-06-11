@@ -39,6 +39,9 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 		$args[] = '--fragment-context';
 		$args[] = $base['fragmentContext'];
 	}
+	foreach ( $base['oracleWorkerArgs'] as $arg ) {
+		$args[] = $arg;
+	}
 	$proc   = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $dir . '/worker.log' );
 	$result = \HtmlApiFuzz\read_json_file( $dir . '/result.json' );
 	if ( null === $result ) {
@@ -89,7 +92,7 @@ function html_api_fuzz_min_target( array $replay, array $options ): array {
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH]\n";
+	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
 	exit( null === $replay_path ? 1 : 0 );
 }
 
@@ -116,6 +119,18 @@ if ( false === $input ) {
 }
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 $source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
+$oracle_options = $options;
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) ) {
+	$oracle_options['dom-oracle'] = $replay['options']['domOracle'] ?? $replay['oracle']['kind'] ?? \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
+}
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ) && is_string( $replay['options']['lexborOracleBin'] ?? null ) ) {
+	$oracle_options['lexbor-oracle-bin'] = $replay['options']['lexborOracleBin'];
+}
+$stored_oracle_timeout_ms = $replay['options']['oracleTimeoutMs'] ?? null;
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
+	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
+}
+$oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
 $base = array(
 	'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 	'profile'           => $replay['profile'] ?? 'replay',
@@ -127,6 +142,8 @@ $base = array(
 	'targetHash'        => $target_hash,
 	'targetKind'        => $target['kind'] ?? 'failure',
 	'sourceReplay'      => $source_replay,
+	'oracle'            => $oracle_renderer->metadata(),
+	'oracleWorkerArgs'  => $oracle_renderer->worker_args(),
 	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
 	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
 	'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
@@ -260,6 +277,9 @@ if ( 'body' !== $base['fragmentContext'] ) {
 	$args[] = '--fragment-context';
 	$args[] = $base['fragmentContext'];
 }
+foreach ( $base['oracleWorkerArgs'] as $arg ) {
+	$args[] = $arg;
+}
 \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $final_dir . '/worker.log' );
 $final_result = \HtmlApiFuzz\read_json_file( $final_dir . '/result.json' );
 $final_replay = \HtmlApiFuzz\read_json_file( $final_dir . '/replay.json' );
@@ -285,6 +305,7 @@ $summary = array(
 	'payloadPolicy'     => $base['payloadPolicy'],
 	'originalGenerator' => $base['originalGenerator'],
 	'sourceReplay'      => $base['sourceReplay'],
+	'oracle'            => $final_result['oracle'] ?? $base['oracle'],
 	'finalFailureClass' => $final_result['failureClass'] ?? null,
 	'finalStatus'       => $final_result['status'] ?? null,
 	'originalLength'    => strlen( $input ),

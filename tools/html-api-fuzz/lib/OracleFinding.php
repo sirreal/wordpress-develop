@@ -20,12 +20,30 @@ class OracleFinding {
 		$fragment_context = (string) ( $result['fragmentContext'] ?? 'body' );
 		$comparison       = is_array( $result['comparison'] ?? null ) ? $result['comparison'] : array();
 		$dom              = is_array( $result['dom'] ?? null ) ? $result['dom'] : array();
+		$oracle           = is_array( $result['oracle'] ?? null ) ? $result['oracle'] : ( is_array( $dom['oracle'] ?? null ) ? $dom['oracle'] : array() );
+		$oracle_kind      = (string) ( $oracle['kind'] ?? OracleRenderer::KIND_PHP_DOM );
 
 		if ( is_string( $comparison['oracleFindingType'] ?? null ) ) {
 			return self::from_type( $comparison['oracleFindingType'], $mode, $fragment_context, $comparison['firstDifference'] ?? array() );
 		}
 
 		if ( 'oracle-unsupported' === ( $result['status'] ?? null ) || TreeRenderer::STATUS_UNSUPPORTED === ( $dom['status'] ?? null ) ) {
+			if ( OracleRenderer::KIND_PHP_DOM !== $oracle_kind ) {
+				return self::build(
+					'oracle-limitation',
+					$oracle_kind . '-unsupported',
+					self::oracle_owner( $oracle_kind ),
+					'The selected oracle cannot expose this tree shape faithfully.',
+					array(
+						'mode'               => $mode,
+						'fragmentContext'    => $fragment_context,
+						'oracleKind'         => $oracle_kind,
+						'oracleFailureClass' => $dom['failureClass'] ?? null,
+						'unsupportedMessage' => $dom['unsupported']['message'] ?? $dom['error'] ?? null,
+						'family'             => $oracle_kind . '-unsupported',
+					)
+				);
+			}
 			return self::build(
 				'oracle-limitation',
 				'dom-template-context-unsupported',
@@ -42,6 +60,22 @@ class OracleFinding {
 		}
 
 		if ( 'oracle-parse-error' === ( $result['status'] ?? null ) ) {
+			if ( OracleRenderer::KIND_PHP_DOM !== $oracle_kind ) {
+				return self::build(
+					'oracle-limitation',
+					$oracle_kind . '-parse-error',
+					self::oracle_owner( $oracle_kind ),
+					'The selected oracle could not parse the input, so differential coverage was unavailable.',
+					array(
+						'mode'               => $mode,
+						'fragmentContext'    => $fragment_context,
+						'oracleKind'         => $oracle_kind,
+						'oracleFailureClass' => $dom['failureClass'] ?? null,
+						'message'            => Signature::normalize_message_for_finding( $dom['error'] ?? '' ),
+						'family'             => $oracle_kind . '-parse-error',
+					)
+				);
+			}
 			return self::build(
 				'oracle-limitation',
 				'dom-parse-error',
@@ -58,7 +92,7 @@ class OracleFinding {
 		}
 
 		$dom_oracle_line_tolerances = $result['wordpress']['domOracleLineTolerances'] ?? array();
-		if ( true === ( $comparison['ok'] ?? null ) && is_array( $dom_oracle_line_tolerances ) && ! empty( $dom_oracle_line_tolerances ) ) {
+		if ( OracleRenderer::KIND_PHP_DOM === $oracle_kind && true === ( $comparison['ok'] ?? null ) && is_array( $dom_oracle_line_tolerances ) && ! empty( $dom_oracle_line_tolerances ) ) {
 			return self::from_type(
 				'dom-xlink-dropped-local-name-after-xlink',
 				$mode,
@@ -161,6 +195,14 @@ class OracleFinding {
 			'upstream'       => $upstream,
 			'signature'      => self::signature( $classification, $type, $facts ),
 		);
+	}
+
+	private static function oracle_owner( string $oracle_kind ): string {
+		if ( OracleRenderer::KIND_LEXBOR_SOURCE === $oracle_kind ) {
+			return 'Lexbor source oracle';
+		}
+
+		return $oracle_kind;
 	}
 
 	private static function signature( string $classification, string $type, array $facts ): array {

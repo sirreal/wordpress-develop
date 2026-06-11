@@ -6,8 +6,8 @@ $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 $store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
 if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY]\n";
-	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY]\n";
+	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
 	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
 	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
 }
@@ -64,6 +64,19 @@ if ( null === $payload_policy ) {
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 $source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
 $git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() );
+$oracle_options = $options;
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) ) {
+	$oracle_options['dom-oracle'] = $replay['options']['domOracle'] ?? $replay['oracle']['kind'] ?? \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
+}
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ) && is_string( $replay['options']['lexborOracleBin'] ?? null ) ) {
+	$oracle_options['lexbor-oracle-bin'] = $replay['options']['lexborOracleBin'];
+}
+$stored_oracle_timeout_ms = $replay['options']['oracleTimeoutMs'] ?? null;
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
+	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
+}
+$oracle_renderer    = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
+$oracle_worker_args = $oracle_renderer->worker_args();
 
 $args = array(
 	__DIR__ . '/worker.php',
@@ -95,6 +108,9 @@ if ( is_string( $fragment_context ) && 'body' !== $fragment_context ) {
 }
 if ( \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', (bool) ( $replay['options']['failUnsupported'] ?? false ) ) ) {
 	$args[] = '--fail-unsupported';
+}
+foreach ( $oracle_worker_args as $arg ) {
+	$args[] = $arg;
 }
 
 $proc = \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 ), $output_dir . '/worker.log' );

@@ -49,6 +49,10 @@ class ResultStore {
 				oracle_suspected_owner TEXT,
 				oracle_signature_hash TEXT,
 				oracle_family_key TEXT,
+				oracle_kind TEXT,
+				oracle_version TEXT,
+				oracle_commit TEXT,
+				oracle_binary TEXT,
 				profile TEXT,
 				mode TEXT,
 				payload_policy TEXT,
@@ -71,6 +75,10 @@ class ResultStore {
 		$this->ensure_column( 'attempts', 'oracle_suspected_owner', 'TEXT' );
 		$this->ensure_column( 'attempts', 'oracle_signature_hash', 'TEXT' );
 		$this->ensure_column( 'attempts', 'oracle_family_key', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_kind', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_version', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_commit', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_binary', 'TEXT' );
 		$this->ensure_column( 'attempts', 'failure_artifacts_retained', 'INTEGER' );
 		$this->ensure_column( 'attempts', 'oracle_artifacts_retained', 'INTEGER' );
 		if ( (int) $this->db->querySingle( 'PRAGMA user_version' ) < 2 ) {
@@ -80,6 +88,7 @@ class ResultStore {
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_family_key ON attempts ( family_key )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_oracle_signature_hash ON attempts ( oracle_signature_hash )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_oracle_family_key ON attempts ( oracle_family_key )' );
+		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_oracle_kind ON attempts ( oracle_kind )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_ok ON attempts ( ok )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_seed ON attempts ( seed )' );
 	}
@@ -111,6 +120,7 @@ class ResultStore {
 	public function record_attempt( array $summary, ?array $result = null, ?array $replay = null ): int {
 		$ok             = (bool) ( $summary['ok'] ?? false );
 		$oracle_finding = is_array( $summary['oracleFinding'] ?? null ) ? $summary['oracleFinding'] : null;
+		$oracle         = is_array( $summary['oracle'] ?? null ) ? $summary['oracle'] : null;
 		$store_json     = ! $ok || null !== $oracle_finding;
 		$artifacts_retained = (bool) ( $summary['artifactsRetained'] ?? false );
 		$failure_artifacts_retained = array_key_exists( 'failureArtifactsRetained', $summary )
@@ -123,6 +133,7 @@ class ResultStore {
 			'INSERT INTO attempts (
 				created_at, seed, ok, status, failure_class, signature_hash, family_key,
 				oracle_finding_class, oracle_finding_type, oracle_suspected_owner, oracle_signature_hash, oracle_family_key,
+				oracle_kind, oracle_version, oracle_commit, oracle_binary,
 				profile, mode, payload_policy, input_source, input_sha1, input_length,
 				duration_ms, worker_code, worker_timed_out, artifacts_retained,
 				failure_artifacts_retained, oracle_artifacts_retained,
@@ -130,6 +141,7 @@ class ResultStore {
 			) VALUES (
 				:created_at, :seed, :ok, :status, :failure_class, :signature_hash, :family_key,
 				:oracle_finding_class, :oracle_finding_type, :oracle_suspected_owner, :oracle_signature_hash, :oracle_family_key,
+				:oracle_kind, :oracle_version, :oracle_commit, :oracle_binary,
 				:profile, :mode, :payload_policy, :input_source, :input_sha1, :input_length,
 				:duration_ms, :worker_code, :worker_timed_out, :artifacts_retained,
 				:failure_artifacts_retained, :oracle_artifacts_retained,
@@ -188,6 +200,14 @@ class ResultStore {
 		$statement->bindValue( ':oracle_signature_hash', $oracle_signature_hash, null === $oracle_signature_hash ? SQLITE3_NULL : SQLITE3_TEXT );
 		$oracle_family_key = $oracle_finding['signature']['familyKey'] ?? null;
 		$statement->bindValue( ':oracle_family_key', $oracle_family_key, null === $oracle_family_key ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_kind = $oracle['kind'] ?? null;
+		$statement->bindValue( ':oracle_kind', $oracle_kind, null === $oracle_kind ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_version = $oracle['lexborVersion'] ?? $oracle['phpVersion'] ?? null;
+		$statement->bindValue( ':oracle_version', $oracle_version, null === $oracle_version ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_commit = $oracle['lexborCommit'] ?? null;
+		$statement->bindValue( ':oracle_commit', $oracle_commit, null === $oracle_commit ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_binary = $oracle['binary'] ?? null;
+		$statement->bindValue( ':oracle_binary', $oracle_binary, null === $oracle_binary ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':profile', $summary['profile'] ?? null, null === ( $summary['profile'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':mode', $summary['mode'] ?? null, null === ( $summary['mode'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':payload_policy', $summary['payloadPolicy'] ?? null, null === ( $summary['payloadPolicy'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );

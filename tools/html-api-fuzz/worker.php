@@ -20,6 +20,14 @@ function html_api_fuzz_worker_fatal_result( array $options, Throwable $e, ?strin
 		'payloadPolicy'  => \HtmlApiFuzz\option_string( $options, 'payload-policy', null ),
 		'inputSource'    => \HtmlApiFuzz\option_string( $options, 'input-file', null ) ? 'input-file' : ( \HtmlApiFuzz\option_string( $options, 'input-base64', null ) ? 'input-base64' : 'generated' ),
 	);
+	try {
+		$fallback['oracle'] = \HtmlApiFuzz\OracleRenderer::from_options( $options )->metadata();
+	} catch ( Throwable $oracle_error ) {
+		$fallback['oracle'] = array(
+			'kind'  => \HtmlApiFuzz\option_string( $options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ),
+			'error' => $oracle_error->getMessage(),
+		);
+	}
 
 	if ( null !== $output_dir ) {
 		$fallback['paths'] = array(
