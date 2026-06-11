@@ -1724,6 +1724,7 @@ for (const [html, context, expected] of [
 	["</html><!--abc-->", "<html>", "<head></head><body></body><!--abc-->"],
 	["", "<html>", "<head></head><body></body>"],
 	["<title>setting head's innerHTML</title>", "<head>", "<title>setting head&apos;s innerHTML</title>"],
+	["</frameset><frame>", "<frameset>", "<frame>"],
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
 	["<option>one", "<select>", "<option>one</option>"],

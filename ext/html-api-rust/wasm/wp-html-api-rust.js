@@ -3077,7 +3077,7 @@ export function createHtmlApi(wasm) {
 				!this.preserve_in_body_ignored_start_tags &&
 				this.template_insertion_modes.length === 0 &&
 				!this.#isInTableInsertionContext() &&
-				IN_BODY_IGNORED_START_TAGS.has(tagName)
+				this.#shouldIgnoreInBodyStartTag(tagName)
 			) {
 				this.#ignoreCurrentToken();
 				return;
@@ -5251,6 +5251,13 @@ export function createHtmlApi(wasm) {
 				this.current_namespace === "html" &&
 				this.template_insertion_modes.length === 0 &&
 				(tagName === "BODY" || tagName === "FRAMESET")
+			);
+		}
+
+		#shouldIgnoreInBodyStartTag(tagName) {
+			return (
+				IN_BODY_IGNORED_START_TAGS.has(tagName) &&
+				!(this.context_namespace === "html" && this.context_node === "FRAMESET" && tagName === "FRAME")
 			);
 		}
 
