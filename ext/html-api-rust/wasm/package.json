@@ -5,6 +5,10 @@
 	"type": "module",
 	"main": "./wp-html-api-rust.js",
 	"types": "./wp-html-api-rust.d.ts",
+	"scripts": {
+		"check": "node --check wp-html-api-rust.js && node --check smoke-test.mjs",
+		"test": "node smoke-test.mjs"
+	},
 	"exports": {
 		".": {
 			"types": "./wp-html-api-rust.d.ts",

@@ -22,7 +22,7 @@ Build the WebAssembly module and JavaScript API wrapper with:
 ```sh
 cd ext/html-api-rust
 ./build-wasm.sh
-node wasm/smoke-test.mjs
+npm --prefix wasm test
 ```
 
 The JavaScript wrapper is an ES module in `wasm/wp-html-api-rust.js`. It exposes
