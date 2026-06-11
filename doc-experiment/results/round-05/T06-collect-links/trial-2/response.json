@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment. It loops through all A tags using next_tag('A'), checks for the href attribute with get_attribute(), and then collects text content by iterating through subsequent tokens with next_token(). It uses get_current_depth() to track when exiting the A element and concatenates text from all #text tokens (which are already decoded by get_modifiable_text()) encountered while still inside the A element.",
+  "confidence": 75
+}

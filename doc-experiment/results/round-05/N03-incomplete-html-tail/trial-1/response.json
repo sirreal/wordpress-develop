@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation leverages WP_HTML_Tag_Processor's token-scanning capability with next_token() to traverse the entire HTML document. After scanning through all tokens, the paused_at_incomplete_token() method (documented in the HTML Tag Processor) returns true if the document ended in the middle of an incomplete token (such as an unfinished tag, unterminated comment, or unclosed SCRIPT element). This handles all the edge cases: a lone '<' at the end is lexically complete so paused_at_incomplete_token() returns false, while '<div class=\"x' with an incomplete attribute returns true.",
+  "confidence": 92
+}

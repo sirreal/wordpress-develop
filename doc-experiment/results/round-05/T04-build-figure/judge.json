@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (WP_HTML_Tag_Processor) for a pure fragment build with no structural insertion. Every method called is documented: next_tag (string 'img' form, html-tag-processor.md:50), set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html. Follows the documented 'Building markup from a template' idiom (html-tag-processor.md:150-174) near-verbatim: empty-value attributes to preserve src/alt order, placeholder text '.' so a #text node exists for set_modifiable_text, the next_token/#text/break loop, and get_updated_html(). Guards set_attribute behind an if(next_tag(...)) check. Relies correctly on documented auto-encoding semantics for both attribute values and modifiable text. Passed 6/6, no _doing_it_wrong. Minor: does not check next_token() return for the text node, but placeholder text guarantees it exists, so the edge case the docs warn about (empty element has no text node) is handled by construction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Functionally and idiomatically identical to trial-1. Uses the array query form next_tag(array('tag_name'=>'img')), which is explicitly documented (html-tag-processor.md:50, :944). Correct processor, all documented methods, faithful application of the template-building pattern (html-tag-processor.md:150-174), correct reliance on documented encoding semantics. Passed 6/6, no _doing_it_wrong, no hallucinated API. Self-reported confidence 72 was lower than warranted given the code is correct."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Effectively the reference solution. next_tag('img') string form, set_attribute for src then alt in template order, next_token loop matching '#text' then set_modifiable_text, get_updated_html(). All methods documented; correct processor choice; faithful to the documented template idiom. Passed 6/6, no _doing_it_wrong. No null/true/'' attribute semantics exercised, but the task did not require them."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials passed all 6 hidden cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed) with zero _doing_it_wrong and zero trigger_error records, and identical actual==expected output. The reason for the clean sweep is that the docs contain a near-exact recipe for this task. The 'Building markup from a template' subsection in html-tag-processor.md (lines 150-174) demonstrates the precise pattern: a literal template '<a href=\\\"\\\" title=\\\"\\\">.</a>' with empty-value attributes (to preserve attribute order) and placeholder text (so a #text node exists), followed by next_tag()/set_attribute()/the next_token()+'#text'+set_modifiable_text() loop, and get_updated_html(). All three subjects mapped this onto the figure/img/figcaption shape. The docs did three things well that drove correctness: (1) the explicit warning at line 154 that ADDED attributes are sorted by name rather than call order, which steered subjects to seed empty src/alt in the template and thus pass the attribute-order requirement; (2) the line-156 note that an empty element has no text node for set_modifiable_text to replace, which led every subject to include the '.' placeholder rather than try to set text on an empty <figcaption>; (3) the encoding examples on set_attribute (html-processor.md:1863-1866: 'Eggs & Milk' -> 'Eggs &amp; Milk') and set_modifiable_text (html-tag-processor.md:1903-1906, plus :1831 stating set_modifiable_text accepts a plain unescaped string and encodes as needed), which gave subjects justified confidence that ampersands, quotes, angle brackets, and raw <script> would be encoded correctly and that HTML inside the caption is treated as text, not parsed. Near-misses in the explanations: trials 2 and 3 reported confidence of 72 and 75 despite producing correct code that exactly mirrors a documented example — a calibration undershoot, suggesting the docs do not make obvious enough that this template pattern is the blessed, complete solution for fragment construction (subjects were unsure whether get_updated_html() on a Tag Processor reliably round-trips the full fragment). None of the explanations mentioned the line-154 attribute-ordering caveat as the reason they seeded empty attributes, so it is unclear whether they reasoned from it or merely copied the example shape.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' subsection (html-tag-processor.md:150-174)",
+      "problem": "The example uses a single tag (<a href=\"\" title=\"\">.</a>). It does not show a multi-element template where one tag's attributes are set and a different, sibling element's text is replaced. Subjects had to generalize the single-tag pattern to figure/img/figcaption; they succeeded here, but the example does not make explicit that the next_token() text loop continues scanning past the tag matched by next_tag() into later siblings.",
+      "suggestion": "Add or extend the example to a small multi-element template (e.g. a wrapper containing an empty-attribute tag plus a separate element that needs text), showing that after next_tag() sets attributes you continue with next_token() to reach the text node of a different element. Reinforces that token walking proceeds through the whole fragment, not just the matched tag's subtree."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() (html-tag-processor.md:2271)",
+      "problem": "The method entry does not state explicitly that calling get_updated_html() returns the entire input document/fragment with queued edits applied (not just the region around the last match), nor that it is the correct terminal step for the template-building workflow. This contributed to low self-reported confidence (72, 75) even when the code was correct.",
+      "suggestion": "State plainly that get_updated_html() returns the full serialized document including all enqueued set_attribute/set_modifiable_text/class changes, and cross-link it from the 'Building markup from a template' section as the standard way to read the finished fragment. A one-line round-trip note (input fragment in, edited fragment out) would calibrate confidence."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text() (html-tag-processor.md:1846-1906)",
+      "problem": "The encoding examples cover '&' but do not explicitly call out that markup-looking text such as <script>...</script> is encoded as literal text (e.g. &lt;script&gt;) rather than being injected as parsed HTML. One of the hidden cases specifically tests this security-relevant behavior; the docs imply it via 'accepts a plain, unescaped string and encodes it as needed' but never show angle brackets or a tag-like string.",
+      "suggestion": "Add an example showing a tag-like input ('<em>hi</em>' or '<script>') being encoded to its entity form, with one sentence noting that set_modifiable_text never interprets its argument as HTML — it always produces text. This makes the XSS-safety guarantee explicit instead of inferred."
+    }
+  ]
+}

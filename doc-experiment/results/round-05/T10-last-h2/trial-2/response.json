@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through the HTML and find all H2 tags. It maintains a bookmark to track the last H2 encountered by repeatedly setting a bookmark named \"last_h2\" at each H2 tag found. After the loop completes, if an H2 was found, it seeks back to that last H2 bookmark and adds the \"final-section\" class using the add_class() method. This approach handles large documents efficiently with a single linear scan, and automatically excludes H2 tags inside HTML comments because the Tag Processor's next_tag() method only matches real tags in the document tree.",
+  "confidence": 92
+}

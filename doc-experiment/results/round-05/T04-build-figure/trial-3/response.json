@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to build a figure fragment. It starts with a template containing the required structure with placeholder values, then uses set_attribute() to set the src and alt attributes on the img tag with proper encoding, and set_modifiable_text() to replace the placeholder text in figcaption with the caption value. The HTML API handles all necessary encoding to ensure special characters in the inputs are properly escaped so the browser renders the exact values provided.",
+  "confidence": 75
+}

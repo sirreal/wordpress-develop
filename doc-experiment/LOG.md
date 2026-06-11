@@ -2,6 +2,23 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 5 — Haiku, template section lands; tree-awareness boundary surfaces
+
+**Train 94.77 (+0.6).** T04 +49.2 → 98.6: all trials used the new
+'Building markup from a template' section; attributes concept 74.7 →
+99.3. Offsetting single-trial collapses: T06 −26.4 (one trial tried
+tree-aware work in the Tag Processor — whose docs never say it lacks
+depth/breadcrumbs) and T08 −15.1 (breadcrumbs-on-closer confusion);
+plus one T03 trial copied the next_token() example but guessed '>'
+since the >= warning lived only in get_current_depth().
+
+Round-6 hypotheses (committed): processor-chooser sections in both
+class docblocks with the no-tree-awareness boundary stated; a real
+description for get_updated_html() (was a verbatim copy of
+__toString's); the >= warning inline in the next_token() example.
+Backlog: breadcrumbs read on a closer token (last crumb is the parent,
+not the closed element); empty elements still produce closers.
+
 ## Round 4 — Haiku, serialization boundary + modifiable-text fixes
 
 **Train 94.18 (+3.5 vs round-3 train).** T07 +35.0 → 100 (the

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to scan through the HTML. For each A tag found with an href attribute, it uses next_token() to walk through all tokens inside that element, accumulating text from all text nodes (which already have character references decoded per the documentation). The depth tracking ensures we only collect text from within the current A element. The href attribute value is already decoded when retrieved via get_attribute().",
+  "confidence": 75
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment in BODY context. It iterates through all tokens using next_token(), checking each one's type. For text nodes (#text), it retrieves the decoded text via get_modifiable_text() and tests for case-sensitive substring matches with the keyword. Matching text nodes get wrapped in <mark> tags by concatenating the opening tag, the serialized token, and the closing tag. All tokens are serialized using serialize_token(), which produces normalized output per the HTML5 specification. Non-text tokens pass through unchanged. The processor's built-in serialization handles tag closing, attribute normalization, and character encoding.",
+  "confidence": 72
+}

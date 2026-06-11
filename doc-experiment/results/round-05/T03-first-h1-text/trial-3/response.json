@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element. After matching the H1 tag, it records the current depth and iterates through all subsequent tokens. For each text node ('#text' token type) while remaining inside the H1 element, it concatenates the modifiable text. The loop automatically handles nested elements by continuing while depth >= H1 depth, and exits at the H1's closing tag. Character references are automatically decoded by get_modifiable_text(). Returns null if no H1 is found, or the accumulated text (which may be an empty string if H1 contains no text) otherwise.",
+  "confidence": 92
+}

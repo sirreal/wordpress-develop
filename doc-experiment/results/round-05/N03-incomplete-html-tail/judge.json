@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to reference. Tag Processor (correct, sufficient choice). Drains next_token() loop, returns paused_at_incomplete_token(). Both methods documented (tag-processor.md lines 954, 1007). No hallucinated/undocumented API, no _doing_it_wrong. Idiomatic token-walk + documented incomplete-token check. Explanation correctly reasons about edge cases (lone '<' lexically complete vs cut attribute). 9/9 pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to reference plus a docblock. Same correct pattern: WP_HTML_Tag_Processor, drain next_token(), return paused_at_incomplete_token(). All API documented. No misuse. Explanation accurately distinguishes lexically-complete unclosed elements from incomplete tokens. 9/9 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to reference plus docblock. Correct processor, idiomatic drain-then-check. All methods documented. No undocumented usage, no _doing_it_wrong. Explanation correct though slightly conflates 'lone <' with 'structurally unclosed' edge cases. Lower self-confidence (85) but functionally perfect. 9/9 pass."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 9 hidden cases with no _doing_it_wrong or trigger_error records. The task maps almost 1:1 onto a single documented method (paused_at_incomplete_token), and all three subjects independently produced the exact reference implementation: construct WP_HTML_Tag_Processor, exhaust the document with `while ($processor->next_token());`, then return paused_at_incomplete_token().\n\nWhat the docs did well: (1) The method-summary table (tag-processor.md line 354) describes paused_at_incomplete_token in plain English ('Whether the processor paused because the input HTML document ended in the middle of a syntax element, such as in the middle of a tag'), which directly names the task. (2) The next_token() description (lines 962-965) explains the pause-and-seek-back behavior on truncated input ('If it starts parsing a token and reaches the end of the document then it will seek to the start of the last token and pause, returning false'), which justifies why draining the loop then checking the flag works. (3) The class-overview bullet at line 933 and the changelog at line 343 ('Pauses processor when input ends in an incomplete syntax token') reinforce the concept. (4) The behavioral edge cases in the task (lone '<' is text, unclosed-but-complete <div> elements) are handled automatically by the engine, so subjects didn't need to special-case them — and the docs' framing of 'incomplete token' vs structural completeness let the subjects explain them correctly.\n\nNear-miss in explanations: trial-3's explanation says a 'lone <' returns false 'since those represent complete tokens', loosely lumping the trailing-'<'-is-text rule together with the structurally-unclosed-element rule; it's slightly imprecise but the code is correct and the distinction didn't matter for any case. All three subjects had to infer that paused_at_incomplete_token must be called after fully draining the document — the documented example for that method (lines 1017-1021) only shows a single next_tag() call on an attribute cut short, not a complete token-drain loop, so the 'scan to end, then check the flag' idiom was reconstructed rather than copied. They reconstructed it correctly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (tag-processor.md, ~line 1007)",
+      "problem": "The only example pairs the method with a single next_tag() call on a cut-off attribute. It does not show the general 'scan the whole document, then check the flag' idiom, which is the actual pattern needed to detect truncation anywhere in a document (not just inside the first tag). Subjects had to infer the drain loop; they succeeded, but a less capable model could call the method prematurely (before reaching EOF) and get a meaningless result.",
+      "suggestion": "Add a second example showing the canonical drain-then-check pattern: `while ( $processor->next_token() ) { continue; } if ( $processor->paused_at_incomplete_token() ) { ... }`, with a one-line note that the flag is only meaningful once next_token()/next_tag() has returned false at the end of input."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (tag-processor.md, ~line 1013)",
+      "problem": "The description lists 'in the middle of a tag' as the example trigger but does not enumerate the other token kinds that count as incomplete (unterminated comment, unclosed special/SCRIPT element running to EOF), nor does it state the contrasting non-triggers (a trailing lone '<' is text; a structurally unclosed element like '<div>text' is lexically complete). These are exactly the boundary cases the concept hinges on.",
+      "suggestion": "Expand the description to: (a) list the token types whose truncation pauses the processor — incomplete tag, unterminated comment/bogus comment, and special elements (SCRIPT/STYLE/TITLE/TEXTAREA) with no closing tag before EOF, cross-referencing the 'special element' note at line 101; and (b) explicitly contrast with cases that are NOT incomplete: a bare trailing '<' (treated as text) and an open element with no closing tag (structurally unclosed but lexically whole)."
+    }
+  ]
+}

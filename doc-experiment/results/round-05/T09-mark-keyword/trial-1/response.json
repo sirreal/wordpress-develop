@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each text node (#text), it gets the decoded text via get_modifiable_text() and checks if it contains the keyword using case-sensitive substring matching. If the keyword is found, the serialized token is wrapped in a <mark> element. All other tokens (tags, comments, etc.) are passed through unchanged. The serialize_token() method produces normalized HTML output, and all tokens together create the final normalized result with mark wrappers added around matching text nodes.",
+  "confidence": 42
+}

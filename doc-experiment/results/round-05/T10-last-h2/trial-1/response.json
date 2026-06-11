@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan linearly through the HTML document finding H2 tags. For each H2 found, it creates a unique bookmark and releases the previous one. Once all H2 tags have been scanned, it seeks to the last bookmarked H2, adds the \"final-section\" class using add_class(), and returns the modified HTML via get_updated_html(). This approach handles documents of any size efficiently without building a full DOM tree, and correctly ignores H2 tags inside HTML comments as those won't match the tag query.",
+  "confidence": 75
+}
