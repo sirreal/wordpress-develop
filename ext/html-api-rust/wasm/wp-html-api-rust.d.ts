@@ -20,17 +20,18 @@ export interface ScanNextTagResult {
 }
 
 export interface NextTagBaseQuery {
-	tag_name?: string | null;
 	class_name?: string | null;
 	tag_closers?: "visit" | "skip";
 	visit_closers?: boolean;
 }
 
 export interface TagNextTagQuery extends NextTagBaseQuery {
+	tag_name?: string | null;
 	match_offset?: number | null;
 }
 
 export interface ProcessorNextTagQuery extends NextTagBaseQuery {
+	tag_name?: string | number | boolean | null;
 	match_offset?: number | string | boolean | null;
 	breadcrumbs?: string[];
 }
