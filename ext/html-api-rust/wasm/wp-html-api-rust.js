@@ -3045,6 +3045,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#shouldIgnoreTableContextTableStartTag(tagName)) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
 			if (
 				allowVirtualPreclosures &&
 				(
@@ -5262,6 +5267,16 @@ export function createHtmlApi(wasm) {
 			return (
 				IN_BODY_IGNORED_START_TAGS.has(tagName) &&
 				!(this.context_namespace === "html" && this.context_node === "FRAMESET" && tagName === "FRAME")
+			);
+		}
+
+		#shouldIgnoreTableContextTableStartTag(tagName) {
+			return (
+				!this.is_full_parser &&
+				tagName === "TABLE" &&
+				this.context_namespace === "html" &&
+				this.context_node === "TABLE" &&
+				this.#currentHtmlElementIs("TABLE")
 			);
 		}
 
