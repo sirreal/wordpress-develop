@@ -1605,6 +1605,9 @@ for (const [html, context, expected] of [
 	["<option>one", "<select>", "<option>one</option>"],
 	["<rect />", "<svg>", "<rect />"],
 	["<circle />", "<svg><g>", "<circle />"],
+	["<nobr>X", "<svg><path>", "<nobr>X</nobr>"],
+	["<g></path>X", "<svg><path>", "<g>X</g>"],
+	["</path>X", "<svg><path>", "X"],
 	["<mi>x", "<math>", "<mi>x</mi>"],
 ]) {
 	const contextProcessor = WP_HTML_Processor.create_fragment(html, context);

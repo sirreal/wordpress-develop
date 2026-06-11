@@ -2617,6 +2617,9 @@ export function createHtmlApi(wasm) {
 				case "#cdata-section":
 					return `<![CDATA[${this.get_modifiable_text() ?? ""}]]>`;
 				case "#tag":
+					if (this.is_virtual() && this.current_virtual.skipSerialization) {
+						return "";
+					}
 					return this.#serializeCurrentTag();
 				default:
 					return "";
@@ -2719,6 +2722,13 @@ export function createHtmlApi(wasm) {
 				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
+				}
+
+				if (!this.is_full_parser && existingIndex !== -1 && existingIndex < this.base_open_element_count) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
 				}
 
 				if (
@@ -3025,6 +3035,7 @@ export function createHtmlApi(wasm) {
 						operation: "pop",
 						tagName,
 						namespaceName: this.current_token_namespace,
+						skipSerialization: false,
 					});
 				}
 			}
@@ -3058,6 +3069,9 @@ export function createHtmlApi(wasm) {
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 					if (token.namespaceName === "html" && TABLE_CELL_ELEMENTS.has(token.tagName)) {
 						this.#clearActiveFormattingElementsUpToLastMarker();
+					}
+					if (token.skipSerialization && existingIndex < this.base_open_element_count) {
+						this.base_open_element_count = existingIndex;
 					}
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 				}
@@ -4647,6 +4661,7 @@ export function createHtmlApi(wasm) {
 					operation: "pop",
 					tagName: this.open_elements[i],
 					namespaceName: this.open_element_namespaces[i],
+					skipSerialization: i < this.base_open_element_count,
 				});
 			}
 		}
