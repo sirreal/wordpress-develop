@@ -2196,7 +2196,71 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (isCloser && tagName === "BODY") {
+							this.full_parser_insertion_mode = "after_body";
+							return false;
+						}
+
+						if (isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "after_body";
+							continue;
+						}
+
 						return false;
+
+					case "after_body":
+						if (
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							this.#bailUnsupported("Content outside of BODY is unsupported.");
+							return true;
+						}
+
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "in_body";
+							continue;
+						}
+
+						if (isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "after_after_body";
+							return false;
+						}
+
+						if (isWhitespaceText) {
+							return false;
+						}
+
+						this.full_parser_insertion_mode = "in_body";
+						continue;
+
+					case "after_after_body":
+						if (
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							this.#bailUnsupported("Content outside of HTML is unsupported.");
+							return true;
+						}
+
+						if (tokenType === "#doctype" || (tokenType === "#tag" && !isCloser && tagName === "HTML")) {
+							this.full_parser_insertion_mode = "in_body";
+							continue;
+						}
+
+						if (isWhitespaceText) {
+							return false;
+						}
+
+						this.full_parser_insertion_mode = "in_body";
+						continue;
 
 					default:
 						return false;

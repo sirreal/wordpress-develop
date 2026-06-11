@@ -407,6 +407,20 @@ assert.deepEqual(fullParserExplicitShellTokens, [
 ]);
 fullParserExplicitShell.destroy();
 
+const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");
+while (fullParserCommentAfterBody.next_token()) {
+}
+assert.equal(fullParserCommentAfterBody.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(fullParserCommentAfterBody.get_unsupported_exception().message, "Content outside of BODY is unsupported.");
+fullParserCommentAfterBody.destroy();
+
+const fullParserCommentAfterHtml = WP_HTML_Processor.create_full_parser("<html><body></body></html><!--outside-->");
+while (fullParserCommentAfterHtml.next_token()) {
+}
+assert.equal(fullParserCommentAfterHtml.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(fullParserCommentAfterHtml.get_unsupported_exception().message, "Content outside of HTML is unsupported.");
+fullParserCommentAfterHtml.destroy();
+
 const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
 assert.equal(noQuirksClasses.next_tag("span"), true);
 assert.equal(noQuirksClasses.compat_mode, WP_HTML_Tag_Processor.NO_QUIRKS_MODE);
