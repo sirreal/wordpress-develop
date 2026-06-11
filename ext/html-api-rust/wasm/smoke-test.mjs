@@ -165,6 +165,11 @@ assert.equal(nonText.get_modifiable_text(), "");
 assert.equal(nonText.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
 assert.equal(nonText.is_tag_closer(), true);
 assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
+assert.equal(nonText.has_class("active"), false);
+assert.deepEqual(nonText.class_list(), []);
+assert.equal(nonText.set_attribute("id", "x"), false);
+assert.equal(nonText.add_class("active"), false);
+assert.equal(nonText.get_updated_html(), "<div></div>");
 nonText.destroy();
 
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");

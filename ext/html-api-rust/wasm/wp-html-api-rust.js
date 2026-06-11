@@ -979,6 +979,10 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			if (this.is_tag_closer()) {
+				return false;
+			}
+
 			return runtime.withEncoded(className, ({ ptr, len }) => {
 				const result = wasm.wp_html_api_rust_tag_processor_has_class(this.pointer, ptr, len, this.#isQuirksMode());
 				return result === 0 ? null : result === 2;
@@ -989,6 +993,10 @@ export function createHtmlApi(wasm) {
 			this.#ensureLive();
 			if (this.parser_state !== STATE_MATCHED_TAG) {
 				return null;
+			}
+
+			if (this.is_tag_closer()) {
+				return [];
 			}
 
 			return runtime.withOutSlice((out) => {
