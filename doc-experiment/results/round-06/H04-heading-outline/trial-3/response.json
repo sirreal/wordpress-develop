@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. It identifies heading tags (H1-H6) by checking the token type and tag name, extracts the level from the tag name, then walks through all child tokens collecting text nodes. Text content from get_modifiable_text() is already character-reference-decoded per the documentation, so concatenating these nodes produces the final decoded text. The depth tracking ensures we only collect text inside the current heading element.",
+  "confidence": 75
+}

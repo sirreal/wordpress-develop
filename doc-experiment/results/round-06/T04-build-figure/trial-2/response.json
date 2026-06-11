@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely build the figure element by filling in a template. It creates a template with the correct structure (figure > img with src and alt in order > figcaption with placeholder text), then uses set_attribute() to populate the src and alt attributes on the img tag with automatic HTML encoding, and set_modifiable_text() to replace the figcaption placeholder with the caption text, also with automatic encoding. Finally, get_updated_html() returns the processed HTML with all inputs properly escaped.",
+  "confidence": 92
+}

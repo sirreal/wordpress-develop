@@ -2,6 +2,25 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 6 — Haiku, checkpoint: held-out generalization confirmed
+
+**All-19 95.92 / train 97.84 (+3.1) / held-out 88.69** (vs 87.38 at the
+round-2 baseline and 75.22 at round 3 — held-out now ABOVE baseline on
+purely train-driven edits). T06 +24.5 and T08 +20.0 (chooser +
+tree-awareness boundary landed); T04 holds at 98.7; H04 and N02 perfect.
+N05 remains the only weak task (60.6): two trials still walked TITLE
+looking for #text children. Its root cause is covered by a TRAIN gap
+(T08 flagged that the HTML Processor's get_modifiable_text() override
+documents neither decoding nor where RCDATA text lives) — so the fix is
+train-driven, as the protocol requires.
+
+Round-7 hypotheses (committed): RCDATA/raw-text contents live on the
+element token, with a verified full-parser TITLE example, plus the
+decoding statement, on the HTML Processor override; the >= rule beside
+the operator with the nested-closer/sibling-text note inline; the
+drain-all-tokens idiom on paused_at_incomplete_token(); add_class()
+return = enqueued-not-applied.
+
 ## Round 5 — Haiku, template section lands; tree-awareness boundary surfaces
 
 **Train 94.77 (+0.6).** T04 +49.2 → 98.6: all trials used the new

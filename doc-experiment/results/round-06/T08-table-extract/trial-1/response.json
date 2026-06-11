@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Processor::create_fragment() to parse HTML with full structure awareness. Finds the first TABLE element, then walks all tokens. Tracks rows using TR tag openers/closers. For each TD/TH cell opener, collects text by iterating tokens while depth >= cell_depth, accumulating all #text tokens found (which contain already-decoded character references per get_modifiable_text()). This approach implicitly handles omitted closing tags, tbody/thead elements, and nested markup since the HTML Processor normalizes the structure. Text from any depth within the cell is concatenated as specified.",
+  "confidence": 48
+}

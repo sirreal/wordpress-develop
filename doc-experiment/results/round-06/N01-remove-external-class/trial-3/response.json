@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to iterate through all A tags in the HTML document. For each A tag found via next_tag('A'), it uses class_list() to iterate through the actual class names and checks for an exact case-sensitive match of 'external'. If found, it calls remove_class('external') to remove that class, which handles the removal properly (including removing the entire class attribute if it's the only class). Finally, get_updated_html() returns the modified HTML with all queued changes applied.",
+  "confidence": 85
+}

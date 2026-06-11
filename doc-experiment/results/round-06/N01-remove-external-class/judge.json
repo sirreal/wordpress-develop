@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Optimal solution, matches the reference idiom. Chose WP_HTML_Tag_Processor (correct). Token-walking with while(next_tag(array('tag_name'=>'a'))) + remove_class('external') + get_updated_html(). Every method is documented in html-tag-processor.md: next_tag (array form at lines 58/952), remove_class (line 2237), get_updated_html (line 2279). No _doing_it_wrong records, all 7 cases pass. Relies correctly on documented remove_class semantics: no-op when class absent, whole-class-attribute removal with whitespace preservation (line 328). The only nit: lowercase 'a' in the query is fine since next_tag tag matching is ASCII case-insensitive (line 937), but the reference and examples use uppercase tag names ('A'/'IMG') as the convention. Not docked materially."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1: WP_HTML_Tag_Processor + while(next_tag(array('tag_name'=>'a'))) + remove_class('external') + get_updated_html(). All methods documented, no hallucinations, no _doing_it_wrong, 7/7 pass. Explanation explicitly and correctly states remove_class is a no-op when the class is absent and that whole-attribute removal preserves surrounding whitespace, both documented behaviors. Highest self-reported confidence (95) and it was warranted."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Functionally correct, 7/7 pass, no hallucinations. Used next_tag('A') string form (matches reference convention) + class_list() (documented, line 1039) to do a case-sensitive exact-match pre-check before calling remove_class('external'). All methods documented. Docked for non-idiomatic redundancy: remove_class is already a no-op when the class is absent and is itself case-sensitive, so the class_list guard loop is unnecessary. The defensive pattern reveals uncertainty about whether remove_class matches case-sensitively (the docs never state this, and the adjacent has_class is documented as ASCII case-insensitive, which plausibly seeded the doubt). Lower confidence (85) reflects that uncertainty. Slightly less idiomatic than the reference's plain remove_class call, but a defensible, correct choice."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. All three trials passed all 7 cases, including the discriminating ones: only-class-removes-attribute (whole class attribute removed, leftover space preserved), case-sensitive-not-removed (EXTERNAL left intact), and non-link-untouched (div skipped via tag_name filter). The docs supported this well: next_tag's query table (lines 55-61) and parse_query docblock (line 952) clearly document the array('tag_name'=>..., 'class_name'=>...) forms and string shorthand, so subjects correctly scoped edits to A tags; the 'minimize the difference' paragraph (line 328) explicitly promises whitespace/ordering preservation and notes attribute updates, which underwrites the only-class-removes-attribute and middle-of-list expectations; and get_updated_html (line 2279) documents that untouched bytes are returned verbatim, supporting no-class-untouched and non-link-untouched.\\n\\nNear-miss / latent risk that did NOT bite but easily could: the case-sensitive-not-removed case. The task demands case-SENSITIVE class matching, and the actual remove_class('external') is case-sensitive (probe confirmed it leaves class=\\\"EXTERNAL\\\" untouched). But the remove_class docblock (lines 2237-2257) says nothing about case at all, while the sibling has_class (line 1074) is explicitly documented as ASCII case-INSENSITIVE, and next_tag's class_name matching is also ASCII case-insensitive. A subject reasoning from the documented methods would reasonably fear remove_class is case-insensitive too and would then WRONGLY strip EXTERNAL — or, in trial-3's case, defensively route around remove_class with a class_list exact-match guard. Trials 1 and 2 trusted remove_class's (undocumented) case-sensitivity and happened to be right; trial 3's hedging is direct evidence the docs left this ambiguous. The pass here is partly luck against a documentation silence, not a doc strength.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::remove_class() (and add_class/has_class for contrast)",
+      "problem": "The remove_class docblock never states whether class-name matching is case-sensitive. Its actual behavior is case-SENSITIVE (remove_class('external') leaves class=\"EXTERNAL\" untouched), but the adjacent has_class is documented as ASCII case-INSENSITIVE and next_tag's class_name query is also case-insensitive. This inconsistency between sibling methods, left unstated for remove_class/add_class, forces subjects to guess; trial-3 added a defensive class_list pre-check specifically because of this uncertainty.",
+      "suggestion": "State the matching case-sensitivity explicitly in the add_class and remove_class docblocks, e.g. 'Class names are matched and stored exactly as given; this comparison is case-sensitive, unlike has_class() and the class_name query of next_tag() which are ASCII case-insensitive.' A one-line note that calls out the contrast with the case-insensitive siblings would remove the trap entirely."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_class()",
+      "problem": "The docblock does not document the no-op behavior (calling remove_class for a class the tag does not have makes no change) nor the whole-attribute-removal behavior (removing a tag's only class removes the entire class attribute, leaving the surrounding whitespace). These are the exact semantics the task's only-class-removes-attribute case depends on. The information exists only indirectly, in the general 'minimize the difference' paragraph (line 328) which talks about add_class/remove_class preserving whitespace but does not spell out the empty-attribute-removal outcome.",
+      "suggestion": "Add to the remove_class docblock: 'Removing a class the tag does not have is a no-op. If the removed class was the tag's only class, the entire class attribute is removed; any whitespace that surrounded the attribute is left in place.' A short before/after example (class=\"external\" -> attribute removed, leftover space) would make the edge case unambiguous."
+    },
+    {
+      "location": "next_tag() query examples / class-modification overview section",
+      "problem": "All canonical examples use plain remove_class()/add_class() without showing the common 'walk every matching tag and edit each' loop, leaving subjects to infer the while(next_tag(...)) { edit } token-walking pattern. They inferred it correctly here, but a basic conditional-class-removal recipe is absent from the modification docs.",
+      "suggestion": "Add one short end-to-end recipe in the class-modification section showing the idiomatic loop: while ( $p->next_tag( array( 'tag_name' => 'A' ) ) ) { $p->remove_class( 'promo' ); } echo $p->get_updated_html(); reinforcing that remove_class is a safe no-op so no has_class/class_list guard is needed before calling it."
+    }
+  ]
+}

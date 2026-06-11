@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to parse the HTML document. It first searches for a TITLE tag using next_tag('title'), returning null if not found. If found, it then uses next_token() to iterate through tokens within the title element, collecting all #text token content via get_modifiable_text() (which automatically decodes character references like &mdash; to \u2014). The loop terminates when the closing TITLE tag is encountered. This approach properly handles the TITLE element's special nature where character references are decoded but the contents are plaintext.",
+  "confidence": 72
+}

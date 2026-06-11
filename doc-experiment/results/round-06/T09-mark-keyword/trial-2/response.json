@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates an HTML processor using WP_HTML_Processor::create_fragment() to parse the HTML fragment. It then walks through every token using next_token(), checking if each token is a text node ('#text'). For text nodes, it retrieves the modifiable text using get_modifiable_text() and performs a case-sensitive substring search for the keyword. If found, the entire text node is wrapped in a <mark> element by prepending and appending the mark tags around the serialized token. All tokens (text and non-text) are serialized using serialize_token() which produces normalized HTML output as required.",
+  "confidence": 72
+}

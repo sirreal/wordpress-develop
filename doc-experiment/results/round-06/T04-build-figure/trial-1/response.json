@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function builds an HTML fragment by creating a template with the required structure and using WP_HTML_Tag_Processor to fill in the values. It sets the src and alt attributes on the img tag using set_attribute() which handles all necessary HTML encoding, and sets the caption text using set_modifiable_text() which also handles encoding. The template approach ensures attributes appear in the exact required order and the placeholder text in figcaption allows for proper text node replacement.",
+  "confidence": 75
+}

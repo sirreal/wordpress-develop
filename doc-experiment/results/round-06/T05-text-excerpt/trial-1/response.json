@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment parser to parse the input HTML, then iterates through all tokens using next_token(). For each token, it checks if the token type is '#text' (text nodes). Text node contents are automatically decoded by the HTML API. The function accumulates text while counting Unicode codepoints using mb_strlen with UTF-8 encoding, and truncates the result to exactly max_codepoints by using mb_substr to avoid cutting multi-byte characters. Contents of SCRIPT and STYLE tags are not text nodes and are naturally excluded by the parser.",
+  "confidence": 82
+}

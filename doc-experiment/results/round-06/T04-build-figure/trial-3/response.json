@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely construct the figure fragment. It starts with a template HTML string containing the exact structure required, with placeholder src and alt attributes in the correct order (src first, then alt) to ensure they appear in that order in the output. After creating the processor, it finds the IMG tag and uses set_attribute() to set src and alt from the parameters, which automatically handles all necessary HTML escaping. Then it walks through tokens to find the text node inside the figcaption and uses set_modifiable_text() to set the caption text with proper escaping. Finally, it returns the processed HTML via get_updated_html().",
+  "confidence": 92
+}

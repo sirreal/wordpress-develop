@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and identify IMG elements within FIGURE ancestors by checking breadcrumbs. For each IMG tag found, we verify FIGURE is in the breadcrumb path (indicating nesting at any depth), then retrieve the src attribute which is already decoded per the documentation. We filter out IMG tags without src attributes, with empty src values, or with boolean attributes.",
+  "confidence": 82
+}

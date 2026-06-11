@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct HTML Processor. All methods documented. Depth walk breaks on depth below opener, accumulates text. 8/8 pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct, documented methods, array-form next_tag. Breaks below opener depth. 8/8 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 78,
+      "hallucinated_methods": [],
+      "notes": "Loop uses strict greater-than not greater-or-equal vs opener depth; nested closer shares container depth so loop drops trailing text. Fails simple. 7/8."
+    }
+  ],
+  "doc_gaps": [
+    {
+      "location": "get_current_depth and next_token examples",
+      "problem": "Greater-or-equal rule is in prose not beside the operator, easy to flip to greater-than.",
+      "suggestion": "Caution beside the operator that it must be greater-or-equal; show the break-below-depth variant."
+    },
+    {
+      "location": "get_current_depth",
+      "problem": "No example shows a nested closer and trailing sibling text at the same depth.",
+      "suggestion": "Add a depth table for an anchor with a nested em then trailing text."
+    },
+    {
+      "location": "get_modifiable_text",
+      "problem": "Split-text-token caveat appears only under next_token.",
+      "suggestion": "Note at get_modifiable_text that text may span several consecutive tokens; concatenate."
+    }
+  ],
+  "failure_analysis": "Only trial-3 simple failed (got second, expected second link). Trial-3 used strict greater-than as depth guard. A nested closer reports depth one less than its opener, equal to container interior depth where trailing text lives (probe: anchor opener 4, em closer 4, trailing text 5); greater-than halts at the em closer and drops trailing text. Correct guard is greater-or-equal, used by reference and trials 1-2. Documented under get_current_depth, next_token, is_tag_closer, so it is a transcription error not a doc gap. Trial-3 other cases pass since none have text after a nested closer. Trials 1-2 also accumulate the split text tokens correctly."
+}
