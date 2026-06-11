@@ -423,6 +423,15 @@ function prefix_family_sweep_cases( array $base_names ): array {
 }
 
 /**
+ * @return array<int, array{shape: string, payload: string, prefix?: string, name?: string}>
+ */
+function token_map_sweep_cases(): array {
+	$method = new \ReflectionMethod( Generator::class, 'token_map_sweep_cases' );
+	$method->setAccessible( true );
+	return $method->invoke( null );
+}
+
+/**
  * @return string[]
  */
 function numeric_boundary_sweep_cases(): array {
@@ -1071,6 +1080,125 @@ check( 'prefix-family uses one strategy label', array( 'prefix-family-sweep' ) =
 check( 'prefix-family payloads are oracle-safe', 0 === $prefix_family_unsafe, (string) $prefix_family_unsafe );
 check( 'prefix-family covers expected ambiguous followers', array() === array_diff( prefix_family_sweep_followers(), array_keys( $prefix_family_followers ) ), implode( ',', array_keys( $prefix_family_followers ) ) );
 
+$token_map_generator = new Generator( new Prng( 'token-map-sweep' ), 4096, $names );
+$token_map_cases = token_map_sweep_cases();
+$token_map_structure = Bootstrap::named_reference_structure();
+$token_map_minimal_large_names = array_values(
+	array_filter(
+		$token_map_structure['large_names'],
+		static fn( string $name ): bool => strlen( $name ) === $token_map_structure['key_length'] + 1
+	)
+);
+$token_map_large_name_set = array_fill_keys( $token_map_structure['large_names'], true );
+$token_map_small_name_set = array_fill_keys( $token_map_structure['small_names'], true );
+$token_map_mismatch = '';
+$token_map_contexts = array();
+$token_map_strategies = array();
+$token_map_shapes = array();
+$token_map_prefixes = array();
+$token_map_small_exact_names = array();
+$token_map_small_extended_names = array();
+$token_map_large_exact_names = array();
+$token_map_large_extended_names = array();
+$token_map_divergence_errors = array();
+$token_map_unsafe = 0;
+$token_map_fault_case_index = null;
+for ( $i = 0; $i < count( $token_map_cases ); $i++ ) {
+	$case      = $token_map_cases[ $i ];
+	$generated = $token_map_generator->generate_token_map_sweep( $i );
+	$shape     = $case['shape'];
+
+	$token_map_contexts[ $generated['context'] ] = true;
+	$token_map_strategies[ $generated['strategy'] ] = true;
+	$token_map_shapes[ $shape ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$token_map_unsafe;
+	}
+	if ( '' === $token_map_mismatch && $case['payload'] !== $generated['payload'] ) {
+		$token_map_mismatch = "case {$i}: expected " . bin2hex( $case['payload'] ) . ' got ' . bin2hex( $generated['payload'] );
+	}
+
+	if ( 'large-prefix-divergent' === $shape ) {
+		$prefix = $case['prefix'] ?? '';
+		$token_map_prefixes[ $prefix ] = true;
+		$payload_name = substr( $case['payload'], 1 );
+		$rest = substr( $payload_name, strlen( $prefix ) );
+		$first_rest = '' === $rest ? '' : $rest[0];
+		$used_first_rest_chars = array();
+		foreach ( $token_map_structure['large_names_by_prefix'][ $prefix ] ?? array() as $name ) {
+			$name_rest = substr( $name, strlen( $prefix ) );
+			if ( '' !== $name_rest ) {
+				$used_first_rest_chars[ $name_rest[0] ] = true;
+			}
+		}
+
+		if (
+			strlen( $prefix ) !== $token_map_structure['key_length'] ||
+			! str_starts_with( $case['payload'], '&' . $prefix ) ||
+			! str_ends_with( $case['payload'], ';' ) ||
+			isset( $token_map_large_name_set[ $payload_name ] ) ||
+			isset( $token_map_small_name_set[ $payload_name ] ) ||
+			'' === $first_rest ||
+			isset( $used_first_rest_chars[ $first_rest ] )
+		) {
+			$token_map_divergence_errors[] = "{$i}:" . bin2hex( $case['payload'] );
+		}
+	} elseif ( 'small-boundary-exact' === $shape ) {
+		$token_map_small_exact_names[ $case['name'] ?? '' ] = true;
+	} elseif ( 'small-boundary-extended' === $shape ) {
+		$token_map_small_extended_names[ $case['name'] ?? '' ] = true;
+		if ( null === $token_map_fault_case_index ) {
+			$token_map_fault_case_index = $i;
+		}
+	} elseif ( 'large-boundary-exact' === $shape ) {
+		$token_map_large_exact_names[ $case['name'] ?? '' ] = true;
+	} elseif ( 'large-boundary-extended' === $shape ) {
+		$token_map_large_extended_names[ $case['name'] ?? '' ] = true;
+	}
+}
+$expected_token_map_shapes = array(
+	'large-prefix-divergent',
+	'small-boundary-exact',
+	'small-boundary-extended',
+	'large-boundary-exact',
+	'large-boundary-extended',
+);
+check(
+	'token-map structure exposes two-byte large-word prefixes',
+	2 === $token_map_structure['key_length'] &&
+		count( $token_map_structure['group_prefixes'] ) > 0 &&
+		count( $token_map_structure['group_prefixes'] ) === count( $token_map_structure['large_names_by_prefix'] ),
+	json_encode(
+		array(
+			'key_length' => $token_map_structure['key_length'],
+			'prefixes'   => count( $token_map_structure['group_prefixes'] ),
+		)
+	)
+);
+check(
+	'token-map period covers prefix divergences and boundary names',
+	$token_map_generator->token_map_period() === count( $token_map_cases ) &&
+		array() === array_diff( $token_map_structure['group_prefixes'], array_keys( $token_map_prefixes ) ) &&
+		count( $token_map_prefixes ) === count( $token_map_structure['group_prefixes'] ) &&
+		array() === array_diff( $token_map_structure['small_names'], array_keys( $token_map_small_exact_names ) ) &&
+		array() === array_diff( $token_map_structure['small_names'], array_keys( $token_map_small_extended_names ) ) &&
+		array() === array_diff( $token_map_minimal_large_names, array_keys( $token_map_large_exact_names ) ) &&
+		array() === array_diff( $token_map_minimal_large_names, array_keys( $token_map_large_extended_names ) ),
+	(string) count( $token_map_cases )
+);
+check( 'token-map generator maps cases deterministically', '' === $token_map_mismatch, $token_map_mismatch );
+check( 'token-map cases run both contexts', array( 'both' ) === array_keys( $token_map_contexts ), implode( ',', array_keys( $token_map_contexts ) ) );
+check( 'token-map uses one strategy label', array( 'token-map-structure-sweep' ) === array_keys( $token_map_strategies ), implode( ',', array_keys( $token_map_strategies ) ) );
+check( 'token-map payloads are oracle-safe', 0 === $token_map_unsafe, (string) $token_map_unsafe );
+check(
+	'token-map emits expected structure-aware shapes',
+	array() === array_diff( $expected_token_map_shapes, array_keys( $token_map_shapes ) ) &&
+		array() === array_diff( array_keys( $token_map_shapes ), $expected_token_map_shapes ),
+	implode( ',', array_keys( $token_map_shapes ) )
+);
+check( 'token-map large-prefix probes diverge after the shared map prefix', array() === $token_map_divergence_errors, implode( ',', $token_map_divergence_errors ) );
+check( 'token-map has semicolonless boundary fault case', null !== $token_map_fault_case_index, json_encode( $token_map_cases ) );
+
 $numeric_boundary_generator = new Generator( new Prng( 'numeric-boundary-sweep' ), 4096, $names );
 $numeric_boundary_cases = numeric_boundary_sweep_cases();
 $numeric_boundary_mismatch = '';
@@ -1621,6 +1749,13 @@ check(
 	$corpus_worker['stdout'] . $corpus_worker['stderr']
 );
 
+$token_map_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'token-map', '--seed', '1', '--cases', '300', '--progress-every', '300' ) );
+check(
+	'300-case token-map worker clean',
+	0 === $token_map_worker['code'] && str_contains( $token_map_worker['stdout'], '"token-map-structure-sweep":300' ),
+	$token_map_worker['stdout'] . $token_map_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -1863,6 +1998,47 @@ check(
 );
 remove_tree( $corpus_runner_dir );
 
+$token_map_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-token-map-runner-' . getmypid();
+remove_tree( $token_map_runner_dir );
+$token_map_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'token-map',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$token_map_runner_dir,
+	)
+);
+$token_map_runner_state = is_file( $token_map_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $token_map_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'token-map runner clean',
+	0 === $token_map_runner['code'] &&
+		( $token_map_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $token_map_runner_state['cases'] ?? null ) === ( $token_map_runner_state['by_strategy']['token-map-structure-sweep'] ?? null ) &&
+		( $token_map_runner_state['cases'] ?? null ) === ( $token_map_runner_state['by_context']['both'] ?? null ),
+	$token_map_runner['stdout'] . $token_map_runner['stderr'] . json_encode( $token_map_runner_state )
+);
+$token_map_runner_windows = summary_start_windows( $token_map_runner_dir, 'token-map' );
+check(
+	'token-map runner uses distinct start-case windows',
+	start_windows_are_distinct( $token_map_runner_windows, 100 ),
+	json_encode( $token_map_runner_windows )
+);
+remove_tree( $token_map_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
 
@@ -1913,6 +2089,22 @@ $corpus_fault_seed_replay = run_process(
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
 check( 'faulted corpus mutation seed replay reproduces generated case', 1 === $corpus_fault_seed_replay['code'], $corpus_fault_seed_replay['stdout'] . $corpus_fault_seed_replay['stderr'] );
+
+$token_map_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'token-map', '--seed', '1', '--case', '0' ) );
+check(
+	'token-map replay regenerates clean case',
+	0 === $token_map_replay['code'] &&
+		str_contains( $token_map_replay['stdout'], 'mode token-map, strategy token-map-structure-sweep' ),
+	$token_map_replay['stdout'] . $token_map_replay['stderr']
+);
+
+if ( null !== $token_map_fault_case_index ) {
+	$token_map_fault_seed_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'token-map', '--seed', '1', '--case', (string) $token_map_fault_case_index ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted token-map seed replay reproduces generated case', 1 === $token_map_fault_seed_replay['code'], $token_map_fault_seed_replay['stdout'] . $token_map_fault_seed_replay['stderr'] );
+}
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -2172,6 +2364,60 @@ if ( null !== $corpus_failure_file ) {
 	check( 'faulted corpus mutation minimizer preserves signature', 0 === $corpus_fault_minimize['code'], $corpus_fault_minimize['stdout'] . $corpus_fault_minimize['stderr'] );
 }
 remove_tree( $corpus_pipeline_dir );
+
+if ( null !== $token_map_fault_case_index ) {
+	$token_map_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-token-map-fault-' . getmypid();
+	remove_tree( $token_map_pipeline_dir );
+	$faulted_token_map_worker = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../worker.php',
+			'--mode',
+			'token-map',
+			'--seed',
+			'1',
+			'--start-case',
+			(string) $token_map_fault_case_index,
+			'--cases',
+			'1',
+			'--output-dir',
+			$token_map_pipeline_dir,
+			'--progress-every',
+			'1',
+		),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted token-map worker reports findings', 1 === $faulted_token_map_worker['code'], $faulted_token_map_worker['stdout'] . $faulted_token_map_worker['stderr'] );
+
+	$token_map_failure_files = glob( $token_map_pipeline_dir . '/failure-*/failure.json' );
+	check( 'faulted token-map worker writes failure artifact', is_array( $token_map_failure_files ) && array() !== $token_map_failure_files );
+
+	$token_map_failure_file = is_array( $token_map_failure_files ) && array() !== $token_map_failure_files ? $token_map_failure_files[0] : null;
+	if ( null !== $token_map_failure_file ) {
+		$token_map_manifest = json_decode( (string) file_get_contents( $token_map_failure_file ), true );
+		check(
+			'token-map failure artifact records mode and signature',
+			'token-map' === ( $token_map_manifest['mode'] ?? null ) &&
+				'token-map-structure-sweep' === ( $token_map_manifest['strategy'] ?? null ) &&
+				$token_map_fault_case_index === ( $token_map_manifest['case'] ?? null ) &&
+				in_array( 'decode-mismatch:attribute', $token_map_manifest['signatures'] ?? array(), true ),
+			json_encode( $token_map_manifest )
+		);
+
+		$token_map_fault_replay = run_process(
+			array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $token_map_failure_file ),
+			array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+		);
+		check( 'faulted token-map replay reproduces finding', 1 === $token_map_fault_replay['code'], $token_map_fault_replay['stdout'] . $token_map_fault_replay['stderr'] );
+
+		$token_map_fault_minimize = run_process(
+			array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $token_map_failure_file ),
+			array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+		);
+		check( 'faulted token-map minimizer preserves signature', 0 === $token_map_fault_minimize['code'], $token_map_fault_minimize['stdout'] . $token_map_fault_minimize['stderr'] );
+	}
+	remove_tree( $token_map_pipeline_dir );
+}
 
 $reader_fault_pipelines = array(
 	array(

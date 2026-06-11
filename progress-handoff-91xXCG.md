@@ -28,7 +28,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 21: assert invalid numeric references decode to exactly U+FFFD.
 - [x] Tier 3 item 22: assert C1 remapping applies only to numeric references while raw C1 bytes pass through unchanged.
 - [x] Tier 3 item 23: add `html_entity_decode( ENT_HTML5 | ENT_QUOTES )` as a secondary text-context oracle.
-- [ ] Tier 3 items 24-26.
+- [x] Tier 3 item 24: add token-map structure-aware deterministic inputs.
+- [ ] Tier 3 items 25-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -143,6 +144,12 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php -l` passed for `Oracles.php`, `Checks.php`, `Targets.php`, `worker.php`, and `tests/harness-smoke.php` after adding the secondary text oracle.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=text-secondary-oracle php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 4 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-secondary-fault-check` reported `text-secondary-oracle-mismatch` findings; replaying the failure manifest reproduced the findings and minimizing it with `--signature text-secondary-oracle-mismatch:text` preserved the secondary-oracle signature.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding the secondary text oracle and tightening it to known semicolon-terminated names.
+- 2026-06-11: `php -l` passed for `Bootstrap.php`, `Cli.php`, `Generator.php`, `worker.php`, `replay.php`, and `tests/harness-smoke.php` after adding the token-map structure-aware sweep mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --cases 764 --progress-every 764` passed for one full token-map period and reported `by_strategy: {"token-map-structure-sweep":764}` and `by_context: {"both":764}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode token-map --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-token-map-runner-check` passed with distinct start-case windows.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode token-map --seed 1 --case 0` passed for the deterministic `&AEaQQ;` large-prefix divergent case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --start-case 631 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-token-map-fault-check` reported the expected `decode-mismatch:attribute` finding; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding the token-map mode, smoke coverage, and docs.
 
 ## Review Log
 
@@ -238,3 +245,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Boole: APPROVE, secondary text oracle semantics and support gating.
   - Ampere: APPROVE, secondary-oracle check, fault target, and smoke pipeline coverage.
   - Feynman: APPROVE, docs/progress scope and commit boundaries.
+- Tier 3 item 24:
+  - Hooke: APPROVE, token-map extraction and generator semantics after verifying name extraction, deterministic coverage, oracle-safety, and default mapping stability.
+  - Nash: APPROVE, CLI/worker/replay/runner integration and mode-aware failure artifact behavior.
+  - Goodall: APPROVE, smoke/docs/progress coverage and commit scope after full smoke and targeted token-map verification.

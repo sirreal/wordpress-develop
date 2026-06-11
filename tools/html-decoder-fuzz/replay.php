@@ -79,6 +79,8 @@ if ( '' !== $options['failure'] ) {
 		$generated = $generator->generate_numeric_boundary_sweep( $options['case'] );
 	} elseif ( 'corpus' === $mode ) {
 		$generated = $generator->generate_corpus_mutation( $options['case'] );
+	} elseif ( 'token-map' === $mode ) {
+		$generated = $generator->generate_token_map_sweep( $options['case'] );
 	} else {
 		$generated = $generator->generate();
 	}

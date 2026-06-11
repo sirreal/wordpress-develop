@@ -51,6 +51,30 @@ class Bootstrap {
 			return $names;
 		}
 
+		$structure = self::named_reference_structure();
+		$names     = array_merge( $structure['large_names'], $structure['small_names'] );
+		self::sort_names( $names );
+
+		return $names;
+	}
+
+	/**
+	 * Extracts lookup-layout details from the generated HTML5 named-reference map.
+	 *
+	 * @return array{
+	 *     key_length: int,
+	 *     group_prefixes: string[],
+	 *     large_names: string[],
+	 *     large_names_by_prefix: array<string, string[]>,
+	 *     small_names: string[]
+	 * }
+	 */
+	public static function named_reference_structure(): array {
+		static $structure = null;
+		if ( null !== $structure ) {
+			return $structure;
+		}
+
 		self::load_targets();
 
 		global $html5_named_character_references;
@@ -63,13 +87,15 @@ class Bootstrap {
 			return $ref->getValue( $map );
 		};
 
-		$key_length    = (int) $get( 'key_length' );
-		$groups        = (string) $get( 'groups' );
-		$large_words   = (array) $get( 'large_words' );
-		$small_words   = (string) $get( 'small_words' );
-		$names_by_key  = array();
-		$group_stride  = $key_length + 1;
-		$groups_length = strlen( $groups );
+		$key_length            = (int) $get( 'key_length' );
+		$groups                = (string) $get( 'groups' );
+		$large_words           = (array) $get( 'large_words' );
+		$small_words           = (string) $get( 'small_words' );
+		$large_names_by_key    = array();
+		$large_names_by_prefix = array();
+		$small_names_by_key    = array();
+		$group_stride          = $key_length + 1;
+		$groups_length         = strlen( $groups );
 
 		for ( $group_at = 0, $group_index = 0; $group_at + $key_length <= $groups_length; $group_at += $group_stride, ++$group_index ) {
 			$prefix = substr( $groups, $group_at, $key_length );
@@ -87,26 +113,54 @@ class Bootstrap {
 				$mapping_length = unpack( 'C', $row[ $row_at++ ] )[1];
 				$row_at        += $mapping_length;
 
-				$names_by_key[ $prefix . $token ] = true;
+				$name = $prefix . $token;
+				$large_names_by_key[ $name ] = true;
+				$large_names_by_prefix[ $prefix ][ $name ] = true;
 			}
 		}
 
 		for ( $at = 0; $at < strlen( $small_words ); $at += $group_stride ) {
 			$name = rtrim( substr( $small_words, $at, $group_stride ), "\x00" );
 			if ( '' !== $name ) {
-				$names_by_key[ $name ] = true;
+				$small_names_by_key[ $name ] = true;
 			}
 		}
 
-		$names = array_keys( $names_by_key );
+		$group_prefixes = array_keys( $large_names_by_prefix );
+		sort( $group_prefixes, SORT_STRING );
+
+		$large_names = array_keys( $large_names_by_key );
+		$small_names = array_keys( $small_names_by_key );
+		self::sort_names( $large_names );
+		self::sort_names( $small_names );
+		foreach ( $large_names_by_prefix as $prefix => $prefix_names_by_key ) {
+			$prefix_names = array_keys( $prefix_names_by_key );
+			self::sort_names( $prefix_names );
+			$large_names_by_prefix[ $prefix ] = $prefix_names;
+		}
+		ksort( $large_names_by_prefix, SORT_STRING );
+
+		$structure = array(
+			'key_length'             => $key_length,
+			'group_prefixes'         => $group_prefixes,
+			'large_names'            => $large_names,
+			'large_names_by_prefix'  => $large_names_by_prefix,
+			'small_names'            => $small_names,
+		);
+
+		return $structure;
+	}
+
+	/**
+	 * @param string[] $names
+	 */
+	private static function sort_names( array &$names ): void {
 		usort(
 			$names,
 			static function ( string $a, string $b ): int {
 				return strlen( $b ) <=> strlen( $a ) ?: strcmp( $a, $b );
 			}
 		);
-
-		return $names;
 	}
 }
 }

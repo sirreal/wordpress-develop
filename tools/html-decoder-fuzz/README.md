@@ -142,6 +142,11 @@ perturb bytes within the oracle-safe alphabet, including space, tab, LF, and FF,
 add or remove semicolons, and duplicate references to diversify structure beyond
 the grammar.
 
+`token-map` mode deterministically sweeps the generated `WP_Token_Map` layout:
+large-word group prefixes with names that diverge immediately after the shared
+two-byte prefix, every small-word boundary name, and every large-word name at
+the small/large length boundary.
+
 ## Common Commands
 
 Run the smoke test:
@@ -190,6 +195,12 @@ Run one corpus mutation batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 5000
+```
+
+Run one token-map structure sweep batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:

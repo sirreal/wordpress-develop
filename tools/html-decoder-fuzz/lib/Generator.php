@@ -250,6 +250,24 @@ class Generator {
 		return count( self::corpus_payloads() );
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_token_map_sweep( int $case_index ): array {
+		$cases      = self::token_map_sweep_cases();
+		$case_index = max( 0, $case_index ) % count( $cases );
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'token-map-structure-sweep',
+			'payload'  => self::trim_to_safe_max( $cases[ $case_index ]['payload'], $this->max_bytes ),
+		);
+	}
+
+	public function token_map_period(): int {
+		return count( self::token_map_sweep_cases() );
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -1225,6 +1243,92 @@ class Generator {
 		}
 
 		return $payloads;
+	}
+
+	/**
+	 * @return array<int, array{shape: string, payload: string, prefix?: string, name?: string}>
+	 */
+	private static function token_map_sweep_cases(): array {
+		static $cases = null;
+		if ( null !== $cases ) {
+			return $cases;
+		}
+
+		$structure  = Bootstrap::named_reference_structure();
+		$key_length = $structure['key_length'];
+		$cases      = array();
+
+		foreach ( $structure['group_prefixes'] as $prefix ) {
+			$cases[] = array(
+				'shape'   => 'large-prefix-divergent',
+				'prefix'  => $prefix,
+				'payload' => '&' . $prefix . self::token_map_divergent_suffix( $prefix, $structure['large_names_by_prefix'][ $prefix ] ?? array() ),
+			);
+		}
+
+		foreach ( $structure['small_names'] as $name ) {
+			$cases[] = array(
+				'shape'   => 'small-boundary-exact',
+				'name'    => $name,
+				'payload' => '&' . $name,
+			);
+			$cases[] = array(
+				'shape'   => 'small-boundary-extended',
+				'name'    => $name,
+				'payload' => '&' . $name . 'Q;',
+			);
+		}
+
+		foreach ( $structure['large_names'] as $name ) {
+			if ( strlen( $name ) !== $key_length + 1 ) {
+				continue;
+			}
+
+			$cases[] = array(
+				'shape'   => 'large-boundary-exact',
+				'name'    => $name,
+				'payload' => '&' . $name,
+			);
+			$cases[] = array(
+				'shape'   => 'large-boundary-extended',
+				'name'    => $name,
+				'payload' => '&' . $name . 'Q;',
+			);
+		}
+
+		$cases = array_values(
+			array_filter(
+				$cases,
+				static fn( array $case ): bool => self::is_oracle_safe_payload( $case['payload'] )
+			)
+		);
+
+		return array() === $cases
+			? array( array( 'shape' => 'fallback', 'payload' => '&NoSuchEntity;' ) )
+			: $cases;
+	}
+
+	/**
+	 * @param string[] $names
+	 */
+	private static function token_map_divergent_suffix( string $prefix, array $names ): string {
+		$used_first_rest_chars = array();
+		$prefix_length         = strlen( $prefix );
+		foreach ( $names as $name ) {
+			$rest = substr( $name, $prefix_length );
+			if ( '' !== $rest ) {
+				$used_first_rest_chars[ $rest[0] ] = true;
+			}
+		}
+
+		for ( $i = 0; $i < strlen( self::NAME_MUTATION_ALPHABET ); $i++ ) {
+			$char = self::NAME_MUTATION_ALPHABET[ $i ];
+			if ( ! isset( $used_first_rest_chars[ $char ] ) ) {
+				return $char . 'QQ;';
+			}
+		}
+
+		return '_QQ;';
 	}
 
 	/**

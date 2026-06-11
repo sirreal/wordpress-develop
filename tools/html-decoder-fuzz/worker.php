@@ -108,6 +108,8 @@ for ( $case = $start; $case < $end; $case++ ) {
 		$generated = $generator->generate_numeric_boundary_sweep( $case );
 	} elseif ( 'corpus' === $options['mode'] ) {
 		$generated = $generator->generate_corpus_mutation( $case );
+	} elseif ( 'token-map' === $options['mode'] ) {
+		$generated = $generator->generate_token_map_sweep( $case );
 	} else {
 		$generated = $generator->generate();
 	}
