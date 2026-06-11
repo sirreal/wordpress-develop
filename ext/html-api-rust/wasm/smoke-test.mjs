@@ -536,6 +536,10 @@ for (const [html, expectedTree] of [
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <select>\n      <optgroup>\n        <option>\n      <option>\n    <option>\n\n',
 	],
 	[
+		"<select><b><option><select><option></b></select>X",
+		'<html>\n  <head>\n  <body>\n    <select>\n      <option>\n    <option>\n      "X"\n\n',
+	],
+	[
 		"<b><table><td></b><i></table>X",
 		'<html>\n  <head>\n  <body>\n    <b>\n      <table>\n        <tbody>\n          <tr>\n            <td>\n              <i>\n      "X"\n\n',
 	],

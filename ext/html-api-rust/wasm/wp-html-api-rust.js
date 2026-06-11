@@ -292,6 +292,17 @@ const SELECT_IN_TABLE_BREAKOUT_TAGS = new Set([
 	"TD",
 	"TH",
 ]);
+const SELECT_ALLOWED_START_TAGS = new Set([
+	"HTML",
+	"OPTION",
+	"OPTGROUP",
+	"HR",
+	"SELECT",
+	...SELECT_BREAKOUT_START_TAGS,
+	"SCRIPT",
+	"TEMPLATE",
+]);
+const SELECT_ALLOWED_END_TAGS = new Set(["OPTION", "OPTGROUP", "SELECT", "TEMPLATE"]);
 const COLGROUP_CLOSING_START_TAGS = new Set([
 	"CAPTION",
 	"COLGROUP",
@@ -1955,6 +1966,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.is_full_parser ? [] : ["html", this.context_namespace];
 			this.active_formatting_elements = [];
+			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
@@ -2621,6 +2633,15 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (
+					closingNamespace === "html" &&
+					this.#hasOpenHtmlElement("SELECT") &&
+					!SELECT_ALLOWED_END_TAGS.has(tagName)
+				) {
+					this.#ignoreCurrentToken();
+					return;
+				}
+
 				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
 					this.#bailUnsupported("Foster parenting is not supported.");
 					return;
@@ -2629,6 +2650,15 @@ export function createHtmlApi(wasm) {
 				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
+				}
+
+				if (
+					closingNamespace === "html" &&
+					existingIndex === -1 &&
+					this.#consumeIgnoredSelectFormattingElement(tagName)
+				) {
+					this.#ignoreCurrentToken();
+					return;
 				}
 
 				if (this.#shouldIgnoreEndTagClosingOutsideTemplate(tagName, closingNamespace, existingIndex)) {
@@ -2822,6 +2852,16 @@ export function createHtmlApi(wasm) {
 
 			if (
 				this.current_namespace === "html" &&
+				this.#hasOpenHtmlElement("SELECT") &&
+				!SELECT_ALLOWED_START_TAGS.has(tagName)
+			) {
+				this.#rememberIgnoredSelectFormattingElement(tagName);
+				this.#ignoreCurrentToken();
+				return;
+			}
+
+			if (
+				this.current_namespace === "html" &&
 				tagName === "FORM" &&
 				!this.#hasOpenHtmlElement("TEMPLATE") &&
 				this.#hasOpenHtmlElement("FORM")
@@ -2949,6 +2989,7 @@ export function createHtmlApi(wasm) {
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
+				ignoredSelectFormattingElements: [...this.ignored_select_formatting_elements.entries()],
 				templateInsertionModes: [...this.template_insertion_modes],
 				encodingConfidence: this.encoding_confidence,
 				baseOpenElementCount: this.base_open_element_count,
@@ -2972,6 +3013,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
+			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
 			this.encoding_confidence = state.encodingConfidence;
 			this.base_open_element_count = state.baseOpenElementCount;
@@ -3107,6 +3149,31 @@ export function createHtmlApi(wasm) {
 
 		#isActiveFormattingMarker(entry) {
 			return entry?.marker === true;
+		}
+
+		#rememberIgnoredSelectFormattingElement(tagName) {
+			if (!ADOPTION_AGENCY_END_TAGS.has(tagName)) {
+				return;
+			}
+
+			this.ignored_select_formatting_elements.set(
+				tagName,
+				(this.ignored_select_formatting_elements.get(tagName) ?? 0) + 1,
+			);
+		}
+
+		#consumeIgnoredSelectFormattingElement(tagName) {
+			const count = this.ignored_select_formatting_elements.get(tagName) ?? 0;
+			if (count < 1) {
+				return false;
+			}
+
+			if (count === 1) {
+				this.ignored_select_formatting_elements.delete(tagName);
+			} else {
+				this.ignored_select_formatting_elements.set(tagName, count - 1);
+			}
+			return true;
 		}
 
 		#activeFormattingElementsAreEquivalent(left, right) {
