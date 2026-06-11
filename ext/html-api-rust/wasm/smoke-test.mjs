@@ -91,4 +91,24 @@ assert.deepEqual(paragraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 assert.equal(paragraphProcessor.get_attribute("target"), true);
 paragraphProcessor.destroy();
 
+const svgProcessor = WP_HTML_Processor.create_fragment("<svg><image /><rect></rect></svg><p>");
+assert.equal(svgProcessor.next_tag("image"), true);
+assert.equal(svgProcessor.get_namespace(), "svg");
+assert.equal(svgProcessor.expects_closer(), false);
+assert.deepEqual(svgProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "IMAGE"]);
+assert.equal(svgProcessor.next_tag("rect"), true);
+assert.equal(svgProcessor.get_namespace(), "svg");
+assert.equal(svgProcessor.expects_closer(), true);
+assert.deepEqual(svgProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "RECT"]);
+assert.equal(svgProcessor.next_tag("p"), true);
+assert.equal(svgProcessor.get_namespace(), "html");
+assert.deepEqual(svgProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+svgProcessor.destroy();
+
+const foreignObjectProcessor = WP_HTML_Processor.create_fragment("<svg><foreignObject><div></div></foreignObject></svg>");
+assert.equal(foreignObjectProcessor.next_tag("div"), true);
+assert.equal(foreignObjectProcessor.get_namespace(), "html");
+assert.deepEqual(foreignObjectProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "FOREIGNOBJECT", "DIV"]);
+foreignObjectProcessor.destroy();
+
 console.log("WASM smoke tests passed.");

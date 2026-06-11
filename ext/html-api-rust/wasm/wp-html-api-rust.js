@@ -845,7 +845,11 @@ export function createHtmlApi(wasm) {
 			this.is_full_parser = Boolean(options.fullParser);
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
+			this.open_element_namespaces = this.open_elements.map(() => "html");
 			this.breadcrumbs = [...this.open_elements];
+			this.current_namespace = contextNamespace(this.context_node);
+			this.current_token_namespace = this.current_namespace;
+			super.change_parsing_namespace(this.current_namespace);
 		}
 
 		static create_fragment(html, context = "<body>") {
@@ -951,6 +955,10 @@ export function createHtmlApi(wasm) {
 			return this.is_virtual() ? this.current_virtual.operation === "pop" : super.is_tag_closer();
 		}
 
+		get_namespace() {
+			return this.current_token_namespace;
+		}
+
 		expects_closer() {
 			const tokenName = this.get_token_name();
 			if (tokenName === null) {
@@ -1009,10 +1017,12 @@ export function createHtmlApi(wasm) {
 
 			if (tokenName === null) {
 				this.breadcrumbs = [...this.open_elements];
+				this.current_token_namespace = this.current_namespace;
 				return;
 			}
 
 			if (tokenType !== "#tag") {
+				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements, tokenName];
 				return;
 			}
@@ -1020,27 +1030,39 @@ export function createHtmlApi(wasm) {
 			const tagName = this.get_tag();
 			if (tagName === null) {
 				this.breadcrumbs = [...this.open_elements];
+				this.current_token_namespace = this.current_namespace;
 				return;
 			}
 
 			if (this.is_tag_closer()) {
 				const existingIndex = this.open_elements.lastIndexOf(tagName);
+				this.current_token_namespace = existingIndex === -1
+					? this.current_namespace
+					: this.open_element_namespaces[existingIndex];
 				this.breadcrumbs = existingIndex === -1
 					? [...this.open_elements, tagName]
 					: [...this.open_elements.slice(0, existingIndex + 1)];
 
 				if (existingIndex !== -1) {
 					this.open_elements = this.open_elements.slice(0, existingIndex);
+					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+					this.#setCurrentNamespace(this.#namespaceForStackTop());
 				}
 				return;
 			}
 
 			this.#applySimpleHtmlSemanticClosures(tagName);
+			this.current_token_namespace = namespaceForTag(tagName, this.current_namespace);
 			this.open_elements.push(tagName);
+			this.open_element_namespaces.push(this.current_token_namespace);
 			this.breadcrumbs = [...this.open_elements];
 
-			if (!tokenExpectsCloser(tagName, this.get_namespace(), this.has_self_closing_flag())) {
+			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
 				this.open_elements.pop();
+				this.open_element_namespaces.pop();
+				this.#setCurrentNamespace(this.#namespaceForStackTop());
+			} else {
+				this.#setCurrentNamespace(childNamespaceForTag(tagName, this.current_token_namespace));
 			}
 		}
 
@@ -1070,10 +1092,26 @@ export function createHtmlApi(wasm) {
 			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
 				if (predicate(this.open_elements[i])) {
 					this.open_elements = this.open_elements.slice(0, i);
+					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
+					this.#setCurrentNamespace(this.#namespaceForStackTop());
 					return true;
 				}
 			}
 			return false;
+		}
+
+		#namespaceForStackTop() {
+			return this.open_element_namespaces.length === 0
+				? "html"
+				: childNamespaceForTag(
+					this.open_elements[this.open_elements.length - 1],
+					this.open_element_namespaces[this.open_element_namespaces.length - 1],
+				);
+		}
+
+		#setCurrentNamespace(namespaceName) {
+			this.current_namespace = namespaceName;
+			super.change_parsing_namespace(namespaceName);
 		}
 	}
 
@@ -1411,6 +1449,42 @@ function contextNodeName(context) {
 
 	const match = context.match(/^<\s*([A-Za-z][^\s/>]*)/);
 	return match ? asciiUpper(match[1]) : "BODY";
+}
+
+function contextNamespace(nodeName) {
+	if (nodeName === "SVG") {
+		return "svg";
+	}
+	if (nodeName === "MATH") {
+		return "math";
+	}
+	return "html";
+}
+
+function namespaceForTag(tagName, currentNamespace) {
+	if (currentNamespace === "html") {
+		if (tagName === "SVG") {
+			return "svg";
+		}
+		if (tagName === "MATH") {
+			return "math";
+		}
+		return "html";
+	}
+
+	return currentNamespace;
+}
+
+function childNamespaceForTag(tagName, tokenNamespace) {
+	if (tokenNamespace === "svg" && tagName === "FOREIGNOBJECT") {
+		return "html";
+	}
+
+	if (tokenNamespace === "math" && ["ANNOTATION-XML", "MI", "MO", "MN", "MS", "MTEXT"].includes(tagName)) {
+		return "html";
+	}
+
+	return tokenNamespace;
 }
 
 function tokenExpectsCloser(tokenName, namespaceName, hasSelfClosingFlag) {
