@@ -30,6 +30,7 @@ class Generator {
 			'select',
 			'foreign-content',
 			'rawtext-rcdata',
+			'text-fragment',
 			'formatting-adoption',
 			'attributes-entities',
 			'comments-doctype-bogus',
@@ -90,6 +91,7 @@ class Generator {
 					'select'                 => 8,
 					'foreign-content'        => 10,
 					'rawtext-rcdata'         => 8,
+					'text-fragment'          => 4,
 					'formatting-adoption'    => 10,
 					'attributes-entities'    => 7,
 					'comments-doctype-bogus' => 5,
@@ -123,7 +125,7 @@ class Generator {
 		}
 
 		if ( 'auto' === $mode ) {
-			$mode = 'full-document' === $profile ? self::MODE_FULL_DOCUMENT : ( 'body-fragment' === $profile ? self::MODE_FRAGMENT_BODY : $rng->weighted( array( self::MODE_FRAGMENT_BODY => 70, self::MODE_FULL_DOCUMENT => 30 ) ) );
+			$mode = 'full-document' === $profile ? self::MODE_FULL_DOCUMENT : ( in_array( $profile, array( 'body-fragment', 'text-fragment' ), true ) ? self::MODE_FRAGMENT_BODY : $rng->weighted( array( self::MODE_FRAGMENT_BODY => 70, self::MODE_FULL_DOCUMENT => 30 ) ) );
 		} elseif ( ! in_array( $mode, self::modes(), true ) ) {
 			throw new \InvalidArgumentException( 'Unknown generator mode: ' . $mode );
 		}
@@ -144,7 +146,7 @@ class Generator {
 			$generator->mark_feature( 'fragment-context:' . $fragment_context );
 		}
 		$max_depth = $generator->depth_for_profile();
-		$body      = $generator->nodes( $max_depth, 'body' );
+		$body      = 'text-fragment' === $profile ? $generator->text_fragment_input() : $generator->nodes( $max_depth, 'body' );
 
 		if ( self::MODE_FULL_DOCUMENT === $mode ) {
 			$html = $generator->full_document( $body );
@@ -802,6 +804,7 @@ class Generator {
 				$out .= $gap . $name . $this->attribute_equals() . $value;
 			} else {
 				$this->mark_feature( 'attr:quoted' );
+				$value = $this->quoted_attr_value( $value, $quote );
 				$out .= $gap . $name . $this->attribute_equals() . $quote . $value . $quote;
 			}
 		}
@@ -899,6 +902,10 @@ class Generator {
 		return (string) preg_replace( '/[\x00-\x20"\'<>`=]+/', '_', $value );
 	}
 
+	private function quoted_attr_value( string $value, string $quote ): string {
+		return str_replace( $quote, '"' === $quote ? "'" : '"', $value );
+	}
+
 	private function tag_gap(): string {
 		$gap = $this->rng->choice( array( ' ', ' ', "\t", "\n", "\f", "\r\n", '  ', " \t " ) );
 		if ( ' ' !== $gap ) {
@@ -979,7 +986,7 @@ class Generator {
 				return $this->rng->choice( array( 'é', '雪', '🙂', 'β', 'עברית', 'مرحبا', 'नमस्ते' ) );
 			case 'nulls':
 				$this->mark_feature( 'payload:nul' );
-				return $this->terminal_ascii( 3 ) . "\0" . $this->terminal_ascii( 3 );
+				return $this->terminal_payload_ascii( 3 ) . "\0" . $this->terminal_payload_ascii( 3 );
 			case 'controls':
 				$this->mark_feature( 'payload:control' );
 				return $this->terminal_control();
@@ -988,12 +995,45 @@ class Generator {
 				return $this->terminal_repeat();
 			case 'long-ascii':
 				$this->mark_feature( 'payload:long-ascii' );
-				return $this->terminal_ascii( $this->rng->int( 64, 512 ) );
+				return $this->terminal_payload_ascii( $this->rng->int( 64, 512 ) );
 			case 'ascii':
 			default:
 				$this->mark_feature( 'payload:ascii' );
-				return $this->terminal_ascii( $this->rng->int( 1, 24 ) );
+				return $this->terminal_payload_ascii( $this->terminal_ascii_payload_length() );
 		}
+	}
+
+	private function text_fragment_input(): string {
+		$this->mark_feature( 'input:text-fragment' );
+		if ( 'stress-long' === $this->payload_policy ) {
+			$this->mark_feature( 'input:long' );
+			return $this->terminal_payload_ascii( $this->rng->int( 64, 1024 ) );
+		}
+
+		if ( $this->rng->chance( 78 ) ) {
+			$length = $this->rng->int( 0, 10 );
+			$this->mark_feature( 'input:short' );
+			$this->mark_feature( 'input:length-' . $length );
+			return $this->terminal_payload_ascii( $length );
+		}
+
+		$this->mark_feature( 'input:medium' );
+		return $this->terminal_payload_ascii( $this->rng->int( 11, 256 ) );
+	}
+
+	private function terminal_ascii_payload_length(): int {
+		if ( $this->rng->chance( 72 ) ) {
+			$length = $this->rng->int( 0, 10 );
+			$this->mark_feature( 'payload:short-ascii' );
+			$this->mark_feature( 'payload:ascii-length-' . $length );
+			if ( 0 === $length ) {
+				$this->mark_feature( 'payload:empty-ascii' );
+			}
+			return $length;
+		}
+
+		$this->mark_feature( 'payload:medium-ascii' );
+		return $this->rng->int( 11, 96 );
 	}
 
 	private function payload_weights(): array {
@@ -1143,7 +1183,7 @@ class Generator {
 	}
 
 	private function terminal_control(): string {
-		return $this->rng->choice( array( "\r", "\n", "\r\n", "\t", "\f", "\x01", "\x1f" ) ) . $this->terminal_ascii( 4 );
+		return $this->rng->choice( array( "\r", "\n", "\r\n", "\t", "\f", "\x01", "\x1f" ) ) . $this->terminal_payload_ascii( 4 );
 	}
 
 	private function terminal_repeat(): string {
@@ -1171,5 +1211,43 @@ class Generator {
 			$out .= $alphabet[ $this->rng->int( 0, strlen( $alphabet ) - 1 ) ];
 		}
 		return $out;
+	}
+
+	private function terminal_payload_ascii( int $length ): string {
+		$alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_:/.,;#[](){}&&&&<<<<>>>>\"\"''====";
+		$out      = '';
+		for ( $i = 0; $i < $length; ++$i ) {
+			$char = $alphabet[ $this->rng->int( 0, strlen( $alphabet ) - 1 ) ];
+			$this->mark_ascii_syntax_feature( $char );
+			$out .= $char;
+		}
+		return $out;
+	}
+
+	private function mark_ascii_syntax_feature( string $char ): void {
+		switch ( $char ) {
+			case '&':
+				$this->mark_feature( 'ascii:syntax-ampersand' );
+				break;
+			case '<':
+				$this->mark_feature( 'ascii:syntax-less-than' );
+				break;
+			case '>':
+				$this->mark_feature( 'ascii:syntax-greater-than' );
+				break;
+			case '"':
+				$this->mark_feature( 'ascii:syntax-double-quote' );
+				break;
+			case "'":
+				$this->mark_feature( 'ascii:syntax-single-quote' );
+				break;
+			case '=':
+				$this->mark_feature( 'ascii:syntax-equals' );
+				break;
+			default:
+				return;
+		}
+
+		$this->mark_feature( 'ascii:syntax-char' );
 	}
 }
