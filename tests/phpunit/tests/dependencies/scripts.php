@@ -4582,7 +4582,7 @@ HTML;
 
 		$output = get_echo( 'wp_print_scripts' );
 
-		$this->assertStringContainsString( '<script type="application/json" id="wp-script-data-test-script">', $output );
+		$this->assertStringContainsString( '<script id="wp-script-data-test-script" type="application/json">', $output );
 		$this->assertStringContainsString( '"foo":"bar"', $output );
 	}
 
