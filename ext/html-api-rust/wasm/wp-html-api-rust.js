@@ -434,6 +434,18 @@ const P_CLOSING_START_TAGS = new Set([
 	...HEADING_ELEMENTS,
 ]);
 
+const FOREIGN_SCOPE_BOUNDARIES = [
+	"math MI",
+	"math MO",
+	"math MN",
+	"math MS",
+	"math MTEXT",
+	"math ANNOTATION-XML",
+	"svg FOREIGNOBJECT",
+	"svg DESC",
+	"svg TITLE",
+];
+
 const BUTTON_SCOPE_BOUNDARIES = new Set([
 	"APPLET",
 	"BUTTON",
@@ -445,6 +457,7 @@ const BUTTON_SCOPE_BOUNDARIES = new Set([
 	"TD",
 	"TEMPLATE",
 	"TH",
+	...FOREIGN_SCOPE_BOUNDARIES,
 ]);
 
 const DEFAULT_SCOPE_BOUNDARIES = new Set([
@@ -457,6 +470,7 @@ const DEFAULT_SCOPE_BOUNDARIES = new Set([
 	"TD",
 	"TEMPLATE",
 	"TH",
+	...FOREIGN_SCOPE_BOUNDARIES,
 ]);
 
 const LIST_ITEM_SCOPE_BOUNDARIES = new Set([
@@ -474,6 +488,7 @@ const LIST_ITEM_SCOPE_BOUNDARIES = new Set([
 	"TEMPLATE",
 	"TH",
 	"UL",
+	...FOREIGN_SCOPE_BOUNDARIES,
 ]);
 
 const END_TAG_SPECIAL_BOUNDARIES = new Set([
@@ -895,15 +910,7 @@ export class WP_HTML_Open_Elements {
 			"MARQUEE",
 			"OBJECT",
 			"TEMPLATE",
-			"math MI",
-			"math MO",
-			"math MN",
-			"math MS",
-			"math MTEXT",
-			"math ANNOTATION-XML",
-			"svg FOREIGNOBJECT",
-			"svg DESC",
-			"svg TITLE",
+			...FOREIGN_SCOPE_BOUNDARIES,
 		]);
 	}
 
@@ -921,15 +928,7 @@ export class WP_HTML_Open_Elements {
 			"OL",
 			"TEMPLATE",
 			"UL",
-			"math MI",
-			"math MO",
-			"math MN",
-			"math MS",
-			"math MTEXT",
-			"math ANNOTATION-XML",
-			"svg FOREIGNOBJECT",
-			"svg DESC",
-			"svg TITLE",
+			...FOREIGN_SCOPE_BOUNDARIES,
 		]);
 	}
 
@@ -945,15 +944,7 @@ export class WP_HTML_Open_Elements {
 			"MARQUEE",
 			"OBJECT",
 			"TEMPLATE",
-			"math MI",
-			"math MO",
-			"math MN",
-			"math MS",
-			"math MTEXT",
-			"math ANNOTATION-XML",
-			"svg FOREIGNOBJECT",
-			"svg DESC",
-			"svg TITLE",
+			...FOREIGN_SCOPE_BOUNDARIES,
 		]);
 	}
 
@@ -5315,7 +5306,8 @@ export function createHtmlApi(wasm) {
 			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
 			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
 				const nodeName = this.open_elements[i];
-				if (predicate(nodeName)) {
+				const namespaceName = this.open_element_namespaces[i];
+				if (namespaceName === "html" && predicate(nodeName)) {
 					this.open_elements = this.open_elements.slice(0, i);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, i);
@@ -5323,7 +5315,7 @@ export function createHtmlApi(wasm) {
 					return true;
 				}
 
-				if (boundaries.has(nodeName)) {
+				if (boundaries.has(this.#scopeBoundaryNameForOpenElement(i))) {
 					return false;
 				}
 			}
@@ -5362,6 +5354,12 @@ export function createHtmlApi(wasm) {
 				nodeName === tagName &&
 				this.open_element_namespaces[index] === "html"
 			));
+		}
+
+		#scopeBoundaryNameForOpenElement(index) {
+			const namespaceName = this.open_element_namespaces[index];
+			const nodeName = this.open_elements[index];
+			return namespaceName === "html" ? nodeName : `${namespaceName} ${nodeName}`;
 		}
 
 		#countOpenHtmlElements(tagName, endIndex = this.open_elements.length) {
@@ -5613,10 +5611,7 @@ export function createHtmlApi(wasm) {
 
 		#hasHtmlScopeBoundaryAfter(index, boundaries) {
 			for (let i = index + 1; i < this.open_elements.length; i += 1) {
-				if (
-					this.open_element_namespaces[i] === "html" &&
-					boundaries.has(this.open_elements[i])
-				) {
+				if (boundaries.has(this.#scopeBoundaryNameForOpenElement(i))) {
 					return true;
 				}
 			}
@@ -5689,7 +5684,7 @@ export function createHtmlApi(wasm) {
 					return i;
 				}
 
-				if (namespaceName === "html" && boundaries.has(nodeName)) {
+				if (boundaries.has(this.#scopeBoundaryNameForOpenElement(i))) {
 					return -1;
 				}
 			}
