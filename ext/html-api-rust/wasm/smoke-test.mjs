@@ -2669,25 +2669,19 @@ assert.equal(selectTextareaProcessor.next_tag("p"), true);
 assert.deepEqual(selectTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 selectTextareaProcessor.destroy();
 
-const selectInTableProcessor = WP_HTML_Processor.create_fragment("<table><select><option>one<tr><td>cell");
-assert.equal(selectInTableProcessor.next_tag("tr"), true);
-assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
-assert.equal(selectInTableProcessor.next_tag("td"), true);
-assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
-selectInTableProcessor.destroy();
-assert.equal(
-	WP_HTML_Processor.normalize("<table><select><option>one<tr><td>cell"),
-	"<table><select><option>one</option></select><tbody><tr><td>cell</td></tr></tbody></table>",
-);
-
-const selectInTableEndTagProcessor = WP_HTML_Processor.create_fragment("<table><select><option>one</table><p>after");
-assert.equal(selectInTableEndTagProcessor.next_tag("p"), true);
-assert.deepEqual(selectInTableEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
-selectInTableEndTagProcessor.destroy();
-assert.equal(
-	WP_HTML_Processor.normalize("<table><select><option>one</table><p>after"),
-	"<table><select><option>one</option></select></table><p>after</p>",
-);
+for (const html of [
+	"<table><select><option>one<tr><td>cell",
+	"<table><select><option>one</table><p>after",
+	"<table><select><option>3</select></table>",
+]) {
+	const selectInTableProcessor = WP_HTML_Processor.create_fragment(html);
+	while (selectInTableProcessor.next_token()) {
+	}
+	assert.equal(selectInTableProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(selectInTableProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+	selectInTableProcessor.destroy();
+	assert.equal(WP_HTML_Processor.normalize(html), null);
+}
 
 const bareColProcessor = WP_HTML_Processor.create_fragment("<table><col><tr><td>cell");
 assert.equal(bareColProcessor.next_tag("col"), true);

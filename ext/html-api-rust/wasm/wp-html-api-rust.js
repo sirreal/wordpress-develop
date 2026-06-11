@@ -207,7 +207,6 @@ const TABLE_MODE_START_TAGS = new Set([
 	"FORM",
 	"INPUT",
 	"SCRIPT",
-	"SELECT",
 	"STYLE",
 	"TABLE",
 	"TBODY",
