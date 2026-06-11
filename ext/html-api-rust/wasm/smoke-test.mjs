@@ -482,6 +482,17 @@ assert.equal(foreignObjectProcessor.get_namespace(), "html");
 assert.deepEqual(foreignObjectProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "FOREIGNOBJECT", "DIV"]);
 foreignObjectProcessor.destroy();
 
+const templateNamespaceProcessor = WP_HTML_Processor.create_fragment("<template><svg><template><foreignObject><div></template><div target>");
+assert.equal(templateNamespaceProcessor.next_tag("div"), true);
+assert.deepEqual(
+	templateNamespaceProcessor.get_breadcrumbs(),
+	["HTML", "BODY", "TEMPLATE", "SVG", "TEMPLATE", "FOREIGNOBJECT", "DIV"],
+);
+assert.equal(templateNamespaceProcessor.next_tag("div"), true);
+assert.deepEqual(templateNamespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
+assert.equal(templateNamespaceProcessor.get_attribute("target"), true);
+templateNamespaceProcessor.destroy();
+
 assert.equal(
 	WP_HTML_Processor.normalize('<a href=#anchor enabled>Tom & Jerry</a>'),
 	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',

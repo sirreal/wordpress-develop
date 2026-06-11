@@ -263,6 +263,7 @@ const MODELED_SCOPED_END_TAGS = new Set([
 	"SEARCH",
 	"SECTION",
 	"SUMMARY",
+	"TEMPLATE",
 	"UL",
 	...HEADING_ELEMENTS,
 ]);
@@ -1466,12 +1467,13 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.is_tag_closer()) {
-				let existingIndex = this.open_elements.lastIndexOf(tagName);
-				if (tagName === "LI") {
+				const closingNamespace = this.current_namespace;
+				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
+				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
-				if (tagName === "P" && existingIndex === -1) {
+				if (tagName === "P" && closingNamespace === "html" && existingIndex === -1) {
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = [...this.open_elements];
 					this.virtual_tokens.push(
