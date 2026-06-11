@@ -217,6 +217,20 @@ assert.equal(comment.get_tag(), "xml-stylesheet");
 assert.equal(comment.get_full_comment_text(), "?xml-stylesheet href='x'?");
 comment.destroy();
 
+const funkyComment = new WP_HTML_Tag_Processor("</%url>");
+assert.equal(funkyComment.next_token(), true);
+assert.equal(funkyComment.get_token_type(), "#funky-comment");
+assert.equal(funkyComment.get_comment_type(), null);
+assert.equal(funkyComment.get_full_comment_text(), "%url");
+funkyComment.destroy();
+
+const processorFunkyComment = WP_HTML_Processor.create_fragment("</%url>");
+assert.equal(processorFunkyComment.next_token(), true);
+assert.equal(processorFunkyComment.get_token_type(), "#funky-comment");
+assert.equal(processorFunkyComment.get_comment_type(), null);
+assert.equal(processorFunkyComment.get_full_comment_text(), "%url");
+processorFunkyComment.destroy();
+
 const incompleteComment = new WP_HTML_Tag_Processor("FOO<!-- BAR --! >BAZ");
 assert.equal(incompleteComment.next_token(), true);
 assert.equal(incompleteComment.get_token_type(), "#text");

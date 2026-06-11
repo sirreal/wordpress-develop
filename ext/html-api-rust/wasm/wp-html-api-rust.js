@@ -1075,6 +1075,10 @@ export function createHtmlApi(wasm) {
 
 		get_comment_type() {
 			this.#ensureLive();
+			if (this.parser_state !== STATE_COMMENT) {
+				return null;
+			}
+
 			return COMMENT_TYPES.get(wasm.wp_html_api_rust_tag_processor_current_comment_type(this.pointer)) ?? null;
 		}
 
