@@ -3,6 +3,7 @@
 #endif
 
 #include "php.h"
+#include "Zend/zend_interfaces.h"
 #include "ext/standard/info.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -1888,8 +1889,13 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_comment_type)
 PHP_METHOD(WP_HTML_Tag_Processor, get_doctype_info)
 {
 	wp_html_tag_processor_object *intern;
+	wp_html_api_rust_byte_slice html;
+	size_t token_start;
+	size_t token_length;
 	zend_string *doctype_class_name;
 	zend_class_entry *doctype_ce;
+	zval raw_token;
+	zval retval;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 
@@ -1899,7 +1905,14 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_doctype_info)
 		RETURN_THROWS();
 	}
 
-	if (4 != wp_html_api_rust_tag_processor_current_token_type(intern->native)) {
+	if (
+		!wp_html_tag_processor_parser_state_is(ZEND_THIS, "STATE_DOCTYPE", sizeof("STATE_DOCTYPE") - 1) ||
+		4 != wp_html_api_rust_tag_processor_current_token_type(intern->native) ||
+		!wp_html_api_rust_tag_processor_current_span(intern->native, &token_start, &token_length) ||
+		!wp_html_api_rust_tag_processor_get_html(intern->native, &html) ||
+		token_start > html.len ||
+		token_length > html.len - token_start
+	) {
 		RETURN_NULL();
 	}
 
@@ -1907,16 +1920,20 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_doctype_info)
 	doctype_ce = zend_lookup_class(doctype_class_name);
 	zend_string_release(doctype_class_name);
 
-	if (NULL != doctype_ce) {
-		object_init_ex(return_value, doctype_ce);
-	} else {
-		object_init(return_value);
+	if (NULL == doctype_ce) {
+		RETURN_NULL();
 	}
 
-	add_property_string(return_value, "name", "html");
-	add_property_null(return_value, "public_identifier");
-	add_property_null(return_value, "system_identifier");
-	add_property_string(return_value, "indicated_compatibility_mode", "no-quirks");
+	ZVAL_STRINGL(&raw_token, (const char *) html.ptr + token_start, token_length);
+	ZVAL_NULL(&retval);
+
+	if (NULL == zend_call_method_with_1_params(NULL, doctype_ce, NULL, "from_doctype_token", &retval, &raw_token)) {
+		zval_ptr_dtor(&raw_token);
+		RETURN_NULL();
+	}
+
+	zval_ptr_dtor(&raw_token);
+	RETURN_ZVAL(&retval, 1, 1);
 }
 
 PHP_METHOD(WP_HTML_Tag_Processor, set_bookmark)
