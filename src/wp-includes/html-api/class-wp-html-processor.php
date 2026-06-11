@@ -765,9 +765,47 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next token in the HTML document.
 	 *
-	 * This doesn't currently have a way to represent non-tags and doesn't process
-	 * semantic rules for text nodes. For access to the raw tokens consider using
-	 * WP_HTML_Tag_Processor instead.
+	 * A token is a span of the document with its own meaning: a tag opener
+	 * or closer, a text node, a comment, a doctype declaration. Use this
+	 * method instead of {@see WP_HTML_Processor::next_tag} when text and
+	 * other non-tag content matters, while keeping the HTML Processor's
+	 * full awareness of document structure: at every visited token,
+	 * {@see WP_HTML_Processor::get_breadcrumbs} and
+	 * {@see WP_HTML_Processor::get_current_depth} describe where in the
+	 * document tree that token lives.
+	 *
+	 * Unlike the Tag Processor's purely lexical scan, the HTML Processor
+	 * visits a closing token for every element it opens, including
+	 * elements the HTML specification closes implicitly and elements left
+	 * unclosed at the end of the input. Walking code can rely on seeing a
+	 * closer for every opener even in malformed input.
+	 *
+	 * An element's text content may be split across several consecutive
+	 * `#text` tokens: accumulate text while walking rather than assuming
+	 * one token carries all of an element's text.
+	 *
+	 * Example:
+	 *
+	 *     // Collect the text content of the first LI element.
+	 *     $processor = WP_HTML_Processor::create_fragment( '<ul><li>Buy <strong>milk</strong> today.</ul>' );
+	 *     if ( $processor->next_tag( 'LI' ) ) {
+	 *         $depth_inside_li = $processor->get_current_depth();
+	 *         $text            = '';
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) {
+	 *             if ( '#text' === $processor->get_token_type() ) {
+	 *                 $text .= $processor->get_modifiable_text();
+	 *             }
+	 *         }
+	 *         // $text === 'Buy milk today.'
+	 *         // The closers of nested elements (`</strong>`) report a depth no
+	 *         // lower than the LI's contents, so the loop continues through
+	 *         // them; it ends on the LI's own closer. The unclosed LI and UL
+	 *         // still produce closing tokens at the end of the input.
+	 *     }
+	 *
+	 *     // The same walk can be guarded with breadcrumbs, which read the
+	 *     // same on openers, text nodes, and closers alike:
+	 *     while ( $processor->next_token() && in_array( 'LI', $processor->get_breadcrumbs(), true ) ) { ... }
 	 *
 	 * @since 6.5.0 Added for internal support; do not use.
 	 * @since 6.7.2 Refactored so subclasses may extend.
