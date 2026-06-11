@@ -150,6 +150,38 @@ class Tests_HtmlApi_WpHtmlDecoder extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures non-ampersand offsets never match character references.
+	 *
+	 * @dataProvider data_non_ampersand_character_reference_offsets
+	 *
+	 * @param string $context       Decoder context.
+	 * @param string $raw_text_node Raw text containing a character reference away from offset.
+	 * @param int    $offset        Offset that does not point at an ampersand.
+	 */
+	public function test_non_ampersand_offset_does_not_set_match_byte_length( $context, $raw_text_node, $offset ) {
+		$match_byte_length = 'sentinel';
+		$this->assertNull(
+			WP_HTML_Decoder::read_character_reference( $context, $raw_text_node, $offset, $match_byte_length ),
+			'Should not have matched a character reference away from an ampersand.'
+		);
+		$this->assertSame( 'sentinel', $match_byte_length );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[].
+	 */
+	public static function data_non_ampersand_character_reference_offsets() {
+		return array(
+			'text before reference'       => array( 'data', 'a&amp;b', 0 ),
+			'text inside reference name'  => array( 'data', 'a&amp;b', 2 ),
+			'attribute before reference'  => array( 'attribute', 'a&amp;b', 0 ),
+			'attribute inside reference name' => array( 'attribute', 'a&amp;b', 2 ),
+		);
+	}
+
+	/**
 	 * Ensures proper detection of attribute prefixes ignoring ASCII case.
 	 *
 	 * @ticket 61072

@@ -205,6 +205,8 @@ class Checks {
 		$at              = 0;
 		$was_at          = 0;
 
+		$failures = array_merge( $failures, $this->check_reader_non_amp_offsets( $context, $decoder_context, $payload ) );
+
 		while ( $at < $end ) {
 			$amp_at = strpos( $payload, '&', $at );
 			if ( false === $amp_at ) {
@@ -348,6 +350,77 @@ class Checks {
 			'decoded'  => $decoded,
 			'failures' => $failures,
 		);
+	}
+
+	/**
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_reader_non_amp_offsets( string $context, string $decoder_context, string $payload ): array {
+		$failures = array();
+		foreach ( $this->reader_non_amp_probe_offsets( $payload ) as $offset ) {
+			$match_byte_length = self::MATCH_BYTE_LENGTH_SENTINEL;
+			try {
+				$chunk = ( $this->targets['read_character_reference'] )( $decoder_context, $payload, $offset, $match_byte_length );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					"{$context}:read-character-reference-non-amp",
+					array(
+						'context' => $context,
+						'at'      => $offset,
+						'class'   => get_class( $error ),
+						'message' => $error->getMessage(),
+					)
+				);
+				break;
+			}
+
+			if ( null !== $chunk || self::MATCH_BYTE_LENGTH_SENTINEL !== $match_byte_length ) {
+				$failures[] = self::failure(
+					'reader-non-amp-match',
+					$context,
+					array(
+						'context'                => $context,
+						'at'                     => $offset,
+						'byte_hex'               => bin2hex( $payload[ $offset ] ),
+						'chunk_type'             => gettype( $chunk ),
+						'chunk_base64'           => is_string( $chunk ) ? base64_encode( $chunk ) : null,
+						'match_byte_length'      => $match_byte_length,
+						'match_byte_length_type' => gettype( $match_byte_length ),
+					)
+				);
+				break;
+			}
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private function reader_non_amp_probe_offsets( string $payload ): array {
+		$length = strlen( $payload );
+		if ( 0 === $length ) {
+			return array();
+		}
+
+		$candidates = array( 0, intdiv( $length, 2 ), $length - 1 );
+		$amp_at     = strpos( $payload, '&' );
+		if ( false !== $amp_at ) {
+			$candidates[] = $amp_at - 1;
+			$candidates[] = $amp_at + 1;
+		}
+
+		$offsets = array();
+		foreach ( $candidates as $offset ) {
+			if ( $offset < 0 || $offset >= $length || '&' === $payload[ $offset ] ) {
+				continue;
+			}
+			$offsets[ $offset ] = true;
+		}
+
+		return array_keys( $offsets );
 	}
 
 	/**

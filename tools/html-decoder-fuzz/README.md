@@ -271,7 +271,8 @@ mutation-tested broken targets:
   followers
 - off-by-one `read_character_reference()` match lengths
 - empty `read_character_reference()` chunks, one-byte matches,
-  null-return match-length mutations, and non-compositional local slice reads
+  null-return match-length mutations, non-ampersand offset matches, and
+  non-compositional local slice reads
 - partial-prefix `attribute_starts_with()` matches
 - partial multi-code-point `attribute_starts_with()` replacement matches
 - non-monotonic `attribute_starts_with()` prefix, extension, and
@@ -282,7 +283,7 @@ For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`,
 `reader-empty-chunk`, `reader-short-match-length`,
 `reader-substring-composition`, `reader-null-mutates-match-length`,
-`byte-no-amp-identity`,
+`reader-non-amp-match`, `byte-no-amp-identity`,
 `attribute-prefix-monotonicity`,
 `attribute-extension-monotonicity`, `attribute-case-monotonicity`, or
 `attribute-multicodepoint-prefix` before running `worker.php`, `runner.php`,

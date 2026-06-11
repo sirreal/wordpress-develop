@@ -733,6 +733,9 @@ check( 'fault target reader-substring-composition exposes local-reader mismatche
 $seen = fault_run( $oracles, 'reader-null-mutates-match-length', 'a&bogus;b' );
 check( 'fault target reader-null-mutates-match-length exposes null match-length mutation', in_array( 'reader-mutated-match-length-on-null', $seen, true ), implode( ',', $seen ) );
 
+$seen = fault_run( $oracles, 'reader-non-amp-match', 'a&amp;b' );
+check( 'fault target reader-non-amp-match exposes non-amp reader matches', in_array( 'reader-non-amp-match', $seen, true ), implode( ',', $seen ) );
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -2073,6 +2076,11 @@ $reader_fault_pipelines = array(
 		'fault'     => 'reader-null-mutates-match-length',
 		'case'      => 7,
 		'signature' => 'reader-mutated-match-length-on-null:text',
+	),
+	array(
+		'fault'     => 'reader-non-amp-match',
+		'case'      => 0,
+		'signature' => 'reader-non-amp-match:text',
 	),
 );
 foreach ( $reader_fault_pipelines as $reader_pipeline ) {

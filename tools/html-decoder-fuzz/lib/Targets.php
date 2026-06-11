@@ -74,6 +74,17 @@ class Targets {
 				};
 				break;
 
+			case 'reader-non-amp-match':
+				$targets['read_character_reference'] = static function ( string $context, string $text, int $at, &$match_byte_length = null ): ?string {
+					$result = \WP_HTML_Decoder::read_character_reference( $context, $text, $at, $match_byte_length );
+					if ( isset( $text[ $at ] ) && '&' !== $text[ $at ] ) {
+						$match_byte_length = 1;
+						return $text[ $at ];
+					}
+					return $result;
+				};
+				break;
+
 			case 'byte-no-amp-identity':
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );

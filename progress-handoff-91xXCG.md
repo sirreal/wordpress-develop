@@ -21,7 +21,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 14: add reader compositionality invariant.
 - [x] Tier 2 item 15: add case-mangled valid-name near-misses.
 - [x] Tier 3 item 16: assert null reader matches leave `match_byte_length` untouched.
-- [ ] Tier 3 items 17-26.
+- [x] Tier 3 item 17: assert non-ampersand reader offsets never match.
+- [ ] Tier 3 items 18-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -112,6 +113,10 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php` passed with the unmatched named-reference match-length regression coverage.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-null-mutates-match-length php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 7 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-null-match-fault-check` reported `reader-mutated-match-length-on-null` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after fixing the decoder and adding the invariant.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, `tests/harness-smoke.php`, and `wpHtmlDecoder.php` after adding non-ampersand reader-offset probes.
+- 2026-06-11: `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php` passed with non-ampersand offset match-length regression coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-non-amp-match php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-non-amp-fault-check` reported `reader-non-amp-match` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding non-ampersand reader-offset probes.
 
 ## Review Log
 
@@ -179,3 +184,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Singer: APPROVE, production decoder semantics and PHPUnit regression coverage.
   - Darwin: APPROVE, fuzzer invariant, fault target, and smoke pipeline coverage.
   - Harvey: APPROVE, integration/docs/progress scope including the decoder fix exposed by the invariant.
+- Tier 3 item 17:
+  - Lorentz: APPROVE, non-ampersand reader-offset invariant semantics and byte-safety.
+  - Arendt: APPROVE, fault target, smoke pipeline, and PHPUnit coverage.
+  - Gibbs: APPROVE, integration/docs/progress scope and commit boundaries.
