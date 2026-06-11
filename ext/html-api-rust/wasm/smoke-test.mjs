@@ -697,6 +697,15 @@ assert.equal(
 	"<select><optgroup><option>one</option></optgroup><optgroup><option>two</option></optgroup></select>",
 );
 
+const selectHrProcessor = WP_HTML_Processor.create_fragment("<select><optgroup><option>one<hr><option>two</select>");
+assert.equal(selectHrProcessor.next_tag("hr"), true);
+assert.deepEqual(selectHrProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "HR"]);
+selectHrProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<select><optgroup><option>one<hr><option>two</select>"),
+	"<select><optgroup><option>one</option></optgroup><hr><option>two</option></select>",
+);
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");

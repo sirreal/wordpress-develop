@@ -2502,7 +2502,14 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
-			if (this.current_namespace === "html" && (tagName === "OPTION" || tagName === "OPTGROUP")) {
+			if (
+				this.current_namespace === "html" &&
+				(
+					tagName === "OPTION" ||
+					tagName === "OPTGROUP" ||
+					(tagName === "HR" && this.#hasOpenHtmlElement("SELECT"))
+				)
+			) {
 				const topIndex = this.open_elements.length - 1;
 				if (
 					topIndex >= 0 &&
@@ -2514,7 +2521,7 @@ export function createHtmlApi(wasm) {
 				}
 
 				if (
-					tagName === "OPTGROUP" &&
+					(tagName === "OPTGROUP" || tagName === "HR") &&
 					topIndex >= 0 &&
 					this.open_elements[topIndex] === "OPTGROUP" &&
 					this.open_element_namespaces[topIndex] === "html" &&
@@ -2805,9 +2812,16 @@ export function createHtmlApi(wasm) {
 		}
 
 		#applySimpleHtmlSemanticClosures(tagName) {
-			if (this.current_namespace === "html" && (tagName === "OPTION" || tagName === "OPTGROUP")) {
+			if (
+				this.current_namespace === "html" &&
+				(
+					tagName === "OPTION" ||
+					tagName === "OPTGROUP" ||
+					(tagName === "HR" && this.#hasOpenHtmlElement("SELECT"))
+				)
+			) {
 				this.#popCurrentHtmlElementIf("OPTION");
-				if (tagName === "OPTGROUP" && this.#hasOpenHtmlElement("SELECT")) {
+				if ((tagName === "OPTGROUP" || tagName === "HR") && this.#hasOpenHtmlElement("SELECT")) {
 					this.#popCurrentHtmlElementIf("OPTGROUP");
 				}
 			}
