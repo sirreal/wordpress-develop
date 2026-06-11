@@ -2141,6 +2141,41 @@ assert.equal(foreignModifiableTextProcessor.set_modifiable_text("Two"), false);
 assert.equal(foreignModifiableTextProcessor.get_updated_html(), "<svg><title>One</title></svg>");
 foreignModifiableTextProcessor.destroy();
 
+for (const [setText, expectedText, expectedHtml] of [
+	["\nAFTER NEWLINE", "\nAFTER NEWLINE", "<textarea>\n\nAFTER NEWLINE</textarea>"],
+	["\rCR", "\nCR", "<textarea>\n\nCR</textarea>"],
+	["\r\nCR-N", "\nCR-N", "<textarea>\n\nCR-N</textarea>"],
+]) {
+	const textareaModifiableTextProcessor = WP_HTML_Processor.create_fragment("<textarea></textarea>");
+	assert.equal(textareaModifiableTextProcessor.next_token(), true);
+	assert.equal(textareaModifiableTextProcessor.set_modifiable_text(setText), true);
+	assert.equal(textareaModifiableTextProcessor.get_modifiable_text(), expectedText);
+	assert.equal(textareaModifiableTextProcessor.get_updated_html(), expectedHtml);
+	textareaModifiableTextProcessor.destroy();
+}
+
+for (const [html, targetTag] of [
+	["<div>", "DIV"],
+	["<svg><path></path></svg>", "PATH"],
+	["<svg><path /></svg>", "PATH"],
+	["<math><mtext></mtext></math>", "MTEXT"],
+	["<math><mspace /></math>", "MSPACE"],
+	["<svg><textarea></textarea></svg>", "TEXTAREA"],
+	["<svg><title></title></svg>", "TITLE"],
+	["<svg><style></style></svg>", "STYLE"],
+	["<svg><script></script></svg>", "SCRIPT"],
+	["<math><textarea></textarea></math>", "TEXTAREA"],
+	["<math><title></title></math>", "TITLE"],
+	["<math><style></style></math>", "STYLE"],
+	["<math><script></script></math>", "SCRIPT"],
+]) {
+	const nonAtomicModifiableTextProcessor = WP_HTML_Processor.create_fragment(html);
+	assert.equal(nonAtomicModifiableTextProcessor.next_tag(targetTag), true);
+	assert.equal(nonAtomicModifiableTextProcessor.set_modifiable_text("test"), false);
+	assert.equal(nonAtomicModifiableTextProcessor.get_updated_html(), html);
+	nonAtomicModifiableTextProcessor.destroy();
+}
+
 const templateNamespaceProcessor = WP_HTML_Processor.create_fragment("<template><svg><template><foreignObject><div></template><div target>");
 assert.equal(templateNamespaceProcessor.next_tag("div"), true);
 assert.deepEqual(
