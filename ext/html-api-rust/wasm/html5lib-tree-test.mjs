@@ -4,6 +4,7 @@ import { loadWasm } from "./wp-html-api-rust.js";
 
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
+const supportedFragmentContexts = new Set(["body", "div"]);
 
 const skippedTests = new Set([
 	"noscript01/line0014",
@@ -60,13 +61,21 @@ function html5libTreeIndentLevel(path, baseDepth) {
 	return level;
 }
 
+function html5libFragmentContextMarkup(fragmentContext) {
+	return `<${fragmentContext}>`;
+}
+
+function html5libFragmentBaseDepth(fragmentContext) {
+	return fragmentContext === null ? 0 : 2;
+}
+
 function buildHtml5libTree(fragmentContext, html) {
 	const processor = fragmentContext === null
 		? WP_HTML_Processor.create_full_parser(html)
-		: WP_HTML_Processor.create_fragment(html, `<${fragmentContext}>`);
+		: WP_HTML_Processor.create_fragment(html, html5libFragmentContextMarkup(fragmentContext));
 	assert.notEqual(processor, null);
 
-	const baseDepth = fragmentContext === "body" ? 2 : 0;
+	const baseDepth = html5libFragmentBaseDepth(fragmentContext);
 	let output = "";
 	let wasText = false;
 	let textNode = "";
@@ -283,7 +292,7 @@ for (const file of files) {
 	for (const test of tests) {
 		summary.total += 1;
 
-		if (test.fragmentContext !== null && test.fragmentContext !== "body") {
+		if (test.fragmentContext !== null && !supportedFragmentContexts.has(test.fragmentContext)) {
 			summary.skippedContext += 1;
 			continue;
 		}

@@ -3040,7 +3040,7 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
-			if (this.#shouldIgnoreBodyContextFragmentStartTag(tagName)) {
+			if (this.#shouldIgnoreInBodyFragmentStartTag(tagName)) {
 				this.#ignoreCurrentToken();
 				return;
 			}
@@ -5215,11 +5215,11 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
-		#shouldIgnoreBodyContextFragmentStartTag(tagName) {
+		#shouldIgnoreInBodyFragmentStartTag(tagName) {
 			return (
 				!this.is_full_parser &&
 				this.context_namespace === "html" &&
-				this.context_node === "BODY" &&
+				(this.context_node === "BODY" || this.context_node === "DIV") &&
 				this.current_namespace === "html" &&
 				this.template_insertion_modes.length === 0 &&
 				(tagName === "BODY" || tagName === "FRAMESET")
