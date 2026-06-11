@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses the WP_HTML_Processor::normalize() static method from the documented HTML API, which returns a normalized string on success or null when it encounters unsupported markup such as mis-nested formatting elements. The function returns true when normalization succeeds (non-null result) and false when it fails (null result). This approach leverages the documented behavior that the processor \"aborts early and stops all processing\" when encountering unsupported markup like the example `<b>one<i>two</b>three</i>`.",
+  "confidence": 92
+}

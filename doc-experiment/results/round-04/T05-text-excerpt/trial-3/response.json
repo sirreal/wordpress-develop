@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment to parse the HTML fragment. It iterates through all tokens using next_token(), checks if each token is a text node (get_token_type() === '#text'), and accumulates the modifiable text content. To handle the code point limit, it counts Unicode code points using mb_strlen with UTF-8 encoding and truncates using mb_substr to avoid cutting multi-byte characters. The function stops early once the maximum code points are reached.",
+  "confidence": 72
+}

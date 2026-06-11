@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through the HTML document token by token. After exhausting all tokens (when next_token() returns false), it checks if the processor paused at an incomplete token using paused_at_incomplete_token(). According to the documentation, this method returns true when the input ended in the middle of a syntax element (like an unfinished tag, unterminated comment, or unclosed SCRIPT), and false when all tokens are complete.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Implemented html_text_excerpt by using WP_HTML_Tag_Processor's next_token() method to iterate through all tokens. For each token with type '#text', I extract the modifiable text (which already has character references decoded) and accumulate it. To respect the max_codepoints limit, I use mb_strlen() and mb_substr() to count and truncate by Unicode codepoints rather than bytes, ensuring we never cut in the middle of a multi-byte character. When max_codepoints is reached or the limit is zero/negative, the function returns the accumulated text.",
+  "confidence": 75
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to construct and populate the HTML fragment. It starts with a template containing the figure structure and a placeholder character in figcaption. It then finds the img tag and uses set_attribute() to add src and alt attributes in the required order, with proper encoding. Next, it creates a new processor instance on the updated HTML, finds the figcaption element, advances to its text node, and uses set_modifiable_text() to replace the placeholder with the actual caption text. The API handles all HTML escaping automatically through set_attribute() and set_modifiable_text().",
+  "confidence": 50
+}

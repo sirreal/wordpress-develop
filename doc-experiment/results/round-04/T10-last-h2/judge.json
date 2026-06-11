@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "All 6 cases pass; no doing_it_wrong/trigger_error. Correct processor (Tag Processor; no tree needed). Every method (next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html) is documented. Uses the documented 'last X seen so far' idiom: one string-literal bookmark name ('last_h2') re-set on each match. Minor non-idiomatic point: calls release_bookmark inside the loop before re-setting the SAME name, which the docs (set_bookmark, line 1109) explicitly say is unnecessary because re-setting a name MOVES the bookmark and does not leak it. Harmless but redundant. Edge cases handled: no-H2 guarded via null check, comment-fake-H2 handled by next_tag, existing class preserved by add_class. Used lowercase 'h2' in tag_name and it matched, which is correct behavior though not explicitly documented for next_tag queries."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "All 6 cases pass; no doing_it_wrong/trigger_error. Cleanest of the three. Single string-literal bookmark name re-set on each match with NO redundant per-iteration release, matching the documented idiom (set_bookmark, line 1109) most faithfully. Adds a defensive has_bookmark() guard and checks seek()'s return before add_class() - both documented methods used correctly. Used lowercase 'h2'. The explanation's claim that an in-comment H2 is 'part of the comment's text content' is slightly imprecise (the comment is its own token, not text), but it correctly concludes next_tag won't match it. No API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 80,
+      "hallucinated_methods": [],
+      "notes": "All 6 cases pass; no doing_it_wrong/trigger_error. Correct processor and all methods documented. However this is the least idiomatic: bookmark names are built programmatically as 'last_h2_' . uniqid(), directly contradicting documented guidance in set_bookmark (line 1107: 'They should not be created with programmatically-made names... only with string-literal names') and the same warning at line 1191. It only avoids hitting the bookmark limit because it releases the previous bookmark each iteration; the docs offer the simpler, recommended single-fixed-name approach (line 1109) which this ignores. Functionally correct, idiomatically wrong. Used uppercase string 'H2' query which matched correctly."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 6/6 with zero doing_it_wrong and zero trigger_error records. The documentation was unusually well-suited to this task. The single most decisive passage is WP_HTML_Tag_Processor::set_bookmark() at line 1109, which states the exact pattern T10 requires: \"Re-setting the same name on every match is the supported idiom for remembering 'the last X seen so far' ... only the final position survives to be used. This is how to track the last occurrence of something in a single pass without hitting the bookmark limit.\" Lines 1076-1102 supply a near-identical worked example (tracking the last LI via a re-set 'last-li' bookmark plus seek + add_class), which is structurally the same as marking the last H2. All three subjects independently reproduced this bookmark-walk + seek + add_class + get_updated_html pipeline correctly.\\n\\nNear-misses worth noting in the explanations rather than the code:\\n1. Trial-3 ignored the explicit warning (lines 1107 and 1191) against programmatic bookmark names and instead generated unique names via uniqid(). It passed only because it also released each prior bookmark, keeping one live bookmark at a time. Had it forgotten the release, a large document (the task warns it 'may contain many H2 tags') could exceed the bookmark limit. The docs warn about this but the subject did not internalize it; the line-1109 idiom that would have avoided the whole problem was present but unused.\\n2. Trial-1 added a redundant release_bookmark inside the loop before re-setting the same name. Line 1109 says re-setting MOVES the bookmark and 'does not leak the old one or require releasing it first,' so the release is dead code. This is a comprehension gap about the move-on-reuse semantics, not an error.\\n3. All three relied on next_tag matching regardless of the casing they passed ('h2', 'H2'). This happens to be correct (the query tag_name is matched case-insensitively, and get_tag returns the uppercased name), and it worked in every trial, but nothing in the next_tag query documentation states that tag_name matching is case-insensitive. This is a latent gap that did not bite here but easily could on a task where a subject assumes the opposite.\\n4. Trials' confidence that comments are skipped is correct (next_tag only stops on real tags, and an H2 inside a comment is part of a comment token), but the docs never explicitly state 'tags inside comments are not matched.' The subjects inferred it correctly, but the reasoning in trial-2's explanation was imprecise about comment tokenization.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() / query parameters ($tag_name)",
+      "problem": "The query documentation never states that tag_name matching is case-insensitive. Subjects passed 'h2', 'H2', and uppercase strings interchangeably; all worked, but this was a guess. A subject who assumed case-sensitive matching (and lowercased a tag that the processor reports uppercased via get_tag) could write subtly broken comparisons.",
+      "suggestion": "In the next_tag $query/$tag_name parameter description, add one sentence: 'Tag name matching is ASCII case-insensitive; \"h2\", \"H2\", and \"H2\" all match the same element. Note that get_tag() returns the uppercased name.' This generalizes to every tag-matching task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (matching semantics / comments)",
+      "problem": "Nothing explicitly states that next_tag never matches tag-like text inside HTML comments (or other non-element tokens). All three subjects relied on this and reasoned about it imprecisely (one called the comment's H2 'text content'). The behavior is load-bearing for any 'real tags only' task.",
+      "suggestion": "Add a short note to next_tag: 'next_tag() only stops on actual HTML element tokens. Tag-like text inside comments, CDATA, or other non-element tokens (e.g. <!-- <h2> --> ) is never matched.' This is a general fact, not specific to this task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / release_bookmark()",
+      "problem": "Line 1109 already explains that re-setting an existing name moves the bookmark without leaking, yet trial-1 still added a redundant release-before-reset and trial-3 generated unique per-iteration names plus releases. The 'do not release before re-setting the same name' point and the 'use a single fixed name' point are stated but easy to miss because they are buried mid-paragraph, while the programmatic-name warning (line 1107) and the move-on-reuse note (line 1109) are in separate places.",
+      "suggestion": "Add a compact 'Tracking the last/Nth match' recipe block directly under set_bookmark contrasting the two patterns: GOOD - one literal name re-set each match, no release needed; BAD - per-iteration uniqid() names or release-before-reset. Co-locating the warning, the move-on-reuse semantics, and a tiny loop snippet would prevent both observed non-idiomatic patterns."
+    }
+  ]
+}

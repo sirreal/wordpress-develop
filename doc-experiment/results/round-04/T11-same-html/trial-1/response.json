@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize() to canonicalize both HTML fragments into a standard form. This method handles all the semantic equivalences mentioned in the task: it normalizes attribute quoting, handles optional/implied closing tags by adding omitted tags, normalizes tag-name case to lowercase, and decodes equivalent character references. If either fragment cannot be fully parsed (normalize returns null), the function returns false. The normalized strings are then compared for exact equality to determine if they represent the same parsed structure.",
+  "confidence": 92
+}

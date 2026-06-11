@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in a BODY context, which properly handles browser-like parsing. It iterates through IMG tags with next_tag('img'), filters out any IMG tags in non-HTML namespaces (like SVG) using get_namespace(), retrieves the src attribute value with get_attribute('src'), and skips empty or missing src attributes. The processor automatically decodes character references in attribute values as browsers would, so no manual decoding is needed.",
+  "confidence": 72
+}

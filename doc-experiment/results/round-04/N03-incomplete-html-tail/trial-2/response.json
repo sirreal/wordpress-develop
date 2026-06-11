@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's built-in `paused_at_incomplete_token()` method, which directly detects when parsing stops due to incomplete syntax (e.g., unclosed tags, unterminated comments, unclosed SCRIPT elements). The function scans all tokens using `next_token()` to ensure the processor examines the entire document, then returns the result of `paused_at_incomplete_token()` to determine if the input ended mid-token.",
+  "confidence": 92
+}

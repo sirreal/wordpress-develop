@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to find the first H1 element and extract its text content. It calls next_tag('h1') to locate the H1, then iterates through tokens using next_token() to collect all #text nodes within the element. The get_modifiable_text() method automatically returns character references in decoded form (e.g., &amp; as &), as documented. The function returns null only when no H1 is found, and returns an empty string if the H1 contains no text (as required).",
+  "confidence": 75
+}

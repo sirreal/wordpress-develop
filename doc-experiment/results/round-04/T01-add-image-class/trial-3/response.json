@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan the HTML document, finding each IMG tag via next_tag() with a tag_name query. For each matched IMG tag, add_class() is called to add the \"wp-image\" class (which safely handles both new and existing classes by appending without duplication). The processor automatically ignores IMG tags within comments since they're not parsed as real tags. Finally, get_updated_html() returns the modified HTML with all queued changes applied.",
+  "confidence": 92
+}

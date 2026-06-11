@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to linearly scan through the HTML document looking for H2 tags via next_tag(). The processor's linear scanning approach naturally handles comments correctly\u2014when it encounters an H2 inside a comment token, that H2 is part of the comment's text content, not a real tag, so next_tag() won't match it. Each H2 found updates a single bookmark named '__last_h2_bookmark', so only the final H2's position is retained. After scanning completes, we seek to that bookmark and use add_class() to add the 'final-section' class, then return the updated HTML via get_updated_html().",
+  "confidence": 75
+}

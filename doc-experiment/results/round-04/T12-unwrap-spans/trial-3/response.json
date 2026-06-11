@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through every token using next_token(). For each token, it checks if the tag name is 'SPAN' and skips both opening and closing span tags by using continue. All other tokens (including text nodes, attributes, nested elements, and their closers) are serialized using serialize_token() and appended to the output string. This automatically produces normalized HTML with double-quoted attributes, canonical text encoding, and closed optional tags.",
+  "confidence": 85
+}

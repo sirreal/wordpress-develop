@@ -1,0 +1,71 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-04/T07-quoted-paragraphs/trial-3/candidate.php",
+    "function": "mark_quoted_paragraphs",
+    "passed": 7,
+    "total": 7,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "pass",
+            "expected": "<blockquote><p class=\"quoted\">Quoted.</p></blockquote><p>Not quoted.</p>",
+            "actual": "<blockquote><p class=\"quoted\">Quoted.</p></blockquote><p>Not quoted.</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "deep-ancestor",
+            "status": "pass",
+            "expected": "<blockquote><div><section><p class=\"quoted\">Deep quote.</p></section></div></blockquote>",
+            "actual": "<blockquote><div><section><p class=\"quoted\">Deep quote.</p></section></div></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "outside-untouched",
+            "status": "pass",
+            "expected": "<p>One</p><p>Two</p>",
+            "actual": "<p>One</p><p>Two</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "implicitly-closed-paragraphs",
+            "status": "pass",
+            "expected": "<blockquote><p class=\"quoted\">first<p class=\"quoted\">second</blockquote>",
+            "actual": "<blockquote><p class=\"quoted\">first<p class=\"quoted\">second</blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "existing-class-preserved",
+            "status": "pass",
+            "expected": "<blockquote><p class=\"lead quoted\">Quote.</p></blockquote>",
+            "actual": "<blockquote><p class=\"lead quoted\">Quote.</p></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "nested-blockquotes",
+            "status": "pass",
+            "expected": "<blockquote><blockquote><p class=\"quoted\">Inner.</p></blockquote><p class=\"quoted\">Outer.</p></blockquote>",
+            "actual": "<blockquote><blockquote><p class=\"quoted\">Inner.</p></blockquote><p class=\"quoted\">Outer.</p></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "mixed-document",
+            "status": "pass",
+            "expected": "<p>intro</p><blockquote><p class=\"quoted\">a</p></blockquote><p>middle</p><blockquote><div><p class=\"quoted\">b</p></div></blockquote>",
+            "actual": "<p>intro</p><blockquote><p class=\"quoted\">a</p></blockquote><p>middle</p><blockquote><div><p class=\"quoted\">b</p></div></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

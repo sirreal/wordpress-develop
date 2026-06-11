@@ -2,6 +2,28 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 4 — Haiku, serialization boundary + modifiable-text fixes
+
+**Train 94.18 (+3.5 vs round-3 train).** T07 +35.0 → 100 (the
+serialize()-vs-get_updated_html() boundary cured the induced
+regression — refine-not-revert vindicated). T08 +8.1, T06 +6.3,
+T10 +2.5. T04 +4.3 but still 49.4: each failing trial absorbed exactly
+ONE of the two template-building facts (placeholder text OR attribute
+order) — they live in distant method docblocks.
+
+Round-5 hypotheses (committed):
+1. 'Building markup from a template' overview section uniting
+   pre-seeded attribute order + placeholder text, verified link-card
+   example unlike any corpus task (T04).
+2. next_tag() 'What this matches' contract: ASCII case-insensitive
+   names, comments/rawtext never match, truncated tails never matched
+   (T01/T03/T10 backlog).
+3. get_attribute() returns decoded values; add_class() idempotency
+   with exact byte-for-byte duplicate check (probe caught and fixed a
+   wrong case-insensitivity claim before commit).
+4. Why the subtree walk uses >= — deep-nesting rule, '>' failure mode
+   verified (T08).
+
 ## Round 3 — Haiku, first edits under test on revised corpus (checkpoint)
 
 **All-19 87.41 / core 85.92 / train 90.66 (−1.9) / held-out 75.22.**
