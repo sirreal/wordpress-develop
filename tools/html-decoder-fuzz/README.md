@@ -97,7 +97,7 @@ strategies for:
 - `attribute_starts_with()` prefixes such as encoded `javascript:`
 - `attribute_starts_with()` prefixes that split multi-code-point named-reference
   replacements such as `&nvlt;`
-- nonexistent lookalikes and ampersand boundaries
+- edit-distance-1 named-reference lookalikes plus ampersand boundaries
 - plain no-ampersand text
 
 `bytes` mode uses separate weighted strategies for uniform random bytes,

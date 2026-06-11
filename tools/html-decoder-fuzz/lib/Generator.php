@@ -16,6 +16,7 @@ class Generator {
 	);
 
 	private const ASCII_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_:/.,;#[](){}\'=+!?*';
+	private const NAME_MUTATION_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 	private Prng $prng;
 	private int $max_bytes;
@@ -28,6 +29,9 @@ class Generator {
 
 	/** @var ?string[] */
 	private ?array $name_sweep_base_names = null;
+
+	/** @var ?array<string, true> */
+	private ?array $name_sweep_base_name_set = null;
 
 	public function __construct( Prng $prng, int $max_bytes = 4096, ?array $named_reference_names = null ) {
 		$this->prng      = $prng;
@@ -289,24 +293,113 @@ class Generator {
 	}
 
 	private function gen_lookalike(): string {
-		$lookalikes = array(
-			'&bogus;',
-			'&NoSuchEntity',
-			'&;',
-			'&amp ;',
-			'&noti;',
-			'&notit;',
-			'&copyright;',
-			'&centerdo;',
-			'&ngE',
-			'&divideontime;',
-			'&amp&amp;',
-			'&&gt;',
-			'&am',
-			'&',
-		);
+		$lookalike = $this->prng->chance( 85 )
+			? $this->edit_distance_lookalike()
+			: $this->legacy_lookalike();
 
-		return $this->plain_text() . $this->prng->choice( $lookalikes ) . $this->plain_text();
+		return $this->plain_text() . $lookalike . $this->plain_text();
+	}
+
+	private function edit_distance_lookalike(): string {
+		for ( $attempt = 0; $attempt < 40; $attempt++ ) {
+			$base      = $this->prng->choice( $this->name_sweep_base_names() );
+			$operation = $this->prng->weighted(
+				array(
+					'delete'     => 25,
+					'insert'     => 25,
+					'substitute' => 25,
+					'transpose'  => 25,
+				)
+			);
+			$mutated = $this->mutate_name_base( $base, $operation );
+
+			if ( '' === $mutated || $mutated === $base || isset( $this->name_sweep_base_name_set()[ $mutated ] ) ) {
+				continue;
+			}
+
+			return '&' . $mutated . ( $this->prng->chance( 80 ) ? ';' : '' );
+		}
+
+		return $this->legacy_lookalike();
+	}
+
+	private function legacy_lookalike(): string {
+		return $this->prng->choice(
+			array(
+				'&bogus;',
+				'&NoSuchEntity',
+				'&;',
+				'&amp ;',
+				'&noti;',
+				'&notit;',
+				'&copyright;',
+				'&centerdo;',
+				'&ngE',
+				'&divideontime;',
+				'&amp&amp;',
+				'&&gt;',
+				'&am',
+				'&',
+			)
+		);
+	}
+
+	private function mutate_name_base( string $base, string $operation ): string {
+		$length = strlen( $base );
+
+		switch ( $operation ) {
+			case 'delete':
+				if ( $length < 2 ) {
+					return '';
+				}
+				$offset = $this->prng->int( 0, $length - 1 );
+				return substr( $base, 0, $offset ) . substr( $base, $offset + 1 );
+
+			case 'insert':
+				$offset = $this->prng->int( 0, $length );
+				return substr( $base, 0, $offset ) . $this->random_name_char() . substr( $base, $offset );
+
+			case 'substitute':
+				if ( 0 === $length ) {
+					return '';
+				}
+				$offset = $this->prng->int( 0, $length - 1 );
+				return substr( $base, 0, $offset ) . $this->random_name_char( $base[ $offset ] ) . substr( $base, $offset + 1 );
+
+			case 'transpose':
+				if ( $length < 2 ) {
+					return '';
+				}
+				$offsets = array();
+				for ( $i = 0; $i < $length - 1; $i++ ) {
+					if ( $base[ $i ] !== $base[ $i + 1 ] ) {
+						$offsets[] = $i;
+					}
+				}
+				if ( array() === $offsets ) {
+					return '';
+				}
+
+				$offset = $this->prng->choice( $offsets );
+				return substr( $base, 0, $offset ) . $base[ $offset + 1 ] . $base[ $offset ] . substr( $base, $offset + 2 );
+		}
+
+		return '';
+	}
+
+	private function random_name_char( ?string $except = null ): string {
+		$alphabet = self::NAME_MUTATION_ALPHABET;
+		$char     = $alphabet[ $this->prng->int( 0, strlen( $alphabet ) - 1 ) ];
+		if ( null === $except || $char !== $except ) {
+			return $char;
+		}
+
+		$offset = strpos( $alphabet, $except );
+		if ( false === $offset ) {
+			return $char;
+		}
+
+		return $alphabet[ ( $offset + $this->prng->int( 1, strlen( $alphabet ) - 1 ) ) % strlen( $alphabet ) ];
 	}
 
 	private function gen_bytes_uniform(): string {
@@ -410,6 +503,17 @@ class Generator {
 
 		$this->name_sweep_base_names = array_keys( $base_names );
 		return $this->name_sweep_base_names;
+	}
+
+	/**
+	 * @return array<string, true>
+	 */
+	private function name_sweep_base_name_set(): array {
+		if ( null === $this->name_sweep_base_name_set ) {
+			$this->name_sweep_base_name_set = array_fill_keys( $this->name_sweep_base_names(), true );
+		}
+
+		return $this->name_sweep_base_name_set;
 	}
 
 	/**

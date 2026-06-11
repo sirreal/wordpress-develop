@@ -260,6 +260,132 @@ function name_sweep_base_names( array $names ): array {
 	return array_keys( $base_names );
 }
 
+/**
+ * @param string[] $base_names
+ * @return array{base_set: array<string, true>, delete: array<string, true>, substitution: array<int, array<string, true>>, transpose: array<string, true>}
+ */
+function lookalike_mutation_indexes( array $base_names ): array {
+	$base_set              = array_fill_keys( $base_names, true );
+	$delete_mutants        = array();
+	$substitution_patterns = array();
+	$transpose_mutants     = array();
+
+	foreach ( $base_names as $base ) {
+		$length = strlen( $base );
+		for ( $i = 0; $i < $length; $i++ ) {
+			$delete = substr( $base, 0, $i ) . substr( $base, $i + 1 );
+			if ( '' !== $delete && ! isset( $base_set[ $delete ] ) ) {
+				$delete_mutants[ $delete ] = true;
+			}
+
+			$substitution_patterns[ $length ][ substr( $base, 0, $i ) . "\0" . substr( $base, $i + 1 ) ] = true;
+		}
+
+		for ( $i = 0; $i < $length - 1; $i++ ) {
+			if ( $base[ $i ] === $base[ $i + 1 ] ) {
+				continue;
+			}
+			$transpose = substr( $base, 0, $i ) . $base[ $i + 1 ] . $base[ $i ] . substr( $base, $i + 2 );
+			if ( ! isset( $base_set[ $transpose ] ) ) {
+				$transpose_mutants[ $transpose ] = true;
+			}
+		}
+	}
+
+	return array(
+		'base_set'     => $base_set,
+		'delete'       => $delete_mutants,
+		'substitution' => $substitution_patterns,
+		'transpose'    => $transpose_mutants,
+	);
+}
+
+/**
+ * @param array{base_set: array<string, true>, delete: array<string, true>, substitution: array<int, array<string, true>>, transpose: array<string, true>} $indexes
+ * @return string[]
+ */
+function lookalike_candidate_classes( string $candidate, array $indexes ): array {
+	if ( '' === $candidate || isset( $indexes['base_set'][ $candidate ] ) ) {
+		return array();
+	}
+
+	$classes = array();
+	if ( isset( $indexes['delete'][ $candidate ] ) ) {
+		$classes['delete'] = true;
+	}
+
+	$length = strlen( $candidate );
+	for ( $i = 0; $i < $length; $i++ ) {
+		$shorter = substr( $candidate, 0, $i ) . substr( $candidate, $i + 1 );
+		if ( isset( $indexes['base_set'][ $shorter ] ) ) {
+			$classes['insert'] = true;
+			break;
+		}
+	}
+
+	$substitution_patterns = $indexes['substitution'][ $length ] ?? array();
+	for ( $i = 0; $i < $length; $i++ ) {
+		$pattern = substr( $candidate, 0, $i ) . "\0" . substr( $candidate, $i + 1 );
+		if ( isset( $substitution_patterns[ $pattern ] ) ) {
+			$classes['substitute'] = true;
+			break;
+		}
+	}
+
+	if ( isset( $indexes['transpose'][ $candidate ] ) ) {
+		$classes['transpose'] = true;
+	}
+
+	return array_keys( $classes );
+}
+
+function sparse_lookalike_operation( string $candidate, string $base ): ?string {
+	$candidate_length = strlen( $candidate );
+	$base_length      = strlen( $base );
+
+	if ( $candidate_length === $base_length - 1 ) {
+		for ( $i = 0; $i < $base_length; $i++ ) {
+			if ( substr( $base, 0, $i ) . substr( $base, $i + 1 ) === $candidate ) {
+				return 'delete';
+			}
+		}
+	}
+
+	if ( $candidate_length === $base_length + 1 ) {
+		for ( $i = 0; $i < $candidate_length; $i++ ) {
+			if ( substr( $candidate, 0, $i ) . substr( $candidate, $i + 1 ) === $base ) {
+				return 'insert';
+			}
+		}
+	}
+
+	if ( $candidate_length !== $base_length ) {
+		return null;
+	}
+
+	$diffs = array();
+	for ( $i = 0; $i < $base_length; $i++ ) {
+		if ( $candidate[ $i ] !== $base[ $i ] ) {
+			$diffs[] = $i;
+		}
+	}
+
+	if ( 1 === count( $diffs ) ) {
+		return 'substitute';
+	}
+
+	if (
+		2 === count( $diffs ) &&
+		$diffs[1] === $diffs[0] + 1 &&
+		$candidate[ $diffs[0] ] === $base[ $diffs[1] ] &&
+		$candidate[ $diffs[1] ] === $base[ $diffs[0] ]
+	) {
+		return 'transpose';
+	}
+
+	return null;
+}
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -435,6 +561,50 @@ check( 'name-sweep generator maps cases deterministically', '' === $name_sweep_m
 check( 'name-sweep cases run both contexts', array( 'both' ) === array_keys( $name_sweep_contexts ), implode( ',', array_keys( $name_sweep_contexts ) ) );
 check( 'name-sweep uses one strategy label', array( 'name-sweep' ) === array_keys( $name_sweep_strategies ), implode( ',', array_keys( $name_sweep_strategies ) ) );
 check( 'name-sweep payloads are oracle-safe', 0 === $name_sweep_unsafe, (string) $name_sweep_unsafe );
+
+$lookalike_indexes    = lookalike_mutation_indexes( $name_sweep_base_names );
+$lookalike_candidates = array();
+for ( $i = 0; $i < 6000; $i++ ) {
+	$generated = ( new Generator( new Prng( "lookalike-smoke:{$i}" ), 4096, $names ) )->generate();
+	if ( 'lookalike' !== $generated['strategy'] ) {
+		continue;
+	}
+	if ( 1 !== preg_match( '/&([A-Za-z0-9]+);?/', $generated['payload'], $match ) ) {
+		continue;
+	}
+
+	$candidate = $match[1];
+	$classes   = lookalike_candidate_classes( $candidate, $lookalike_indexes );
+	if ( array() === $classes ) {
+		continue;
+	}
+
+	$lookalike_candidates[ $candidate ] = true;
+}
+check( 'lookalike generator emits edit-distance-1 name misses', count( $lookalike_candidates ) >= 100, (string) count( $lookalike_candidates ) );
+
+$sparse_lookalike_names   = array( 'abcde;', 'vwxyz' );
+$sparse_lookalike_bases   = name_sweep_base_names( $sparse_lookalike_names );
+$sparse_lookalike_classes = array();
+for ( $i = 0; $i < 6000; $i++ ) {
+	$generated = ( new Generator( new Prng( "lookalike-sparse-smoke:{$i}" ), 4096, $sparse_lookalike_names ) )->generate();
+	if ( 'lookalike' !== $generated['strategy'] || 1 !== preg_match( '/&([A-Za-z0-9]+);?/', $generated['payload'], $match ) ) {
+		continue;
+	}
+
+	foreach ( $sparse_lookalike_bases as $base ) {
+		$operation = sparse_lookalike_operation( $match[1], $base );
+		if ( null !== $operation ) {
+			$sparse_lookalike_classes[ $operation ] = true;
+			break;
+		}
+	}
+}
+check(
+	'lookalike generator exercises every edit operation branch',
+	array() === array_diff( array( 'delete', 'insert', 'substitute', 'transpose' ), array_keys( $sparse_lookalike_classes ) ),
+	implode( ',', array_keys( $sparse_lookalike_classes ) )
+);
 
 $strategies            = array();
 $contexts              = array();

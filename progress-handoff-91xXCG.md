@@ -12,7 +12,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 1 item 5: exercise multi-code-point `attribute_starts_with()` prefix paths.
 - [x] Tier 1 item 6: add range-based numeric code point generation.
 - [x] Tier 2 item 7: add exhaustive deterministic name sweep lane.
-- [ ] Tier 2 items 8-15.
+- [x] Tier 2 item 8: add edit-distance-1 lookalike generation.
+- [ ] Tier 2 items 9-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -62,6 +63,10 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` reproduced the expected attribute decode mismatch for `&Aacutex`.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-name-fault-11593/failure-seed1-case11593/failure.json` minimized the finding from 8 to 7 bytes.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding reviewer-requested checks for distinct `names` runner start-case windows and the faulted name-sweep worker/replay/minimize pipeline.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding edit-distance-1 lookalike generation.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting lookalike samples produce edit-distance-1 name misses and a sparse-name corpus exercises delete, insert, substitute, and transpose branches.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding dynamic lookalikes.
+- 2026-06-11: `git diff --check` passed after adding dynamic lookalikes.
 
 ## Review Log
 
@@ -93,3 +98,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Mendel: APPROVE, generator semantics and deterministic mapping after smoke additions.
   - Pasteur: APPROVE, CLI/worker/replay/minimize/runner integration and mode handling.
   - Popper: APPROVE, smoke and fault-pipeline coverage after requested start-window and name-fault checks.
+- Tier 2 item 8:
+  - Hilbert: APPROVE, generator semantics and single-edit mutation filtering after sparse smoke fix.
+  - Sagan: APPROVE, smoke rigor after branch-specific sparse corpus coverage replaced inferred operation coverage.
+  - Turing: APPROVE, runtime/integration compatibility and deterministic replay behavior.
