@@ -419,6 +419,22 @@ assert.equal(reconstructedAfterParagraphCloseProcessor.get_modifiable_text(), "t
 assert.deepEqual(reconstructedAfterParagraphCloseProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "#text"]);
 reconstructedAfterParagraphCloseProcessor.destroy();
 
+const nestedFormattingCloseProcessor = WP_HTML_Processor.create_full_parser("<b><b></b>X</b>");
+while (
+	nestedFormattingCloseProcessor.next_token() &&
+	(
+		nestedFormattingCloseProcessor.get_token_type() !== "#text" ||
+		nestedFormattingCloseProcessor.get_modifiable_text() !== "X"
+	)
+) {}
+assert.equal(nestedFormattingCloseProcessor.get_modifiable_text(), "X");
+assert.deepEqual(nestedFormattingCloseProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "#text"]);
+while (nestedFormattingCloseProcessor.next_token()) {}
+assert.equal(nestedFormattingCloseProcessor.get_last_error(), null);
+assert.equal(nestedFormattingCloseProcessor.get_unsupported_exception(), null);
+nestedFormattingCloseProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<b><b></b>X</b>"), "<b><b></b>X</b>");
+
 const menuitemReconstructsFormattingProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><b></p><menuitem>");
 assert.equal(menuitemReconstructsFormattingProcessor.next_tag("menuitem"), true);
 assert.deepEqual(menuitemReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "MENUITEM"]);

@@ -2016,11 +2016,11 @@ export function createHtmlApi(wasm) {
 					this.#clearActiveFormattingElementsForTemplateClose(existingIndex);
 					this.#popTemplateInsertionMode();
 				}
-				this.open_elements = this.open_elements.slice(0, existingIndex);
-				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 				if (closingNamespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
 					this.#removeActiveFormattingElementsForClose(tagName);
 				}
+				this.open_elements = this.open_elements.slice(0, existingIndex);
+				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 				this.breadcrumbs = [...this.open_elements];
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
