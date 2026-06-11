@@ -3,6 +3,10 @@
     "title": "Open links in a new tab",
     "difficulty": "basic",
     "split": "train",
+    "role": "smoke",
+    "commonness": "high",
+    "concept": "attributes",
+    "processor": "tag",
     "function": "add_link_targets",
     "cases": [
         {

@@ -3,6 +3,10 @@
     "title": "Remove span wrappers",
     "difficulty": "advanced",
     "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "serialization",
+    "processor": "html",
     "function": "unwrap_spans",
     "cases": [
         {

@@ -3,6 +3,10 @@
     "title": "Collect all links",
     "difficulty": "intermediate",
     "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "text",
+    "processor": "html",
     "function": "collect_links",
     "cases": [
         {

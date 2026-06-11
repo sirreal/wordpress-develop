@@ -68,11 +68,42 @@ def main() -> int:
         print("No results found.", file=sys.stderr)
         return 1
 
+    # Per-category breakdowns from corpus labels (concept, role, split).
+    corpus_dir = Path(__file__).resolve().parent.parent / "corpus"
+    by_concept = {}
+    by_split = {}
+    core_scores = []
+    for task_id, data in task_scores.items():
+        meta_file = corpus_dir / task_id / "tests.json"
+        if not meta_file.exists():
+            continue
+        meta = json.loads(meta_file.read_text())
+        data["labels"] = {
+            "role": meta.get("role"),
+            "commonness": meta.get("commonness"),
+            "concept": meta.get("concept"),
+            "processor": meta.get("processor"),
+            "split": meta.get("split"),
+        }
+        by_concept.setdefault(meta.get("concept"), []).append(data["score"])
+        by_split.setdefault(meta.get("split"), []).append(data["score"])
+        if meta.get("role") == "core":
+            core_scores.append(data["score"])
+
     round_score = sum(t["score"] for t in task_scores.values()) / len(task_scores)
     print(
         json.dumps(
             {
                 "round_score": round(round_score, 2),
+                "core_score": round(sum(core_scores) / len(core_scores), 2)
+                if core_scores
+                else None,
+                "by_split": {
+                    k: round(sum(v) / len(v), 2) for k, v in sorted(by_split.items())
+                },
+                "by_concept": {
+                    k: round(sum(v) / len(v), 2) for k, v in sorted(by_concept.items())
+                },
                 "tasks": task_scores,
             },
             indent=2,

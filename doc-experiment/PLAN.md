@@ -71,22 +71,40 @@ documentation, then editing the docs to fix observed failure modes.
 
 ## Corpus
 
-16 tasks total: 12 train + 4 held-out, mixed difficulty (≈4 basic / 4
-intermediate / 4 advanced in the train set). Held-out tasks are scored only
-at checkpoints (every 3rd round and at the end) and never drive doc edits —
+Revised after Jon's round-1 review (task-first, not API-surface-first):
+19 active tasks — 15 train + 4 held-out. Held-out tasks are scored only at
+checkpoints (every 3rd round and at the end) and never drive doc edits —
 they detect doc edits that game the train set.
+
+- Train core: T03–T12 (text extraction, traversal, serialization,
+  bookmarks) plus N03 (incomplete-input detection via
+  paused_at_incomplete_token), N04 (normalize() failure handling),
+  N06 (HTML img vs SVG image namespace distinction).
+- Train smoke: T01, T02 — basic sanity checks, kept in the round score
+  but reviewed separately; they must not dominate coverage.
+- Held-out: N01 (class removal), N02 (contextual selection with
+  breadcrumbs), N05 (full-document title via create_full_parser),
+  H04 (advanced subtree text extraction).
+- Retired to corpus-retired/ (too close to train patterns to give
+  held-out anti-overfitting value): H01, H02, H03.
+
+Every task carries labels in tests.json — role (core/smoke), commonness
+(high/medium/low), concept (attributes, classes, text, traversal,
+serialization, full-document, failure-handling, namespace), and intended
+processor (tag/html/either). Rounds are reviewed per concept, not only by
+aggregate score, so a high aggregate cannot hide an untaught concept.
 
 Sources of task patterns: dmsnell's gists (HTML serialization builder,
 streaming html-grep, semantic truncation) adapted to the *current* API on
 this branch — the gists use experimental methods that don't exist here —
-plus basic patterns: locate a tag and add a class, read/set attributes,
-extract element text, build a fragment and set properties. Most tasks do not
-name which processor class to use; choosing correctly is part of what the
-docs must teach. Every task ships: prompt, function signature, reference
-implementation, hidden test cases. All references must pass their hidden
-tests in the harness before round 0.
-
-The corpus and reference implementations are reviewed by Jon before round 0.
+plus common content workflows: class manipulation, contextual selection,
+truncated-input detection, normalization failure, full-document parsing,
+namespace distinction. Most tasks do not name which processor class to
+use; choosing correctly is part of what the docs must teach. Every task
+ships: prompt, function signature, reference implementation, hidden test
+cases. All references must pass their hidden tests in the harness, and
+extraction tasks are cross-checked against PHP's Dom\HTMLDocument oracle,
+before they enter a round.
 
 ## Execution harness
 

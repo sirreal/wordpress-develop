@@ -3,6 +3,10 @@
     "title": "Extract table data",
     "difficulty": "intermediate",
     "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "traversal",
+    "processor": "html",
     "function": "table_to_array",
     "cases": [
         {

@@ -3,6 +3,10 @@
     "title": "Compare two HTML fragments",
     "difficulty": "advanced",
     "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "serialization",
+    "processor": "html",
     "function": "is_same_html",
     "cases": [
         {

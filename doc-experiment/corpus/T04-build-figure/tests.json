@@ -3,6 +3,10 @@
     "title": "Build a figure fragment",
     "difficulty": "basic",
     "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "attributes",
+    "processor": "tag",
     "function": "build_figure",
     "cases": [
         {

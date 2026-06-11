@@ -3,6 +3,10 @@
     "title": "Mark paragraphs inside blockquotes",
     "difficulty": "intermediate",
     "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "traversal",
+    "processor": "html",
     "function": "mark_quoted_paragraphs",
     "cases": [
         {

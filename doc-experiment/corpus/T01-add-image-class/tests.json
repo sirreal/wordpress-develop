@@ -3,6 +3,10 @@
     "title": "Add a class to every image",
     "difficulty": "basic",
     "split": "train",
+    "role": "smoke",
+    "commonness": "high",
+    "concept": "classes",
+    "processor": "tag",
     "function": "add_image_class",
     "cases": [
         {

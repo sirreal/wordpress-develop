@@ -3,6 +3,10 @@
     "title": "Mark the last section heading",
     "difficulty": "advanced",
     "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "traversal",
+    "processor": "tag",
     "function": "mark_last_h2",
     "cases": [
         {

@@ -3,6 +3,10 @@
     "title": "Build a heading outline",
     "difficulty": "advanced",
     "split": "holdout",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "text",
+    "processor": "html",
     "function": "heading_outline",
     "cases": [
         {

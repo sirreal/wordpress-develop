@@ -2,6 +2,24 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Corpus revision (after Jon's review)
+
+Per the review: stay task-first; train was saturated for Sonnet and
+clustered on a few patterns. Changes:
+- Added N01 (remove class), N02 (images inside figures), N03 (detect
+  truncated HTML), N04 (can-normalize failure handling), N05 (document
+  title via full parser), N06 (HTML img vs SVG image). All references
+  validated in the harness; N02/N05/N06 cross-checked against
+  Dom\HTMLDocument (including the image→img conversion and
+  img-breaks-out-of-svg parsing behaviors).
+- Held-out is now N01/N02/N05/H04 (class manipulation, contextual
+  selection, full-document, advanced extraction). H01–H03 retired to
+  corpus-retired/. T01/T02 relabeled smoke.
+- All tasks labeled (role, commonness, concept, processor);
+  aggregate-round.py now reports per-concept and per-split means.
+Held-out history note: round-0 held-out (93.47) was measured on the OLD
+held-out set; the new set's baseline comes from the Haiku re-baseline.
+
 ## Round 1 — closer-depth semantics, next_token() rehab, decoded text
 
 Doc edits under test (commits 58140b2235, 2d763ed14f, 0b9366fe70):

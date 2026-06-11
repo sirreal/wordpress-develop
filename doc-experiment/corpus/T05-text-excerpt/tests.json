@@ -3,6 +3,10 @@
     "title": "Plain-text excerpt with a length limit",
     "difficulty": "intermediate",
     "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "text",
+    "processor": "html",
     "function": "html_text_excerpt",
     "cases": [
         {

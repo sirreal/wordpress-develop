@@ -3,6 +3,10 @@
     "title": "Highlight a keyword in text",
     "difficulty": "advanced",
     "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "serialization",
+    "processor": "html",
     "function": "mark_keyword",
     "cases": [
         {

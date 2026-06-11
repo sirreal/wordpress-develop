@@ -1,0 +1,76 @@
+{
+    "id": "N03-incomplete-html-tail",
+    "title": "Detect truncated HTML",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "failure-handling",
+    "processor": "tag",
+    "function": "has_incomplete_html_tail",
+    "cases": [
+        {
+            "id": "complete-document",
+            "args": [
+                "<p>all fine</p>"
+            ],
+            "expected": false
+        },
+        {
+            "id": "cut-inside-attribute",
+            "args": [
+                "<div class=\"x"
+            ],
+            "expected": true
+        },
+        {
+            "id": "cut-inside-comment",
+            "args": [
+                "<!-- unfinished comment"
+            ],
+            "expected": true
+        },
+        {
+            "id": "plain-text",
+            "args": [
+                "plain text only"
+            ],
+            "expected": false
+        },
+        {
+            "id": "trailing-lt-is-text",
+            "args": [
+                "ends with <"
+            ],
+            "expected": false
+        },
+        {
+            "id": "unterminated-script",
+            "args": [
+                "<script>var x = 1;"
+            ],
+            "expected": true
+        },
+        {
+            "id": "cut-after-complete-content",
+            "args": [
+                "<p>fine</p><img src=\"a.jpg"
+            ],
+            "expected": true
+        },
+        {
+            "id": "unclosed-element-is-complete",
+            "args": [
+                "<div>unclosed element"
+            ],
+            "expected": false
+        },
+        {
+            "id": "empty-string",
+            "args": [
+                ""
+            ],
+            "expected": false
+        }
+    ]
+}
