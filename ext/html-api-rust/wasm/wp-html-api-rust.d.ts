@@ -140,6 +140,51 @@ export interface WP_HTML_Unsupported_Exception_Constructor {
 
 export const WP_HTML_Unsupported_Exception: WP_HTML_Unsupported_Exception_Constructor;
 
+export interface WP_HTML_Span {
+	start: number;
+	length: number;
+}
+
+export interface WP_HTML_Span_Constructor {
+	new (start: number | string, length: number | string): WP_HTML_Span;
+}
+
+export const WP_HTML_Span: WP_HTML_Span_Constructor;
+
+export interface WP_HTML_Text_Replacement {
+	start: number;
+	length: number;
+	text: string;
+}
+
+export interface WP_HTML_Text_Replacement_Constructor {
+	new (start: number | string, length: number | string, text: string): WP_HTML_Text_Replacement;
+}
+
+export const WP_HTML_Text_Replacement: WP_HTML_Text_Replacement_Constructor;
+
+export interface WP_HTML_Attribute_Token {
+	name: string;
+	value_starts_at: number;
+	value_length: number;
+	start: number;
+	length: number;
+	is_true: boolean;
+}
+
+export interface WP_HTML_Attribute_Token_Constructor {
+	new (
+		name: string,
+		valueStart: number | string,
+		valueLength: number | string,
+		start: number | string,
+		length: number | string,
+		isTrue: boolean,
+	): WP_HTML_Attribute_Token;
+}
+
+export const WP_HTML_Attribute_Token: WP_HTML_Attribute_Token_Constructor;
+
 export interface WP_HTML_Token {
 	bookmark_name: string | null;
 	namespace: HtmlNamespace;
@@ -161,6 +206,20 @@ export interface WP_HTML_Token_Constructor {
 }
 
 export const WP_HTML_Token: WP_HTML_Token_Constructor;
+
+export interface WP_HTML_Stack_Event {
+	token: WP_HTML_Token;
+	operation: "pop" | "push" | string;
+	provenance: "virtual" | "real" | string;
+}
+
+export interface WP_HTML_Stack_Event_Constructor {
+	readonly POP: "pop";
+	readonly PUSH: "push";
+	new (token: WP_HTML_Token, operation: string, provenance: string): WP_HTML_Stack_Event;
+}
+
+export const WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
 
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
@@ -299,7 +358,11 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 export interface HtmlApi {
 	WP_HTML_Decoder: WP_HTML_Decoder_Constructor;
 	WP_HTML_Unsupported_Exception: WP_HTML_Unsupported_Exception_Constructor;
+	WP_HTML_Span: WP_HTML_Span_Constructor;
+	WP_HTML_Text_Replacement: WP_HTML_Text_Replacement_Constructor;
+	WP_HTML_Attribute_Token: WP_HTML_Attribute_Token_Constructor;
 	WP_HTML_Token: WP_HTML_Token_Constructor;
+	WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

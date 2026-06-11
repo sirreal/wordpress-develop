@@ -32,14 +32,15 @@ node scripts/generate-html5-named-character-references.mjs
 ```
 
 The JavaScript wrapper is an ES module in `wasm/wp-html-api-rust.js`. It exposes
-`loadWasm()`, `WP_HTML_Decoder`, `WP_HTML_Token`,
-`WP_HTML_Unsupported_Exception`, `WP_HTML_Tag_Processor`,
-`WP_HTML_Processor`, `WP_HTML_Doctype_Info`, `scanNextTag()`, and
-`version()`. The tag processor methods call the same Rust core used by the PHP
-extension. The JavaScript API surface mirrors the public WordPress HTML API
-classes with JavaScript naming, including processor factory/static helpers,
-constants, bookmark methods, doctype parsing, serialization helpers, and
-inherited tag-processor methods.
+`loadWasm()`, `WP_HTML_Decoder`, `WP_HTML_Span`,
+`WP_HTML_Text_Replacement`, `WP_HTML_Attribute_Token`, `WP_HTML_Token`,
+`WP_HTML_Stack_Event`, `WP_HTML_Unsupported_Exception`,
+`WP_HTML_Tag_Processor`, `WP_HTML_Processor`, `WP_HTML_Doctype_Info`,
+`scanNextTag()`, and `version()`. The tag processor methods call the same Rust
+core used by the PHP extension. The JavaScript API surface mirrors the public
+WordPress HTML API classes with JavaScript naming, including processor
+factory/static helpers, constants, bookmark methods, doctype parsing,
+serialization helpers, and inherited tag-processor methods.
 
 ```js
 import { loadWasm } from "./wasm/wp-html-api-rust.js";

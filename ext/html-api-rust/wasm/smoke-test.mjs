@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { loadWasm, WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info } from "./wp-html-api-rust.js";
+import {
+	loadWasm,
+	WP_HTML_Attribute_Token as Exported_WP_HTML_Attribute_Token,
+	WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info,
+	WP_HTML_Span as Exported_WP_HTML_Span,
+	WP_HTML_Stack_Event as Exported_WP_HTML_Stack_Event,
+	WP_HTML_Text_Replacement as Exported_WP_HTML_Text_Replacement,
+} from "./wp-html-api-rust.js";
 
 const {
 	WP_HTML_Decoder,
 	WP_HTML_Unsupported_Exception,
+	WP_HTML_Span,
+	WP_HTML_Text_Replacement,
+	WP_HTML_Attribute_Token,
 	WP_HTML_Token,
+	WP_HTML_Stack_Event,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -17,9 +28,17 @@ const {
 assert.equal(version(), "0.1.0");
 assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
 assert.equal(Exported_WP_HTML_Doctype_Info, WP_HTML_Doctype_Info);
+assert.equal(Exported_WP_HTML_Span, WP_HTML_Span);
+assert.equal(Exported_WP_HTML_Text_Replacement, WP_HTML_Text_Replacement);
+assert.equal(Exported_WP_HTML_Attribute_Token, WP_HTML_Attribute_Token);
+assert.equal(Exported_WP_HTML_Stack_Event, WP_HTML_Stack_Event);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
 assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
+assert.equal(typeof WP_HTML_Span, "function");
+assert.equal(typeof WP_HTML_Text_Replacement, "function");
+assert.equal(typeof WP_HTML_Attribute_Token, "function");
 assert.equal(typeof WP_HTML_Token, "function");
+assert.equal(typeof WP_HTML_Stack_Event, "function");
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -57,6 +76,23 @@ const legacyNotReferenceLength = {};
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "&notin", 0, legacyNotReferenceLength), "¬");
 assert.equal(legacyNotReferenceLength.value, 4);
 
+const span = new WP_HTML_Span("14", 28);
+assert.equal(span.start, 14);
+assert.equal(span.length, 28);
+
+const replacement = new WP_HTML_Text_Replacement(14, "28", "updated");
+assert.equal(replacement.start, 14);
+assert.equal(replacement.length, 28);
+assert.equal(replacement.text, "updated");
+
+const attributeToken = new WP_HTML_Attribute_Token("class", 12, "6", 5, 13, false);
+assert.equal(attributeToken.name, "class");
+assert.equal(attributeToken.value_starts_at, 12);
+assert.equal(attributeToken.value_length, 6);
+assert.equal(attributeToken.start, 5);
+assert.equal(attributeToken.length, 13);
+assert.equal(attributeToken.is_true, false);
+
 for (const attributeValue of [
 	"javascript:",
 	"JAVASCRIPT:",
@@ -88,6 +124,12 @@ assert.equal(token.bookmark_name, "mark");
 assert.equal(token.namespace, "html");
 assert.equal(token.node_name, "img");
 assert.equal(token.has_self_closing_flag, false);
+const stackEvent = new WP_HTML_Stack_Event(token, WP_HTML_Stack_Event.PUSH, "real");
+assert.equal(WP_HTML_Stack_Event.POP, "pop");
+assert.equal(WP_HTML_Stack_Event.PUSH, "push");
+assert.equal(stackEvent.token, token);
+assert.equal(stackEvent.operation, "push");
+assert.equal(stackEvent.provenance, "real");
 token.destroy();
 assert.equal(destroyedTokenBookmark, "mark");
 token.free();

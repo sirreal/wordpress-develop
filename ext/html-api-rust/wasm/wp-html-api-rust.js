@@ -609,6 +609,32 @@ export class WP_HTML_Unsupported_Exception extends Error {
 	}
 }
 
+export class WP_HTML_Span {
+	constructor(start, length) {
+		this.start = Number(start);
+		this.length = Number(length);
+	}
+}
+
+export class WP_HTML_Text_Replacement {
+	constructor(start, length, text) {
+		this.start = Number(start);
+		this.length = Number(length);
+		this.text = String(text);
+	}
+}
+
+export class WP_HTML_Attribute_Token {
+	constructor(name, valueStart, valueLength, start, length, isTrue) {
+		this.name = name;
+		this.value_starts_at = Number(valueStart);
+		this.value_length = Number(valueLength);
+		this.start = Number(start);
+		this.length = Number(length);
+		this.is_true = Boolean(isTrue);
+	}
+}
+
 export class WP_HTML_Token {
 	constructor(bookmarkName, nodeName, hasSelfClosingFlag, onDestroy = null) {
 		this.bookmark_name = bookmarkName;
@@ -628,6 +654,17 @@ export class WP_HTML_Token {
 
 	free() {
 		this.destroy();
+	}
+}
+
+export class WP_HTML_Stack_Event {
+	static POP = "pop";
+	static PUSH = "push";
+
+	constructor(token, operation, provenance) {
+		this.token = token;
+		this.operation = String(operation);
+		this.provenance = String(provenance);
 	}
 }
 
@@ -4457,7 +4494,11 @@ export function createHtmlApi(wasm) {
 	return {
 		WP_HTML_Decoder,
 		WP_HTML_Unsupported_Exception,
+		WP_HTML_Span,
+		WP_HTML_Text_Replacement,
+		WP_HTML_Attribute_Token,
 		WP_HTML_Token,
+		WP_HTML_Stack_Event,
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
 		WP_HTML_Doctype_Info,
