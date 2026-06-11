@@ -257,6 +257,20 @@ assert.equal(unsupportedActiveFormattingProcessor.get_last_error(), WP_HTML_Proc
 assert.notEqual(unsupportedActiveFormattingProcessor.get_unsupported_exception(), null);
 unsupportedActiveFormattingProcessor.destroy();
 
+for (const html of [
+	'<a><strong>Click <span supported><a unsupported><big>Here</big></a></strong></a>',
+	'<a><div supported><a unsupported></div></a>',
+]) {
+	const unsupportedAdoptionProcessor = WP_HTML_Processor.create_fragment(html);
+	while (unsupportedAdoptionProcessor.next_token() && unsupportedAdoptionProcessor.get_attribute("supported") === null) {
+	}
+	assert.equal(unsupportedAdoptionProcessor.get_attribute("supported"), true);
+	assert.equal(unsupportedAdoptionProcessor.get_last_error(), null);
+	assert.equal(unsupportedAdoptionProcessor.next_token(), false);
+	assert.equal(unsupportedAdoptionProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	unsupportedAdoptionProcessor.destroy();
+}
+
 const fullParserText = WP_HTML_Processor.create_full_parser("text");
 assert.equal(fullParserText.next_tag("body"), true);
 assert.equal(fullParserText.get_tag(), "BODY");

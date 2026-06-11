@@ -1842,6 +1842,15 @@ export function createHtmlApi(wasm) {
 			if (tagName === "A") {
 				const anchorIndex = this.#lastOpenElementIndex("A", "html");
 				if (anchorIndex !== -1) {
+					const activeAnchorIndex = this.active_formatting_elements.lastIndexOf("A");
+					if (
+						(activeAnchorIndex !== -1 && activeAnchorIndex < this.active_formatting_elements.length - 1) ||
+						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, anchorIndex)
+					) {
+						this.#bailUnsupported("Cannot process nested A elements which require adoption agency reconstruction.");
+						return true;
+					}
+
 					this.#queueVirtualPopsFrom(anchorIndex);
 					this.#removeActiveFormattingElement("A");
 					return true;
