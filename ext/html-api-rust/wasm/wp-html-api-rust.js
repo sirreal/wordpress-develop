@@ -217,6 +217,17 @@ const TABLE_ROW_MODE_IGNORED_END_TAGS = new Set([
 	"TH",
 ]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
+const FORM_TABLE_DESCENDANT_ELEMENTS = new Set([
+	"CAPTION",
+	"COLGROUP",
+	"TABLE",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
 const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
 	"CAPTION",
 	"COL",
@@ -1849,6 +1860,20 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
+				if (
+					allowVirtualPreclosures &&
+					tagName === "FORM" &&
+					closingNamespace === "html" &&
+					existingIndex !== -1 &&
+					this.#hasOnlyTableElementsAfter(existingIndex)
+				) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.#queueVirtualPopsFrom(existingIndex + 1);
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (this.#shouldBailUnsupportedFormCloser(tagName, closingNamespace, existingIndex)) {
 					this.#bailUnsupported("Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.");
 					return;
@@ -1951,6 +1976,18 @@ export function createHtmlApi(wasm) {
 
 			if (this.#shouldBailUnsupportedTableFosterParenting(tagName, false)) {
 				this.#bailUnsupported("Foster parenting is not supported.");
+				return;
+			}
+
+			if (
+				this.current_namespace === "html" &&
+				tagName === "FORM" &&
+				!this.#hasOpenHtmlElement("TEMPLATE") &&
+				this.#hasOpenHtmlElement("FORM")
+			) {
+				this.current_token_namespace = this.current_namespace;
+				this.breadcrumbs = [...this.open_elements];
+				this.skip_current_token = true;
 				return;
 			}
 
@@ -3401,6 +3438,23 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#hasOnlyTableElementsAfter(index) {
+			if (index >= this.open_elements.length - 1) {
+				return false;
+			}
+
+			for (let i = index + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" ||
+					!FORM_TABLE_DESCENDANT_ELEMENTS.has(this.open_elements[i])
+				) {
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {

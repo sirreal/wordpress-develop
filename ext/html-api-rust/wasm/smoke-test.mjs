@@ -774,6 +774,15 @@ for (const html of [
 	assert.equal(WP_HTML_Processor.normalize(html), null);
 }
 
+assert.equal(
+	WP_HTML_Processor.normalize('<form id><table te"><script></script><td srce" ID/></form><form claslicate>'),
+	'<form id><table te"><script></script><tbody><tr><td srce" id></td></tr></tbody></table></form>',
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<form><table><caption></form><form >"),
+	"<form><table><caption></caption></table></form>",
+);
+
 const selectOptionProcessor = WP_HTML_Processor.create_fragment("<select><option>one<option>two</select>");
 assert.equal(selectOptionProcessor.next_tag({ breadcrumbs: ["SELECT", "OPTION"], match_offset: 2 }), true);
 assert.deepEqual(selectOptionProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "OPTION"]);
