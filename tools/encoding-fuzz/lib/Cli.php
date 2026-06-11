@@ -103,15 +103,21 @@ class Cli {
 	}
 
 	public static function environment_metadata( Oracles $oracles ): array {
+		$forced_pcre_u = getenv( 'ENCODING_FUZZ_FORCE_PCRE_U' );
+		$pcre_override = false !== $forced_pcre_u && in_array( strtolower( $forced_pcre_u ), array( '0', 'false', 'no', 'off' ), true )
+			? 'off'
+			: null;
+
 		return array(
-			'php'     => PHP_VERSION,
-			'os'      => PHP_OS_FAMILY,
-			'oracles' => $oracles->names(),
+			'php'             => PHP_VERSION,
+			'os'              => PHP_OS_FAMILY,
+			'oracles'         => $oracles->names(),
 			// Which environment branch of utf8.php loaded (PCRE vs fallback).
-			'pcre_u'  => function_exists( '_wp_can_use_pcre_u' ) ? _wp_can_use_pcre_u() : null,
+			'pcre_u'          => function_exists( '_wp_can_use_pcre_u' ) ? _wp_can_use_pcre_u() : null,
+			'pcre_u_override' => $pcre_override,
 			// Mark fault-injected artifacts so they can never be mistaken
 			// for real findings.
-			'fault'   => getenv( 'ENCODING_FUZZ_FAULT' ) ?: null,
+			'fault'           => getenv( 'ENCODING_FUZZ_FAULT' ) ?: null,
 		);
 	}
 }

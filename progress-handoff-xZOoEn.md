@@ -126,3 +126,32 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-xZOoEn
   - Reviewer 2: noted smoke skipped the new CLI/artifact path; satisfied after adding CLI smoke coverage, fail-closed artifact writes, and manual faulted artifact verification.
   - Reviewer 3: noted count/fingerprint/runtime and oracle-event ordering gaps; satisfied after pinning corpus count/fingerprint, updating smoke docs, and making CLI smoke parse NDJSON by record type.
 - Commit: this step commit.
+
+### Step 6: environment matrix
+
+- Status: done; included in the step 6 commit.
+- Prior step commit: `4005f40d3c`.
+- Scope:
+  - Add a compact environment matrix command that runs the fixed corpus under current environment, forced no-PCRE-u target branch, simulated PHP 9 native `utf8_encode()` / `utf8_decode()` absence, and missing primary mbstring oracle functions.
+  - Add a fuzzer-only PCRE-u override in `wp-stubs.php` so the fallback `wp_has_noncharacters()` branch can be exercised without a separate PHP build.
+  - Document that a true no-mbstring target run still requires a PHP build without mbstring because the local harness fails closed without its mb-backed primary oracle.
+- Verification:
+  - `php -l tools/encoding-fuzz/lib/Checks.php`
+  - `php -l tools/encoding-fuzz/lib/Targets.php`
+  - `php -l tools/encoding-fuzz/lib/Bootstrap.php`
+  - `php -l tools/encoding-fuzz/lib/Cli.php`
+  - `php -l tools/encoding-fuzz/lib/wp-stubs.php`
+  - `php -l tools/encoding-fuzz/matrix.php`
+  - `php -l tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/matrix.php`
+  - `env ENCODING_FUZZ_FORCE_PCRE_U=0 php tools/encoding-fuzz/matrix.php`
+  - `php tools/encoding-fuzz/corpus.php --external none`
+  - `php -d disable_functions=utf8_encode,utf8_decode tools/encoding-fuzz/corpus.php --external none`
+  - `php tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/worker.php --seed 1 --cases 200 --external none`
+  - `git diff --cached --check`
+- Review gate: satisfied by 3 adversarial reviewers.
+  - Reviewer 1: initially noted PCRE override metadata and force-on risks; satisfied after adding `pcre_u_override` metadata and making the override force-off only.
+  - Reviewer 2: initially found matrix pipe-deadlock, exit-code, and NDJSON-shape issues; satisfied after nonblocking pipe reads, harness-error exit `2`, and stricter record parsing.
+  - Reviewer 3: initially found the matrix exit-code contract mismatch; satisfied after preserving exit `2` for harness-error-shaped failures and checking docs/progress accuracy.
+- Commit: this step commit.

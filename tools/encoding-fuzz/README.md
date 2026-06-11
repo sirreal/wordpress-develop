@@ -178,6 +178,20 @@ Run the deterministic short-boundary corpus:
 php tools/encoding-fuzz/corpus.php
 ```
 
+Run the compact environment matrix:
+
+```sh
+php tools/encoding-fuzz/matrix.php
+```
+
+The matrix runs the fixed corpus in the current environment, with the
+fuzzer's PCRE-u branch forced off, with native `utf8_encode()` /
+`utf8_decode()` disabled to simulate PHP 9, and with the primary mbstring
+oracle functions disabled to verify the harness fails closed. A true
+no-mbstring target run still requires a PHP build without mbstring; the
+local harness intentionally refuses to fuzz without the mb-backed primary
+oracle.
+
 Run parallel lanes for a minute (artifacts under `artifacts/encoding-fuzz/`):
 
 ```sh

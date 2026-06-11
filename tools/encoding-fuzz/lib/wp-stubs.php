@@ -8,8 +8,13 @@ if ( ! function_exists( '_wp_can_use_pcre_u' ) ) {
 	function _wp_can_use_pcre_u( $set = null ): bool {
 		static $utf8_pcre = null;
 		if ( null === $utf8_pcre ) {
-			// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
-			$utf8_pcre = false !== @preg_match( '/^./u', 'a' );
+			$forced = getenv( 'ENCODING_FUZZ_FORCE_PCRE_U' );
+			if ( false !== $forced && in_array( strtolower( $forced ), array( '0', 'false', 'no', 'off' ), true ) ) {
+				$utf8_pcre = false;
+			} else {
+				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+				$utf8_pcre = false !== @preg_match( '/^./u', 'a' );
+			}
 		}
 		return (bool) $utf8_pcre;
 	}
