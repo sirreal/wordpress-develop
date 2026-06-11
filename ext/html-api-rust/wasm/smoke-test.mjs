@@ -794,6 +794,36 @@ assert.equal(foreignObjectProcessor.get_namespace(), "html");
 assert.deepEqual(foreignObjectProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "FOREIGNOBJECT", "DIV"]);
 foreignObjectProcessor.destroy();
 
+const mathProcessor = WP_HTML_Processor.create_fragment("<mo><image /></mo><math><image /><mo><image /></mo></math>");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "MO");
+assert.equal(mathProcessor.get_namespace(), "html");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "IMG");
+assert.equal(mathProcessor.get_namespace(), "html");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.is_tag_closer(), true);
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "MATH");
+assert.equal(mathProcessor.get_namespace(), "math");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "IMAGE");
+assert.equal(mathProcessor.get_namespace(), "math");
+assert.equal(mathProcessor.get_qualified_tag_name(), "image");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "MO");
+assert.equal(mathProcessor.get_namespace(), "math");
+assert.equal(mathProcessor.next_token(), true);
+assert.equal(mathProcessor.get_tag(), "IMG");
+assert.equal(mathProcessor.get_namespace(), "html");
+mathProcessor.destroy();
+
+const mathQualifiedProcessor = WP_HTML_Processor.create_fragment('<math><mi definitionurl="x"></mi></math>');
+assert.equal(mathQualifiedProcessor.next_tag("mi"), true);
+assert.equal(mathQualifiedProcessor.get_namespace(), "math");
+assert.equal(mathQualifiedProcessor.get_qualified_attribute_name("definitionurl"), "definitionURL");
+mathQualifiedProcessor.destroy();
+
 const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
 assert.equal(foreignModifiableTextProcessor.next_tag("title"), true);
 assert.equal(foreignModifiableTextProcessor.get_namespace(), "svg");
