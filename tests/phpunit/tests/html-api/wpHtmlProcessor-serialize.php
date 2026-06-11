@@ -135,6 +135,23 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that XMP contents are not escaped, as they are not parsed like text nodes are.
+	 *
+	 * XMP contents are parsed as raw text: character references are never decoded.
+	 * Escaping the contents would change the document, e.g. a "<" would be replaced
+	 * by the literal text "&lt;" after serializing and re-parsing.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_xmp_contents_are_not_escaped() {
+		$this->assertSame(
+			"<xmp>1 < 2 &amp; apples > or\u{FFFD}anges</xmp>",
+			WP_HTML_Processor::normalize( "<xmp>1 < 2 &amp; apples > or\x00anges</xmp>" ),
+			'Should have preserved text inside an XMP element, except for replacing NULL bytes.'
+		);
+	}
+
+	/**
 	 * Ensures that the contents of IFRAME, NOEMBED, and NOFRAMES elements are
 	 * preserved when serializing.
 	 *
@@ -379,6 +396,7 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 			'IFRAME content'       => array( "<iframe>a\x00b</iframe>", "<iframe>a\u{FFFD}b</iframe>" ),
 			'NOEMBED content'      => array( "<noembed>a\x00b</noembed>", "<noembed>a\u{FFFD}b</noembed>" ),
 			'NOFRAMES content'     => array( "<noframes>a\x00b</noframes>", "<noframes>a\u{FFFD}b</noframes>" ),
+			'XMP content'          => array( "<xmp>a\x00b</xmp>", "<xmp>a\u{FFFD}b</xmp>" ),
 			'Comment text'         => array( "<!-- \x00 -->", "<!-- \u{FFFD} -->" ),
 		);
 	}

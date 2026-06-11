@@ -1347,8 +1347,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @since 6.7.0
 	 * @since 6.9.0 Converted from protected to public method.
-	 * @since 7.1.0 Contents of IFRAME, NOEMBED, and NOFRAMES elements are
-	 *              serialized literally instead of being dropped.
+	 * @since 7.1.0 Contents of IFRAME, NOEMBED, NOFRAMES, and XMP elements are
+	 *              serialized literally instead of being dropped or escaped.
 	 *
 	 * @return string Serialization of token, or empty string if no serialization exists.
 	 */
@@ -1503,7 +1503,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 *
 				 * This is safe because character references are never decoded in
 				 * their contents. RAWTEXT contents (IFRAME, NOEMBED, NOFRAMES,
-				 * STYLE) cannot contain their own closing tag, so the closer
+				 * STYLE, XMP) cannot contain their own closing tag, so the closer
 				 * appended below cannot be matched early. SCRIPT data may contain
 				 * escaped closers (e.g. within `<!-- -->`), but re-parsing the
 				 * identical bytes follows the same tokenization rules that produced
@@ -1516,8 +1516,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				case 'NOFRAMES':
 				case 'SCRIPT':
 				case 'STYLE':
+				case 'XMP':
 					break;
 
+				/*
+				 * The contents of TEXTAREA and TITLE are parsed as RCDATA, in which
+				 * character references are decoded, so the decoded modifiable text
+				 * must be re-escaped to preserve the document's contents.
+				 */
 				default:
 					$text = htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
 			}
