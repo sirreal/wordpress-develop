@@ -107,11 +107,28 @@
 > Grammar-level truncations (`[`, `[a=`, `div >`, `div,`) stay invalid —
 > browsers reject those too. No Trac tickets for any of this.
 >
-> **Still open from the original follow-up list:** the O(1) identity-escape
-> decode (perf only, do only if asked) and the invalid-UTF-8 input policy
-> (contract decision; see the escape-decode note above), plus the tooling
-> items in this file's hardening notes (self-check decoupling, class-NUL
-> injection, vacuous-assertion rate, quirks-mode single-oracle gap).
+> **O(1) identity-escape decode — IMPLEMENTED (2026-06-11, perf only):**
+> `consume_escaped_codepoint()`'s identity arm no longer copies the input
+> tail per escape (`mb_substr( substr( … ) )`); it sizes the code point in
+> place with `_wp_scan_utf8( $input, $at, $invalid_length, 4, 1 )`
+> (`compat-utf8.php`, WP 6.9). 200KB all-escape selector: 180 ms → 45 ms,
+> scaling now linear (47/90/180 ms at 200/400/800KB; previously ~4× per
+> doubling). Behavior is byte-identical by construction: escapes of
+> *invalid* UTF-8 still fall through to the literal old `mb_substr()` line
+> (re-verified ~74M differential cases, 0 mismatches, including non-default
+> `mb_substitute_character` settings), so the open invalid-UTF-8 policy
+> decision is untouched — and that fallback path remains quadratic for
+> selectors made of escaped invalid bytes (accepted; developer-supplied
+> input). Caution recorded in-code: `_wp_utf8_codepoint_span()` looks like
+> the natural helper but passes `max_bytes = null`, making its ASCII
+> fast-path O(tail) per call — quadratic again. Escape pin coverage grew to
+> 14 cases (2/3/4-byte chars incl. at-EOF, NUL, each invalid-byte class).
+>
+> **Still open from the original follow-up list:** the invalid-UTF-8 input
+> policy (contract decision; see the escape-decode note above), plus the
+> tooling items in this file's hardening notes (self-check decoupling,
+> class-NUL injection, vacuous-assertion rate, quirks-mode single-oracle
+> gap).
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` (trunk + merged `html-api/add-css-selector-parser`).
