@@ -187,6 +187,8 @@ const IN_BODY_IGNORED_START_TAGS = new Set([
 	"TR",
 ]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
+const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", "MTEXT"]);
+const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"COLGROUP",
 	"TABLE",
@@ -3010,7 +3012,7 @@ export function createHtmlApi(wasm) {
 				this.pending_real_parser_state = this.parser_state;
 				return;
 			}
-			this.current_token_namespace = namespaceForTag(super.get_tag(), this.current_namespace);
+			this.current_token_namespace = this.#namespaceForCurrentStartTag(super.get_tag());
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
 			if (this.current_token_namespace === "html" && tagName === "TEMPLATE") {
@@ -4674,8 +4676,26 @@ export function createHtmlApi(wasm) {
 
 			return normalizeTagNameForNamespace(
 				rawTagName,
-				namespaceForTag(rawTagName, this.current_namespace),
+				this.#namespaceForCurrentStartTag(rawTagName),
 			);
+		}
+
+		#namespaceForCurrentStartTag(tagName) {
+			if (
+				this.current_namespace === "html" &&
+				MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS.has(tagName)
+			) {
+				const topIndex = this.open_elements.length - 1;
+				if (
+					topIndex >= 0 &&
+					this.open_element_namespaces[topIndex] === "math" &&
+					MATHML_TEXT_INTEGRATION_POINT_ELEMENTS.has(this.open_elements[topIndex])
+				) {
+					return "math";
+				}
+			}
+
+			return namespaceForTag(tagName, this.current_namespace);
 		}
 
 		#lastOpenElementIndex(tagName, namespaceName) {

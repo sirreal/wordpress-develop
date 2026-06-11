@@ -3176,6 +3176,21 @@ assert.equal(
 	"<math><mo><img></mo><mn>1</mn></math>",
 );
 
+const mathTextIntegrationFragmentProcessor = WP_HTML_Processor.create_fragment(
+	"<b></b><mglyph/><i></i><malignmark/><u></u><ms/>X",
+	"<math><ms>",
+);
+assert.equal(mathTextIntegrationFragmentProcessor.next_tag("mglyph"), true);
+assert.equal(mathTextIntegrationFragmentProcessor.get_namespace(), "math");
+assert.deepEqual(mathTextIntegrationFragmentProcessor.get_breadcrumbs(), ["HTML", "MS", "MGLYPH"]);
+assert.equal(mathTextIntegrationFragmentProcessor.next_tag("malignmark"), true);
+assert.equal(mathTextIntegrationFragmentProcessor.get_namespace(), "math");
+assert.deepEqual(mathTextIntegrationFragmentProcessor.get_breadcrumbs(), ["HTML", "MS", "MALIGNMARK"]);
+assert.equal(mathTextIntegrationFragmentProcessor.next_tag("ms"), true);
+assert.equal(mathTextIntegrationFragmentProcessor.get_namespace(), "html");
+assert.deepEqual(mathTextIntegrationFragmentProcessor.get_breadcrumbs(), ["HTML", "MS", "MS"]);
+mathTextIntegrationFragmentProcessor.destroy();
+
 const svgTableNameProcessor = WP_HTML_Processor.create_fragment("<svg><tr><td>cell");
 assert.equal(svgTableNameProcessor.next_tag("tr"), true);
 assert.equal(svgTableNameProcessor.get_namespace(), "svg");
