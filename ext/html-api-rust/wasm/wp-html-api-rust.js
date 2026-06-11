@@ -258,6 +258,30 @@ const TABLE_CELL_MODE_IGNORED_END_TAGS = new Set([
 	"HTML",
 ]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
+const FRAMESET_NOT_OK_START_TAGS = new Set([
+	"APPLET",
+	"AREA",
+	"BODY",
+	"BR",
+	"BUTTON",
+	"DD",
+	"DT",
+	"EMBED",
+	"HR",
+	"IFRAME",
+	"IMG",
+	"KEYGEN",
+	"LI",
+	"LISTING",
+	"MARQUEE",
+	"OBJECT",
+	"PRE",
+	"SELECT",
+	"TABLE",
+	"TEXTAREA",
+	"WBR",
+	"XMP",
+]);
 const TEMPLATE_TABLE_WRAPPER_START_TAGS = new Set(["CAPTION", "COLGROUP", "TBODY", "TFOOT", "THEAD"]);
 const FORM_TABLE_DESCENDANT_ELEMENTS = new Set([
 	"CAPTION",
@@ -2702,6 +2726,15 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (
+					this.is_full_parser &&
+					this.current_namespace !== "html" &&
+					tokenType === "#text" &&
+					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_GENERIC
+				) {
+					this.frameset_ok = false;
+				}
+
 				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements, tokenName];
 				return;
@@ -3720,7 +3753,7 @@ export function createHtmlApi(wasm) {
 
 						if (tokenType === "#text" && !isWhitespaceText && !isNullText) {
 							this.frameset_ok = false;
-						} else if (tokenType === "#tag" && !isCloser && !this.#isHiddenInputStartTag(tagName)) {
+						} else if (tokenType === "#tag" && !isCloser && this.#startTagClearsFramesetOk(tagName)) {
 							this.frameset_ok = false;
 						}
 
@@ -4420,6 +4453,14 @@ export function createHtmlApi(wasm) {
 
 			const typeAttribute = this.get_attribute("type");
 			return typeof typeAttribute === "string" && typeAttribute.toLowerCase() === "hidden";
+		}
+
+		#startTagClearsFramesetOk(tagName) {
+			if (tagName === "INPUT") {
+				return !this.#isHiddenInputStartTag(tagName);
+			}
+
+			return FRAMESET_NOT_OK_START_TAGS.has(tagName);
 		}
 
 		#firstForeignElementToPopForHtmlBreakout() {

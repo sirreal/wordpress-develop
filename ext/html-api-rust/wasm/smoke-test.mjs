@@ -2278,8 +2278,8 @@ for (const [html, message] of [
 for (const html of [
 	"<body><frameset></frameset><p>x</p>",
 	"text<frameset></frameset><p>x</p>",
-	"<div><frameset></frameset><p>x</p>",
 	'<input type="text"><frameset></frameset><p>x</p>',
+	"<svg>x</svg><frameset></frameset><p>x</p>",
 ]) {
 	const ignoredFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
 	const visitedFramesetTags = [];
@@ -2294,15 +2294,22 @@ for (const html of [
 	ignoredFramesetProcessor.destroy();
 }
 
-const hiddenInputFramesetProcessor = WP_HTML_Processor.create_full_parser('<input type="hidden"><frameset>');
-while (hiddenInputFramesetProcessor.next_token()) {
+for (const html of [
+	'<input type="hidden"><frameset>',
+	"<div><frameset>",
+	"<svg>\0</svg><frameset>",
+	"<svg> </svg><frameset>",
+]) {
+	const nonIgnoredFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
+	while (nonIgnoredFramesetProcessor.next_token()) {
+	}
+	assert.equal(nonIgnoredFramesetProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(
+		nonIgnoredFramesetProcessor.get_unsupported_exception().message,
+		"Cannot process non-ignored FRAMESET tags.",
+	);
+	nonIgnoredFramesetProcessor.destroy();
 }
-assert.equal(hiddenInputFramesetProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(
-	hiddenInputFramesetProcessor.get_unsupported_exception().message,
-	"Cannot process non-ignored FRAMESET tags.",
-);
-hiddenInputFramesetProcessor.destroy();
 
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");
 while (
