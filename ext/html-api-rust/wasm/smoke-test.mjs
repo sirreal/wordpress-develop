@@ -404,7 +404,7 @@ while (
 	)
 ) {}
 assert.equal(nestedStaleFormattingCloserProcessor.get_modifiable_text(), "TEST");
-assert.deepEqual(nestedStaleFormattingCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.deepEqual(nestedStaleFormattingCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "#text"]);
 nestedStaleFormattingCloserProcessor.destroy();
 
 const reconstructedAfterParagraphCloseProcessor = WP_HTML_Processor.create_full_parser("<p><b></p>text");

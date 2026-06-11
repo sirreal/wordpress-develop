@@ -1948,6 +1948,14 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldIgnoreAdoptionAgencyEndTagWithStaleEntry(tagName, closingNamespace)) {
+					this.#removeStaleActiveFormattingElementsForClose(tagName);
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (this.#shouldIgnoreAdoptionAgencyEndTagOutsideScope(tagName, closingNamespace, existingIndex)) {
 					this.#removeActiveFormattingElementsForClose(tagName);
 					this.current_token_namespace = this.current_namespace;
@@ -2943,20 +2951,27 @@ export function createHtmlApi(wasm) {
 			return false;
 		}
 
-		#removeActiveFormattingElementsForClose(tagName) {
+		#removeStaleActiveFormattingElementsForClose(tagName) {
 			let openCount = this.#countOpenHtmlElements(tagName);
 			let activeCount = this.active_formatting_elements.reduce((count, entry) => (
 				entry.tagName === tagName && entry.namespaceName === "html" ? count + 1 : count
 			), 0);
+			let removed = false;
 
 			for (let i = this.active_formatting_elements.length - 1; i >= 0 && activeCount > openCount; i -= 1) {
 				const entry = this.active_formatting_elements[i];
 				if (entry.tagName === tagName && entry.namespaceName === "html") {
 					this.active_formatting_elements.splice(i, 1);
 					activeCount -= 1;
+					removed = true;
 				}
 			}
 
+			return removed;
+		}
+
+		#removeActiveFormattingElementsForClose(tagName) {
+			this.#removeStaleActiveFormattingElementsForClose(tagName);
 			return this.#removeActiveFormattingElement(tagName);
 		}
 
@@ -4099,6 +4114,22 @@ export function createHtmlApi(wasm) {
 				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
 				this.#hasHtmlScopeBoundaryAfter(formattingElementIndex, DEFAULT_SCOPE_BOUNDARIES)
 			);
+		}
+
+		#shouldIgnoreAdoptionAgencyEndTagWithStaleEntry(tagName, namespaceName) {
+			if (
+				namespaceName !== "html" ||
+				!ADOPTION_AGENCY_END_TAGS.has(tagName) ||
+				this.#lastActiveFormattingElementIndex(tagName) === -1
+			) {
+				return false;
+			}
+
+			const activeCount = this.active_formatting_elements.reduce((count, entry) => (
+				entry.tagName === tagName && entry.namespaceName === "html" ? count + 1 : count
+			), 0);
+
+			return activeCount > this.#countOpenHtmlElements(tagName);
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {
