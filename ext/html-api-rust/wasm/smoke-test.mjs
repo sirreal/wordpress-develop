@@ -85,6 +85,7 @@ assert.deepEqual(
 	},
 );
 assert.equal(scanNextTag("<span>", -10).tag_name, "SPAN");
+assert.equal(scanNextTag("plain text"), false);
 
 const tags = new WP_HTML_Tag_Processor('<div class="one"><span data-id="7">Hi</span></div>');
 assert.equal(tags.next_tag({ tag_name: "span" }), true);

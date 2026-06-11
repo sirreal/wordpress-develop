@@ -207,9 +207,9 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 	readonly ERROR_UNSUPPORTED: "unsupported";
 	readonly ERROR_EXCEEDED_MAX_BOOKMARKS: "exceeded-max-bookmarks";
 	readonly CONSTRUCTOR_UNLOCK_CODE: string;
-	create_fragment(html: string, context?: string, encoding?: string): WP_HTML_Processor | null;
-	create_full_parser(html: string, encoding?: string): WP_HTML_Processor | null;
-	normalize(html: string): string | null;
+	create_fragment(html: unknown, context?: string, encoding?: string): WP_HTML_Processor | null;
+	create_full_parser(html: unknown, encoding?: string): WP_HTML_Processor | null;
+	normalize(html: unknown): string | null;
 	is_void(tagName: string): boolean;
 	is_special(tagName: string | SpecialTagInput): boolean;
 }
@@ -218,7 +218,7 @@ export interface HtmlApi {
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;
-	scanNextTag(html: string, offset?: number): ScanNextTagResult | null;
+	scanNextTag(html: unknown, offset?: number | string | boolean | null): ScanNextTagResult | false;
 	version(): string;
 }
 
