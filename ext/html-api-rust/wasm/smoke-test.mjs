@@ -217,7 +217,12 @@ for (const html of [
 	'<!DOCTYPE html><meta charset="utf8">',
 	'<!DOCTYPE html><meta http-equiv="content-type" content="">',
 ]) {
-	const unsupportedMetaProcessor = WP_HTML_Processor.create_full_parser(html);
+	const supportedMetaProcessor = WP_HTML_Processor.create_full_parser(html);
+	assert.equal(supportedMetaProcessor.next_tag("meta"), true);
+	assert.equal(supportedMetaProcessor.get_last_error(), null);
+	supportedMetaProcessor.destroy();
+
+	const unsupportedMetaProcessor = new WP_HTML_Processor(html, { fullParser: true });
 	assert.equal(unsupportedMetaProcessor.next_tag("meta"), false);
 	assert.equal(unsupportedMetaProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
 	assert.notEqual(unsupportedMetaProcessor.get_unsupported_exception(), null);

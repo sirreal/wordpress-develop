@@ -1109,6 +1109,7 @@ export function createHtmlApi(wasm) {
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
+			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
 			this.context_node = options.contextNode ?? "BODY";
@@ -1140,6 +1141,7 @@ export function createHtmlApi(wasm) {
 
 			return new this(html, {
 				fullParser: true,
+				encodingConfidence: "certain",
 			});
 		}
 
@@ -1707,6 +1709,7 @@ export function createHtmlApi(wasm) {
 
 			if (
 				this.is_full_parser &&
+				this.encoding_confidence === "tentative" &&
 				this.current_namespace === "html" &&
 				tagName === "META" &&
 				this.#isUnsupportedEncodingMeta()
@@ -1780,6 +1783,7 @@ export function createHtmlApi(wasm) {
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
 				activeFormattingElements: [...this.active_formatting_elements],
+				encodingConfidence: this.encoding_confidence,
 				baseOpenElementCount: this.base_open_element_count,
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
@@ -1797,6 +1801,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.active_formatting_elements = [...state.activeFormattingElements];
+			this.encoding_confidence = state.encodingConfidence;
 			this.base_open_element_count = state.baseOpenElementCount;
 			this.breadcrumbs = [...state.breadcrumbs];
 			this.current_namespace = state.currentNamespace;
