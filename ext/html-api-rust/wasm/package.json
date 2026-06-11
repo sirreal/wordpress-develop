@@ -1,3 +1,21 @@
 {
-	"type": "module"
+	"name": "wp-html-api-rust-wasm",
+	"version": "0.1.0",
+	"description": "WebAssembly build of the WordPress HTML API Rust implementation.",
+	"type": "module",
+	"main": "./wp-html-api-rust.js",
+	"types": "./wp-html-api-rust.d.ts",
+	"exports": {
+		".": {
+			"types": "./wp-html-api-rust.d.ts",
+			"default": "./wp-html-api-rust.js"
+		},
+		"./dist/wp_html_api_rust_core.wasm": "./dist/wp_html_api_rust_core.wasm"
+	},
+	"files": [
+		"dist/wp_html_api_rust_core.wasm",
+		"wp-html-api-rust.d.ts",
+		"wp-html-api-rust.js"
+	],
+	"sideEffects": false
 }

@@ -33,6 +33,16 @@ surface mirrors the public WordPress HTML API classes with JavaScript naming,
 including processor factory/static helpers, constants, bookmark methods,
 doctype parsing, serialization helpers, and inherited tag-processor methods.
 
+```js
+import { loadWasm } from "./wasm/wp-html-api-rust.js";
+
+const { WP_HTML_Processor } = await loadWasm();
+const processor = WP_HTML_Processor.create_fragment("<p>Hello</p>");
+processor.next_tag("p");
+console.log(processor.get_breadcrumbs());
+processor.destroy();
+```
+
 The processor layer adds JavaScript-side open-element stack tracking for common
 HTML breadcrumbs, breadcrumb queries, void-element handling, namespaces, scoped
 end tags, and simple implied closures. Full HTML5 tree-construction behavioral
