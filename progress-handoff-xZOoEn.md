@@ -99,3 +99,30 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-xZOoEn
   - Reviewer 2: initially found missing false-negative noncharacter mutation coverage; satisfied after adding `scan-miss-nonchars` and selector wiring checks.
   - Reviewer 3: satisfied after checking probe volume, performance, README mutation count/list, fault list, and progress ordering.
 - Commit: this step commit.
+
+### Step 5: deterministic short-boundary corpus
+
+- Status: done; included in the step 5 commit.
+- Prior step commit: `1c208acee0`.
+- Scope:
+  - Add a deterministic short-boundary corpus separate from the random generator so random `(seed, case)` derivation remains stable.
+  - Cover lead-byte boundary classes crossed with boundary continuation positions, adjacent invalid maximal subparts, valid/malformed sandwiches, EOF truncations, and noncharacter boundary neighbors.
+  - Add a standalone corpus runner and smoke coverage for the new fixed cases.
+- Verification:
+  - `php -l tools/encoding-fuzz/lib/Checks.php`
+  - `php -l tools/encoding-fuzz/lib/Targets.php`
+  - `php -l tools/encoding-fuzz/lib/Bootstrap.php`
+  - `php -l tools/encoding-fuzz/lib/Corpus.php`
+  - `php -l tools/encoding-fuzz/corpus.php`
+  - `php -l tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/corpus.php --external none`
+  - `php -d disable_functions=utf8_encode,utf8_decode tools/encoding-fuzz/corpus.php --external none`
+  - `ENCODING_FUZZ_FAULT=scan-ignore-bytes php tools/encoding-fuzz/corpus.php --external none --output-dir /tmp/encoding-fuzz-corpus-fault`
+  - `php tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/worker.php --seed 1 --cases 200 --external none`
+  - `git diff --cached --check`
+- Review gate: satisfied by 3 adversarial reviewers.
+  - Reviewer 1: initially noted byte-level dedupe hid intended labels; satisfied after preserving label-level corpus entries.
+  - Reviewer 2: noted smoke skipped the new CLI/artifact path; satisfied after adding CLI smoke coverage, fail-closed artifact writes, and manual faulted artifact verification.
+  - Reviewer 3: noted count/fingerprint/runtime and oracle-event ordering gaps; satisfied after pinning corpus count/fingerprint, updating smoke docs, and making CLI smoke parse NDJSON by record type.
+- Commit: this step commit.

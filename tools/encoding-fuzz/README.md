@@ -142,7 +142,7 @@ Internal invariants:
 
 ## Inputs
 
-Each case is fully determined by `(seed, case index)` **for a given
+Random cases are fully determined by `(seed, case index)` **for a given
 generator version**: changing the generator (e.g. its boundary code
 point list) invalidates `--seed`/`--case` re-derivation of older
 findings. Failure artifacts embed the input bytes, so `--failure` and
@@ -156,12 +156,26 @@ ISO-8859-1-ish text, UTF-16 with/without BOM, long ASCII runs with
 broken tails (`strspn()` fast-path stress), and repeated motifs.
 Roughly a third of generated inputs are fully valid UTF-8.
 
+A separate deterministic short-boundary corpus lives outside the random
+generator so changing the fixed corpus does not perturb random
+`(seed, case)` reproduction. It covers lead-byte boundary classes
+crossed with boundary second/third/fourth byte positions, adjacent
+invalid maximal subparts, valid text immediately before and after
+malformed prefixes, EOF truncations at each prefix length, and
+noncharacter boundary neighbors.
+
 ## Common Commands
 
 Run one worker batch:
 
 ```sh
 php tools/encoding-fuzz/worker.php --seed 1 --cases 5000
+```
+
+Run the deterministic short-boundary corpus:
+
+```sh
+php tools/encoding-fuzz/corpus.php
 ```
 
 Run parallel lanes for a minute (artifacts under `artifacts/encoding-fuzz/`):
@@ -231,8 +245,9 @@ noncharacter-leaking `_wp_scan_utf8()`, noncharacter-missing
 `_wp_scan_utf8()`, ASCII-overrunning `_wp_scan_utf8()`, and
 stale-noncharacter-flag `_wp_scan_utf8()`)
 must all be caught. It also asserts generator determinism, the
-valid/invalid input mix, and the documented
-`wp_has_noncharacters()` divergence stance on ill-formed input.
+valid/invalid input mix, the deterministic short-boundary corpus, and
+the documented `wp_has_noncharacters()` divergence stance on ill-formed
+input.
 
 For end-to-end pipeline testing while the real implementations are
 healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale|substr-byte-level|substr-scrub|substr-no-neg-len|substr-force-utf8|count-invalid-bytes|count-range-minus1|count-ignore-offset|scan-ignore-bytes|scan-nonchars-leak|scan-miss-nonchars|scan-ascii-overrun|scan-stale-nonchars`

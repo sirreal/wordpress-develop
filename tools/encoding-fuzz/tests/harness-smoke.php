@@ -9,7 +9,9 @@
  *     masquerade as "no findings".
  *  4. The generator is deterministic and produces the advertised mix of
  *     valid and invalid inputs across all strategies.
- *  5. A short real fuzz run completes.
+ *  5. The deterministic short-boundary corpus is stable and clean.
+ *  6. A short real fuzz run completes.
+ *  7. The one-shot exhaustive companion test passes and catches its mutant.
  *
  * Exit codes: 0 pass, 1 fail.
  */
@@ -418,7 +420,88 @@ check(
 );
 
 // ---------------------------------------------------------------------
-// 5. Short real fuzz run.
+// 5. Deterministic short-boundary corpus.
+// ---------------------------------------------------------------------
+$corpus_cases      = Corpus::short_boundary_cases();
+$corpus_categories = array();
+foreach ( $corpus_cases as $entry ) {
+	$category                       = explode( ':', $entry['label'], 2 )[0];
+	$corpus_categories[ $category ] = true;
+}
+
+$expected_categories = array(
+	'lead',
+	'two-second',
+	'three-second',
+	'three-third',
+	'four-second',
+	'four-third',
+	'four-fourth',
+	'adjacent-invalid',
+	'sandwich',
+	'truncation',
+	'noncharacter-boundary',
+);
+$missing_categories  = array_values( array_diff( $expected_categories, array_keys( $corpus_categories ) ) );
+check(
+	'short-boundary corpus has broad deterministic coverage',
+	1133 === count( $corpus_cases ) && array() === $missing_categories,
+	'count ' . count( $corpus_cases ) . ', missing ' . implode( ',', $missing_categories )
+);
+
+$corpus_fingerprint = static function ( array $cases ): string {
+	$parts = array();
+	foreach ( $cases as $entry ) {
+		$parts[] = $entry['label'] . '=' . bin2hex( $entry['bytes'] );
+	}
+	return hash( 'sha256', implode( "\n", $parts ) );
+};
+check(
+	'short-boundary corpus deterministic',
+	'93f63dec5d9534e0ed1db643d5eb0596ececb0807cc3fb92cc6fe21fc4c60fbd' === $corpus_fingerprint( $corpus_cases )
+);
+
+$corpus_failures = 0;
+foreach ( $corpus_cases as $entry ) {
+	$failures = $checks->run( $entry['bytes'] );
+	foreach ( $failures as $failure ) {
+		++$corpus_failures;
+		echo "  corpus finding: {$failure['signature']} on {$entry['label']} " . bin2hex( $entry['bytes'] ) . "\n";
+	}
+}
+check( 'short-boundary corpus clean (' . count( $corpus_cases ) . ' cases)', 0 === $corpus_failures );
+
+$corpus_command = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/../corpus.php' ) . ' --external none';
+exec( "{$corpus_command} 2>&1", $corpus_output, $corpus_code );
+$corpus_start = null;
+$corpus_done  = null;
+foreach ( $corpus_output as $line ) {
+	$record = json_decode( $line, true );
+	if ( ! is_array( $record ) ) {
+		continue;
+	}
+
+	if ( 'start' === ( $record['type'] ?? null ) ) {
+		$corpus_start = $record;
+	} elseif ( 'done' === ( $record['type'] ?? null ) ) {
+		$corpus_done = $record;
+	}
+}
+check(
+	'short-boundary corpus CLI clean',
+	0 === $corpus_code &&
+	is_array( $corpus_start ) &&
+	is_array( $corpus_done ) &&
+	'start' === ( $corpus_start['type'] ?? null ) &&
+	'done' === ( $corpus_done['type'] ?? null ) &&
+	1133 === ( $corpus_start['cases'] ?? null ) &&
+	1133 === ( $corpus_done['stats']['cases'] ?? null ) &&
+	0 === ( $corpus_done['stats']['failures'] ?? null ),
+	implode( ' | ', array_slice( $corpus_output, -3 ) )
+);
+
+// ---------------------------------------------------------------------
+// 6. Short real fuzz run.
 // ---------------------------------------------------------------------
 $fuzz_failures = 0;
 for ( $i = 0; $i < 300; $i++ ) {
@@ -432,7 +515,7 @@ for ( $i = 0; $i < 300; $i++ ) {
 check( '300-case fuzz run clean (real findings would also surface here)', 0 === $fuzz_failures );
 
 // ---------------------------------------------------------------------
-// 6. One-shot exhaustive companion test: must pass, and its detection
+// 7. One-shot exhaustive companion test: must pass, and its detection
 //    must provably fire (same mutation-testing rule as everything else).
 // ---------------------------------------------------------------------
 $exhaustive = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/code-point-to-utf8-exhaustive.php' );
