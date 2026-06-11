@@ -2,6 +2,38 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 1 — closer-depth semantics, next_token() rehab, decoded text
+
+Doc edits under test (commits 58140b2235, 2d763ed14f, 0b9366fe70):
+closer-token depth rule on get_current_depth()/is_tag_closer(); rewrite
+of WP_HTML_Processor::next_token() with the canonical subtree-walk
+example; explicit decoded-text rule on get_modifiable_text().
+
+**TRAIN 98.78 (+5.21 vs round-0 train 93.57).** 36/36 trials passed
+100% of hidden cases — the first all-green functional sweep.
+- T03 +13.95 → 100: all trials now use the documented `>=` depth guard
+  and several cite the new next_token() example and decoding rule
+  verbatim in their explanations.
+- T06 +46.33 → 99.8: the two previously-empty-result trials are gone.
+- No regression beyond judge noise (T07 −0.7, T08 −0.7; threshold 2.0).
+All three hypotheses confirmed; nothing reverted.
+
+Residual signal for round 2 (adherence-only; functional is saturated
+for Sonnet):
+- T08 adherence stuck at 68–78: the misleading "tables unsupported"
+  bullet still causes defensive fallback code; "which class do I use"
+  guidance still missing.
+- Judge-discovered doc bug: paused_at_incomplete_token() example calls
+  nonexistent `get_next_tag()` (should be `next_tag()`).
+- next_tag() contract never states it matches only real tag openers
+  (comments/rawtext can't match); get_updated_html() description is a
+  copy of __toString()'s and never says it applies queued edits.
+
+Sonnet train score has now been ≥90 for two consecutive rounds — per
+PLAN.md, switch the test model to Haiku and re-baseline before further
+edits. Isolation: round-1 transcripts spot-checked, zero external
+reads (same benign grep-on-scratch and draft-write-to-scratch pattern).
+
 ## Round 0 — baseline
 
 Unmodified docs. All 16 tasks (12 train + 4 held-out) × 3 Sonnet trials,

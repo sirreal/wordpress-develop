@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (WP_HTML_Tag_Processor — attribute-only mutation, no structural navigation needed): 30/30. Every method called exists in html-tag-processor.md: next_tag (893), set_bookmark (1048), seek (1336), release_bookmark (1126), add_class (2128), get_updated_html (2192), is_tag_closer (1595): 30/30. Fully idiomatic: single repeatedly-overwritten bookmark in a loop, then seek + add_class + get_updated_html — this mirrors the set_bookmark() 'mark the last LI' example (lines 1076-1102) and the loop-update guidance at line 191. Releases the bookmark afterward. 25/25. Edge cases handled: no-H2 returns input unchanged; add_class merges with existing class attribute (existing-class case passes); comment H2 skipped by parser. 12/15 — the is_tag_closer() guard is documented and harmless but redundant noise (next_tag('H2') already skips closers, which the probe confirms), so slightly less clean than trials 2/3. All 6 hidden cases pass; no _doing_it_wrong records. The one unstated assumption (string-arg next_tag skips closers by default) happened to be correct."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and same fully-documented method set as trial-1, minus the redundant is_tag_closer guard. 30/30 processor, 30/30 no hallucination, 25/25 idiomatic (clean loop-overwrite-bookmark + seek + add_class + release + get_updated_html, matching the documented set_bookmark example). Edge cases 14/15: no-H2 returns $html unchanged; existing-class merge correct; comment H2 skipped. Inline comment correctly notes tag_closers defaults to 'skip' (an inference — the docs never state the default, but it is correct per probe). All 6 cases pass, no _doing_it_wrong. Cleanest of the three."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical structure and method set to trial-2; all methods documented. 30/30 processor, 30/30 no hallucination, 25/25 idiomatic — explanation explicitly cites the documented bookmark idiom in the set_bookmark() section ('keep updating one bookmark in a loop, then seek back'), which is exactly correct. Edge cases 14/15: no-H2 returns input unchanged, class merge correct, comment H2 ignored. All 6 cases pass, no _doing_it_wrong. Highest self-reported confidence (97) and well-justified."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial — all three trials passed all 6 cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class) with no _doing_it_wrong or trigger_error records. The documentation was strongly aligned with this task. What the docs did well: (1) The Bookmarks overview (html-tag-processor.md line 187-212) and the set_bookmark() method docblock (1048-1110) both contain the precise idiom this task needs — a single bookmark repeatedly overwritten inside a next_tag loop, then seek-back-and-mutate. The set_bookmark() example (lines 1076-1102) is essentially a 'mark the last LI' problem solved with seek + add_class, near-isomorphic to 'mark the last H2'. Line 191 explicitly blesses 'create a bookmark and update it frequently, such as within a loop' and warns against programmatic bookmark names, which all three subjects respected (string literal 'last-h2'). (2) The 'Finding tags' table (line 51) documents the string shorthand next_tag('img') == tag_name, so passing 'H2' as a string was a documented usage, not a guess. (3) add_class merging into an existing class attribute (lines 150-185) covered the existing-class case. (4) Comment handling 'just worked' because the parser never surfaces tags inside comments as tags, so subjects didn't even need to reason about it.\\n\\nNear-misses / latent risk that did not bite: All three subjects relied on the assumption that next_tag('H2') skips tag closers by default. The probe confirms this is true (two <h2> elements match exactly twice, is_tag_closer() is false on the match). But the docs NEVER state that 'skip' is the default for tag_closers — the next_tag() $query table (line 910) only lists '\\\"visit\\\" or \\\"skip\\\"' with no stated default, and the prose never says the string-shorthand form sets only tag_name and leaves closers skipped. Trial-1 hedged with an explicit is_tag_closer() guard ('belt-and-suspenders'); trials 2/3 asserted the default confidently in prose. Had the default been 'visit', all three would have set the bookmark on the closing </h2> as well — the bookmark would still land on the last token (a closer), seek would land on the closer, and add_class on a closer would be a no-op or _doing_it_wrong. So this latent gap was one design decision away from causing a real failure; the subjects guessed correctly but the documentation deserves no credit for it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — $query parameter table (html-tag-processor.md ~line 910) and the 'Finding tags' section (~line 37)",
+      "problem": "The default value of the tag_closers option is never stated. The table lists '\"visit\" or \"skip\"' but does not say which applies when omitted. All three subjects had to infer that closers are skipped by default; a wrong inference here would have silently bookmarked/sought a closing tag and broken the mutation.",
+      "suggestion": "State the default explicitly, e.g. '@type string $tag_closers \"visit\" or \"skip\". Default \"skip\" — closing tags such as </div> are not matched unless this is set to \"visit\".' Add one sentence to the Finding tags prose: 'By default next_tag() stops only on opening tags; pass tag_closers => \"visit\" to also stop on closers.'"
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — 'Finding tags' section (~line 37-53)",
+      "problem": "The string-shorthand form next_tag('img') is shown in the table as equivalent to array('tag_name'=>'img'), but the text never states that the shorthand sets only tag_name and leaves all other query options (notably tag_closers) at their defaults. Subjects inferred this correctly but it is implicit.",
+      "suggestion": "Add a one-line note after the table: 'Passing a string is shorthand for array(\"tag_name\" => $string); all other query options take their defaults.' This generalizes to any task using the string form."
+    },
+    {
+      "location": "Bookmarks overview (~line 187) and set_bookmark() docblock (~line 1048)",
+      "problem": "Both bookmark examples solve a 'find the last matching element' problem but embed the bookmark logic inside a more complex nested/stateful loop (tracking UL open/close, in_list flags). The simplest, most common case — a flat loop that overwrites one bookmark on every match and seeks back once afterward — is described in prose (line 191) but not shown as a standalone minimal example.",
+      "suggestion": "Add a short standalone snippet for the canonical 'mark the last matching tag' pattern: a while(next_tag(X)) loop that calls set_bookmark('mark') each iteration, then after the loop seek('mark') + apply a mutation. This is the single most reusable bookmark idiom and would make the pattern unmistakable without requiring readers to extract it from the more elaborate nested examples."
+    }
+  ]
+}

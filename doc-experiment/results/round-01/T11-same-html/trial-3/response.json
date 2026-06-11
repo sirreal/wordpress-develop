@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The approach uses `WP_HTML_Processor::normalize()`, a static method documented in html-processor.md that serializes an HTML fragment into a canonical form: double-quoted attribute values, lower-cased tag/attribute names, omitted tags added, duplicate attributes removed, and text re-encoded. If either input cannot be fully parsed/represented, `normalize()` returns `null`, which maps directly to the \"return false\" requirement. Comparing the two normalized strings then captures all structural differences (element order, attribute values, text content) while ignoring irrelevant surface differences (quoting style, optional closing tags, tag-name case, character references).",
+  "confidence": 92
+}

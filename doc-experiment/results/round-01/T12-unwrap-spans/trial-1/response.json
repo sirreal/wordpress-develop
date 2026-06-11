@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, then iterate over every token with next_token(). For each token, I check if get_tag() returns 'SPAN' \u2014 this matches both opening and closing SPAN tags (including virtually generated ones). If the current token is a SPAN, I skip it; otherwise I append serialize_token() to the output buffer. serialize_token() returns the normalized serialization of the current token (normalized attribute quoting, canonical text encoding, proper tag casing, etc.), so the accumulated output is already in normalized form. This handles nested spans naturally because each SPAN opener and closer is individually skipped while the inner content tokens (text nodes, other elements) are serialized normally.",
+  "confidence": 77
+}

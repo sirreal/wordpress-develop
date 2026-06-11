@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterates through every token via next_token(). For each token, get_token_type() is checked; if it is a '#text' token, get_modifiable_text() (which returns the decoded text) is tested with str_contains() for the keyword. Matching text nodes are wrapped with literal '<mark>' and '</mark>' strings around the output of serialize_token(), which produces the normalized encoding of the text content. All other tokens are passed through via serialize_token() unchanged. Because serialize_token() is called on every token including virtual ones (implied closers, etc.), the output is the normalized serialization the task requires.",
+  "confidence": 78
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The approach uses WP_HTML_Tag_Processor with a structural template. I start from a pre-built HTML string with the correct shape and attribute order (`<figure><img src=\"\" alt=\"\"><figcaption>x</figcaption></figure>`). In the first pass, I use next_tag('img') then set_attribute('src', $url) and set_attribute('alt', $alt) \u2014 the Tag Processor preserves existing attribute order when modifying in-place, so src comes before alt as required, and set_attribute handles all HTML encoding. I retrieve the updated HTML via get_updated_html(), then do a second pass using next_token() to walk all tokens until the first #text node (which is the placeholder inside figcaption) and call set_modifiable_text($caption), which also handles all necessary HTML encoding. The result is returned via get_updated_html().",
+  "confidence": 72
+}

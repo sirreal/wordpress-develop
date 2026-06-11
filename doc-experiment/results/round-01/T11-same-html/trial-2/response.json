@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses `WP_HTML_Processor::normalize()`, a static method documented to normalize HTML fragments in BODY context. It canonicalizes attribute quoting to double-quotes, lowercases tag and attribute names, adds omitted/implied closing tags, re-encodes character references uniformly, and removes duplicate attributes \u2014 covering all the \"don't matter\" differences listed in the task. It returns `null` when the input cannot be fully parsed or represented (e.g., unsupported markup causes the processor to bail), which maps directly to the \"return false\" requirement. Both fragments are normalized then compared as strings; since attribute order is preserved through normalization, differing attribute orders in the source will produce differing normalized strings, satisfying the requirement that attribute order differences are significant.",
+  "confidence": 87
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterate every token with next_token(). For each #text token (identified via get_token_type()), I call get_modifiable_text() to get the decoded text and check whether it contains the keyword using str_contains(). If it matches, I wrap the serialized token (via serialize_token(), which produces normalized HTML) in <mark>...</mark> tags; otherwise I emit serialize_token() directly. For all non-text tokens I also emit serialize_token(). The result is the concatenation of all serialized tokens, which forms the normalized HTML output with the correct <mark> wrappers around matching whole text nodes. This uses the documented APIs: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), and serialize_token().",
+  "confidence": 75
+}

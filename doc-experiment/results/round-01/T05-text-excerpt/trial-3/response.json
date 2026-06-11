@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then iterated over all tokens with `next_token()`. For each token where `get_token_type()` returns `'#text'`, I accumulated the decoded text via `get_modifiable_text()` (which returns character references already decoded). Script and style element contents are not text nodes in the HTML Processor's token stream, so they are naturally excluded. After collecting all text, I use `mb_strlen` and `mb_substr` with UTF-8 encoding to count and truncate by Unicode code points without cutting mid-character.",
+  "confidence": 82
+}

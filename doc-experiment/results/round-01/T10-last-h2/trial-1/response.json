@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor, which is sufficient for this task since we only need to modify attributes on a tag, not navigate HTML structure. The approach loops through every H2 opener by calling next_tag('H2') in a loop (next_tag skips closers by default, but I added an is_tag_closer() guard for safety), updating a bookmark named 'last-h2' each time. After exhausting the document, if any H2 was found the processor seeks back to the bookmark, calls add_class('final-section'), releases the bookmark, and returns get_updated_html(). The bookmark pattern is documented explicitly in the Tag Processor docs for exactly this \"mark the last matching tag\" use case. The next_tag() query with a tag name string matches only opening tags by default (tag_closers defaults to 'skip'), so the is_tag_closer() guard is belt-and-suspenders.",
+  "confidence": 95
+}

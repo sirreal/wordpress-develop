@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML. The `next_tag('a')` call finds each A opener in sequence (closing tags are skipped by default). For each match, I call `get_attribute('href')`: per the docs, it returns `null` when the attribute is absent, `true` for a boolean/valueless attribute (e.g. `<a href>`), or a string (including empty string) for a valued attribute \u2014 so a non-null result means `href` is present. When present, I call `set_attribute('target', '_blank')`, which both creates the attribute if missing and overwrites it if it already exists. Finally, `get_updated_html()` returns the modified document.",
+  "confidence": 97
+}

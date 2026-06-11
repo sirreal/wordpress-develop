@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses `WP_HTML_Processor::normalize()`, a static method that serializes an HTML fragment into a canonical form. Normalization handles all the cases the task requires treating as equivalent: attribute quoting style (all values become double-quoted), tag-name case (lowercased), optional/implied closing tags (added), and equivalent character references (text re-encoded). Attribute order is preserved as-is during normalization, so differing attribute order in the inputs will produce different normalized strings and correctly return false. If either input contains markup the processor cannot handle (e.g., unsupported elements like those in tables or foreign content), `normalize()` returns `null`, and the function returns `false` as required. The final comparison is a simple string equality check on the two normalized outputs.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor, which is the appropriate tool for scanning and modifying HTML tag attributes without full tree construction. A while loop calls next_tag('img') repeatedly to find every IMG opener (tag name matching is case-insensitive per the documented behavior), then add_class('wp-image') appends the class to any existing class attribute value without removing or reordering existing classes. The processor inherently skips HTML comments when using next_tag(), so images inside comments are not matched. Finally, get_updated_html() returns the complete modified document.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then iterated all tokens with `next_token()`, filtering for `get_token_type() === '#text'` tokens and accumulating their text via `get_modifiable_text()`, which already decodes character references. Script/style contents are not exposed as `#text` tokens by the HTML Processor \u2014 they are part of the opening tag token itself \u2014 so the filter naturally excludes them. For Unicode-safe truncation, I used `mb_strlen()` and `mb_substr()` with `'UTF-8'` encoding, which operates on code points rather than bytes.",
+  "confidence": 88
+}

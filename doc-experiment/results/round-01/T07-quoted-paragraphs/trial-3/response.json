@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context. I iterate with next_tag('P') to find all P opener tags (next_tag() skips closers by default). For each matched P, I call get_breadcrumbs() which returns the full ancestor path from HTML root to the current node. I then check whether 'BLOCKQUOTE' appears anywhere in that array using in_array(), which handles any depth of nesting (not just direct parent). When found, I add the 'quoted' class with add_class(). Finally, get_updated_html() (inherited from WP_HTML_Tag_Processor) returns the modified HTML with all changes applied.",
+  "confidence": 82
+}
