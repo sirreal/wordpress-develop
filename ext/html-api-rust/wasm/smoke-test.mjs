@@ -384,15 +384,37 @@ function compareHtml5libTreeAttributes(left, right) {
 	return left.display < right.display ? -1 : left.display > right.display ? 1 : 0;
 }
 
+function html5libTreeIndentLevel(path) {
+	let level = Math.max(0, path.length - 1);
+	for (let i = 0; i < path.length - 1; i += 1) {
+		if (path[i].name === "TEMPLATE" && path[i].namespace === "html") {
+			level += 1;
+		}
+	}
+	return level;
+}
+
 function buildFullParserHtml5libTree(html) {
 	const processor = WP_HTML_Processor.create_full_parser(html);
 	assert.notEqual(processor, null);
 
 	let output = "";
-	let indentLevel = 0;
 	let wasText = false;
 	let textNode = "";
+	let openElementPath = [];
 	const indent = (level) => "  ".repeat(level);
+	const pathFromBreadcrumbs = (currentNamespace = "html", currentIsElement = false) => (
+		processor.get_breadcrumbs().map((name, index, breadcrumbs) => {
+			if (openElementPath[index]?.name === name) {
+				return openElementPath[index];
+			}
+
+			return {
+				name,
+				namespace: currentIsElement && index === breadcrumbs.length - 1 ? currentNamespace : "html",
+			};
+		})
+	);
 
 	while (processor.next_token()) {
 		const tokenName = processor.get_token_name();
@@ -420,20 +442,15 @@ function buildFullParserHtml5libTree(html) {
 
 			case "#tag": {
 				if (processor.is_tag_closer()) {
-					indentLevel -= 1;
-					if (namespace === "html" && tokenName === "TEMPLATE") {
-						indentLevel -= 1;
-					}
+					openElementPath = pathFromBreadcrumbs(namespace, false);
 					break;
 				}
 
+				const path = pathFromBreadcrumbs(namespace, true);
 				const tagName = namespace === "html"
 					? processor.get_tag().toLowerCase()
 					: `${namespace} ${processor.get_qualified_tag_name()}`;
-				const tagIndent = indentLevel;
-				if (processor.expects_closer()) {
-					indentLevel += 1;
-				}
+				const tagIndent = html5libTreeIndentLevel(path);
 				output += `${indent(tagIndent)}<${tagName}>\n`;
 
 				const attributeNames = processor.get_attribute_names_with_prefix("");
@@ -453,33 +470,42 @@ function buildFullParserHtml5libTree(html) {
 				}
 
 				if (namespace === "html" && tokenName === "TEMPLATE") {
-					output += `${indent(indentLevel)}content\n`;
-					indentLevel += 1;
+					output += `${indent(tagIndent + 1)}content\n`;
 				}
+				openElementPath = processor.expects_closer() ? path : path.slice(0, -1);
 				break;
 			}
 
 			case "#cdata-section":
 			case "#text": {
+				const path = pathFromBreadcrumbs(namespace, false);
 				const textContent = processor.get_modifiable_text();
 				if (textContent === "") {
+					openElementPath = path.slice(0, -1);
 					break;
 				}
 				wasText = true;
 				if (textNode === "") {
-					textNode += `${indent(indentLevel)}"`;
+					textNode += `${indent(html5libTreeIndentLevel(path))}"`;
 				}
 				textNode += textContent;
+				openElementPath = path.slice(0, -1);
 				break;
 			}
 
-			case "#funky-comment":
-				output += `${indent(indentLevel)}<!-- ${processor.get_modifiable_text()} -->\n`;
+			case "#funky-comment": {
+				const path = pathFromBreadcrumbs(namespace, false);
+				output += `${indent(html5libTreeIndentLevel(path))}<!-- ${processor.get_modifiable_text()} -->\n`;
+				openElementPath = path.slice(0, -1);
 				break;
+			}
 
-			case "#comment":
-				output += `${indent(indentLevel)}<!-- ${processor.get_full_comment_text()} -->\n`;
+			case "#comment": {
+				const path = pathFromBreadcrumbs(namespace, false);
+				output += `${indent(html5libTreeIndentLevel(path))}<!-- ${processor.get_full_comment_text()} -->\n`;
+				openElementPath = path.slice(0, -1);
 				break;
+			}
 
 			default:
 				throw new Error(`Unhandled token type for html5lib tree smoke test: ${tokenType}`);
@@ -2208,6 +2234,11 @@ assert.equal(
 assert.equal(
 	buildFullParserHtml5libTree("<template><td></template><body><span>Foo"),
 	"<html>\n  <head>\n    <template>\n      content\n        <td>\n  <body>\n    <span>\n      \"Foo\"\n\n",
+);
+
+assert.equal(
+	buildFullParserHtml5libTree("<head></head><template>"),
+	"<html>\n  <head>\n    <template>\n      content\n  <body>\n\n",
 );
 
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
