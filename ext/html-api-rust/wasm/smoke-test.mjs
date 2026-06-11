@@ -2604,6 +2604,16 @@ assert.equal(
 	"<table><colgroup><col></colgroup><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
+const trailingColProcessor = WP_HTML_Processor.create_fragment("<table><col></table><col>");
+assert.equal(trailingColProcessor.next_tag("col"), true);
+assert.deepEqual(trailingColProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "COLGROUP", "COL"]);
+assert.equal(trailingColProcessor.next_tag("col"), false);
+trailingColProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><col></table><col>"),
+	"<table><colgroup><col></colgroup></table>",
+);
+
 const colgroupProcessor = WP_HTML_Processor.create_fragment("<table><colgroup><tbody><tr><td>cell");
 assert.equal(colgroupProcessor.next_tag("tbody"), true);
 assert.deepEqual(colgroupProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY"]);

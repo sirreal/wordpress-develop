@@ -173,6 +173,19 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"MENUITEM",
 	"OBJECT",
 ]);
+const IN_BODY_IGNORED_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"FRAME",
+	"HEAD",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"COLGROUP",
@@ -1960,6 +1973,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
+			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
@@ -1980,10 +1994,12 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			const contextProcessor = this.create_full_parser(`<!DOCTYPE html>${context}`, encoding);
-			if (contextProcessor === null) {
-				return null;
-			}
+			// Context discovery must preserve otherwise ignored table-context tags like TR and TD.
+			const contextProcessor = new this(`<!DOCTYPE html>${context}`, {
+				fullParser: true,
+				encodingConfidence: "certain",
+				preserveInBodyIgnoredStartTags: true,
+			});
 
 			let contextNode = null;
 			let contextNamespaceName = null;
@@ -2835,6 +2851,18 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
+				this.current_namespace === "html" &&
+				(!this.is_full_parser || this.full_parser_insertion_mode === "in_body") &&
+				!this.preserve_in_body_ignored_start_tags &&
+				this.template_insertion_modes.length === 0 &&
+				!this.#isInTableInsertionContext() &&
+				IN_BODY_IGNORED_START_TAGS.has(tagName)
+			) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
+			if (
 				allowVirtualPreclosures &&
 				this.current_namespace === "html" &&
 				tagName === "SELECT"
@@ -3536,7 +3564,14 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
-						if (tokenType === "#tag" && !isCloser && tagName === "FRAME") {
+						if (
+							tokenType === "#tag" &&
+							!isCloser &&
+							!this.preserve_in_body_ignored_start_tags &&
+							this.template_insertion_modes.length === 0 &&
+							!this.#isInTableInsertionContext() &&
+							IN_BODY_IGNORED_START_TAGS.has(tagName)
+						) {
 							this.skip_current_token = true;
 							return true;
 						}
@@ -4537,6 +4572,32 @@ export function createHtmlApi(wasm) {
 
 		#hasElementInTableScope(match) {
 			return this.#findElementInTableScope(match) !== -1;
+		}
+
+		#isInTableInsertionContext() {
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				const nodeName = this.open_elements[i];
+				if (this.open_element_namespaces[i] !== "html") {
+					continue;
+				}
+
+				if (
+					nodeName === "TABLE" ||
+					nodeName === "CAPTION" ||
+					nodeName === "COLGROUP" ||
+					nodeName === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(nodeName) ||
+					TABLE_CELL_ELEMENTS.has(nodeName)
+				) {
+					return true;
+				}
+
+				if (nodeName === "HTML" || nodeName === "TEMPLATE") {
+					return false;
+				}
+			}
+
+			return false;
 		}
 
 		#findElementInTableScope(match) {
