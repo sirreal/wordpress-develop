@@ -480,7 +480,108 @@ class WP_Scripts extends WP_Dependencies {
 			$attr['data-wp-fetchpriority'] = $original_fetchpriority;
 		}
 
-		$tag  = $translations . $before_script;
+		/**
+		 * Filters data associated with a given script.
+		 *
+		 * Scripts may require data that is required for initialization or is essential
+		 * to have immediately available on page load. These are suitable use cases for
+		 * this data.
+		 *
+		 * The dynamic portion of the hook name, `$handle`, refers to the script handle.
+		 *
+		 * This is best suited to pass essential data that must be available to the script for
+		 * initialization or immediately on page load. It does not replace the REST API or
+		 * fetching data from the client.
+		 *
+		 * Example:
+		 *
+		 *     add_filter(
+		 *         'script_data_my-script-handle',
+		 *         function ( array $data ): array {
+		 *             $data['myConfig'] = array( 'key' => 'value' );
+		 *             return $data;
+		 *         }
+		 *     );
+		 *
+		 * If the filter returns no data (an empty array), nothing will be embedded in the page.
+		 *
+		 * The data for a given script, if provided, will be JSON serialized in a script
+		 * tag with an ID of the form `wp-script-data-{$handle}` and type `application/json`.
+		 *
+		 * The data can be read on the client with a pattern like this:
+		 *
+		 * Example:
+		 *
+		 *     const dataContainer = document.getElementById( 'wp-script-data-my-script-handle' );
+		 *     let data = {};
+		 *     if ( dataContainer ) {
+		 *         try {
+		 *             data = JSON.parse( dataContainer.textContent );
+		 *         } catch {}
+		 *     }
+		 *     // data.myConfig.key === 'value';
+		 *     initMyScriptWithData( data );
+		 *
+		 * @since 7.1.0
+		 *
+		 * @param array $data The data associated with the script.
+		 */
+		$script_data = apply_filters( "script_data_{$handle}", array() );
+
+		$script_data_tag = '';
+		if ( ! empty( $script_data ) ) {
+			/*
+			 * This data will be printed as JSON inside a script tag like this:
+			 *   <script type="application/json"></script>
+			 *
+			 * A script tag must be closed by a sequence beginning with `</`. It's impossible to
+			 * close a script tag without using `<`. We ensure that `<` is escaped and `/` can
+			 * remain unescaped, so `</script>` will be printed as `\u003C/script>`.
+			 *
+			 *   - JSON_HEX_TAG: All < and > are converted to \u003C and \u003E.
+			 *   - JSON_UNESCAPED_SLASHES: Don't escape /.
+			 *   - JSON_INVALID_UTF8_SUBSTITUTE: Substitute invalid UTF-8 sequences with U+FFFD (�)
+			 *     instead of failing. This avoids the overhead of `wp_json_encode()`'s fallback
+			 *     re-encoding and ensures consistent handling with the standard replacement character.
+			 *
+			 * If the page will use UTF-8 encoding, it's safe to print unescaped unicode:
+			 *
+			 *   - JSON_UNESCAPED_UNICODE: Encode multibyte Unicode characters literally (instead of as `\uXXXX`).
+			 *   - JSON_UNESCAPED_LINE_TERMINATORS: The line terminators are kept unescaped when
+			 *     JSON_UNESCAPED_UNICODE is supplied. It uses the same behaviour as it was
+			 *     before PHP 7.1 without this constant. Available as of PHP 7.1.0.
+			 *
+			 * The JSON specification requires encoding in UTF-8, so if the generated HTML page
+			 * is not encoded in UTF-8 then it's not safe to include those literals. They must
+			 * be escaped to avoid encoding issues.
+			 *
+			 * @see https://www.rfc-editor.org/rfc/rfc8259.html for details on encoding requirements.
+			 * @see https://www.php.net/manual/en/json.constants.php for details on these constants.
+			 * @see https://html.spec.whatwg.org/#script-data-state for details on script tag parsing.
+			 */
+			$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS | JSON_INVALID_UTF8_SUBSTITUTE;
+			if ( ! is_utf8_charset() ) {
+				$json_encode_flags = JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+			}
+
+			/*
+			 * Return the data script tag as a string (third parameter false) rather than echoing it.
+			 * This allows it to be included with the script tag in the concatenated output.
+			 */
+			$script_data_tag = wp_print_inline_script_tag(
+				wp_json_encode(
+					$script_data,
+					$json_encode_flags
+				),
+				array(
+					'type' => 'application/json',
+					'id'   => "wp-script-data-{$handle}",
+				),
+				false
+			);
+		}
+
+		$tag  = $translations . $before_script . $script_data_tag;
 		$tag .= wp_get_script_tag( $attr );
 		$tag .= $after_script;
 

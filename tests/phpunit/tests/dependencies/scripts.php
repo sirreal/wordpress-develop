@@ -4563,4 +4563,169 @@ HTML;
 		}
 		return $processor->get_updated_html();
 	}
+
+	/**
+	 * Tests that script_data_{$handle} filter outputs JSON script tags before the script.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_outputs_json_script_tag() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $data ) {
+				$data['foo'] = 'bar';
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertStringContainsString( '<script type="application/json" id="wp-script-data-test-script">', $output );
+		$this->assertStringContainsString( '"foo":"bar"', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter receives an empty array by default.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_receives_empty_array() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+
+		$filter_called = false;
+		add_filter(
+			'script_data_test-script',
+			function ( $data ) use ( &$filter_called ) {
+				$filter_called = true;
+				$this->assertSame( array(), $data );
+				return $data;
+			}
+		);
+
+		get_echo( 'wp_print_scripts' );
+
+		$this->assertTrue( $filter_called, 'Filter should have been called' );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter doesn't output anything for empty data.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_no_output_for_empty_data() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $data ) {
+				// Return empty array.
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		// Should not contain data script tag.
+		$this->assertStringNotContainsString( 'wp-script-data-test-script', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter is called for each enqueued script.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_called_for_each_enqueued_script() {
+		wp_enqueue_script( 'script-1', '/script-1.js', array(), null );
+		wp_enqueue_script( 'script-2', '/script-2.js', array(), null );
+
+		$filter_calls = array();
+		add_filter(
+			'script_data_script-1',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'script-1';
+				$data['script'] = '1';
+				return $data;
+			}
+		);
+
+		add_filter(
+			'script_data_script-2',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'script-2';
+				$data['script'] = '2';
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertSame( array( 'script-1', 'script-2' ), $filter_calls );
+		$this->assertStringContainsString( 'wp-script-data-script-1', $output );
+		$this->assertStringContainsString( 'wp-script-data-script-2', $output );
+		$this->assertStringContainsString( '"script":"1"', $output );
+		$this->assertStringContainsString( '"script":"2"', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter is only called for enqueued scripts.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_only_called_for_enqueued_scripts() {
+		wp_register_script( 'registered-only', '/registered-only.js', array(), null );
+		wp_enqueue_script( 'enqueued', '/enqueued.js', array(), null );
+
+		$filter_calls = array();
+		add_filter(
+			'script_data_registered-only',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'registered-only';
+				return $data;
+			}
+		);
+
+		add_filter(
+			'script_data_enqueued',
+			function ( $data ) use ( &$filter_calls ) {
+				$filter_calls[] = 'enqueued';
+				$data['test'] = 'value';
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		$this->assertSame( array( 'enqueued' ), $filter_calls );
+		$this->assertStringNotContainsString( 'wp-script-data-registered-only', $output );
+		$this->assertStringContainsString( 'wp-script-data-enqueued', $output );
+	}
+
+	/**
+	 * Tests that the script_data_{$handle} filter outputs data before the script tag.
+	 *
+	 * @covers WP_Scripts::do_item
+	 */
+	public function test_script_data_filter_outputs_before_script() {
+		wp_enqueue_script( 'test-script', '/test.js', array(), null );
+
+		add_filter(
+			'script_data_test-script',
+			function ( $data ) {
+				$data['config'] = 'value';
+				return $data;
+			}
+		);
+
+		$output = get_echo( 'wp_print_scripts' );
+
+		// Find positions of data script tag and script tag.
+		$data_pos = strpos( $output, 'wp-script-data-test-script' );
+		$script_pos = strpos( $output, 'test-script-js' );
+
+		$this->assertNotFalse( $data_pos, 'Data script tag should be present' );
+		$this->assertNotFalse( $script_pos, 'Script tag should be present' );
+		$this->assertLessThan( $script_pos, $data_pos, 'Data script tag should come before script tag' );
+	}
 }
