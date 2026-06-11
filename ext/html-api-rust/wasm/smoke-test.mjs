@@ -412,7 +412,7 @@ function buildFullParserHtml5libTree(html) {
 				const doctype = processor.get_doctype_info();
 				output += `<!DOCTYPE ${doctype.name ?? ""}`;
 				if (doctype.public_identifier !== null || doctype.system_identifier !== null) {
-					output += ` "${doctype.public_identifier}" "${doctype.system_identifier}"`;
+					output += ` "${doctype.public_identifier ?? ""}" "${doctype.system_identifier ?? ""}"`;
 				}
 				output += ">\n";
 				break;
@@ -506,6 +506,14 @@ for (const [html, expectedTree] of [
 	[
 		"<!DOCTYPEhtml>Hello",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
+	],
+	[
+		'<!DOCTYPE potato SYSTEM "taco">Hello',
+		'<!DOCTYPE potato "" "taco">\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
+	],
+	[
+		'<!DOCTYPE potato PUBLIC "go\'of">Hello',
+		'<!DOCTYPE potato "go\'of" "">\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
 	],
 	[
 		"FOO<!-- BAR -->BAZ",
