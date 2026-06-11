@@ -2276,12 +2276,10 @@ fn find_script_closer(html: &[u8], offset: usize) -> Option<usize> {
             continue;
         }
 
-        if (escaped || double_escaped)
-            && (html[at..].starts_with(b"-->") || html[at..].starts_with(b"--!>"))
-        {
+        if (escaped || double_escaped) && html[at..].starts_with(b"-->") {
             escaped = false;
             double_escaped = false;
-            at += if html[at..].starts_with(b"-->") { 3 } else { 4 };
+            at += 3;
             continue;
         }
 
@@ -2672,8 +2670,9 @@ fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)
 #[cfg(test)]
 mod tests {
     use super::{
-        scan_next_tag, scan_next_token_in_namespace, AttributeValue, ScanResult, TagProcessor,
-        TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
+        find_script_closer, scan_next_tag, scan_next_token_in_namespace, AttributeValue,
+        ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
+        NAMESPACE_HTML, TOKEN_TYPE_TAG,
     };
     use std::ptr;
 
@@ -2740,6 +2739,13 @@ mod tests {
 
         let div = scan_next_tag(html, script.token_end).unwrap();
         assert_eq!(&html[div.name_start..div.name_start + div.name_len], b"div");
+    }
+
+    #[test]
+    fn scanner_keeps_script_double_escaped_after_bogus_comment_end() {
+        let html = b"<script><!--<script>--!></script>X";
+
+        assert!(find_script_closer(html, b"<script>".len()).is_none());
     }
 
     #[test]
