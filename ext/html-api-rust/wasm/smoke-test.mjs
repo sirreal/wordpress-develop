@@ -139,6 +139,27 @@ assert.equal(processor.expects_closer(), true);
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 
+const completedProcessor = WP_HTML_Processor.create_fragment('<div class="test">Test</div>');
+assert.equal(completedProcessor.next_tag(), true);
+assert.equal(completedProcessor.get_tag(), "DIV");
+assert.equal(completedProcessor.next_tag(), false);
+assert.equal(completedProcessor.get_tag(), null);
+completedProcessor.destroy();
+
+const imageNamespaceProcessor = WP_HTML_Processor.create_fragment("<image/><svg><image/></svg>");
+assert.equal(imageNamespaceProcessor.next_tag(), true);
+assert.equal(imageNamespaceProcessor.get_tag(), "IMG");
+assert.equal(imageNamespaceProcessor.get_namespace(), "html");
+assert.equal(imageNamespaceProcessor.expects_closer(), false);
+assert.deepEqual(imageNamespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", "IMG"]);
+assert.equal(imageNamespaceProcessor.next_tag("svg"), true);
+assert.equal(imageNamespaceProcessor.next_tag(), true);
+assert.equal(imageNamespaceProcessor.get_tag(), "IMAGE");
+assert.equal(imageNamespaceProcessor.get_namespace(), "svg");
+assert.equal(imageNamespaceProcessor.expects_closer(), false);
+assert.deepEqual(imageNamespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "IMAGE"]);
+imageNamespaceProcessor.destroy();
+
 assert.equal(WP_HTML_Processor.PROCESS_NEXT_NODE, "process-next-node");
 assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node");
 assert.equal(WP_HTML_Processor.PROCESS_CURRENT_NODE, "process-current-node");

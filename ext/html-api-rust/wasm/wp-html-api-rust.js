@@ -577,6 +577,10 @@ export function createHtmlApi(wasm) {
 
 		get_tag() {
 			this.#ensureLive();
+			if (![STATE_MATCHED_TAG, STATE_COMMENT].includes(this.parser_state)) {
+				return null;
+			}
+
 			if (this.parser_state === STATE_COMMENT && wasm.wp_html_api_rust_tag_processor_current_comment_type(this.pointer) !== 4) {
 				return null;
 			}
@@ -1232,7 +1236,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		get_tag() {
-			return this.is_virtual() ? this.current_virtual.tagName : super.get_tag();
+			if (this.is_virtual()) {
+				return this.current_virtual.tagName;
+			}
+
+			return normalizeTagNameForNamespace(super.get_tag(), this.current_token_namespace);
 		}
 
 		get_attribute(name) {
@@ -1434,7 +1442,7 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
-			const tagName = this.get_tag();
+			const tagName = this.#getCurrentTreeTagName();
 			if (tagName === null) {
 				this.breadcrumbs = [...this.open_elements];
 				this.current_token_namespace = this.current_namespace;
@@ -1498,7 +1506,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.#applySimpleHtmlSemanticClosures(tagName);
-			this.current_token_namespace = namespaceForTag(tagName, this.current_namespace);
+			this.current_token_namespace = namespaceForTag(super.get_tag(), this.current_namespace);
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
 			this.breadcrumbs = [...this.open_elements];
@@ -1627,6 +1635,18 @@ export function createHtmlApi(wasm) {
 					namespaceName: this.open_element_namespaces[i],
 				});
 			}
+		}
+
+		#getCurrentTreeTagName() {
+			const rawTagName = super.get_tag();
+			if (rawTagName === null) {
+				return null;
+			}
+
+			return normalizeTagNameForNamespace(
+				rawTagName,
+				namespaceForTag(rawTagName, this.current_namespace),
+			);
 		}
 
 		#lastOpenElementIndex(tagName, namespaceName) {
@@ -2183,6 +2203,14 @@ function namespaceForTag(tagName, currentNamespace) {
 	}
 
 	return currentNamespace;
+}
+
+function normalizeTagNameForNamespace(tagName, namespaceName) {
+	if (tagName === null) {
+		return null;
+	}
+
+	return namespaceName === "html" && tagName === "IMAGE" ? "IMG" : tagName;
 }
 
 function childNamespaceForTag(tagName, tokenNamespace) {
