@@ -3329,6 +3329,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.current_namespace !== "html") {
+				return false;
+			}
+
 			const isWhitespaceText = (
 				tokenType === "#text" &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
@@ -4083,6 +4087,10 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
+			if (this.current_namespace !== "html") {
+				return false;
+			}
+
 			if (CAPTION_CLOSING_START_TAGS.has(tagName)) {
 				const captionIndex = this.#findElementInTableScope("CAPTION");
 				if (captionIndex !== -1) {
@@ -4653,8 +4661,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		#applySimpleHtmlSemanticClosures(tagName) {
+			if (this.current_namespace !== "html") {
+				return;
+			}
+
 			if (
-				this.current_namespace === "html" &&
 				(
 					tagName === "OPTION" ||
 					tagName === "OPTGROUP" ||

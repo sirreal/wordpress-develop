@@ -568,6 +568,10 @@ for (const [html, expectedTree] of [
 		'<html>\n  <head>\n  <body>\n    <b>\n      "TestTest"\n\n',
 	],
 	[
+		"<a><svg><tr><input></a>",
+		"<html>\n  <head>\n  <body>\n    <a>\n      <svg svg>\n        <svg tr>\n          <svg input>\n\n",
+	],
+	[
 		"<div a=1 b><span>Hi</span></div>",
 		'<html>\n  <head>\n  <body>\n    <div>\n      a="1"\n      b=""\n      <span>\n        "Hi"\n\n',
 	],
@@ -3159,6 +3163,29 @@ assert.equal(
 assert.equal(
 	WP_HTML_Processor.normalize("<math><mo><image /></mo><mn>1</mn></math>"),
 	"<math><mo><img></mo><mn>1</mn></math>",
+);
+
+const svgTableNameProcessor = WP_HTML_Processor.create_fragment("<svg><tr><td>cell");
+assert.equal(svgTableNameProcessor.next_tag("tr"), true);
+assert.equal(svgTableNameProcessor.get_namespace(), "svg");
+assert.deepEqual(svgTableNameProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "TR"]);
+assert.equal(svgTableNameProcessor.next_tag("td"), true);
+assert.equal(svgTableNameProcessor.get_namespace(), "svg");
+assert.deepEqual(svgTableNameProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "TR", "TD"]);
+svgTableNameProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<svg><tr><td>cell"), "<svg><tr><td>cell</td></tr></svg>");
+
+const svgTableNameInCellProcessor = WP_HTML_Processor.create_fragment("<table><tr><td><svg><tr><circle>");
+assert.equal(svgTableNameInCellProcessor.next_tag("svg"), true);
+assert.equal(svgTableNameInCellProcessor.get_namespace(), "svg");
+assert.deepEqual(svgTableNameInCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG"]);
+assert.equal(svgTableNameInCellProcessor.next_tag("tr"), true);
+assert.equal(svgTableNameInCellProcessor.get_namespace(), "svg");
+assert.deepEqual(svgTableNameInCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG", "TR"]);
+svgTableNameInCellProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tr><td><svg><tr><circle>"),
+	"<table><tbody><tr><td><svg><tr><circle></circle></tr></svg></td></tr></tbody></table>",
 );
 
 const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
