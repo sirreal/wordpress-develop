@@ -148,6 +148,17 @@ const SELECT_IN_TABLE_BREAKOUT_TAGS = new Set([
 	"TD",
 	"TH",
 ]);
+const COLGROUP_CLOSING_START_TAGS = new Set([
+	"CAPTION",
+	"COLGROUP",
+	"TABLE",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -2513,6 +2524,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (COLGROUP_CLOSING_START_TAGS.has(tagName) && this.#currentHtmlElementIs("COLGROUP")) {
+				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
+				return true;
+			}
+
 			if (this.current_namespace === "html" && SELECT_IN_TABLE_BREAKOUT_TAGS.has(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1 && this.#openHtmlElementBefore("TABLE", selectIndex)) {
@@ -2657,6 +2673,16 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				this.#currentHtmlElementIs("COLGROUP") &&
+				tagName !== "COL" &&
+				tagName !== "COLGROUP" &&
+				tagName !== "TEMPLATE"
+			) {
+				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
+				return true;
+			}
+
 			if (SELECT_IN_TABLE_BREAKOUT_TAGS.has(tagName) && this.#hasElementInTableScope(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1 && this.#openHtmlElementBefore("TABLE", selectIndex)) {
@@ -2706,6 +2732,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			const queued = [];
+			if (tagName === "COL" && this.#currentHtmlElementIs("TABLE")) {
+				queued.push("COLGROUP");
+			}
+
 			if (
 				tagName === "TR" &&
 				!this.#hasElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName))
@@ -2933,11 +2963,7 @@ export function createHtmlApi(wasm) {
 
 		#popCurrentHtmlElementIf(tagName) {
 			const topIndex = this.open_elements.length - 1;
-			if (
-				topIndex < 0 ||
-				this.open_elements[topIndex] !== tagName ||
-				this.open_element_namespaces[topIndex] !== "html"
-			) {
+			if (!this.#currentHtmlElementIs(tagName)) {
 				return false;
 			}
 
@@ -2964,6 +2990,15 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return false;
+		}
+
+		#currentHtmlElementIs(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			return (
+				topIndex >= 0 &&
+				this.open_elements[topIndex] === tagName &&
+				this.open_element_namespaces[topIndex] === "html"
+			);
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {

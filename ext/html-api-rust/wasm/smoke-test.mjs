@@ -744,6 +744,26 @@ assert.equal(
 	"<table><select><option>one</option></select></table><p>after</p>",
 );
 
+const bareColProcessor = WP_HTML_Processor.create_fragment("<table><col><tr><td>cell");
+assert.equal(bareColProcessor.next_tag("col"), true);
+assert.deepEqual(bareColProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "COLGROUP", "COL"]);
+assert.equal(bareColProcessor.next_tag("tr"), true);
+assert.deepEqual(bareColProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+bareColProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><col><tr><td>cell"),
+	"<table><colgroup><col></colgroup><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
+const colgroupProcessor = WP_HTML_Processor.create_fragment("<table><colgroup><tbody><tr><td>cell");
+assert.equal(colgroupProcessor.next_tag("tbody"), true);
+assert.deepEqual(colgroupProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY"]);
+colgroupProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><colgroup><tbody><tr><td>cell"),
+	"<table><colgroup></colgroup><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");
