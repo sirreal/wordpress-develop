@@ -2199,7 +2199,92 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_qualified_attribute_name)
 
 PHP_METHOD(WP_HTML_Tag_Processor, get_full_comment_text)
 {
+	wp_html_tag_processor_object *intern;
+	wp_html_api_rust_byte_slice text;
+	wp_html_api_rust_byte_slice tag_name;
+	wp_html_api_rust_byte_slice html;
+	size_t token_start;
+	size_t token_length;
+	unsigned char comment_type;
+	zend_string *comment_text;
+	size_t offset;
+	bool starts_with_question_mark = false;
+
 	ZEND_PARSE_PARAMETERS_NONE();
+
+	intern = Z_WP_HTML_TAG_PROCESSOR_P(ZEND_THIS);
+	if (NULL == intern->native) {
+		zend_throw_error(NULL, "WP_HTML_Tag_Processor is not initialized");
+		RETURN_THROWS();
+	}
+
+	if (wp_html_tag_processor_parser_state_is(ZEND_THIS, "STATE_FUNKY_COMMENT", sizeof("STATE_FUNKY_COMMENT") - 1)) {
+		if (wp_html_api_rust_tag_processor_get_modifiable_text(intern->native, &text)) {
+			RETURN_STRINGL((const char *) text.ptr, text.len);
+		}
+
+		RETURN_NULL();
+	}
+
+	if (!wp_html_tag_processor_parser_state_is(ZEND_THIS, "STATE_COMMENT", sizeof("STATE_COMMENT") - 1)) {
+		RETURN_NULL();
+	}
+
+	if (!wp_html_api_rust_tag_processor_get_modifiable_text(intern->native, &text)) {
+		RETURN_NULL();
+	}
+
+	comment_type = wp_html_api_rust_tag_processor_current_comment_type(intern->native);
+	switch (comment_type) {
+		case 1:
+		case 3:
+			RETURN_STRINGL((const char *) text.ptr, text.len);
+
+		case 2:
+			comment_text = zend_string_alloc(sizeof("[CDATA[") - 1 + text.len + sizeof("]]") - 1, 0);
+			memcpy(ZSTR_VAL(comment_text), "[CDATA[", sizeof("[CDATA[") - 1);
+			memcpy(ZSTR_VAL(comment_text) + sizeof("[CDATA[") - 1, text.ptr, text.len);
+			memcpy(ZSTR_VAL(comment_text) + sizeof("[CDATA[") - 1 + text.len, "]]", sizeof("]]") - 1);
+			ZSTR_VAL(comment_text)[ZSTR_LEN(comment_text)] = '\0';
+			RETURN_STR(comment_text);
+
+		case 4:
+			if (!wp_html_api_rust_tag_processor_get_tag(intern->native, &tag_name)) {
+				RETURN_NULL();
+			}
+
+			comment_text = zend_string_alloc(1 + tag_name.len + text.len + 1, 0);
+			offset = 0;
+			ZSTR_VAL(comment_text)[offset++] = '?';
+			memcpy(ZSTR_VAL(comment_text) + offset, tag_name.ptr, tag_name.len);
+			offset += tag_name.len;
+			memcpy(ZSTR_VAL(comment_text) + offset, text.ptr, text.len);
+			offset += text.len;
+			ZSTR_VAL(comment_text)[offset++] = '?';
+			ZSTR_VAL(comment_text)[offset] = '\0';
+			RETURN_STR(comment_text);
+
+		case 5:
+			if (
+				wp_html_api_rust_tag_processor_current_span(intern->native, &token_start, &token_length) &&
+				wp_html_api_rust_tag_processor_get_html(intern->native, &html) &&
+				token_start < html.len &&
+				html.len - token_start > 1 &&
+				'?' == html.ptr[token_start + 1]
+			) {
+				starts_with_question_mark = true;
+			}
+
+			if (!starts_with_question_mark) {
+				RETURN_STRINGL((const char *) text.ptr, text.len);
+			}
+
+			comment_text = zend_string_alloc(1 + text.len, 0);
+			ZSTR_VAL(comment_text)[0] = '?';
+			memcpy(ZSTR_VAL(comment_text) + 1, text.ptr, text.len);
+			ZSTR_VAL(comment_text)[ZSTR_LEN(comment_text)] = '\0';
+			RETURN_STR(comment_text);
+	}
 
 	RETURN_NULL();
 }

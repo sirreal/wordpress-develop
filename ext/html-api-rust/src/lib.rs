@@ -788,13 +788,9 @@ impl TagProcessor {
             }
         }
 
-        if token.starts_with(b"<?") {
+        if token.starts_with(b"<?") && token.ends_with(b"?>") {
             if let Some((_target_start, target_end)) = pi_target_span(&self.html, scan) {
-                let text_end = if token.ends_with(b"?>") {
-                    scan.token_end.saturating_sub(2)
-                } else {
-                    scan.token_end.saturating_sub(1)
-                };
+                let text_end = scan.token_end.saturating_sub(2);
                 return Some(transform_text(
                     &self.html[target_end..text_end],
                     false,
@@ -2354,7 +2350,7 @@ fn decode_character_reference(input: &[u8]) -> Option<(char, usize)> {
 mod tests {
     use super::{
         scan_next_tag, scan_next_token_in_namespace, AttributeValue, ScanResult, TagProcessor,
-        TagScan, NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
+        TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
     };
     use std::ptr;
 
@@ -2531,6 +2527,27 @@ mod tests {
         let first = scan_next_tag(html, 0).unwrap();
         let after = scan_next_tag(html, first.token_end).unwrap();
         assert!(html[after.tag_start..after.token_end].starts_with(b"<hr id=after"));
+    }
+
+    #[test]
+    fn invalid_processing_instruction_keeps_target_in_modifiable_text() {
+        let mut processor = TagProcessor {
+            html: b"<?xml foo >".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
+        });
+
+        let scan = processor.current.unwrap();
+        assert_eq!(processor.comment_type(scan), COMMENT_TYPE_INVALID);
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"xml foo ");
     }
 
     #[test]
