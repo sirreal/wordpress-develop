@@ -1046,6 +1046,7 @@ export function createHtmlApi(wasm) {
 			this.unsupported_exception = null;
 			this.current_virtual = null;
 			this.virtual_tokens = [];
+			this.pending_real_token = false;
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
 			this.context_node = options.contextNode ?? "BODY";
@@ -1162,12 +1163,26 @@ export function createHtmlApi(wasm) {
 				return this.#consumeVirtualToken();
 			}
 
+			if (this.pending_real_token) {
+				this.current_virtual = null;
+				this.pending_real_token = false;
+				this.skip_current_token = false;
+				this.#updateTreeStateForCurrentToken(false);
+				return !this.skip_current_token;
+			}
+
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
-				this.#updateTreeStateForCurrentToken();
+				this.#updateTreeStateForCurrentToken(true);
+				if (this.pending_real_token && this.virtual_tokens.length > 0) {
+					return this.#consumeVirtualToken();
+				}
 				if (!this.skip_current_token) {
 					return true;
+				}
+				if (this.virtual_tokens.length > 0) {
+					return this.#consumeVirtualToken();
 				}
 				this.current_virtual = null;
 			}
@@ -1355,7 +1370,7 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		#updateTreeStateForCurrentToken() {
+		#updateTreeStateForCurrentToken(allowVirtualPreclosures = true) {
 			const tokenType = this.get_token_type();
 			const tokenName = this.get_token_name();
 
@@ -1384,6 +1399,25 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
+				if (tagName === "P" && existingIndex === -1) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.virtual_tokens.push(
+						{
+							operation: "push",
+							tagName: "P",
+							namespaceName: "html",
+						},
+						{
+							operation: "pop",
+							tagName: "P",
+							namespaceName: "html",
+						},
+					);
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (
 					existingIndex === -1 ||
 					(
@@ -1406,6 +1440,11 @@ export function createHtmlApi(wasm) {
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 				this.breadcrumbs = [...this.open_elements];
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
+				return;
+			}
+
+			if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForStartTag(tagName)) {
+				this.pending_real_token = true;
 				return;
 			}
 
@@ -1438,7 +1477,12 @@ export function createHtmlApi(wasm) {
 			this.parser_state = STATE_MATCHED_TAG;
 			this.current_token_namespace = token.namespaceName;
 
-			if (token.operation === "pop") {
+			if (token.operation === "push") {
+				this.open_elements.push(token.tagName);
+				this.open_element_namespaces.push(token.namespaceName);
+				this.breadcrumbs = [...this.open_elements];
+				this.#setCurrentNamespace(childNamespaceForTag(token.tagName, token.namespaceName));
+			} else if (token.operation === "pop") {
 				const existingIndex = this.#lastOpenElementIndex(token.tagName, token.namespaceName);
 				if (existingIndex !== -1) {
 					this.open_elements = this.open_elements.slice(0, existingIndex);
@@ -1449,6 +1493,40 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (HEADING_ELEMENTS.has(tagName)) {
+				const topIndex = this.open_elements.length - 1;
+				if (
+					topIndex >= 0 &&
+					this.open_element_namespaces[topIndex] === "html" &&
+					HEADING_ELEMENTS.has(this.open_elements[topIndex])
+				) {
+					this.#queueVirtualPopsFrom(topIndex);
+					return true;
+				}
+			}
+
+			if (tagName === "A") {
+				const anchorIndex = this.#lastOpenElementIndex("A", "html");
+				if (anchorIndex !== -1) {
+					this.#queueVirtualPopsFrom(anchorIndex);
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#queueVirtualPopsFrom(index) {
+			for (let i = this.open_elements.length - 1; i >= index; i -= 1) {
+				this.virtual_tokens.push({
+					operation: "pop",
+					tagName: this.open_elements[i],
+					namespaceName: this.open_element_namespaces[i],
+				});
+			}
 		}
 
 		#lastOpenElementIndex(tagName, namespaceName) {
@@ -1495,7 +1573,16 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (HEADING_ELEMENTS.has(tagName)) {
-				this.#popLastMatching((nodeName) => HEADING_ELEMENTS.has(nodeName));
+				const topIndex = this.open_elements.length - 1;
+				if (
+					topIndex >= 0 &&
+					this.open_element_namespaces[topIndex] === "html" &&
+					HEADING_ELEMENTS.has(this.open_elements[topIndex])
+				) {
+					this.open_elements.pop();
+					this.open_element_namespaces.pop();
+					this.#setCurrentNamespace(this.#namespaceForStackTop());
+				}
 				return;
 			}
 
