@@ -2017,7 +2017,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
-			this.form_element_pointer = false;
+			this.form_element_pointer = null;
 			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
@@ -2870,16 +2870,24 @@ export function createHtmlApi(wasm) {
 				) {
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = [...this.open_elements];
+					this.form_element_pointer = null;
+					if (this.open_elements.length === existingIndex + 2) {
+						this.skip_current_token = true;
+						return;
+					}
 					this.#queueVirtualPopsFrom(existingIndex + 1);
 					this.skip_current_token = true;
 					return;
 				}
 
-				if (tagName === "FORM" && closingNamespace === "html" && this.form_element_pointer) {
-					this.form_element_pointer = false;
-					if (existingIndex === -1) {
+				if (tagName === "FORM" && closingNamespace === "html") {
+					if (this.form_element_pointer === "detached") {
+						this.form_element_pointer = null;
 						this.#ignoreCurrentToken();
 						return;
+					}
+					if (this.form_element_pointer === "open") {
+						this.form_element_pointer = null;
 					}
 				}
 
@@ -3091,7 +3099,13 @@ export function createHtmlApi(wasm) {
 				this.current_namespace === "html" &&
 				tagName === "FORM" &&
 				!this.#hasOpenHtmlElement("TEMPLATE") &&
-				this.form_element_pointer
+				(
+					this.form_element_pointer !== null ||
+					(
+						this.#hasOpenHtmlElement("FORM") &&
+						!this.#isInTableInsertionContext()
+					)
+				)
 			) {
 				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements];
@@ -3158,12 +3172,16 @@ export function createHtmlApi(wasm) {
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingElement(this.#createActiveFormattingElement(tagName));
 			}
+			const shouldPopTableFormImmediately = this.#shouldPopTableFormImmediately(
+				tagName,
+				this.current_token_namespace,
+			);
 			if (
 				this.current_token_namespace === "html" &&
 				tagName === "FORM" &&
 				!this.#hasOpenHtmlElement("TEMPLATE")
 			) {
-				this.form_element_pointer = true;
+				this.form_element_pointer = shouldPopTableFormImmediately ? "detached" : "open";
 			}
 			this.breadcrumbs = [...this.open_elements];
 
@@ -3178,7 +3196,7 @@ export function createHtmlApi(wasm) {
 					this.current_token_namespace,
 					currentTokenIntegrationNodeType,
 				));
-				if (this.#shouldPopTableFormImmediately(tagName, this.current_token_namespace)) {
+				if (shouldPopTableFormImmediately) {
 					this.virtual_tokens.push({
 						operation: "pop",
 						tagName,
