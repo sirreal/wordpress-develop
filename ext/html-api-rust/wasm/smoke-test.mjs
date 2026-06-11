@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { loadWasm } from "./wp-html-api-rust.js";
 
 const {
@@ -10,6 +11,10 @@ const {
 } = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 
 assert.equal(version(), "0.1.0");
+
+const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
+const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
+assert.equal(apiFromDataView.version(), "0.1.0");
 
 for (const method of [
 	"change_parsing_namespace",

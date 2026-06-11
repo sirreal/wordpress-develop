@@ -468,7 +468,9 @@ async function bytesFromInput(input) {
 	}
 
 	if (ArrayBuffer.isView(input)) {
-		return input;
+		return input instanceof Uint8Array
+			? input
+			: new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
 	}
 
 	if (input instanceof URL && input.protocol === "file:") {

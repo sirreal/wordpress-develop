@@ -3,7 +3,7 @@ export type WasmInput =
 	| Request
 	| string
 	| ArrayBuffer
-	| Uint8Array
+	| ArrayBufferView
 	| WebAssembly.Module;
 
 export interface ScanNextTagResult {
