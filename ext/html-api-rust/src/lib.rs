@@ -2110,7 +2110,7 @@ fn scan_next_token_in_namespace(html: &[u8], offset: usize, namespace: u8) -> Sc
     }
 
     if tag_start + 1 >= len {
-        return ScanResult::Incomplete;
+        return ScanResult::Token(text_scan(tag_start, len));
     }
 
     if starts_with_ignore_ascii_case(&html[tag_start..], b"<!--") {
@@ -2140,7 +2140,11 @@ fn scan_next_token_in_namespace(html: &[u8], offset: usize, namespace: u8) -> Sc
     }
 
     if name_start >= len {
-        return ScanResult::Incomplete;
+        return if is_closing {
+            ScanResult::Token(text_scan(tag_start, len))
+        } else {
+            ScanResult::Incomplete
+        };
     }
 
     if is_closing && html[name_start] == b'>' {
@@ -2905,7 +2909,7 @@ mod tests {
     use super::{
         find_script_closer, scan_next_tag, scan_next_token, scan_next_token_in_namespace,
         AttributeValue, ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
-        NAMESPACE_HTML, TOKEN_TYPE_TAG,
+        NAMESPACE_HTML, TOKEN_TYPE_TAG, TOKEN_TYPE_TEXT,
     };
     use std::ptr;
 
@@ -2962,6 +2966,28 @@ mod tests {
     #[test]
     fn reports_incomplete_tag_as_not_found() {
         assert!(scan_next_tag(br#"<div title="unterminated"#, 0).is_none());
+    }
+
+    #[test]
+    fn treats_bare_less_than_at_eof_as_text() {
+        let ScanResult::Token(scan) = scan_next_token(b"<", 0) else {
+            panic!("Expected a text token.");
+        };
+
+        assert_eq!(scan.token_type, TOKEN_TYPE_TEXT);
+        assert_eq!(scan.tag_start, 0);
+        assert_eq!(scan.token_end, 1);
+    }
+
+    #[test]
+    fn treats_bare_closing_less_than_at_eof_as_text() {
+        let ScanResult::Token(scan) = scan_next_token(b"</", 0) else {
+            panic!("Expected a text token.");
+        };
+
+        assert_eq!(scan.token_type, TOKEN_TYPE_TEXT);
+        assert_eq!(scan.tag_start, 0);
+        assert_eq!(scan.token_end, 2);
     }
 
     #[test]
