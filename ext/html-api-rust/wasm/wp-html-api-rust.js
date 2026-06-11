@@ -99,6 +99,14 @@ const TABLE_ROW_BOUNDARY_START_TAGS = new Set([
 	"THEAD",
 	"TR",
 ]);
+const TABLE_SECTION_BOUNDARY_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"TBODY",
+	"TFOOT",
+	"THEAD",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -1707,6 +1715,14 @@ export function createHtmlApi(wasm) {
 				const rowIndex = this.#findElementInTableScope("TR");
 				if (rowIndex !== -1) {
 					this.#queueVirtualPopsFrom(rowIndex);
+					return true;
+				}
+			}
+
+			if (TABLE_SECTION_BOUNDARY_START_TAGS.has(tagName)) {
+				const sectionIndex = this.#findElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName));
+				if (sectionIndex !== -1) {
+					this.#queueVirtualPopsFrom(sectionIndex);
 					return true;
 				}
 			}

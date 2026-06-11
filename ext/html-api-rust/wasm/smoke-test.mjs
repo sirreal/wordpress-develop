@@ -489,6 +489,31 @@ assert.equal(adjacentTableRowProcessor.is_tag_closer(), false);
 assert.deepEqual(adjacentTableRowProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
 adjacentTableRowProcessor.destroy();
 
+const adjacentTableSectionProcessor = WP_HTML_Processor.create_fragment("<table><tbody><tr><td>a<tbody><tr><td>b");
+assert.equal(adjacentTableSectionProcessor.next_tag("td"), true);
+assert.deepEqual(adjacentTableSectionProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(adjacentTableSectionProcessor.next_token(), true);
+assert.equal(adjacentTableSectionProcessor.get_token_name(), "#text");
+assert.equal(adjacentTableSectionProcessor.next_token(), true);
+assert.equal(adjacentTableSectionProcessor.get_tag(), "TD");
+assert.equal(adjacentTableSectionProcessor.is_virtual(), true);
+assert.equal(adjacentTableSectionProcessor.is_tag_closer(), true);
+assert.equal(adjacentTableSectionProcessor.next_token(), true);
+assert.equal(adjacentTableSectionProcessor.get_tag(), "TR");
+assert.equal(adjacentTableSectionProcessor.is_virtual(), true);
+assert.equal(adjacentTableSectionProcessor.is_tag_closer(), true);
+assert.equal(adjacentTableSectionProcessor.next_token(), true);
+assert.equal(adjacentTableSectionProcessor.get_tag(), "TBODY");
+assert.equal(adjacentTableSectionProcessor.is_virtual(), true);
+assert.equal(adjacentTableSectionProcessor.is_tag_closer(), true);
+assert.deepEqual(adjacentTableSectionProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(adjacentTableSectionProcessor.next_token(), true);
+assert.equal(adjacentTableSectionProcessor.get_tag(), "TBODY");
+assert.equal(adjacentTableSectionProcessor.is_virtual(), false);
+assert.equal(adjacentTableSectionProcessor.is_tag_closer(), false);
+assert.deepEqual(adjacentTableSectionProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY"]);
+adjacentTableSectionProcessor.destroy();
+
 const unexpectedCloserProcessor = WP_HTML_Processor.create_fragment("<div>Test</button></div>");
 assert.equal(unexpectedCloserProcessor.next_token(), true);
 assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
@@ -611,6 +636,7 @@ assert.equal(WP_HTML_Processor.normalize("<table><td>cell"), "<table><tbody><tr>
 assert.equal(WP_HTML_Processor.normalize("<table><tr><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><td>a<td>b"), "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><tr><td>a<tr><td>b"), "<table><tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>");
+assert.equal(WP_HTML_Processor.normalize("<table><tbody><tr><td>a<tbody><tr><td>b"), "<table><tbody><tr><td>a</td></tr></tbody><tbody><tr><td>b</td></tr></tbody></table>");
 
 const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
 assert.equal(serializationProcessor.next_token(), true);
