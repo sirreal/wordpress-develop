@@ -512,6 +512,10 @@ export function createHtmlApi(wasm) {
 		static COMMENT_AS_INVALID_HTML = "COMMENT_AS_INVALID_HTML";
 
 		constructor(html) {
+			if (typeof html !== "string") {
+				html = "";
+			}
+
 			this.parser_state = STATE_READY;
 			this.compat_mode = WP_HTML_Tag_Processor.NO_QUIRKS_MODE;
 			this.parsing_namespace = "html";

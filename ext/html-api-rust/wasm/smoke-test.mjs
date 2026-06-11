@@ -95,6 +95,13 @@ assert.deepEqual(tags.class_list(), ["active"]);
 assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" data-id="8">Hi</span></div>');
 tags.destroy();
 
+for (const invalidHtml of [null, 123]) {
+	const invalidTags = new WP_HTML_Tag_Processor(invalidHtml);
+	assert.equal(invalidTags.get_updated_html(), "");
+	assert.equal(invalidTags.next_token(), false);
+	invalidTags.destroy();
+}
+
 const text = new WP_HTML_Tag_Processor(" \0<p>Hi</p>");
 assert.equal(text.get_modifiable_text(), "");
 assert.equal(text.get_qualified_attribute_name("data-id"), null);

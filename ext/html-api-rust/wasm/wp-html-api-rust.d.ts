@@ -121,7 +121,7 @@ export interface WP_HTML_Tag_Processor {
 }
 
 export interface WP_HTML_Tag_Processor_Constructor {
-	new (html: string): WP_HTML_Tag_Processor;
+	new (html: unknown): WP_HTML_Tag_Processor;
 	readonly MAX_BOOKMARKS: number;
 	readonly MAX_SEEK_OPS: 1000;
 	readonly ADD_CLASS: true;
