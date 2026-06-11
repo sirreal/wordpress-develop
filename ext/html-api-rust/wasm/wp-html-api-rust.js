@@ -3612,8 +3612,13 @@ export function createHtmlApi(wasm) {
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag"
 						) {
-							this.#bailUnsupported("Content outside of BODY is unsupported.");
-							return true;
+							if (this.open_elements.length > 1) {
+								this.#queueVirtualPopsFrom(1);
+								this.pending_real_token = true;
+								this.pending_real_parser_state = this.parser_state;
+								return true;
+							}
+							return false;
 						}
 
 						if (tokenType === "#doctype") {
@@ -3651,8 +3656,13 @@ export function createHtmlApi(wasm) {
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag"
 						) {
-							this.#bailUnsupported("Content outside of HTML is unsupported.");
-							return true;
+							if (this.open_elements.length > 0) {
+								this.#queueVirtualPopsFrom(0);
+								this.pending_real_token = true;
+								this.pending_real_parser_state = this.parser_state;
+								return true;
+							}
+							return false;
 						}
 
 						if (tokenType === "#doctype" || (tokenType === "#tag" && !isCloser && tagName === "HTML")) {

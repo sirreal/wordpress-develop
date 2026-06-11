@@ -532,6 +532,10 @@ for (const [html, expectedTree] of [
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "XX"\n\n',
 	],
 	[
+		"<!DOCTYPE html><body></body><!--do-->",
+		"<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n  <!-- do -->\n\n",
+	],
+	[
 		"<!DOCTYPE html><select><optgroup><option></optgroup><option><select><option>",
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <select>\n      <optgroup>\n        <option>\n      <option>\n    <option>\n\n',
 	],
@@ -2226,17 +2230,27 @@ for (const html of [
 }
 
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");
-while (fullParserCommentAfterBody.next_token()) {
+while (
+	fullParserCommentAfterBody.next_token() &&
+	fullParserCommentAfterBody.get_token_type() !== "#comment"
+) {
 }
-assert.equal(fullParserCommentAfterBody.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(fullParserCommentAfterBody.get_unsupported_exception().message, "Content outside of BODY is unsupported.");
+assert.equal(fullParserCommentAfterBody.get_token_type(), "#comment");
+assert.deepEqual(fullParserCommentAfterBody.get_breadcrumbs(), ["HTML", "#comment"]);
+assert.equal(fullParserCommentAfterBody.get_last_error(), null);
+assert.equal(fullParserCommentAfterBody.get_unsupported_exception(), null);
 fullParserCommentAfterBody.destroy();
 
 const fullParserCommentAfterHtml = WP_HTML_Processor.create_full_parser("<html><body></body></html><!--outside-->");
-while (fullParserCommentAfterHtml.next_token()) {
+while (
+	fullParserCommentAfterHtml.next_token() &&
+	fullParserCommentAfterHtml.get_token_type() !== "#comment"
+) {
 }
-assert.equal(fullParserCommentAfterHtml.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(fullParserCommentAfterHtml.get_unsupported_exception().message, "Content outside of HTML is unsupported.");
+assert.equal(fullParserCommentAfterHtml.get_token_type(), "#comment");
+assert.deepEqual(fullParserCommentAfterHtml.get_breadcrumbs(), ["#comment"]);
+assert.equal(fullParserCommentAfterHtml.get_last_error(), null);
+assert.equal(fullParserCommentAfterHtml.get_unsupported_exception(), null);
 fullParserCommentAfterHtml.destroy();
 
 const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
