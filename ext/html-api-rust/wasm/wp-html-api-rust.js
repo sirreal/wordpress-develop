@@ -2642,6 +2642,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (tokenType === "#doctype" && this.current_namespace !== "html") {
+				this.skip_current_token = true;
+				return;
+			}
+
 			if (tokenType !== "#tag") {
 				if (this.#shouldIgnoreTextInTemplateColumnGroup(tokenType)) {
 					this.skip_current_token = true;

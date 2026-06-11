@@ -576,6 +576,10 @@ for (const [html, expectedTree] of [
 		"<html>\n  <head>\n  <body>\n    <a>\n      <svg svg>\n        <svg tr>\n          <svg input>\n\n",
 	],
 	[
+		"<svg><!DOCTYPE html></svg>",
+		"<html>\n  <head>\n  <body>\n    <svg svg>\n\n",
+	],
+	[
 		"<div a=1 b><span>Hi</span></div>",
 		'<html>\n  <head>\n  <body>\n    <div>\n      a="1"\n      b=""\n      <span>\n        "Hi"\n\n',
 	],
@@ -3191,6 +3195,7 @@ assert.equal(
 	WP_HTML_Processor.normalize("<table><tr><td><svg><tr><circle>"),
 	"<table><tbody><tr><td><svg><tr><circle></circle></tr></svg></td></tr></tbody></table>",
 );
+assert.equal(WP_HTML_Processor.normalize("<svg><!DOCTYPE html></svg>"), "<svg></svg>");
 
 const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
 assert.equal(foreignModifiableTextProcessor.next_tag("title"), true);
