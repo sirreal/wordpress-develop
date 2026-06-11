@@ -1994,6 +1994,7 @@ PHP_METHOD(WP_HTML_Tag_Processor, seek)
 		token_start == (size_t) bookmark_start &&
 		token_length == (size_t) bookmark_length
 	) {
+		wp_html_tag_processor_update_parser_state_from_native(ZEND_THIS, intern->native);
 		RETURN_TRUE;
 	}
 
