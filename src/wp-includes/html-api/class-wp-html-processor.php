@@ -1495,6 +1495,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @since 6.7.0
 	 * @since 6.9.0 Converted from protected to public method.
+	 * @since 7.1.0 Contents of IFRAME, NOEMBED, NOFRAMES, and XMP elements are
+	 *              serialized literally instead of being dropped or escaped.
 	 *
 	 * @return string Serialization of token, or empty string if no serialization exists.
 	 */
@@ -1636,17 +1638,38 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$text = $this->get_modifiable_text();
 
 			switch ( $tag_name ) {
+				/*
+				 * The contents of these elements are emitted literally to preserve
+				 * the document's contents, following the HTML serialization spec:
+				 *
+				 * > If the parent of current node is a style, script, xmp, iframe,
+				 * > noembed, noframes, or plaintext element, or if the parent of
+				 * > current node is a noscript element and scripting is enabled for
+				 * > the node, then append the value of current node's data literally.
+				 *
+				 * This is safe because character references are never decoded in
+				 * their contents. RAWTEXT contents (IFRAME, NOEMBED, NOFRAMES,
+				 * STYLE, XMP) cannot contain their own closing tag, so the closer
+				 * appended below cannot be matched early. SCRIPT data may contain
+				 * escaped closers (e.g. within `<!-- -->`), but re-parsing the
+				 * identical bytes follows the same tokenization rules that produced
+				 * this text, terminating at the appended closer all the same.
+				 *
+				 * @see https://html.spec.whatwg.org/multipage/parsing.html#serialising-html-fragments
+				 */
 				case 'IFRAME':
 				case 'NOEMBED':
 				case 'NOFRAMES':
-					$text = '';
-					break;
-
 				case 'SCRIPT':
 				case 'STYLE':
 				case 'XMP':
 					break;
 
+				/*
+				 * The contents of TEXTAREA and TITLE are parsed as RCDATA, in which
+				 * character references are decoded, so the decoded modifiable text
+				 * must be re-escaped to preserve the document's contents.
+				 */
 				default:
 					$text = self::serialize_decoded_text( $text );
 			}
