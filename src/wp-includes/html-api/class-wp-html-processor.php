@@ -1314,6 +1314,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *         }
 	 *     }
 	 *
+	 * The `>=` comparison is what makes this loop correct at any nesting
+	 * depth. Tokens many levels down (a link inside an LI inside this UL,
+	 * or a TD inside a TR inside a TBODY) always report a depth greater
+	 * than the container's, and the closers of nested elements report a
+	 * depth no less than it; only the container's own closer reports
+	 * less. Writing `>` instead would end the walk early, at the first
+	 * closer of a direct child.
+	 *
 	 * @since 6.6.0
 	 *
 	 * @return int Nesting-depth of current location in the document.
