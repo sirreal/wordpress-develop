@@ -3321,7 +3321,14 @@ export function createHtmlApi(wasm) {
 					this.open_element_namespaces[topIndex] !== "html"
 				) {
 					if (
+						this.full_parser_insertion_mode === "in_head" &&
+						this.#hasOpenHtmlElement("HEAD")
+					) {
+						this.#queueVirtualPopsFrom(this.#lastOpenElementIndex("HEAD", "html") + 1);
+						this.#queueVirtualPop("HEAD");
+					} else if (
 						this.full_parser_insertion_mode !== "after_head" ||
+						topIndex < 0 ||
 						this.open_elements[topIndex] !== "HTML" ||
 						this.open_element_namespaces[topIndex] !== "html"
 					) {
