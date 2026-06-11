@@ -3261,7 +3261,7 @@ export function createHtmlApi(wasm) {
 		#queueFullParserMissingBodyAtEof() {
 			if (
 				!this.is_full_parser ||
-				!["in_head", "after_head"].includes(this.full_parser_insertion_mode) ||
+				!["before_head", "in_head", "after_head"].includes(this.full_parser_insertion_mode) ||
 				this.#hasOpenHtmlElement("BODY") ||
 				this.#hasOpenHtmlElement("FRAMESET")
 			) {
@@ -3269,20 +3269,33 @@ export function createHtmlApi(wasm) {
 			}
 
 			const topIndex = this.open_elements.length - 1;
-			if (
-				topIndex < 0 ||
-				this.open_elements[topIndex] !== "HEAD" ||
-				this.open_element_namespaces[topIndex] !== "html"
-			) {
+			if (this.full_parser_insertion_mode === "before_head") {
 				if (
-					this.full_parser_insertion_mode !== "after_head" ||
+					topIndex < 0 ||
 					this.open_elements[topIndex] !== "HTML" ||
 					this.open_element_namespaces[topIndex] !== "html"
 				) {
 					return false;
 				}
-			} else {
+
+				this.#queueVirtualPush("HEAD");
 				this.#queueVirtualPop("HEAD");
+			} else {
+				if (
+					topIndex < 0 ||
+					this.open_elements[topIndex] !== "HEAD" ||
+					this.open_element_namespaces[topIndex] !== "html"
+				) {
+					if (
+						this.full_parser_insertion_mode !== "after_head" ||
+						this.open_elements[topIndex] !== "HTML" ||
+						this.open_element_namespaces[topIndex] !== "html"
+					) {
+						return false;
+					}
+				} else {
+					this.#queueVirtualPop("HEAD");
+				}
 			}
 
 			this.full_parser_insertion_mode = "in_body";

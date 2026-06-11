@@ -450,6 +450,25 @@ assert.equal(fullParserDoctype.get_tag(), "P");
 assert.deepEqual(fullParserDoctype.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 fullParserDoctype.destroy();
 
+const fullParserExplicitHtmlEof = WP_HTML_Processor.create_full_parser("<html><!DOCTYPE html>");
+const fullParserExplicitHtmlEofTokens = [];
+while (fullParserExplicitHtmlEof.next_token()) {
+	fullParserExplicitHtmlEofTokens.push(
+		fullParserExplicitHtmlEof.get_token_type() === "#tag"
+			? `${fullParserExplicitHtmlEof.is_virtual() ? "V" : "R"}${fullParserExplicitHtmlEof.is_tag_closer() ? "-" : "+"}${fullParserExplicitHtmlEof.get_tag()}:${fullParserExplicitHtmlEof.get_breadcrumbs().join("/")}`
+			: fullParserExplicitHtmlEof.get_token_name(),
+	);
+}
+assert.deepEqual(fullParserExplicitHtmlEofTokens, [
+	"R+HTML:HTML",
+	"V+HEAD:HTML/HEAD",
+	"V-HEAD:HTML",
+	"V+BODY:HTML/BODY",
+	"V-BODY:HTML",
+	"V-HTML:",
+]);
+fullParserExplicitHtmlEof.destroy();
+
 const fullParserHeadNoscriptBreakout = WP_HTML_Processor.create_full_parser("<head><noscript></br><!--foo--></noscript>");
 assert.equal(fullParserHeadNoscriptBreakout.next_tag("noscript"), true);
 assert.deepEqual(fullParserHeadNoscriptBreakout.get_breadcrumbs(), ["HTML", "HEAD", "NOSCRIPT"]);
