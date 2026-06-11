@@ -1732,6 +1732,7 @@ for (const [html, context, expected] of [
 	["<caption><td>", "<tr>", "<td></td>"],
 	["<tbody><td>", "<tr>", "<td></td>"],
 	["<tr><td>", "<tr>", "<td></td>"],
+	["<caption><col><colgroup><tbody><tfoot><thead><tr>", "<tbody>", "<tr></tr>"],
 	[
 		'<template><form><input name="q"></form><div>second</div></template>',
 		"<template>",

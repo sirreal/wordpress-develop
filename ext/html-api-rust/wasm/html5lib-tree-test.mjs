@@ -27,6 +27,7 @@ const supportedFragmentContexts = new Set([
 	"svg svg",
 	"svg title",
 	"table",
+	"tbody",
 	"template",
 	"td",
 	"tfoot",
