@@ -612,6 +612,17 @@ assert.equal(quirksClasses.remove_class("upPer"), true);
 assert.equal(quirksClasses.get_updated_html(), "<span >");
 quirksClasses.destroy();
 
+const noQuirksParagraphTable = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><table>");
+assert.equal(noQuirksParagraphTable.next_tag("table"), true);
+assert.deepEqual(noQuirksParagraphTable.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+noQuirksParagraphTable.destroy();
+
+const quirksParagraphTable = WP_HTML_Processor.create_full_parser('<!DOCTYPE html PUBLIC "html"><p><table>');
+assert.equal(quirksParagraphTable.next_tag("table"), true);
+assert.equal(quirksParagraphTable.compat_mode, WP_HTML_Tag_Processor.QUIRKS_MODE);
+assert.deepEqual(quirksParagraphTable.get_breadcrumbs(), ["HTML", "BODY", "P", "TABLE"]);
+quirksParagraphTable.destroy();
+
 const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
 assert.equal(stepProcessor.step(), true);
 assert.equal(stepProcessor.get_tag(), "DIV");

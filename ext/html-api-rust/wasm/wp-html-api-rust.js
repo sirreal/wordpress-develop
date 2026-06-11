@@ -2924,7 +2924,7 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
-			if (P_CLOSING_START_TAGS.has(tagName)) {
+			if (this.#shouldClosePForStartTag(tagName)) {
 				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
 				if (paragraphIndex !== -1) {
 					this.#queueVirtualPopsFrom(paragraphIndex);
@@ -3322,7 +3322,7 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
-			if (P_CLOSING_START_TAGS.has(tagName)) {
+			if (this.#shouldClosePForStartTag(tagName)) {
 				this.#closePInButtonScope();
 			}
 
@@ -3359,6 +3359,13 @@ export function createHtmlApi(wasm) {
 
 		#closePInButtonScope() {
 			return this.#popLastMatchingBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+		}
+
+		#shouldClosePForStartTag(tagName) {
+			return (
+				P_CLOSING_START_TAGS.has(tagName) &&
+				(tagName !== "TABLE" || this.compat_mode !== WP_HTML_Tag_Processor.QUIRKS_MODE)
+			);
 		}
 
 		#popLastMatchingBeforeBoundary(match, boundaries) {
