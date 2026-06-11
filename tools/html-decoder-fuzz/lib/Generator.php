@@ -213,6 +213,42 @@ class Generator {
 		return count( self::numeric_boundary_sweep_cases() );
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_corpus_mutation( int $case_index ): array {
+		$corpus     = self::corpus_payloads();
+		$case_index = max( 0, $case_index );
+		$operation  = $this->prng->weighted(
+			array(
+				'splice'                => 25,
+				'byte-perturb'          => 25,
+				'semicolon-toggle'      => 25,
+				'reference-duplication' => 25,
+			)
+		);
+		$payload    = $corpus[ $case_index % count( $corpus ) ];
+		$payload    = $this->mutate_corpus_payload( $payload, $operation, $corpus );
+
+		if ( $this->prng->chance( 35 ) ) {
+			$payload = $this->mutate_corpus_payload(
+				$payload,
+				$this->prng->choice( array( 'splice', 'byte-perturb', 'semicolon-toggle', 'reference-duplication' ) ),
+				$corpus
+			);
+		}
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'corpus-' . $operation,
+			'payload'  => self::trim_to_safe_max( $payload, $this->max_bytes ),
+		);
+	}
+
+	public function corpus_period(): int {
+		return count( self::corpus_payloads() );
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -432,6 +468,163 @@ class Generator {
 		}
 
 		return '&';
+	}
+
+	/**
+	 * @param string[] $corpus
+	 */
+	private function mutate_corpus_payload( string $payload, string $operation, array $corpus ): string {
+		switch ( $operation ) {
+			case 'splice':
+				return $this->mutate_corpus_splice( $payload, $corpus );
+
+			case 'byte-perturb':
+				return $this->mutate_corpus_byte_perturb( $payload );
+
+			case 'semicolon-toggle':
+				return $this->mutate_corpus_semicolon_toggle( $payload );
+
+			case 'reference-duplication':
+				return $this->mutate_corpus_reference_duplication( $payload );
+		}
+
+		return $payload;
+	}
+
+	/**
+	 * @param string[] $corpus
+	 */
+	private function mutate_corpus_splice( string $payload, array $corpus ): string {
+		$other = $this->prng->choice( $corpus );
+
+		$left_at  = $this->utf8_boundary( $payload );
+		$right_at = $this->utf8_boundary( $payload );
+		if ( $right_at < $left_at ) {
+			list( $left_at, $right_at ) = array( $right_at, $left_at );
+		}
+
+		$other_left  = $this->utf8_boundary( $other );
+		$other_right = $this->utf8_boundary( $other );
+		if ( $other_right < $other_left ) {
+			list( $other_left, $other_right ) = array( $other_right, $other_left );
+		}
+		$splice      = substr( $other, $other_left, $other_right - $other_left );
+		if ( '' === $splice ) {
+			$splice = $this->prng->choice( array( '&amp;', '&#x80;', '&notin;', '&gt' ) );
+		}
+
+		return substr( $payload, 0, $left_at ) . $splice . substr( $payload, $right_at );
+	}
+
+	private function mutate_corpus_byte_perturb( string $payload ): string {
+		$operation = $this->prng->weighted(
+			array(
+				'insert'  => 35,
+				'replace' => 45,
+				'delete'  => 20,
+			)
+		);
+
+		if ( '' === $payload || 'insert' === $operation ) {
+			$at = $this->utf8_boundary( $payload );
+			return substr( $payload, 0, $at ) . $this->safe_corpus_byte() . substr( $payload, $at );
+		}
+
+		list( $at, $next ) = $this->utf8_character_span( $payload );
+		if ( 'delete' === $operation ) {
+			return substr( $payload, 0, $at ) . substr( $payload, $next );
+		}
+
+		return substr( $payload, 0, $at ) . $this->safe_corpus_byte() . substr( $payload, $next );
+	}
+
+	private function mutate_corpus_semicolon_toggle( string $payload ): string {
+		$matches = $this->reference_matches( $payload );
+		if ( array() === $matches ) {
+			return $payload . $this->prng->choice( array( '&amp', '&amp;', '&#58', '&#58;' ) );
+		}
+
+		$match     = $this->prng->choice( $matches );
+		$reference = $match['text'];
+		if ( str_ends_with( $reference, ';' ) ) {
+			$replacement = substr( $reference, 0, -1 );
+		} else {
+			$replacement = $reference . ';';
+		}
+
+		return substr( $payload, 0, $match['offset'] ) . $replacement . substr( $payload, $match['offset'] + strlen( $reference ) );
+	}
+
+	private function mutate_corpus_reference_duplication( string $payload ): string {
+		$matches = $this->reference_matches( $payload );
+		if ( array() === $matches ) {
+			return $payload . $this->prng->choice( array( '&gt;&gt;', '&#x80;&#x80;', '&notin;&notin;' ) );
+		}
+
+		$match = $this->prng->choice( $matches );
+		return substr( $payload, 0, $match['offset'] + strlen( $match['text'] ) ) . $match['text'] . substr( $payload, $match['offset'] + strlen( $match['text'] ) );
+	}
+
+	private function safe_corpus_byte(): string {
+		return self::ASCII_ALPHABET[ $this->prng->int( 0, strlen( self::ASCII_ALPHABET ) - 1 ) ];
+	}
+
+	private function utf8_boundary( string $payload ): int {
+		return $this->prng->choice( self::utf8_boundaries( $payload ) );
+	}
+
+	/**
+	 * @return array{0: int, 1: int}
+	 */
+	private function utf8_character_span( string $payload ): array {
+		$boundaries = self::utf8_boundaries( $payload );
+		if ( count( $boundaries ) < 2 ) {
+			return array( 0, 0 );
+		}
+
+		$index = $this->prng->int( 0, count( $boundaries ) - 2 );
+		return array( $boundaries[ $index ], $boundaries[ $index + 1 ] );
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private static function utf8_boundaries( string $payload ): array {
+		$boundaries = array( 0 );
+		if ( '' === $payload ) {
+			return $boundaries;
+		}
+
+		$match_count = preg_match_all( '/./us', $payload, $matches, PREG_OFFSET_CAPTURE );
+		if ( false === $match_count || 0 === $match_count ) {
+			return array( 0, strlen( $payload ) );
+		}
+
+		foreach ( $matches[0] as $match ) {
+			$boundaries[] = $match[1] + strlen( $match[0] );
+		}
+
+		return array_values( array_unique( $boundaries ) );
+	}
+
+	/**
+	 * @return array<int, array{text: string, offset: int}>
+	 */
+	private function reference_matches( string $payload ): array {
+		$matches = array();
+		$match_count = preg_match_all( '/&(?:#[xX][0-9A-Fa-f]+|#[0-9]+|[A-Za-z][A-Za-z0-9]+);?/', $payload, $raw_matches, PREG_OFFSET_CAPTURE );
+		if ( false === $match_count || 0 === $match_count ) {
+			return $matches;
+		}
+
+		foreach ( $raw_matches[0] as $match ) {
+			$matches[] = array(
+				'text'   => $match[0],
+				'offset' => $match[1],
+			);
+		}
+
+		return $matches;
 	}
 
 	/**
@@ -925,6 +1118,112 @@ class Generator {
 		return $prefix . $digits . ( $semicolon ? ';' : '' );
 	}
 
+	/**
+	 * @return string[]
+	 */
+	private static function corpus_payloads(): array {
+		static $payloads = null;
+		if ( null !== $payloads ) {
+			return $payloads;
+		}
+
+		$payloads = array(
+			'',
+			'plain text',
+			'FOO&gt;BAR',
+			'FOO&gtBAR',
+			'FOO&gt;;;BAR',
+			'FOO&&&&gt;BAR',
+			"I'm &notit; I tell you",
+			"I'm &notin; I tell you",
+			'&ammmp;',
+			'&amp;amp;',
+			'&notin;&notinva;&not;',
+			'ZZ&gt=YY',
+			'ZZ&gt0YY',
+			'ZZ&gt YY',
+			'ZZ&gt',
+			'javascript&colon;alert(1)',
+			'javascript&#58;alert(1)',
+			'javascript&#x3a;alert(1)',
+			'&#x80;&#128;&#00000128;',
+			'&#0;&#xD800;&#x110000;',
+			'&nvlt;tail',
+			'&NoSuchEntity;&amp',
+		);
+
+		foreach ( Oracles::battery() as $vector ) {
+			$payloads[] = $vector[1];
+		}
+
+		foreach ( self::html5lib_entity_payloads() as $payload ) {
+			$payloads[] = $payload;
+		}
+
+		$payloads = array_values(
+			array_unique(
+				array_filter(
+					$payloads,
+					static fn( string $payload ): bool => self::is_oracle_safe_payload( $payload )
+				)
+			)
+		);
+
+		if ( array() === $payloads ) {
+			$payloads = array( '&amp;' );
+		}
+
+		return $payloads;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function html5lib_entity_payloads(): array {
+		$payloads = array();
+		foreach ( array( 'entities01.dat', 'entities02.dat' ) as $file ) {
+			$path = Bootstrap::repo_root() . '/tests/phpunit/data/html5lib-tests/tree-construction/' . $file;
+			if ( ! is_file( $path ) ) {
+				continue;
+			}
+
+			$lines = file( $path, FILE_IGNORE_NEW_LINES );
+			if ( ! is_array( $lines ) ) {
+				continue;
+			}
+
+			for ( $i = 0; $i + 1 < count( $lines ); $i++ ) {
+				if ( '#data' !== $lines[ $i ] ) {
+					continue;
+				}
+
+				$payload = self::html5lib_entity_payload_from_data_line( $lines[ $i + 1 ] );
+				if ( strlen( $payload ) > 512 ) {
+					$payload = substr( $payload, 0, 512 );
+				}
+				$payloads[] = $payload;
+			}
+		}
+
+		return $payloads;
+	}
+
+	private static function html5lib_entity_payload_from_data_line( string $line ): string {
+		if ( 1 === preg_match( '/^<div\s+bar=(?:"([^"]*)"|\'([^\']*)\'|([^>\s]+))><\/div>$/', $line, $match ) ) {
+			foreach ( array( 1, 2, 3 ) as $index ) {
+				if ( isset( $match[ $index ] ) && '' !== $match[ $index ] ) {
+					return $match[ $index ];
+				}
+			}
+		}
+
+		if ( 1 === preg_match( '/^<div>(.*)<\/div>$/', $line, $match ) ) {
+			return $match[1];
+		}
+
+		return $line;
+	}
+
 	private function numeric_reference( bool $allow_missing_digits = false ): string {
 		$kind = $this->prng->weighted(
 			array(
@@ -1071,6 +1370,10 @@ class Generator {
 
 	private static function trim_to_safe_max( string $payload, int $max_bytes ): string {
 		$payload = str_replace( array( '<', '"', "\r", "\x00" ), array( '', "'", "\n", '' ), $payload );
+
+		while ( '' !== $payload && ! mb_check_encoding( $payload, 'UTF-8' ) ) {
+			$payload = substr( $payload, 0, -1 );
+		}
 
 		if ( strlen( $payload ) <= $max_bytes ) {
 			return $payload;

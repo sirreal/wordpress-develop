@@ -17,7 +17,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 10: add prefix-family stress generation.
 - [x] Tier 2 item 11: add digit-count numeric boundary stress generation.
 - [x] Tier 2 item 12: add strategy composition and generalized attribute-prefix encoding.
-- [ ] Tier 2 items 13-15.
+- [x] Tier 2 item 13: add mutation/corpus mode.
+- [ ] Tier 2 items 14-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -86,6 +87,14 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed after adding strategy composition and reported `by_strategy` including `"composition":30`; `git diff --check` passed.
 - 2026-06-11: After reviewer feedback, semicolonless numeric boundary protection now treats `;` as a reference-extending follower, composition inserts explicit fragment separators, and smoke asserts the exact weighted strategy set plus 2-3 separated composition fragments; `php tools/html-decoder-fuzz/tests/harness-smoke.php` and `git diff --check` passed.
 - 2026-06-11: After follow-up reviewer feedback, composition now keeps separated fragments nonempty under small public `max-bytes` values; a targeted probe for max bytes 3, 5, 7, and 12, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `replay.php`, and `tests/harness-smoke.php` after adding the corpus mutation mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting corpus seed-corpus size, retained html5lib text and attribute vectors, all four mutation strategies, semicolon-toggle/reference-duplication shapes, UTF-8-safe splice/perturb mutations, oracle-safe diversified payloads, worker, runner start windows, seed replay, faulted seed replay, and failure-manifest replay/minimize coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 300 --progress-every 300` passed and reported all corpus mutation strategies with `by_context: {"both":300}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode corpus --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-corpus-runner-check-20260611-2` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 0` passed for the deterministic `corpus-byte-perturb` case with hex preview `67262335383b`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-corpus-fault-check-20260611-2` reported the expected `reader-overran-input` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` and `git diff --check` passed after adding corpus mutation mode.
+- 2026-06-11: After reviewer feedback, html5lib tree-construction entity rows now normalize simple `<div bar=...>` and `<div>...</div>` fixtures into decoder payloads before oracle-safety filtering, corpus mutations choose splice/edit offsets on UTF-8 boundaries, and smoke asserts retained WPT attribute sentinels plus mutation helper shapes; `php tools/html-decoder-fuzz/tests/harness-smoke.php`, the refreshed corpus worker/runner/replay/fault-manifest checks, default 500-case worker, and `git diff --check` passed.
 
 ## Review Log
 
@@ -137,3 +146,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Lagrange: APPROVE, generator semantics after semicolon follower protection and small-`max-bytes` composition fixes.
   - Pauli: APPROVE, smoke coverage after exact strategy-set and delimiter-based composition assertions.
   - Locke: APPROVE, integration/docs/progress accuracy after weighted composition and generalized encoder changes.
+- Tier 2 item 13:
+  - Russell: APPROVE, corpus generator semantics after WPT attribute retention and UTF-8 boundary fixes.
+  - Ramanujan: APPROVE, CLI/worker/replay/runner integration and deterministic corpus replay.
+  - Zeno: APPROVE, smoke/docs/progress coverage after WPT sentinel and mutation-shape assertions.

@@ -106,6 +106,8 @@ for ( $case = $start; $case < $end; $case++ ) {
 		$generated = $generator->generate_prefix_family_sweep( $case );
 	} elseif ( 'numeric-boundaries' === $options['mode'] ) {
 		$generated = $generator->generate_numeric_boundary_sweep( $case );
+	} elseif ( 'corpus' === $options['mode'] ) {
+		$generated = $generator->generate_corpus_mutation( $case );
 	} else {
 		$generated = $generator->generate();
 	}

@@ -123,6 +123,11 @@ each reference at every byte split and appending ambiguous followers.
 references at the decoder's maximum significant-digit count and one digit past
 it, with and without leading zeros, semicolons, and mixed-case hex digits.
 
+`corpus` mode mutates a seed corpus built from retained decoder payloads, the
+oracle battery, and html5lib entity vectors. Mutations splice corpus fragments,
+perturb bytes within the oracle-safe alphabet, add or remove semicolons, and
+duplicate references to diversify structure beyond the grammar.
+
 ## Common Commands
 
 Run the smoke test:
@@ -165,6 +170,12 @@ Run one deterministic numeric-boundary sweep batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --cases 5000
+```
+
+Run one corpus mutation batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:

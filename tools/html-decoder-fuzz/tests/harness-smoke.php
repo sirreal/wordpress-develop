@@ -532,6 +532,27 @@ function expected_weighted_strategies(): array {
 }
 
 /**
+ * @return string[]
+ */
+function expected_corpus_strategies(): array {
+	return array(
+		'corpus-byte-perturb',
+		'corpus-reference-duplication',
+		'corpus-semicolon-toggle',
+		'corpus-splice',
+	);
+}
+
+/**
+ * @return string[]
+ */
+function corpus_seed_payloads(): array {
+	$method = new \ReflectionMethod( Generator::class, 'corpus_payloads' );
+	$method->setAccessible( true );
+	return $method->invoke( null );
+}
+
+/**
  * @param string[] $base_names
  * @return array{base_set: array<string, true>, delete: array<string, true>, substitution: array<int, array<string, true>>, transpose: array<string, true>}
  */
@@ -991,6 +1012,73 @@ check( 'numeric-boundary uses one strategy label', array( 'numeric-boundary-swee
 check( 'numeric-boundary payloads are oracle-safe', 0 === $numeric_boundary_unsafe, (string) $numeric_boundary_unsafe );
 check( 'numeric-boundary emits mixed-case hex digits', $numeric_boundary_mixed_hex, implode( ',', $numeric_boundary_cases ) );
 
+$corpus_period_generator = new Generator( new Prng( 'corpus-period' ), 4096, $names );
+$corpus_strategies = array();
+$corpus_contexts = array();
+$corpus_payloads = array();
+$corpus_unsafe = 0;
+for ( $i = 0; $i < 600; $i++ ) {
+	$generated = ( new Generator( new Prng( "1:{$i}" ), 4096, $names ) )->generate_corpus_mutation( $i );
+	$corpus_strategies[ $generated['strategy'] ] = true;
+	$corpus_contexts[ $generated['context'] ] = true;
+	$corpus_payloads[ $generated['payload'] ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$corpus_unsafe;
+	}
+}
+$seen_corpus_strategies = array_keys( $corpus_strategies );
+sort( $seen_corpus_strategies );
+$corpus_seed_payloads = corpus_seed_payloads();
+$required_corpus_payloads = array(
+	'FOO&gt;BAR',
+	'ZZ&gt9YY',
+	'ZZ&gtaYY',
+	'ZZ&pound_id=23',
+	'ZZ&prod;_id=23',
+	'ZZ&AElig=',
+);
+check( 'corpus mutation seed corpus includes retained and external vectors', $corpus_period_generator->corpus_period() >= 40, (string) $corpus_period_generator->corpus_period() );
+check( 'corpus seed retains html5lib text and attribute entity vectors', array() === array_diff( $required_corpus_payloads, $corpus_seed_payloads ), implode( ',', array_diff( $required_corpus_payloads, $corpus_seed_payloads ) ) );
+check( 'corpus mutation generator emits every mutation strategy', expected_corpus_strategies() === $seen_corpus_strategies, implode( ',', $seen_corpus_strategies ) );
+check( 'corpus mutation cases run both contexts', array( 'both' ) === array_keys( $corpus_contexts ), implode( ',', array_keys( $corpus_contexts ) ) );
+check( 'corpus mutation payloads are oracle-safe', 0 === $corpus_unsafe, (string) $corpus_unsafe );
+check( 'corpus mutation diversifies retained payload shapes', count( $corpus_payloads ) > 300, (string) count( $corpus_payloads ) );
+
+$semicolon_toggle_method = new \ReflectionMethod( Generator::class, 'mutate_corpus_semicolon_toggle' );
+$semicolon_toggle_method->setAccessible( true );
+$duplication_method = new \ReflectionMethod( Generator::class, 'mutate_corpus_reference_duplication' );
+$duplication_method->setAccessible( true );
+$byte_perturb_method = new \ReflectionMethod( Generator::class, 'mutate_corpus_byte_perturb' );
+$byte_perturb_method->setAccessible( true );
+$splice_method = new \ReflectionMethod( Generator::class, 'mutate_corpus_splice' );
+$splice_method->setAccessible( true );
+
+check(
+	'corpus semicolon toggle adds and removes semicolons',
+	'&amp' === $semicolon_toggle_method->invoke( new Generator( new Prng( 'corpus-toggle-remove' ), 4096, $names ), '&amp;' ) &&
+		'&amp;' === $semicolon_toggle_method->invoke( new Generator( new Prng( 'corpus-toggle-add' ), 4096, $names ), '&amp' )
+);
+check(
+	'corpus reference duplication duplicates matched reference text',
+	'x&notin;&notin;y' === $duplication_method->invoke( new Generator( new Prng( 'corpus-duplication' ), 4096, $names ), 'x&notin;y' )
+);
+$corpus_utf8_mutation_errors = array();
+for ( $i = 0; $i < 100; $i++ ) {
+	$byte_payload = $byte_perturb_method->invoke( new Generator( new Prng( "corpus-utf8-byte:{$i}" ), 4096, $names ), "\u{00E9}&amp;\u{2603}" );
+	$splice_payload = $splice_method->invoke(
+		new Generator( new Prng( "corpus-utf8-splice:{$i}" ), 4096, $names ),
+		"A\u{00E9}B",
+		array( "\u{2603}&amp;\u{00E9}", 'plain &gt;' )
+	);
+	if ( ! mb_check_encoding( $byte_payload, 'UTF-8' ) ) {
+		$corpus_utf8_mutation_errors[] = 'byte:' . $i . ':' . bin2hex( $byte_payload );
+	}
+	if ( ! mb_check_encoding( $splice_payload, 'UTF-8' ) ) {
+		$corpus_utf8_mutation_errors[] = 'splice:' . $i . ':' . bin2hex( $splice_payload );
+	}
+}
+check( 'corpus byte perturb and splice preserve UTF-8 boundaries', array() === $corpus_utf8_mutation_errors, implode( ',', $corpus_utf8_mutation_errors ) );
+
 $lookalike_indexes    = lookalike_mutation_indexes( $name_sweep_base_names );
 $lookalike_candidates = array();
 for ( $i = 0; $i < 6000; $i++ ) {
@@ -1346,6 +1434,17 @@ check(
 	$numeric_boundary_worker['stdout'] . $numeric_boundary_worker['stderr']
 );
 
+$corpus_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'corpus', '--seed', '1', '--cases', '300', '--progress-every', '300' ) );
+$corpus_worker_has_strategies = true;
+foreach ( expected_corpus_strategies() as $strategy ) {
+	$corpus_worker_has_strategies = $corpus_worker_has_strategies && str_contains( $corpus_worker['stdout'], '"' . $strategy . '"' );
+}
+check(
+	'300-case corpus mutation worker clean',
+	0 === $corpus_worker['code'] && $corpus_worker_has_strategies,
+	$corpus_worker['stdout'] . $corpus_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -1544,6 +1643,50 @@ check(
 );
 remove_tree( $numeric_runner_dir );
 
+$corpus_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-corpus-runner-' . getmypid();
+remove_tree( $corpus_runner_dir );
+$corpus_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'corpus',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$corpus_runner_dir,
+	)
+);
+$corpus_runner_state = is_file( $corpus_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $corpus_runner_dir . '/state.json' ), true )
+	: array();
+$corpus_runner_strategies = array_keys( $corpus_runner_state['by_strategy'] ?? array() );
+sort( $corpus_runner_strategies );
+check(
+	'corpus mutation runner clean',
+	0 === $corpus_runner['code'] &&
+		( $corpus_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $corpus_runner_state['cases'] ?? null ) === ( $corpus_runner_state['by_context']['both'] ?? null ) &&
+		( $corpus_runner_state['cases'] ?? null ) === array_sum( $corpus_runner_state['by_strategy'] ?? array() ) &&
+		expected_corpus_strategies() === $corpus_runner_strategies,
+	$corpus_runner['stdout'] . $corpus_runner['stderr'] . json_encode( $corpus_runner_state )
+);
+$corpus_runner_windows = summary_start_windows( $corpus_runner_dir, 'corpus' );
+check(
+	'corpus mutation runner uses distinct start-case windows',
+	start_windows_are_distinct( $corpus_runner_windows, 100 ),
+	json_encode( $corpus_runner_windows )
+);
+remove_tree( $corpus_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
 
@@ -1579,6 +1722,21 @@ $numeric_fault_seed_replay = run_process(
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
 check( 'faulted numeric-boundary seed replay reproduces generated case', 1 === $numeric_fault_seed_replay['code'], $numeric_fault_seed_replay['stdout'] . $numeric_fault_seed_replay['stderr'] );
+
+$corpus_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'corpus', '--seed', '1', '--case', '0' ) );
+check(
+	'corpus mutation replay regenerates clean case',
+	0 === $corpus_replay['code'] &&
+		str_contains( $corpus_replay['stdout'], 'mode corpus, strategy corpus-byte-perturb' ) &&
+		str_contains( $corpus_replay['stdout'], 'Hex preview: 67262335383b' ),
+	$corpus_replay['stdout'] . $corpus_replay['stderr']
+);
+
+$corpus_fault_seed_replay = run_process(
+	array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'corpus', '--seed', '1', '--case', '0' ),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+check( 'faulted corpus mutation seed replay reproduces generated case', 1 === $corpus_fault_seed_replay['code'], $corpus_fault_seed_replay['stdout'] . $corpus_fault_seed_replay['stderr'] );
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -1786,6 +1944,58 @@ if ( null !== $numeric_failure_file ) {
 	check( 'faulted numeric-boundary minimizer preserves signature', 0 === $numeric_fault_minimize['code'], $numeric_fault_minimize['stdout'] . $numeric_fault_minimize['stderr'] );
 }
 remove_tree( $numeric_pipeline_dir );
+
+$corpus_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-corpus-fault-' . getmypid();
+remove_tree( $corpus_pipeline_dir );
+$faulted_corpus_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'corpus',
+		'--seed',
+		'1',
+		'--start-case',
+		'0',
+		'--cases',
+		'1',
+		'--output-dir',
+		$corpus_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+);
+check( 'faulted corpus mutation worker reports findings', 1 === $faulted_corpus_worker['code'], $faulted_corpus_worker['stdout'] . $faulted_corpus_worker['stderr'] );
+
+$corpus_failure_files = glob( $corpus_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted corpus mutation worker writes failure artifact', is_array( $corpus_failure_files ) && array() !== $corpus_failure_files );
+
+$corpus_failure_file = is_array( $corpus_failure_files ) && array() !== $corpus_failure_files ? $corpus_failure_files[0] : null;
+if ( null !== $corpus_failure_file ) {
+	$corpus_manifest = json_decode( (string) file_get_contents( $corpus_failure_file ), true );
+	check(
+		'corpus mutation failure artifact records mode and signature',
+		'corpus' === ( $corpus_manifest['mode'] ?? null ) &&
+			'corpus-byte-perturb' === ( $corpus_manifest['strategy'] ?? null ) &&
+			0 === ( $corpus_manifest['case'] ?? null ) &&
+			in_array( 'reader-overran-input:text', $corpus_manifest['signatures'] ?? array(), true ),
+		json_encode( $corpus_manifest )
+	);
+
+	$corpus_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $corpus_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+	);
+	check( 'faulted corpus mutation replay reproduces finding', 1 === $corpus_fault_replay['code'], $corpus_fault_replay['stdout'] . $corpus_fault_replay['stderr'] );
+
+	$corpus_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $corpus_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
+	);
+	check( 'faulted corpus mutation minimizer preserves signature', 0 === $corpus_fault_minimize['code'], $corpus_fault_minimize['stdout'] . $corpus_fault_minimize['stderr'] );
+}
+remove_tree( $corpus_pipeline_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );

@@ -77,6 +77,8 @@ if ( '' !== $options['failure'] ) {
 		$generated = $generator->generate_prefix_family_sweep( $options['case'] );
 	} elseif ( 'numeric-boundaries' === $mode ) {
 		$generated = $generator->generate_numeric_boundary_sweep( $options['case'] );
+	} elseif ( 'corpus' === $mode ) {
+		$generated = $generator->generate_corpus_mutation( $options['case'] );
 	} else {
 		$generated = $generator->generate();
 	}
