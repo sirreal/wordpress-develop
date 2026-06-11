@@ -3040,6 +3040,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#shouldIgnoreBodyContextFragmentStartTag(tagName)) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
 			if (this.#shouldBailUnsupportedTableFosterParenting(tagName, false)) {
 				this.#bailUnsupported("Foster parenting is not supported.");
 				return;
@@ -5207,6 +5212,17 @@ export function createHtmlApi(wasm) {
 			return (
 				P_CLOSING_START_TAGS.has(tagName) &&
 				(tagName !== "TABLE" || this.compat_mode !== WP_HTML_Tag_Processor.QUIRKS_MODE)
+			);
+		}
+
+		#shouldIgnoreBodyContextFragmentStartTag(tagName) {
+			return (
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				this.context_node === "BODY" &&
+				this.current_namespace === "html" &&
+				this.template_insertion_modes.length === 0 &&
+				(tagName === "BODY" || tagName === "FRAMESET")
 			);
 		}
 

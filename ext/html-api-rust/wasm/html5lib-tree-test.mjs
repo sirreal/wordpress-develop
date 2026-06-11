@@ -26,10 +26,6 @@ const skippedTests = new Set([
 	"tests26/line0221",
 	"tests26/line0242",
 	"tests3/line0023",
-	"tests_innerHTML_1/line0001",
-	"tests_innerHTML_1/line0011",
-	"tests_innerHTML_1/line0042",
-	"tests_innerHTML_1/line0052",
 	"webkit01/line0515",
 	"webkit01/line0231",
 ]);

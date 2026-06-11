@@ -1710,6 +1710,10 @@ assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreig
 
 for (const [html, context, expected] of [
 	["<span>x", "<div>", "<span>x</span>"],
+	["<body><span>", "<body>", "<span></span>"],
+	["<span><body>", "<body>", "<span></span>"],
+	["<frameset><span>", "<body>", "<span></span>"],
+	["<span><frameset>", "<body>", "<span></span>"],
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
 	["<option>one", "<select>", "<option>one</option>"],
