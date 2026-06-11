@@ -61,8 +61,135 @@ const VOID_ELEMENTS = new Set([
 	"WBR",
 ]);
 
+const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
+	"+//silmaril//dtd html pro v0r11 19970101//",
+	"-//as//dtd html 3.0 aswedit + extensions//",
+	"-//advasoft ltd//dtd html 3.0 aswedit + extensions//",
+	"-//ietf//dtd html 2.0 level 1//",
+	"-//ietf//dtd html 2.0 level 2//",
+	"-//ietf//dtd html 2.0 strict level 1//",
+	"-//ietf//dtd html 2.0 strict level 2//",
+	"-//ietf//dtd html 2.0 strict//",
+	"-//ietf//dtd html 2.0//",
+	"-//ietf//dtd html 2.1e//",
+	"-//ietf//dtd html 3.0//",
+	"-//ietf//dtd html 3.2 final//",
+	"-//ietf//dtd html 3.2//",
+	"-//ietf//dtd html 3//",
+	"-//ietf//dtd html level 0//",
+	"-//ietf//dtd html level 1//",
+	"-//ietf//dtd html level 2//",
+	"-//ietf//dtd html level 3//",
+	"-//ietf//dtd html strict level 0//",
+	"-//ietf//dtd html strict level 1//",
+	"-//ietf//dtd html strict level 2//",
+	"-//ietf//dtd html strict level 3//",
+	"-//ietf//dtd html strict//",
+	"-//ietf//dtd html//",
+	"-//metrius//dtd metrius presentational//",
+	"-//microsoft//dtd internet explorer 2.0 html strict//",
+	"-//microsoft//dtd internet explorer 2.0 html//",
+	"-//microsoft//dtd internet explorer 2.0 tables//",
+	"-//microsoft//dtd internet explorer 3.0 html strict//",
+	"-//microsoft//dtd internet explorer 3.0 html//",
+	"-//microsoft//dtd internet explorer 3.0 tables//",
+	"-//netscape comm. corp.//dtd html//",
+	"-//netscape comm. corp.//dtd strict html//",
+	"-//o'reilly and associates//dtd html 2.0//",
+	"-//o'reilly and associates//dtd html extended 1.0//",
+	"-//o'reilly and associates//dtd html extended relaxed 1.0//",
+	"-//sq//dtd html 2.0 hotmetal + extensions//",
+	"-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//",
+	"-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//",
+	"-//spyglass//dtd html 2.0 extended//",
+	"-//sun microsystems corp.//dtd hotjava html//",
+	"-//sun microsystems corp.//dtd hotjava strict html//",
+	"-//w3c//dtd html 3 1995-03-24//",
+	"-//w3c//dtd html 3.2 draft//",
+	"-//w3c//dtd html 3.2 final//",
+	"-//w3c//dtd html 3.2//",
+	"-//w3c//dtd html 3.2s draft//",
+	"-//w3c//dtd html 4.0 frameset//",
+	"-//w3c//dtd html 4.0 transitional//",
+	"-//w3c//dtd html experimental 19960712//",
+	"-//w3c//dtd html experimental 970421//",
+	"-//w3c//dtd w3 html//",
+	"-//w3o//dtd w3 html 3.0//",
+	"-//webtechs//dtd mozilla html 2.0//",
+	"-//webtechs//dtd mozilla html//",
+];
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+export class WP_HTML_Doctype_Info {
+	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
+		this.name = name;
+		this.public_identifier = publicIdentifier;
+		this.system_identifier = systemIdentifier;
+		this.indicated_compatibility_mode = doctypeCompatibilityMode(
+			name,
+			publicIdentifier,
+			systemIdentifier,
+			forceQuirksFlag,
+		);
+	}
+
+	static from_doctype_token(doctypeHtml) {
+		let doctype = String(doctypeHtml);
+		let end = doctype.length - 1;
+
+		if (end < 9 || !asciiStartsWithAt(doctype, "<!DOCTYPE", 0)) {
+			return null;
+		}
+
+		let at = 9;
+		if (doctype[end] !== ">" || doctype.indexOf(">", at) < end) {
+			return null;
+		}
+
+		doctype = doctype.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+		end = doctype.length - 1;
+		at = skipHtmlWhitespace(doctype, at, end);
+
+		if (at >= end) {
+			return new WP_HTML_Doctype_Info(null, null, null, true);
+		}
+
+		const nameStart = at;
+		while (at < end && !isHtmlWhitespaceCode(doctype.charCodeAt(at))) {
+			at += 1;
+		}
+		const name = replaceNulls(doctype.slice(nameStart, at).toLowerCase());
+
+		at = skipHtmlWhitespace(doctype, at, end);
+		if (at >= end) {
+			return new WP_HTML_Doctype_Info(name, null, null, false);
+		}
+
+		if (at + 6 >= end) {
+			return new WP_HTML_Doctype_Info(name, null, null, true);
+		}
+
+		if (asciiStartsWithAt(doctype, "PUBLIC", at)) {
+			at = skipHtmlWhitespace(doctype, at + 6, end);
+			if (at >= end) {
+				return new WP_HTML_Doctype_Info(name, null, null, true);
+			}
+			return parsePublicIdentifier(doctype, at, end, name);
+		}
+
+		if (asciiStartsWithAt(doctype, "SYSTEM", at)) {
+			at = skipHtmlWhitespace(doctype, at + 6, end);
+			if (at >= end) {
+				return new WP_HTML_Doctype_Info(name, null, null, true);
+			}
+			return parseSystemIdentifier(doctype, at, end, name, null);
+		}
+
+		return new WP_HTML_Doctype_Info(name, null, null, true);
+	}
+}
 
 async function bytesFromInput(input) {
 	if (input instanceof WebAssembly.Module) {
@@ -247,7 +374,13 @@ export function createHtmlApi(wasm) {
 				wasm.wp_html_api_rust_tag_processor_get_tag(this.pointer, out)
 			));
 
-			return tagName === null ? null : asciiUpper(tagName);
+			if (tagName === null) {
+				return null;
+			}
+
+			return this.parser_state === STATE_COMMENT && wasm.wp_html_api_rust_tag_processor_current_comment_type(this.pointer) === 4
+				? tagName
+				: asciiUpper(tagName);
 		}
 
 		get_attribute(name) {
@@ -444,6 +577,15 @@ export function createHtmlApi(wasm) {
 			return COMMENT_TYPES.get(wasm.wp_html_api_rust_tag_processor_current_comment_type(this.pointer)) ?? null;
 		}
 
+		get_doctype_info() {
+			this.#ensureLive();
+			if (this.parser_state !== STATE_DOCTYPE) {
+				return null;
+			}
+
+			return WP_HTML_Doctype_Info.from_doctype_token(this.#currentTokenString());
+		}
+
 		set_bookmark(name) {
 			this.#ensureLive();
 			if (this.bookmarks.size >= WP_HTML_Tag_Processor.MAX_BOOKMARKS && !this.bookmarks.has(name)) {
@@ -523,7 +665,29 @@ export function createHtmlApi(wasm) {
 			if (![STATE_COMMENT, STATE_FUNKY_COMMENT].includes(this.parser_state)) {
 				return null;
 			}
-			return this.get_modifiable_text();
+
+			const text = this.get_modifiable_text();
+			if (text === null || this.parser_state === STATE_FUNKY_COMMENT) {
+				return text;
+			}
+
+			switch (wasm.wp_html_api_rust_tag_processor_current_comment_type(this.pointer)) {
+				case 1:
+				case 3:
+					return text;
+				case 2:
+					return `[CDATA[${text}]]`;
+				case 4: {
+					const tagName = this.get_tag();
+					return tagName === null ? null : `?${tagName}${text}?`;
+				}
+				case 5: {
+					const token = this.#currentTokenBytes();
+					return token && token[1] === 0x3f ? `?${text}` : text;
+				}
+				default:
+					return null;
+			}
 		}
 
 		get_updated_html() {
@@ -588,6 +752,23 @@ export function createHtmlApi(wasm) {
 					length: runtime.readU32(lengthPtr),
 				};
 			});
+		}
+
+		#currentTokenBytes() {
+			const span = this.#currentSpan();
+			if (!span) {
+				return null;
+			}
+
+			const html = runtime.readOutputBytes((out) => (
+				wasm.wp_html_api_rust_tag_processor_get_html(this.pointer, out)
+			));
+			return html === null ? null : html.slice(span.start, span.start + span.length);
+		}
+
+		#currentTokenString() {
+			const token = this.#currentTokenBytes();
+			return token === null ? "" : textDecoder.decode(token);
 		}
 
 		#mutateCurrentToken(callback) {
@@ -673,6 +854,7 @@ export function createHtmlApi(wasm) {
 	return {
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
+		WP_HTML_Doctype_Info,
 		scanNextTag: (html, offset = 0) => runtime.scanNextTag(html, offset),
 		version: () => runtime.version(),
 		wasm,
@@ -758,6 +940,15 @@ class WasmRuntime {
 				return null;
 			}
 			return this.readStringFromOut(out);
+		});
+	}
+
+	readOutputBytes(callback) {
+		return this.withOutSlice((out) => {
+			if (!callback(out)) {
+				return null;
+			}
+			return this.readBytesFromOut(out);
 		});
 	}
 
@@ -856,6 +1047,135 @@ function splitNullSeparatedAscii(bytes) {
 		}
 	}
 	return parts;
+}
+
+function parsePublicIdentifier(doctype, at, end, name) {
+	const quote = doctype[at];
+	if (quote !== '"' && quote !== "'") {
+		return new WP_HTML_Doctype_Info(name, null, null, true);
+	}
+
+	at += 1;
+	const identifierStart = at;
+	const identifierEnd = doctype.indexOf(quote, at);
+	const boundedIdentifierEnd = identifierEnd === -1 || identifierEnd > end ? end : identifierEnd;
+	const publicIdentifier = replaceNulls(doctype.slice(identifierStart, boundedIdentifierEnd));
+
+	if (identifierEnd === -1 || identifierEnd >= end || doctype[identifierEnd] !== quote) {
+		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, true);
+	}
+
+	at = skipHtmlWhitespace(doctype, identifierEnd + 1, end);
+	if (at >= end) {
+		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, false);
+	}
+
+	return parseSystemIdentifier(doctype, at, end, name, publicIdentifier);
+}
+
+function parseSystemIdentifier(doctype, at, end, name, publicIdentifier) {
+	const quote = doctype[at];
+	if (quote !== '"' && quote !== "'") {
+		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, true);
+	}
+
+	at += 1;
+	const identifierStart = at;
+	const identifierEnd = doctype.indexOf(quote, at);
+	const boundedIdentifierEnd = identifierEnd === -1 || identifierEnd > end ? end : identifierEnd;
+	const systemIdentifier = replaceNulls(doctype.slice(identifierStart, boundedIdentifierEnd));
+
+	if (identifierEnd === -1 || identifierEnd >= end || doctype[identifierEnd] !== quote) {
+		return new WP_HTML_Doctype_Info(name, publicIdentifier, systemIdentifier, true);
+	}
+
+	return new WP_HTML_Doctype_Info(name, publicIdentifier, systemIdentifier, false);
+}
+
+function doctypeCompatibilityMode(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
+	if (forceQuirksFlag) {
+		return "quirks";
+	}
+
+	if (name === "html" && publicIdentifier === null && systemIdentifier === null) {
+		return "no-quirks";
+	}
+
+	if (name !== "html") {
+		return "quirks";
+	}
+
+	const systemIdentifierIsMissing = systemIdentifier === null;
+	const publicId = publicIdentifier === null ? "" : publicIdentifier.toLowerCase();
+	const systemId = systemIdentifier === null ? "" : systemIdentifier.toLowerCase();
+
+	if (
+		publicId === "-//w3o//dtd w3 html strict 3.0//en//" ||
+		publicId === "-/w3c/dtd html 4.0 transitional/en" ||
+		publicId === "html"
+	) {
+		return "quirks";
+	}
+
+	if (systemId === "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd") {
+		return "quirks";
+	}
+
+	if (publicId === "") {
+		return "no-quirks";
+	}
+
+	if (QUIRKS_PUBLIC_IDENTIFIER_PREFIXES.some((prefix) => publicId.startsWith(prefix))) {
+		return "quirks";
+	}
+
+	if (
+		systemIdentifierIsMissing &&
+		(
+			publicId.startsWith("-//w3c//dtd html 4.01 frameset//") ||
+			publicId.startsWith("-//w3c//dtd html 4.01 transitional//")
+		)
+	) {
+		return "quirks";
+	}
+
+	if (
+		publicId.startsWith("-//w3c//dtd xhtml 1.0 frameset//") ||
+		publicId.startsWith("-//w3c//dtd xhtml 1.0 transitional//")
+	) {
+		return "limited-quirks";
+	}
+
+	if (
+		!systemIdentifierIsMissing &&
+		(
+			publicId.startsWith("-//w3c//dtd html 4.01 frameset//") ||
+			publicId.startsWith("-//w3c//dtd html 4.01 transitional//")
+		)
+	) {
+		return "limited-quirks";
+	}
+
+	return "no-quirks";
+}
+
+function skipHtmlWhitespace(value, at, end) {
+	while (at < end && isHtmlWhitespaceCode(value.charCodeAt(at))) {
+		at += 1;
+	}
+	return at;
+}
+
+function isHtmlWhitespaceCode(code) {
+	return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d;
+}
+
+function asciiStartsWithAt(value, needle, at) {
+	return value.slice(at, at + needle.length).toLowerCase() === needle.toLowerCase();
+}
+
+function replaceNulls(value) {
+	return value.replace(/\0/g, "\uFFFD");
 }
 
 function qualifySvgTagName(lowerTagName) {

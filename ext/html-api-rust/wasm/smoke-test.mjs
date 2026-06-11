@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { loadWasm } from "./wp-html-api-rust.js";
 
 const {
+	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
 	scanNextTag,
@@ -49,6 +50,22 @@ assert.equal(textarea.get_modifiable_text(), "One");
 assert.equal(textarea.set_modifiable_text("Two"), true);
 assert.equal(textarea.get_updated_html(), "<textarea>Two</textarea>");
 textarea.destroy();
+
+const doctype = new WP_HTML_Tag_Processor('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd"><p>');
+assert.equal(doctype.next_token(), true);
+const doctypeInfo = doctype.get_doctype_info();
+assert.ok(doctypeInfo instanceof WP_HTML_Doctype_Info);
+assert.equal(doctypeInfo.name, "html");
+assert.equal(doctypeInfo.public_identifier, "-//W3C//DTD HTML 4.01//EN");
+assert.equal(doctypeInfo.system_identifier, "http://www.w3.org/TR/html4/strict.dtd");
+assert.equal(doctypeInfo.indicated_compatibility_mode, "no-quirks");
+doctype.destroy();
+
+const comment = new WP_HTML_Tag_Processor("<?xml-stylesheet href='x'?>");
+assert.equal(comment.next_token(), true);
+assert.equal(comment.get_tag(), "xml-stylesheet");
+assert.equal(comment.get_full_comment_text(), "?xml-stylesheet href='x'?");
+comment.destroy();
 
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
