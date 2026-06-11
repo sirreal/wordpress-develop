@@ -46,7 +46,11 @@
  *
  * Use of this class requires three steps:
  *
- *  1. Create a new class instance with your input HTML document.
+ *  1. Create a new class instance with your input HTML document:
+ *     `new WP_HTML_Tag_Processor( $html )`. This is the ONLY way to
+ *     construct a Tag Processor — the class has no static factory
+ *     methods. (`create_fragment()` and `create_full_parser()` exist
+ *     only on {@see WP_HTML_Processor}, not on this class.)
  *  2. Find the tag(s) you are looking for.
  *  3. Request changes to the attributes in those tag(s).
  *

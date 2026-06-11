@@ -94,7 +94,12 @@
  * ### Supported elements
  *
  * The HTML Processor builds on {@see WP_HTML_Tag_Processor} and adds full
- * structural awareness: nesting depth, ancestor breadcrumbs, implied and
+ * structural awareness. Construction differs between the two classes:
+ * this class is created through its static factories — create_fragment()
+ * for markup that lives inside a BODY, create_full_parser() for complete
+ * documents — while the Tag Processor is created directly with
+ * `new WP_HTML_Tag_Processor( $html )` and has no factory methods.
+ * It adds, beyond the Tag Processor: nesting depth, ancestor breadcrumbs, implied and
  * virtual closing tags, and normalized serialization. Choose it whenever
  * document STRUCTURE matters — containment checks, collecting an
  * element's text, walking subtrees, normalizing markup. For flat
