@@ -803,6 +803,29 @@ assert.equal(explicitTokenExpectationsProcessor.expects_closer({
 }), true);
 explicitTokenExpectationsProcessor.destroy();
 
+for (const [html, expected] of [
+	["", null],
+	["<!-- comment -->", false],
+	["<!-- comment --!>", false],
+	["<![CDATA[ comment ]]>", false],
+	["<?ok comment ?>", false],
+	["<//wp:post-meta key=isbn>", false],
+	["Trombone", false],
+	["<img>", false],
+	["<source>", false],
+	["<script>content</script>", false],
+	["<textarea>content</textarea>", false],
+	["<div>", true],
+	["<p>", true],
+]) {
+	const currentTokenExpectationsProcessor = WP_HTML_Processor.create_fragment(html);
+	if (html !== "") {
+		assert.equal(currentTokenExpectationsProcessor.next_token(), true);
+	}
+	assert.equal(currentTokenExpectationsProcessor.expects_closer(), expected);
+	currentTokenExpectationsProcessor.destroy();
+}
+
 for (const [html, message] of [
 	['<!DOCTYPE html><meta charset="utf8">', "Cannot yet process META tags with charset to determine encoding."],
 	['<!DOCTYPE html><meta http-equiv="content-type" content="">', "Cannot yet process META tags with http-equiv Content-Type to determine encoding."],
