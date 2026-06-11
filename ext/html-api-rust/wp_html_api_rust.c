@@ -119,21 +119,25 @@ extern bool wp_html_api_rust_tag_processor_remove_attribute(
 extern bool wp_html_api_rust_tag_processor_add_class(
 	void *processor,
 	const unsigned char *class_name,
-	size_t class_name_len
+	size_t class_name_len,
+	bool quirks_mode
 );
 extern bool wp_html_api_rust_tag_processor_remove_class(
 	void *processor,
 	const unsigned char *class_name,
-	size_t class_name_len
+	size_t class_name_len,
+	bool quirks_mode
 );
 extern unsigned char wp_html_api_rust_tag_processor_has_class(
 	void *processor,
 	const unsigned char *class_name,
-	size_t class_name_len
+	size_t class_name_len,
+	bool quirks_mode
 );
 extern unsigned char wp_html_api_rust_tag_processor_class_list(
 	void *processor,
-	wp_html_api_rust_byte_slice *out
+	wp_html_api_rust_byte_slice *out,
+	bool quirks_mode
 );
 extern bool wp_html_api_rust_tag_processor_get_html(
 	const void *processor,
@@ -553,6 +557,27 @@ static bool wp_html_tag_processor_parser_state_is_terminal(zval *object)
 	return (
 		wp_html_tag_processor_parser_state_is(object, "STATE_COMPLETE", sizeof("STATE_COMPLETE") - 1) ||
 		wp_html_tag_processor_parser_state_is(object, "STATE_INCOMPLETE_INPUT", sizeof("STATE_INCOMPLETE_INPUT") - 1)
+	);
+}
+
+static bool wp_html_tag_processor_is_quirks_mode(zval *object)
+{
+	zval rv;
+	zval *compat_mode;
+
+	compat_mode = zend_read_property(
+		wp_html_tag_processor_ce,
+		Z_OBJ_P(object),
+		"compat_mode",
+		sizeof("compat_mode") - 1,
+		1,
+		&rv
+	);
+
+	return (
+		IS_STRING == Z_TYPE_P(compat_mode) &&
+		sizeof("quirks-mode") - 1 == Z_STRLEN_P(compat_mode) &&
+		0 == memcmp(Z_STRVAL_P(compat_mode), "quirks-mode", sizeof("quirks-mode") - 1)
 	);
 }
 
@@ -982,7 +1007,8 @@ PHP_METHOD(WP_HTML_Tag_Processor, next_tag)
 			2 != wp_html_api_rust_tag_processor_has_class(
 				intern->native,
 				(const unsigned char *) ZSTR_VAL(query_class_name),
-				ZSTR_LEN(query_class_name)
+				ZSTR_LEN(query_class_name),
+				wp_html_tag_processor_is_quirks_mode(ZEND_THIS)
 			)
 		) {
 			continue;
@@ -1318,7 +1344,8 @@ PHP_METHOD(WP_HTML_Tag_Processor, add_class)
 		bool result = wp_html_api_rust_tag_processor_add_class(
 			intern->native,
 			(const unsigned char *) class_name,
-			class_name_len
+			class_name_len,
+			wp_html_tag_processor_is_quirks_mode(ZEND_THIS)
 		);
 
 		if (result) {
@@ -1371,7 +1398,8 @@ PHP_METHOD(WP_HTML_Tag_Processor, remove_class)
 		bool result = wp_html_api_rust_tag_processor_remove_class(
 			intern->native,
 			(const unsigned char *) class_name,
-			class_name_len
+			class_name_len,
+			wp_html_tag_processor_is_quirks_mode(ZEND_THIS)
 		);
 
 		if (result) {
@@ -1418,7 +1446,8 @@ PHP_METHOD(WP_HTML_Tag_Processor, has_class)
 	result = wp_html_api_rust_tag_processor_has_class(
 		intern->native,
 		(const unsigned char *) class_name,
-		class_name_len
+		class_name_len,
+		wp_html_tag_processor_is_quirks_mode(ZEND_THIS)
 	);
 
 	if (0 == result) {
@@ -1447,7 +1476,11 @@ PHP_METHOD(WP_HTML_Tag_Processor, class_list)
 		RETURN_THROWS();
 	}
 
-	if (!wp_html_api_rust_tag_processor_class_list(intern->native, &classes)) {
+	if (!wp_html_api_rust_tag_processor_class_list(
+		intern->native,
+		&classes,
+		wp_html_tag_processor_is_quirks_mode(ZEND_THIS)
+	)) {
 		RETURN_NULL();
 	}
 

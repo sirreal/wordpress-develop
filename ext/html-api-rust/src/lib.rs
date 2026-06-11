@@ -604,6 +604,7 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_add_class(
     processor: *mut TagProcessor,
     class_name: *const u8,
     class_name_len: usize,
+    quirks_mode: bool,
 ) -> bool {
     let Some(processor) = processor.as_mut() else {
         return false;
@@ -614,7 +615,7 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_add_class(
     }
 
     let class_name = slice::from_raw_parts(class_name, class_name_len);
-    processor.add_class(class_name)
+    processor.add_class(class_name, quirks_mode)
 }
 
 #[no_mangle]
@@ -622,6 +623,7 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_remove_class(
     processor: *mut TagProcessor,
     class_name: *const u8,
     class_name_len: usize,
+    quirks_mode: bool,
 ) -> bool {
     let Some(processor) = processor.as_mut() else {
         return false;
@@ -632,7 +634,7 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_remove_class(
     }
 
     let class_name = slice::from_raw_parts(class_name, class_name_len);
-    processor.remove_class(class_name)
+    processor.remove_class(class_name, quirks_mode)
 }
 
 #[no_mangle]
@@ -640,6 +642,7 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_has_class(
     processor: *mut TagProcessor,
     class_name: *const u8,
     class_name_len: usize,
+    quirks_mode: bool,
 ) -> u8 {
     let Some(processor) = processor.as_mut() else {
         return 0;
@@ -650,19 +653,20 @@ pub unsafe extern "C" fn wp_html_api_rust_tag_processor_has_class(
     }
 
     let class_name = slice::from_raw_parts(class_name, class_name_len);
-    processor.has_class(class_name)
+    processor.has_class(class_name, quirks_mode)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn wp_html_api_rust_tag_processor_class_list(
     processor: *mut TagProcessor,
     out: *mut ByteSlice,
+    quirks_mode: bool,
 ) -> u8 {
     let Some(processor) = processor.as_mut() else {
         return 0;
     };
 
-    if out.is_null() || !processor.class_list() {
+    if out.is_null() || !processor.class_list(quirks_mode) {
         return 0;
     }
 
@@ -700,6 +704,11 @@ enum AttributeValue {
     Missing,
     Boolean,
     String,
+}
+
+struct ClassEntry {
+    name: Vec<u8>,
+    comparable: Vec<u8>,
 }
 
 impl TagProcessor {
@@ -1107,7 +1116,7 @@ impl TagProcessor {
         removed
     }
 
-    fn add_class(&mut self, class_name: &[u8]) -> bool {
+    fn add_class(&mut self, class_name: &[u8], quirks_mode: bool) -> bool {
         let Some(scan) = self.current else {
             return false;
         };
@@ -1117,29 +1126,32 @@ impl TagProcessor {
         }
 
         let normalized_class_name = normalize_class_bytes(class_name);
-        let mut classes = self.current_classes();
-        if !classes.iter().any(|class| class.as_slice() == normalized_class_name.as_slice()) {
-            match self.get_attribute(b"class") {
-                AttributeValue::String => {
-                    let mut value = self.scratch.clone();
-                    trim_html_whitespace_in_place(&mut value);
-                    if !value.is_empty() {
-                        value.push(b' ');
-                    }
-                    value.extend_from_slice(&normalized_class_name);
-                    return self.set_attribute(b"class", &value, 2);
+        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
+        if self
+            .current_class_entries(quirks_mode)
+            .iter()
+            .any(|class| class.comparable.as_slice() == comparable_class_name.as_slice())
+        {
+            return true;
+        }
+
+        match self.get_attribute(b"class") {
+            AttributeValue::String => {
+                let mut value = self.scratch.clone();
+                trim_html_whitespace_in_place(&mut value);
+                if !value.is_empty() {
+                    value.push(b' ');
                 }
-                AttributeValue::Boolean | AttributeValue::Missing => {
-                    classes.push(normalized_class_name);
-                }
+                value.extend_from_slice(&normalized_class_name);
+                self.set_attribute(b"class", &value, 2)
+            }
+            AttributeValue::Boolean | AttributeValue::Missing => {
+                self.set_attribute(b"class", &normalized_class_name, 2)
             }
         }
-
-        let value = join_classes(&classes);
-        self.set_attribute(b"class", &value, 2)
     }
 
-    fn remove_class(&mut self, class_name: &[u8]) -> bool {
+    fn remove_class(&mut self, class_name: &[u8], quirks_mode: bool) -> bool {
         let Some(scan) = self.current else {
             return false;
         };
@@ -1149,11 +1161,17 @@ impl TagProcessor {
         }
 
         let normalized_class_name = normalize_class_bytes(class_name);
-        let classes: Vec<Vec<u8>> = self
-            .current_classes()
-            .into_iter()
-            .filter(|class| class.as_slice() != normalized_class_name.as_slice())
+        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
+        let entries = self.current_class_entries(quirks_mode);
+        let classes: Vec<Vec<u8>> = entries
+            .iter()
+            .filter(|class| class.comparable.as_slice() != comparable_class_name.as_slice())
+            .map(|class| class.name.clone())
             .collect();
+
+        if classes.len() == entries.len() {
+            return true;
+        }
 
         if classes.is_empty() {
             let _ = self.remove_attribute(b"class");
@@ -1164,7 +1182,7 @@ impl TagProcessor {
         self.set_attribute(b"class", &value, 2)
     }
 
-    fn has_class(&mut self, class_name: &[u8]) -> u8 {
+    fn has_class(&mut self, class_name: &[u8], quirks_mode: bool) -> u8 {
         let Some(scan) = self.current else {
             return 0;
         };
@@ -1174,11 +1192,12 @@ impl TagProcessor {
         }
 
         let normalized_class_name = normalize_class_bytes(class_name);
+        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
 
         if self
-            .current_classes()
-            .iter()
-            .any(|class| class.as_slice() == normalized_class_name.as_slice())
+            .current_class_entries(quirks_mode)
+            .into_iter()
+            .any(|class| class.comparable.as_slice() == comparable_class_name.as_slice())
         {
             2
         } else {
@@ -1186,7 +1205,7 @@ impl TagProcessor {
         }
     }
 
-    fn class_list(&mut self) -> bool {
+    fn class_list(&mut self, quirks_mode: bool) -> bool {
         let Some(scan) = self.current else {
             return false;
         };
@@ -1195,19 +1214,23 @@ impl TagProcessor {
             return false;
         }
 
-        let classes = self.current_classes();
+        let classes = self.current_class_entries(quirks_mode);
         self.scratch.clear();
         for class in classes {
             if !self.scratch.is_empty() {
                 self.scratch.push(0x1f);
             }
-            self.scratch.extend_from_slice(&class);
+            self.scratch.extend_from_slice(if quirks_mode {
+                &class.comparable
+            } else {
+                &class.name
+            });
         }
 
         true
     }
 
-    fn current_classes(&mut self) -> Vec<Vec<u8>> {
+    fn current_class_entries(&mut self, quirks_mode: bool) -> Vec<ClassEntry> {
         let value = match self.get_attribute(b"class") {
             AttributeValue::String => self.scratch.clone(),
             AttributeValue::Boolean | AttributeValue::Missing => Vec::new(),
@@ -1215,10 +1238,19 @@ impl TagProcessor {
 
         let mut classes = Vec::new();
         for class in value.split(|byte| is_html_whitespace(*byte)) {
-            if class.is_empty() || classes.iter().any(|seen: &Vec<u8>| seen.as_slice() == class) {
+            if class.is_empty() {
                 continue;
             }
-            classes.push(normalize_class_bytes(class));
+
+            let name = normalize_class_bytes(class);
+            let comparable = comparable_class_bytes(&name, quirks_mode);
+            if classes
+                .iter()
+                .any(|seen: &ClassEntry| seen.comparable.as_slice() == comparable.as_slice())
+            {
+                continue;
+            }
+            classes.push(ClassEntry { name, comparable });
         }
 
         classes
@@ -2181,6 +2213,14 @@ fn normalize_class_bytes(class_name: &[u8]) -> Vec<u8> {
     output
 }
 
+fn comparable_class_bytes(class_name: &[u8], quirks_mode: bool) -> Vec<u8> {
+    if quirks_mode {
+        ascii_lowercase_vec(class_name)
+    } else {
+        class_name.to_vec()
+    }
+}
+
 fn ascii_lowercase_vec(value: &[u8]) -> Vec<u8> {
     value.iter().map(u8::to_ascii_lowercase).collect()
 }
@@ -2677,15 +2717,58 @@ mod tests {
             super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
         });
 
-        assert_eq!(processor.has_class(b"one"), 2);
-        assert_eq!(processor.has_class(b"three"), 1);
-        assert!(processor.add_class(b"three"));
-        assert!(processor.remove_class(b"two"));
-        assert!(processor.class_list());
+        assert_eq!(processor.has_class(b"one", false), 2);
+        assert_eq!(processor.has_class(b"three", false), 1);
+        assert!(processor.add_class(b"three", false));
+        assert!(processor.remove_class(b"two", false));
+        assert!(processor.class_list(false));
         assert_eq!(processor.scratch, b"one\x1fthree");
         assert_eq!(
             std::str::from_utf8(&processor.html).unwrap(),
             r#"<div class="one three">"#
+        );
+    }
+
+    #[test]
+    fn tag_processor_matches_classes_case_insensitively_in_quirks_mode() {
+        let mut processor = TagProcessor {
+            html: "<span class=\"UPPER A a E\u{301} e\u{301}\">"
+                .as_bytes()
+                .to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
+        });
+
+        assert_eq!(processor.has_class(b"upper", true), 2);
+        assert!(processor.add_class(b"upper", true));
+        assert_eq!(
+            std::str::from_utf8(&processor.html).unwrap(),
+            "<span class=\"UPPER A a E\u{301} e\u{301}\">"
+        );
+
+        assert!(processor.add_class(b"ANOTHER-UPPER", true));
+        assert!(processor.class_list(true));
+        assert_eq!(
+            processor.scratch,
+            b"upper\x1fa\x1fe\xcc\x81\x1fanother-upper"
+        );
+        assert_eq!(
+            std::str::from_utf8(&processor.html).unwrap(),
+            "<span class=\"UPPER A a E\u{301} e\u{301} ANOTHER-UPPER\">"
+        );
+
+        assert!(processor.remove_class(b"upper", true));
+        assert_eq!(
+            std::str::from_utf8(&processor.html).unwrap(),
+            "<span class=\"A E\u{301} ANOTHER-UPPER\">"
         );
     }
 
@@ -2705,7 +2788,7 @@ mod tests {
             super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
         });
 
-        assert!(processor.add_class(b"foo-class"));
+        assert!(processor.add_class(b"foo-class", false));
         assert_eq!(
             std::str::from_utf8(&processor.html).unwrap(),
             r#"<div class="main   with-border foo-class">"#
