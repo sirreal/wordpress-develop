@@ -724,6 +724,17 @@ assert.equal(selectTextareaProcessor.next_tag("p"), true);
 assert.deepEqual(selectTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 selectTextareaProcessor.destroy();
 
+const selectInTableProcessor = WP_HTML_Processor.create_fragment("<table><select><option>one<tr><td>cell");
+assert.equal(selectInTableProcessor.next_tag("tr"), true);
+assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+assert.equal(selectInTableProcessor.next_tag("td"), true);
+assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+selectInTableProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><select><option>one<tr><td>cell"),
+	"<table><select><option>one</option></select><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");

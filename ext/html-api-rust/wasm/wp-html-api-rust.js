@@ -138,6 +138,16 @@ const TABLE_SECTION_BOUNDARY_START_TAGS = new Set([
 	"THEAD",
 ]);
 const SELECT_BREAKOUT_START_TAGS = new Set(["INPUT", "KEYGEN", "TEXTAREA"]);
+const SELECT_IN_TABLE_BREAKOUT_START_TAGS = new Set([
+	"CAPTION",
+	"TABLE",
+	"TBODY",
+	"TFOOT",
+	"THEAD",
+	"TR",
+	"TD",
+	"TH",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -2503,6 +2513,14 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (this.current_namespace === "html" && SELECT_IN_TABLE_BREAKOUT_START_TAGS.has(tagName)) {
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (selectIndex !== -1 && this.#openHtmlElementBefore("TABLE", selectIndex)) {
+					this.#queueVirtualPopsFrom(selectIndex);
+					return true;
+				}
+			}
+
 			if (this.current_namespace === "html" && SELECT_BREAKOUT_START_TAGS.has(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1) {
@@ -2926,6 +2944,18 @@ export function createHtmlApi(wasm) {
 				nodeName === tagName &&
 				this.open_element_namespaces[index] === "html"
 			));
+		}
+
+		#openHtmlElementBefore(tagName, beforeIndex) {
+			for (let i = beforeIndex - 1; i >= 0; i -= 1) {
+				if (
+					this.open_elements[i] === tagName &&
+					this.open_element_namespaces[i] === "html"
+				) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {
