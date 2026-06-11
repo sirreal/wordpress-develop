@@ -287,6 +287,7 @@
 
 	<rule ref="PEAR.NamingConventions.ValidClassName.Invalid">
 		<exclude-pattern>/tests/phpunit/tests/*</exclude-pattern>
+		<exclude-pattern>/tests/benchmarks/benchmarks/*</exclude-pattern>
 		<!-- Exclude some old classes that cannot be renamed, as it would break back compat. -->
 		<exclude-pattern>/src/wp-admin/includes/class-wp-filesystem-ftpsockets\.php</exclude-pattern>
 		<exclude-pattern>/src/wp-includes/class-wp-oembed\.php</exclude-pattern>
@@ -329,6 +330,7 @@
 	<!-- Exclude the unit tests from the file name rules. -->
 	<rule ref="WordPress.Files.FileName">
 		<exclude-pattern>/tests/phpunit/*</exclude-pattern>
+		<exclude-pattern>/tests/benchmarks/benchmarks/*</exclude-pattern>
 	</rule>
 
 	<!-- WPCS1620: template.php isn't a template tag file. -->
