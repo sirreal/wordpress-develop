@@ -239,6 +239,42 @@ export interface WP_HTML_Active_Formatting_Elements_Constructor {
 
 export const WP_HTML_Active_Formatting_Elements: WP_HTML_Active_Formatting_Elements_Constructor;
 
+export interface WP_HTML_Open_Elements {
+	stack: WP_HTML_Token[];
+	set_pop_handler(handler: (token: WP_HTML_Token) => void): void;
+	set_push_handler(handler: (token: WP_HTML_Token) => void): void;
+	at(nth: number | string): WP_HTML_Token | null;
+	contains(nodeName: string): boolean;
+	contains_node(token: WP_HTML_Token): boolean;
+	count(): number;
+	current_node(): WP_HTML_Token | null;
+	current_node_is(identity: string): boolean;
+	has_element_in_specific_scope(tagName: string, terminationList: string[]): boolean;
+	has_element_in_scope(tagName: string): boolean;
+	has_element_in_list_item_scope(tagName: string): boolean;
+	has_element_in_button_scope(tagName: string): boolean;
+	has_element_in_table_scope(tagName: string): boolean;
+	has_element_in_select_scope(tagName: string): boolean;
+	has_p_in_button_scope(): boolean;
+	pop(): boolean;
+	pop_until(htmlTagName: string): boolean;
+	push(stackItem: WP_HTML_Token): void;
+	remove_node(token: WP_HTML_Token): boolean;
+	walk_down(): IterableIterator<WP_HTML_Token>;
+	walk_up(aboveThisNode?: WP_HTML_Token | null): IterableIterator<WP_HTML_Token>;
+	after_element_push(item: WP_HTML_Token): void;
+	after_element_pop(item: WP_HTML_Token): void;
+	clear_to_table_context(): void;
+	clear_to_table_body_context(): void;
+	clear_to_table_row_context(): void;
+}
+
+export interface WP_HTML_Open_Elements_Constructor {
+	new (): WP_HTML_Open_Elements;
+}
+
+export const WP_HTML_Open_Elements: WP_HTML_Open_Elements_Constructor;
+
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
 	compat_mode: "no-quirks-mode" | "quirks-mode";
@@ -382,6 +418,7 @@ export interface HtmlApi {
 	WP_HTML_Token: WP_HTML_Token_Constructor;
 	WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
 	WP_HTML_Active_Formatting_Elements: WP_HTML_Active_Formatting_Elements_Constructor;
+	WP_HTML_Open_Elements: WP_HTML_Open_Elements_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

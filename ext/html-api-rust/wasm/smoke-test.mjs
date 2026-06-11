@@ -5,6 +5,7 @@ import {
 	WP_HTML_Active_Formatting_Elements as Exported_WP_HTML_Active_Formatting_Elements,
 	WP_HTML_Attribute_Token as Exported_WP_HTML_Attribute_Token,
 	WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info,
+	WP_HTML_Open_Elements as Exported_WP_HTML_Open_Elements,
 	WP_HTML_Span as Exported_WP_HTML_Span,
 	WP_HTML_Stack_Event as Exported_WP_HTML_Stack_Event,
 	WP_HTML_Text_Replacement as Exported_WP_HTML_Text_Replacement,
@@ -19,6 +20,7 @@ const {
 	WP_HTML_Token,
 	WP_HTML_Stack_Event,
 	WP_HTML_Active_Formatting_Elements,
+	WP_HTML_Open_Elements,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -35,6 +37,7 @@ assert.equal(Exported_WP_HTML_Text_Replacement, WP_HTML_Text_Replacement);
 assert.equal(Exported_WP_HTML_Attribute_Token, WP_HTML_Attribute_Token);
 assert.equal(Exported_WP_HTML_Stack_Event, WP_HTML_Stack_Event);
 assert.equal(Exported_WP_HTML_Active_Formatting_Elements, WP_HTML_Active_Formatting_Elements);
+assert.equal(Exported_WP_HTML_Open_Elements, WP_HTML_Open_Elements);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
 assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
 assert.equal(typeof WP_HTML_Span, "function");
@@ -43,6 +46,7 @@ assert.equal(typeof WP_HTML_Attribute_Token, "function");
 assert.equal(typeof WP_HTML_Token, "function");
 assert.equal(typeof WP_HTML_Stack_Event, "function");
 assert.equal(typeof WP_HTML_Active_Formatting_Elements, "function");
+assert.equal(typeof WP_HTML_Open_Elements, "function");
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -157,6 +161,86 @@ activeFormattingElements.push(new WP_HTML_Token("after-marker", "B", false));
 assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A", "marker", "B"]);
 activeFormattingElements.clear_up_to_last_marker();
 assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A"]);
+
+const openElements = new WP_HTML_Open_Elements();
+const openEvents = [];
+openElements.set_push_handler(({ node_name }) => openEvents.push(`push:${node_name}`));
+openElements.set_pop_handler(({ node_name }) => openEvents.push(`pop:${node_name}`));
+const openHtmlToken = new WP_HTML_Token("html", "HTML", false);
+const openBodyToken = new WP_HTML_Token("body", "BODY", false);
+const openPToken = new WP_HTML_Token("p", "P", false);
+const openButtonToken = new WP_HTML_Token("button", "BUTTON", false);
+openElements.push(openHtmlToken);
+openElements.push(openBodyToken);
+openElements.push(openPToken);
+assert.equal(openElements.stack.length, 3);
+assert.equal(openElements.count(), 3);
+assert.equal(openElements.at(1), openHtmlToken);
+assert.equal(openElements.current_node(), openPToken);
+assert.equal(openElements.current_node_is("P"), true);
+assert.equal(openElements.current_node_is("#tag"), true);
+assert.equal(openElements.contains("BODY"), true);
+assert.equal(openElements.contains_node(openPToken), true);
+assert.equal(openElements.contains_node(new WP_HTML_Token("p", "P", false)), false);
+assert.deepEqual([...openElements.walk_up(openBodyToken)].map(({ node_name }) => node_name), ["HTML"]);
+assert.equal(openElements.has_p_in_button_scope(), true);
+assert.equal(openElements.has_element_in_scope("P"), true);
+openElements.push(openButtonToken);
+assert.equal(openElements.has_p_in_button_scope(), false);
+assert.equal(openElements.has_element_in_button_scope("P"), false);
+assert.equal(openElements.pop(), true);
+assert.equal(openElements.has_p_in_button_scope(), true);
+const openTableToken = new WP_HTML_Token("table", "TABLE", false);
+openElements.push(openTableToken);
+assert.equal(openElements.has_element_in_scope("P"), false);
+assert.equal(openElements.has_element_in_table_scope("TABLE"), true);
+assert.equal(openElements.pop_until("TABLE"), true);
+assert.equal(openElements.has_p_in_button_scope(), true);
+assert.equal(openElements.remove_node(new WP_HTML_Token("p", "P", false)), true);
+assert.deepEqual(openElements.stack.map(({ node_name }) => node_name), ["HTML", "BODY"]);
+assert.deepEqual(openEvents, [
+	"push:HTML",
+	"push:BODY",
+	"push:P",
+	"push:BUTTON",
+	"pop:BUTTON",
+	"push:TABLE",
+	"pop:TABLE",
+	"pop:P",
+]);
+
+const scopedOpenElements = new WP_HTML_Open_Elements();
+scopedOpenElements.push(new WP_HTML_Token("html", "HTML", false));
+const mathMiToken = new WP_HTML_Token("math-mi", "MI", false);
+mathMiToken.namespace = "math";
+scopedOpenElements.push(mathMiToken);
+assert.equal(scopedOpenElements.has_element_in_scope("math MI"), true);
+assert.equal(scopedOpenElements.has_element_in_specific_scope("P", ["math MI"]), false);
+
+const selectOpenElements = new WP_HTML_Open_Elements();
+selectOpenElements.push(new WP_HTML_Token("select", "SELECT", false));
+selectOpenElements.push(new WP_HTML_Token("optgroup", "OPTGROUP", false));
+selectOpenElements.push(new WP_HTML_Token("option", "OPTION", false));
+assert.equal(selectOpenElements.has_element_in_select_scope("SELECT"), true);
+assert.equal(selectOpenElements.has_element_in_select_scope("OPTION"), true);
+assert.equal(selectOpenElements.has_element_in_select_scope("DIV"), false);
+
+const tableContextOpenElements = new WP_HTML_Open_Elements();
+for (const nodeName of ["HTML", "TABLE", "TBODY", "TR", "TD"]) {
+	tableContextOpenElements.push(new WP_HTML_Token(nodeName.toLowerCase(), nodeName, false));
+}
+tableContextOpenElements.clear_to_table_context();
+assert.deepEqual(tableContextOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "TABLE"]);
+for (const nodeName of ["TBODY", "TR", "TD"]) {
+	tableContextOpenElements.push(new WP_HTML_Token(nodeName.toLowerCase(), nodeName, false));
+}
+tableContextOpenElements.clear_to_table_body_context();
+assert.deepEqual(tableContextOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "TABLE", "TBODY"]);
+for (const nodeName of ["TR", "TD"]) {
+	tableContextOpenElements.push(new WP_HTML_Token(nodeName.toLowerCase(), nodeName, false));
+}
+tableContextOpenElements.clear_to_table_row_context();
+assert.deepEqual(tableContextOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "TABLE", "TBODY", "TR"]);
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
