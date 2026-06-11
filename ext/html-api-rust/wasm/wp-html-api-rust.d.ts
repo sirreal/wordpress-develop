@@ -118,7 +118,7 @@ export interface WP_HTML_Doctype_Info_Constructor {
 
 export const WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 
-export interface WP_HTML_Unsupported_Exception {
+export interface WP_HTML_Unsupported_Exception extends Error {
 	message: string;
 	token_name: string;
 	token_at: number;
@@ -126,6 +126,41 @@ export interface WP_HTML_Unsupported_Exception {
 	stack_of_open_elements: string[];
 	active_formatting_elements: string[];
 }
+
+export interface WP_HTML_Unsupported_Exception_Constructor {
+	new (
+		message: string,
+		tokenName: string,
+		tokenAt: number,
+		token: string,
+		stackOfOpenElements: string[],
+		activeFormattingElements: string[],
+	): WP_HTML_Unsupported_Exception;
+}
+
+export const WP_HTML_Unsupported_Exception: WP_HTML_Unsupported_Exception_Constructor;
+
+export interface WP_HTML_Token {
+	bookmark_name: string | null;
+	namespace: HtmlNamespace;
+	node_name: string;
+	has_self_closing_flag: boolean;
+	integration_node_type: "math" | "html" | null;
+	on_destroy: ((bookmarkName: string | null) => void) | null;
+	destroy(): void;
+	free(): void;
+}
+
+export interface WP_HTML_Token_Constructor {
+	new (
+		bookmarkName: string | null,
+		nodeName: string,
+		hasSelfClosingFlag: boolean,
+		onDestroy?: ((bookmarkName: string | null) => void) | null,
+	): WP_HTML_Token;
+}
+
+export const WP_HTML_Token: WP_HTML_Token_Constructor;
 
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
@@ -263,6 +298,8 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 
 export interface HtmlApi {
 	WP_HTML_Decoder: WP_HTML_Decoder_Constructor;
+	WP_HTML_Unsupported_Exception: WP_HTML_Unsupported_Exception_Constructor;
+	WP_HTML_Token: WP_HTML_Token_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

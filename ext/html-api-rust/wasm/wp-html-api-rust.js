@@ -597,6 +597,40 @@ const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+export class WP_HTML_Unsupported_Exception extends Error {
+	constructor(message, tokenName, tokenAt, token, stackOfOpenElements, activeFormattingElements) {
+		super(message);
+		this.name = "WP_HTML_Unsupported_Exception";
+		this.token_name = tokenName;
+		this.token_at = tokenAt;
+		this.token = token;
+		this.stack_of_open_elements = [...stackOfOpenElements];
+		this.active_formatting_elements = [...activeFormattingElements];
+	}
+}
+
+export class WP_HTML_Token {
+	constructor(bookmarkName, nodeName, hasSelfClosingFlag, onDestroy = null) {
+		this.bookmark_name = bookmarkName;
+		this.namespace = "html";
+		this.node_name = nodeName;
+		this.has_self_closing_flag = Boolean(hasSelfClosingFlag);
+		this.integration_node_type = null;
+		this.on_destroy = onDestroy;
+	}
+
+	destroy() {
+		if (typeof this.on_destroy === "function") {
+			this.on_destroy(this.bookmark_name);
+		}
+		this.on_destroy = null;
+	}
+
+	free() {
+		this.destroy();
+	}
+}
+
 export class WP_HTML_Doctype_Info {
 	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
 		this.name = name;
@@ -3242,14 +3276,14 @@ export function createHtmlApi(wasm) {
 
 		#createUnsupportedException(message) {
 			const span = this.is_virtual() ? null : this.#currentRealTokenSpan();
-			return {
+			return new WP_HTML_Unsupported_Exception(
 				message,
-				token_name: this.get_token_name() ?? "",
-				token_at: span?.start ?? 0,
-				token: this.is_virtual() ? "" : this.#currentRealTokenString(),
-				stack_of_open_elements: [...this.open_elements],
-				active_formatting_elements: this.active_formatting_elements.map((entry) => entry.tagName),
-			};
+				this.get_token_name() ?? "",
+				span?.start ?? 0,
+				this.is_virtual() ? "" : this.#currentRealTokenString(),
+				this.open_elements,
+				this.active_formatting_elements.map((entry) => entry.tagName),
+			);
 		}
 
 		#currentRealTokenSpan() {
@@ -4422,6 +4456,8 @@ export function createHtmlApi(wasm) {
 
 	return {
 		WP_HTML_Decoder,
+		WP_HTML_Unsupported_Exception,
+		WP_HTML_Token,
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
 		WP_HTML_Doctype_Info,

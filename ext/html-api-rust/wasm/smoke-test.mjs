@@ -4,6 +4,8 @@ import { loadWasm, WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info } from 
 
 const {
 	WP_HTML_Decoder,
+	WP_HTML_Unsupported_Exception,
+	WP_HTML_Token,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -16,6 +18,8 @@ assert.equal(version(), "0.1.0");
 assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
 assert.equal(Exported_WP_HTML_Doctype_Info, WP_HTML_Doctype_Info);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
+assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
+assert.equal(typeof WP_HTML_Token, "function");
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -65,6 +69,18 @@ for (const attributeValue of [
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP"), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", "ascii-case-insensitive"), true);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "https", "ascii-case-insensitive"), false);
+
+let destroyedTokenBookmark = null;
+const token = new WP_HTML_Token("mark", "img", false, (bookmarkName) => {
+	destroyedTokenBookmark = bookmarkName;
+});
+assert.equal(token.bookmark_name, "mark");
+assert.equal(token.namespace, "html");
+assert.equal(token.node_name, "img");
+assert.equal(token.has_self_closing_flag, false);
+token.destroy();
+assert.equal(destroyedTokenBookmark, "mark");
+token.free();
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
@@ -899,6 +915,8 @@ for (const [html, context, expected] of [
 const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ nodeName: "DIV", namespaceName: "html" }), true);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "img", false)), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "div", false)), true);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "TITLE", namespace: "html" }), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "#text", namespace: "html" }), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "html", namespace: "html" }), false);
@@ -950,6 +968,8 @@ for (const [html, message] of [
 	assert.equal(unsupportedMetaProcessor.next_tag("meta"), false);
 	assert.equal(unsupportedMetaProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
 	const exception = unsupportedMetaProcessor.get_unsupported_exception();
+	assert.ok(exception instanceof WP_HTML_Unsupported_Exception);
+	assert.ok(exception instanceof Error);
 	const tokenAt = html.indexOf("<meta");
 	assert.equal(exception.message, message);
 	assert.equal(exception.token_name, "META");
