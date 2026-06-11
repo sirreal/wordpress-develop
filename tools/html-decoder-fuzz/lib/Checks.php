@@ -6,6 +6,7 @@ namespace HtmlDecoderFuzz;
  */
 class Checks {
 	public const PREVIEW_BYTES = 64;
+	private const ATTRIBUTE_SEARCH_PREFIX_BYTES = 32;
 
 	private Oracles $oracles;
 
@@ -334,12 +335,14 @@ class Checks {
 					$failures[] = self::failure(
 						'attribute-starts-with-mismatch',
 						$case_sensitivity,
-						array(
-							'case_sensitivity' => $case_sensitivity,
-							'search'           => $search,
-							'expected'         => $expected,
-							'got'              => $got,
-							'decoded'          => self::preview( $decoded ),
+						array_merge(
+							array(
+								'case_sensitivity' => $case_sensitivity,
+								'expected'         => $expected,
+								'got'              => $got,
+								'decoded'          => self::preview( $decoded ),
+							),
+							self::byte_detail( 'search', $search )
 						)
 					);
 				}
@@ -377,10 +380,12 @@ class Checks {
 							$failures[] = self::failure(
 								'attribute-starts-with-prefix-monotonicity',
 								$case_sensitivity,
-								array(
-									'case_sensitivity' => $case_sensitivity,
-									'search'           => $search,
-									'prefix'           => $prefix,
+								array_merge(
+									array(
+										'case_sensitivity' => $case_sensitivity,
+									),
+									self::byte_detail( 'search', $search ),
+									self::byte_detail( 'prefix', $prefix )
 								)
 							);
 							break;
@@ -396,10 +401,12 @@ class Checks {
 							$failures[] = self::failure(
 								'attribute-starts-with-extension-monotonicity',
 								$case_sensitivity,
-								array(
-									'case_sensitivity' => $case_sensitivity,
-									'search'           => $search,
-									'extension'        => $extension,
+								array_merge(
+									array(
+										'case_sensitivity' => $case_sensitivity,
+									),
+									self::byte_detail( 'search', $search ),
+									self::byte_detail( 'extension', $extension )
 								)
 							);
 							break;
@@ -415,9 +422,7 @@ class Checks {
 					$failures[] = self::failure(
 						'attribute-starts-with-case-monotonicity',
 						'case-sensitive',
-						array(
-							'search' => $search,
-						)
+						self::byte_detail( 'search', $search )
 					);
 				}
 			}
@@ -439,6 +444,13 @@ class Checks {
 				$searches[] = $prefix . 'x';
 				$searches[] = strtoupper( $prefix );
 			}
+		}
+
+		$max_prefix_length = min( strlen( $decoded ), self::ATTRIBUTE_SEARCH_PREFIX_BYTES );
+		for ( $length = 1; $length <= $max_prefix_length; $length++ ) {
+			$prefix     = substr( $decoded, 0, $length );
+			$searches[] = $prefix;
+			$searches[] = $prefix . 'x';
 		}
 
 		return array_values( array_unique( $searches ) );
@@ -485,6 +497,20 @@ class Checks {
 	 */
 	private static function attribute_search_extensions(): array {
 		return array( "\x7F", 'x', 'A', '0', ':' );
+	}
+
+	private static function byte_detail( string $name, string $bytes ): array {
+		$detail = array(
+			"{$name}_length" => strlen( $bytes ),
+			"{$name}_base64" => base64_encode( $bytes ),
+			"{$name}_preview" => self::preview( $bytes ),
+		);
+
+		if ( mb_check_encoding( $bytes, 'UTF-8' ) ) {
+			$detail[ "{$name}_text" ] = $bytes;
+		}
+
+		return $detail;
 	}
 
 	private static function failure( string $check, string $party, array $detail ): array {

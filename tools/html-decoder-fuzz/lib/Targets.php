@@ -68,6 +68,16 @@ class Targets {
 					return $attribute_starts_with( $haystack, $search, $case_sensitivity );
 				};
 				break;
+
+			case 'attribute-multicodepoint-prefix':
+				$attribute_starts_with            = $targets['attribute_starts_with'];
+				$targets['attribute_starts_with'] = static function ( string $haystack, string $search, string $case_sensitivity ) use ( $attribute_starts_with ): bool {
+					if ( str_starts_with( $haystack, '&nvlt;' ) && "<\xE2" === $search ) {
+						return false;
+					}
+					return $attribute_starts_with( $haystack, $search, $case_sensitivity );
+				};
+				break;
 		}
 
 		return $targets;

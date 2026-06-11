@@ -51,7 +51,8 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
    does not overrun the input.
 4. Check `attribute_starts_with()` against the decoded attribute prefix for
    ASCII search strings in both case-sensitive and ASCII-case-insensitive modes,
-   including monotonic prefix, extension, and case-sensitivity invariants.
+   leading byte-slice prefixes that can end inside UTF-8 replacements, and
+   monotonic prefix, extension, and case-sensitivity invariants.
 5. Assert decoded output is valid UTF-8.
 6. Assert text without `&` is an identity decode.
 
@@ -88,6 +89,8 @@ strategies for:
   references, semicolonless numeric references, and truncated names
 - multibyte UTF-8 around references
 - `attribute_starts_with()` prefixes such as encoded `javascript:`
+- `attribute_starts_with()` prefixes that split multi-code-point named-reference
+  replacements such as `&nvlt;`
 - nonexistent lookalikes and ampersand boundaries
 - plain no-ampersand text
 
@@ -205,6 +208,7 @@ mutation-tested broken targets:
   followers
 - off-by-one `read_character_reference()` match lengths
 - partial-prefix `attribute_starts_with()` matches
+- partial multi-code-point `attribute_starts_with()` replacement matches
 - non-monotonic `attribute_starts_with()` prefix, extension, and
   case-sensitivity results
 - raw byte payloads without `&` not decoding identically
@@ -212,5 +216,6 @@ mutation-tested broken targets:
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
 `skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`, or
 `byte-no-amp-identity`, `attribute-prefix-monotonicity`,
-`attribute-extension-monotonicity`, or `attribute-case-monotonicity` before
-running `worker.php`, `runner.php`, `replay.php`, or `minimize.php`.
+`attribute-extension-monotonicity`, `attribute-case-monotonicity`, or
+`attribute-multicodepoint-prefix` before running `worker.php`, `runner.php`,
+`replay.php`, or `minimize.php`.

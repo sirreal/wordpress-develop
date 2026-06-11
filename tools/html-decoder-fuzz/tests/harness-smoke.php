@@ -114,6 +114,7 @@ function broken_run( Oracles $oracles, array $real_targets, array $overrides ): 
 			array( 'attribute', '&notx' ),
 			array( 'attribute', 'jav' ),
 			array( 'attribute', 'javascript&colon;alert(1)' ),
+			array( 'attribute', '&nvlt;tail' ),
 		)
 	);
 
@@ -129,7 +130,7 @@ function broken_run( Oracles $oracles, array $real_targets, array $overrides ): 
 /**
  * @return string[] Distinct check names observed.
  */
-function fault_run( Oracles $oracles, string $fault ): array {
+function fault_run( Oracles $oracles, string $fault, string $payload = 'javascript&colon;alert(1)' ): array {
 	$old_fault = getenv( 'HTML_DECODER_FUZZ_FAULT' );
 	putenv( "HTML_DECODER_FUZZ_FAULT={$fault}" );
 
@@ -137,7 +138,7 @@ function fault_run( Oracles $oracles, string $fault ): array {
 		$checks = new Checks( $oracles, Targets::resolve() );
 		$seen   = array();
 
-		foreach ( $checks->run( 'attribute', 'javascript&colon;alert(1)' ) as $failure ) {
+		foreach ( $checks->run( 'attribute', $payload ) as $failure ) {
 			$seen[ $failure['check'] ] = true;
 		}
 
@@ -249,6 +250,20 @@ $seen = broken_run(
 	$real_targets,
 	array(
 		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ) use ( $real_targets ): bool {
+			if ( str_starts_with( $haystack, '&nvlt;' ) && "<\xE2" === $search ) {
+				return false;
+			}
+			return $real_targets['attribute_starts_with']( $haystack, $search, $case_sensitivity );
+		},
+	)
+);
+check( 'catches partial multi-code-point attribute matcher', in_array( 'attribute-starts-with-mismatch', $seen, true ), implode( ',', $seen ) );
+
+$seen = broken_run(
+	$oracles,
+	$real_targets,
+	array(
+		'attribute_starts_with' => static function ( string $haystack, string $search, string $case_sensitivity ) use ( $real_targets ): bool {
 			if ( 'jav' === $search ) {
 				return false;
 			}
@@ -296,6 +311,9 @@ foreach ( $attribute_faults as $fault => $expected_check ) {
 	check( "fault target {$fault} exposes {$expected_check}", in_array( $expected_check, $seen, true ), implode( ',', $seen ) );
 }
 
+$seen = fault_run( $oracles, 'attribute-multicodepoint-prefix', '&nvlt;tail' );
+check( 'fault target attribute-multicodepoint-prefix exposes partial replacement prefixes', in_array( 'attribute-starts-with-mismatch', $seen, true ), implode( ',', $seen ) );
+
 $seen = broken_oracle_free_run(
 	$oracles,
 	$real_targets,
@@ -324,6 +342,7 @@ $unsafe                = 0;
 $reference_at_eof      = 0;
 $reference_at_eof_bad = 0;
 $reference_at_eof_shapes = array();
+$attribute_multicodepoint_prefix = 0;
 $total                 = 1200;
 for ( $i = 0; $i < $total; $i++ ) {
 	$generated = ( new Generator( new Prng( "smoke:{$i}" ), 4096, $names ) )->generate();
@@ -341,10 +360,22 @@ for ( $i = 0; $i < $total; $i++ ) {
 			$reference_at_eof_shapes[ $shape ] = true;
 		}
 	}
+	if (
+		'attribute-prefix' === $generated['strategy'] &&
+		(
+			str_starts_with( $generated['payload'], '&nvlt;' ) ||
+			str_starts_with( $generated['payload'], '&nvgt;' ) ||
+			str_starts_with( $generated['payload'], '&NotLessLess;' ) ||
+			str_starts_with( $generated['payload'], '&bne;' )
+		)
+	) {
+		++$attribute_multicodepoint_prefix;
+	}
 }
 check( 'all 11 strategies appear', 11 === count( $strategies ), implode( ',', array_keys( $strategies ) ) );
 check( 'generated cases run both contexts', array( 'both' ) === array_keys( $contexts ), implode( ',', array_keys( $contexts ) ) );
 check( 'generated payloads are oracle-safe', 0 === $unsafe, (string) $unsafe );
+check( 'attribute-prefix generator emits multi-code-point references', $attribute_multicodepoint_prefix > 0, (string) $attribute_multicodepoint_prefix );
 check( 'reference-at-EOF cases end inside a reference', $reference_at_eof > 0 && 0 === $reference_at_eof_bad, "{$reference_at_eof_bad}/{$reference_at_eof}" );
 check(
 	'reference-at-EOF covers expected suffix shapes',

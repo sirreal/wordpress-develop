@@ -9,7 +9,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 1 item 2: add oracle-free arbitrary byte-space lane.
 - [x] Tier 1 item 3: add reference-at-EOF generation strategy.
 - [x] Tier 1 item 4: add `attribute_starts_with()` monotonicity invariants.
-- [ ] Tier 1 items 5-6.
+- [x] Tier 1 item 5: exercise multi-code-point `attribute_starts_with()` prefix paths.
+- [ ] Tier 1 item 6.
 - [ ] Tier 2 items 7-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
@@ -39,6 +40,13 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding `attribute_starts_with()` prefix, extension, case monotonicity, and fault-target coverage.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding `attribute_starts_with()` monotonicity checks.
 - 2026-06-11: `git diff --check` passed after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Checks.php`, `php -l tools/html-decoder-fuzz/lib/Generator.php`, `php -l tools/html-decoder-fuzz/lib/Targets.php`, and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding multi-code-point `attribute_starts_with()` prefix coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding byte-slice search probes, multi-code-point generator cases, and the `attribute-multicodepoint-prefix` fault target.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding multi-code-point prefix coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 681 --cases 1 --progress-every 1` reported findings as expected and verified invalid-UTF-8 search details remain JSON-safe.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/replay.php --seed 1 --case 681` reproduced the multi-code-point prefix finding.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-multicodepoint-fault-681/failure-seed1-case681/failure.json` minimized the finding from 18 to 6 bytes.
+- 2026-06-11: `git diff --check` passed after adding multi-code-point prefix coverage.
 
 ## Review Log
 
@@ -58,3 +66,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Copernicus: APPROVE, invariant semantics and exception handling.
   - Maxwell: APPROVE, fault-target and smoke coverage.
   - Poincare: APPROVE, integration/runtime compatibility.
+- Tier 1 item 5:
+  - Banach: APPROVE, generator and fault-target coverage.
+  - Meitner: APPROVE, byte-slice search semantics and JSON-safe failure details.
+  - Carver: APPROVE, worker/replay/minimize integration and runtime compatibility.
