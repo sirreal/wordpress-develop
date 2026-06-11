@@ -1521,6 +1521,32 @@ enum DecodeContext {
 }
 
 #[derive(Clone, Copy)]
+enum CharacterReference {
+    Scalar(char),
+    Text(&'static str),
+}
+
+impl CharacterReference {
+    fn append_to(self, output: &mut Vec<u8>) {
+        match self {
+            CharacterReference::Scalar(value) => {
+                let mut buffer = [0; 4];
+                output.extend_from_slice(value.encode_utf8(&mut buffer).as_bytes());
+            }
+            CharacterReference::Text(value) => output.extend_from_slice(value.as_bytes()),
+        }
+    }
+
+    fn is_line_feed(self) -> bool {
+        matches!(self, CharacterReference::Scalar('\n'))
+    }
+
+    fn is_null(self) -> bool {
+        matches!(self, CharacterReference::Scalar('\0'))
+    }
+}
+
+#[derive(Clone, Copy)]
 enum ScriptContentType {
     JavaScript,
     Json,
@@ -1577,14 +1603,13 @@ fn transform_text(input: &[u8], decode_entities: bool, null_transform: NullTrans
             if let Some((decoded, consumed)) =
                 decode_character_reference(DecodeContext::Data, &input[at..])
             {
-                if decoded == '\0' {
+                if decoded.is_null() {
                     match null_transform {
                         NullTransform::Remove => {}
                         NullTransform::Replace => output.extend_from_slice("\u{FFFD}".as_bytes()),
                     }
                 } else {
-                    let mut buffer = [0; 4];
-                    output.extend_from_slice(decoded.encode_utf8(&mut buffer).as_bytes());
+                    decoded.append_to(&mut output);
                 }
                 at += consumed;
                 continue;
@@ -1611,7 +1636,11 @@ fn strip_initial_newline(input: &[u8]) -> &[u8] {
         return &input[1..];
     }
 
-    if let Some(('\n', consumed)) = decode_character_reference(DecodeContext::Data, input) {
+    if let Some((decoded, consumed)) = decode_character_reference(DecodeContext::Data, input) {
+        if !decoded.is_line_feed() {
+            return input;
+        }
+
         return &input[consumed..];
     }
 
@@ -2391,15 +2420,17 @@ fn decode_html_attribute(input: &[u8]) -> Vec<u8> {
             continue;
         };
 
-        let mut buffer = [0; 4];
-        output.extend_from_slice(decoded.encode_utf8(&mut buffer).as_bytes());
+        decoded.append_to(&mut output);
         at += consumed;
     }
 
     output
 }
 
-fn decode_character_reference(context: DecodeContext, input: &[u8]) -> Option<(char, usize)> {
+fn decode_character_reference(
+    context: DecodeContext,
+    input: &[u8],
+) -> Option<(CharacterReference, usize)> {
     if input.len() < 3 || input[0] != b'&' {
         return None;
     }
@@ -2437,12 +2468,15 @@ fn decode_character_reference(context: DecodeContext, input: &[u8]) -> Option<(c
 
         let consumed = if at < input.len() && input[at] == b';' { at + 1 } else { at };
         if 0 == digit_count || digit_count > max_digits {
-            return Some(('\u{FFFD}', consumed));
+            return Some((CharacterReference::Scalar('\u{FFFD}'), consumed));
         }
 
         let digits = std::str::from_utf8(&input[significant_digits_start..at]).ok()?;
         let value = u32::from_str_radix(digits, radix).ok()?;
-        return Some((character_reference_code_point(value), consumed));
+        return Some((
+            CharacterReference::Scalar(character_reference_code_point(value)),
+            consumed,
+        ));
     }
 
     let (decoded, name_len) = named_character_reference(&input[1..])?;
@@ -2498,40 +2532,43 @@ fn character_reference_code_point(code_point: u32) -> char {
     char::from_u32(code_point).unwrap_or('\u{FFFD}')
 }
 
-fn named_character_reference(input: &[u8]) -> Option<(char, usize)> {
-    const NAMED: &[(&[u8], char)] = &[
-        (b"amp;", '&'),
-        (b"amp", '&'),
-        (b"AMP;", '&'),
-        (b"AMP", '&'),
-        (b"apos;", '\''),
-        (b"apos", '\''),
-        (b"copy;", '©'),
-        (b"copy", '©'),
-        (b"dagger;", '†'),
-        (b"dagger", '†'),
-        (b"Gopf;", '\u{1D53E}'),
-        (b"gt;", '>'),
-        (b"gt", '>'),
-        (b"hellip;", '…'),
-        (b"hellip", '…'),
-        (b"ImaginaryI;", 'ⅈ'),
-        (b"Kopf;", '\u{1D542}'),
-        (b"lang;", '⟨'),
-        (b"lt;", '<'),
-        (b"lt", '<'),
-        (b"nbsp;", '\u{00a0}'),
-        (b"nbsp", '\u{00a0}'),
-        (b"notinva;", '∉'),
-        (b"notin;", '∉'),
-        (b"not;", '¬'),
-        (b"not", '¬'),
-        (b"pound;", '£'),
-        (b"pound", '£'),
-        (b"prod;", '∏'),
-        (b"quot;", '"'),
-        (b"quot", '"'),
-        (b"rang;", '⟩'),
+fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)> {
+    const NAMED: &[(&[u8], CharacterReference)] = &[
+        (b"amp;", CharacterReference::Scalar('&')),
+        (b"amp", CharacterReference::Scalar('&')),
+        (b"AMP;", CharacterReference::Scalar('&')),
+        (b"AMP", CharacterReference::Scalar('&')),
+        (b"apos;", CharacterReference::Scalar('\'')),
+        (b"apos", CharacterReference::Scalar('\'')),
+        (b"copy;", CharacterReference::Scalar('©')),
+        (b"copy", CharacterReference::Scalar('©')),
+        (b"dagger;", CharacterReference::Scalar('†')),
+        (b"dagger", CharacterReference::Scalar('†')),
+        (b"Gopf;", CharacterReference::Scalar('\u{1D53E}')),
+        (b"gt;", CharacterReference::Scalar('>')),
+        (b"gt", CharacterReference::Scalar('>')),
+        (b"hellip;", CharacterReference::Scalar('…')),
+        (b"hellip", CharacterReference::Scalar('…')),
+        (b"ImaginaryI;", CharacterReference::Scalar('ⅈ')),
+        (b"Kopf;", CharacterReference::Scalar('\u{1D542}')),
+        (b"lang;", CharacterReference::Scalar('⟨')),
+        (b"lt;", CharacterReference::Scalar('<')),
+        (b"lt", CharacterReference::Scalar('<')),
+        (b"nbsp;", CharacterReference::Scalar('\u{00a0}')),
+        (b"nbsp", CharacterReference::Scalar('\u{00a0}')),
+        (b"NotEqualTilde;", CharacterReference::Text("≂̸")),
+        (b"NotSubset;", CharacterReference::Text("⊂⃒")),
+        (b"notinva;", CharacterReference::Scalar('∉')),
+        (b"notin;", CharacterReference::Scalar('∉')),
+        (b"not;", CharacterReference::Scalar('¬')),
+        (b"not", CharacterReference::Scalar('¬')),
+        (b"pound;", CharacterReference::Scalar('£')),
+        (b"pound", CharacterReference::Scalar('£')),
+        (b"prod;", CharacterReference::Scalar('∏')),
+        (b"quot;", CharacterReference::Scalar('"')),
+        (b"quot", CharacterReference::Scalar('"')),
+        (b"rang;", CharacterReference::Scalar('⟩')),
+        (b"ThickSpace;", CharacterReference::Text("\u{205F}\u{200A}")),
     ];
 
     let mut best = None;
@@ -2782,11 +2819,11 @@ mod tests {
     fn additional_named_character_references_cover_html5lib_cases() {
         assert_eq!(
             super::transform_text(
-                b"&lang;&rang; &ImaginaryI; &Kopf; &Gopf; &notinva; &AMP",
+                b"&lang;&rang; &ImaginaryI; &Kopf; &Gopf; &notinva; &AMP &NotEqualTilde;A &ThickSpace;A &NotSubset;A",
                 true,
                 super::NullTransform::Replace
             ),
-            "⟨⟩ ⅈ 𝕂 𝔾 ∉ &".as_bytes()
+            "⟨⟩ ⅈ 𝕂 𝔾 ∉ & ≂̸A   A ⊂⃒A".as_bytes()
         );
         assert_eq!(
             super::decode_html_attribute(b"ZZ&pound_id=23 ZZ&pound;_id=23 ZZ&prod;_id=23"),
