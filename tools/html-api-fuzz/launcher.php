@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
 	echo "Create OUTPUT_DIR/STOP (see stop.php) to stop all lanes gracefully: each finishes its current batch and exits.\n";
 	echo "--max-keep-per-signature is applied per lane; a signature seen in every lane keeps up to N x lanes exemplar directories.\n";
 	echo "--triage-oracle-findings passes oracle findings to the watcher/minimizer when --watcher is used.\n";
@@ -142,6 +142,9 @@ $git_metadata = null === \HtmlApiFuzz\option_string( $options, 'git-metadata-bas
 	? \HtmlApiFuzz\git_metadata()
 	: \HtmlApiFuzz\git_metadata_from_base64( \HtmlApiFuzz\option_string( $options, 'git-metadata-base64' ) );
 $git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( $git_metadata );
+$oracle_renderer      = \HtmlApiFuzz\OracleRenderer::from_options( $options );
+$oracle_metadata      = $oracle_renderer->metadata();
+$oracle_worker_args   = $oracle_renderer->worker_args();
 
 $state = array(
 	'schemaVersion' => 1,
@@ -157,11 +160,12 @@ $state = array(
 	'payloadPolicy' => $payload_policy,
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
+	'oracle'        => $oracle_metadata,
 	'finished'      => false,
 	'laneResults'   => array(),
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
-\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'launcher-start', 'outputDir' => $output_dir, 'lanes' => $lanes, 'git' => $git_metadata ) );
+\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'launcher-start', 'outputDir' => $output_dir, 'lanes' => $lanes, 'git' => $git_metadata, 'oracle' => $oracle_metadata ) );
 
 $running = array();
 for ( $i = 0; $i < $lanes; ++$i ) {
@@ -211,6 +215,9 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		'--stop-file',
 		$output_dir . '/STOP',
 	);
+	foreach ( $oracle_worker_args as $arg ) {
+		$command[] = $arg;
+	}
 
 	if ( 0 !== $max_seeds ) {
 		$command[] = '--max-seeds';
@@ -238,7 +245,7 @@ for ( $i = 0; $i < $lanes; ++$i ) {
 		'outputDir' => $lane_dir,
 		'logPath'   => $lane_dir . '/runner.stdout.log',
 	);
-	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'lane-start', 'lane' => $i, 'outputDir' => $lane_dir ) );
+	\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'lane-start', 'lane' => $i, 'outputDir' => $lane_dir, 'oracle' => $oracle_metadata ) );
 }
 \HtmlApiFuzz\write_json_file( $state_path, $state );
 

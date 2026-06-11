@@ -80,18 +80,23 @@ class Worker {
 			'maxNodes'  => option_int( $options, 'max-nodes', 3000 ),
 		);
 		$fail_unsupported = option_bool( $options, 'fail-unsupported', false );
+		$oracle_renderer  = OracleRenderer::from_options( $options );
+		$oracle_metadata  = $oracle_renderer->metadata();
 
 		$replay_path = $output_dir . DIRECTORY_SEPARATOR . 'replay.json';
 		$result_path = $output_dir . DIRECTORY_SEPARATOR . 'result.json';
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options() );
 		write_json_file( $replay_path, $replay );
 
 		$tag_result = TagInvariants::check( $input, $limits, $mode, $fragment_context );
 		$wp_result  = TreeRenderer::render_wordpress( $input, $mode, $limits, $fragment_context );
-		$dom_result = array( 'status' => TreeRenderer::STATUS_ERROR, 'error' => 'Not run.' );
+		if ( ! $oracle_renderer->is_php_dom() ) {
+			$wp_result['domOracleLineTolerances'] = array();
+		}
+		$dom_result = array( 'status' => TreeRenderer::STATUS_ERROR, 'error' => 'Not run.', 'oracle' => $oracle_metadata );
 
 		$result = array(
 			'schemaVersion' => 1,
@@ -109,6 +114,7 @@ class Worker {
 			'inputSha1'     => sha1( $input ),
 			'inputLength'   => strlen( $input ),
 			'inputPreview'  => preview_bytes( $input ),
+			'oracle'        => $oracle_metadata,
 			'paths'         => array(
 				'outputDir'  => $output_dir,
 				'inputPath'  => $input_path,
@@ -138,13 +144,14 @@ class Worker {
 			$result['failureClass'] = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : $wp_failure_class;
 		} else {
 			try {
-				$dom_result = TreeRenderer::render_dom( $input, $mode, $limits, $fragment_context );
+				$dom_result = $oracle_renderer->render( $input, $mode, $limits, $fragment_context );
 			} catch ( \Throwable $e ) {
 				$dom_result = array(
 					'status'       => TreeRenderer::STATUS_ERROR,
 					'error'        => $e->getMessage(),
 					'throwable'    => get_class( $e ),
 					'failureClass' => 'oracle-renderer-error',
+					'oracle'       => $oracle_metadata,
 				);
 			}
 			$result['dom'] = self::compact_parse_result( $dom_result, $output_dir, 'dom-tree.txt' );
@@ -162,9 +169,9 @@ class Worker {
 				$result['status']       = 'oracle-unsupported';
 				$result['failureClass'] = $dom_result['failureClass'] ?? 'oracle-unsupported';
 			} else {
-				$dom_oracle_line_tolerances = $wp_result['domOracleLineTolerances'] ?? array();
+				$dom_oracle_line_tolerances = $oracle_renderer->is_php_dom() ? ( $wp_result['domOracleLineTolerances'] ?? array() ) : array();
 				$comparison = TreeRenderer::compare_trees( $wp_result['tree'], $dom_result['tree'], $dom_oracle_line_tolerances );
-				if ( ! $comparison['ok'] && self::is_oracle_form_feed_quirk( $input, $mode, $limits, $fragment_context, $wp_result['tree'] ?? null, $dom_oracle_line_tolerances ) ) {
+				if ( $oracle_renderer->is_php_dom() && ! $comparison['ok'] && self::is_oracle_form_feed_quirk( $input, $mode, $limits, $fragment_context, $wp_result['tree'] ?? null, $dom_oracle_line_tolerances, $oracle_renderer ) ) {
 					$comparison = array(
 						'ok'                => true,
 						'formFeedQuirk'     => true,
@@ -172,7 +179,7 @@ class Worker {
 					);
 					$result['status']       = 'oracle-tolerated';
 					$result['failureClass'] = 'oracle-tolerated';
-				} elseif ( ! $comparison['ok'] && self::is_dom_mathml_heading_scope_quirk( $input, $mode, $comparison, $wp_result['tree'] ?? null, $dom_result['tree'] ?? null ) ) {
+				} elseif ( $oracle_renderer->is_php_dom() && ! $comparison['ok'] && self::is_dom_mathml_heading_scope_quirk( $input, $mode, $comparison, $wp_result['tree'] ?? null, $dom_result['tree'] ?? null ) ) {
 					$comparison = array(
 						'ok'                => true,
 						'oracleTolerated'   => true,
@@ -205,7 +212,7 @@ class Worker {
 			&& true === ( $result['comparison']['ok'] ?? false );
 
 		if ( $has_clean_baseline ) {
-			$mutation           = self::check_mutation_differential( $input, $mode, $limits, $wp_result['tree'] ?? null, $fragment_context );
+			$mutation           = self::check_mutation_differential( $input, $mode, $limits, $wp_result['tree'] ?? null, $oracle_renderer, $fragment_context );
 			$result['mutation'] = $mutation;
 			if ( false === $mutation['ok'] ) {
 				$result['ok']           = false;
@@ -252,6 +259,7 @@ class Worker {
 			'failureClass' => $result['failureClass'] ?? null,
 			'signature'    => $signature,
 			'oracleFinding' => $result['oracleFinding'] ?? null,
+			'oracle'       => $result['oracle'] ?? $oracle_metadata,
 			'resultPath'   => $result_path,
 		);
 		$replay['signature'] = $signature;
@@ -339,7 +347,7 @@ class Worker {
 		}
 	}
 
-	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata ): array {
+	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata, array $oracle_metadata, array $oracle_options ): array {
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
@@ -360,8 +368,12 @@ class Worker {
 			'inputLength'   => strlen( $input ),
 			'inputPreview'  => preview_bytes( $input ),
 			'limits'        => $limits,
+			'oracle'        => $oracle_metadata,
 			'options'       => array(
 				'failUnsupported' => $fail_unsupported,
+				'domOracle'       => $oracle_options['domOracle'] ?? OracleRenderer::KIND_PHP_DOM,
+				'lexborOracleBin' => $oracle_options['lexborOracleBin'] ?? null,
+				'oracleTimeoutMs' => $oracle_options['oracleTimeoutMs'] ?? null,
 			),
 			'command'       => array(
 				'program' => PHP_BINARY,
@@ -378,13 +390,13 @@ class Worker {
 	/**
 	 * Differential check of a simple mutation: set data-fuzz="1" on the first
 	 * tag, then verify the mutated document still parses identically in
-	 * WordPress and the DOM oracle, and that the WordPress tree changed by
+	 * WordPress and the selected oracle, and that the WordPress tree changed by
 	 * exactly that one attribute line.
 	 *
 	 * Runs only on a clean baseline so a failure is attributable to the
 	 * mutation machinery rather than to a pre-existing divergence.
 	 */
-	private static function check_mutation_differential( string $input, string $mode, array $limits, ?string $original_tree, string $fragment_context = 'body' ): array {
+	private static function check_mutation_differential( string $input, string $mode, array $limits, ?string $original_tree, OracleRenderer $oracle_renderer, string $fragment_context = 'body' ): array {
 		if ( ! is_string( $original_tree ) ) {
 			return array(
 				'ok'     => true,
@@ -414,23 +426,24 @@ class Worker {
 				'status' => 'skipped-wordpress-' . $wp_updated['status'],
 			);
 		}
-		$dom_updated = TreeRenderer::render_dom( $updated, $mode, $limits, $fragment_context );
+		$dom_updated = $oracle_renderer->render( $updated, $mode, $limits, $fragment_context );
 		if ( TreeRenderer::STATUS_OK !== $dom_updated['status'] ) {
 			return array(
 				'ok'     => true,
-				'status' => 'skipped-dom-' . $dom_updated['status'],
+				'status' => 'skipped-oracle-' . $dom_updated['status'],
 			);
 		}
 
-		$comparison = TreeRenderer::compare_trees( $wp_updated['tree'], $dom_updated['tree'], $wp_updated['domOracleLineTolerances'] ?? array() );
+		$dom_oracle_line_tolerances = $oracle_renderer->is_php_dom() ? ( $wp_updated['domOracleLineTolerances'] ?? array() ) : array();
+		$comparison = TreeRenderer::compare_trees( $wp_updated['tree'], $dom_updated['tree'], $dom_oracle_line_tolerances );
 		if ( ! $comparison['ok'] ) {
-			if ( self::is_oracle_form_feed_quirk( $updated, $mode, $limits, $fragment_context, $wp_updated['tree'], $wp_updated['domOracleLineTolerances'] ?? array() ) ) {
+			if ( $oracle_renderer->is_php_dom() && self::is_oracle_form_feed_quirk( $updated, $mode, $limits, $fragment_context, $wp_updated['tree'], $dom_oracle_line_tolerances, $oracle_renderer ) ) {
 				return array(
 					'ok'     => true,
 					'status' => 'skipped-oracle-form-feed-quirk',
 				);
 			}
-			if ( self::is_dom_mathml_heading_scope_quirk( $updated, $mode, $comparison, $wp_updated['tree'] ?? null, $dom_updated['tree'] ?? null ) ) {
+			if ( $oracle_renderer->is_php_dom() && self::is_dom_mathml_heading_scope_quirk( $updated, $mode, $comparison, $wp_updated['tree'] ?? null, $dom_updated['tree'] ?? null ) ) {
 				return array(
 					'ok'     => true,
 					'status' => 'skipped-oracle-mathml-heading-scope-quirk',
@@ -440,7 +453,7 @@ class Worker {
 				'ok'              => false,
 				'status'          => 'failed',
 				'failureClass'    => 'mutation-tree-mismatch',
-				'message'         => 'The mutated document parses differently in WordPress and the DOM oracle.',
+				'message'         => 'The mutated document parses differently in WordPress and the selected oracle.',
 				'firstDifference' => $comparison['firstDifference'] ?? array(),
 			);
 		}
@@ -561,8 +574,9 @@ class Worker {
 	 * The substitution is conservative: form feeds in attribute values or
 	 * body text make the trees differ and the tolerance simply not apply.
 	 */
-	private static function is_oracle_form_feed_quirk( string $input, string $mode, array $limits, string $fragment_context, ?string $wp_tree, array $dom_oracle_line_tolerances ): bool {
+	private static function is_oracle_form_feed_quirk( string $input, string $mode, array $limits, string $fragment_context, ?string $wp_tree, array $dom_oracle_line_tolerances, OracleRenderer $oracle_renderer ): bool {
 		if (
+			! $oracle_renderer->is_php_dom() ||
 			! is_string( $wp_tree ) ||
 			Generator::MODE_FULL_DOCUMENT !== $mode ||
 			false === strpos( $input, "" ) ||
@@ -571,7 +585,7 @@ class Worker {
 			return false;
 		}
 
-		$substituted = TreeRenderer::render_dom( str_replace( "", ' ', $input ), $mode, $limits, $fragment_context );
+		$substituted = $oracle_renderer->render( str_replace( "", ' ', $input ), $mode, $limits, $fragment_context );
 		if ( TreeRenderer::STATUS_OK !== $substituted['status'] ) {
 			return false;
 		}
