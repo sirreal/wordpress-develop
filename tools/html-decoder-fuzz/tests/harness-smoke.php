@@ -125,7 +125,8 @@ function start_windows_are_distinct( array $windows, int $cases_per_batch ): boo
 
 $oracles = Oracles::build();
 $events  = $oracles->drain_events();
-$skip_c1_fault_case = 157;
+$skip_c1_fault_seed = 2;
+$skip_c1_fault_case = 36;
 
 check( 'required oracles available', $oracles->has_required(), json_encode( $events ) );
 check(
@@ -519,6 +520,7 @@ function expected_weighted_strategies(): array {
 		'adjacency',
 		'attribute-discriminator',
 		'attribute-prefix',
+		'case-mangled-name',
 		'composition',
 		'lookalike',
 		'multibyte-around',
@@ -1130,6 +1132,48 @@ check(
 	'lookalike generator exercises every edit operation branch',
 	array() === array_diff( array( 'delete', 'insert', 'substitute', 'transpose' ), array_keys( $sparse_lookalike_classes ) ),
 	implode( ',', array_keys( $sparse_lookalike_classes ) )
+);
+
+$case_mangled_candidates = array();
+$case_mangled_invalid = array();
+$base_names_by_lowercase = array();
+foreach ( $name_sweep_base_names as $base ) {
+	$base_names_by_lowercase[ strtolower( $base ) ][] = $base;
+}
+for ( $i = 0; $i < 8000; $i++ ) {
+	$generated = ( new Generator( new Prng( "case-mangled-smoke:{$i}" ), 4096, $names ) )->generate();
+	if ( 'case-mangled-name' !== $generated['strategy'] ) {
+		continue;
+	}
+	if ( 1 !== preg_match( '/&([A-Za-z0-9]+);/', $generated['payload'], $match ) ) {
+		continue;
+	}
+
+	$candidate = $match[1];
+	$case_mangled_candidates[ $candidate ] = true;
+	if ( isset( $lookalike_indexes['base_set'][ $candidate ] ) || ! isset( $base_names_by_lowercase[ strtolower( $candidate ) ] ) ) {
+		$case_mangled_invalid[] = $candidate;
+	}
+}
+check( 'case-mangled generator emits case-only name misses', count( $case_mangled_candidates ) >= 100 && array() === $case_mangled_invalid, implode( ',', array_slice( $case_mangled_invalid, 0, 20 ) ) . ':' . count( $case_mangled_candidates ) );
+
+$case_mangle_method = new \ReflectionMethod( Generator::class, 'case_mangle_name_base' );
+$case_mangle_method->setAccessible( true );
+$case_mangle_direct_errors = array();
+for ( $i = 0; $i < 50; $i++ ) {
+	$lower_mutated = $case_mangle_method->invoke( new Generator( new Prng( "case-mangle-lower:{$i}" ), 4096, $names ), 'amp' );
+	$upper_mutated = $case_mangle_method->invoke( new Generator( new Prng( "case-mangle-upper:{$i}" ), 4096, $names ), 'AMP' );
+	if ( 'amp' === $lower_mutated || 'amp' !== strtolower( $lower_mutated ) ) {
+		$case_mangle_direct_errors[] = 'lower:' . $lower_mutated;
+	}
+	if ( 'AMP' === $upper_mutated || 'AMP' !== strtoupper( $upper_mutated ) ) {
+		$case_mangle_direct_errors[] = 'upper:' . $upper_mutated;
+	}
+}
+check(
+	'case-mangle helper flips lowercase and uppercase source letters directly',
+	array() === $case_mangle_direct_errors,
+	implode( ',', array_slice( $case_mangle_direct_errors, 0, 20 ) )
 );
 
 $strategies            = array();
@@ -2009,17 +2053,17 @@ remove_tree( $corpus_pipeline_dir );
 $reader_fault_pipelines = array(
 	array(
 		'fault'     => 'reader-empty-chunk',
-		'case'      => 38,
+		'case'      => 57,
 		'signature' => 'reader-returned-empty-chunk:text',
 	),
 	array(
 		'fault'     => 'reader-short-match-length',
-		'case'      => 38,
+		'case'      => 57,
 		'signature' => 'reader-match-too-short:text',
 	),
 	array(
 		'fault'     => 'reader-substring-composition',
-		'case'      => 31,
+		'case'      => 97,
 		'signature' => 'reader-composition-mismatch:text',
 	),
 );
@@ -2616,14 +2660,14 @@ file_put_contents(
 		)
 	)
 );
-$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . "/failure-seed1-case{$skip_c1_fault_case}" );
+$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}" );
 if ( $symlink_write_created ) {
 	$symlink_write_worker = run_process(
 		array(
 			PHP_BINARY,
 			__DIR__ . '/../worker.php',
 			'--seed',
-			'1',
+			(string) $skip_c1_fault_seed,
 			'--cases',
 			'200',
 			'--output-dir',
@@ -2633,7 +2677,7 @@ if ( $symlink_write_created ) {
 		),
 		array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
 	);
-	$symlink_write_suffixed = glob( $symlink_write_dir . "/failure-seed1-case{$skip_c1_fault_case}-sig*/failure.json" );
+	$symlink_write_suffixed = glob( $symlink_write_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}-sig*/failure.json" );
 	check(
 		'worker does not write through symlinked failure artifact dirs',
 		1 === $symlink_write_worker['code'] &&
@@ -2770,7 +2814,7 @@ $unverified_seed_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--max-artifacts-per-signature',
@@ -2832,7 +2876,7 @@ $unverified_weak_seed_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--max-artifacts-per-signature',
@@ -2883,7 +2927,7 @@ check(
 	1 === $unverified_weak_seed_runner['code'] &&
 		0 === $unverified_weak_runner['code'] &&
 		! is_dir( $unverified_weak_manifest_dir . '/failure-000weak' ) &&
-		is_file( $unverified_weak_manifest_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
+		is_file( $unverified_weak_manifest_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}/failure.json" ) &&
 		( $unverified_weak_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
 		( false !== ( $unverified_weak_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_weak_seed_runner['stdout'] . $unverified_weak_seed_runner['stderr'] . $unverified_weak_runner['stdout'] . $unverified_weak_runner['stderr'] . json_encode( $unverified_weak_state['artifact_retention'] ?? null )
@@ -2903,7 +2947,7 @@ $unverified_fake_seed_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--max-artifacts-per-signature',
@@ -2961,7 +3005,7 @@ check(
 	1 === $unverified_fake_seed_runner['code'] &&
 		0 === $unverified_fake_runner['code'] &&
 		is_file( $unverified_fake_manifest_dir . '/failure-000fake/failure.json' ) &&
-		is_file( $unverified_fake_manifest_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
+		is_file( $unverified_fake_manifest_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}/failure.json" ) &&
 		array_sum( is_array( $unverified_fake_counts ) ? $unverified_fake_counts : array() ) >= 2 &&
 		( false !== ( $unverified_fake_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_fake_seed_runner['stdout'] . $unverified_fake_seed_runner['stderr'] . $unverified_fake_runner['stdout'] . $unverified_fake_runner['stderr'] . json_encode( $unverified_fake_state['artifact_retention'] ?? null )
@@ -3163,7 +3207,7 @@ $faulted_worker = run_process(
 		PHP_BINARY,
 		__DIR__ . '/../worker.php',
 		'--seed',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases',
 		'200',
 		'--output-dir',
@@ -3225,7 +3269,7 @@ $faulted_runner = run_process(
 		'--max-cases',
 		'1000',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'1000',
 		'--max-artifacts-per-signature',
@@ -3295,7 +3339,7 @@ $reuse_same_runner = run_process(
 		'--max-cases',
 		'1000',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'1000',
 		'--max-artifacts-per-signature',
@@ -3315,7 +3359,7 @@ check(
 	1 === $reuse_same_runner['code'] &&
 		is_array( $reuse_same_dirs ) &&
 		count( $reuse_same_dirs ) === array_sum( $reuse_same_counts ) &&
-		is_file( $runner_dir . "/failure-seed1-case{$skip_c1_fault_case}/failure.json" ) &&
+		is_file( $runner_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}/failure.json" ) &&
 		array() === array_filter( $reuse_same_counts, static fn( $count ) => $count > 1 ),
 	$reuse_same_runner['stdout'] . $reuse_same_runner['stderr'] . json_encode( $reuse_same_state['artifact_retention'] ?? null )
 );
@@ -3334,7 +3378,7 @@ $different_signature_first = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--max-artifacts-per-signature',
@@ -3355,7 +3399,7 @@ $different_signature_second = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--max-artifacts-per-signature',
@@ -3367,7 +3411,7 @@ $different_signature_second = run_process(
 	),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
-$different_signature_case_files = glob( $different_signature_dir . "/failure-seed1-case{$skip_c1_fault_case}*/failure.json" );
+$different_signature_case_files = glob( $different_signature_dir . "/failure-seed{$skip_c1_fault_seed}-case{$skip_c1_fault_case}*/failure.json" );
 $different_signature_seen   = array();
 foreach ( is_array( $different_signature_case_files ) ? $different_signature_case_files : array() as $failure_file ) {
 	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
@@ -3398,7 +3442,7 @@ $overcap_seed_run = run_process(
 		'--max-cases',
 		'1000',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'1000',
 		'--artifact-retention',
@@ -3461,7 +3505,7 @@ $no_artifact_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--artifact-retention',
@@ -3495,7 +3539,7 @@ $corrupt_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--output-dir',
@@ -3529,7 +3573,7 @@ $bogus_mode_runner = run_process(
 		'--max-cases',
 		'200',
 		'--seed-base',
-		'1',
+		(string) $skip_c1_fault_seed,
 		'--cases-per-batch',
 		'200',
 		'--output-dir',

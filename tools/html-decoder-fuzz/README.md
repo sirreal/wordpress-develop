@@ -101,6 +101,8 @@ strategies for:
 - `attribute_starts_with()` prefixes that split multi-code-point named-reference
   replacements such as `&nvlt;`
 - edit-distance-1 named-reference lookalikes plus ampersand boundaries
+- valid named-reference names with letter case mangled into case-sensitive
+  near-misses
 - composed cases that splice two or three generated strategy outputs
 - plain no-ampersand text
 

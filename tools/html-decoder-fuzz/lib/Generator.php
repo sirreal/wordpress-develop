@@ -91,6 +91,7 @@ class Generator {
 				'attribute-prefix'       => 8,
 				'lookalike'              => 8,
 				'composition'            => 9,
+				'case-mangled-name'      => 8,
 			)
 		);
 
@@ -410,6 +411,10 @@ class Generator {
 		return $this->plain_text() . $lookalike . $this->plain_text();
 	}
 
+	private function gen_case_mangled_name(): string {
+		return $this->plain_text() . $this->case_mangled_name() . $this->plain_text();
+	}
+
 	private function gen_composition(): string {
 		if ( $this->max_bytes < 3 ) {
 			return self::trim_to_safe_max( $this->named_exact(), $this->max_bytes );
@@ -426,6 +431,7 @@ class Generator {
 			'multibyte-around',
 			'attribute-prefix',
 			'lookalike',
+			'case-mangled-name',
 		);
 		$max_count          = min( 3, intdiv( $this->max_bytes + strlen( self::COMPOSITION_SEPARATOR ), 1 + strlen( self::COMPOSITION_SEPARATOR ) ) );
 		$count              = $this->prng->int( 2, $max_count );
@@ -734,6 +740,11 @@ class Generator {
 		);
 	}
 
+	private static function is_ascii_alpha( string $char ): bool {
+		$ord = ord( $char );
+		return ( $ord >= 0x41 && $ord <= 0x5A ) || ( $ord >= 0x61 && $ord <= 0x7A );
+	}
+
 	/**
 	 * @param callable(): string $callback
 	 */
@@ -769,6 +780,46 @@ class Generator {
 		}
 
 		return $this->legacy_lookalike();
+	}
+
+	private function case_mangled_name(): string {
+		$base_set = $this->name_sweep_base_name_set();
+		for ( $attempt = 0; $attempt < 60; $attempt++ ) {
+			$base    = $this->prng->choice( $this->name_sweep_base_names() );
+			$mutated = $this->case_mangle_name_base( $base );
+			if ( '' === $mutated || $mutated === $base || isset( $base_set[ $mutated ] ) ) {
+				continue;
+			}
+
+			return '&' . $mutated . ';';
+		}
+
+		return $this->legacy_lookalike();
+	}
+
+	private function case_mangle_name_base( string $base ): string {
+		$letter_offsets = array();
+		for ( $i = 0; $i < strlen( $base ); $i++ ) {
+			if ( self::is_ascii_alpha( $base[ $i ] ) ) {
+				$letter_offsets[] = $i;
+			}
+		}
+
+		if ( array() === $letter_offsets ) {
+			return '';
+		}
+
+		$mutated = $base;
+		$flips   = $this->prng->int( 1, min( 3, count( $letter_offsets ) ) );
+		for ( $i = 0; $i < $flips; $i++ ) {
+			$index  = $this->prng->int( 0, count( $letter_offsets ) - 1 );
+			$offset = $letter_offsets[ $index ];
+			array_splice( $letter_offsets, $index, 1 );
+			$char   = $mutated[ $offset ];
+			$mutated[ $offset ] = strtolower( $char ) === $char ? strtoupper( $char ) : strtolower( $char );
+		}
+
+		return $mutated;
 	}
 
 	private function legacy_lookalike(): string {

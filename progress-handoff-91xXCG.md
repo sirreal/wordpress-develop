@@ -19,7 +19,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 12: add strategy composition and generalized attribute-prefix encoding.
 - [x] Tier 2 item 13: add mutation/corpus mode.
 - [x] Tier 2 item 14: add reader compositionality invariant.
-- [ ] Tier 2 item 15.
+- [x] Tier 2 item 15: add case-mangled valid-name near-misses.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -101,6 +101,11 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/replay.php --seed 1 --case 31`, and `git diff --check` passed after adding reader compositionality checks.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 31 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-reader-composition-fault-20260611-1` reported `reader-composition-mismatch` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
 - 2026-06-11: After reviewer feedback, `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed with automated worker, failure-manifest, replay, and minimize coverage for `reader-empty-chunk`, `reader-short-match-length`, and `reader-substring-composition`.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding the case-mangled named-reference strategy.
+- 2026-06-11: A targeted probe over 2,000 seeds produced 115 distinct `case-mangled-name` candidates with zero invalid shape/collision samples, including both lowercase-to-uppercase and uppercase-to-lowercase flips.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=skip-c1-remap php tools/html-decoder-fuzz/worker.php --seed 2 --start-case 36 --cases 1 --progress-every 1`, `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 57 --cases 1 --progress-every 1`, and `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 97 --cases 1 --progress-every 1` reported the expected findings after the weighted strategy shifted generated-case mappings.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding case-mangled valid-name near-misses.
+- 2026-06-11: After reviewer feedback, case-mangled smoke coverage now directly invokes `case_mangle_name_base()` against lowercase and uppercase source names; `php -l tools/html-decoder-fuzz/lib/Generator.php`, `php -l tools/html-decoder-fuzz/tests/harness-smoke.php`, a direct helper probe reporting `errors=0`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
 
 ## Review Log
 
@@ -160,3 +165,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Boyle: APPROVE, reader compositionality invariant semantics and deterministic cases after pipeline coverage.
   - Kuhn: APPROVE, fault-target and smoke coverage after automated worker/replay/minimize pipelines.
   - Bohr: APPROVE, integration/runtime/docs/progress coverage after shared reader-path verification.
+- Tier 2 item 15:
+  - Anscombe: APPROVE, generator semantics after independent generated-candidate and raw-helper probes.
+  - Cicero: APPROVE, smoke and deterministic fault fixture coverage after direct lowercase/uppercase helper checks replaced ambiguous source inference.
+  - Parfit: APPROVE, integration/docs/progress scope and generated-case mapping drift notes.
