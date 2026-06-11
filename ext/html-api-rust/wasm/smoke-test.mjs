@@ -2771,6 +2771,18 @@ for (const html of [
 	assert.equal(WP_HTML_Processor.normalize(html), null);
 }
 
+const tableForeignCellFosterParentingProcessor = WP_HTML_Processor.create_full_parser(
+	"<body><table><tr><td><svg><td><foreignObject><span></td>Foo",
+);
+while (tableForeignCellFosterParentingProcessor.next_token()) {
+}
+assert.equal(tableForeignCellFosterParentingProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(
+	tableForeignCellFosterParentingProcessor.get_unsupported_exception().message,
+	"Foster parenting is not supported.",
+);
+tableForeignCellFosterParentingProcessor.destroy();
+
 const tableHiddenInputProcessor = WP_HTML_Processor.create_fragment("<table><input type=hidden><tr><td>cell");
 assert.equal(tableHiddenInputProcessor.next_tag("input"), true);
 assert.equal(tableHiddenInputProcessor.get_attribute("type"), "hidden");

@@ -559,6 +559,8 @@ const MODELED_SCOPED_END_TAGS = new Set([
 	"SECTION",
 	"SUMMARY",
 	"TEMPLATE",
+	"TD",
+	"TH",
 	"UL",
 	...HEADING_ELEMENTS,
 ]);
