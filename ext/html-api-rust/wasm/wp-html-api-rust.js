@@ -4183,7 +4183,7 @@ export function createHtmlApi(wasm) {
 			} else if (TABLE_SECTION_ELEMENTS.has(tagName)) {
 				this.#setCurrentTemplateInsertionMode("in_table");
 			} else if (tagName === "CAPTION") {
-				this.#setCurrentTemplateInsertionMode("in_body");
+				this.#setCurrentTemplateInsertionMode("in_table");
 			}
 		}
 
