@@ -108,6 +108,10 @@ sequences, and raw HTML delimiters/control bytes.
 Case index maps directly to a named-reference base, semicolon variant, and
 follower class; the same payload still runs in both text and attribute contexts.
 
+`legacy-followers` mode deterministically sweeps every semicolonless legacy
+name followed by each oracle-safe ASCII byte, plus valid UTF-8 sequences
+covering multibyte lead and continuation byte values.
+
 ## Common Commands
 
 Run the smoke test:
@@ -132,6 +136,12 @@ Run one deterministic named-reference sweep batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode names --seed 1 --cases 5000
+```
+
+Run one deterministic legacy-follower sweep batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode legacy-followers --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:

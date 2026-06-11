@@ -332,7 +332,7 @@ $next_start_case = 0;
 $lanes     = array();
 
 $spawn_lane = static function ( int $lane_id ) use ( &$next_seed, &$next_start_case, &$stderr_bytes_by_lane, &$stderr_truncated_lanes, $seed_base, $options, $output_dir ): array {
-	if ( 'names' === $options['mode'] ) {
+	if ( Cli::mode_uses_start_case_windows( $options['mode'] ) ) {
 		$seed       = $seed_base;
 		$start_case = $next_start_case;
 		$next_start_case += $options['cases-per-batch'];

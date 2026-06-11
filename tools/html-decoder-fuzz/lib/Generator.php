@@ -142,6 +142,27 @@ class Generator {
 		return count( $this->name_sweep_base_names() ) * 2 * count( self::name_sweep_followers() );
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_legacy_follower_sweep( int $case_index ): array {
+		$followers  = self::legacy_follower_sweep_followers();
+		$case_index = max( 0, $case_index );
+		$name_index = intdiv( $case_index, count( $followers ) ) % count( $this->legacy_names );
+		$follower   = $followers[ $case_index % count( $followers ) ];
+		$payload    = '&' . $this->legacy_names[ $name_index ] . $follower;
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'legacy-follower-sweep',
+			'payload'  => self::trim_to_safe_max( $payload, $this->max_bytes ),
+		);
+	}
+
+	public function legacy_follower_sweep_period(): int {
+		return count( $this->legacy_names ) * count( self::legacy_follower_sweep_followers() );
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -521,6 +542,48 @@ class Generator {
 	 */
 	private static function name_sweep_followers(): array {
 		return array( '', 'x', 'X', '0', '=', '-', ' ', '/', "\u{00E9}" );
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function legacy_follower_sweep_followers(): array {
+		static $followers = null;
+		if ( null !== $followers ) {
+			return $followers;
+		}
+
+		$followers = array();
+
+		for ( $byte = 1; $byte <= 0x7F; $byte++ ) {
+			if ( in_array( $byte, array( 0x0D, 0x22, 0x3C ), true ) ) {
+				continue;
+			}
+			$followers[] = chr( $byte );
+		}
+
+		for ( $lead = 0xC2; $lead <= 0xF4; $lead++ ) {
+			if ( $lead < 0xE0 ) {
+				$followers[] = chr( $lead ) . "\x80";
+			} elseif ( 0xE0 === $lead ) {
+				$followers[] = "\xE0\xA0\x80";
+			} elseif ( $lead < 0xF0 ) {
+				$followers[] = chr( $lead ) . "\x80\x80";
+			} elseif ( 0xF0 === $lead ) {
+				$followers[] = "\xF0\x90\x80\x80";
+			} elseif ( $lead < 0xF4 ) {
+				$followers[] = chr( $lead ) . "\x80\x80\x80";
+			} else {
+				$followers[] = "\xF4\x80\x80\x80";
+			}
+		}
+
+		for ( $continuation = 0x80; $continuation <= 0xBF; $continuation++ ) {
+			$followers[] = "\xC2" . chr( $continuation );
+		}
+
+		$followers = array_values( array_unique( $followers ) );
+		return $followers;
 	}
 
 	private function numeric_reference( bool $allow_missing_digits = false ): string {

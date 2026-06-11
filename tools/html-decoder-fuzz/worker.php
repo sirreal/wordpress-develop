@@ -100,6 +100,8 @@ for ( $case = $start; $case < $end; $case++ ) {
 		$generated = $generator->generate_bytes();
 	} elseif ( 'names' === $options['mode'] ) {
 		$generated = $generator->generate_name_sweep( $case );
+	} elseif ( 'legacy-followers' === $options['mode'] ) {
+		$generated = $generator->generate_legacy_follower_sweep( $case );
 	} else {
 		$generated = $generator->generate();
 	}

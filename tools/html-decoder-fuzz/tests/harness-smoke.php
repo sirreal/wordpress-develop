@@ -78,6 +78,51 @@ function remove_tree( string $path ): void {
 	rmdir( $path );
 }
 
+/**
+ * @return array<int, array{start: mixed, cases: mixed}>
+ */
+function summary_start_windows( string $dir, string $mode ): array {
+	$summary = is_file( $dir . '/summary.ndjson' )
+		? file( $dir . '/summary.ndjson', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES )
+		: array();
+	$windows = array();
+
+	if ( is_array( $summary ) ) {
+		foreach ( $summary as $line ) {
+			$record = json_decode( $line, true );
+			if ( is_array( $record ) && 'start' === ( $record['type'] ?? null ) && $mode === ( $record['mode'] ?? null ) ) {
+				$windows[] = array(
+					'start' => $record['start_case'] ?? null,
+					'cases' => $record['cases'] ?? null,
+				);
+			}
+		}
+	}
+
+	usort(
+		$windows,
+		static fn( array $a, array $b ): int => ( $a['start'] ?? -1 ) <=> ( $b['start'] ?? -1 )
+	);
+
+	return $windows;
+}
+
+function start_windows_are_distinct( array $windows, int $cases_per_batch ): bool {
+	if ( count( $windows ) < 2 ) {
+		return false;
+	}
+
+	$previous_window_end = null;
+	foreach ( $windows as $window ) {
+		if ( ! is_int( $window['start'] ) || $cases_per_batch !== $window['cases'] || 0 !== $window['start'] % $cases_per_batch || ( null !== $previous_window_end && $window['start'] < $previous_window_end ) ) {
+			return false;
+		}
+		$previous_window_end = $window['start'] + $window['cases'];
+	}
+
+	return true;
+}
+
 $oracles = Oracles::build();
 $events  = $oracles->drain_events();
 
@@ -258,6 +303,42 @@ function name_sweep_base_names( array $names ): array {
 		}
 	}
 	return array_keys( $base_names );
+}
+
+/**
+ * @return string[]
+ */
+function legacy_follower_sweep_followers(): array {
+	$followers = array();
+
+	for ( $byte = 1; $byte <= 0x7F; $byte++ ) {
+		if ( in_array( $byte, array( 0x0D, 0x22, 0x3C ), true ) ) {
+			continue;
+		}
+		$followers[] = chr( $byte );
+	}
+
+	for ( $lead = 0xC2; $lead <= 0xF4; $lead++ ) {
+		if ( $lead < 0xE0 ) {
+			$followers[] = chr( $lead ) . "\x80";
+		} elseif ( 0xE0 === $lead ) {
+			$followers[] = "\xE0\xA0\x80";
+		} elseif ( $lead < 0xF0 ) {
+			$followers[] = chr( $lead ) . "\x80\x80";
+		} elseif ( 0xF0 === $lead ) {
+			$followers[] = "\xF0\x90\x80\x80";
+		} elseif ( $lead < 0xF4 ) {
+			$followers[] = chr( $lead ) . "\x80\x80\x80";
+		} else {
+			$followers[] = "\xF4\x80\x80\x80";
+		}
+	}
+
+	for ( $continuation = 0x80; $continuation <= 0xBF; $continuation++ ) {
+		$followers[] = "\xC2" . chr( $continuation );
+	}
+
+	return array_values( array_unique( $followers ) );
 }
 
 /**
@@ -562,6 +643,60 @@ check( 'name-sweep cases run both contexts', array( 'both' ) === array_keys( $na
 check( 'name-sweep uses one strategy label', array( 'name-sweep' ) === array_keys( $name_sweep_strategies ), implode( ',', array_keys( $name_sweep_strategies ) ) );
 check( 'name-sweep payloads are oracle-safe', 0 === $name_sweep_unsafe, (string) $name_sweep_unsafe );
 
+$legacy_follower_generator = new Generator( new Prng( 'legacy-follower-sweep' ), 4096, $names );
+$legacy_names = array_values( array_filter( $names, static fn( string $name ): bool => ! str_ends_with( $name, ';' ) ) );
+$legacy_followers = legacy_follower_sweep_followers();
+$legacy_period = count( $legacy_names ) * count( $legacy_followers );
+$legacy_mismatch = '';
+$legacy_contexts = array();
+$legacy_strategies = array();
+$legacy_unsafe = 0;
+$legacy_seen_names = array();
+$legacy_seen_followers = array();
+$legacy_ascii_followers = array();
+$legacy_utf8_leads = array();
+$legacy_utf8_continuations = array();
+for ( $i = 0; $i < $legacy_period; $i++ ) {
+	$generated = $legacy_follower_generator->generate_legacy_follower_sweep( $i );
+	$name      = $legacy_names[ intdiv( $i, count( $legacy_followers ) ) ];
+	$follower  = $legacy_followers[ $i % count( $legacy_followers ) ];
+	$expected  = '&' . $name . $follower;
+
+	$legacy_contexts[ $generated['context'] ] = true;
+	$legacy_strategies[ $generated['strategy'] ] = true;
+	$legacy_seen_names[ $name ] = true;
+	$legacy_seen_followers[ $follower ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$legacy_unsafe;
+	}
+	if ( '' === $legacy_mismatch && $expected !== $generated['payload'] ) {
+		$legacy_mismatch = "case {$i}: expected " . bin2hex( $expected ) . ' got ' . bin2hex( $generated['payload'] );
+	}
+
+	if ( 1 === strlen( $follower ) ) {
+		$legacy_ascii_followers[ ord( $follower ) ] = true;
+	} else {
+		$legacy_utf8_leads[ ord( $follower[0] ) ] = true;
+		for ( $j = 1; $j < strlen( $follower ); $j++ ) {
+			$legacy_utf8_continuations[ ord( $follower[ $j ] ) ] = true;
+		}
+	}
+}
+$expected_ascii_followers = array_values(
+	array_filter(
+		range( 1, 0x7F ),
+		static fn( int $byte ): bool => ! in_array( $byte, array( 0x0D, 0x22, 0x3C ), true )
+	)
+);
+check( 'legacy-follower period covers every legacy name and follower', $legacy_follower_generator->legacy_follower_sweep_period() === $legacy_period && count( $legacy_seen_names ) === count( $legacy_names ) && count( $legacy_seen_followers ) === count( $legacy_followers ), (string) $legacy_period );
+check( 'legacy-follower generator maps cases deterministically', '' === $legacy_mismatch, $legacy_mismatch );
+check( 'legacy-follower cases run both contexts', array( 'both' ) === array_keys( $legacy_contexts ), implode( ',', array_keys( $legacy_contexts ) ) );
+check( 'legacy-follower uses one strategy label', array( 'legacy-follower-sweep' ) === array_keys( $legacy_strategies ), implode( ',', array_keys( $legacy_strategies ) ) );
+check( 'legacy-follower payloads are oracle-safe', 0 === $legacy_unsafe, (string) $legacy_unsafe );
+check( 'legacy-follower covers every oracle-safe ASCII follower byte', array() === array_diff( $expected_ascii_followers, array_keys( $legacy_ascii_followers ) ), implode( ',', array_keys( $legacy_ascii_followers ) ) );
+check( 'legacy-follower covers valid UTF-8 lead bytes', array() === array_diff( range( 0xC2, 0xF4 ), array_keys( $legacy_utf8_leads ) ), implode( ',', array_map( static fn( int $byte ): string => dechex( $byte ), array_keys( $legacy_utf8_leads ) ) ) );
+check( 'legacy-follower covers UTF-8 continuation bytes', array() === array_diff( range( 0x80, 0xBF ), array_keys( $legacy_utf8_continuations ) ), implode( ',', array_map( static fn( int $byte ): string => dechex( $byte ), array_keys( $legacy_utf8_continuations ) ) ) );
+
 $lookalike_indexes    = lookalike_mutation_indexes( $name_sweep_base_names );
 $lookalike_candidates = array();
 for ( $i = 0; $i < 6000; $i++ ) {
@@ -801,6 +936,13 @@ check(
 	$name_worker['stdout'] . $name_worker['stderr']
 );
 
+$legacy_follower_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'legacy-followers', '--seed', '1', '--cases', '300', '--progress-every', '300' ) );
+check(
+	'300-case legacy-follower worker clean',
+	0 === $legacy_follower_worker['code'] && str_contains( $legacy_follower_worker['stdout'], '"legacy-follower-sweep":300' ),
+	$legacy_follower_worker['stdout'] . $legacy_follower_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -868,43 +1010,60 @@ check(
 		( $name_runner_state['cases'] ?? null ) === ( $name_runner_state['by_context']['both'] ?? null ),
 	$name_runner['stdout'] . $name_runner['stderr'] . json_encode( $name_runner_state )
 );
-$name_runner_summary = is_file( $name_runner_dir . '/summary.ndjson' )
-	? file( $name_runner_dir . '/summary.ndjson', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES )
-	: array();
-$name_runner_windows = array();
-if ( is_array( $name_runner_summary ) ) {
-	foreach ( $name_runner_summary as $line ) {
-		$record = json_decode( $line, true );
-		if ( is_array( $record ) && 'start' === ( $record['type'] ?? null ) && 'names' === ( $record['mode'] ?? null ) ) {
-			$name_runner_windows[] = array(
-				'start' => $record['start_case'] ?? null,
-				'cases' => $record['cases'] ?? null,
-			);
-		}
-	}
-}
-usort(
-	$name_runner_windows,
-	static fn( array $a, array $b ): int => ( $a['start'] ?? -1 ) <=> ( $b['start'] ?? -1 )
-);
-$name_runner_windows_valid = count( $name_runner_windows ) > 1;
-$previous_window_end       = null;
-foreach ( $name_runner_windows as $window ) {
-	if ( ! is_int( $window['start'] ) || 100 !== $window['cases'] || 0 !== $window['start'] % 100 || ( null !== $previous_window_end && $window['start'] < $previous_window_end ) ) {
-		$name_runner_windows_valid = false;
-		break;
-	}
-	$previous_window_end = $window['start'] + $window['cases'];
-}
+$name_runner_windows = summary_start_windows( $name_runner_dir, 'names' );
 check(
 	'name-sweep runner uses distinct start-case windows',
-	$name_runner_windows_valid,
+	start_windows_are_distinct( $name_runner_windows, 100 ),
 	json_encode( $name_runner_windows )
 );
 remove_tree( $name_runner_dir );
 
+$legacy_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-legacy-follower-runner-' . getmypid();
+remove_tree( $legacy_runner_dir );
+$legacy_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'legacy-followers',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$legacy_runner_dir,
+	)
+);
+$legacy_runner_state = is_file( $legacy_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $legacy_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'legacy-follower runner clean',
+	0 === $legacy_runner['code'] &&
+		( $legacy_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $legacy_runner_state['cases'] ?? null ) === ( $legacy_runner_state['by_strategy']['legacy-follower-sweep'] ?? null ) &&
+		( $legacy_runner_state['cases'] ?? null ) === ( $legacy_runner_state['by_context']['both'] ?? null ),
+	$legacy_runner['stdout'] . $legacy_runner['stderr'] . json_encode( $legacy_runner_state )
+);
+$legacy_runner_windows = summary_start_windows( $legacy_runner_dir, 'legacy-followers' );
+check(
+	'legacy-follower runner uses distinct start-case windows',
+	start_windows_are_distinct( $legacy_runner_windows, 100 ),
+	json_encode( $legacy_runner_windows )
+);
+remove_tree( $legacy_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
+
+$legacy_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'legacy-followers', '--seed', '1', '--case', '0' ) );
+check( 'legacy-follower replay regenerates clean case', 0 === $legacy_replay['code'], $legacy_replay['stdout'] . $legacy_replay['stderr'] );
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -957,6 +1116,57 @@ if ( null !== $name_failure_file ) {
 	check( 'faulted name-sweep minimizer preserves signature', 0 === $name_fault_minimize['code'], $name_fault_minimize['stdout'] . $name_fault_minimize['stderr'] );
 }
 remove_tree( $name_pipeline_dir );
+
+$legacy_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-legacy-follower-fault-' . getmypid();
+remove_tree( $legacy_pipeline_dir );
+$faulted_legacy_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'legacy-followers',
+		'--seed',
+		'1',
+		'--start-case',
+		'0',
+		'--cases',
+		'80',
+		'--output-dir',
+		$legacy_pipeline_dir,
+		'--progress-every',
+		'80',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+);
+check( 'faulted legacy-follower worker reports findings', 1 === $faulted_legacy_worker['code'], $faulted_legacy_worker['stdout'] . $faulted_legacy_worker['stderr'] );
+
+$legacy_failure_files = glob( $legacy_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted legacy-follower worker writes failure artifact', is_array( $legacy_failure_files ) && array() !== $legacy_failure_files );
+
+$legacy_failure_file = is_array( $legacy_failure_files ) && array() !== $legacy_failure_files ? $legacy_failure_files[0] : null;
+if ( null !== $legacy_failure_file ) {
+	$legacy_manifest = json_decode( (string) file_get_contents( $legacy_failure_file ), true );
+	check(
+		'legacy-follower failure artifact records mode and signature',
+		'legacy-followers' === ( $legacy_manifest['mode'] ?? null ) &&
+			'legacy-follower-sweep' === ( $legacy_manifest['strategy'] ?? null ) &&
+			in_array( 'decode-mismatch:attribute', $legacy_manifest['signatures'] ?? array(), true ),
+		json_encode( $legacy_manifest )
+	);
+
+	$legacy_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $legacy_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted legacy-follower replay reproduces finding', 1 === $legacy_fault_replay['code'], $legacy_fault_replay['stdout'] . $legacy_fault_replay['stderr'] );
+
+	$legacy_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $legacy_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted legacy-follower minimizer preserves signature', 0 === $legacy_fault_minimize['code'], $legacy_fault_minimize['stdout'] . $legacy_fault_minimize['stderr'] );
+}
+remove_tree( $legacy_pipeline_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );

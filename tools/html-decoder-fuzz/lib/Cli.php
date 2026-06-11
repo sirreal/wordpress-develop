@@ -5,7 +5,7 @@ namespace HtmlDecoderFuzz;
  * Shared helpers for command line entry points.
  */
 class Cli {
-	private const VALID_MODES = array( 'oracle', 'bytes', 'names' );
+	private const VALID_MODES = array( 'oracle', 'bytes', 'names', 'legacy-followers' );
 
 	/**
 	 * @return string[]
@@ -16,6 +16,10 @@ class Cli {
 
 	public static function mode_uses_oracle( string $mode ): bool {
 		return 'bytes' !== $mode;
+	}
+
+	public static function mode_uses_start_case_windows( string $mode ): bool {
+		return in_array( $mode, array( 'names', 'legacy-followers' ), true );
 	}
 
 	/**
