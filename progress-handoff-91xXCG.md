@@ -10,7 +10,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 1 item 3: add reference-at-EOF generation strategy.
 - [x] Tier 1 item 4: add `attribute_starts_with()` monotonicity invariants.
 - [x] Tier 1 item 5: exercise multi-code-point `attribute_starts_with()` prefix paths.
-- [ ] Tier 1 item 6.
+- [x] Tier 1 item 6: add range-based numeric code point generation.
 - [ ] Tier 2 items 7-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
@@ -47,6 +47,13 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/replay.php --seed 1 --case 681` reproduced the multi-code-point prefix finding.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-multicodepoint-fault-681/failure-seed1-case681/failure.json` minimized the finding from 18 to 6 bytes.
 - 2026-06-11: `git diff --check` passed after adding multi-code-point prefix coverage.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding range-based numeric code point generation.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting numeric range buckets, all 32 C1 remap rows, and all 16 noncharacter planes.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding range-based numeric code points.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=skip-c1-remap php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 128 --cases 1 --progress-every 1` reported findings as expected after the range generator shifted the deterministic C1 fault case from 170 to 128.
+- 2026-06-11: `git diff --check` passed after adding range-based numeric code points.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after addressing reviewer feedback on post-surrogate BMP coverage and multi-reference numeric smoke classification.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after adding explicit BMP terminal noncharacter coverage for `0xFFFE` and `0xFFFF`.
 
 ## Review Log
 
@@ -70,3 +77,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Banach: APPROVE, generator and fault-target coverage.
   - Meitner: APPROVE, byte-slice search semantics and JSON-safe failure details.
   - Carver: APPROVE, worker/replay/minimize integration and runtime compatibility.
+- Tier 1 item 6:
+  - Kepler: APPROVE, numeric generator ranges after post-surrogate BMP coverage fix.
+  - Pascal: APPROVE, numeric smoke coverage after BMP noncharacter and multi-reference fixes.
+  - Beauvoir: APPROVE, integration/runtime compatibility after explicit `0xFFFE`/`0xFFFF` coverage.

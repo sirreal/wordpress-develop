@@ -81,8 +81,10 @@ strategies for:
 - exact named references
 - semicolonless legacy references
 - attribute-context ambiguous followers
-- numeric decimal and hex references, including C1 controls, surrogates,
-  noncharacters, zero, overflow, and leading zeros
+- numeric decimal and hex references drawn from ranges covering C0 controls,
+  all C1 controls, surrogates, BMP and per-plane noncharacters, astral values,
+  above-Unicode values with legal digit counts, digit-count overflow, zero-only
+  references, and leading zeros
 - adjacent references
 - truncation sweeps
 - references ending at EOF, including bare introducers, partial numeric

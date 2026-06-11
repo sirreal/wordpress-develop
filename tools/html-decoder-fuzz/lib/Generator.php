@@ -376,14 +376,7 @@ class Generator {
 			return $this->prng->choice( array( '&#;', '&#x;', '&#X;' ) );
 		}
 
-		$values = array(
-			0, 9, 10, 12, 13, 34, 38, 58, 60, 62, 65, 0x7F,
-			0x80, 0x81, 0x82, 0x8D, 0x91, 0x9F,
-			0xD7FF, 0xD800, 0xDFFF, 0xE000,
-			0xFDD0, 0xFDEF, 0xFFFE, 0xFFFF, 0x10FFFF, 0x110000,
-			99999999,
-		);
-		$value = $this->prng->choice( $values );
+		$value = $this->numeric_code_point( 'hex' === $kind ? 16 : 10 );
 
 		if ( 'hex' === $kind ) {
 			$digits = dechex( $value );
@@ -401,6 +394,70 @@ class Generator {
 		}
 
 		return $prefix . $digits . ( $this->prng->chance( 82 ) ? ';' : '' );
+	}
+
+	private function numeric_code_point( int $numeric_base ): int {
+		$bucket = $this->prng->weighted(
+			array(
+				'zero'                       => 5,
+				'c0-control'                 => 8,
+				'ascii'                      => 10,
+				'c1-control'                 => 14,
+				'bmp'                        => 12,
+				'surrogate'                  => 12,
+				'bmp-noncharacter'           => 8,
+				'plane-noncharacter'         => 10,
+				'astral'                     => 10,
+				'above-unicode-legal-digits' => 8,
+				'digit-count-overflow'       => 5,
+			)
+		);
+
+		switch ( $bucket ) {
+			case 'zero':
+				return 0;
+
+			case 'c0-control':
+				return $this->prng->int( 1, 0x1F );
+
+			case 'ascii':
+				return $this->prng->int( 0x20, 0x7F );
+
+			case 'c1-control':
+				return $this->prng->int( 0x80, 0x9F );
+
+			case 'bmp':
+				if ( $this->prng->chance( 50 ) ) {
+					return $this->prng->int( 0xA0, 0xD7FF );
+				}
+				if ( $this->prng->chance( 50 ) ) {
+					return $this->prng->int( 0xE000, 0xFDCF );
+				}
+				return $this->prng->int( 0xFDF0, 0xFFFD );
+
+			case 'surrogate':
+				return $this->prng->int( 0xD800, 0xDFFF );
+
+			case 'bmp-noncharacter':
+				if ( $this->prng->chance( 75 ) ) {
+					return $this->prng->int( 0xFDD0, 0xFDEF );
+				}
+				return $this->prng->choice( array( 0xFFFE, 0xFFFF ) );
+
+			case 'plane-noncharacter':
+				return ( $this->prng->int( 1, 16 ) << 16 ) + $this->prng->choice( array( 0xFFFE, 0xFFFF ) );
+
+			case 'astral':
+				return ( $this->prng->int( 1, 16 ) << 16 ) + $this->prng->int( 0, 0xFFFD );
+
+			case 'above-unicode-legal-digits':
+				return $this->prng->int( 0x110000, 16 === $numeric_base ? 0xFFFFFF : 9999999 );
+
+			case 'digit-count-overflow':
+				return $this->prng->int( 16 === $numeric_base ? 0x1000000 : 10000000, 16 === $numeric_base ? 0xFFFFFFF : 99999999 );
+		}
+
+		return 0x41;
 	}
 
 	private function plain_text( bool $allow_amp = false ): string {

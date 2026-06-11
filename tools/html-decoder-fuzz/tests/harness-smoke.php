@@ -192,6 +192,59 @@ function reference_at_eof_shape( string $payload ): ?string {
 	return null;
 }
 
+/**
+ * @return array<string, true>
+ */
+function numeric_reference_ranges( string $payload ): array {
+	$ranges = array();
+	$match_count = preg_match_all( '/&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?/', $payload, $matches, PREG_SET_ORDER );
+	if ( false === $match_count || 0 === $match_count ) {
+		return $ranges;
+	}
+
+	foreach ( $matches as $match ) {
+		$is_hex    = '' !== ( $match[1] ?? '' );
+		$digits    = $is_hex ? $match[2] : $match[3];
+		$base      = $is_hex ? 16 : 10;
+		$max_digits = $is_hex ? 6 : 7;
+		$zero_count = strspn( $digits, '0' );
+		$significant_digits = substr( $digits, $zero_count );
+
+		if ( '' === $significant_digits ) {
+			$ranges['zero-only'] = true;
+			continue;
+		}
+
+		if ( strlen( $significant_digits ) > $max_digits ) {
+			$ranges['digit-count-overflow'] = true;
+			continue;
+		}
+
+		$value = intval( $significant_digits, $base );
+		if ( $value <= 0x1F ) {
+			$ranges['c0-control'] = true;
+		} elseif ( $value >= 0x80 && $value <= 0x9F ) {
+			$ranges['c1-control'] = true;
+		} elseif ( $value >= 0xA0 && $value <= 0xD7FF ) {
+			$ranges['bmp-pre-surrogate'] = true;
+		} elseif ( $value >= 0xD800 && $value <= 0xDFFF ) {
+			$ranges['surrogate'] = true;
+		} elseif ( ( $value >= 0xFDD0 && $value <= 0xFDEF ) || 0xFFFE === $value || 0xFFFF === $value ) {
+			$ranges['bmp-noncharacter'] = true;
+		} elseif ( $value >= 0xE000 && $value <= 0xFFFD ) {
+			$ranges['bmp-post-surrogate'] = true;
+		} elseif ( $value >= 0x1FFFE && $value <= 0x10FFFF && ( $value & 0xFFFF ) >= 0xFFFE ) {
+			$ranges['plane-noncharacter'] = true;
+		} elseif ( $value > 0x10FFFF ) {
+			$ranges['above-unicode-legal-digits'] = true;
+		} elseif ( $value >= 0x10000 ) {
+			$ranges['astral'] = true;
+		}
+	}
+
+	return $ranges;
+}
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -384,6 +437,98 @@ check(
 		array_keys( $reference_at_eof_shapes )
 	),
 	implode( ',', array_keys( $reference_at_eof_shapes ) )
+);
+
+$numeric_ranges = array();
+$numeric_c1_values = array();
+$numeric_bmp_terminal_noncharacters = array();
+$numeric_noncharacter_planes = array();
+for ( $i = 0; $i < 6000; $i++ ) {
+	$generated = ( new Generator( new Prng( "numeric-range-smoke:{$i}" ), 4096, $names ) )->generate();
+	foreach ( numeric_reference_ranges( $generated['payload'] ) as $range => $_ ) {
+		$numeric_ranges[ $range ] = true;
+	}
+	$match_count = preg_match_all( '/&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?/', $generated['payload'], $matches, PREG_SET_ORDER );
+	if ( false !== $match_count && $match_count > 0 ) {
+		foreach ( $matches as $match ) {
+			$is_hex = '' !== ( $match[1] ?? '' );
+			$digits = $is_hex ? $match[2] : $match[3];
+			$significant_digits = substr( $digits, strspn( $digits, '0' ) );
+			if ( '' === $significant_digits || strlen( $significant_digits ) > ( $is_hex ? 6 : 7 ) ) {
+				continue;
+			}
+
+			$value = intval( $significant_digits, $is_hex ? 16 : 10 );
+			if ( $value >= 0x80 && $value <= 0x9F ) {
+				$numeric_c1_values[ $value ] = true;
+			}
+			if ( 0xFFFE === $value || 0xFFFF === $value ) {
+				$numeric_bmp_terminal_noncharacters[ $value ] = true;
+			}
+			if ( $value >= 0x1FFFE && $value <= 0x10FFFF && ( $value & 0xFFFF ) >= 0xFFFE ) {
+				$numeric_noncharacter_planes[ $value >> 16 ] = true;
+			}
+		}
+	}
+	if (
+		array() === array_diff(
+			array(
+				'zero-only',
+				'c0-control',
+				'c1-control',
+				'bmp-pre-surrogate',
+				'bmp-post-surrogate',
+				'surrogate',
+				'bmp-noncharacter',
+				'plane-noncharacter',
+				'astral',
+				'above-unicode-legal-digits',
+				'digit-count-overflow',
+			),
+			array_keys( $numeric_ranges )
+		) &&
+		32 === count( $numeric_c1_values ) &&
+		2 === count( $numeric_bmp_terminal_noncharacters ) &&
+		16 === count( $numeric_noncharacter_planes )
+	) {
+		break;
+	}
+}
+check(
+	'numeric generator covers range buckets',
+	array() === array_diff(
+		array(
+			'zero-only',
+			'c0-control',
+			'c1-control',
+			'bmp-pre-surrogate',
+			'bmp-post-surrogate',
+			'surrogate',
+			'bmp-noncharacter',
+			'plane-noncharacter',
+			'astral',
+			'above-unicode-legal-digits',
+			'digit-count-overflow',
+		),
+		array_keys( $numeric_ranges )
+	),
+	implode( ',', array_keys( $numeric_ranges ) )
+);
+$expected_c1_values = range( 0x80, 0x9F );
+check(
+	'numeric generator covers all C1 remap rows',
+	array() === array_diff( $expected_c1_values, array_keys( $numeric_c1_values ) ),
+	implode( ',', array_map( static fn( int $value ): string => dechex( $value ), array_keys( $numeric_c1_values ) ) )
+);
+check(
+	'numeric generator covers BMP terminal noncharacters',
+	array() === array_diff( array( 0xFFFE, 0xFFFF ), array_keys( $numeric_bmp_terminal_noncharacters ) ),
+	implode( ',', array_map( static fn( int $value ): string => dechex( $value ), array_keys( $numeric_bmp_terminal_noncharacters ) ) )
+);
+check(
+	'numeric generator covers per-plane noncharacters',
+	array() === array_diff( range( 1, 16 ), array_keys( $numeric_noncharacter_planes ) ),
+	implode( ',', array_keys( $numeric_noncharacter_planes ) )
 );
 
 $byte_strategies = array();
@@ -1008,7 +1153,7 @@ file_put_contents(
 		)
 	)
 );
-$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case170' );
+$symlink_write_created = @symlink( $symlink_write_dir . '/keepdir', $symlink_write_dir . '/failure-seed1-case128' );
 if ( $symlink_write_created ) {
 	$symlink_write_worker = run_process(
 		array(
@@ -1025,7 +1170,7 @@ if ( $symlink_write_created ) {
 		),
 		array( 'HTML_DECODER_FUZZ_FAULT' => 'skip-c1-remap' )
 	);
-	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case170-sig*/failure.json' );
+	$symlink_write_suffixed = glob( $symlink_write_dir . '/failure-seed1-case128-sig*/failure.json' );
 	check(
 		'worker does not write through symlinked failure artifact dirs',
 		1 === $symlink_write_worker['code'] &&
@@ -1275,7 +1420,7 @@ check(
 	1 === $unverified_weak_seed_runner['code'] &&
 		0 === $unverified_weak_runner['code'] &&
 		! is_dir( $unverified_weak_manifest_dir . '/failure-000weak' ) &&
-		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case170/failure.json' ) &&
+		is_file( $unverified_weak_manifest_dir . '/failure-seed1-case128/failure.json' ) &&
 		( $unverified_weak_state['artifact_retention']['startup_pruned_partial'] ?? 0 ) > 0 &&
 		( false !== ( $unverified_weak_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_weak_seed_runner['stdout'] . $unverified_weak_seed_runner['stderr'] . $unverified_weak_runner['stdout'] . $unverified_weak_runner['stderr'] . json_encode( $unverified_weak_state['artifact_retention'] ?? null )
@@ -1353,7 +1498,7 @@ check(
 	1 === $unverified_fake_seed_runner['code'] &&
 		0 === $unverified_fake_runner['code'] &&
 		is_file( $unverified_fake_manifest_dir . '/failure-000fake/failure.json' ) &&
-		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case170/failure.json' ) &&
+		is_file( $unverified_fake_manifest_dir . '/failure-seed1-case128/failure.json' ) &&
 		array_sum( is_array( $unverified_fake_counts ) ? $unverified_fake_counts : array() ) >= 2 &&
 		( false !== ( $unverified_fake_state['artifact_retention']['startup_verification_unavailable'] ?? false ) ),
 	$unverified_fake_seed_runner['stdout'] . $unverified_fake_seed_runner['stderr'] . $unverified_fake_runner['stdout'] . $unverified_fake_runner['stderr'] . json_encode( $unverified_fake_state['artifact_retention'] ?? null )
@@ -1707,7 +1852,7 @@ check(
 	1 === $reuse_same_runner['code'] &&
 		is_array( $reuse_same_dirs ) &&
 		count( $reuse_same_dirs ) === array_sum( $reuse_same_counts ) &&
-		is_file( $runner_dir . '/failure-seed1-case170/failure.json' ) &&
+		is_file( $runner_dir . '/failure-seed1-case128/failure.json' ) &&
 		array() === array_filter( $reuse_same_counts, static fn( $count ) => $count > 1 ),
 	$reuse_same_runner['stdout'] . $reuse_same_runner['stderr'] . json_encode( $reuse_same_state['artifact_retention'] ?? null )
 );
@@ -1759,9 +1904,9 @@ $different_signature_second = run_process(
 	),
 	array( 'HTML_DECODER_FUZZ_FAULT' => 'match-length-off-by-one' )
 );
-$different_signature_case170 = glob( $different_signature_dir . '/failure-seed1-case170*/failure.json' );
+$different_signature_case128 = glob( $different_signature_dir . '/failure-seed1-case128*/failure.json' );
 $different_signature_seen   = array();
-foreach ( is_array( $different_signature_case170 ) ? $different_signature_case170 : array() as $failure_file ) {
+foreach ( is_array( $different_signature_case128 ) ? $different_signature_case128 : array() as $failure_file ) {
 	$manifest = json_decode( (string) file_get_contents( $failure_file ), true );
 	if ( is_array( $manifest ) && isset( $manifest['signatures'] ) && is_array( $manifest['signatures'] ) ) {
 		$different_signature_seen[] = implode( ',', $manifest['signatures'] );
