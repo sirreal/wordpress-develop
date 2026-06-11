@@ -368,6 +368,157 @@ for (const method of ["create_fragment", "create_full_parser", "normalize", "is_
 	assert.equal(typeof WP_HTML_Processor[method], "function", `Missing processor static method ${method}`);
 }
 
+function compareHtml5libTreeAttributes(left, right) {
+	const leftHasColon = left.display.includes(":");
+	const rightHasColon = right.display.includes(":");
+	if (leftHasColon !== rightHasColon) {
+		return leftHasColon ? 1 : -1;
+	}
+
+	const leftHasNamespaceSeparator = left.display.includes(" ");
+	const rightHasNamespaceSeparator = right.display.includes(" ");
+	if (leftHasNamespaceSeparator !== rightHasNamespaceSeparator) {
+		return leftHasNamespaceSeparator ? 1 : -1;
+	}
+
+	return left.display < right.display ? -1 : left.display > right.display ? 1 : 0;
+}
+
+function buildFullParserHtml5libTree(html) {
+	const processor = WP_HTML_Processor.create_full_parser(html);
+	assert.notEqual(processor, null);
+
+	let output = "";
+	let indentLevel = 0;
+	let wasText = false;
+	let textNode = "";
+	const indent = (level) => "  ".repeat(level);
+
+	while (processor.next_token()) {
+		const tokenName = processor.get_token_name();
+		const tokenType = processor.get_token_type();
+		const namespace = processor.get_namespace();
+
+		if (wasText && tokenName !== "#text") {
+			if (textNode !== "") {
+				output += `${textNode}"\n`;
+			}
+			wasText = false;
+			textNode = "";
+		}
+
+		switch (tokenType) {
+			case "#doctype": {
+				const doctype = processor.get_doctype_info();
+				output += `<!DOCTYPE ${doctype.name ?? ""}`;
+				if (doctype.public_identifier !== null || doctype.system_identifier !== null) {
+					output += ` "${doctype.public_identifier}" "${doctype.system_identifier}"`;
+				}
+				output += ">\n";
+				break;
+			}
+
+			case "#tag": {
+				if (processor.is_tag_closer()) {
+					indentLevel -= 1;
+					if (namespace === "html" && tokenName === "TEMPLATE") {
+						indentLevel -= 1;
+					}
+					break;
+				}
+
+				const tagName = namespace === "html"
+					? processor.get_tag().toLowerCase()
+					: `${namespace} ${processor.get_qualified_tag_name()}`;
+				const tagIndent = indentLevel;
+				if (processor.expects_closer()) {
+					indentLevel += 1;
+				}
+				output += `${indent(tagIndent)}<${tagName}>\n`;
+
+				const attributeNames = processor.get_attribute_names_with_prefix("");
+				if (attributeNames) {
+					const attributes = attributeNames
+						.map((name) => ({ name, display: processor.get_qualified_attribute_name(name) }))
+						.sort(compareHtml5libTreeAttributes);
+					for (const { name, display } of attributes) {
+						const value = processor.get_attribute(name) === true ? "" : processor.get_attribute(name);
+						output += `${indent(tagIndent + 1)}${display}="${value}"\n`;
+					}
+				}
+
+				const modifiableText = processor.get_modifiable_text();
+				if (modifiableText !== "") {
+					output += `${indent(tagIndent + 1)}"${modifiableText}"\n`;
+				}
+
+				if (namespace === "html" && tokenName === "TEMPLATE") {
+					output += `${indent(indentLevel)}content\n`;
+					indentLevel += 1;
+				}
+				break;
+			}
+
+			case "#cdata-section":
+			case "#text": {
+				const textContent = processor.get_modifiable_text();
+				if (textContent === "") {
+					break;
+				}
+				wasText = true;
+				if (textNode === "") {
+					textNode += `${indent(indentLevel)}"`;
+				}
+				textNode += textContent;
+				break;
+			}
+
+			case "#funky-comment":
+				output += `${indent(indentLevel)}<!-- ${processor.get_modifiable_text()} -->\n`;
+				break;
+
+			case "#comment":
+				output += `${indent(indentLevel)}<!-- ${processor.get_full_comment_text()} -->\n`;
+				break;
+
+			default:
+				throw new Error(`Unhandled token type for html5lib tree smoke test: ${tokenType}`);
+		}
+	}
+
+	if (textNode !== "") {
+		output += `${textNode}"\n`;
+	}
+
+	assert.equal(processor.get_unsupported_exception(), null);
+	assert.equal(processor.get_last_error(), null);
+	assert.equal(processor.paused_at_incomplete_token(), false);
+	processor.destroy();
+
+	return `${output}\n`;
+}
+
+for (const [html, expectedTree] of [
+	[
+		"<!DOCTYPE html>Hello",
+		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
+	],
+	[
+		"<!DOCTYPEhtml>Hello",
+		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    "Hello"\n\n',
+	],
+	[
+		"FOO<!-- BAR -->BAZ",
+		'<html>\n  <head>\n  <body>\n    "FOO"\n    <!--  BAR  -->\n    "BAZ"\n\n',
+	],
+	[
+		"<div a=1 b><span>Hi</span></div>",
+		'<html>\n  <head>\n  <body>\n    <div>\n      a="1"\n      b=""\n      <span>\n        "Hi"\n\n',
+	],
+]) {
+	assert.equal(buildFullParserHtml5libTree(html), expectedTree);
+}
+
 assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT, "COMMENT_AS_HTML_COMMENT");
 assert.equal(WP_HTML_Tag_Processor.COMMENT_AS_PI_NODE_LOOKALIKE, "COMMENT_AS_PI_NODE_LOOKALIKE");
 
