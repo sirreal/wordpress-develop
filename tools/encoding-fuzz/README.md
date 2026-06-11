@@ -118,6 +118,10 @@ Internal invariants:
   maximal-subpart parser checks that invalid subparts count as one code
   point. Nonzero starts are probed only at known code point or
   maximal-subpart boundaries.
+- bounded `_wp_scan_utf8()` calls agree with an independent scan model for
+  `max_bytes`, `max_code_points`, negative limits, nonzero boundary starts,
+  invalid spans, forward progress, by-ref noncharacter flag reset, and
+  scanned-region noncharacter reporting
 - scanning with `_wp_scan_utf8()` in pseudo-random `max_code_points`
   chunks reconstructs the same scrubbed text and always makes forward
   progress (chunk sizes derive from the input hash, so replays are exact)
@@ -208,7 +212,7 @@ php tools/encoding-fuzz/tests/harness-smoke.php
 ```
 
 Verifies the oracle battery, runs the real targets over the battery
-vectors, and — most importantly — mutation-tests the harness: thirty
+vectors, and — most importantly — mutation-tests the harness: thirty-five
 classes of deliberately broken implementations (validator accepting
 0xC0, validator rejecting noncharacters, non-maximal-subpart scrubber,
 identity scrubber, byte-dropping scrubber, off-by-one code point count,
@@ -222,13 +226,16 @@ detector, cp1252-confused `_mb_chr()`, invalid-accepting `_mb_ord()`,
 off-by-one code point span, invalid-subpart byte-counted span, and
 wrong or stale `found_code_points` span, byte-offset `_mb_substr()`,
 scrubbed-input `_mb_substr()`, negative-length `_mb_substr()`, and
-non-UTF-8 fallback drift)
+non-UTF-8 fallback drift, max-bytes-ignoring `_wp_scan_utf8()`,
+noncharacter-leaking `_wp_scan_utf8()`, noncharacter-missing
+`_wp_scan_utf8()`, ASCII-overrunning `_wp_scan_utf8()`, and
+stale-noncharacter-flag `_wp_scan_utf8()`)
 must all be caught. It also asserts generator determinism, the
 valid/invalid input mix, and the documented
 `wp_has_noncharacters()` divergence stance on ill-formed input.
 
 For end-to-end pipeline testing while the real implementations are
-healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale|substr-byte-level|substr-scrub|substr-no-neg-len|substr-force-utf8|count-invalid-bytes|count-range-minus1|count-ignore-offset`
+healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale|substr-byte-level|substr-scrub|substr-no-neg-len|substr-force-utf8|count-invalid-bytes|count-range-minus1|count-ignore-offset|scan-ignore-bytes|scan-nonchars-leak|scan-miss-nonchars|scan-ascii-overrun|scan-stale-nonchars`
 injects a broken target into worker, replay, and minimize alike.
 Fault-injected artifacts record the fault name in their environment
 metadata so they cannot be mistaken for real findings. Replaying or

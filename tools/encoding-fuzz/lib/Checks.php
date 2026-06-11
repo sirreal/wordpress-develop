@@ -20,6 +20,10 @@ namespace EncodingFuzz;
  *    requested number of code points, with invalid maximal subparts
  *    counted as one code point and `found_code_points` reporting the
  *    available/requested count
+ *  - bounded `_wp_scan_utf8()` calls agree with an independent scan model
+ *    for `max_bytes`, `max_code_points`, negative limits, nonzero boundary
+ *    starts, invalid spans, by-ref noncharacter flag reset, and
+ *    scanned-region noncharacter reporting
  *  - scanning with `_wp_scan_utf8()` in pseudo-random `max_code_points`
  *    chunks reconstructs the same scrubbed text and always makes
  *    forward progress
@@ -273,28 +277,33 @@ class Checks {
 			$failures[] = $failure;
 		}
 
-		// 8. Chunked scan reconstruction.
+		// 8. Direct bounded scan properties.
+		foreach ( $this->check_bounded_scan( $input, $ref_scrub ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		// 9. Chunked scan reconstruction.
 		$chunk_failure = $this->check_chunked_scan( $input, $ref_scrub );
 		if ( null !== $chunk_failure ) {
 			$failures[] = $chunk_failure;
 		}
 
-		// 9. Legacy utf8_encode()/utf8_decode() fallback differentials.
+		// 10. Legacy utf8_encode()/utf8_decode() fallback differentials.
 		foreach ( $this->check_utf8_encode_decode( $input, $ref_valid, $mb_validity ) as $failure ) {
 			$failures[] = $failure;
 		}
 
-		// 10. Noncharacter detection, on valid input only.
+		// 11. Noncharacter detection, on valid input only.
 		foreach ( $this->check_noncharacters( $input, $ref_valid ) as $failure ) {
 			$failures[] = $failure;
 		}
 
-		// 11. _mb_substr() UTF-8 and byte-fallback properties.
+		// 12. _mb_substr() UTF-8 and byte-fallback properties.
 		foreach ( $this->check_mb_substr( $input, $ref_valid, $ref_scrub ) as $failure ) {
 			$failures[] = $failure;
 		}
 
-		// 12. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
+		// 13. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
 		foreach ( $this->check_mb_chr_ord( $input ) as $failure ) {
 			$failures[] = $failure;
 		}
@@ -403,6 +412,151 @@ class Checks {
 					'got'             => $actual,
 					'expected'        => $expected,
 					'input_preview'   => self::preview( $input, max( 0, $byte_offset ) ),
+				)
+			);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Tests optional `_wp_scan_utf8()` bounds directly from known code
+	 * point/maximal-subpart boundaries. Starts inside continuation bytes or
+	 * inside invalid maximal subparts remain undefined for this property.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_bounded_scan( string $input, string $ref_scrub ): array {
+		if ( ! isset( $this->targets['scan_utf8'] ) ) {
+			return array();
+		}
+
+		list( $offsets, $reference_scrub ) = self::reference_utf8_offsets_and_scrub( $input );
+		if ( $reference_scrub !== $ref_scrub ) {
+			return array(
+				self::failure(
+					'scan-reference-disagreement',
+					'maximal-subpart-reference',
+					self::diff_detail( 'maximal-subpart-reference', $ref_scrub, $reference_scrub )
+				),
+			);
+		}
+
+		$failures = array();
+		foreach ( self::scan_utf8_probes( $offsets, strlen( $input ), $input ) as $probe ) {
+			list( $start, $max_bytes, $max_code_points ) = $probe;
+			$expected                                   = self::expected_scan_utf8( $input, $start, $max_bytes, $max_code_points );
+
+			$failure = $this->assert_scan_utf8(
+				$input,
+				$start,
+				$max_bytes,
+				$max_code_points,
+				$expected
+			);
+
+			if ( null !== $failure ) {
+				$failures[] = $failure;
+			}
+		}
+
+		return $failures;
+	}
+
+	/**
+	 * @param array{count: int, at: int, invalid_length: int, has_noncharacters: bool} $expected
+	 */
+	private function assert_scan_utf8( string $input, int $start, ?int $max_bytes, ?int $max_code_points, array $expected ): ?array {
+		$failure = $this->assert_scan_utf8_with_initial_has( $input, $start, $max_bytes, $max_code_points, null, $expected );
+		if ( null !== $failure ) {
+			return $failure;
+		}
+
+		if ( ! $expected['has_noncharacters'] ) {
+			$failure = $this->assert_scan_utf8_with_initial_has(
+				$input,
+				$start,
+				$max_bytes,
+				$max_code_points,
+				true,
+				$expected
+			);
+
+			if ( null !== $failure ) {
+				return $failure;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param array{count: int, at: int, invalid_length: int, has_noncharacters: bool} $expected
+	 */
+	private function assert_scan_utf8_with_initial_has( string $input, int $start, ?int $max_bytes, ?int $max_code_points, ?bool $initial_has, array $expected ): ?array {
+		$at                = $start;
+		$invalid_length    = -1;
+		$has_noncharacters = $initial_has;
+
+		try {
+			$count = ( $this->targets['scan_utf8'] )( $input, $at, $invalid_length, $max_bytes, $max_code_points, $has_noncharacters );
+		} catch ( \Throwable $error ) {
+			return self::failure(
+				'target-exception',
+				'scan_utf8',
+				array(
+					'target'          => 'scan_utf8',
+					'start'           => $start,
+					'max_bytes'       => $max_bytes,
+					'max_code_points' => $max_code_points,
+					'initial_has'     => $initial_has,
+					'message'         => $error->getMessage(),
+					'class'           => get_class( $error ),
+				)
+			);
+		}
+
+		if (
+			! is_int( $count ) ||
+			! is_int( $at ) ||
+			! is_int( $invalid_length ) ||
+			( ! is_bool( $has_noncharacters ) && ! in_array( $has_noncharacters, array( 0, 1 ), true ) )
+		) {
+			return self::failure(
+				'scan-utf8-bad-return',
+				'scan_utf8',
+				array(
+					'start'                  => $start,
+					'max_bytes'              => $max_bytes,
+					'max_code_points'        => $max_code_points,
+					'initial_has'            => $initial_has,
+					'count_type'             => get_debug_type( $count ),
+					'at_type'                => get_debug_type( $at ),
+					'invalid_length_type'    => get_debug_type( $invalid_length ),
+					'has_noncharacters_type' => get_debug_type( $has_noncharacters ),
+				)
+			);
+		}
+
+		$actual = array(
+			'count'             => $count,
+			'at'                => $at,
+			'invalid_length'    => $invalid_length,
+			'has_noncharacters' => (bool) $has_noncharacters,
+		);
+
+		if ( $actual !== $expected ) {
+			return self::failure(
+				'scan-utf8-mismatch',
+				'scan_utf8',
+				array(
+					'start'           => $start,
+					'max_bytes'       => $max_bytes,
+					'max_code_points' => $max_code_points,
+					'initial_has'     => $initial_has,
+					'got'             => $actual,
+					'expected'        => $expected,
+					'input_preview'   => self::preview( $input, $start ),
 				)
 			);
 		}
@@ -1560,6 +1714,131 @@ class Checks {
 
 		list( $offsets ) = self::reference_utf8_offsets_and_scrub( $window );
 		return count( $offsets ) - 1;
+	}
+
+	/**
+	 * @param int[] $offsets Boundary offsets from `reference_utf8_offsets_and_scrub()`.
+	 * @return array<int, array{0: int, 1: int|null, 2: int|null}> Start, max bytes, max code points.
+	 */
+	private static function scan_utf8_probes( array $offsets, int $byte_length, string $salt ): array {
+		$segment_count = count( $offsets ) - 1;
+		$probes        = array(
+			array( 0, null, null ),
+			array( 0, 0, null ),
+			array( 0, null, 0 ),
+			array( $byte_length, null, null ),
+			array( $byte_length, 1, 1 ),
+		);
+
+		foreach ( self::span_probe_indices( $segment_count, $salt . ':scan' ) as $segment_index ) {
+			$start     = $offsets[ $segment_index ];
+			$remaining = max( 0, $byte_length - $start );
+			$available = $segment_count - $segment_index;
+
+			$byte_limits = array( null, -1, 0, 1, min( 7, $remaining ), $remaining, $remaining + 1 );
+			if ( $segment_index < $segment_count ) {
+				$next_length   = $offsets[ $segment_index + 1 ] - $start;
+				$byte_limits[] = max( 0, $next_length - 1 );
+				$byte_limits[] = $next_length;
+				$byte_limits[] = $next_length + 1;
+			}
+			if ( $segment_index + 2 <= $segment_count ) {
+				$two_length    = $offsets[ $segment_index + 2 ] - $start;
+				$byte_limits[] = max( 0, $two_length - 1 );
+				$byte_limits[] = $two_length;
+			}
+
+			$point_limits = array( null, -1, 0, 1, 2, min( 7, $available ), $available, $available + 1 );
+
+			foreach ( array_values( array_unique( $byte_limits ) ) as $max_bytes ) {
+				$probes[] = array( $start, $max_bytes, null );
+			}
+
+			foreach ( array_values( array_unique( $point_limits ) ) as $max_code_points ) {
+				$probes[] = array( $start, null, $max_code_points );
+			}
+
+			foreach ( array( -1, 0, 1, min( 7, $remaining ), $remaining ) as $max_bytes ) {
+				foreach ( array( -1, 0, 1, min( 3, $available ) ) as $max_code_points ) {
+					$probes[] = array( $start, $max_bytes, $max_code_points );
+				}
+			}
+		}
+
+		$hash = hash( 'sha256', $salt . ':scan-random', true );
+		for ( $i = 0; $i < 4; $i++ ) {
+			$start_index     = ord( $hash[ $i ] ) % ( $segment_count + 1 );
+			$start           = $offsets[ $start_index ];
+			$remaining       = max( 0, $byte_length - $start );
+			$available       = $segment_count - $start_index;
+			$max_bytes       = ord( $hash[ $i + 4 ] ) % ( $remaining + 2 );
+			$max_code_points = ord( $hash[ $i + 8 ] ) % ( $available + 2 );
+			$probes[]        = array( $start, $max_bytes, $max_code_points );
+		}
+
+		$unique = array();
+		foreach ( $probes as $probe ) {
+			$unique[ json_encode( $probe ) ] = $probe;
+		}
+
+		return array_values( $unique );
+	}
+
+	/**
+	 * @return array{count: int, at: int, invalid_length: int, has_noncharacters: bool}
+	 */
+	private static function expected_scan_utf8( string $input, int $start, ?int $max_bytes, ?int $max_code_points ): array {
+		$byte_length       = strlen( $input );
+		$end               = min( $byte_length, $start + ( $max_bytes ?? PHP_INT_MAX ) );
+		$max_code_points   = $max_code_points ?? PHP_INT_MAX;
+		$at                = $start;
+		$count             = 0;
+		$has_noncharacters = false;
+
+		while ( $at < $end ) {
+			if ( $count >= $max_code_points ) {
+				return array(
+					'count'             => $count,
+					'at'                => $at,
+					'invalid_length'    => 0,
+					'has_noncharacters' => $has_noncharacters,
+				);
+			}
+
+			list( $segment_length, $valid ) = self::reference_utf8_segment( $input, $at );
+
+			if ( ! $valid ) {
+				return array(
+					'count'             => $count,
+					'at'                => $at,
+					'invalid_length'    => min( $segment_length, $end - $at ),
+					'has_noncharacters' => $has_noncharacters,
+				);
+			}
+
+			$character = substr( $input, $at, $segment_length );
+			list( $code_point ) = self::first_code_point_or_false( $character );
+			if ( is_int( $code_point ) && self::is_noncharacter_code_point( $code_point ) ) {
+				$has_noncharacters = true;
+			}
+
+			++$count;
+			$at += $segment_length;
+		}
+
+		return array(
+			'count'             => $count,
+			'at'                => $at,
+			'invalid_length'    => 0,
+			'has_noncharacters' => $has_noncharacters,
+		);
+	}
+
+	private static function is_noncharacter_code_point( int $code_point ): bool {
+		return (
+			( $code_point >= 0xFDD0 && $code_point <= 0xFDEF ) ||
+			0xFFFE === ( $code_point & 0xFFFE )
+		);
 	}
 
 	/**

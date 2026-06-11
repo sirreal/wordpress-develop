@@ -108,6 +108,7 @@ $real_targets = array(
 	'mb_ord'          => '_mb_ord',
 	'codepoint_span'  => '_wp_utf8_codepoint_span',
 	'mb_substr'       => '_mb_substr',
+	'scan_utf8'       => '_wp_scan_utf8',
 );
 
 /**
@@ -124,6 +125,35 @@ function broken_run( Oracles $oracles, array $real, array $vectors, array $overr
 			$seen[ $failure['check'] ] = true;
 		}
 	}
+	return array_keys( $seen );
+}
+
+/**
+ * Runs every battery vector through `Targets::resolve()` with a fault
+ * environment variable, proving the CLI fault selector names are wired.
+ *
+ * @return string[] Distinct check names observed.
+ */
+function fault_run( Oracles $oracles, array $vectors, string $fault ): array {
+	$previous_fault = getenv( 'ENCODING_FUZZ_FAULT' );
+	putenv( "ENCODING_FUZZ_FAULT={$fault}" );
+
+	try {
+		$checks = new Checks( $oracles, Targets::resolve() );
+		$seen   = array();
+		foreach ( $vectors as $bytes ) {
+			foreach ( $checks->run( $bytes ) as $failure ) {
+				$seen[ $failure['check'] ] = true;
+			}
+		}
+	} finally {
+		if ( false === $previous_fault ) {
+			putenv( 'ENCODING_FUZZ_FAULT' );
+		} else {
+			putenv( "ENCODING_FUZZ_FAULT={$previous_fault}" );
+		}
+	}
+
 	return array_keys( $seen );
 }
 
@@ -325,6 +355,41 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_substr' => Targets::mb_substr_force_utf8( ... ),
 ) );
 check( 'catches non-UTF-8 _mb_substr fallback drift', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3ae. Bounded scan that ignores max_bytes.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'scan_utf8' => Targets::scan_utf8_ignore_max_bytes( ... ),
+) );
+check( 'catches max_bytes-ignoring scan', in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3af. Bounded scan that leaks noncharacters from outside the scanned region.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'scan_utf8' => Targets::scan_utf8_noncharacters_leak( ... ),
+) );
+check( 'catches noncharacter-leaking scan', in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3ag. Bounded scan that misses noncharacters inside the scanned region.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'scan_utf8' => Targets::scan_utf8_miss_noncharacters( ... ),
+) );
+check( 'catches noncharacter-missing scan', in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3ah. Bounded scan whose ASCII fast path overruns max_code_points.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'scan_utf8' => Targets::scan_utf8_ascii_overrun( ... ),
+) );
+check( 'catches ASCII-overrunning scan', in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3ai. Bounded scan that preserves a stale noncharacter flag.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'scan_utf8' => Targets::scan_utf8_stale_noncharacters( ... ),
+) );
+check( 'catches stale noncharacter scan flag', in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+
+foreach ( array( 'scan-ignore-bytes', 'scan-nonchars-leak', 'scan-miss-nonchars', 'scan-ascii-overrun', 'scan-stale-nonchars' ) as $fault ) {
+	$seen = fault_run( $oracles, $battery_vectors, $fault );
+	check( "fault selector {$fault} is wired", in_array( 'scan-utf8-mismatch', $seen, true ), implode( ',', $seen ) );
+}
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.

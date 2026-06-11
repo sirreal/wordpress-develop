@@ -26,6 +26,11 @@ namespace EncodingFuzz;
  *   ENCODING_FUZZ_FAULT=count-invalid-bytes count treats invalid bytes individually
  *   ENCODING_FUZZ_FAULT=count-range-minus1  count stops one byte early in bounded ranges
  *   ENCODING_FUZZ_FAULT=count-ignore-offset count ignores the requested byte offset
+ *   ENCODING_FUZZ_FAULT=scan-ignore-bytes   scan ignores max_bytes
+ *   ENCODING_FUZZ_FAULT=scan-nonchars-leak  scan reports noncharacters outside scanned region
+ *   ENCODING_FUZZ_FAULT=scan-miss-nonchars  scan misses noncharacters inside scanned region
+ *   ENCODING_FUZZ_FAULT=scan-ascii-overrun  scan ASCII fast path overruns max_code_points
+ *   ENCODING_FUZZ_FAULT=scan-stale-nonchars scan leaves a stale noncharacter flag
  */
 class Targets {
 	/**
@@ -46,6 +51,7 @@ class Targets {
 			'mb_ord'          => '_mb_ord',
 			'codepoint_span'  => '_wp_utf8_codepoint_span',
 			'mb_substr'       => '_mb_substr',
+			'scan_utf8'       => '_wp_scan_utf8',
 		);
 
 		switch ( getenv( 'ENCODING_FUZZ_FAULT' ) ) {
@@ -123,6 +129,26 @@ class Targets {
 
 			case 'count-ignore-offset':
 				$targets['codepoint_count'] = self::codepoint_count_ignore_offset( ... );
+				break;
+
+			case 'scan-ignore-bytes':
+				$targets['scan_utf8'] = self::scan_utf8_ignore_max_bytes( ... );
+				break;
+
+			case 'scan-nonchars-leak':
+				$targets['scan_utf8'] = self::scan_utf8_noncharacters_leak( ... );
+				break;
+
+			case 'scan-miss-nonchars':
+				$targets['scan_utf8'] = self::scan_utf8_miss_noncharacters( ... );
+				break;
+
+			case 'scan-ascii-overrun':
+				$targets['scan_utf8'] = self::scan_utf8_ascii_overrun( ... );
+				break;
+
+			case 'scan-stale-nonchars':
+				$targets['scan_utf8'] = self::scan_utf8_stale_noncharacters( ... );
 				break;
 		}
 
@@ -314,5 +340,64 @@ class Targets {
 	 */
 	public static function codepoint_count_ignore_offset( string $text, ?int $byte_offset = 0, ?int $max_byte_length = PHP_INT_MAX ): int {
 		return _wp_utf8_codepoint_count( $text, 0, $max_byte_length );
+	}
+
+	/**
+	 * Deliberately broken scan: ignores the byte limit.
+	 */
+	public static function scan_utf8_ignore_max_bytes( string $bytes, int &$at, int &$invalid_length, ?int $max_bytes = null, ?int $max_code_points = null, ?bool &$has_noncharacters = null ): int {
+		return _wp_scan_utf8( $bytes, $at, $invalid_length, null, $max_code_points, $has_noncharacters );
+	}
+
+	/**
+	 * Deliberately broken scan: leaks noncharacters from outside the scanned
+	 * region into `$has_noncharacters`.
+	 */
+	public static function scan_utf8_noncharacters_leak( string $bytes, int &$at, int &$invalid_length, ?int $max_bytes = null, ?int $max_code_points = null, ?bool &$has_noncharacters = null ): int {
+		$count = _wp_scan_utf8( $bytes, $at, $invalid_length, $max_bytes, $max_code_points, $has_noncharacters );
+
+		if ( _wp_has_noncharacters_fallback( $bytes ) ) {
+			$has_noncharacters = true;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Deliberately broken scan: misses noncharacters inside the scanned
+	 * region.
+	 */
+	public static function scan_utf8_miss_noncharacters( string $bytes, int &$at, int &$invalid_length, ?int $max_bytes = null, ?int $max_code_points = null, ?bool &$has_noncharacters = null ): int {
+		$count             = _wp_scan_utf8( $bytes, $at, $invalid_length, $max_bytes, $max_code_points, $has_noncharacters );
+		$has_noncharacters = false;
+
+		return $count;
+	}
+
+	/**
+	 * Deliberately broken scan: the ASCII fast path consumes one extra code
+	 * point when a code point limit is supplied.
+	 */
+	public static function scan_utf8_ascii_overrun( string $bytes, int &$at, int &$invalid_length, ?int $max_bytes = null, ?int $max_code_points = null, ?bool &$has_noncharacters = null ): int {
+		if ( null !== $max_code_points && $at < strlen( $bytes ) && ord( $bytes[ $at ] ) <= 0x7F ) {
+			return _wp_scan_utf8( $bytes, $at, $invalid_length, $max_bytes, $max_code_points + 1, $has_noncharacters );
+		}
+
+		return _wp_scan_utf8( $bytes, $at, $invalid_length, $max_bytes, $max_code_points, $has_noncharacters );
+	}
+
+	/**
+	 * Deliberately broken scan: preserves a stale noncharacter flag instead
+	 * of resetting it for the current scan.
+	 */
+	public static function scan_utf8_stale_noncharacters( string $bytes, int &$at, int &$invalid_length, ?int $max_bytes = null, ?int $max_code_points = null, ?bool &$has_noncharacters = null ): int {
+		$initial_has = $has_noncharacters;
+		$count       = _wp_scan_utf8( $bytes, $at, $invalid_length, $max_bytes, $max_code_points, $has_noncharacters );
+
+		if ( true === $initial_has && ! (bool) $has_noncharacters ) {
+			$has_noncharacters = true;
+		}
+
+		return $count;
 	}
 }

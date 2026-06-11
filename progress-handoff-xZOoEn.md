@@ -77,3 +77,25 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-xZOoEn
   - Reviewer 2: satisfied after checking the new mutation modes through worker/replay/minimize.
   - Reviewer 3: satisfied after checking probe coverage, performance, docs/progress accuracy, and the smoke comment cleanup.
 - Commit: this step commit.
+
+### Step 4: bounded `_wp_scan_utf8()` properties
+
+- Status: done; included in the step 4 commit.
+- Prior step commit: `a0f6820eb1`.
+- Scope:
+  - Add direct `_wp_scan_utf8()` probes for `max_bytes`, `max_code_points`, negative limits, nonzero boundary starts, invalid spans, by-ref noncharacter flag reset, and scanned-region noncharacter reporting.
+  - Pin current scan semantics: valid multibyte characters that start before the byte limit are scanned whole, while invalid spans are bounded by `max_bytes`.
+  - Add mutation tests for ignored `max_bytes`, noncharacter leakage from outside the scanned region, missed noncharacters inside the scanned region, ASCII fast-path overrun of `max_code_points`, and stale noncharacter flags.
+- Verification:
+  - `php -l tools/encoding-fuzz/lib/Checks.php`
+  - `php -l tools/encoding-fuzz/lib/Targets.php`
+  - `php -l tools/encoding-fuzz/lib/Bootstrap.php`
+  - `php -l tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/tests/harness-smoke.php`
+  - `php tools/encoding-fuzz/worker.php --seed 1 --cases 200 --external none`
+  - `git diff --check`
+- Review gate: satisfied by 3 adversarial reviewers.
+  - Reviewer 1: initially found stale `has_noncharacters` and negative-bound gaps; satisfied after adding stale-true probes and negative limit probes.
+  - Reviewer 2: initially found missing false-negative noncharacter mutation coverage; satisfied after adding `scan-miss-nonchars` and selector wiring checks.
+  - Reviewer 3: satisfied after checking probe volume, performance, README mutation count/list, fault list, and progress ordering.
+- Commit: this step commit.
