@@ -4701,7 +4701,10 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * If the tag has no `class` attribute, one is created. If it already
 	 * has classes, the new name is appended after them; existing classes
-	 * are never removed, reordered, or re-spaced. Adding a class name the
+	 * are never removed, reordered, or re-spaced. This method only ever
+	 * adds — it never removes the `class` attribute. (Dropping the
+	 * attribute when its final class is removed is behavior of
+	 * {@see WP_HTML_Tag_Processor::remove_class}, not of this method.) Adding a class name the
 	 * tag already has is a no-op — no duplicate is appended. The
 	 * already-present check compares class names exactly, byte for byte:
 	 * adding `NOTE` to `class="note"` appends it, since those are
@@ -4817,6 +4820,9 @@ class WP_HTML_Tag_Processor {
 	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}. Every byte the
 	 * updates did not touch is returned exactly as it appeared in the
 	 * input — no re-encoding, normalization, or reformatting occurs.
+	 * Only attributes the API actually wrote are re-emitted (always
+	 * double-quoted); other attributes on the same tag, including
+	 * unquoted or single-quoted ones, keep their original bytes.
 	 * It is safe to call mid-scan and continue processing afterward.
 	 *
 	 * @since 6.2.0
