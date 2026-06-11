@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Tag_Processor with a template-based approach as documented. Created a template with the exact HTML structure needed, including empty attribute placeholders to preserve attribute order. Used set_attribute() to safely set the src and alt attributes with proper encoding of untrusted values. Used next_token() with get_token_type() to find the text placeholder inside figcaption, then set_modifiable_text() to replace it with the caption. Called get_updated_html() to retrieve the final encoded result.",
+  "confidence": 42
+}

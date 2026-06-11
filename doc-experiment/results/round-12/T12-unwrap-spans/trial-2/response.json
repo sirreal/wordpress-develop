@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment, then iterates through each token with next_token(). When a SPAN tag (opening or closing) is encountered, it skips that token using continue. All other tokens are serialized using serialize_token() and accumulated into the output string. The processor automatically handles normalization during serialization\u2014double-quoting attributes, closing optional tags, re-encoding text, and ensuring proper HTML structure. The normalize() method is called implicitly as part of the serialization process.",
+  "confidence": 78
+}

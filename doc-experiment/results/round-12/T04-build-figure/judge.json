@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Textbook execution of the documented 'Building markup from a template' pattern. Tag Processor is the correct choice for flat attribute + text edits (max processor score). Every method called (next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html) has a documented heading in html-tag-processor.md; no hallucinations, no _doing_it_wrong. Template includes empty src/alt attributes (preserves written order) and a '.' placeholder inside figcaption (so a #text node exists for set_modifiable_text). Single processor handles both edits, then get_updated_html() returns output. Guards next_tag with if. 6/6 pass. Confidence 92 is well-calibrated. Minor: does not guard the token-walk for the no-text case, but the controlled template guarantees the node, so this is not a real defect."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Same correct Tag Processor choice and same documented template pattern; 6/6 pass, no hallucinated or undocumented calls. Slightly less idiomatic than trial-1: inserts a redundant next_tag(array('tag_name'=>'figcaption')) before the token walk. It happens to be harmless because the figcaption's #text is the next #text token after the IMG anyway, but the extra positioning call is unnecessary and signals slight uncertainty about how next_token relates to the prior next_tag cursor. Both the array and string forms of next_tag it uses are documented. Confidence 72 reasonably reflects the added hedging."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 80,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all methods documented (no hallucinations, 6/6 pass), but non-idiomatic and reflects a real misconception: after setting attributes on the IMG, it calls get_updated_html() and constructs a SECOND WP_HTML_Tag_Processor over that output solely to set the caption text. Verified by probe that a single processor continues token-walking after set_attribute and yields the correct result, so the re-parse is pure waste (extra full parse + string copy) born of believing queued attribute edits prevent further traversal. Loses idiomatic-pattern points for not using one processor end-to-end as the documented template example shows. Confidence 42 is appropriately low and honest about the uncertainty."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 6 cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed) with zero _doing_it_wrong and zero trigger_error records. The encoding-sensitive cases (ampersand, quotes, angle brackets, the script-injection case) all passed because set_attribute and set_modifiable_text encode plain values automatically — the docs communicate this clearly in 'Building markup from a template' ('the API ... handles all of the necessary encoding') and in get_attribute ('The inverse holds for set_attribute, which accepts plain, unescaped values and encodes them as needed'). The two template rules in 'Building markup from a template' (include empty attributes to fix order; include placeholder text so a #text node exists for set_modifiable_text) directly prevented the two ways this task could silently fail: attributes emitted in sorted rather than source order, and an empty figcaption with no text node to replace. All three subjects internalized both rules. The docs did especially well here: the worked example at lines 166-182 is almost a one-to-one match for the task, the modifiable-text/get_token_type section enumerates '#text' precisely, and the 'special self-contained elements' material correctly steered subjects away from treating figcaption text as anything exotic. Near-misses in the explanations rather than the code: trial-3's belief that it had to re-parse the updated HTML into a fresh processor to continue editing text. The probe confirms a single processor keeps walking tokens after set_attribute, so this was a documentation-shaped gap, not a code bug — see doc_gaps. Trial-2's redundant next_tag('figcaption') is a milder version of the same uncertainty about how next_token's cursor relates to a preceding next_tag and to queued edits.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' section (and/or set_attribute method)",
+      "problem": "The template example shows set_attribute calls followed by a next_token text-walk on the SAME processor, but never states explicitly that queued attribute edits do NOT consume or invalidate the cursor — you may continue scanning tokens and call set_modifiable_text afterward, all on one processor, and read everything back at the end with get_updated_html(). Trial-3 missed this and re-parsed get_updated_html() into a second processor purely to edit the caption (a wasteful full re-parse), and trial-2 inserted a redundant next_tag to re-anchor before walking. Both behaviors trace to the doc not asserting that edits are queued, non-destructive to traversal, and applied lazily.",
+      "suggestion": "Add one sentence near the template example or in set_attribute: 'Attribute and text edits are queued, not applied immediately; they do not move or invalidate the scan cursor. A single processor can find a tag, set its attributes, continue with next_tag()/next_token() to later tokens, edit those too, and finally read the combined result once with get_updated_html(). Re-parsing get_updated_html() into a new processor is never required to make further edits.'"
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html()",
+      "problem": "The get_updated_html() heading exists and is referenced from the template example, but (per the visible portion) its own entry does not emphasize that it can be called once at the end to capture ALL queued edits across multiple tags/tokens, nor that calling it mid-stream is allowed but unnecessary. This ambiguity contributed to trial-3 calling it mid-function and then rebuilding a processor.",
+      "suggestion": "In get_updated_html()'s description, state that it returns the document with every queued update applied so far and is normally called a single time after all edits are made; calling it does not reset the processor, and there is no need to re-instantiate a processor to keep editing."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — 'Tokens and finer-grained processing' / set_modifiable_text",
+      "problem": "The recurring 'walk next_token() until get_token_type() === \"#text\" then break' idiom appears in the template example but the docs never note what happens if no #text node exists (empty element) — set_modifiable_text would never be reached and the function would silently emit the placeholder/nothing. Subjects relied on their own controlled template so it didn't bite here, but a generalizable caution is missing.",
+      "suggestion": "Add a short note to set_modifiable_text (or the template section): when targeting an element's text, ensure the element actually contains a text token before this loop — an empty element yields no #text token, so include placeholder text in templates (as rule 2 already says) and, when walking untrusted input, handle the loop completing without a match rather than assuming a #text node is always present."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to scan for A tags with the tag_name query, checks for href attribute presence using get_attribute (which returns null only if the attribute doesn't exist), and sets target=\"_blank\" using set_attribute when href is present. Returns the modified HTML via get_updated_html(), which preserves byte-for-byte accuracy for all other content.",
+  "confidence": 95
+}

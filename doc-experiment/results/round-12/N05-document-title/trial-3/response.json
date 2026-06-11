@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_full_parser() to properly parse the complete HTML document, then calls next_tag( array( 'tag_name' => 'title' ) ) to find the TITLE element. Once matched on TITLE, get_modifiable_text() is called to extract the text content with character references already decoded (TITLE is a special element where plaintext content has character references decoded according to HTML spec). Returns null if no processor is created or no TITLE tag is found, otherwise returns the title text (empty string if TITLE exists but is empty).",
+  "confidence": 92
+}

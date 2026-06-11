@@ -2,6 +2,23 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 12 — Haiku, checkpoint: held-out at new high
+
+**All-19 96.05 / train 97.39 / held-out 91.04 (new high; was 88.79 at
+round 9, 87.38 at the round-2 baseline).** N05 +12.4 → 70.6: two
+perfect trials at last (the walk-path RCDATA note generalized); its
+remaining failure is a NEW, narrower gap — a trial hallucinated
+WP_HTML_Tag_Processor::create_fragment() (the factory exists only on
+the HTML Processor). That construction-asymmetry gap has only ever
+been flagged from held-out, so no edit — monitoring for train
+evidence. T08 had one 1/8 relapse (implied-TBODY depth surprises);
+T06 trials add needless is_tag_closer() guards.
+
+Round-13 hypotheses (committed): the skip-default's consequence stated
+affirmatively (no closer guard needed after plain next_tag()); implied
+elements appear in walks (synthesized TBODY verified), anchor on
+matched depth rather than absolute numbers.
+
 ## Round 11 — Haiku, equality-case fix lands; asymptote territory
 
 **Train 98.28 (within noise of round-10's 98.70).** T03 +5.2 → 98.9

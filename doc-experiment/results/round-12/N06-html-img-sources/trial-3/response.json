@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to properly parse the HTML according to HTML5 semantics, which ensures browser-compatible tag recognition. It iterates through all IMG tags using next_tag(), checks that the tag is in the 'html' namespace (not 'svg', which would be SVG <image> elements), retrieves the decoded src attribute value via get_attribute(), and only includes non-empty string values. The processor automatically handles attribute decoding, so the returned values are ready to use.",
+  "confidence": 82
+}

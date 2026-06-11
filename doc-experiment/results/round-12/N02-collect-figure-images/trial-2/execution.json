@@ -1,0 +1,116 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-12/N02-collect-figure-images/trial-2/candidate.php",
+    "function": "collect_figure_images",
+    "passed": 8,
+    "total": 8,
+    "cases": [
+        {
+            "id": "in-and-out",
+            "status": "pass",
+            "expected": [
+                "in.jpg"
+            ],
+            "actual": [
+                "in.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "nested-depth",
+            "status": "pass",
+            "expected": [
+                "deep.jpg"
+            ],
+            "actual": [
+                "deep.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "multiple-figures",
+            "status": "pass",
+            "expected": [
+                "a.jpg",
+                "b.jpg",
+                "c.jpg"
+            ],
+            "actual": [
+                "a.jpg",
+                "b.jpg",
+                "c.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-figures",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-src-skipped",
+            "status": "pass",
+            "expected": [
+                "yes.jpg"
+            ],
+            "actual": [
+                "yes.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entity-decoded-src",
+            "status": "pass",
+            "expected": [
+                "/i?a=1&b=2"
+            ],
+            "actual": [
+                "/i?a=1&b=2"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "figcaption-sibling",
+            "status": "pass",
+            "expected": [
+                "pic.jpg",
+                "cap.jpg"
+            ],
+            "actual": [
+                "pic.jpg",
+                "cap.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-figure",
+            "status": "pass",
+            "expected": [
+                "open.jpg",
+                "later.jpg"
+            ],
+            "actual": [
+                "open.jpg",
+                "later.jpg"
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

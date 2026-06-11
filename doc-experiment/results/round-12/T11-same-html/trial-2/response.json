@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor::normalize() which normalizes HTML fragments by parsing them fully according to HTML5 rules (handling optional tags, tag case, attribute quoting, character references, etc.) and serializing them back to a canonical form. If either fragment cannot be fully parsed/represented, normalize() returns null. Comparing the two normalized results determines structural equivalence.",
+  "confidence": 70
+}

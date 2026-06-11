@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment parser on the input HTML. If the processor cannot be created (due to unsupported HTML), it returns null and the function returns false. Otherwise, it attempts to serialize the parsed HTML using the documented serialize() method. If serialization succeeds (returns non-null), normalization is possible and the function returns true; if serialization fails with null, it returns false. This correctly identifies markup that the HTML API cannot normalize, such as misnested formatting elements requiring reconstruction.",
+  "confidence": 92
+}

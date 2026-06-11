@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to scan through all tokens in the HTML document until reaching the end. The paused_at_incomplete_token() method then returns whether the input ended mid-token (e.g., inside an unfinished tag, unterminated comment, or unclosed special element like SCRIPT). This handles all cases: incomplete tags like `<div class=\"x`, unterminated comments, unclosed SCRIPT/STYLE elements, but returns false for structurally unclosed elements like `<div>text` which are lexically complete.",
+  "confidence": 92
+}

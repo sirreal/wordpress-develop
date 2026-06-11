@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor following the template-building pattern documented in the API. It creates a literal HTML template with empty attribute values and placeholder text, then uses set_attribute() to safely set the src and alt attributes (which automatically handles encoding), and set_modifiable_text() to replace the placeholder text with the caption (also automatically encoded). The processor ensures attributes appear in the specified order by including them in the template, and get_updated_html() returns the final encoded result.",
+  "confidence": 72
+}

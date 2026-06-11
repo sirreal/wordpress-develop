@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML in fragment mode, then iterates through all tags looking for H1-H6 elements. For each heading opener encountered, it uses the documented pattern of collecting text tokens within that element by recording the depth and walking until the depth drops back out. The text content is concatenated from all #text tokens encountered, which automatically handles nested elements by extracting only their text content (not markup). The heading level is extracted numerically from the tag name.",
+  "confidence": 72
+}

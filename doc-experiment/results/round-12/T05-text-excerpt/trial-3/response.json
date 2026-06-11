@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to properly parse the HTML with full structural awareness, then iterates through all tokens with next_token(). It collects only #text type tokens (which get_modifiable_text() returns already-decoded), concatenating them in document order while tracking Unicode codepoints using mb_strlen(). When the limit would be exceeded, it truncates the current token using mb_substr() to exact codepoint boundaries without cutting multi-byte characters. SCRIPT and STYLE content is naturally excluded because they don't produce #text child tokens per HTML spec. Returns empty string for zero or negative max_codepoints.",
+  "confidence": 92
+}

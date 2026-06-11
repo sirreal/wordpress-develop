@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor, required for namespace awareness). Uses the documented 'custom query' pattern: bare next_tag() walking with manual get_tag()/get_namespace() checks. All four methods (create_fragment, next_tag, get_tag, get_namespace, get_attribute) are documented in the two markdown files; no hallucination. Null-check on create_fragment is idiomatic. Edge cases handled fully and explicitly: src guard is `null !== $src && '' !== $src && true !== $src`, correctly rejecting absent, empty, AND boolean-attribute src (the only trial besides 3 to handle the true case). The bare-next_tag()+manual-filter is slightly less idiomatic than passing a tag_name query, but is exactly the pattern the Tag Processor 'Custom queries' section endorses. Passed 7/7. Minor: get_namespace()==='html' guard is technically redundant given that SVG <image> is reported as tag IMAGE not IMG, but it is the correct, documented mechanism and a reasonable defensive choice."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 86,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and clean structure. Uses next_tag(array('tag_name'=>'img')) — the more idiomatic engine-side tag filter — plus a get_namespace() guard to skip SVG. All methods documented; no hallucination. Continue-on-non-html-namespace is clean. The one weakness: the src guard is `null !== $src && '' !== $src`, which omits the boolean-attribute case. get_attribute('src') returns boolean true for `<img src>` (verified by probe), so this code would push `true` into the result array for a bare src attribute — a latent edge-case bug the hidden tests do not exercise (no boolean-src fixture). The task's 'src has no value' wording arguably means a bare src should be skipped. Comment even says 'has a value' but the code does not enforce it. Passed 7/7. Docked on edge-case handling (max-15 bucket) relative to trials 1 and 3."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three and equivalent to the reference's attribute guard. Correct processor; idiomatic next_tag('img') (passed as array tag_name) plus get_namespace()==='html' to exclude SVG. All methods documented; no hallucination. Edge cases fully correct: `is_string( $src ) && '' !== $src` rejects null, true (boolean attr), and empty string in one expression — matches the reference exactly. The inline comment about boolean true shows the author understood the get_attribute() return-type contract from the docs. Null-check on create_fragment present. Highest self-reported confidence (82) and it is warranted. Passed 7/7."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 with zero _doing_it_wrong records. The docs were sufficient for this task. What worked: (1) The WP_HTML_Processor 'HTML Support' / 'Supported elements' section steered all three subjects to the structural processor rather than the lexical Tag Processor — essential here, because only the structural processor applies HTML5 tree-construction semantics (the <image>->IMG rename, SVG namespace assignment, and the img-breaks-out-of-svg adoption rule that the three 'tricky' fixtures depend on). (2) get_namespace()'s documented return contract ('One of \\\"html\\\", \\\"math\\\", or \\\"svg\\\"') gave every subject a reliable, correct mechanism to exclude SVG <image>; all three converged on it independently. (3) get_attribute()'s documented tri-state return (null absent / true boolean / decoded string, with '' for present-but-empty) let subjects write correct src guards.\\n\\nNear-misses in reasoning, not caught by the tests: (a) None of the three explanations articulates WHY the namespace check is what makes the SVG exclusion work at the parser level — they assert 'SVG <image> is in the svg namespace' but none connects this to the fact that the HTML parser RENAMES <image> to IMG only in HTML content while leaving it as IMAGE in foreign content. The docs never state the <image>->img rename explicitly (it is only implied by get_tag()'s 'certain tags be reprocessed with a different tag name'), so the subjects got the right answer by a slightly hand-wavy route. (b) The trickiest fixture, img-inside-svg-breaks-out (`<svg><img src></svg>` -> the IMG escapes foreign content into HTML namespace), is a pure HTML5 tree-construction subtlety. All trials passed it for free because they trusted the processor, but none of the explanations shows awareness that an IMG textually inside <svg> lands in the HTML namespace — they would likely have been surprised. The docs give no example of this 'breaking out' behavior; subjects succeeded by delegating to the parser rather than by understanding. (c) Trial 2's src guard has a latent boolean-attribute bug (would emit `true` for `<img src>`); it passed only because no fixture exercises a valueless boolean src. The docs DO document this return value (next to get_attribute), so this is a subject oversight, not a doc gap, but it shows the boolean-true case is easy to miss when reading quickly.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_namespace() and the class-level 'HTML Support' / foreign-content discussion",
+      "problem": "get_namespace() is documented only as a one-line return-type contract ('One of \"html\", \"math\", or \"svg\"'). There is no worked example showing that this is THE documented way to distinguish an HTML element from a same-spelled foreign-content element, nor any statement that SVG/MathML subtrees place their descendants in a non-html namespace. Subjects had to infer the whole SVG-exclusion strategy from a bare enum. They succeeded, but blindly.",
+      "suggestion": "Add a short example to get_namespace() showing two elements that look alike but differ by namespace, e.g. an HTML element vs. its foreign-content counterpart inside <svg>, and one sentence stating that elements inside an <svg> or <math> subtree report that namespace. This generalizes to any 'select HTML elements but not their foreign-content lookalikes' task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() (the 'certain tags be reprocessed with a different tag name' note)",
+      "problem": "get_tag() states that the HTML Processor may report a different tag name than the source spelling, but gives no concrete example of a tag that gets renamed. The <image>->IMG rename (and that this rename happens ONLY in HTML content, not in foreign content) is exactly the behavior three of the fixtures hinge on, yet a reader cannot learn it from the docs — they can only trust that 'something' is normalized.",
+      "suggestion": "List one or two concrete renamed-tag examples in get_tag(), e.g. that an <image> start tag in HTML content is treated as IMG. Note that this normalization is namespace-sensitive (it does not apply inside SVG/MathML). This teaches the general principle that get_tag() returns the parsed/normalized name, not the byte-for-byte source name."
+    },
+    {
+      "location": "WP_HTML_Processor 'HTML Support' / foreign-content section",
+      "problem": "The docs mention SVG/MathML foreign content is supported but never illustrate the tree-construction consequence that an element textually nested inside <svg> can be relocated into the HTML namespace (e.g. an IMG inside <svg> breaks out). A reader has no way to predict the img-inside-svg-breaks-out outcome from the documentation; correctness here depends entirely on delegating to the parser.",
+      "suggestion": "Add a brief note (or breadcrumbs example) showing that certain HTML elements appearing inside foreign content are popped back into HTML context by the parser, so their get_namespace() is 'html' and their breadcrumbs do not include SVG. This warns readers not to assume textual nesting equals DOM nesting for foreign content."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() return-value contract (inherited/referenced by WP_HTML_Processor)",
+      "problem": "The tri-state return (null / true / decoded string, with '' for present-but-empty) is documented correctly, but the boolean-true case for a valueless attribute is easy to overlook: trial 2 wrote `null !== $src && '' !== $src` and would emit a PHP `true` into a string array for `<img src>`. The doc text mentions boolean attributes return true but does not flag the common foot-gun of a guard that checks only null and '' .",
+      "suggestion": "In get_attribute(), add a one-line caution next to the boolean-attribute note: when filtering for 'has a real string value', test with is_string() (or explicitly exclude true), because a valueless boolean attribute returns true, not '' or null. This is a general guard pattern, not specific to this task."
+    }
+  ]
+}

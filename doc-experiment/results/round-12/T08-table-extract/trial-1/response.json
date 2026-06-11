@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This revised implementation uses a state machine approach with WP_HTML_Processor. It creates a processor in fragment mode, finds the first TABLE element, then walks through all tokens inside the table using next_token(). It tracks state with $in_cell and $current_row flags to accumulate text from #text tokens (via get_modifiable_text() which returns character-decoded text) into cells, and flushes rows when TR closers are encountered. This handles optional closing tags naturally since the HTML Processor generates closing tokens for implicitly closed elements as per the HTML specification.",
+  "confidence": 68
+}
