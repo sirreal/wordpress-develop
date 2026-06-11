@@ -260,6 +260,12 @@ assert.equal(fragmentMetaProcessor.next_tag("meta"), true);
 assert.equal(fragmentMetaProcessor.get_last_error(), null);
 fragmentMetaProcessor.destroy();
 
+const plaintextProcessor = WP_HTML_Processor.create_fragment("<plaintext>raw <b>markup</b>");
+assert.equal(plaintextProcessor.next_tag("plaintext"), false);
+assert.equal(plaintextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(plaintextProcessor.get_unsupported_exception().message, "Cannot process PLAINTEXT elements.");
+plaintextProcessor.destroy();
+
 const processorBookmarkLimit = WP_HTML_Processor.create_fragment("<div>");
 assert.equal(processorBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {

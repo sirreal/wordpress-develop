@@ -1766,6 +1766,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.current_namespace === "html" && tagName === "PLAINTEXT") {
+				this.#bailUnsupported("Cannot process PLAINTEXT elements.");
+				return;
+			}
+
 			this.#applySimpleHtmlSemanticClosures(tagName);
 			if (
 				allowVirtualPreclosures &&
