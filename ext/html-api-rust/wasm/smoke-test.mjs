@@ -1727,6 +1727,11 @@ for (const [html, context, expected] of [
 	["</frameset><frame>", "<frameset>", "<frame>"],
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
+	[
+		'<template><form><input name="q"></form><div>second</div></template>',
+		"<template>",
+		'<template><form><input name="q"></form><div>second</div></template>',
+	],
 	["<option>one", "<select>", "<option>one</option>"],
 	["<input><option>", "<select>", "<option></option>"],
 	["<keygen><option>", "<select>", "<option></option>"],
