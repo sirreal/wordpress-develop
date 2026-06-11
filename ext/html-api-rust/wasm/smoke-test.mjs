@@ -1420,6 +1420,7 @@ processorZeroBreadcrumbMatchOffset.destroy();
 for (const [html, expectedBreadcrumbs] of [
 	["<p><p><p><p><article target>", ["HTML", "BODY", "ARTICLE"]],
 	["<li><li><blockquote><li target>", ["HTML", "BODY", "LI", "BLOCKQUOTE", "LI"]],
+	["<li><address><li target>", ["HTML", "BODY", "LI"]],
 	["<dt><dt><div><dt target>", ["HTML", "BODY", "DT"]],
 	["<dd><dd><p><button><p><dd target>", ["HTML", "BODY", "DD", "P", "BUTTON", "DD"]],
 ]) {

@@ -407,7 +407,6 @@ const DEFAULT_SCOPE_BOUNDARIES = new Set([
 ]);
 
 const LIST_ITEM_SCOPE_BOUNDARIES = new Set([
-	"ADDRESS",
 	"APPLET",
 	"BLOCKQUOTE",
 	"BUTTON",
