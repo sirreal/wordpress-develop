@@ -199,7 +199,7 @@ for ( $i = 0; $i < $total; $i++ ) {
 	}
 }
 check( 'all 10 strategies appear', 10 === count( $strategies ), implode( ',', array_keys( $strategies ) ) );
-check( 'both contexts appear', isset( $contexts['text'], $contexts['attribute'] ), implode( ',', array_keys( $contexts ) ) );
+check( 'generated cases run both contexts', array( 'both' ) === array_keys( $contexts ), implode( ',', array_keys( $contexts ) ) );
 check( 'generated payloads are oracle-safe', 0 === $unsafe, (string) $unsafe );
 
 $fuzz_failures = 0;
@@ -1336,8 +1336,8 @@ check(
 	'runner preserves same-seed artifacts with different signatures',
 	1 === $different_signature_first['code'] &&
 		1 === $different_signature_second['code'] &&
-		in_array( 'decode-mismatch:text,reader-decode-mismatch:text', $different_signature_seen, true ) &&
-		in_array( 'reader-decode-mismatch:text', $different_signature_seen, true ),
+		in_array( 'decode-mismatch:text,reader-decode-mismatch:text,decode-mismatch:attribute,reader-decode-mismatch:attribute', $different_signature_seen, true ) &&
+		in_array( 'reader-decode-mismatch:text,reader-decode-mismatch:attribute', $different_signature_seen, true ),
 	$different_signature_first['stdout'] . $different_signature_first['stderr'] . $different_signature_second['stdout'] . $different_signature_second['stderr'] . json_encode( $different_signature_seen )
 );
 remove_tree( $different_signature_dir );

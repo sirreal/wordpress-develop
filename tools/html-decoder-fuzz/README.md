@@ -39,7 +39,7 @@ later extension.
 
 ## Checks
 
-For each generated `(context, payload)` case:
+For each generated payload, the fuzzer runs both text and attribute contexts:
 
 1. Compare `decode_text_node()` or `decode_attribute()` to the DOM oracle.
 2. Rebuild the decoded string with repeated `read_character_reference()` calls
@@ -56,8 +56,13 @@ to `&amp;`.
 
 ## Generator
 
-Every case is determined by `(seed, case index)`. The generator uses the real
-generated named-reference map, with weighted strategies for:
+Every case is determined by `(seed, case index)`. Generated cases run in both
+text and attribute contexts so the same payload exercises semicolonless and
+attribute-disambiguation differences side by side. The generator preserves the
+former context PRNG draw to keep existing seed-to-payload replay stable.
+
+The generator uses the real generated named-reference map, with weighted
+strategies for:
 
 - exact named references
 - semicolonless legacy references

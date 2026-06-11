@@ -57,7 +57,8 @@ class Generator {
 	 * @return array{context: string, strategy: string, payload: string}
 	 */
 	public function generate(): array {
-		$context  = $this->prng->chance( 50 ) ? 'text' : 'attribute';
+		// Preserve seed-to-payload mapping from the former one-context lane.
+		$this->prng->chance( 50 );
 		$strategy = $this->prng->weighted(
 			array(
 				'plain-no-amp'           => 8,
@@ -77,7 +78,7 @@ class Generator {
 		$payload = $this->$method();
 
 		return array(
-			'context'  => $context,
+			'context'  => 'both',
 			'strategy' => $strategy,
 			'payload'  => self::trim_to_safe_max( $payload, $this->max_bytes ),
 		);
