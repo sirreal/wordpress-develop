@@ -2502,6 +2502,29 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (this.current_namespace === "html" && (tagName === "OPTION" || tagName === "OPTGROUP")) {
+				const topIndex = this.open_elements.length - 1;
+				if (
+					topIndex >= 0 &&
+					this.open_elements[topIndex] === "OPTION" &&
+					this.open_element_namespaces[topIndex] === "html"
+				) {
+					this.#queueVirtualPopsFrom(topIndex);
+					return true;
+				}
+
+				if (
+					tagName === "OPTGROUP" &&
+					topIndex >= 0 &&
+					this.open_elements[topIndex] === "OPTGROUP" &&
+					this.open_element_namespaces[topIndex] === "html" &&
+					this.#hasOpenHtmlElement("SELECT")
+				) {
+					this.#queueVirtualPopsFrom(topIndex);
+					return true;
+				}
+			}
+
 			if (P_CLOSING_START_TAGS.has(tagName)) {
 				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
 				if (paragraphIndex !== -1) {
@@ -2782,6 +2805,13 @@ export function createHtmlApi(wasm) {
 		}
 
 		#applySimpleHtmlSemanticClosures(tagName) {
+			if (this.current_namespace === "html" && (tagName === "OPTION" || tagName === "OPTGROUP")) {
+				this.#popCurrentHtmlElementIf("OPTION");
+				if (tagName === "OPTGROUP" && this.#hasOpenHtmlElement("SELECT")) {
+					this.#popCurrentHtmlElementIf("OPTGROUP");
+				}
+			}
+
 			if (P_CLOSING_START_TAGS.has(tagName)) {
 				this.#closePInButtonScope();
 			}
@@ -2850,6 +2880,29 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return false;
+		}
+
+		#popCurrentHtmlElementIf(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_elements[topIndex] !== tagName ||
+				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				return false;
+			}
+
+			this.open_elements.pop();
+			this.open_element_namespaces.pop();
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
+			return true;
+		}
+
+		#hasOpenHtmlElement(tagName) {
+			return this.open_elements.some((nodeName, index) => (
+				nodeName === tagName &&
+				this.open_element_namespaces[index] === "html"
+			));
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {

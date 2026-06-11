@@ -679,6 +679,24 @@ assert.equal(brEndTagProcessor.get_attribute_names_with_prefix(""), null);
 assert.deepEqual(brEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "BR"]);
 brEndTagProcessor.destroy();
 
+const selectOptionProcessor = WP_HTML_Processor.create_fragment("<select><option>one<option>two</select>");
+assert.equal(selectOptionProcessor.next_tag({ breadcrumbs: ["SELECT", "OPTION"], match_offset: 2 }), true);
+assert.deepEqual(selectOptionProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "OPTION"]);
+selectOptionProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<select><option>one<option>two</select>"),
+	"<select><option>one</option><option>two</option></select>",
+);
+
+const selectOptgroupProcessor = WP_HTML_Processor.create_fragment("<select><optgroup><option>one<optgroup><option>two</select>");
+assert.equal(selectOptgroupProcessor.next_tag({ breadcrumbs: ["SELECT", "OPTGROUP"], match_offset: 2 }), true);
+assert.deepEqual(selectOptgroupProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT", "OPTGROUP"]);
+selectOptgroupProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<select><optgroup><option>one<optgroup><option>two</select>"),
+	"<select><optgroup><option>one</option></optgroup><optgroup><option>two</option></optgroup></select>",
+);
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");
