@@ -23,7 +23,7 @@ export interface NextTagQuery {
 	class_name?: string | null;
 	tag_closers?: "visit" | "skip";
 	visit_closers?: boolean;
-	match_offset?: number | null;
+	match_offset?: number | string | boolean | null;
 	breadcrumbs?: string[];
 }
 
@@ -103,7 +103,7 @@ export interface WP_HTML_Tag_Processor {
 	get_token_type(): TokenType | null;
 	paused_at_incomplete_token(): boolean;
 	subdivide_text_appropriately(): boolean;
-	get_modifiable_text(): string | null;
+	get_modifiable_text(): string;
 	set_modifiable_text(text: string): boolean;
 	get_comment_type(): CommentType | null;
 	get_doctype_info(): WP_HTML_Doctype_Info | null;
@@ -188,8 +188,8 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 	readonly ERROR_UNSUPPORTED: "unsupported";
 	readonly ERROR_EXCEEDED_MAX_BOOKMARKS: "exceeded-max-bookmarks";
 	readonly CONSTRUCTOR_UNLOCK_CODE: string;
-	create_fragment(html: string, context?: string): WP_HTML_Processor;
-	create_full_parser(html: string): WP_HTML_Processor;
+	create_fragment(html: string, context?: string, encoding?: string): WP_HTML_Processor | null;
+	create_full_parser(html: string, encoding?: string): WP_HTML_Processor | null;
 	normalize(html: string): string | null;
 	is_void(tagName: string): boolean;
 	is_special(tagName: string | SpecialTagInput): boolean;
