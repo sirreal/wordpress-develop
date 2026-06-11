@@ -20,7 +20,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 13: add mutation/corpus mode.
 - [x] Tier 2 item 14: add reader compositionality invariant.
 - [x] Tier 2 item 15: add case-mangled valid-name near-misses.
-- [ ] Tier 3 items 16-26.
+- [x] Tier 3 item 16: assert null reader matches leave `match_byte_length` untouched.
+- [ ] Tier 3 items 17-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -106,6 +107,11 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=skip-c1-remap php tools/html-decoder-fuzz/worker.php --seed 2 --start-case 36 --cases 1 --progress-every 1`, `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 57 --cases 1 --progress-every 1`, and `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 97 --cases 1 --progress-every 1` reported the expected findings after the weighted strategy shifted generated-case mappings.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding case-mangled valid-name near-misses.
 - 2026-06-11: After reviewer feedback, case-mangled smoke coverage now directly invokes `case_mangle_name_base()` against lowercase and uppercase source names; `php -l tools/html-decoder-fuzz/lib/Generator.php`, `php -l tools/html-decoder-fuzz/tests/harness-smoke.php`, a direct helper probe reporting `errors=0`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
+- 2026-06-11: Adding the null-return `match_byte_length` sentinel invariant exposed a real `WP_HTML_Decoder::read_character_reference()` issue for unmatched named references in `data` context; `WP_Token_Map::read_token()` returns `null`, and the decoder now checks for `null` instead of `false`.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, `tests/harness-smoke.php`, `class-wp-html-decoder.php`, and `wpHtmlDecoder.php` after adding the null-return match-length invariant and decoder regression test.
+- 2026-06-11: `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php` passed with the unmatched named-reference match-length regression coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-null-mutates-match-length php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 7 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-null-match-fault-check` reported `reader-mutated-match-length-on-null` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after fixing the decoder and adding the invariant.
 
 ## Review Log
 
@@ -169,3 +175,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Anscombe: APPROVE, generator semantics after independent generated-candidate and raw-helper probes.
   - Cicero: APPROVE, smoke and deterministic fault fixture coverage after direct lowercase/uppercase helper checks replaced ambiguous source inference.
   - Parfit: APPROVE, integration/docs/progress scope and generated-case mapping drift notes.
+- Tier 3 item 16:
+  - Singer: APPROVE, production decoder semantics and PHPUnit regression coverage.
+  - Darwin: APPROVE, fuzzer invariant, fault target, and smoke pipeline coverage.
+  - Harvey: APPROVE, integration/docs/progress scope including the decoder fix exposed by the invariant.

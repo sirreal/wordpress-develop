@@ -7,6 +7,7 @@ namespace HtmlDecoderFuzz;
 class Checks {
 	public const PREVIEW_BYTES = 64;
 	private const ATTRIBUTE_SEARCH_PREFIX_BYTES = 32;
+	private const MATCH_BYTE_LENGTH_SENTINEL = '__html_decoder_fuzz_match_length_unset__';
 
 	private Oracles $oracles;
 
@@ -210,7 +211,7 @@ class Checks {
 				break;
 			}
 
-			$match_byte_length = null;
+			$match_byte_length = self::MATCH_BYTE_LENGTH_SENTINEL;
 			try {
 				$chunk = ( $this->targets['read_character_reference'] )( $decoder_context, $payload, $amp_at, $match_byte_length );
 			} catch ( \Throwable $error ) {
@@ -227,6 +228,19 @@ class Checks {
 			}
 
 			if ( null === $chunk ) {
+				if ( self::MATCH_BYTE_LENGTH_SENTINEL !== $match_byte_length ) {
+					$failures[] = self::failure(
+						'reader-mutated-match-length-on-null',
+						$context,
+						array(
+							'context'                => $context,
+							'at'                     => $amp_at,
+							'match_byte_length'      => $match_byte_length,
+							'match_byte_length_type' => gettype( $match_byte_length ),
+						)
+					);
+					break;
+				}
 				$at = $amp_at + 1;
 				continue;
 			}
