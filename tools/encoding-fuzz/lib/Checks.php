@@ -14,8 +14,8 @@ namespace EncodingFuzz;
  *  - valid ⟺ scrub returns the input unchanged
  *  - scrub output is always valid UTF-8
  *  - scrub is idempotent
- *  - `_wp_utf8_codepoint_count()` equals `mb_strlen()` of the scrubbed
- *    text (each maximal subpart counts as one code point)
+ *  - `_wp_utf8_codepoint_count()` equals the independent maximal-subpart
+ *    count for whole strings and bounded byte windows
  *  - `_wp_utf8_codepoint_span()` reports the original byte span for a
  *    requested number of code points, with invalid maximal subparts
  *    counted as one code point and `found_code_points` reporting the
@@ -263,30 +263,9 @@ class Checks {
 			}
 		}
 
-		// 6. Code point count agrees with the scrubbed length.
-		try {
-			$count    = ( $this->targets['codepoint_count'] )( $input );
-			$expected = mb_strlen( $ref_scrub, 'UTF-8' );
-			if ( $count !== $expected ) {
-				$failures[] = self::failure(
-					'codepoint-count-mismatch',
-					'codepoint_count',
-					array(
-						'got'      => $count,
-						'expected' => $expected,
-					)
-				);
-			}
-		} catch ( \Throwable $error ) {
-			$failures[] = self::failure(
-				'target-exception',
-				'codepoint_count',
-				array(
-					'target'  => 'codepoint_count',
-					'message' => $error->getMessage(),
-					'class'   => get_class( $error ),
-				)
-			);
+		// 6. Code point count agrees with whole-string and bounded-window references.
+		foreach ( $this->check_codepoint_count( $input, $ref_scrub ) as $failure ) {
+			$failures[] = $failure;
 		}
 
 		// 7. Code point span agrees with valid-text and maximal-subpart references.
@@ -321,6 +300,114 @@ class Checks {
 		}
 
 		return $failures;
+	}
+
+	/**
+	 * Tests `_wp_utf8_codepoint_count()` over whole strings and bounded byte
+	 * windows. Byte windows are counted as standalone strings: if a window
+	 * ends inside a valid multibyte character or invalid maximal subpart,
+	 * the truncated prefix counts as one invalid maximal subpart.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_codepoint_count( string $input, string $ref_scrub ): array {
+		if ( ! isset( $this->targets['codepoint_count'] ) ) {
+			return array();
+		}
+
+		list( $offsets, $reference_scrub ) = self::reference_utf8_offsets_and_scrub( $input );
+		if ( $reference_scrub !== $ref_scrub ) {
+			return array(
+				self::failure(
+					'count-reference-disagreement',
+					'maximal-subpart-reference',
+					self::diff_detail( 'maximal-subpart-reference', $ref_scrub, $reference_scrub )
+				),
+			);
+		}
+
+		$failures = array();
+		$whole    = $this->assert_codepoint_count(
+			$input,
+			0,
+			null,
+			count( $offsets ) - 1,
+			'whole-string'
+		);
+
+		if ( null !== $whole ) {
+			$failures[] = $whole;
+		}
+
+		foreach ( self::codepoint_count_probes( $offsets, strlen( $input ), $input ) as $probe ) {
+			list( $byte_offset, $max_byte_length ) = $probe;
+			$expected                             = self::expected_codepoint_count_window( $input, $byte_offset, $max_byte_length );
+
+			$failure = $this->assert_codepoint_count(
+				$input,
+				$byte_offset,
+				$max_byte_length,
+				$expected,
+				'bounded-window'
+			);
+
+			if ( null !== $failure ) {
+				$failures[] = $failure;
+			}
+		}
+
+		return $failures;
+	}
+
+	private function assert_codepoint_count( string $input, int $byte_offset, ?int $max_byte_length, int $expected, string $property ): ?array {
+		try {
+			$actual = null === $max_byte_length
+				? ( $this->targets['codepoint_count'] )( $input )
+				: ( $this->targets['codepoint_count'] )( $input, $byte_offset, $max_byte_length );
+		} catch ( \Throwable $error ) {
+			return self::failure(
+				'target-exception',
+				'codepoint_count',
+				array(
+					'target'          => 'codepoint_count',
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_byte_length' => $max_byte_length,
+					'message'         => $error->getMessage(),
+					'class'           => get_class( $error ),
+				)
+			);
+		}
+
+		if ( ! is_int( $actual ) ) {
+			return self::failure(
+				'codepoint-count-bad-return',
+				'codepoint_count',
+				array(
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_byte_length' => $max_byte_length,
+					'type'            => get_debug_type( $actual ),
+				)
+			);
+		}
+
+		if ( $actual !== $expected ) {
+			return self::failure(
+				'codepoint-count-mismatch',
+				'codepoint_count',
+				array(
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_byte_length' => $max_byte_length,
+					'got'             => $actual,
+					'expected'        => $expected,
+					'input_preview'   => self::preview( $input, max( 0, $byte_offset ) ),
+				)
+			);
+		}
+
+		return null;
 	}
 
 	/**
@@ -1386,6 +1473,93 @@ class Checks {
 		$end_index         = min( $start_index + $normalized_length, $total );
 
 		return substr( $input, $start_offset, $offsets[ $end_index ] - $start_offset );
+	}
+
+	/**
+	 * @param int[] $offsets Boundary offsets from `reference_utf8_offsets_and_scrub()`.
+	 * @return array<int, array{0: int, 1: int}> Byte offset and max byte length probes.
+	 */
+	private static function codepoint_count_probes( array $offsets, int $byte_length, string $salt ): array {
+		$segment_count = count( $offsets ) - 1;
+		$probes        = array(
+			array( -1, 0 ),
+			array( -1, 1 ),
+			array( -5, 10 ),
+			array( 0, -1 ),
+			array( 0, 0 ),
+			array( 0, $byte_length ),
+			array( 0, $byte_length + 1 ),
+			array( $byte_length, 0 ),
+			array( $byte_length, 1 ),
+			array( $byte_length + 1, 1 ),
+		);
+
+		foreach ( self::span_probe_indices( $segment_count, $salt . ':boundaries' ) as $segment_index ) {
+			$byte_offset = $offsets[ $segment_index ];
+			$remaining   = max( 0, $byte_length - $byte_offset );
+			$lengths     = array(
+				0,
+				1,
+				2,
+				3,
+				min( 7, $remaining ),
+				$remaining,
+				$remaining + 1,
+			);
+
+			if ( $segment_index < $segment_count ) {
+				$next_segment_length = $offsets[ $segment_index + 1 ] - $byte_offset;
+				$lengths[]           = max( 0, $next_segment_length - 1 );
+				$lengths[]           = $next_segment_length;
+				$lengths[]           = $next_segment_length + 1;
+			}
+
+			if ( $segment_index + 2 <= $segment_count ) {
+				$two_segment_length = $offsets[ $segment_index + 2 ] - $byte_offset;
+				$lengths[]          = max( 0, $two_segment_length - 1 );
+				$lengths[]          = $two_segment_length;
+			}
+
+			foreach ( $lengths as $length ) {
+				$probes[] = array( $byte_offset, $length );
+			}
+		}
+
+		foreach ( array( 0, 1, 2, intdiv( $byte_length, 2 ), max( 0, $byte_length - 1 ), $byte_length ) as $byte_offset ) {
+			$remaining = max( 0, $byte_length - $byte_offset );
+			foreach ( array( 0, 1, 2, min( 7, $remaining ), $remaining, $remaining + 1 ) as $length ) {
+				$probes[] = array( $byte_offset, $length );
+			}
+		}
+
+		$hash  = hash( 'sha256', $salt . ':count', true );
+		$range = max( 3, $byte_length + 2 );
+		for ( $i = 0; $i < 4; $i++ ) {
+			$byte_offset = ( ord( $hash[ $i ] ) % ( ( 2 * $range ) + 1 ) ) - $range;
+			$length      = ( ord( $hash[ $i + 4 ] ) % ( $byte_length + 8 ) ) - 2;
+			$probes[]    = array( $byte_offset, $length );
+		}
+
+		$unique = array();
+		foreach ( $probes as $probe ) {
+			$unique[ json_encode( $probe ) ] = $probe;
+		}
+
+		return array_values( $unique );
+	}
+
+	private static function expected_codepoint_count_window( string $input, int $byte_offset, int $max_byte_length ): int {
+		if ( $byte_offset < 0 || $max_byte_length < 0 ) {
+			return 0;
+		}
+
+		$window = substr( $input, $byte_offset, $max_byte_length );
+		if ( '' === $window ) {
+			return 0;
+		}
+
+		list( $offsets ) = self::reference_utf8_offsets_and_scrub( $window );
+		return count( $offsets ) - 1;
 	}
 
 	/**

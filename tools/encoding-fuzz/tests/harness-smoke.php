@@ -162,13 +162,31 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 ) );
 check( 'catches byte-dropping scrubber', in_array( 'scrub-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3f. Code point counter that counts invalid bytes individually.
+// 3f. Code point counter with a simple off-by-one drift on invalid input.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
-	'codepoint_count' => static fn( string $bytes ): int => _wp_utf8_codepoint_count( $bytes ) + ( wp_is_valid_utf8( $bytes ) ? 0 : 1 ),
+	'codepoint_count' => static fn( string $bytes, ?int $offset = 0, ?int $length = PHP_INT_MAX ): int => _wp_utf8_codepoint_count( $bytes, $offset, $length ) + ( wp_is_valid_utf8( $bytes ) ? 0 : 1 ),
 ) );
 check( 'catches off-by-one code point count', in_array( 'codepoint-count-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3g. Throwing target is reported, not fatal.
+// 3g. Code point counter that counts each byte in invalid maximal subparts.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_count' => Targets::codepoint_count_invalid_bytes( ... ),
+) );
+check( 'catches invalid-byte-counting code point count', in_array( 'codepoint-count-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3h. Bounded counter that stops one byte early at the range end.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_count' => Targets::codepoint_count_range_minus_one( ... ),
+) );
+check( 'catches range-end off-by-one code point count', in_array( 'codepoint-count-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3i. Bounded counter that ignores the byte offset.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_count' => Targets::codepoint_count_ignore_offset( ... ),
+) );
+check( 'catches byte-offset-ignoring code point count', in_array( 'codepoint-count-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3j. Throwing target is reported, not fatal.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'is_valid_fb' => static function ( string $bytes ): bool {
 		throw new \RuntimeException( 'boom' );
@@ -176,13 +194,13 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 ) );
 check( 'reports throwing target', in_array( 'target-exception', $seen, true ), implode( ',', $seen ) );
 
-// 3h. Encoder that confuses ISO-8859-1 with Windows-1252 (0x80 becomes '€').
+// 3k. Encoder that confuses ISO-8859-1 with Windows-1252 (0x80 becomes '€').
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_encode_fb' => static fn( string $bytes ): string => str_replace( "\xC2\x80", "\xE2\x82\xAC", _wp_utf8_encode_fallback( $bytes ) ),
 ) );
 check( 'catches cp1252-confused encoder', in_array( 'utf8-encode-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3i. Encoder that passes high bytes through raw (invalid UTF-8 output).
+// 3l. Encoder that passes high bytes through raw (invalid UTF-8 output).
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_encode_fb' => static fn( string $bytes ): string => $bytes,
 ) );
@@ -192,27 +210,27 @@ check(
 	implode( ',', $seen )
 );
 
-// 3j. Decoder that emits one '?' per invalid byte instead of per maximal
+// 3m. Decoder that emits one '?' per invalid byte instead of per maximal
 //     subpart (`E2 8C` becomes '??' instead of '?').
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_decode_fb' => Targets::decode_per_invalid_byte( ... ),
 ) );
 check( 'catches per-byte decoder', in_array( 'utf8-decode-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3k. Decoder that mangles a mappable code point on fully valid input.
+// 3n. Decoder that mangles a mappable code point on fully valid input.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_decode_fb' => static fn( string $bytes ): string => str_replace( "\xFC", "\xFD", _wp_utf8_decode_fallback( $bytes ) ),
 ) );
 check( 'catches decoder mangling valid input', in_array( 'utf8-decode-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3l. Decoder that drops U+0080 entirely; the encode→decode round trip
+// 3o. Decoder that drops U+0080 entirely; the encode→decode round trip
 //     must restore every input byte string exactly.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_decode_fb' => static fn( string $bytes ): string => str_replace( "\x80", '', _wp_utf8_decode_fallback( $bytes ) ),
 ) );
 check( 'catches round-trip violation', in_array( 'utf8-round-trip-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3m. Encoder that returns null (the fallbacks are untyped, so a broken
+// 3p. Encoder that returns null (the fallbacks are untyped, so a broken
 //     variant can return non-strings without throwing); must be reported,
 //     not silently skipped by every encode-side check.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
@@ -220,89 +238,89 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 ) );
 check( 'catches null-returning encoder', in_array( 'target-bad-return', $seen, true ), implode( ',', $seen ) );
 
-// 3n. Decoder that returns null only for some inputs; must be reported
+// 3q. Decoder that returns null only for some inputs; must be reported
 //     from both the direct call and the round-trip path without crashing.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'utf8_decode_fb' => static fn( string $bytes ) => str_contains( $bytes, "\x80" ) ? null : _wp_utf8_decode_fallback( $bytes ),
 ) );
 check( 'catches sometimes-null decoder', in_array( 'target-bad-return', $seen, true ), implode( ',', $seen ) );
 
-// 3o. Noncharacter detector that never finds anything.
+// 3r. Noncharacter detector that never finds anything.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'has_nonchars_fb' => static fn( string $text ): bool => false,
 ) );
 check( 'catches blind noncharacter detector', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3p. Detector that misses the contiguous U+FDD0–U+FDEF block (the
+// 3s. Detector that misses the contiguous U+FDD0–U+FDEF block (the
 //     plane-final pairs alone are a plausible spec misreading).
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'has_nonchars_fb' => Targets::nonchars_missing_fdd0_block( ... ),
 ) );
 check( 'catches detector missing U+FDD0 block', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3q. Over-eager detector that flags U+FDCF, just below the block.
+// 3t. Over-eager detector that flags U+FDCF, just below the block.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'has_nonchars' => Targets::nonchars_overeager( ... ),
 ) );
 check( 'catches over-eager noncharacter detector', in_array( 'noncharacters-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3r. Character encoder that confuses U+0080 with Windows-1252's euro sign.
+// 3u. Character encoder that confuses U+0080 with Windows-1252's euro sign.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_chr' => static fn( int $code_point ) => 0x80 === $code_point ? "\xE2\x82\xAC" : _mb_chr( $code_point ),
 ) );
 check( 'catches cp1252-confused _mb_chr', in_array( 'mb-chr-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3s. Character decoder that accepts an invalid leading C0 byte.
+// 3v. Character decoder that accepts an invalid leading C0 byte.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_ord' => static fn( string $bytes ) => str_starts_with( $bytes, "\xC0" ) ? 0 : _mb_ord( $bytes ),
 ) );
 check( 'catches invalid-accepting _mb_ord', in_array( 'mb-ord-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3t. Code point span that reports one extra byte.
+// 3w. Code point span that reports one extra byte.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_span' => Targets::codepoint_span_off_by_one( ... ),
 ) );
 check( 'catches off-by-one code point span', in_array( 'codepoint-span-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3u. Code point span that treats invalid maximal subparts as one code
+// 3x. Code point span that treats invalid maximal subparts as one code
 //     point per byte instead of one code point per maximal subpart.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_span' => Targets::codepoint_span_counts_invalid_bytes( ... ),
 ) );
 check( 'catches byte-counted invalid code point span', in_array( 'codepoint-span-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3v. Code point span that returns the right byte span but corrupts the
+// 3y. Code point span that returns the right byte span but corrupts the
 //     by-reference found count.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_span' => Targets::codepoint_span_found_max( ... ),
 ) );
 check( 'catches wrong code point span found count', in_array( 'codepoint-span-found-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3w. Code point span that leaves found_code_points stale on empty spans.
+// 3z. Code point span that leaves found_code_points stale on empty spans.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'codepoint_span' => Targets::codepoint_span_stale_empty_found( ... ),
 ) );
 check( 'catches stale empty code point span found count', in_array( 'codepoint-span-found-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3x. UTF-8 substring that treats character offsets as byte offsets.
+// 3aa. UTF-8 substring that treats character offsets as byte offsets.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_substr' => Targets::mb_substr_byte_level( ... ),
 ) );
 check( 'catches byte-offset _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3y. UTF-8 substring that slices scrubbed text, losing original invalid bytes.
+// 3ab. UTF-8 substring that slices scrubbed text, losing original invalid bytes.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_substr' => Targets::mb_substr_scrub_invalid( ... ),
 ) );
 check( 'catches scrubbed-input _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3z. UTF-8 substring that ignores negative length semantics.
+// 3ac. UTF-8 substring that ignores negative length semantics.
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_substr' => Targets::mb_substr_no_negative_length( ... ),
 ) );
 check( 'catches negative-length _mb_substr', in_array( 'mb-substr-mismatch', $seen, true ), implode( ',', $seen ) );
 
-// 3aa. Non-UTF-8 substring must fall back to byte-level substr().
+// 3ad. Non-UTF-8 substring must fall back to byte-level substr().
 $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_substr' => Targets::mb_substr_force_utf8( ... ),
 ) );

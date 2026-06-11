@@ -23,6 +23,9 @@ namespace EncodingFuzz;
  *   ENCODING_FUZZ_FAULT=substr-scrub        substr slices scrubbed invalid input
  *   ENCODING_FUZZ_FAULT=substr-no-neg-len   substr ignores negative lengths
  *   ENCODING_FUZZ_FAULT=substr-force-utf8   substr ignores non-UTF-8 byte fallback
+ *   ENCODING_FUZZ_FAULT=count-invalid-bytes count treats invalid bytes individually
+ *   ENCODING_FUZZ_FAULT=count-range-minus1  count stops one byte early in bounded ranges
+ *   ENCODING_FUZZ_FAULT=count-ignore-offset count ignores the requested byte offset
  */
 class Targets {
 	/**
@@ -108,6 +111,18 @@ class Targets {
 
 			case 'substr-force-utf8':
 				$targets['mb_substr'] = self::mb_substr_force_utf8( ... );
+				break;
+
+			case 'count-invalid-bytes':
+				$targets['codepoint_count'] = self::codepoint_count_invalid_bytes( ... );
+				break;
+
+			case 'count-range-minus1':
+				$targets['codepoint_count'] = self::codepoint_count_range_minus_one( ... );
+				break;
+
+			case 'count-ignore-offset':
+				$targets['codepoint_count'] = self::codepoint_count_ignore_offset( ... );
 				break;
 		}
 
@@ -252,5 +267,52 @@ class Targets {
 	 */
 	public static function mb_substr_force_utf8( $str, $start, $length = null, $encoding = null ) {
 		return _mb_substr( $str, $start, $length, _is_utf8_charset( $encoding ?? get_option( 'blog_charset' ) ) ? $encoding : 'UTF-8' );
+	}
+
+	/**
+	 * Deliberately broken code point counter: treats every byte in an invalid
+	 * maximal subpart as a separate code point.
+	 */
+	public static function codepoint_count_invalid_bytes( string $text, ?int $byte_offset = 0, ?int $max_byte_length = PHP_INT_MAX ): int {
+		$byte_offset     = $byte_offset ?? 0;
+		$max_byte_length = $max_byte_length ?? PHP_INT_MAX;
+
+		if ( $byte_offset < 0 || $max_byte_length < 0 ) {
+			return 0;
+		}
+
+		$count           = 0;
+		$at              = $byte_offset;
+		$end             = strlen( $text );
+		$invalid_length  = 0;
+		$max_byte_length = min( $end - $at, $max_byte_length );
+
+		while ( $at < $end && ( $at - $byte_offset ) < $max_byte_length ) {
+			$count += _wp_scan_utf8( $text, $at, $invalid_length, $max_byte_length - ( $at - $byte_offset ) );
+			$count += $invalid_length;
+			$at    += $invalid_length;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Deliberately broken code point counter: stops one byte early when a
+	 * bounded range is requested.
+	 */
+	public static function codepoint_count_range_minus_one( string $text, ?int $byte_offset = 0, ?int $max_byte_length = PHP_INT_MAX ): int {
+		$max_byte_length = $max_byte_length ?? PHP_INT_MAX;
+		if ( $max_byte_length <= 0 ) {
+			return _wp_utf8_codepoint_count( $text, $byte_offset, $max_byte_length );
+		}
+
+		return _wp_utf8_codepoint_count( $text, $byte_offset, $max_byte_length - 1 );
+	}
+
+	/**
+	 * Deliberately broken code point counter: always starts at byte offset 0.
+	 */
+	public static function codepoint_count_ignore_offset( string $text, ?int $byte_offset = 0, ?int $max_byte_length = PHP_INT_MAX ): int {
+		return _wp_utf8_codepoint_count( $text, 0, $max_byte_length );
 	}
 }
