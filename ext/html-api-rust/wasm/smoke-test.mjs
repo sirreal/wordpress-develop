@@ -630,6 +630,34 @@ for (const [html, breadcrumbs, expected] of [
 	breadcrumbsProcessor.destroy();
 }
 
+for (const [html, expectedDepth] of [
+	['<div class="target">', 3],
+	['<div><span><p><b><em class="target">', 7],
+	['<div><span></span><span class="target"></div>', 4],
+]) {
+	const elementDepthProcessor = WP_HTML_Processor.create_fragment(html);
+	assert.equal(elementDepthProcessor.next_tag({ class_name: "target" }), true);
+	assert.equal(elementDepthProcessor.get_current_depth(), expectedDepth);
+	elementDepthProcessor.destroy();
+}
+
+for (const [html, expectedDepth] of [
+	['<div class="target">One Deeper', 4],
+	['<div><span><p><b><em class="target">Formatted', 8],
+	['<div>a<span>b<p>c<b>e<em class="target">e', 8],
+	['<div><span></span><span class="target">Here</div>', 5],
+	['<p>Before<img class="target">After</p>', 4],
+	['<img class="target"><!-- this is inside the BODY -->', 3],
+	['<div class="target"><!-- this is inside the BODY -->', 4],
+	['<div><p>What <br class="target"><//wp:post-author></p></div>', 5],
+]) {
+	const nextNodeDepthProcessor = WP_HTML_Processor.create_fragment(html);
+	assert.equal(nextNodeDepthProcessor.next_tag({ class_name: "target" }), true);
+	assert.equal(nextNodeDepthProcessor.next_token(), true);
+	assert.equal(nextNodeDepthProcessor.get_current_depth(), expectedDepth);
+	nextNodeDepthProcessor.destroy();
+}
+
 const completedProcessor = WP_HTML_Processor.create_fragment('<div class="test">Test</div>');
 assert.equal(completedProcessor.next_tag(), true);
 assert.equal(completedProcessor.get_tag(), "DIV");
