@@ -2166,6 +2166,11 @@ export function createHtmlApi(wasm) {
 							return false;
 						}
 
+						if (tokenType === "#tag" && !isCloser && tagName === "FRAMESET") {
+							this.full_parser_insertion_mode = "in_frameset";
+							return false;
+						}
+
 						if (tokenType === "#tag" && !isCloser && HEAD_CONTENT_ELEMENTS.has(tagName)) {
 							this.#bailUnsupported("Cannot process elements after HEAD which reopen the HEAD element.");
 							return true;
@@ -2261,6 +2266,132 @@ export function createHtmlApi(wasm) {
 
 						this.full_parser_insertion_mode = "in_body";
 						continue;
+
+					case "in_frameset":
+						if (tokenType === "#text") {
+							if (isWhitespaceText) {
+								return false;
+							}
+							this.#bailUnsupported("Non-whitespace characters cannot be handled in frameset.");
+							return true;
+						}
+
+						if (
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							return false;
+						}
+
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "in_body";
+							continue;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "FRAMESET") {
+							return false;
+						}
+
+						if (isCloser && tagName === "FRAMESET") {
+							const topIndex = this.open_elements.length - 1;
+							if (this.open_elements[topIndex] === "HTML") {
+								this.skip_current_token = true;
+								return true;
+							}
+							if (this.open_elements[topIndex - 1] !== "FRAMESET") {
+								this.full_parser_insertion_mode = "after_frameset";
+							}
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "FRAME") {
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
+							this.full_parser_insertion_mode = "in_head";
+							continue;
+						}
+
+						this.skip_current_token = true;
+						return true;
+
+					case "after_frameset":
+						if (tokenType === "#text") {
+							if (isWhitespaceText) {
+								return false;
+							}
+							this.#bailUnsupported("Non-whitespace characters cannot be handled in after frameset");
+							return true;
+						}
+
+						if (
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							return false;
+						}
+
+						if (tokenType === "#doctype") {
+							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "in_body";
+							continue;
+						}
+
+						if (isCloser && tagName === "HTML") {
+							this.full_parser_insertion_mode = "after_after_frameset";
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
+							this.full_parser_insertion_mode = "in_head";
+							continue;
+						}
+
+						this.skip_current_token = true;
+						return true;
+
+					case "after_after_frameset":
+						if (
+							tokenType === "#comment" ||
+							tokenType === "#funky-comment" ||
+							tokenType === "#presumptuous-tag"
+						) {
+							this.#bailUnsupported("Content outside of HTML is unsupported.");
+							return true;
+						}
+
+						if (tokenType === "#doctype" || (tokenType === "#tag" && !isCloser && tagName === "HTML")) {
+							this.full_parser_insertion_mode = "in_body";
+							continue;
+						}
+
+						if (tokenType === "#text") {
+							if (isWhitespaceText) {
+								return false;
+							}
+							this.#bailUnsupported("Non-whitespace characters cannot be handled in after after frameset.");
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
+							this.full_parser_insertion_mode = "in_head";
+							continue;
+						}
+
+						this.skip_current_token = true;
+						return true;
 
 					default:
 						return false;

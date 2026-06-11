@@ -407,6 +407,39 @@ assert.deepEqual(fullParserExplicitShellTokens, [
 ]);
 fullParserExplicitShell.destroy();
 
+const fullParserFrameset = WP_HTML_Processor.create_full_parser("<frameset><frame></frameset>");
+const fullParserFramesetTokens = [];
+while (fullParserFrameset.next_token()) {
+	fullParserFramesetTokens.push(
+		fullParserFrameset.get_token_type() === "#tag"
+			? `${fullParserFrameset.is_tag_closer() ? "-" : "+"}${fullParserFrameset.get_tag()}:${fullParserFrameset.get_breadcrumbs().join("/")}`
+			: fullParserFrameset.get_token_name(),
+	);
+}
+assert.deepEqual(fullParserFramesetTokens, [
+	"+HTML:HTML",
+	"+HEAD:HTML/HEAD",
+	"-HEAD:HTML",
+	"+FRAMESET:HTML/FRAMESET",
+	"+FRAME:HTML/FRAMESET/FRAME",
+	"-FRAMESET:HTML",
+	"-HTML:",
+]);
+fullParserFrameset.destroy();
+
+for (const [html, message] of [
+	["<frameset>text", "Non-whitespace characters cannot be handled in frameset."],
+	["<frameset></frameset>text", "Non-whitespace characters cannot be handled in after frameset"],
+	["<frameset></frameset></html>text", "Non-whitespace characters cannot be handled in after after frameset."],
+]) {
+	const framesetTextProcessor = WP_HTML_Processor.create_full_parser(html);
+	while (framesetTextProcessor.next_token()) {
+	}
+	assert.equal(framesetTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(framesetTextProcessor.get_unsupported_exception().message, message);
+	framesetTextProcessor.destroy();
+}
+
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");
 while (fullParserCommentAfterBody.next_token()) {
 }
