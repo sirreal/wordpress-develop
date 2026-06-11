@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() to parse both HTML fragments into a canonical form. This method handles all the required normalizations: optional/implied closing tags, tag-name casing, attribute quoting, and character references. If either input fails to parse (returns null), the function returns false. Otherwise, it compares the two normalized strings for equality, which correctly handles all differences that don't affect DOM structure while catching differences in element structure, attributes, and content.",
+  "confidence": 92
+}

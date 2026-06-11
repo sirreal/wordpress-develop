@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Processor, required for the ancestor-containment check (structure matters). All called methods are documented in html-processor.md: create_fragment (L348), next_tag (L575), get_breadcrumbs (L842), add_class (L1997), get_updated_html (inherited, html-tag-processor.md L2289). Idiomatic token walk: while(next_tag('P')) loop, breadcrumb inspection, add_class, get_updated_html. Handles null from create_fragment (returns $html). Passed 7/7 including existing-class-preserved, implicitly-closed-paragraphs, and nested-blockquotes. Minor non-idiomatic point vs reference: checks the FULL get_breadcrumbs() array, which (per docs L850-851, L858) includes the matched P node itself, rather than slicing off the last element. Harmless because the node name 'P' is never 'BLOCKQUOTE', so the inclusion can never produce a false positive for this query; it would matter only for a self-matching ancestor name. Explanation is accurate and correctly describes breadcrumbs as the ancestor chain."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and method set as trial-1, all documented. Idiomatic walk and edge-case handling; passed 7/7. Uses `! $processor` truthiness check instead of `=== null`, which is fine. One blemish: `$result = $processor->get_updated_html(); return $result ?? $html;` — the docs (html-tag-processor.md L2289-2308) declare the return type `string` (never null), so the `?? $html` fallback is dead code. Not a misuse, but a sign the subject was uncertain about the return contract. Like trial-1 it checks the full breadcrumb array including the P node rather than slicing the last element; harmless for an ancestor check. Explanation is accurate, correctly notes breadcrumbs return uppercase tag names from root to element."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Byte-for-byte the cleanest of the three: correct WP_HTML_Processor choice, all methods documented, idiomatic while(next_tag('P')) + get_breadcrumbs + in_array('BLOCKQUOTE') + add_class + get_updated_html, null guard on create_fragment. Passed 7/7. Same full-breadcrumbs-array check (includes the P node) as trials 1 and 2 — harmless for this ancestor query. No redundant defensive code. Explanation accurate; correctly states breadcrumbs represent the ancestor stack and that get_updated_html preserves untouched bytes."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 across every case (simple, deep-ancestor, outside-untouched, implicitly-closed-paragraphs, existing-class-preserved, nested-blockquotes, mixed-document). The documentation supported this task well and the convergence on a near-identical correct solution is strong evidence of that.\n\nWhat the docs did well:\n- The \"When to choose\" framing (html-processor.md L81) explicitly steers structural/containment work to WP_HTML_Processor and flat attribute edits to the Tag Processor. All three subjects picked the right processor with no hesitation, and none reached for the Tag Processor (which lacks get_breadcrumbs and would have failed the ancestor requirement). html-tag-processor.md L20 reinforces this by stating outright that get_breadcrumbs/get_current_depth do NOT exist on the Tag Processor — a clear negative signpost that prevents the most likely wrong turn.\n- The get_breadcrumbs() doc (L842-867) with its concrete example `array('HTML','BODY','P','STRONG','EM','IMG')` made the ancestor-chain semantics unambiguous, so in_array('BLOCKQUOTE', ...) was the obvious idiom. The intro note at L54 that breadcrumbs always contain the implied 'HTML','BODY' outermost elements pre-empted any off-by-one confusion about whether the root is present.\n- get_updated_html()'s byte-exact-preservation guarantee (html-tag-processor.md L2297) directly answered the task's \"everything else preserved byte-for-byte\" requirement; all three explanations cited it.\n- The HTML parser's own implicit-paragraph-close handling made the implicitly-closed-paragraphs case (`<blockquote><p>first<p>second</blockquote>`) pass for free via next_tag('P') — subjects did not need to reason about it, and the structure-aware processor did the right thing.\n\nNear-misses in the approach (no functional impact, but worth noting):\n1. The most interesting near-miss is the breadcrumbs slice. The canonical reference computes ancestors via `array_slice( get_breadcrumbs(), 0, -1 )` to exclude the matched node before the in_array check. All three subjects skipped the slice and tested the full array. This is correct here ONLY because the matched node is always 'P' and the target ancestor name 'BLOCKQUOTE' differs. If the task had been \"mark every BLOCKQUOTE that has a BLOCKQUOTE ancestor,\" the unsliced check would self-match and produce a false positive on every blockquote. The docs say get_breadcrumbs() includes the matched element (L850-851, example ends in 'IMG') but never explicitly warn that for an ancestor-only test you must drop the last element. Subjects got the right answer without grasping this subtlety.\n2. Trial-2's `?? $html` on get_updated_html() reflects uncertainty about the return contract — the doc declares `string`, so the fallback is unreachable. Minor.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs()",
+      "problem": "The doc states breadcrumbs include the currently-matched element itself (example ends in 'IMG'), but it does not call out the consequence for ancestor-only containment checks: testing the full returned array with in_array() will also match the current node, so an element can spuriously match its own tag name. All three subjects checked the full array and only avoided a false positive because the queried ancestor name happened to differ from the matched node's name.",
+      "suggestion": "Add a one-line note plus a snippet contrasting the two intents: to test whether the matched node IS an X, inspect the last breadcrumb; to test whether it has an X ANCESTOR, exclude the last element first, e.g. `$ancestors = array_slice( $processor->get_breadcrumbs(), 0, -1 );` then `in_array( 'BLOCKQUOTE', $ancestors, true )`. State that breadcrumbs[count-1] is always the matched node."
+    },
+    {
+      "location": "WP_HTML_Processor::matches_breadcrumbs()",
+      "problem": "matches_breadcrumbs() is documented (L750) but only supports a suffix/path match from the matched element upward; it cannot answer 'does this node have an X ancestor at ANY depth' (the doc even notes the deliberate absence of a `**` deep-match syntax at L760). A reader scanning method names might reach for matches_breadcrumbs() for an arbitrary-depth ancestor test and be unable to express it, with no pointer to the get_breadcrumbs()+in_array idiom that is the intended approach.",
+      "suggestion": "In matches_breadcrumbs()'s description, add a cross-reference: for arbitrary-depth 'has any ancestor named X' queries (which matches_breadcrumbs cannot express because it has no deep wildcard), iterate get_breadcrumbs() and use in_array()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html()",
+      "problem": "Return type is `string` and the prose says it returns the processed HTML, but it never explicitly states the method cannot return null/false. One subject added a defensive `?? $html` fallback, indicating the contract was not unambiguous to a reader who must guard the create_fragment() null case separately.",
+      "suggestion": "Add an explicit sentence that get_updated_html() always returns a string (never null), so no null-coalescing guard is needed on its result — the only null check required in a create_fragment()+edit+read flow is on the create_fragment() return value."
+    }
+  ]
+}

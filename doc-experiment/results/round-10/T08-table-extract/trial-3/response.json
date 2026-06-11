@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse HTML, then calls next_tag() to find the first TABLE element. Iterates through tokens with next_token() while tracking depth with get_current_depth() to stay within the table. Collects text via get_modifiable_text() on #text tokens, building up each cell's content. Detects TR/TD/TH tag boundaries using get_token_name(), get_token_type(), and is_tag_closer() to structure rows and cells, handling optional closing tags the way HTML parsers do.",
+  "confidence": 72
+}

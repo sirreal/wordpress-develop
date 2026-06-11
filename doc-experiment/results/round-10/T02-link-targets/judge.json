@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-for-byte the canonical reference solution. Correct processor choice: WP_HTML_Tag_Processor is the right tool for flat, position-based attribute edits (no tree/breadcrumb needs). Every method called is documented in html-tag-processor.md: constructor (line ~170), next_tag('A') string form (line 59), get_attribute('href') with null semantics (lines 89-90, 1469-1505), set_attribute('target','_blank') overwrite semantics (lines 156, 2127), get_updated_html() byte-preservation (lines 2289-2297). The href-presence check `null !== get_attribute('href')` is exactly correct: get_attribute returns true for valueless <a href>, '' for <a href=''>, and null only when absent (probe-confirmed), so null-inequality cleanly treats both true and '' as present. Idiomatic token walking via while(next_tag()). Explanation accurately states get_attribute 'returns null only when the attribute is absent' (the load-bearing fact). 8/8 passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to reference; passed 8/8 and uses no undocumented API. Uses the array query form next_tag(array('tag_name' => 'a')) which is explicitly documented (lines 58, 952). The 3-point deduction is for the explanation's misstated mental model, not the code: it claims get_attribute returns 'null if absent, true if present but empty, or the attribute value.' That conflates the empty-value case ('' per docs line 89) with the boolean/valueless case (true per line 90). The code survives because `null !==` treats both '' and true as present, but the subject's verbal understanding of the empty-string vs boolean distinction is wrong. Processor choice, token walking, and get_updated_html usage all idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Canonical solution with a docblock; binds get_attribute('href') to a $href variable before the null check, which is fine. All methods documented (constructor, next_tag('A'), get_attribute, set_attribute, get_updated_html). Correct processor choice and idiomatic while(next_tag()) walk. Explanation is accurate: 'get_attribute() which returns null only when attribute is absent' and 'returns updated HTML preserving byte-for-byte.' Correctly reasons about WP_HTML_Tag_Processor being for 'flat, position-based attribute modifications.' 8/8 passed. Self-reported confidence 92 (lower than trials 1-2 at 95) despite identical correctness; mild under-confidence."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8, with zero _doing_it_wrong records and zero trigger_errors. This is a basic/smoke task and all three subjects independently converged on the canonical reference implementation. The decisive documentation passages did their job:\n\n1. The href-presence semantics (the only subtle requirement) are covered precisely by html-tag-processor.md lines 89-90 and the get_attribute() heading (lines 1469-1505). Line 89 states null when absent vs '' when present-with-empty-value; line 90 adds true for boolean/valueless attributes; the signature `string|true|null` (line 1472) and example (lines 1483-1484) reinforce it. This is exactly why every subject wrote `null !== get_attribute('href')` and passed the empty-href-counts and valueless-href-counts cases. Probe confirmed: <a href> => true, <a href=''> => '', <a name> => null.\n\n2. Case-insensitivity for both tag matching (lowercase next_tag('a') matching <a>/<A>) and the uppercase HREF case is handled implicitly. The query-array doc note says tag_name matching is 'ASCII case-insensitive' (line 952), and get_attribute name matching is case-insensitive in practice; the uppercase-attribute case passed in all trials. The docs do not explicitly state that get_attribute('href') matches a HREF attribute, but no subject stumbled because they queried lowercase and it worked.\n\n3. Comment-skipping (inside-comment-ignored) and nested-markup cases passed because next_tag only visits actual tag tokens and get_updated_html preserves untouched bytes (lines 2289-2297). The docs frame next_tag as a tokenizer-aware cursor, so subjects never tried regex/string matching that would have matched the <a> inside the comment.\n\nThe single near-miss is verbal, not functional: trial-2's explanation conflates the empty-string return ('') with the boolean-true return when describing get_attribute. The code is unaffected because the null-inequality check subsumes both. This suggests the empty-value-vs-boolean distinction, though documented, is easy to blur in a reader's summary — a clarity signal rather than a defect.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() — return-value description (html-tag-processor.md lines 89-90 and the method heading lines 1503-1505)",
+      "problem": "The three-way return contract (null = absent, '' = present with empty value, true = boolean/valueless) is split across two prose sentences and the Returns table only mentions 'null if not available' plus 'Boolean attributes return true' — it omits the empty-string case entirely. trial-2's explanation conflated '' and true as a result, showing the distinction is easy to blur even when technically present.",
+      "suggestion": "Add a compact three-row table to the get_attribute() heading mapping input markup to return value, e.g. attr=\"x\" => 'x' (string), attr=\"\" => '' (empty string), bare `attr` => true (boolean), absent => null. Co-locating all four outcomes in one place (rather than across lines 89-90 and a separate Returns row) makes the empty-vs-boolean boundary unmissable and reinforces the idiom `null !== get_attribute(...)` for 'is the attribute present in any form.'"
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() — attribute-name matching (html-tag-processor.md around lines 1475, 1499-1505)",
+      "problem": "The docs state tag_name query matching is ASCII case-insensitive (line 952) but never state that the $name passed to get_attribute()/set_attribute() is matched case-insensitively against the source. The uppercase-attribute test (<a HREF>) depended on this, yet subjects only succeeded because they happened to query lowercase 'href'. A reader cannot tell from the docs whether get_attribute('href') would find a HREF attribute.",
+      "suggestion": "Add one sentence to get_attribute()/set_attribute() noting that attribute names are matched ASCII case-insensitively (and that the original casing is preserved in output for untouched attributes). This generalizes beyond this task and prevents readers from defensively lowercasing or skipping uppercase-attribute inputs."
+    },
+    {
+      "location": "Idiomatic-patterns / overview section (html-tag-processor.md near lines 89-90)",
+      "problem": "There is no single recommended idiom stated for the common 'does this attribute exist at all, regardless of value' check. Subjects derived `null !== get_attribute(...)` correctly here, but only because this task's required semantics happened to match. The docs describe the return values but not the canonical presence test.",
+      "suggestion": "Add a short note near the get_attribute() return-value discussion: to test mere presence of an attribute (any value, including empty or boolean), compare against null: `if ( null !== $p->get_attribute( $name ) )`. This names the general pattern explicitly rather than leaving each reader to re-derive it from the three-way return table."
+    }
+  ]
+}

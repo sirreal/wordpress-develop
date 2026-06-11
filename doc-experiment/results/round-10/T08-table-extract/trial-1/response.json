@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and locate the first TABLE element. It traverses all tokens within the table using next_token(), identifying TD and TH cells to collect their text content (using get_modifiable_text() which returns decoded character references). It tracks row boundaries via TR closing tags and uses get_current_depth() to ensure processing stops when exiting the table structure. Character references are automatically decoded by get_modifiable_text(), so no additional decoding is needed.",
+  "confidence": 45
+}

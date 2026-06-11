@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function attempts to create an HTML fragment processor and calls serialize() to normalize the HTML. The serialize() method returns null when the HTML Processor encounters unsupported markup (like mis-nested formatting elements), and a normalized string otherwise. This leverages WP_HTML_Processor::create_fragment() and the serialize() method, which are the documented APIs for fragment parsing and normalization.",
+  "confidence": 78
+}

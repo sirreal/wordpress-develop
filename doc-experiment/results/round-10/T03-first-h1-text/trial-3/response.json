@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor with fragment parsing to safely parse the HTML. It finds the first H1 tag, then uses next_token() to walk through all tokens within that H1 element, collecting text content from all #text nodes. The depth comparison ensures we stay within the H1 element, including nested text in child elements like em, strong, etc. The get_modifiable_text() method returns already-decoded character references, satisfying the requirement to decode &amp; and similar entities. Returns null when no H1 is found, and empty string when H1 contains no text nodes (e.g., only images).",
+  "confidence": 90
+}

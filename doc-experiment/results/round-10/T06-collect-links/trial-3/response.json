@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and iterates through A elements using next_tag(). For each A tag with an href attribute, it collects all text tokens within that element using next_token() with depth tracking to stay within the A element boundaries. The href attribute value is retrieved decoded via get_attribute(), and text content is collected from #text tokens via get_modifiable_text(), which provides decoded character references as documented.",
+  "confidence": 75
+}

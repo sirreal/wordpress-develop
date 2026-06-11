@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, including proper handling of foreign content (SVG). Loops through tags using next_tag(), filters for IMG tags in the 'html' namespace (excluding SVG <image> elements), and collects decoded src attribute values from get_attribute(), skipping tags without a src attribute or with an empty src value.",
+  "confidence": 82
+}

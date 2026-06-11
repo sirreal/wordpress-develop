@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's full parsing capabilities to properly handle nested HTML structure. It creates a fragment processor, iterates through A tags with `next_tag()`, checks for the href attribute, then uses `next_token()` and `get_current_depth()` to collect all text nodes inside each link element until the link closes. Text is decoded automatically by `get_modifiable_text()`, and attributes are decoded by `get_attribute()` as documented. The depth-based termination ensures we capture text from any nesting level within the A element.",
+  "confidence": 72
+}

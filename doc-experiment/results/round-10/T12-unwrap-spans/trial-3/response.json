@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML fragment with full HTML5 structural awareness. Iterates through all tokens with next_token(), checking each token's name with get_token_name() (which returns uppercase tag names for tag tokens). Skips all tokens with name 'SPAN' (both opening and closing tags are identified by the same name, and the processor handles both). All non-SPAN tokens are serialized using serialize_token(), which produces normalized output (with normalized casing, quoted attributes, optional tags closed, text re-encoded, etc.). The concatenated result is normalized HTML with all SPAN elements removed but their contents preserved.",
+  "confidence": 72
+}

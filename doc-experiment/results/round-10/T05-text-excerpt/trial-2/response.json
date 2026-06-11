@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML document. It collects text only from #text token types (ignoring content from SCRIPT, STYLE, and other special elements which the API treats as raw text on the tag itself, not as text nodes). The get_modifiable_text() method already returns decoded character references, so no additional decoding is needed. The function accumulates text while checking the UTF-8 code point count using mb_strlen/mb_substr, and truncates to exactly the requested code point limit without breaking multi-byte characters.",
+  "confidence": 75
+}

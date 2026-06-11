@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical in substance to the canonical reference. Uses only WP_HTML_Tag_Processor constructor, next_token(), and paused_at_incomplete_token() — all three are documented in html-tag-processor.md (lines 962, 1015). Correct processor choice: the task is purely lexical (did the byte stream end mid-token?), needing no tree structure, so the lighter Tag Processor is exactly right per the 'Which processor should I use?' guidance. The drain-loop idiom (`while next_token() {} then paused_at_incomplete_token()`) is copied straight from the documented example at lines 1033-1039. Explanation is accurate and correctly distinguishes lexically-complete-but-structurally-unclosed (`<div>unclosed`) from incomplete tokens. 9/9 pass. No deductions across any rubric axis."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally and stylistically identical to trial-1 and the reference (only differs by a `continue;` in the loop body). Same three documented API calls, no hallucinations, correct Tag Processor choice, documented drain idiom. Explanation adds the accurate detail that next_token() returns false when input ends mid-token (consistent with the next_token() docblock at line 972: 'reaches the end of the document then it will seek to the start of the last token and pause, returning false'). Correctly handles the 'every token is whole' edge distinction. 9/9 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Again identical to the reference implementation. Same documented API surface, correct processor, documented idiom. Explanation is accurate and explicitly names the scan-to-completion pattern as 'documented as the correct way to use this API for checking the final state' — a faithful read of the paused_at_incomplete_token() docblock note ('In a longer document, drain all tokens first; this method reports the state at the point scanning stopped'). Highest self-reported confidence (92) and fully warranted. 9/9 pass."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three passed all 9 hidden cases, and all three are near-verbatim reproductions of the canonical reference.php. This is a documentation success story with an identifiable cause. The `paused_at_incomplete_token()` docblock (html-tag-processor.md lines 1015-1047) contains exactly the recipe the task requires: a first short example showing `next_tag()` then `paused_at_incomplete_token()`, followed by a second example explicitly captioned 'In a longer document, drain all tokens first; this method reports the state at the point scanning stopped' that shows the precise `while ( $processor->next_token() ) { continue; } $was_truncated = $processor->paused_at_incomplete_token();` pattern. All three subjects lifted this idiom directly. Several supporting passages reinforced the correct model and headed off plausible failure modes: (1) 'When matching fails' (lines 92-119) explains that a false return can mean either 'tag not found' OR 'input ended mid-syntax-element,' and that a special element like SCRIPT with no closer counts as incomplete — directly covering the unterminated-script case a naive implementation could miss. (2) next_token()'s docblock (line 972) states that hitting end-of-document mid-token pauses and returns false, making the drain loop's terminating condition unambiguous. (3) The Tag Processor's documented lack of tree awareness aligns with the task's `<div>unclosed element` note, so subjects correctly returned false there. The only near-miss is conceptual, not behavioral: none of the explanations articulate WHY the lone-`<` and `<div>unclosed` cases return false at the lexical level — they assert the correct outcome but lean on the task prompt's framing, because the docs never state that a trailing bare `<` is tokenized as text rather than an incomplete tag start.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() — examples block",
+      "problem": "The docblock documents what counts as an incomplete token by example (mid-tag, mid-attribute-value) but never states the boundary cases that are NOT incomplete: a trailing bare `<` at end of input is tokenized as text (not an incomplete tag opener), and a structurally-unclosed-but-lexically-complete element like `<div>text` is complete. Subjects produced correct behavior here only because the task prompt spelled this out; absent that framing the asymmetry (some trailing `<`-syntax pauses, some does not) is non-obvious and a reader could wrongly expect `ends with <` to pause.",
+      "suggestion": "Add one or two contrasting negative examples to the method docblock, e.g. show that `new WP_HTML_Tag_Processor( 'text <' )` drains fully with paused_at_incomplete_token() === false (a lone trailing `<` is text), and that `'<div>text'` is also false (an unclosed element is lexically complete) — versus `'<div class=\"x'` which is true. Stating the rule 'this reports incomplete LEXICAL tokens, not unclosed elements; a bare trailing < is text' generalizes beyond this task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — 'Special self-contained elements' / 'When matching fails' sections",
+      "problem": "The docs state that an unclosed special element (SCRIPT/STYLE/etc.) 'will count as an incomplete tag' and pause the processor, but this fact lives only in the 'When matching fails' narrative for next_tag(); it is not cross-referenced from paused_at_incomplete_token(). A reader landing on the truncation-detection method would not know that `<script>var x = 1;` (a fully-formed opening tag whose raw-text content runs to EOF) reports as incomplete, which is counterintuitive since the opening tag itself is complete.",
+      "suggestion": "From the paused_at_incomplete_token() docblock, add a sentence and {@see} cross-reference noting that an unterminated special/rawtext element (SCRIPT, STYLE, TITLE, TEXTAREA, etc.) whose contents run to the end of input is also reported as incomplete, even though its opening tag is well-formed. This is the generalizable rule behind the unterminated-script case."
+    }
+  ]
+}

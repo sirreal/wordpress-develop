@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a template HTML fragment with placeholders for attribute values and text content. It uses WP_HTML_Tag_Processor to find the IMG tag and set its src and alt attributes (in that order), then scans for the text token inside the figcaption element and replaces the placeholder with the provided caption text. The HTML API handles all proper escaping of special characters automatically, ensuring that unescaped input strings like \"A dog\" or \"My & dog\" are correctly encoded when rendered. Finally, get_updated_html() returns the complete, properly-escaped fragment.",
+  "confidence": 75
+}

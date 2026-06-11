@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function builds a figure element by starting with a template HTML string containing placeholder values. It uses WP_HTML_Tag_Processor to locate the img tag, then calls set_attribute() to safely encode and assign the src and alt attributes in the correct order. It then locates the figcaption element and uses set_modifiable_text() to safely encode and insert the caption text. All special characters (&, <, >, quotes) are automatically encoded by the API methods. Finally, get_updated_html() returns the complete, properly-encoded HTML fragment.",
+  "confidence": 85
+}

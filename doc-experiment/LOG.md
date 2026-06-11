@@ -2,6 +2,20 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 10 — Haiku, T08 perfect for the first time
+
+**Train 98.70 — new high.** T08 +10.0 → 96.8 with 8/8 in every trial
+(RCDATA-on-the-walk-path + walk-to-EOF caveat completed the cursor
+series begun in round 9). Failure-handling and classes at 100. The
+only functional miss in the whole train set: one T03 trial (7/8) again
+sampling the `>` bound; judges note the equality case (child closer
+depth == ancestor opener depth) is shown numerically but never stated
+as the REASON for `>=`.
+
+Round-11 hypotheses (committed): the equality case stated causally on
+get_current_depth(); empty-region flush property added to the
+closer-driven state-machine note.
+
 ## Round 9 — Haiku, checkpoint: train 98.66 (high), shared-cursor fix lands
 
 **All-19 96.58 / train 98.66 (+1.0, new high) / held-out 88.79.**

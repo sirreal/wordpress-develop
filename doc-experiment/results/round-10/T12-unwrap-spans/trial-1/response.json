@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's serialize_token() method in a token-by-token loop, which is the documented pattern for removing elements while preserving their contents and normalizing output. We create a fragment processor, iterate through each token, skip SPAN tags (both openers and closers), and serialize all other tokens. The processor automatically handles normalization (double-quoted attributes, optional tag closure, canonical re-encoding) as documented in the serialize_token() method.",
+  "confidence": 92
+}
