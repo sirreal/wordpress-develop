@@ -31,7 +31,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 24: add token-map structure-aware deterministic inputs.
 - [x] Tier 3 item 25: add pcov-backed coverage-guided lane with new-edge corpus retention.
 - [x] Tier 3 item 26: assert documented single-level decoding for nested ampersand references.
-- [ ] Cross-cutting concerns.
+- [x] Cross-cutting concerns: sort derived name lists deterministically and document DOM oracle throughput limits.
 
 ## Verification
 
@@ -163,6 +163,9 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: A direct real-target probe over `pre&amp;amp;post` returned no failures, and `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 11875` passed for the deterministic `&amp;amp;Z` corpus-splice fixture.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=single-level-overdecode php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 11875 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-single-level-fault-check` reported `single-level-decode-overdecoded` findings in text and attribute contexts; replaying the manifest reproduced the findings and minimizing it with `--signature single-level-decode-overdecoded:text` reduced the payload to `&amp;amp;`.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding single-level decode checks, smoke coverage, and docs.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after sorting derived named-reference lists.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 11875` and `php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` still passed with the expected deterministic payloads after adding explicit generator list sorting.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after addressing the cross-cutting determinism and throughput notes.
 
 ## Review Log
 
@@ -270,3 +273,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Fermat: APPROVE, single-level decode invariant semantics and oracle-free byte-mode narrowness.
   - Newton: APPROVE, fault target and worker/replay/minimize integration after README fault-target docs fix.
   - Euler: APPROVE, docs/progress scope after README self-test and fault-target list updates.
+- Cross-cutting concerns:
+  - Ohm: APPROVE, generator derived-list sorting and default mapping stability.
+  - Archimedes: APPROVE, injected-order smoke coverage and verification scope.
+  - Faraday: APPROVE, README throughput note, progress accuracy, and commit scope.

@@ -65,9 +65,13 @@ class Generator {
 
 		if ( array() === $this->semicolon_names ) {
 			$this->semicolon_names = self::PREFERRED_SEMICOLON;
+		} else {
+			self::sort_reference_names( $this->semicolon_names );
 		}
 		if ( array() === $this->legacy_names ) {
 			$this->legacy_names = self::PREFERRED_LEGACY;
+		} else {
+			self::sort_reference_names( $this->legacy_names );
 		}
 	}
 
@@ -1000,6 +1004,18 @@ class Generator {
 		}
 
 		return $this->prng->choice( $this->legacy_names );
+	}
+
+	/**
+	 * @param string[] $names
+	 */
+	private static function sort_reference_names( array &$names ): void {
+		usort(
+			$names,
+			static function ( string $a, string $b ): int {
+				return strlen( $b ) <=> strlen( $a ) ?: strcmp( $a, $b );
+			}
+		);
 	}
 
 	/**

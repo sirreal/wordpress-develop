@@ -955,6 +955,33 @@ $a = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 $b = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 check( 'generator deterministic for (seed, case)', $a === $b );
 
+$custom_names = array( 'zz;', 'amp;', 'LongName;', 'abc', 'copy', 'z' );
+$reversed_custom_names = array_reverse( $custom_names );
+$order_stable_error = '';
+for ( $i = 0; $i < 80; $i++ ) {
+	$ordered_generator  = new Generator( new Prng( "order-stable:{$i}" ), 4096, $custom_names );
+	$reversed_generator = new Generator( new Prng( "order-stable:{$i}" ), 4096, $reversed_custom_names );
+	if ( $ordered_generator->generate() !== $reversed_generator->generate() ) {
+		$order_stable_error = "weighted case {$i}";
+		break;
+	}
+
+	$ordered_sweep  = new Generator( new Prng( "order-stable-name:{$i}" ), 4096, $custom_names );
+	$reversed_sweep = new Generator( new Prng( "order-stable-name:{$i}" ), 4096, $reversed_custom_names );
+	if ( $ordered_sweep->generate_name_sweep( $i ) !== $reversed_sweep->generate_name_sweep( $i ) ) {
+		$order_stable_error = "name sweep case {$i}";
+		break;
+	}
+
+	$ordered_legacy  = new Generator( new Prng( "order-stable-legacy:{$i}" ), 4096, $custom_names );
+	$reversed_legacy = new Generator( new Prng( "order-stable-legacy:{$i}" ), 4096, $reversed_custom_names );
+	if ( $ordered_legacy->generate_legacy_follower_sweep( $i ) !== $reversed_legacy->generate_legacy_follower_sweep( $i ) ) {
+		$order_stable_error = "legacy follower case {$i}";
+		break;
+	}
+}
+check( 'generator sorts injected named-reference lists deterministically', '' === $order_stable_error, $order_stable_error );
+
 $name_sweep_generator = new Generator( new Prng( 'name-sweep' ), 4096, $names );
 $name_sweep_base_names = name_sweep_base_names( $names );
 $name_sweep_followers = array( '', 'x', 'X', '0', '=', '-', ' ', '/', "\u{00E9}" );

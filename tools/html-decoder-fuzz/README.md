@@ -88,6 +88,9 @@ text and attribute contexts so the same payload exercises semicolonless and
 attribute-disambiguation differences side by side. The generator preserves the
 former context PRNG draw, so the earlier both-context lane change did not by
 itself shift payload mapping.
+Named-reference lists derived from the generated token map, or injected for
+tests, are sorted by length and byte value before case-index mapping, so token
+map storage order and caller array order do not affect generated payloads.
 Adding or reweighting generation strategies intentionally changes future
 `--seed --case` payload mapping; failure-manifest replay remains stable because
 manifests store `payload_base64`.
@@ -224,6 +227,11 @@ Run parallel lanes for one minute:
 ```sh
 php tools/html-decoder-fuzz/runner.php --lanes 4 --duration-seconds 60
 ```
+
+Oracle modes spend most of their time in the two DOM parser calls per payload,
+not in the PRNG. Scale long oracle runs with more lanes; the oracle-free `bytes`
+mode avoids that DOM cost, and future high-throughput oracle work should batch
+payloads into fewer documents or cache repeated sub-payloads.
 
 Run indefinitely:
 
