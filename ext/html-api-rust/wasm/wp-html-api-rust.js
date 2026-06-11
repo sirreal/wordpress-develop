@@ -77,6 +77,22 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 ]);
 
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
+const FORMATTING_ELEMENTS = new Set([
+	"A",
+	"B",
+	"BIG",
+	"CODE",
+	"EM",
+	"FONT",
+	"I",
+	"NOBR",
+	"S",
+	"SMALL",
+	"STRIKE",
+	"STRONG",
+	"TT",
+	"U",
+]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
 const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
@@ -1098,6 +1114,7 @@ export function createHtmlApi(wasm) {
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
+			this.active_formatting_elements = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
 			this.current_namespace = contextNamespace(this.context_node);
@@ -1242,6 +1259,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		next_token() {
+			if (this.last_error !== null) {
+				return false;
+			}
+
 			if (this.virtual_tokens.length > 0) {
 				return this.#consumeVirtualToken();
 			}
@@ -1255,6 +1276,9 @@ export function createHtmlApi(wasm) {
 				}
 				this.skip_current_token = false;
 				this.#updateTreeStateForCurrentToken(true);
+				if (this.last_error !== null) {
+					return false;
+				}
 				if (this.pending_real_token && this.virtual_tokens.length > 0) {
 					return this.#consumeVirtualToken();
 				}
@@ -1289,6 +1313,9 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.#updateTreeStateForCurrentToken(true);
+				if (this.last_error !== null) {
+					return false;
+				}
 				if (this.pending_real_token && this.virtual_tokens.length > 0) {
 					return this.#consumeVirtualToken();
 				}
@@ -1658,6 +1685,9 @@ export function createHtmlApi(wasm) {
 				this.current_token_namespace = this.open_element_namespaces[existingIndex];
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+				if (FORMATTING_ELEMENTS.has(tagName)) {
+					this.#removeActiveFormattingElement(tagName);
+				}
 				this.breadcrumbs = [...this.open_elements];
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
@@ -1676,9 +1706,16 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.#applySimpleHtmlSemanticClosures(tagName);
+			if (FORMATTING_ELEMENTS.has(tagName) && !this.#canReconstructActiveFormattingElements()) {
+				this.#bailUnsupported("Cannot reconstruct active formatting elements when advancing and rewinding is required.");
+				return;
+			}
 			this.current_token_namespace = namespaceForTag(super.get_tag(), this.current_namespace);
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
+			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
+				this.active_formatting_elements.push(tagName);
+			}
 			this.breadcrumbs = [...this.open_elements];
 
 			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
@@ -1729,6 +1766,7 @@ export function createHtmlApi(wasm) {
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
+				activeFormattingElements: [...this.active_formatting_elements],
 				baseOpenElementCount: this.base_open_element_count,
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
@@ -1745,6 +1783,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
+			this.active_formatting_elements = [...state.activeFormattingElements];
 			this.base_open_element_count = state.baseOpenElementCount;
 			this.breadcrumbs = [...state.breadcrumbs];
 			this.current_namespace = state.currentNamespace;
@@ -1757,6 +1796,34 @@ export function createHtmlApi(wasm) {
 			this.compat_mode = doctype?.indicated_compatibility_mode === "quirks"
 				? WP_HTML_Tag_Processor.QUIRKS_MODE
 				: WP_HTML_Tag_Processor.NO_QUIRKS_MODE;
+		}
+
+		#removeActiveFormattingElement(tagName) {
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				if (this.active_formatting_elements[i] === tagName) {
+					this.active_formatting_elements.splice(i, 1);
+					return true;
+				}
+			}
+			return false;
+		}
+
+		#canReconstructActiveFormattingElements() {
+			if (this.active_formatting_elements.length === 0) {
+				return true;
+			}
+
+			const lastEntry = this.active_formatting_elements[this.active_formatting_elements.length - 1];
+			return this.#lastOpenElementIndex(lastEntry, "html") !== -1;
+		}
+
+		#bailUnsupported(message) {
+			this.last_error = WP_HTML_Processor.ERROR_UNSUPPORTED;
+			this.unsupported_exception = { message };
+			this.virtual_tokens = [];
+			this.pending_real_token = false;
+			this.pending_real_parser_state = null;
+			this.skip_current_token = true;
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
@@ -1776,6 +1843,7 @@ export function createHtmlApi(wasm) {
 				const anchorIndex = this.#lastOpenElementIndex("A", "html");
 				if (anchorIndex !== -1) {
 					this.#queueVirtualPopsFrom(anchorIndex);
+					this.#removeActiveFormattingElement("A");
 					return true;
 				}
 			}

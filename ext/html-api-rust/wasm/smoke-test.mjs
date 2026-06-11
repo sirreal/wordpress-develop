@@ -249,6 +249,14 @@ assert.equal(processorSeekNamespace.next_tag("rect"), true);
 assert.deepEqual(processorSeekNamespace.get_breadcrumbs(), ["HTML", "BODY", "CUSTOM-ELEMENT", "SVG", "RECT"]);
 processorSeekNamespace.destroy();
 
+assert.equal(WP_HTML_Processor.normalize("<A><I><A>"), null);
+const unsupportedActiveFormattingProcessor = WP_HTML_Processor.create_fragment("<p><em>One<p><em>Two");
+assert.equal(unsupportedActiveFormattingProcessor.next_tag("em"), true);
+assert.equal(unsupportedActiveFormattingProcessor.next_tag("em"), false);
+assert.equal(unsupportedActiveFormattingProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.notEqual(unsupportedActiveFormattingProcessor.get_unsupported_exception(), null);
+unsupportedActiveFormattingProcessor.destroy();
+
 const fullParserText = WP_HTML_Processor.create_full_parser("text");
 assert.equal(fullParserText.next_tag("body"), true);
 assert.equal(fullParserText.get_tag(), "BODY");
