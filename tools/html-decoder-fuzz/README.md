@@ -51,8 +51,9 @@ For each generated payload, the fuzzer runs both text and attribute contexts:
 1. Compare `decode_text_node()` or `decode_attribute()` to the DOM oracle.
 2. Rebuild the decoded string with repeated `read_character_reference()` calls
    plus literal spans, then compare it to the high-level decoder.
-3. Assert every matched character reference reports a positive byte length and
-   does not overrun the input.
+3. Assert every matched character reference reports a nonempty chunk, a byte
+   length of at least two, no input overrun, and the same chunk/length when
+   the matched slice is read again at offset zero.
 4. Check `attribute_starts_with()` against the decoded attribute prefix for
    ASCII search strings in both case-sensitive and ASCII-case-insensitive modes,
    leading byte-slice prefixes that can end inside UTF-8 replacements, and
@@ -267,6 +268,8 @@ mutation-tested broken targets:
 - semicolonless named references decoded in attributes despite ambiguous
   followers
 - off-by-one `read_character_reference()` match lengths
+- empty `read_character_reference()` chunks, one-byte matches, and
+  non-compositional local slice reads
 - partial-prefix `attribute_starts_with()` matches
 - partial multi-code-point `attribute_starts_with()` replacement matches
 - non-monotonic `attribute_starts_with()` prefix, extension, and
@@ -274,8 +277,10 @@ mutation-tested broken targets:
 - raw byte payloads without `&` not decoding identically
 
 For end-to-end failure-pipeline checks, set `HTML_DECODER_FUZZ_FAULT` to one of
-`skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`, or
-`byte-no-amp-identity`, `attribute-prefix-monotonicity`,
+`skip-c1-remap`, `attribute-semicolonless`, `match-length-off-by-one`,
+`reader-empty-chunk`, `reader-short-match-length`,
+`reader-substring-composition`, `byte-no-amp-identity`,
+`attribute-prefix-monotonicity`,
 `attribute-extension-monotonicity`, `attribute-case-monotonicity`, or
 `attribute-multicodepoint-prefix` before running `worker.php`, `runner.php`,
 `replay.php`, or `minimize.php`.

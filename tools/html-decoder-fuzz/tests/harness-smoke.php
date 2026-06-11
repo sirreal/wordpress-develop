@@ -719,6 +719,15 @@ check(
 	implode( ',', $seen )
 );
 
+$seen = fault_run( $oracles, 'reader-empty-chunk', 'a&amp;b' );
+check( 'fault target reader-empty-chunk exposes empty chunks', in_array( 'reader-returned-empty-chunk', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'reader-short-match-length', 'a&amp;b' );
+check( 'fault target reader-short-match-length exposes one-byte matches', in_array( 'reader-match-too-short', $seen, true ), implode( ',', $seen ) );
+
+$seen = fault_run( $oracles, 'reader-substring-composition' );
+check( 'fault target reader-substring-composition exposes local-reader mismatches', in_array( 'reader-composition-mismatch', $seen, true ), implode( ',', $seen ) );
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -1996,6 +2005,74 @@ if ( null !== $corpus_failure_file ) {
 	check( 'faulted corpus mutation minimizer preserves signature', 0 === $corpus_fault_minimize['code'], $corpus_fault_minimize['stdout'] . $corpus_fault_minimize['stderr'] );
 }
 remove_tree( $corpus_pipeline_dir );
+
+$reader_fault_pipelines = array(
+	array(
+		'fault'     => 'reader-empty-chunk',
+		'case'      => 38,
+		'signature' => 'reader-returned-empty-chunk:text',
+	),
+	array(
+		'fault'     => 'reader-short-match-length',
+		'case'      => 38,
+		'signature' => 'reader-match-too-short:text',
+	),
+	array(
+		'fault'     => 'reader-substring-composition',
+		'case'      => 31,
+		'signature' => 'reader-composition-mismatch:text',
+	),
+);
+foreach ( $reader_fault_pipelines as $reader_pipeline ) {
+	$reader_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-' . $reader_pipeline['fault'] . '-' . getmypid();
+	remove_tree( $reader_pipeline_dir );
+	$faulted_reader_worker = run_process(
+		array(
+			PHP_BINARY,
+			__DIR__ . '/../worker.php',
+			'--seed',
+			'1',
+			'--start-case',
+			(string) $reader_pipeline['case'],
+			'--cases',
+			'1',
+			'--output-dir',
+			$reader_pipeline_dir,
+			'--progress-every',
+			'1',
+		),
+		array( 'HTML_DECODER_FUZZ_FAULT' => $reader_pipeline['fault'] )
+	);
+	check( "faulted {$reader_pipeline['fault']} worker reports findings", 1 === $faulted_reader_worker['code'], $faulted_reader_worker['stdout'] . $faulted_reader_worker['stderr'] );
+
+	$reader_failure_files = glob( $reader_pipeline_dir . '/failure-*/failure.json' );
+	check( "faulted {$reader_pipeline['fault']} worker writes failure artifact", is_array( $reader_failure_files ) && array() !== $reader_failure_files );
+
+	$reader_failure_file = is_array( $reader_failure_files ) && array() !== $reader_failure_files ? $reader_failure_files[0] : null;
+	if ( null !== $reader_failure_file ) {
+		$reader_manifest = json_decode( (string) file_get_contents( $reader_failure_file ), true );
+		check(
+			"{$reader_pipeline['fault']} failure artifact records mode and signature",
+			'oracle' === ( $reader_manifest['mode'] ?? null ) &&
+				$reader_pipeline['case'] === ( $reader_manifest['case'] ?? null ) &&
+				in_array( $reader_pipeline['signature'], $reader_manifest['signatures'] ?? array(), true ),
+			json_encode( $reader_manifest )
+		);
+
+		$reader_fault_replay = run_process(
+			array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $reader_failure_file ),
+			array( 'HTML_DECODER_FUZZ_FAULT' => $reader_pipeline['fault'] )
+		);
+		check( "faulted {$reader_pipeline['fault']} replay reproduces finding", 1 === $reader_fault_replay['code'], $reader_fault_replay['stdout'] . $reader_fault_replay['stderr'] );
+
+		$reader_fault_minimize = run_process(
+			array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $reader_failure_file ),
+			array( 'HTML_DECODER_FUZZ_FAULT' => $reader_pipeline['fault'] )
+		);
+		check( "faulted {$reader_pipeline['fault']} minimizer preserves signature", 0 === $reader_fault_minimize['code'], $reader_fault_minimize['stdout'] . $reader_fault_minimize['stderr'] );
+	}
+	remove_tree( $reader_pipeline_dir );
+}
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );

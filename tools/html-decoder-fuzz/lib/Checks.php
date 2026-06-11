@@ -244,6 +244,32 @@ class Checks {
 				break;
 			}
 
+			if ( '' === $chunk ) {
+				$failures[] = self::failure(
+					'reader-returned-empty-chunk',
+					$context,
+					array(
+						'context'           => $context,
+						'at'                => $amp_at,
+						'match_byte_length' => $match_byte_length,
+					)
+				);
+				break;
+			}
+
+			if ( $match_byte_length < 2 ) {
+				$failures[] = self::failure(
+					'reader-match-too-short',
+					$context,
+					array(
+						'context'           => $context,
+						'at'                => $amp_at,
+						'match_byte_length' => $match_byte_length,
+					)
+				);
+				break;
+			}
+
 			if ( $amp_at + $match_byte_length > $end ) {
 				$failures[] = self::failure(
 					'reader-overran-input',
@@ -256,6 +282,42 @@ class Checks {
 					)
 				);
 				break;
+			}
+
+			$reference = substr( $payload, $amp_at, $match_byte_length );
+			$local_match_byte_length = null;
+			try {
+				$local_chunk = ( $this->targets['read_character_reference'] )( $decoder_context, $reference, 0, $local_match_byte_length );
+			} catch ( \Throwable $error ) {
+				$failures[] = self::failure(
+					'target-exception',
+					"{$context}:read-character-reference-local",
+					array(
+						'context' => $context,
+						'class'   => get_class( $error ),
+						'message' => $error->getMessage(),
+					)
+				);
+				break;
+			}
+
+			if ( $local_chunk !== $chunk || $local_match_byte_length !== $match_byte_length ) {
+				$failures[] = self::failure(
+					'reader-composition-mismatch',
+					$context,
+					array_merge(
+						array(
+							'context'                    => $context,
+							'at'                         => $amp_at,
+							'match_byte_length'          => $match_byte_length,
+							'local_match_byte_length'    => $local_match_byte_length,
+							'expected_chunk_base64'      => base64_encode( $chunk ),
+							'local_chunk_base64'         => is_string( $local_chunk ) ? base64_encode( $local_chunk ) : null,
+							'local_chunk_type'           => gettype( $local_chunk ),
+						),
+						self::byte_detail( 'reference', $reference )
+					)
+				);
 			}
 
 			$decoded .= substr( $payload, $was_at, $amp_at - $was_at );

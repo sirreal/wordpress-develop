@@ -18,7 +18,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 11: add digit-count numeric boundary stress generation.
 - [x] Tier 2 item 12: add strategy composition and generalized attribute-prefix encoding.
 - [x] Tier 2 item 13: add mutation/corpus mode.
-- [ ] Tier 2 items 14-15.
+- [x] Tier 2 item 14: add reader compositionality invariant.
+- [ ] Tier 2 item 15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -95,6 +96,11 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-corpus-fault-check-20260611-2` reported the expected `reader-overran-input` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` and `git diff --check` passed after adding corpus mutation mode.
 - 2026-06-11: After reviewer feedback, html5lib tree-construction entity rows now normalize simple `<div bar=...>` and `<div>...</div>` fixtures into decoder payloads before oracle-safety filtering, corpus mutations choose splice/edit offsets on UTF-8 boundaries, and smoke asserts retained WPT attribute sentinels plus mutation helper shapes; `php tools/html-decoder-fuzz/tests/harness-smoke.php`, the refreshed corpus worker/runner/replay/fault-manifest checks, default 500-case worker, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the reader compositionality invariant.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting empty reader chunks, one-byte matches, and non-compositional local-slice reads are detected by fault targets.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/replay.php --seed 1 --case 31`, and `git diff --check` passed after adding reader compositionality checks.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 31 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-reader-composition-fault-20260611-1` reported `reader-composition-mismatch` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: After reviewer feedback, `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed with automated worker, failure-manifest, replay, and minimize coverage for `reader-empty-chunk`, `reader-short-match-length`, and `reader-substring-composition`.
 
 ## Review Log
 
@@ -150,3 +156,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Russell: APPROVE, corpus generator semantics after WPT attribute retention and UTF-8 boundary fixes.
   - Ramanujan: APPROVE, CLI/worker/replay/runner integration and deterministic corpus replay.
   - Zeno: APPROVE, smoke/docs/progress coverage after WPT sentinel and mutation-shape assertions.
+- Tier 2 item 14:
+  - Boyle: APPROVE, reader compositionality invariant semantics and deterministic cases after pipeline coverage.
+  - Kuhn: APPROVE, fault-target and smoke coverage after automated worker/replay/minimize pipelines.
+  - Bohr: APPROVE, integration/runtime/docs/progress coverage after shared reader-path verification.
