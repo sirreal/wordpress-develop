@@ -21,6 +21,7 @@ All included PRs were merged into `html-api-fuzz` with merge commits. Trunk was 
 - PR #17, `origin/copilot/add-script-data-filter`
   - Merge commit: `adbe354c94`
   - Why: Addresses issue #16 by adding the classic-script `script_data_{$handle}` JSON data hook. This is separate from the HTML API fuzzer stack, so it was kept in its own merge commit.
+  - Follow-up: `57d458df91` corrects the new test's script-tag assertion to match WordPress's emitted attribute order.
 
 ## Not merged
 
