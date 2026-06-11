@@ -1437,6 +1437,31 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * if able. If not matched at any token or if the token doesn't correspond to any HTML
 	 * it will return an empty string (for example, presumptuous end tags are ignored).
 	 *
+	 * Walking every token with {@see WP_HTML_Processor::next_token} and
+	 * concatenating `serialize_token()` for each one reconstructs the
+	 * normalized serialization of the input — the same output that
+	 * {@see WP_HTML_Processor::serialize} produces in a single call. The
+	 * token-by-token form exists so that a rewriting loop can transform
+	 * the document while serializing: skip tokens to remove them, or emit
+	 * extra markup around them to insert wrappers. Closing tokens of
+	 * skipped elements must be skipped too.
+	 *
+	 * Example:
+	 *
+	 *     // Remove every SUP element but keep its contents.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     $output    = '';
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'SUP' === $processor->get_tag() ) {
+	 *             continue; // Skips both the opener and the closer.
+	 *         }
+	 *         $output .= $processor->serialize_token();
+	 *     }
+	 *
+	 * Prefer `serialize()` when the whole document is wanted unchanged,
+	 * and `serialize_token()` inside a loop when tokens are dropped,
+	 * altered, or wrapped along the way.
+	 *
 	 * @see static::serialize()
 	 *
 	 * @since 6.7.0
