@@ -726,11 +726,19 @@ impl TagProcessor {
                 };
                 Some(transform_text(raw, true, null_transform))
             }
-            TOKEN_TYPE_CDATA if scan.token_end >= scan.tag_start + 12 => Some(transform_text(
-                &self.html[scan.tag_start + 9..scan.token_end - 3],
-                false,
-                NullTransform::Replace,
-            )),
+            TOKEN_TYPE_CDATA if scan.token_end >= scan.tag_start + 9 => {
+                let token = &self.html[scan.tag_start..scan.token_end];
+                let text_end = if token.ends_with(b"]]>") {
+                    scan.token_end - 3
+                } else {
+                    scan.token_end
+                };
+                Some(transform_text(
+                    &self.html[scan.tag_start + 9..text_end],
+                    false,
+                    NullTransform::Replace,
+                ))
+            }
             TOKEN_TYPE_DOCTYPE if scan.token_end > scan.tag_start + 9 => {
                 Some(self.html[scan.tag_start + 9..scan.token_end - 1].to_vec())
             }
@@ -2099,7 +2107,7 @@ fn scan_cdata(html: &[u8], tag_start: usize, namespace: u8) -> ScanResult {
     }
 
     let Some(relative_end) = find_subslice(&html[tag_start + 9..], b"]]>") else {
-        return scan_markup_declaration(html, tag_start, TOKEN_TYPE_COMMENT);
+        return ScanResult::Token(non_tag_scan(tag_start, html.len(), TOKEN_TYPE_CDATA));
     };
 
     let token_end = tag_start + 9 + relative_end + 3;
@@ -2891,6 +2899,35 @@ mod tests {
             processor.current_modifiable_text(scan).unwrap(),
             b"A\nB\nC"
         );
+    }
+
+    #[test]
+    fn foreign_incomplete_cdata_consumes_rest_as_text() {
+        for (html, expected) in [
+            (&b"<![CDATA[]>a"[..], &b"]>a"[..]),
+            (&b"<![CDATA[<svg>a"[..], &b"<svg>a"[..]),
+            (&b"<![CDATA[</svg>a"[..], &b"</svg>a"[..]),
+        ] {
+            let processor = TagProcessor {
+                html: html.to_vec(),
+                offset: 0,
+                current: None,
+                scratch: Vec::new(),
+                paused_at_incomplete: false,
+                inserted_attributes: Vec::new(),
+                parsing_namespace: NAMESPACE_FOREIGN,
+            };
+
+            let ScanResult::Token(scan) =
+                scan_next_token_in_namespace(&processor.html, 0, NAMESPACE_FOREIGN)
+            else {
+                panic!("Expected CDATA token.");
+            };
+
+            assert_eq!(scan.token_type, super::TOKEN_TYPE_CDATA);
+            assert_eq!(scan.token_end, processor.html.len());
+            assert_eq!(processor.current_modifiable_text(scan).unwrap(), expected);
+        }
     }
 
     #[test]
