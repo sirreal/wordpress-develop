@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { loadWasm, WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info } from "./wp-html-api-rust.js";
 
 const {
+	WP_HTML_Decoder,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -14,6 +15,56 @@ const {
 assert.equal(version(), "0.1.0");
 assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
 assert.equal(Exported_WP_HTML_Doctype_Info, WP_HTML_Doctype_Info);
+assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
+
+assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
+assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
+assert.equal(WP_HTML_Decoder.decode_text_node("&#x93;&#x1f604;&#x94;"), "“😄”");
+assert.equal(WP_HTML_Decoder.decode_text_node("&notin"), "¬in");
+assert.equal(WP_HTML_Decoder.decode_attribute("&notin"), "&notin");
+assert.equal(WP_HTML_Decoder.decode_attribute("&notin;"), "∉");
+assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
+assert.equal(WP_HTML_Decoder.decode("attribute", "&notit;"), "&notit;");
+assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0x1f170), "🅰");
+assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0xd83c), "�");
+
+const hellipReferenceLength = {};
+assert.equal(
+	WP_HTML_Decoder.read_character_reference("attribute", "Ships&hellip;", 5, hellipReferenceLength),
+	"…",
+);
+assert.equal(hellipReferenceLength.value, 8);
+assert.equal(WP_HTML_Decoder.read_character_reference("attribute", "Ships&hellip;", 0), null);
+assert.equal(WP_HTML_Decoder.read_character_reference("attribute", "&notin"), null);
+const notinReferenceLength = {};
+assert.equal(WP_HTML_Decoder.read_character_reference("attribute", "&notin;", 0, notinReferenceLength), "∉");
+assert.equal(notinReferenceLength.value, 7);
+const legacyNotReferenceLength = {};
+assert.equal(WP_HTML_Decoder.read_character_reference("data", "&notin", 0, legacyNotReferenceLength), "¬");
+assert.equal(legacyNotReferenceLength.value, 4);
+
+for (const attributeValue of [
+	"javascript:",
+	"JAVASCRIPT:",
+	"&#106;avascript:",
+	"&#x6A;avascript:",
+	"&#X6A;avascript&colon;",
+	"javascript&#58;alert(1);",
+	"javascript&#0000058alert(1);",
+	"javascript&#x3a;alert(1);",
+	"&#x6A&#x61&#x76&#x61&#x73&#x63&#x72&#x69&#x70&#x74&#x3A&#x61&#x6C&#x65&#x72&#x74&#x28&#x27&#x58&#x53&#x53&#x27&#x29",
+	"javascript&#58alert(1)",
+	"javascript&#x3ax=1;alert(1)",
+]) {
+	assert.equal(
+		WP_HTML_Decoder.attribute_starts_with(attributeValue, "javascript:", "ascii-case-insensitive"),
+		true,
+		attributeValue,
+	);
+}
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP"), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", "ascii-case-insensitive"), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "https", "ascii-case-insensitive"), false);
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));

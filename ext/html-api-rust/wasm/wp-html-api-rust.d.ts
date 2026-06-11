@@ -75,6 +75,30 @@ export type HtmlNamespace = "html" | "math" | "svg";
 
 export type EncodingConfidence = "tentative" | "certain" | "irrelevant";
 
+export type DecoderContext = "attribute" | "data" | string;
+
+export interface MatchByteLength {
+	value?: number;
+}
+
+export interface WP_HTML_Decoder_Constructor {
+	attribute_starts_with(
+		haystack: string,
+		searchText: string,
+		caseSensitivity?: "case-sensitive" | "ascii-case-insensitive",
+	): boolean;
+	decode_text_node(text: string): string;
+	decode_attribute(text: string): string;
+	decode(context: DecoderContext, text: string): string;
+	read_character_reference(
+		context: DecoderContext,
+		text: string,
+		at?: number | string | boolean | null,
+		matchByteLength?: MatchByteLength | null,
+	): string | null;
+	code_point_to_utf8_bytes(codePoint: number | string): string;
+}
+
 export interface WP_HTML_Doctype_Info {
 	name: string | null;
 	public_identifier: string | null;
@@ -238,6 +262,7 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 }
 
 export interface HtmlApi {
+	WP_HTML_Decoder: WP_HTML_Decoder_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

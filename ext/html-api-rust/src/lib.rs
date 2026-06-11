@@ -80,6 +80,120 @@ pub extern "C" fn wp_html_api_rust_core_version() -> *const c_char {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_decoder_decode(
+    context: u8,
+    text: *const u8,
+    text_len: usize,
+    out_ptr: *mut u8,
+    out_capacity: usize,
+    out_len: *mut usize,
+) -> bool {
+    if (text.is_null() && text_len > 0) || out_ptr.is_null() || out_len.is_null() {
+        return false;
+    }
+
+    let text = if text_len == 0 {
+        &[][..]
+    } else {
+        slice::from_raw_parts(text, text_len)
+    };
+    let decoded = decode_html_text(decode_context_from_byte(context), text);
+    write_output_buffer(&decoded, out_ptr, out_capacity, out_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_decoder_read_character_reference(
+    context: u8,
+    text: *const u8,
+    text_len: usize,
+    at: usize,
+    out_ptr: *mut u8,
+    out_capacity: usize,
+    out_len: *mut usize,
+    match_len: *mut usize,
+) -> bool {
+    if (text.is_null() && text_len > 0)
+        || out_ptr.is_null()
+        || out_len.is_null()
+        || match_len.is_null()
+    {
+        return false;
+    }
+
+    let text = if text_len == 0 {
+        &[][..]
+    } else {
+        slice::from_raw_parts(text, text_len)
+    };
+
+    if at >= text.len() {
+        return false;
+    }
+
+    let Some((decoded, consumed)) =
+        decode_character_reference(decode_context_from_byte(context), &text[at..])
+    else {
+        return false;
+    };
+
+    let mut output = Vec::with_capacity(consumed);
+    decoded.append_to(&mut output);
+    if !write_output_buffer(&output, out_ptr, out_capacity, out_len) {
+        return false;
+    }
+
+    ptr::write(match_len, consumed);
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_decoder_attribute_starts_with(
+    haystack: *const u8,
+    haystack_len: usize,
+    search_text: *const u8,
+    search_text_len: usize,
+    ascii_case_insensitive: bool,
+) -> bool {
+    if (haystack.is_null() && haystack_len > 0) || (search_text.is_null() && search_text_len > 0) {
+        return false;
+    }
+
+    let haystack = if haystack_len == 0 {
+        &[][..]
+    } else {
+        slice::from_raw_parts(haystack, haystack_len)
+    };
+    let search_text = if search_text_len == 0 {
+        &[][..]
+    } else {
+        slice::from_raw_parts(search_text, search_text_len)
+    };
+
+    attribute_starts_with(haystack, search_text, ascii_case_insensitive)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_decoder_code_point_to_utf8_bytes(
+    code_point: u32,
+    out_ptr: *mut u8,
+    out_capacity: usize,
+    out_len: *mut usize,
+) -> bool {
+    if out_ptr.is_null() || out_len.is_null() {
+        return false;
+    }
+
+    let character = char::from_u32(code_point).unwrap_or('\u{FFFD}');
+    let mut buffer = [0; 4];
+    write_output_buffer(
+        character.encode_utf8(&mut buffer).as_bytes(),
+        out_ptr,
+        out_capacity,
+        out_len,
+    )
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn wp_html_api_rust_scan_next_tag(
     html: *const u8,
     len: usize,
@@ -2559,6 +2673,115 @@ fn decode_html_attribute(input: &[u8]) -> Vec<u8> {
     output
 }
 
+fn decode_html_text(context: DecodeContext, input: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(input.len());
+    let mut at = 0;
+
+    while at < input.len() {
+        if input[at] != b'&' {
+            output.push(input[at]);
+            at += 1;
+            continue;
+        }
+
+        let Some((decoded, consumed)) = decode_character_reference(context, &input[at..]) else {
+            output.push(input[at]);
+            at += 1;
+            continue;
+        };
+
+        decoded.append_to(&mut output);
+        at += consumed;
+    }
+
+    output
+}
+
+fn decode_context_from_byte(context: u8) -> DecodeContext {
+    if context == 1 {
+        DecodeContext::Attribute
+    } else {
+        DecodeContext::Data
+    }
+}
+
+unsafe fn write_output_buffer(
+    output: &[u8],
+    out_ptr: *mut u8,
+    out_capacity: usize,
+    out_len: *mut usize,
+) -> bool {
+    if output.len() > out_capacity {
+        return false;
+    }
+
+    if !output.is_empty() {
+        ptr::copy_nonoverlapping(output.as_ptr(), out_ptr, output.len());
+    }
+    ptr::write(out_len, output.len());
+    true
+}
+
+fn attribute_starts_with(
+    haystack: &[u8],
+    search_text: &[u8],
+    ascii_case_insensitive: bool,
+) -> bool {
+    let mut search_at = 0;
+    let mut haystack_at = 0;
+
+    while search_at < search_text.len() && haystack_at < haystack.len() {
+        if haystack[haystack_at] == b'&' {
+            if let Some((decoded, consumed)) =
+                decode_character_reference(DecodeContext::Attribute, &haystack[haystack_at..])
+            {
+                let mut decoded_bytes = Vec::new();
+                decoded.append_to(&mut decoded_bytes);
+                if !slice_starts_with(
+                    &search_text[search_at..],
+                    &decoded_bytes,
+                    ascii_case_insensitive,
+                ) {
+                    return false;
+                }
+
+                haystack_at += consumed;
+                search_at += decoded_bytes.len();
+                continue;
+            }
+        }
+
+        if !byte_eq(
+            haystack[haystack_at],
+            search_text[search_at],
+            ascii_case_insensitive,
+        ) {
+            return false;
+        }
+
+        haystack_at += 1;
+        search_at += 1;
+    }
+
+    true
+}
+
+fn slice_starts_with(value: &[u8], prefix: &[u8], ascii_case_insensitive: bool) -> bool {
+    value.len() >= prefix.len()
+        && value
+            .iter()
+            .zip(prefix.iter())
+            .all(|(&left, &right)| byte_eq(left, right, ascii_case_insensitive))
+}
+
+fn byte_eq(left: u8, right: u8, ascii_case_insensitive: bool) -> bool {
+    if ascii_case_insensitive {
+        left.eq_ignore_ascii_case(&right)
+    } else {
+        left == right
+    }
+}
+
 fn decode_character_reference(
     context: DecodeContext,
     input: &[u8],
@@ -2674,6 +2897,7 @@ fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)
         (b"AMP", CharacterReference::Scalar('&')),
         (b"apos;", CharacterReference::Scalar('\'')),
         (b"apos", CharacterReference::Scalar('\'')),
+        (b"colon;", CharacterReference::Scalar(':')),
         (b"copy;", CharacterReference::Scalar('©')),
         (b"copy", CharacterReference::Scalar('©')),
         (b"dagger;", CharacterReference::Scalar('†')),

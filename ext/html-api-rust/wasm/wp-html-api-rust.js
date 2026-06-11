@@ -5,6 +5,8 @@ const TOKEN_TYPE_DOCTYPE = 4;
 const TOKEN_TYPE_CDATA = 5;
 const TOKEN_TYPE_PRESUMPTUOUS_TAG = 6;
 const TOKEN_TYPE_FUNKY_COMMENT = 7;
+const DECODE_CONTEXT_DATA = 0;
+const DECODE_CONTEXT_ATTRIBUTE = 1;
 
 const STATE_READY = "STATE_READY";
 const STATE_COMPLETE = "STATE_COMPLETE";
@@ -725,6 +727,36 @@ export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.was
 
 export function createHtmlApi(wasm) {
 	const runtime = new WasmRuntime(wasm);
+
+	class WP_HTML_Decoder {
+		static attribute_starts_with(haystack, searchText, caseSensitivity = "case-sensitive") {
+			return runtime.decoderAttributeStartsWith(
+				haystack,
+				searchText,
+				caseSensitivity === "ascii-case-insensitive",
+			);
+		}
+
+		static decode_text_node(text) {
+			return runtime.decoderDecode("data", text);
+		}
+
+		static decode_attribute(text) {
+			return runtime.decoderDecode("attribute", text);
+		}
+
+		static decode(context, text) {
+			return runtime.decoderDecode(context, text);
+		}
+
+		static read_character_reference(context, text, at = 0, matchByteLength = null) {
+			return runtime.decoderReadCharacterReference(context, text, at, matchByteLength);
+		}
+
+		static code_point_to_utf8_bytes(codePoint) {
+			return runtime.decoderCodePointToUtf8Bytes(codePoint);
+		}
+	}
 
 	class WP_HTML_Tag_Processor {
 		static MAX_BOOKMARKS = 10;
@@ -4389,6 +4421,7 @@ export function createHtmlApi(wasm) {
 	}
 
 	return {
+		WP_HTML_Decoder,
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
 		WP_HTML_Doctype_Info,
@@ -4527,6 +4560,107 @@ class WasmRuntime {
 		return new Uint8Array(this.wasm.memory.buffer);
 	}
 
+	decoderDecode(context, text) {
+		const input = this.encode(text);
+		const contextKind = decodeContextKind(context);
+		return this.withBytes(input, ({ ptr, len }) => {
+			const output = this.allocBytes(new Uint8Array(Math.max(1, len)));
+			const outLen = this.allocBytes(new Uint8Array(4));
+			try {
+				if (!this.wasm.wp_html_api_rust_decoder_decode(
+					contextKind,
+					ptr,
+					len,
+					output.ptr,
+					output.allocationLen,
+					outLen.ptr,
+				)) {
+					return "";
+				}
+
+				const decodedLen = this.readU32(outLen.ptr);
+				return textDecoder.decode(this.bytes().subarray(output.ptr, output.ptr + decodedLen));
+			} finally {
+				this.freeBytes(outLen);
+				this.freeBytes(output);
+			}
+		});
+	}
+
+	decoderReadCharacterReference(context, text, at = 0, matchByteLength = null) {
+		const input = this.encode(text);
+		const contextKind = decodeContextKind(context);
+		const normalizedAt = Math.max(0, phpIntegerCast(at));
+		return this.withBytes(input, ({ ptr, len }) => {
+			const outputCapacity = Math.max(4, len - normalizedAt);
+			const output = this.allocBytes(new Uint8Array(outputCapacity));
+			const lengths = this.allocBytes(new Uint8Array(8));
+			try {
+				if (!this.wasm.wp_html_api_rust_decoder_read_character_reference(
+					contextKind,
+					ptr,
+					len,
+					normalizedAt,
+					output.ptr,
+					output.allocationLen,
+					lengths.ptr,
+					lengths.ptr + 4,
+				)) {
+					return null;
+				}
+
+				if (matchByteLength && typeof matchByteLength === "object") {
+					matchByteLength.value = this.readU32(lengths.ptr + 4);
+				}
+
+				const decodedLen = this.readU32(lengths.ptr);
+				return textDecoder.decode(this.bytes().subarray(output.ptr, output.ptr + decodedLen));
+			} finally {
+				this.freeBytes(lengths);
+				this.freeBytes(output);
+			}
+		});
+	}
+
+	decoderAttributeStartsWith(haystack, searchText, asciiCaseInsensitive) {
+		return this.withEncoded(haystack, (haystackBytes) => (
+			this.withEncoded(searchText, (searchBytes) => (
+				Boolean(this.wasm.wp_html_api_rust_decoder_attribute_starts_with(
+					haystackBytes.ptr,
+					haystackBytes.len,
+					searchBytes.ptr,
+					searchBytes.len,
+					Boolean(asciiCaseInsensitive),
+				))
+			))
+		));
+	}
+
+	decoderCodePointToUtf8Bytes(codePoint) {
+		const numericCodePoint = Number(codePoint);
+		const normalizedCodePoint = Number.isFinite(numericCodePoint) && numericCodePoint >= 0
+			? Math.trunc(numericCodePoint)
+			: 0x110000;
+		const output = this.allocBytes(new Uint8Array(4));
+		const outLen = this.allocBytes(new Uint8Array(4));
+		try {
+			if (!this.wasm.wp_html_api_rust_decoder_code_point_to_utf8_bytes(
+				normalizedCodePoint,
+				output.ptr,
+				output.allocationLen,
+				outLen.ptr,
+			)) {
+				return "\uFFFD";
+			}
+
+			const decodedLen = this.readU32(outLen.ptr);
+			return textDecoder.decode(this.bytes().subarray(output.ptr, output.ptr + decodedLen));
+		} finally {
+			this.freeBytes(outLen);
+			this.freeBytes(output);
+		}
+	}
+
 	scanNextTag(html, offset = 0) {
 		const input = this.encode(html);
 		const normalizedOffset = Math.max(0, phpIntegerCast(offset));
@@ -4559,6 +4693,10 @@ class WasmRuntime {
 			}
 		});
 	}
+}
+
+function decodeContextKind(context) {
+	return context === "attribute" ? DECODE_CONTEXT_ATTRIBUTE : DECODE_CONTEXT_DATA;
 }
 
 function asciiUpper(value) {

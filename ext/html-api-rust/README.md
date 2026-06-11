@@ -26,7 +26,7 @@ npm --prefix wasm test
 ```
 
 The JavaScript wrapper is an ES module in `wasm/wp-html-api-rust.js`. It exposes
-`loadWasm()`, `WP_HTML_Tag_Processor`, `WP_HTML_Processor`,
+`loadWasm()`, `WP_HTML_Decoder`, `WP_HTML_Tag_Processor`, `WP_HTML_Processor`,
 `WP_HTML_Doctype_Info`, `scanNextTag()`, and `version()`. The tag processor
 methods call the same Rust core used by the PHP extension. The JavaScript API
 surface mirrors the public WordPress HTML API classes with JavaScript naming,
