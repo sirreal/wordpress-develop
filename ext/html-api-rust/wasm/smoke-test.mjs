@@ -192,6 +192,11 @@ assert.equal(processorBreadcrumbMatchOffset.get_attribute("one"), null);
 assert.equal(processorBreadcrumbMatchOffset.get_attribute("two"), true);
 processorBreadcrumbMatchOffset.destroy();
 
+const processorBreadcrumbIgnoresTagName = WP_HTML_Processor.create_fragment("<span></span><div></div>");
+assert.equal(processorBreadcrumbIgnoresTagName.next_tag({ tag_name: "span", breadcrumbs: ["DIV"] }), true);
+assert.equal(processorBreadcrumbIgnoresTagName.get_tag(), "DIV");
+processorBreadcrumbIgnoresTagName.destroy();
+
 const processorZeroBreadcrumbMatchOffset = WP_HTML_Processor.create_fragment("<div><span></span></div>");
 assert.equal(processorZeroBreadcrumbMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPAN"], match_offset: 0 }), false);
 assert.equal(processorZeroBreadcrumbMatchOffset.get_tag(), null);

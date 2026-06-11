@@ -1249,10 +1249,6 @@ export function createHtmlApi(wasm) {
 					}
 				}
 
-				if (needsTag !== null && this.get_token_name() !== needsTag) {
-					continue;
-				}
-
 				if (needsClass !== null && this.has_class(needsClass) !== true) {
 					continue;
 				}
