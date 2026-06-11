@@ -1078,6 +1078,23 @@ assert.equal(tableCellProcessor.is_virtual(), false);
 assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
 tableCellProcessor.destroy();
 
+const ignoredTableEndTagsProcessor = WP_HTML_Processor.create_fragment(
+	"<table></body></caption></col></colgroup></html></tbody></td></tfoot></th></thead></tr><td>",
+);
+assert.equal(ignoredTableEndTagsProcessor.next_tag("td"), true);
+assert.deepEqual(ignoredTableEndTagsProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+ignoredTableEndTagsProcessor.destroy();
+
+const ignoredTableCellEndTagsProcessor = WP_HTML_Processor.create_fragment(
+	"<table><td></body></caption></col></colgroup></html>foo",
+);
+assert.equal(ignoredTableCellEndTagsProcessor.next_tag("td"), true);
+assert.equal(ignoredTableCellEndTagsProcessor.next_token(), true);
+assert.equal(ignoredTableCellEndTagsProcessor.get_token_name(), "#text");
+assert.equal(ignoredTableCellEndTagsProcessor.get_modifiable_text(), "foo");
+assert.deepEqual(ignoredTableCellEndTagsProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "#text"]);
+ignoredTableCellEndTagsProcessor.destroy();
+
 const adjacentTableCellProcessor = WP_HTML_Processor.create_fragment("<table><td>a<td>b");
 assert.equal(adjacentTableCellProcessor.next_tag("td"), true);
 assert.deepEqual(adjacentTableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);

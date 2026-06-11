@@ -228,6 +228,13 @@ const TABLE_ROW_MODE_IGNORED_END_TAGS = new Set([
 	"TD",
 	"TH",
 ]);
+const TABLE_CELL_MODE_IGNORED_END_TAGS = new Set([
+	"BODY",
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"HTML",
+]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
 const FORM_TABLE_DESCENDANT_ELEMENTS = new Set([
 	"CAPTION",
@@ -1863,6 +1870,16 @@ export function createHtmlApi(wasm) {
 			if (this.is_tag_closer()) {
 				const closingNamespace = this.#namespaceForEndTag(tagName);
 
+				if (
+					closingNamespace === "html" &&
+					this.#shouldIgnoreEndTagInTableContext(tagName)
+				) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForEndTag(tagName)) {
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
@@ -3419,6 +3436,39 @@ export function createHtmlApi(wasm) {
 				tagName === "RB" ||
 				tagName === "RTC"
 			);
+		}
+
+		#shouldIgnoreEndTagInTableContext(tagName) {
+			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
+				return false;
+			}
+
+			if (this.#currentHtmlElementIs("TABLE")) {
+				return TABLE_MODE_IGNORED_END_TAGS.has(tagName);
+			}
+
+			if (this.#currentHtmlElementIs("COLGROUP")) {
+				return tagName !== "COLGROUP" && TABLE_MODE_IGNORED_END_TAGS.has(tagName);
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			const currentNode = topIndex >= 0 && this.open_element_namespaces[topIndex] === "html"
+				? this.open_elements[topIndex]
+				: null;
+
+			if (TABLE_SECTION_ELEMENTS.has(currentNode)) {
+				return TABLE_BODY_MODE_IGNORED_END_TAGS.has(tagName);
+			}
+
+			if (currentNode === "TR") {
+				return TABLE_ROW_MODE_IGNORED_END_TAGS.has(tagName);
+			}
+
+			if (TABLE_CELL_ELEMENTS.has(currentNode)) {
+				return TABLE_CELL_MODE_IGNORED_END_TAGS.has(tagName);
+			}
+
+			return false;
 		}
 
 		#popLastMatchingBeforeBoundary(match, boundaries) {
