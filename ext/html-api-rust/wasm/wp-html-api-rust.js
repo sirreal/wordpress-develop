@@ -1060,6 +1060,7 @@ export function createHtmlApi(wasm) {
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
+			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
 			this.current_namespace = contextNamespace(this.context_node);
 			this.current_token_namespace = this.current_namespace;
@@ -1229,6 +1230,10 @@ export function createHtmlApi(wasm) {
 					this.compat_mode = WP_HTML_Tag_Processor.QUIRKS_MODE;
 				}
 				this.#queueFullParserScaffold();
+				return this.#consumeVirtualToken();
+			}
+
+			if (this.#queueEofVirtualClosers()) {
 				return this.#consumeVirtualToken();
 			}
 
@@ -1608,6 +1613,7 @@ export function createHtmlApi(wasm) {
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
+				baseOpenElementCount: this.base_open_element_count,
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
 			};
@@ -1623,6 +1629,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
+			this.base_open_element_count = state.baseOpenElementCount;
 			this.breadcrumbs = [...state.breadcrumbs];
 			this.current_namespace = state.currentNamespace;
 			this.current_token_namespace = state.currentTokenNamespace;
@@ -1683,6 +1690,15 @@ export function createHtmlApi(wasm) {
 					namespaceName: "html",
 				},
 			);
+		}
+
+		#queueEofVirtualClosers() {
+			if (this.open_elements.length <= this.base_open_element_count) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(this.base_open_element_count);
+			return true;
 		}
 
 		#queueVirtualPopsFrom(index) {

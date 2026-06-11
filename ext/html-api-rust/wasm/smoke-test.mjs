@@ -439,6 +439,28 @@ assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
 assert.equal(unexpectedCloserProcessor.is_tag_closer(), true);
 unexpectedCloserProcessor.destroy();
 
+const eofCloserProcessor = WP_HTML_Processor.create_fragment("<div><p><span>");
+assert.equal(eofCloserProcessor.next_tag("span"), true);
+assert.deepEqual(eofCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "P", "SPAN"]);
+assert.equal(eofCloserProcessor.next_token(), true);
+assert.equal(eofCloserProcessor.get_tag(), "SPAN");
+assert.equal(eofCloserProcessor.is_virtual(), true);
+assert.equal(eofCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(eofCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "P"]);
+assert.equal(eofCloserProcessor.next_token(), true);
+assert.equal(eofCloserProcessor.get_tag(), "P");
+assert.equal(eofCloserProcessor.is_virtual(), true);
+assert.equal(eofCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(eofCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
+assert.equal(eofCloserProcessor.next_token(), true);
+assert.equal(eofCloserProcessor.get_tag(), "DIV");
+assert.equal(eofCloserProcessor.is_virtual(), true);
+assert.equal(eofCloserProcessor.is_tag_closer(), true);
+assert.deepEqual(eofCloserProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(eofCloserProcessor.next_token(), false);
+assert.equal(eofCloserProcessor.get_tag(), null);
+eofCloserProcessor.destroy();
+
 const specialEndTagProcessor = WP_HTML_Processor.create_fragment("<div><span><p></span><div target>");
 assert.equal(specialEndTagProcessor.next_tag("p"), true);
 assert.deepEqual(specialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN", "P"]);
@@ -523,6 +545,7 @@ assert.equal(
 	WP_HTML_Processor.normalize('<a href=#anchor enabled>Tom & Jerry</a>'),
 	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',
 );
+assert.equal(WP_HTML_Processor.normalize("<div><p>One"), "<div><p>One</p></div>");
 
 const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
 assert.equal(serializationProcessor.next_token(), true);
