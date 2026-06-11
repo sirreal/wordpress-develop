@@ -7,6 +7,10 @@
  * @since 6.4.0
  */
 
+if ( class_exists( 'WP_HTML_Processor', false ) ) {
+	return;
+}
+
 /**
  * Core class used to safely parse and modify an HTML document.
  *
@@ -5617,7 +5621,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$actual_bookmark_name = "_{$bookmark_name}";
 		$processor_started_at = $this->state->current_token
 			? $this->bookmarks[ $this->state->current_token->bookmark_name ]->start
-			: 0;
+			: ( WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state ? strlen( $this->html ) : 0 );
 		$bookmark_starts_at   = $this->bookmarks[ $actual_bookmark_name ]->start;
 		$direction            = $bookmark_starts_at > $processor_started_at ? 'forward' : 'backward';
 
@@ -5730,7 +5734,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * The processor will stop on virtual tokens, but bookmarks may not be set on them.
 			 * They should not be matched when seeking a bookmark, skip them.
 			 */
-			if ( $this->is_virtual() ) {
+			if ( ! isset( $this->state->current_token ) || $this->is_virtual() ) {
 				continue;
 			}
 			if ( $bookmark_starts_at === $this->bookmarks[ $this->state->current_token->bookmark_name ]->start ) {

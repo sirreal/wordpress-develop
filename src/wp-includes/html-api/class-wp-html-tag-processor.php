@@ -21,6 +21,24 @@
  * @since 6.2.0
  */
 
+if ( class_exists( 'WP_HTML_Tag_Processor_Native', false ) ) {
+	if ( class_exists( 'WP_HTML_Tag_Processor', false ) ) {
+		return;
+	}
+
+	class WP_HTML_Tag_Processor extends WP_HTML_Tag_Processor_Native {
+		private function get_script_content_type(): ?string {
+			return $this->native_get_script_content_type();
+		}
+	}
+
+	return;
+}
+
+if ( class_exists( 'WP_HTML_Tag_Processor', false ) ) {
+	return;
+}
+
 /**
  * Core class used to modify attributes in an HTML document for tags matching a query.
  *
