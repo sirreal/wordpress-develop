@@ -2342,8 +2342,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
-							this.full_parser_insertion_mode = "in_head";
-							continue;
+							return false;
 						}
 
 						this.skip_current_token = true;
@@ -2382,8 +2381,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
-							this.full_parser_insertion_mode = "in_head";
-							continue;
+							return false;
 						}
 
 						this.skip_current_token = true;
@@ -2413,8 +2411,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
-							this.full_parser_insertion_mode = "in_head";
-							continue;
+							return false;
 						}
 
 						this.skip_current_token = true;

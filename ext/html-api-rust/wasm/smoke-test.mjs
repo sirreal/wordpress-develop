@@ -427,6 +427,27 @@ assert.deepEqual(fullParserFramesetTokens, [
 ]);
 fullParserFrameset.destroy();
 
+const fullParserFramesetNoframes = WP_HTML_Processor.create_full_parser("<frameset><noframes>x</noframes><frame></frameset>");
+const fullParserFramesetNoframesTokens = [];
+while (fullParserFramesetNoframes.next_token()) {
+	fullParserFramesetNoframesTokens.push(
+		fullParserFramesetNoframes.get_token_type() === "#tag"
+			? `${fullParserFramesetNoframes.is_tag_closer() ? "-" : "+"}${fullParserFramesetNoframes.get_tag()}:${fullParserFramesetNoframes.get_breadcrumbs().join("/")}`
+			: fullParserFramesetNoframes.get_token_name(),
+	);
+}
+assert.deepEqual(fullParserFramesetNoframesTokens, [
+	"+HTML:HTML",
+	"+HEAD:HTML/HEAD",
+	"-HEAD:HTML",
+	"+FRAMESET:HTML/FRAMESET",
+	"+NOFRAMES:HTML/FRAMESET/NOFRAMES",
+	"+FRAME:HTML/FRAMESET/FRAME",
+	"-FRAMESET:HTML",
+	"-HTML:",
+]);
+fullParserFramesetNoframes.destroy();
+
 for (const [html, message] of [
 	["<frameset>text", "Non-whitespace characters cannot be handled in frameset."],
 	["<frameset></frameset>text", "Non-whitespace characters cannot be handled in after frameset"],
