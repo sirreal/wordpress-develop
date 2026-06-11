@@ -2195,6 +2195,11 @@ assert.equal(
 	"<html>\n  <head>\n  <body>\n    <template>\n      content\n        <div>\n          \"Foo\"\n        <template>\n          content\n\n",
 );
 
+assert.equal(
+	buildFullParserHtml5libTree("<body><template><script>var i = 1;</script><td></td></template>"),
+	"<html>\n  <head>\n  <body>\n    <template>\n      content\n        <script>\n          \"var i = 1;\"\n        <td>\n\n",
+);
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

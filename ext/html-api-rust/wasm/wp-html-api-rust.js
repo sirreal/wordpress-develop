@@ -91,6 +91,17 @@ const HEAD_CONTENT_ELEMENTS = new Set([
 	"TEMPLATE",
 	"TITLE",
 ]);
+const TEMPLATE_HEAD_START_TAGS = new Set([
+	"BASE",
+	"BASEFONT",
+	"BGSOUND",
+	"LINK",
+	"META",
+	"NOFRAMES",
+	"SCRIPT",
+	"STYLE",
+	"TITLE",
+]);
 const IN_HEAD_NOSCRIPT_ALLOWED_START_TAGS = new Set([
 	"BASEFONT",
 	"BGSOUND",
@@ -4057,6 +4068,10 @@ export function createHtmlApi(wasm) {
 
 			const mode = this.#currentTemplateInsertionMode();
 			if (mode === "in_template") {
+				if (TEMPLATE_HEAD_START_TAGS.has(tagName)) {
+					return false;
+				}
+
 				if (TEMPLATE_TABLE_WRAPPER_START_TAGS.has(tagName)) {
 					this.#setCurrentTemplateInsertionMode("in_table");
 					return this.#applyTemplateInsertionModeForStartTag(tagName);
