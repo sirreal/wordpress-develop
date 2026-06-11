@@ -2636,6 +2636,14 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (tagName === "TABLE") {
+				const tableIndex = this.#tableStartTagPreclosureIndex();
+				if (tableIndex !== -1) {
+					this.#queueVirtualPopsFrom(tableIndex);
+					return true;
+				}
+			}
+
 			if (this.current_namespace === "html" && SELECT_BREAKOUT_START_TAGS.has(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1) {
@@ -3197,6 +3205,24 @@ export function createHtmlApi(wasm) {
 			}
 
 			return TABLE_CELL_ELEMENTS.has(tagName) || TABLE_ROW_BOUNDARY_START_TAGS.has(tagName);
+		}
+
+		#tableStartTagPreclosureIndex() {
+			const topIndex = this.open_elements.length - 1;
+			if (topIndex < 0 || this.open_element_namespaces[topIndex] !== "html") {
+				return -1;
+			}
+
+			const currentNode = this.open_elements[topIndex];
+			if (
+				currentNode !== "TABLE" &&
+				currentNode !== "TR" &&
+				!TABLE_SECTION_ELEMENTS.has(currentNode)
+			) {
+				return -1;
+			}
+
+			return this.#lastOpenElementIndex("TABLE", "html");
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {

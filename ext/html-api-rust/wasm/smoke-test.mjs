@@ -961,6 +961,44 @@ assert.equal(tableEndTagProcessor.next_tag("p"), true);
 assert.deepEqual(tableEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 tableEndTagProcessor.destroy();
 
+const nestedTableStartProcessor = WP_HTML_Processor.create_fragment("<table><tbody><table><tr><td>cell");
+assert.equal(nestedTableStartProcessor.next_token(), true);
+assert.equal(nestedTableStartProcessor.get_tag(), "TABLE");
+assert.equal(nestedTableStartProcessor.is_tag_closer(), false);
+assert.deepEqual(nestedTableStartProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(nestedTableStartProcessor.next_token(), true);
+assert.equal(nestedTableStartProcessor.get_tag(), "TBODY");
+assert.equal(nestedTableStartProcessor.is_tag_closer(), false);
+assert.deepEqual(nestedTableStartProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY"]);
+assert.equal(nestedTableStartProcessor.next_token(), true);
+assert.equal(nestedTableStartProcessor.get_tag(), "TBODY");
+assert.equal(nestedTableStartProcessor.is_virtual(), true);
+assert.equal(nestedTableStartProcessor.is_tag_closer(), true);
+assert.deepEqual(nestedTableStartProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(nestedTableStartProcessor.next_token(), true);
+assert.equal(nestedTableStartProcessor.get_tag(), "TABLE");
+assert.equal(nestedTableStartProcessor.is_virtual(), true);
+assert.equal(nestedTableStartProcessor.is_tag_closer(), true);
+assert.deepEqual(nestedTableStartProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(nestedTableStartProcessor.next_token(), true);
+assert.equal(nestedTableStartProcessor.get_tag(), "TABLE");
+assert.equal(nestedTableStartProcessor.is_virtual(), false);
+assert.equal(nestedTableStartProcessor.is_tag_closer(), false);
+assert.deepEqual(nestedTableStartProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+nestedTableStartProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tbody><table><tr><td>cell"),
+	"<table><tbody></tbody></table><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tr><table><tr><td>cell"),
+	"<table><tbody><tr></tr></tbody></table><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><td><table><td>cell"),
+	"<table><tbody><tr><td><table><tbody><tr><td>cell</td></tr></tbody></table></td></tr></tbody></table>",
+);
+
 const unexpectedCloserProcessor = WP_HTML_Processor.create_fragment("<div>Test</button></div>");
 assert.equal(unexpectedCloserProcessor.next_token(), true);
 assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
