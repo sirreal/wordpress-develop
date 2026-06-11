@@ -87,8 +87,10 @@ const P_CLOSING_START_TAGS = new Set([
 	"DETAILS",
 	"DIALOG",
 	"DIR",
+	"DD",
 	"DIV",
 	"DL",
+	"DT",
 	"FIELDSET",
 	"FIGCAPTION",
 	"FIGURE",
@@ -96,6 +98,7 @@ const P_CLOSING_START_TAGS = new Set([
 	"HEADER",
 	"HGROUP",
 	"HR",
+	"LI",
 	"MAIN",
 	"MENU",
 	"NAV",
@@ -1376,7 +1379,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.is_tag_closer()) {
-				const existingIndex = this.open_elements.lastIndexOf(tagName);
+				let existingIndex = this.open_elements.lastIndexOf(tagName);
+				if (tagName === "LI") {
+					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
+				}
+
 				if (
 					existingIndex === -1 ||
 					(
@@ -1538,6 +1545,22 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return false;
+		}
+
+		#findOpenElementBeforeBoundary(match, boundaries) {
+			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				const nodeName = this.open_elements[i];
+				const namespaceName = this.open_element_namespaces[i];
+				if (namespaceName === "html" && predicate(nodeName)) {
+					return i;
+				}
+
+				if (namespaceName === "html" && boundaries.has(nodeName)) {
+					return -1;
+				}
+			}
+			return -1;
 		}
 
 		#serializeCurrentTag() {

@@ -217,6 +217,30 @@ assert.deepEqual(listImpliedProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI"])
 assert.equal(listImpliedProcessor.get_attribute("target"), true);
 listImpliedProcessor.destroy();
 
+const listPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<li><li><p><button><p><li target>");
+assert.equal(listPInButtonScopeProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.deepEqual(listPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI", "P", "BUTTON", "LI"]);
+assert.equal(listPInButtonScopeProcessor.get_attribute("target"), true);
+listPInButtonScopeProcessor.destroy();
+
+const ddPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<dd><dd><p><button><p><dd target>");
+assert.equal(ddPInButtonScopeProcessor.next_tag({ tag_name: "dd", match_offset: 3 }), true);
+assert.deepEqual(ddPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "DD", "P", "BUTTON", "DD"]);
+assert.equal(ddPInButtonScopeProcessor.get_attribute("target"), true);
+ddPInButtonScopeProcessor.destroy();
+
+const dtPInButtonScopeProcessor = WP_HTML_Processor.create_fragment("<dt><dt><p><button><p><dt target>");
+assert.equal(dtPInButtonScopeProcessor.next_tag({ tag_name: "dt", match_offset: 3 }), true);
+assert.deepEqual(dtPInButtonScopeProcessor.get_breadcrumbs(), ["HTML", "BODY", "DT", "P", "BUTTON", "DT"]);
+assert.equal(dtPInButtonScopeProcessor.get_attribute("target"), true);
+dtPInButtonScopeProcessor.destroy();
+
+const unexpectedListCloserProcessor = WP_HTML_Processor.create_fragment("<ul><li><ul></li><li target>a</li></ul></li></ul>");
+assert.equal(unexpectedListCloserProcessor.next_tag({ tag_name: "li", match_offset: 2 }), true);
+assert.deepEqual(unexpectedListCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "UL", "LI", "UL", "LI"]);
+assert.equal(unexpectedListCloserProcessor.get_attribute("target"), true);
+unexpectedListCloserProcessor.destroy();
+
 const hrProcessor = WP_HTML_Processor.create_fragment("<p><hr>");
 assert.equal(hrProcessor.next_tag("hr"), true);
 assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
