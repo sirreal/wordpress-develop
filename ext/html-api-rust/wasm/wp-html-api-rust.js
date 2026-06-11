@@ -137,6 +137,7 @@ const TABLE_SECTION_BOUNDARY_START_TAGS = new Set([
 	"TFOOT",
 	"THEAD",
 ]);
+const SELECT_BREAKOUT_START_TAGS = new Set(["INPUT", "KEYGEN", "TEXTAREA"]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -2502,6 +2503,14 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (this.current_namespace === "html" && SELECT_BREAKOUT_START_TAGS.has(tagName)) {
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (selectIndex !== -1) {
+					this.#queueVirtualPopsFrom(selectIndex);
+					return true;
+				}
+			}
+
 			if (
 				this.current_namespace === "html" &&
 				(

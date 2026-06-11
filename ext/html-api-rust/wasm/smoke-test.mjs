@@ -706,6 +706,24 @@ assert.equal(
 	"<select><optgroup><option>one</option></optgroup><hr><option>two</option></select>",
 );
 
+const selectInputProcessor = WP_HTML_Processor.create_fragment("<select><option>one<input><p>after");
+assert.equal(selectInputProcessor.next_tag("input"), true);
+assert.deepEqual(selectInputProcessor.get_breadcrumbs(), ["HTML", "BODY", "INPUT"]);
+assert.equal(selectInputProcessor.next_tag("p"), true);
+assert.deepEqual(selectInputProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+selectInputProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<select><option>one<input><p>after"),
+	"<select><option>one</option></select><input><p>after</p>",
+);
+
+const selectTextareaProcessor = WP_HTML_Processor.create_fragment("<select><option>one<textarea>after</textarea><p>end");
+assert.equal(selectTextareaProcessor.next_tag("textarea"), true);
+assert.deepEqual(selectTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "TEXTAREA"]);
+assert.equal(selectTextareaProcessor.next_tag("p"), true);
+assert.deepEqual(selectTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+selectTextareaProcessor.destroy();
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");
