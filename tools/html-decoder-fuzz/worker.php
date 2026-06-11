@@ -32,7 +32,7 @@ Cli::require_int_at_least( $options, 'cases', 1 );
 Cli::require_int_at_least( $options, 'start-case', 0 );
 Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_int_at_least( $options, 'progress-every', 1 );
-Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
+Cli::require_one_of( $options, 'mode', Cli::valid_modes() );
 
 Bootstrap::load_targets();
 
@@ -41,7 +41,7 @@ foreach ( $oracles->drain_events() as $event ) {
 	Cli::emit( array( 'type' => 'oracle-event' ) + $event );
 }
 
-if ( 'oracle' === $options['mode'] && ! $oracles->has_required() ) {
+if ( Cli::mode_uses_oracle( $options['mode'] ) && ! $oracles->has_required() ) {
 	Cli::emit(
 		array(
 			'type'   => 'fatal',
@@ -96,7 +96,13 @@ for ( $case = $start; $case < $end; $case++ ) {
 
 	$prng      = new Prng( "{$seed}:{$case}" );
 	$generator = new Generator( $prng, $options['max-bytes'], $reference_names );
-	$generated = 'bytes' === $options['mode'] ? $generator->generate_bytes() : $generator->generate();
+	if ( 'bytes' === $options['mode'] ) {
+		$generated = $generator->generate_bytes();
+	} elseif ( 'names' === $options['mode'] ) {
+		$generated = $generator->generate_name_sweep( $case );
+	} else {
+		$generated = $generator->generate();
+	}
 	$payload   = $generated['payload'];
 	$context   = $generated['context'];
 	$strategy  = $generated['strategy'];
@@ -144,7 +150,7 @@ for ( $case = $start; $case < $end; $case++ ) {
 					isset( $manifest['signatures'] ) &&
 					is_array( $manifest['signatures'] ) &&
 					is_string( $manifest_mode ) &&
-					in_array( $manifest_mode, array( 'oracle', 'bytes' ), true ) &&
+					in_array( $manifest_mode, Cli::valid_modes(), true ) &&
 					$signature_key === Cli::failure_signature_key( $manifest['signatures'], $manifest_mode );
 			};
 

@@ -42,7 +42,7 @@ Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_int_at_least( $options, 'stall-timeout', 1 );
 Cli::require_int_at_least( $options, 'max-artifacts-per-signature', 0 );
 Cli::require_int_at_least( $options, 'max-stderr-bytes', 0 );
-Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
+Cli::require_one_of( $options, 'mode', Cli::valid_modes() );
 Cli::require_one_of( $options, 'artifact-retention', array( 'bounded', 'all', 'none' ) );
 Cli::require_one_of( $options, 'summary-mode', array( 'all', 'failures', 'none' ) );
 
@@ -158,7 +158,7 @@ $is_replayable_failure_manifest   = static function ( $manifest ): bool {
 	if ( ! in_array( $manifest['context'], array( 'text', 'attribute', 'both' ), true ) ) {
 		return false;
 	}
-	if ( isset( $manifest['mode'] ) && ! in_array( $manifest['mode'], array( 'oracle', 'bytes' ), true ) ) {
+	if ( isset( $manifest['mode'] ) && ! in_array( $manifest['mode'], Cli::valid_modes(), true ) ) {
 		return false;
 	}
 	$payload = base64_decode( $manifest['payload_base64'], true );
@@ -185,7 +185,7 @@ $startup_verifier_available = static function ( string $mode ) use ( &$startup_c
 	if ( ! isset( $startup_checks_available[ $mode ] ) ) {
 		Bootstrap::load_targets();
 		$oracles                  = Oracles::build();
-		$startup_checks_available[ $mode ] = 'bytes' === $mode || $oracles->has_required();
+		$startup_checks_available[ $mode ] = ! Cli::mode_uses_oracle( $mode ) || $oracles->has_required();
 		$startup_checks[ $mode ]           = $startup_checks_available[ $mode ] ? new Checks( $oracles ) : null;
 	}
 
@@ -328,15 +328,26 @@ $state = array(
 );
 
 $next_seed = $seed_base;
+$next_start_case = 0;
 $lanes     = array();
 
-$spawn_lane = static function ( int $lane_id ) use ( &$next_seed, &$stderr_bytes_by_lane, &$stderr_truncated_lanes, $options, $output_dir ): array {
-	$seed    = $next_seed++;
+$spawn_lane = static function ( int $lane_id ) use ( &$next_seed, &$next_start_case, &$stderr_bytes_by_lane, &$stderr_truncated_lanes, $seed_base, $options, $output_dir ): array {
+	if ( 'names' === $options['mode'] ) {
+		$seed       = $seed_base;
+		$start_case = $next_start_case;
+		$next_start_case += $options['cases-per-batch'];
+	} else {
+		$seed       = $next_seed++;
+		$start_case = 0;
+	}
+
 	$command = array(
 		PHP_BINARY,
 		__DIR__ . '/worker.php',
 		'--seed',
 		(string) $seed,
+		'--start-case',
+		(string) $start_case,
 		'--cases',
 		(string) $options['cases-per-batch'],
 		'--max-bytes',
@@ -375,6 +386,7 @@ $spawn_lane = static function ( int $lane_id ) use ( &$next_seed, &$stderr_bytes
 	return array(
 		'id'                => $lane_id,
 		'seed'              => $seed,
+		'start_case'        => $start_case,
 		'process'           => $process,
 		'stdout'            => $pipes[1],
 		'stderr'            => $pipes[2],
@@ -556,7 +568,7 @@ $handle_line = static function ( string $line, int $lane_id ) use ( &$state, &$s
 				return 'invalid';
 			}
 			$record['mode'] = $record['mode'] ?? 'oracle';
-			if ( ! in_array( $record['mode'], array( 'oracle', 'bytes' ), true ) ) {
+			if ( ! in_array( $record['mode'], Cli::valid_modes(), true ) ) {
 				++$state['harness_errors'];
 				$state['stop_reason'] = 'harness-error';
 				$stop_requested       = true;

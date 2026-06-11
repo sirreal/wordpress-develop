@@ -28,7 +28,7 @@ $options = Cli::parse_args(
 );
 
 Cli::require_one_of( $options, 'context', array( 'text', 'attribute', 'both' ) );
-Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
+Cli::require_one_of( $options, 'mode', Cli::valid_modes() );
 
 Bootstrap::load_targets();
 
@@ -51,7 +51,7 @@ if ( '' !== $options['failure'] ) {
 		fwrite( STDERR, "Invalid context in failure manifest: {$context}\n" );
 		exit( 2 );
 	}
-	if ( ! in_array( $mode, array( 'oracle', 'bytes' ), true ) ) {
+	if ( ! in_array( $mode, Cli::valid_modes(), true ) ) {
 		fwrite( STDERR, "Invalid mode in failure manifest: {$mode}\n" );
 		exit( 2 );
 	}
@@ -86,7 +86,7 @@ if ( '' === $signature ) {
 }
 
 $oracles = Oracles::build();
-if ( 'oracle' === $mode && ! $oracles->has_required() ) {
+if ( Cli::mode_uses_oracle( $mode ) && ! $oracles->has_required() ) {
 	fwrite( STDERR, "Required oracle unavailable; cannot minimize.\n" );
 	exit( 2 );
 }

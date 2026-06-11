@@ -26,6 +26,9 @@ class Generator {
 	/** @var string[] */
 	private array $legacy_names;
 
+	/** @var ?string[] */
+	private ?array $name_sweep_base_names = null;
+
 	public function __construct( Prng $prng, int $max_bytes = 4096, ?array $named_reference_names = null ) {
 		$this->prng      = $prng;
 		$this->max_bytes = max( 1, $max_bytes );
@@ -107,6 +110,32 @@ class Generator {
 			'strategy' => $strategy,
 			'payload'  => substr( $payload, 0, $this->max_bytes ),
 		);
+	}
+
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_name_sweep( int $case_index ): array {
+		$base_names = $this->name_sweep_base_names();
+		$followers  = self::name_sweep_followers();
+		$variants   = 2 * count( $followers );
+		$case_index = max( 0, $case_index );
+		$name_index = intdiv( $case_index, $variants ) % count( $base_names );
+		$variant    = $case_index % $variants;
+		$with_semicolon = $variant >= count( $followers );
+		$follower       = $followers[ $variant % count( $followers ) ];
+
+		$payload = '&' . $base_names[ $name_index ] . ( $with_semicolon ? ';' : '' ) . $follower;
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'name-sweep',
+			'payload'  => self::trim_to_safe_max( $payload, $this->max_bytes ),
+		);
+	}
+
+	public function name_sweep_period(): int {
+		return count( $this->name_sweep_base_names() ) * 2 * count( self::name_sweep_followers() );
 	}
 
 	public static function is_oracle_safe_payload( string $payload ): bool {
@@ -361,6 +390,33 @@ class Generator {
 		}
 
 		return $this->prng->choice( $this->legacy_names );
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function name_sweep_base_names(): array {
+		if ( null !== $this->name_sweep_base_names ) {
+			return $this->name_sweep_base_names;
+		}
+
+		$base_names = array();
+		foreach ( array_merge( $this->semicolon_names, $this->legacy_names ) as $name ) {
+			$base = rtrim( $name, ';' );
+			if ( '' !== $base ) {
+				$base_names[ $base ] = true;
+			}
+		}
+
+		$this->name_sweep_base_names = array_keys( $base_names );
+		return $this->name_sweep_base_names;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function name_sweep_followers(): array {
+		return array( '', 'x', 'X', '0', '=', '-', ' ', '/', "\u{00E9}" );
 	}
 
 	private function numeric_reference( bool $allow_missing_digits = false ): string {

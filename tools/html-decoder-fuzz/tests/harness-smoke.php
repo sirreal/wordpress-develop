@@ -245,6 +245,21 @@ function numeric_reference_ranges( string $payload ): array {
 	return $ranges;
 }
 
+/**
+ * @param string[] $names
+ * @return string[]
+ */
+function name_sweep_base_names( array $names ): array {
+	$base_names = array();
+	foreach ( $names as $name ) {
+		$base = rtrim( $name, ';' );
+		if ( '' !== $base ) {
+			$base_names[ $base ] = true;
+		}
+	}
+	return array_keys( $base_names );
+}
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -388,6 +403,38 @@ check( 'uses generated named-reference map', count( $names ) > 2000, (string) co
 $a = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 $b = ( new Generator( new Prng( '7:3' ), 4096, $names ) )->generate();
 check( 'generator deterministic for (seed, case)', $a === $b );
+
+$name_sweep_generator = new Generator( new Prng( 'name-sweep' ), 4096, $names );
+$name_sweep_base_names = name_sweep_base_names( $names );
+$name_sweep_followers = array( '', 'x', 'X', '0', '=', '-', ' ', '/', "\u{00E9}" );
+$name_sweep_period = count( $name_sweep_base_names ) * 2 * count( $name_sweep_followers );
+$name_sweep_mismatch = '';
+$name_sweep_contexts = array();
+$name_sweep_strategies = array();
+$name_sweep_unsafe = 0;
+for ( $i = 0; $i < $name_sweep_period; $i++ ) {
+	$generated = $name_sweep_generator->generate_name_sweep( $i );
+	$name_sweep_contexts[ $generated['context'] ] = true;
+	$name_sweep_strategies[ $generated['strategy'] ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$name_sweep_unsafe;
+	}
+
+	if ( '' === $name_sweep_mismatch ) {
+		$variant = $i % ( 2 * count( $name_sweep_followers ) );
+		$expected = '&' . $name_sweep_base_names[ intdiv( $i, 2 * count( $name_sweep_followers ) ) ] .
+			( $variant >= count( $name_sweep_followers ) ? ';' : '' ) .
+			$name_sweep_followers[ $variant % count( $name_sweep_followers ) ];
+		if ( $generated['payload'] !== $expected ) {
+			$name_sweep_mismatch = "case {$i}: expected " . bin2hex( $expected ) . ' got ' . bin2hex( $generated['payload'] );
+		}
+	}
+}
+check( 'name-sweep period covers every base/semicolon/follower case', $name_sweep_generator->name_sweep_period() === $name_sweep_period && $name_sweep_period > count( $names ), (string) $name_sweep_period );
+check( 'name-sweep generator maps cases deterministically', '' === $name_sweep_mismatch, $name_sweep_mismatch );
+check( 'name-sweep cases run both contexts', array( 'both' ) === array_keys( $name_sweep_contexts ), implode( ',', array_keys( $name_sweep_contexts ) ) );
+check( 'name-sweep uses one strategy label', array( 'name-sweep' ) === array_keys( $name_sweep_strategies ), implode( ',', array_keys( $name_sweep_strategies ) ) );
+check( 'name-sweep payloads are oracle-safe', 0 === $name_sweep_unsafe, (string) $name_sweep_unsafe );
 
 $strategies            = array();
 $contexts              = array();
@@ -577,6 +624,13 @@ check( '300-case fuzz run clean', 0 === $fuzz_failures );
 $byte_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'bytes', '--seed', '1', '--cases', '200', '--progress-every', '200' ) );
 check( '200-case byte-space worker clean', 0 === $byte_worker['code'], $byte_worker['stdout'] . $byte_worker['stderr'] );
 
+$name_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'names', '--seed', '1', '--cases', '300', '--progress-every', '300' ) );
+check(
+	'300-case name-sweep worker clean',
+	0 === $name_worker['code'] && str_contains( $name_worker['stdout'], '"name-sweep":300' ),
+	$name_worker['stdout'] . $name_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -610,6 +664,129 @@ check(
 	$byte_runner['stdout'] . $byte_runner['stderr'] . json_encode( $byte_runner_state )
 );
 remove_tree( $byte_runner_dir );
+
+$name_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-runner-' . getmypid();
+remove_tree( $name_runner_dir );
+$name_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'names',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$name_runner_dir,
+	)
+);
+$name_runner_state = is_file( $name_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $name_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'name-sweep runner clean',
+	0 === $name_runner['code'] &&
+		( $name_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $name_runner_state['cases'] ?? null ) === ( $name_runner_state['by_strategy']['name-sweep'] ?? null ) &&
+		( $name_runner_state['cases'] ?? null ) === ( $name_runner_state['by_context']['both'] ?? null ),
+	$name_runner['stdout'] . $name_runner['stderr'] . json_encode( $name_runner_state )
+);
+$name_runner_summary = is_file( $name_runner_dir . '/summary.ndjson' )
+	? file( $name_runner_dir . '/summary.ndjson', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES )
+	: array();
+$name_runner_windows = array();
+if ( is_array( $name_runner_summary ) ) {
+	foreach ( $name_runner_summary as $line ) {
+		$record = json_decode( $line, true );
+		if ( is_array( $record ) && 'start' === ( $record['type'] ?? null ) && 'names' === ( $record['mode'] ?? null ) ) {
+			$name_runner_windows[] = array(
+				'start' => $record['start_case'] ?? null,
+				'cases' => $record['cases'] ?? null,
+			);
+		}
+	}
+}
+usort(
+	$name_runner_windows,
+	static fn( array $a, array $b ): int => ( $a['start'] ?? -1 ) <=> ( $b['start'] ?? -1 )
+);
+$name_runner_windows_valid = count( $name_runner_windows ) > 1;
+$previous_window_end       = null;
+foreach ( $name_runner_windows as $window ) {
+	if ( ! is_int( $window['start'] ) || 100 !== $window['cases'] || 0 !== $window['start'] % 100 || ( null !== $previous_window_end && $window['start'] < $previous_window_end ) ) {
+		$name_runner_windows_valid = false;
+		break;
+	}
+	$previous_window_end = $window['start'] + $window['cases'];
+}
+check(
+	'name-sweep runner uses distinct start-case windows',
+	$name_runner_windows_valid,
+	json_encode( $name_runner_windows )
+);
+remove_tree( $name_runner_dir );
+
+$name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
+check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
+
+$name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
+remove_tree( $name_pipeline_dir );
+$faulted_name_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'names',
+		'--seed',
+		'1',
+		'--start-case',
+		'11593',
+		'--cases',
+		'1',
+		'--output-dir',
+		$name_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+);
+check( 'faulted name-sweep worker reports findings', 1 === $faulted_name_worker['code'], $faulted_name_worker['stdout'] . $faulted_name_worker['stderr'] );
+
+$name_failure_files = glob( $name_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted name-sweep worker writes failure artifact', is_array( $name_failure_files ) && array() !== $name_failure_files );
+
+$name_failure_file = is_array( $name_failure_files ) && array() !== $name_failure_files ? $name_failure_files[0] : null;
+if ( null !== $name_failure_file ) {
+	$name_manifest = json_decode( (string) file_get_contents( $name_failure_file ), true );
+	check(
+		'name-sweep failure artifact records mode and signature',
+		'names' === ( $name_manifest['mode'] ?? null ) &&
+			'name-sweep' === ( $name_manifest['strategy'] ?? null ) &&
+			11593 === ( $name_manifest['case'] ?? null ) &&
+			in_array( 'decode-mismatch:attribute', $name_manifest['signatures'] ?? array(), true ),
+		json_encode( $name_manifest )
+	);
+
+	$name_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $name_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted name-sweep replay reproduces finding', 1 === $name_fault_replay['code'], $name_fault_replay['stdout'] . $name_fault_replay['stderr'] );
+
+	$name_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $name_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted name-sweep minimizer preserves signature', 0 === $name_fault_minimize['code'], $name_fault_minimize['stdout'] . $name_fault_minimize['stderr'] );
+}
+remove_tree( $name_pipeline_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );

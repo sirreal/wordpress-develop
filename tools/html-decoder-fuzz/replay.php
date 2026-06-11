@@ -31,7 +31,7 @@ $options = Cli::parse_args(
 
 Cli::require_int_at_least( $options, 'max-bytes', 1 );
 Cli::require_one_of( $options, 'context', array( 'text', 'attribute', 'both' ) );
-Cli::require_one_of( $options, 'mode', array( 'oracle', 'bytes' ) );
+Cli::require_one_of( $options, 'mode', Cli::valid_modes() );
 
 Bootstrap::load_targets();
 
@@ -53,7 +53,7 @@ if ( '' !== $options['failure'] ) {
 		fwrite( STDERR, "Invalid context in failure manifest: {$context}\n" );
 		exit( 2 );
 	}
-	if ( ! in_array( $mode, array( 'oracle', 'bytes' ), true ) ) {
+	if ( ! in_array( $mode, Cli::valid_modes(), true ) ) {
 		fwrite( STDERR, "Invalid mode in failure manifest: {$mode}\n" );
 		exit( 2 );
 	}
@@ -67,7 +67,13 @@ if ( '' !== $options['failure'] ) {
 	$source = "input file {$options['input']}";
 } elseif ( $options['seed'] >= 0 && $options['case'] >= 0 ) {
 	$generator = new Generator( new Prng( "{$options['seed']}:{$options['case']}" ), $options['max-bytes'], Bootstrap::named_reference_names() );
-	$generated = 'bytes' === $mode ? $generator->generate_bytes() : $generator->generate();
+	if ( 'bytes' === $mode ) {
+		$generated = $generator->generate_bytes();
+	} elseif ( 'names' === $mode ) {
+		$generated = $generator->generate_name_sweep( $options['case'] );
+	} else {
+		$generated = $generator->generate();
+	}
 	$payload   = $generated['payload'];
 	$context   = $generated['context'];
 	$source    = "seed {$options['seed']} case {$options['case']} (mode {$mode}, strategy {$generated['strategy']}, context {$context})";
@@ -85,7 +91,7 @@ $oracles = Oracles::build();
 foreach ( $oracles->drain_events() as $event ) {
 	fwrite( STDERR, "oracle event: {$event['oracle']}: {$event['detail']}\n" );
 }
-if ( 'oracle' === $mode && ! $oracles->has_required() ) {
+if ( Cli::mode_uses_oracle( $mode ) && ! $oracles->has_required() ) {
 	fwrite( STDERR, "Required oracle unavailable; cannot replay.\n" );
 	exit( 2 );
 }

@@ -11,7 +11,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 1 item 4: add `attribute_starts_with()` monotonicity invariants.
 - [x] Tier 1 item 5: exercise multi-code-point `attribute_starts_with()` prefix paths.
 - [x] Tier 1 item 6: add range-based numeric code point generation.
-- [ ] Tier 2 items 7-15.
+- [x] Tier 2 item 7: add exhaustive deterministic name sweep lane.
+- [ ] Tier 2 items 8-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -54,6 +55,13 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `git diff --check` passed after adding range-based numeric code points.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after addressing reviewer feedback on post-surrogate BMP coverage and multi-reference numeric smoke classification.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after adding explicit BMP terminal noncharacter coverage for `0xFFFE` and `0xFFFF`.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, `minimize.php`, and `tests/harness-smoke.php` after adding the deterministic name-sweep lane.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding full-period name-sweep generator coverage plus worker, runner, and replay smoke checks for `--mode names`.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode names --seed 1 --cases 1000 --progress-every 1000` passed and reported `by_strategy: {"name-sweep":1000}` and `by_context: {"both":1000}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` passed for the deterministic `&Aacutex` case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` reproduced the expected attribute decode mismatch for `&Aacutex`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-name-fault-11593/failure-seed1-case11593/failure.json` minimized the finding from 8 to 7 bytes.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding reviewer-requested checks for distinct `names` runner start-case windows and the faulted name-sweep worker/replay/minimize pipeline.
 
 ## Review Log
 
@@ -81,3 +89,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Kepler: APPROVE, numeric generator ranges after post-surrogate BMP coverage fix.
   - Pascal: APPROVE, numeric smoke coverage after BMP noncharacter and multi-reference fixes.
   - Beauvoir: APPROVE, integration/runtime compatibility after explicit `0xFFFE`/`0xFFFF` coverage.
+- Tier 2 item 7:
+  - Mendel: APPROVE, generator semantics and deterministic mapping after smoke additions.
+  - Pasteur: APPROVE, CLI/worker/replay/minimize/runner integration and mode handling.
+  - Popper: APPROVE, smoke and fault-pipeline coverage after requested start-window and name-fault checks.

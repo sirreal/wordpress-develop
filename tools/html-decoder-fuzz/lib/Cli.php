@@ -5,6 +5,19 @@ namespace HtmlDecoderFuzz;
  * Shared helpers for command line entry points.
  */
 class Cli {
+	private const VALID_MODES = array( 'oracle', 'bytes', 'names' );
+
+	/**
+	 * @return string[]
+	 */
+	public static function valid_modes(): array {
+		return self::VALID_MODES;
+	}
+
+	public static function mode_uses_oracle( string $mode ): bool {
+		return 'bytes' !== $mode;
+	}
+
 	/**
 	 * @param string[] $argv
 	 * @param array<string, mixed> $defaults

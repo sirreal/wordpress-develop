@@ -40,6 +40,10 @@ The separate `bytes` mode deliberately generates arbitrary byte payloads,
 including invalid UTF-8, NUL, raw `<`, raw double quote, and CR. These payloads
 never go to the DOM oracle. They run only oracle-free decoder invariants.
 
+The separate `names` mode deterministically sweeps every generated named
+character reference base name with and without `;`, followed by representative
+end, alphanumeric, equals, punctuation, whitespace, and multibyte followers.
+
 ## Checks
 
 For each generated payload, the fuzzer runs both text and attribute contexts:
@@ -100,6 +104,10 @@ strategies for:
 no-ampersand byte strings, arbitrary bytes around `&` boundaries, invalid UTF-8
 sequences, and raw HTML delimiters/control bytes.
 
+`names` mode uses a deterministic sweep instead of weighted random generation.
+Case index maps directly to a named-reference base, semicolon variant, and
+follower class; the same payload still runs in both text and attribute contexts.
+
 ## Common Commands
 
 Run the smoke test:
@@ -118,6 +126,12 @@ Run one oracle-free arbitrary-byte worker batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 5000
+```
+
+Run one deterministic named-reference sweep batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode names --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:
