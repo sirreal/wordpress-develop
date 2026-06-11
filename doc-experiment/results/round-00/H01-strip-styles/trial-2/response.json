@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor, iterating over every opening tag with next_tag() (which by default skips tag closers and does not enter special elements like STYLE or SCRIPT, and does not visit HTML comments). On each matched tag, remove_attribute('style') removes the style attribute in a case-insensitive manner (as documented since 6.2.1), leaving surrounding whitespace intact as specified. Finally, get_updated_html() returns the modified document.",
+  "confidence": 97
+}

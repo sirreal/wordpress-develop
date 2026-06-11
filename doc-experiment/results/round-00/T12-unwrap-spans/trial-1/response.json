@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a fragment processor via `WP_HTML_Processor::create_fragment()`, then walks every token with `next_token()`. For each token, `get_tag()` is checked: if it returns `'SPAN'` (which it does for both opening and closing SPAN tags, while returning `null` for text nodes and other non-tag tokens), the token is skipped; otherwise `serialize_token()` appends the normalized form of that token to the output string. After the loop, the assembled HTML is passed through `WP_HTML_Processor::normalize()` to produce the fully-normalized serialization (double-quoted attributes, closed optional tags, canonical text encoding, etc.) as required by the task.",
+  "confidence": 62
+}

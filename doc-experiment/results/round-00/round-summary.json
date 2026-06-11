@@ -1,0 +1,421 @@
+{
+  "round_score": 93.55,
+  "tasks": {
+    "H01-strip-styles": {
+      "score": 99.1,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 96,
+          "score": 98.8
+        }
+      ]
+    },
+    "H02-data-attributes": {
+      "score": 99.1,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 95,
+          "score": 98.5
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 98,
+          "score": 99.4
+        }
+      ]
+    },
+    "H03-img-alt-audit": {
+      "score": 99.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 94,
+          "score": 98.2
+        }
+      ]
+    },
+    "H04-heading-outline": {
+      "score": 76.7,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 95,
+          "score": 98.5
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 92,
+          "score": 97.6
+        },
+        {
+          "trial": "trial-3",
+          "passed": 1,
+          "total": 7,
+          "adherence": 80,
+          "score": 34.0
+        }
+      ]
+    },
+    "T01-add-image-class": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ]
+    },
+    "T02-link-targets": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ]
+    },
+    "T03-first-h1-text": {
+      "score": 86.05,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 8,
+          "adherence": 80,
+          "score": 85.25
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 8,
+          "adherence": 84,
+          "score": 86.45
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 8,
+          "adherence": 84,
+          "score": 86.45
+        }
+      ]
+    },
+    "T04-build-figure": {
+      "score": 98.2,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 93,
+          "score": 97.9
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 93,
+          "score": 97.9
+        }
+      ]
+    },
+    "T05-text-excerpt": {
+      "score": 99.2,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 9,
+          "total": 9,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-2",
+          "passed": 9,
+          "total": 9,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 9,
+          "total": 9,
+          "adherence": 97,
+          "score": 99.1
+        }
+      ]
+    },
+    "T06-collect-links": {
+      "score": 53.47,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 1,
+          "total": 8,
+          "adherence": 74,
+          "score": 30.95
+        },
+        {
+          "trial": "trial-2",
+          "passed": 1,
+          "total": 8,
+          "adherence": 74,
+          "score": 30.95
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 95,
+          "score": 98.5
+        }
+      ]
+    },
+    "T07-quoted-paragraphs": {
+      "score": 99.2,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        }
+      ]
+    },
+    "T08-table-extract": {
+      "score": 92.3,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 70,
+          "score": 91.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 76,
+          "score": 92.8
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 77,
+          "score": 93.1
+        }
+      ]
+    },
+    "T09-mark-keyword": {
+      "score": 99.3,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 98,
+          "score": 99.4
+        }
+      ]
+    },
+    "T10-last-h2": {
+      "score": 98.7,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 93,
+          "score": 97.9
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 97,
+          "score": 99.1
+        }
+      ]
+    },
+    "T11-same-html": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ]
+    },
+    "T12-unwrap-spans": {
+      "score": 96.4,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 88,
+          "score": 96.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 88,
+          "score": 96.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 88,
+          "score": 96.4
+        }
+      ]
+    }
+  }
+}

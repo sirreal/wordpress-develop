@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor with next_tag('img') to iterate over all IMG elements. For each, I call get_attribute('src') \u2014 if it returns null, the src attribute is absent and the tag is skipped per spec. Then I call get_attribute('alt'): per the documentation, absent attributes return null, valueless boolean attributes (like `<img alt>`) return true, and attributes with an explicit empty value return the empty string \"\". All three of these cases indicate \"missing or empty\" alt text. An alt with only whitespace would return that whitespace string, which is neither null, true, nor \"\", so it correctly passes through. The src value is cast to string before appending (to handle the theoretical edge case where src is a boolean attribute, though in practice src always has a string value).",
+  "confidence": 96
+}

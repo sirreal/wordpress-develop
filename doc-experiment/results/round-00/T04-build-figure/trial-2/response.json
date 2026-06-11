@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to modify a template HTML string rather than hand-assembling. Starting with a template `<figure><img src=\"\" alt=\"\"><figcaption>x</figcaption></figure>`, it calls next_tag('img') to locate the IMG element, then uses set_attribute('src', $url) and set_attribute('alt', $alt) to update the attributes in their existing order (src then alt). It then iterates via next_token() to find the first #text node (the placeholder 'x' inside figcaption) and calls set_modifiable_text($caption) to replace it. Both set_attribute and set_modifiable_text handle all necessary HTML encoding automatically per the documented API. Finally, get_updated_html() returns the modified string.",
+  "confidence": 72
+}

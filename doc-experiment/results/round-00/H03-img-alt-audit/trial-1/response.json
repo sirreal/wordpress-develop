@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan for IMG tags with next_tag('img'), then checked each tag's attributes using get_attribute(). According to the documentation, get_attribute() returns null when the attribute is absent, true for boolean/valueless attributes (e.g., `alt` with no value), and the string value otherwise (including empty string \"\"). I skip IMG tags where src is null or boolean (no src), and collect the decoded src value for any IMG where alt is null (absent), true (valueless boolean), or \"\" (empty string). Whitespace-only alt values are non-empty strings, so they pass through without being flagged \u2014 matching the task requirement that `alt=\" \"` is considered present.",
+  "confidence": 97
+}

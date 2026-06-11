@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML document. First, `next_tag('DIV')` finds the first DIV opener tag (returns false if none exists). Then `get_attribute_names_with_prefix('data-')` retrieves all lowercase attribute names starting with 'data-' in document order (returns null if no tag is matched). Finally, for each attribute name, `get_attribute($name)` retrieves the decoded value \u2014 returning a string for value-bearing attributes or `true` for boolean attributes (those present without a value), exactly matching the required output format.",
+  "confidence": 97
+}

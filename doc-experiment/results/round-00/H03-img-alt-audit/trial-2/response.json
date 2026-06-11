@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan for all `img` tags via `next_tag('img')`. For each matched tag, I call `get_attribute('src')` to get the src value \u2014 skipping tags where src is absent (`null`) or a bare boolean attribute (`true`). Then I call `get_attribute('alt')` and collect the src into the result array when alt is `null` (absent), `true` (boolean/valueless attribute like `<img alt>`), or `\"\"` (empty string). Whitespace-only values like `\" \"` return as their string value and thus pass through the check correctly. The `get_attribute()` method returns decoded attribute values per the documentation, satisfying the requirement for decoded src values.",
+  "confidence": 95
+}

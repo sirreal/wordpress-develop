@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to canonical reference except returns $html (vs get_updated_html) on the no-H2 path. Correct processor choice: Tag Processor is right for a flat single-tag-name search; HTML Processor's nesting machinery is unneeded. All methods (constructor, next_tag('H2') string form, set_bookmark, seek, add_class, get_updated_html) are documented; next_tag string-arg form appears at md lines 51/110/1810. Idiomatic bookmark-update-in-loop + seek-after-loop pattern, mirroring the set_bookmark() example. Edge cases handled correctly: empty/no-H2 returns input unchanged; existing class merged by add_class; comment-embedded <h2> never matched (confirmed by probe: count=1). Minor deduction: omits release_bookmark, which the set_bookmark docblock explicitly recommends ('Release bookmarks when they are no longer needed'). Harmless since the processor is discarded, but the canonical example models releasing. Explanation claims comment-skipping is a next_tag() feature; true in effect but the docs only establish it via token-type sections, not the next_tag entry."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Matches canonical logic and adds release_bookmark('last-h2') before returning, following the documented best practice and the set_bookmark() worked example exactly. Correct processor (Tag Processor) for a flat last-match search. Every method verified present in html-tag-processor.md: next_tag (string form documented), set_bookmark (#1048), seek (#343), add_class (#365), release_bookmark (#1126), get_updated_html (#2179). No _doing_it_wrong records, all 6 cases pass. Edge cases handled: no-H2 unchanged, existing class merged, comment H2 not counted. Explanation accurately attributes closer-skipping to next_tag default behavior, which is documented via $tag_closers/$stop_on_tag_closers. Fully idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-2 (releases the bookmark) with an explanatory inline comment about closer-skipping. Correct Tag Processor choice; all called methods documented; no hallucinations or _doing_it_wrong. All 6 cases pass. Idiomatic bookmark-in-loop/seek/add_class/release pattern straight from the set_bookmark() example. Edge cases handled correctly including comment-embedded H2 (docs lines 267-268 establish comments tokenize as comment nodes whose interior is text, so inner <h2> is not a tag). Slightly stronger than trial-2 only in documentation-faithful commenting; same score warranted."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. Across all three trials every case (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class) passed with no _doing_it_wrong or trigger_error records, and all three converged on the canonical solution. This is a documentation success story driven almost entirely by the set_bookmark() docblock in html-tag-processor.md (around line 1048), which carries a near-isomorphic worked example: walk a list, set_bookmark('last-li') on every matching item so it overwrites and ends up pointing at the LAST one, then seek back and add_class. The task ('mark the LAST h2') maps onto that example by changing only the tag name, so subjects had a direct template and did not have to invent the overwrite-in-loop idiom. Supporting docs reinforced the rest: the next_tag() string-argument form is shown (md lines 51, 110, 1810) so passing 'H2' as a bare string was unambiguous; the no-match return path is naturally handled because next_tag returns bool. The comment requirement ('H2 inside HTML comments do not count') was satisfied correctly, and a probe confirms next_tag('H2') counts 1 on '<h2>Real</h2><!-- <h2>fake</h2> -->'. However, this is the only genuine near-miss in reasoning: all three explanations assert that next_tag() 'skips content inside HTML comments' or 'ignores H2-like text inside comments,' framing comment-skipping as a next_tag() guarantee. The next_tag() entry itself (md ~893) says nothing about comments; the behavior is only inferable from the token-model section (lines 267-268: comment text is the interior of the comment) and the get_full_comment_text/get_comment_type listings. The subjects reached the right conclusion, but by reasonable inference rather than from an explicit statement at next_tag(). Had a case relied on a subtler comment form (e.g., a bogus/abruptly-closed comment, or '<!--> ' empty comments, or '</%post_author>' funky comments), an implementer trusting a vague 'next_tag skips comments' mental model could have been wrong; the docs do not currently connect that token behavior to next_tag()'s matching contract. The one stylistic non-failure: trial-1 omits release_bookmark, which the set_bookmark docblock recommends; it is harmless because the processor is discarded immediately, but it diverges from the documented example that trials 2 and 3 followed faithfully.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (html-tag-processor.md, ~line 893)",
+      "problem": "The next_tag() entry documents the $query fields (tag_name, match_offset, class_name, tag_closers) but never states what kinds of tokens next_tag() will and will not match. In particular it does not say that next_tag() only matches real tag tokens and therefore never matches tag-like text inside HTML comments, CDATA/bogus comments, RAWTEXT/RCDATA/SCRIPT contents, or funky comments. All three subjects had to infer the comment-skipping guarantee from the distant token-model section, and asserted it as a next_tag() property without a supporting passage.",
+      "suggestion": "Add one sentence to next_tag(): 'next_tag() only stops on actual HTML tag tokens. Tag-like sequences appearing inside comments, CDATA-like bogus comments, or the raw-text contents of SCRIPT/STYLE/TEXTAREA/TITLE are not tags and will never be matched; use next_token() if you need to visit those tokens.' This generalizes the fact that prevented errors here to all the token categories an implementer might trip on."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (html-tag-processor.md, ~line 906-914)",
+      "problem": "next_tag() does not state its default tag_closers behavior in prose. Subjects relied on the default (skip closers) so a while(next_tag('H2')) loop visits only openers, but the entry only lists tag_closers as an optional query field with values 'visit'/'skip' and never says which is the default. The default is only discoverable from the unrelated $stop_on_tag_closers property (line 436) and from example code.",
+      "suggestion": "State explicitly in the next_tag() description: 'By default next_tag() skips tag closers (e.g. </h2>) and stops only on tag openers. Pass tag_closers => \"visit\" to also stop on closers.' This makes the opener-only loop semantics that subjects depended on a documented contract rather than an inferred one."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / seek() (html-tag-processor.md, ~line 1048)",
+      "problem": "The set_bookmark() example demonstrates the find-the-last-match-then-seek-back idiom (which is exactly why all trials succeeded), but the guidance to release bookmarks ('Release bookmarks when they are no longer needed') is stated as prose separate from the minimal seek pattern. Trial-1 omitted release_bookmark, showing the release step is easy to drop when the example's relevance to a one-shot edit isn't emphasized.",
+      "suggestion": "In the seek()/set_bookmark() docs, note that bookmarks set before get_updated_html() do not need manual release if the processor is then discarded, but releasing is required when continuing to process or when bookmark count matters. Clarifying when release is and isn't necessary would remove ambiguity about whether trial-1's omission is a bug or acceptable."
+    }
+  ]
+}

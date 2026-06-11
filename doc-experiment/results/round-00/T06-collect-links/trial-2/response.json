@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then iterated all tokens with `next_token()`. For each token I checked `get_token_type()`: on `#tag` tokens I detect `A` openers via `get_tag()` and `is_tag_closer()`, capture the `href` attribute with `get_attribute('href')` (which returns null when absent, a string when present with value, or true for boolean attributes \u2014 all three satisfy \"attribute exists\"), and record the nesting depth via `get_current_depth()`. On `#text` tokens while inside a tracked link I accumulate the decoded text via `get_modifiable_text()`. When the matching A closer is seen at the same depth the entry is finalized and appended to the results array.",
+  "confidence": 82
+}

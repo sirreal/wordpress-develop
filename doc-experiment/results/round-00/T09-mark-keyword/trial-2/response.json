@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterates all tokens with next_token(). For each token, it calls serialize_token() to get the normalized serialization of that token. If the current token is a #text node (detected via get_token_type() returning '#text') and its decoded modifiable text (get_modifiable_text()) contains the keyword as a substring, the serialized text is wrapped in <mark>...</mark> tags. Otherwise the token is serialized normally. Because WP_HTML_Processor visits virtual tokens (implied elements like TBODY, TR, etc.) and serialize_token() produces normative HTML for each, the concatenated output is equivalent to what serialize() would produce, but with the mark wrappers inserted around matching text nodes. The match is against the decoded text (get_modifiable_text() returns decoded content), so character references in the source that spell out the keyword will still match.",
+  "confidence": 62
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to canonical reference: new WP_HTML_Tag_Processor -> while(next_tag()) -> remove_attribute('style') -> get_updated_html(). All three methods are documented (next_tag line 39/325, remove_attribute line 364/2093, get_updated_html line 368/2179). 6/6 cases pass, zero _doing_it_wrong. Correct processor choice (Tag Processor is the right tool for a flat attribute-removal sweep; HTML Processor unnecessary). Idiomatic token walking via the documented while-next_tag loop and get_updated_html. Edge cases handled correctly without extra code: case-insensitive STYLE (doc line 315), valueless/boolean style attribute removed (boolean semantics doc lines 82/1448), comments untouched. Minor explanation imprecision: attributes the comment-preservation to next_tag 'never matching comments as tags' which is correct, but also gestures at special-element skipping. No code defect. Docs well-supported the solution."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Identical reference solution, 6/6 pass, no _doing_it_wrong. All methods documented. Explanation contains an inaccurate-but-harmless claim: states next_tag() by default 'does not enter special elements like STYLE or SCRIPT' as the reason content is safe, conflating two distinct mechanisms. The real reason the comment case passes is that comment tokens are not tags so next_tag never stops on them (doc lines 39, 267); STYLE/SCRIPT rawtext skipping (lines 259, 316) is unrelated to this task's inputs. The conflation didn't affect the code. Slightly lower than trial-1 only for the more confidently-wrong mechanism claim in prose."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Identical reference solution, 6/6 pass, no _doing_it_wrong. All methods documented. Two prose imprecisions, no code impact: (1) cites whitespace-preservation to the 'Possible future direction' section (line 9-11), which actually describes a FUTURE where whitespace would be PRUNED ('a b c' -> 'c'); the correct citation for current diff-minimizing behavior is line 294. (2) Same STYLE/SCRIPT-skipping conflation as trial-2 for why comments are untouched. The reasoning reached the right conclusion via a wrong citation. Lowest of the three for mis-citing a section that says the opposite of what was claimed."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three produced the canonical reference solution byte-for-byte (new WP_HTML_Tag_Processor, while(next_tag()), remove_attribute('style'), get_updated_html()) and passed 6/6 with zero _doing_it_wrong records. The docs supported this task well: next_tag() with no argument is clearly documented as matching any tag (line 39 and table line 49), remove_attribute is documented as safe to call when the attribute is absent (line 148, covering the no-styles-unchanged case), and case-insensitive attribute handling is in the changelog (line 315, covering uppercase-attribute). The diff-minimization paragraph (line 294) backs the leftover-whitespace expectation, and boolean-attribute semantics (lines 82, 1448, 2070) explain why the valueless `style` case works even though no code reads the value.\\n\\nThe only weaknesses are in the EXPLANATIONS, not the code, and they reveal genuine doc gaps that would cause failures on adjacent tasks:\\n\\n1. Why comments are untouched. All three trials credited next_tag()'s skipping of 'special elements like STYLE/SCRIPT' for the comment-untouched case. That is a conflation: comments survive because comment tokens are not tag tokens, so next_tag() simply never stops on them (line 39 says it finds the next HTML tag; the comment-token discussion is at lines 267-272). The STYLE/SCRIPT rawtext-skipping mechanism (lines 259, 316) is unrelated and was triggered by none of the test inputs. The docs never state plainly, at the next_tag() heading, that next_tag() visits only tag openers/closers and skips comments, text, CDATA, and doctype tokens. A subject who believed comment-safety comes from rawtext-skipping would write incorrect code on a task involving a real STYLE element with HTML-looking text inside, or a task needing to walk comment tokens.\\n\\n2. Whitespace on removal. Trial 3 cited the 'Possible future direction' bullet (lines 9-11) as the source of the leftover-whitespace behavior, but that bullet describes a hypothetical FUTURE in which whitespace would be PRUNED — the opposite of current behavior. The actual guarantee lives in a dense paragraph at line 294 under a different heading and is not attached to remove_attribute or set_attribute. The current diff-minimizing behavior of remove_attribute (leaves surrounding whitespace where it was) is never stated at the remove_attribute heading itself, so a subject has to infer it. Here that inference was correct; on a task that asserts whitespace IS pruned, the same subject would be wrong, and the 'future direction' bullet actively misleads.\\n\\nNet: the documentation was sufficient for this basic task (perfect pass rate), but the reasoning chains expose two places where the docs let subjects reach the right answer for partly wrong reasons.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (section ~line 39)",
+      "problem": "The next_tag() heading explains it finds the next tag but never enumerates what it skips. All three subjects wrongly attributed comment-safety to special-element (STYLE/SCRIPT) skipping rather than to the fact that next_tag() only stops on tag tokens. The two mechanisms are conflated, which would produce wrong code on inputs containing real rawtext elements or requiring comment traversal.",
+      "suggestion": "Add one sentence to the next_tag() docblock: 'next_tag() stops only on tag openers (and tag closers when tag_closers => visit is set). It does not stop on HTML comments, text nodes, CDATA-like or doctype tokens, so their contents are never matched as tags.' Note this is independent of the separate rawtext-skipping behavior for STYLE/SCRIPT contents."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() (heading ~line 2093) and set_attribute()",
+      "problem": "The whitespace behavior on removal (surrounding whitespace is preserved, only the attribute's own span is removed) is not stated at the remove_attribute heading. It is only inferable from the general diff-minimization paragraph at line 294, and the 'Possible future direction' bullet (lines 9-11) describes whitespace PRUNING, which one subject cited as if it were current behavior — the opposite of the truth.",
+      "suggestion": "State at the remove_attribute() heading: 'Removing an attribute deletes only the attribute name/value span; whitespace that surrounded it is left in place (the document is changed as little as possible). Whitespace is NOT collapsed.' Cross-reference the diff-minimization note, and clearly mark the whitespace-pruning bullet under 'Possible future direction' as not-yet-implemented so it cannot be mistaken for current behavior."
+    },
+    {
+      "location": "'Possible future direction for this module' section (lines 9-11)",
+      "problem": "This section lists aspirational behavior (whitespace pruning on attribute/class removal) using present-tense framing that a reader mistook for documented current behavior, leading to a citation that contradicts what the code actually does.",
+      "suggestion": "Prefix the section with an explicit disclaimer such as 'The items below are NOT implemented; they describe possible future changes. Do not rely on them.' and use 'would' rather than imperative phrasing for each bullet."
+    },
+    {
+      "location": "Special/rawtext elements section (lines 243-259, 316)",
+      "problem": "The list of special/atomic elements (STYLE, SCRIPT, IFRAME, TITLE, etc.) explains their contents are skipped, but does not contrast this with comment handling. Subjects merged 'rawtext content is skipped' with 'comments are not tags', treating them as the same safety mechanism.",
+      "suggestion": "Add a one-line contrast: 'Note: rawtext/RCDATA skipping applies to the CONTENTS of elements like STYLE and SCRIPT. It is unrelated to HTML comments, which are skipped by next_tag() simply because comments are not tags. The two are distinct mechanisms.'"
+    }
+  ]
+}

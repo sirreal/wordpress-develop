@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Processor is required because the Tag Processor cannot relate a tag to its ancestors (per its 'Design and limitations' section), and breadcrumbs are a Processor-only feature. Every method called is documented: create_fragment, next_tag('P') (string-shorthand form shown in the tag-processor usage table), get_breadcrumbs, add_class, get_updated_html. Idiomatic token walking via while(next_tag(...)) and ancestor detection via in_array('BLOCKQUOTE', get_breadcrumbs()). Full-path breadcrumb semantics used exactly as documented. Null-guard on create_fragment handles unsupported/unparseable input, matching the 'returns null' contract. Passed 7/7 including implicitly-closed-paragraphs and nested-blockquotes, which work because the Processor builds a real tree. Minor: get_updated_html is not in the Processor doc's own method index; subject correctly inferred it from '**Extends:** WP_HTML_Tag_Processor' (and said so), so no hallucination penalty, but it relied on inference."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same correct approach as trial-1. Adds a redundant is_tag_closer() continue-guard. Harmless and documented (is_tag_closer exists in the Processor doc) but unnecessary: next_tag with a tag-name query stops only at openers unless tag_closers => 'visit' is passed (verified by probe: next_tag('P') yields one opener match, is_tag_closer() === false). The guard signals slight uncertainty about default closer-visiting behavior rather than a defect. All methods documented, no hallucinations, passed 7/7. Tiny deduction vs trial-1 only for superfluous defensive code the docs already make unnecessary."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Identical correct approach using the array query form next_tag(array('tag_name' => 'P')), the canonical documented query shape. All methods documented (create_fragment, next_tag, get_breadcrumbs, add_class, get_updated_html), no hallucinations, idiomatic breadcrumb-based ancestor detection, null-guard present, passed 7/7. Self-reported confidence lowest (72) despite a fully correct, clean implementation; explanation is accurate. Same near-miss as the others: get_updated_html inferred from inheritance rather than found in the Processor doc index."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 7 cases (simple, deep-ancestor, outside-untouched, implicitly-closed-paragraphs, existing-class-preserved, nested-blockquotes, mixed-document), with no _doing_it_wrong or trigger_error records. The task is a near-perfect fit for the documented WP_HTML_Processor breadcrumb feature, and all three subjects converged on essentially the reference solution.\\n\\nWhat the docs did well: The 'Breadcrumbs' section and the get_breadcrumbs() method doc were decisive. The explicit statement that breadcrumbs 'always include the entire path from the root HTML node to the matched element' plus the worked example get_breadcrumbs() === array('HTML','BODY','P','STRONG','EM','IMG') told subjects exactly that an ancestor-at-any-depth check is a membership test over the breadcrumb array. This directly produced the correct in_array('BLOCKQUOTE', ...) pattern and is why deep-ancestor and nested-blockquotes passed without special handling. The class overview steering toward the Processor ('Querying based on nested HTML structure') combined with the Tag Processor's 'Design and limitations' (which states it cannot associate a tag with structure) prevented the wrong-processor failure mode. The 'Supported markup' bullet 'HTML with optional tags omitted, e.g. <p>one<p>two' reassured that the implicitly-closed-paragraphs case is handled by the tree-building parser, and it passed for all three.\\n\\nNear-misses in the explanations: (1) All three subjects relied on get_updated_html() being inherited from WP_HTML_Tag_Processor and said so, but the Processor doc never lists get_updated_html in its method index or methods section; they inferred it from the single '**Extends:** WP_HTML_Tag_Processor' line. A subject not making that inference could have been stuck, since there is no documented Processor method to emit the modified string. (2) Trial-2's redundant is_tag_closer() guard indicates the next_tag default closer-visiting behavior was not fully clear from the next_tag doc, where the tag_closers default is buried in the inline @type param hash. (3) The reference uses array_slice(get_breadcrumbs(), 0, -1) to exclude self while the subjects checked the full array; this works only because the matched self node is always 'P', never 'BLOCKQUOTE'. The docs show, but do not state as a named guarantee, that the matched node is the last breadcrumb entry, so the robustness of the in_array-over-full-array shortcut was somewhat lucky rather than doc-guaranteed.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor — class Usage section / Method Index",
+      "problem": "The Processor doc relies on the single '**Extends:** WP_HTML_Tag_Processor' line for discovery of inherited output methods. get_updated_html() — the only documented way to retrieve the modified HTML and the method used in every realistic edit workflow — never appears in the Processor's method index, methods section, or any example, even though the overview's three-step usage implies a final output step. Subjects had to infer it.",
+      "suggestion": "Add a 'Producing output' note in the Processor Usage section (or a one-line method-index entry) pointing to the inherited WP_HTML_Tag_Processor::get_updated_html() as the way to obtain the modified document, and show it in at least one end-to-end Usage example so the create -> find -> modify -> emit cycle is fully demonstrated on a Processor instance."
+    },
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs()",
+      "problem": "The doc says breadcrumbs run from outermost parent down to the matched element and shows an example, but never states as a named guarantee that the matched node itself is the LAST array element (and that ancestors are everything before it). Code testing 'does an ancestor of type X exist' must decide whether to exclude the self entry; this is only discoverable by reading the example carefully.",
+      "suggestion": "State explicitly that the last entry of get_breadcrumbs() is the currently-matched node and all preceding entries are its ancestors (root-first). Optionally show the ancestor-only idiom, e.g. checking membership in array_slice($crumbs, 0, -1), so callers know whether self is included."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() / WP_HTML_Tag_Processor::next_tag()",
+      "problem": "The default tag-closer behavior is conveyed only inside the dense inline @type hash ('tag_closers ... whether to stop on tag closers'), with the openers-only default stated indirectly. One subject defensively added a redundant is_tag_closer() guard, showing the default was unclear.",
+      "suggestion": "Add a sentence near the next_tag description stating that, by default, next_tag stops only on opening tags unless tag_closers => 'visit' is supplied. A small example contrasting default vs 'visit' would remove the ambiguity that prompted the redundant guard."
+    }
+  ]
+}

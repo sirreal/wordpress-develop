@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (WP_HTML_Processor::create_fragment, same approach as the reference). All four methods called — create_fragment, next_token, get_token_type, get_modifiable_text — exist verbatim in the docs (html-processor.md lines 348, 606, 1696, 1974). Idiomatic token-walking loop filtering on get_token_type()==='#text'; null-checks the create_fragment return (documented static|null, line 383); handles zero/negative limit up front; mb_substr only when over-length. All 9 hidden cases pass, no _doing_it_wrong. Minor: redundant mb_strlen guard before mb_substr (harmless); explanation asserts get_modifiable_text 'returns character references already decoded' — true, but the get_modifiable_text docblock never states this for #text nodes, so it is an inference not a documented fact."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1; same documented method set; all 9 cases pass; no _doing_it_wrong. Strongest explanation of the three: explicitly reasons that SCRIPT/STYLE content is exposed as a #tag token's modifiable text (not a #text token), so the '#text' filter excludes it — exactly correct and verified by probe (SCRIPT surfaces as type=#tag, name=SCRIPT). Demonstrates real comprehension of the 'special atomic elements' section rather than luck. Same single near-miss about entity decoding not being stated in the get_modifiable_text docblock."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation and result to the others; all 9 cases pass; no hallucinated methods; no _doing_it_wrong. Correct null-check, zero-limit guard, idiomatic next_token walk, codepoint-accurate truncation via mb_substr('UTF-8'). Explanation accurate and concise. Shares the one near-miss across all trials: relies on get_modifiable_text decoding character references for #text nodes — correct behavior but not spelled out in that method's own docblock."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 9 cases (no-truncation-needed, truncate-mid-link, entities-count-decoded, multibyte-emoji, accented, script-excluded, interelement-whitespace, zero-limit, malformed-nesting). All three converged on the reference approach exactly. What the docs did well, plus the near-misses:\\n\\n1. ENTITY DECODING (entities-count-decoded): The task hinges on '&amp;' decoding to '&' and counting as one codepoint. Probe confirms get_modifiable_text() returns decoded text for #text nodes ('<p>Fish &amp; Chips</p>' -> 'Fish & Chips'). But the get_modifiable_text() docblock (html-processor.md line 1974; html-tag-processor.md line 1769) NEVER states references are decoded for #text nodes — it only lists WHICH tokens have modifiable text. All three subjects asserted the decoding in their explanations and got it right, but by inference, most plausibly from the Tag Processor 'Special atomic elements' section (lines 243-259, which says TITLE/TEXTAREA references are decoded) and from set_modifiable_text encode/decode examples. This is the single largest near-miss: correct behavior reachable only by cross-referencing other sections, not from the method's own contract.\\n\\n2. SCRIPT/STYLE EXCLUSION (script-excluded): All three correctly relied on SCRIPT content surfacing as a #tag token (name=SCRIPT) rather than a #text token, so the get_token_type()==='#text' filter drops it. Probe confirms. Docs support this only indirectly via the 'special atomic elements' discussion and get_token_type's #tag-vs-#text enumeration (line 1635); no single passage states 'SCRIPT/STYLE inner text is reported under the opening #tag token, not as a #text node.' Trial-2's explanation reconstructed the mechanism; the others stated the outcome.\\n\\n3. MALFORMED NESTING (malformed-nesting '<div><p>one<p>two</div>tail' -> 'onetwotail'): Worked because WP_HTML_Processor applies HTML5 tree construction (implied </p>). The HTML Processor 'Supported markup' section (lines 95-109) explicitly lists '<p>one<p>two' as handled, which directly justified the processor choice. Docs did well here.\\n\\n4. TRAP THAT DID NOT FIRE: The HTML Processor's own next_token() docblock (lines 606-623) discourages its use — 'doesn't process semantic rules for text nodes. For access to the raw tokens consider using WP_HTML_Tag_Processor instead' and '6.5.0 - Added for internal support; do not use.' This contradicts the pattern that actually works (and that the reference uses). A more literal subject could have been steered to the wrong processor or away from next_token. All three ignored the warning and succeeded, but it is a live contradiction.\\n\\n5. CODEPOINT TRUNCATION: All used mb_substr(...,'UTF-8') for no-mid-character truncation (multibyte-emoji, accented). Pure PHP stdlib, not API behavior, so docs neither helped nor hurt.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and WP_HTML_Processor::get_modifiable_text() (docblock)",
+      "problem": "The method contract never states what transformations are applied to the returned text. In particular it does not say that for #text nodes (and RCDATA elements like TITLE/TEXTAREA) character references are DECODED, while for rawtext elements (SCRIPT/STYLE/XMP) they are left raw. Subjects had to infer the decoding from unrelated sections; the inference was correct but the method's own docs gave no guarantee.",
+      "suggestion": "Add an explicit sentence to the get_modifiable_text() docblock: the returned string is the decoded plain text for #text, TITLE, and TEXTAREA tokens (e.g. '&amp;' becomes '&'), and the verbatim raw text for SCRIPT, STYLE, and other rawtext sections. A one-line example (input '<p>Fish &amp; Chips</p>' yields 'Fish & Chips') would make the decode-vs-raw distinction unambiguous without embedding this task's solution."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor / WP_HTML_Processor — get_token_type() and the 'Special self-contained elements' section",
+      "problem": "It is not stated in one place that the inner text of SCRIPT/STYLE/TITLE/TEXTAREA is reported as the modifiable text of the OPENING tag token (get_token_type()==='#tag'), and therefore is NOT emitted as a separate '#text' token. Code that walks tokens and accumulates only '#text' content depends on this to exclude script/style text but must currently deduce it; getting it wrong would silently include script source in 'text content'.",
+      "suggestion": "In the get_token_type() docs (or the 'special atomic elements' section) add a note: 'The inner contents of SCRIPT, STYLE, TITLE, and TEXTAREA are exposed as the modifiable text of that element's opening #tag token; they do not appear as separate #text tokens.' This generalizes the rule that lets callers reliably separate true text nodes from raw/atomic element contents."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() (docblock, html-processor.md lines 606-623)",
+      "problem": "The docblock discourages the very usage that is correct and idiomatic for extracting text from a parsed document: it says next_token() 'doesn't process semantic rules for text nodes' and 'consider using WP_HTML_Tag_Processor instead,' and tags it 'Added for internal support; do not use.' Yet walking next_token() on the HTML Processor and reading get_modifiable_text() on #text tokens is exactly how text extraction with full tree construction (implied tags, mis-nesting) is achieved, and is what the reference does. This contradiction risks steering callers to the wrong tool for structural correctness.",
+      "suggestion": "Clarify the boundary: state that next_token() on the HTML Processor IS appropriate for reading the token stream (including #text nodes and their modifiable text) with full HTML5 tree construction applied, and scope the 'use the Tag Processor instead' guidance to cases needing low-level/raw tokens without semantic processing. Remove or qualify the blanket 'do not use' so it no longer contradicts the documented, working pattern."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (Returns / docblock)",
+      "problem": "create_fragment() is documented to return 'static|null' (null on failure), but the docblock gives no example of the null-check and no prose stating callers must guard against null before use. Subjects added the guard correctly, but only because the type annotation flagged it; the prose never mentions failure handling or what causes it.",
+      "suggestion": "Add a short note and example showing the null guard, e.g. '$p = WP_HTML_Processor::create_fragment( $html ); if ( null === $p ) { /* unsupported input, bail */ }', and briefly state what conditions yield null (e.g. unsupported context or encoding). This is a general robustness fact useful for every consumer of the static creators."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment, then looped with next_tag('P') to find every P element opener. For each P, I called get_breadcrumbs() (which returns the full ancestor path from HTML down to the current node) and checked whether 'BLOCKQUOTE' appears anywhere in that array using in_array(). Since breadcrumbs always include the full path, this correctly detects BLOCKQUOTE as any ancestor (not only direct parent). When found, add_class('quoted') is called. Finally, get_updated_html() (inherited from WP_HTML_Tag_Processor) returns the modified HTML string with all queued changes applied.",
+  "confidence": 92
+}

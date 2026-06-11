@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan every tag opener in the document. The `next_tag()` method with no arguments finds any tag; on each match, `remove_attribute( 'style' )` is called to remove the style attribute. Per the documentation, attribute matching is case-insensitive (since 6.2.1), so `STYLE=\"\u2026\"` is handled automatically. The Tag Processor is designed to minimize diffs, leaving surrounding whitespace in place when an attribute is removed \u2014 matching the expected output shown in the task. HTML comments are never matched as tags, so their contents are left untouched. Finally, `get_updated_html()` returns the transformed document.",
+  "confidence": 97
+}

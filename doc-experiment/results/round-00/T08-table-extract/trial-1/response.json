@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "WP_HTML_Processor cannot be used here because its documentation explicitly states it aborts on \"any element inside a TABLE\". Instead, I use WP_HTML_Tag_Processor with next_token() to scan all tokens linearly. I implement a four-state machine (outside_table, in_table, in_row, in_cell) and manually track TR/TD/TH boundaries. In the in_cell state, #text tokens are accumulated via get_modifiable_text(); because the Tag Processor returns raw text (character references not decoded), I apply html_entity_decode() when finalising each cell. Optional closing tags (omitted </td>, </tr>) are handled by detecting the next opening tag of the same or parent type and implicitly finalising the current cell/row. THEAD, TBODY, TFOOT, CAPTION, and COLGROUP tags are silently ignored, allowing the code to work regardless of whether those structural wrappers are present.",
+  "confidence": 62
+}
