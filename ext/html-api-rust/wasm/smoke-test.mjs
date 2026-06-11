@@ -595,6 +595,44 @@ assert.equal(fullParserNestedTemplateFormatting.get_modifiable_text(), "text");
 assert.deepEqual(fullParserNestedTemplateFormatting.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE", "#text"]);
 fullParserNestedTemplateFormatting.destroy();
 
+const fullParserTemplateCellAfterRow = WP_HTML_Processor.create_full_parser("<body><template><tr></tr><td></td></template>");
+assert.equal(fullParserTemplateCellAfterRow.next_tag("td"), true);
+assert.deepEqual(fullParserTemplateCellAfterRow.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE", "TR", "TD"]);
+fullParserTemplateCellAfterRow.destroy();
+
+const fullParserTemplateSkipsTableWrappers = WP_HTML_Processor.create_full_parser(
+	"<body><template><td></td><tbody><td></td></template>",
+);
+const fullParserTemplateSkipsTableWrapperCells = [];
+while (fullParserTemplateSkipsTableWrappers.next_tag("td")) {
+	fullParserTemplateSkipsTableWrapperCells.push(fullParserTemplateSkipsTableWrappers.get_breadcrumbs());
+}
+assert.deepEqual(fullParserTemplateSkipsTableWrapperCells, [
+	["HTML", "BODY", "TEMPLATE", "TD"],
+	["HTML", "BODY", "TEMPLATE", "TD"],
+]);
+fullParserTemplateSkipsTableWrappers.destroy();
+
+const fullParserTemplateIgnoresBadTableRows = WP_HTML_Processor.create_full_parser("<body><template><div><tr></tr></div></template>");
+assert.equal(fullParserTemplateIgnoresBadTableRows.next_tag("tr"), false);
+assert.equal(fullParserTemplateIgnoresBadTableRows.get_last_error(), null);
+fullParserTemplateIgnoresBadTableRows.destroy();
+
+const fullParserTemplateIgnoresAfterCol = WP_HTML_Processor.create_full_parser("<body><template><col><div>");
+assert.equal(fullParserTemplateIgnoresAfterCol.next_tag("col"), true);
+assert.deepEqual(fullParserTemplateIgnoresAfterCol.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE", "COL"]);
+assert.equal(fullParserTemplateIgnoresAfterCol.next_tag("div"), false);
+assert.equal(fullParserTemplateIgnoresAfterCol.get_last_error(), null);
+fullParserTemplateIgnoresAfterCol.destroy();
+
+const fullParserTemplateIgnoresTextAfterCol = WP_HTML_Processor.create_full_parser("<body><template><col>Hello");
+assert.equal(fullParserTemplateIgnoresTextAfterCol.next_tag("col"), true);
+assert.deepEqual(fullParserTemplateIgnoresTextAfterCol.get_breadcrumbs(), ["HTML", "BODY", "TEMPLATE", "COL"]);
+assert.equal(fullParserTemplateIgnoresTextAfterCol.next_token(), true);
+assert.equal(fullParserTemplateIgnoresTextAfterCol.get_token_name(), "TEMPLATE");
+assert.equal(fullParserTemplateIgnoresTextAfterCol.is_tag_closer(), true);
+fullParserTemplateIgnoresTextAfterCol.destroy();
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

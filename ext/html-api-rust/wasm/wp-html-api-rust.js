@@ -236,6 +236,7 @@ const TABLE_CELL_MODE_IGNORED_END_TAGS = new Set([
 	"HTML",
 ]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
+const TEMPLATE_TABLE_WRAPPER_START_TAGS = new Set(["CAPTION", "COLGROUP", "TBODY", "TFOOT", "THEAD"]);
 const FORM_TABLE_DESCENDANT_ELEMENTS = new Set([
 	"CAPTION",
 	"COLGROUP",
@@ -1325,6 +1326,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
 			this.active_formatting_elements = [];
+			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
 			this.current_namespace = contextNamespace(this.context_node);
@@ -1836,6 +1838,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tokenType !== "#tag") {
+				if (this.#shouldIgnoreTextInTemplateColumnGroup(tokenType)) {
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (tokenType === "#text" && this.#isInTableTextContext()) {
 					if (this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE) {
 						this.skip_current_token = true;
@@ -1999,8 +2006,12 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.current_token_namespace = this.open_element_namespaces[existingIndex];
+				if (closingNamespace === "html") {
+					this.#applyTemplateInsertionModeForEndTag(tagName);
+				}
 				if (tagName === "TEMPLATE" && closingNamespace === "html") {
 					this.#clearActiveFormattingElementsForTemplateClose(existingIndex);
+					this.#popTemplateInsertionMode();
 				}
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
@@ -2026,6 +2037,10 @@ export function createHtmlApi(wasm) {
 
 			if (this.#shouldBailUnsupportedTableFosterParenting(tagName, false)) {
 				this.#bailUnsupported("Foster parenting is not supported.");
+				return;
+			}
+
+			if (this.#applyTemplateInsertionModeForStartTag(tagName)) {
 				return;
 			}
 
@@ -2086,6 +2101,9 @@ export function createHtmlApi(wasm) {
 			this.current_token_namespace = namespaceForTag(super.get_tag(), this.current_namespace);
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
+			if (this.current_token_namespace === "html" && tagName === "TEMPLATE") {
+				this.template_insertion_modes.push("in_body");
+			}
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingElement(this.#createActiveFormattingElement(tagName));
 			}
@@ -2127,6 +2145,9 @@ export function createHtmlApi(wasm) {
 				if (existingIndex !== -1) {
 					if (token.tagName === "TEMPLATE" && token.namespaceName === "html") {
 						this.#clearActiveFormattingElementsForTemplateClose(existingIndex);
+						this.#popTemplateInsertionMode();
+					} else if (token.namespaceName === "html") {
+						this.#applyTemplateInsertionModeForEndTag(token.tagName);
 					}
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
@@ -2146,6 +2167,7 @@ export function createHtmlApi(wasm) {
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
+				templateInsertionModes: [...this.template_insertion_modes],
 				encodingConfidence: this.encoding_confidence,
 				baseOpenElementCount: this.base_open_element_count,
 				fullParserInsertionMode: this.full_parser_insertion_mode,
@@ -2168,6 +2190,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
+			this.template_insertion_modes = [...state.templateInsertionModes];
 			this.encoding_confidence = state.encodingConfidence;
 			this.base_open_element_count = state.baseOpenElementCount;
 			this.breadcrumbs = [...state.breadcrumbs];
@@ -2872,6 +2895,116 @@ export function createHtmlApi(wasm) {
 			this.active_formatting_elements = this.active_formatting_elements.filter((entry) => (
 				(entry.templateDepth ?? 0) < closedTemplateDepth
 			));
+		}
+
+		#applyTemplateInsertionModeForStartTag(tagName) {
+			if (
+				this.current_namespace !== "html" ||
+				this.template_insertion_modes.length === 0 ||
+				tagName === "TEMPLATE"
+			) {
+				return false;
+			}
+
+			const mode = this.#currentTemplateInsertionMode();
+			if (mode === "in_column_group") {
+				if (tagName === "COL") {
+					return false;
+				}
+
+				this.#ignoreCurrentToken();
+				return true;
+			}
+
+			if (mode === "in_table_body") {
+				if (TEMPLATE_TABLE_WRAPPER_START_TAGS.has(tagName)) {
+					this.#ignoreCurrentToken();
+					return true;
+				}
+
+				if (TABLE_CELL_ELEMENTS.has(tagName)) {
+					this.#setCurrentTemplateInsertionMode("in_row");
+					this.#queueVirtualPush("TR");
+					return this.#reprocessCurrentTokenAfterVirtualTokens();
+				}
+
+				if (tagName === "TR") {
+					this.#setCurrentTemplateInsertionMode("in_row");
+				}
+				return false;
+			}
+
+			if (mode === "in_row") {
+				if (TEMPLATE_TABLE_WRAPPER_START_TAGS.has(tagName)) {
+					this.#ignoreCurrentToken();
+					return true;
+				}
+				return false;
+			}
+
+			if (mode !== "in_body") {
+				return false;
+			}
+
+			if (!this.#currentHtmlElementIs("TEMPLATE")) {
+				if (tagName === "COL" || tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
+					this.#ignoreCurrentToken();
+					return true;
+				}
+				return false;
+			}
+
+			if (tagName === "COL") {
+				this.#setCurrentTemplateInsertionMode("in_column_group");
+			} else if (tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
+				this.#setCurrentTemplateInsertionMode("in_row");
+			} else if (TABLE_SECTION_ELEMENTS.has(tagName)) {
+				this.#setCurrentTemplateInsertionMode("in_table_body");
+			}
+
+			return false;
+		}
+
+		#applyTemplateInsertionModeForEndTag(tagName) {
+			if (this.template_insertion_modes.length === 0) {
+				return;
+			}
+
+			if (tagName === "TR") {
+				this.#setCurrentTemplateInsertionMode("in_table_body");
+			} else if (TABLE_SECTION_ELEMENTS.has(tagName) || tagName === "CAPTION") {
+				this.#setCurrentTemplateInsertionMode("in_body");
+			}
+		}
+
+		#shouldIgnoreTextInTemplateColumnGroup(tokenType) {
+			return (
+				tokenType === "#text" &&
+				this.template_insertion_modes.length > 0 &&
+				this.#currentTemplateInsertionMode() === "in_column_group"
+			);
+		}
+
+		#currentTemplateInsertionMode() {
+			return this.template_insertion_modes[this.template_insertion_modes.length - 1] ?? "in_body";
+		}
+
+		#setCurrentTemplateInsertionMode(mode) {
+			if (this.template_insertion_modes.length > 0) {
+				this.template_insertion_modes[this.template_insertion_modes.length - 1] = mode;
+			}
+		}
+
+		#popTemplateInsertionMode() {
+			if (this.template_insertion_modes.length > 0) {
+				this.template_insertion_modes.pop();
+			}
+		}
+
+		#ignoreCurrentToken() {
+			this.current_token_namespace = this.current_namespace;
+			this.breadcrumbs = [...this.open_elements];
+			this.skip_current_token = true;
 		}
 
 		#bailUnsupported(message) {
