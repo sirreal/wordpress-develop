@@ -581,6 +581,22 @@ static bool wp_html_tag_processor_is_quirks_mode(zval *object)
 	);
 }
 
+static zend_long wp_html_tag_processor_max_bookmarks(zval *object)
+{
+	zend_string *processor_class_name;
+	zend_class_entry *processor_ce;
+
+	processor_class_name = zend_string_init("WP_HTML_Processor", sizeof("WP_HTML_Processor") - 1, 0);
+	processor_ce = zend_lookup_class(processor_class_name);
+	zend_string_release(processor_class_name);
+
+	if (NULL != processor_ce && instanceof_function(Z_OBJCE_P(object), processor_ce)) {
+		return 10000;
+	}
+
+	return 10;
+}
+
 static int wp_html_api_rust_compare_text_replacements(const void *left_ptr, const void *right_ptr)
 {
 	const wp_html_api_rust_text_replacement *left = (const wp_html_api_rust_text_replacement *) left_ptr;
@@ -1934,7 +1950,8 @@ PHP_METHOD(WP_HTML_Tag_Processor, set_bookmark)
 	bookmarks = wp_html_tag_processor_read_bookmarks(ZEND_THIS, &rv);
 	if (
 		NULL == zend_symtable_find(Z_ARRVAL_P(bookmarks), bookmark_name) &&
-		zend_hash_num_elements(Z_ARRVAL_P(bookmarks)) >= 10
+		zend_hash_num_elements(Z_ARRVAL_P(bookmarks)) >=
+			(uint32_t) wp_html_tag_processor_max_bookmarks(ZEND_THIS)
 	) {
 		wp_html_api_rust_doing_it_wrong(
 			"WP_HTML_Tag_Processor::set_bookmark",
