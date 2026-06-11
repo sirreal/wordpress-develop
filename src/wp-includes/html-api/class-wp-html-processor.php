@@ -878,6 +878,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *         // them; it ends on the LI's own closer. The unclosed LI and UL
 	 *         // still produce closing tokens at the end of the input.
 	 *         //
+	 *         // The accumulated string is decoded UTF-8: measure or
+	 *         // truncate it by code points with the mb_* functions and an
+	 *         // explicit encoding, e.g. mb_substr( $text, 0, 100, 'UTF-8' ).
+	 *         //
 	 *         // The `>=` comparison is required: `>` would end this walk at
 	 *         // the first nested closer (`</strong>` reports the same depth
 	 *         // as the LI's contents) and silently drop the trailing text.
