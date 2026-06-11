@@ -1420,7 +1420,15 @@ export function createHtmlApi(wasm) {
 
 		static normalize(html) {
 			const processor = this.create_fragment(html);
-			return processor === null ? null : processor.serialize();
+			if (processor === null) {
+				return null;
+			}
+
+			try {
+				return processor.serialize();
+			} finally {
+				processor.destroy();
+			}
 		}
 
 		static is_void(tagName) {
