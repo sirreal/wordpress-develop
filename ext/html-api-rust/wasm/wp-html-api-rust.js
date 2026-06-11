@@ -2713,11 +2713,6 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
-				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
-					this.#bailUnsupported("Foster parenting is not supported.");
-					return;
-				}
-
 				if (this.#shouldBailUnsupportedAdoptionAgency(tagName, closingNamespace, existingIndex)) {
 					this.#bailUnsupported("Cannot extract common ancestor in adoption agency algorithm.");
 					return;
@@ -2798,6 +2793,11 @@ export function createHtmlApi(wasm) {
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = [...this.open_elements];
 					this.skip_current_token = true;
+					return;
+				}
+
+				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+					this.#bailUnsupported("Foster parenting is not supported.");
 					return;
 				}
 

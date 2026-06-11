@@ -2786,6 +2786,30 @@ assert.equal(tableCellProcessor.is_virtual(), false);
 assert.deepEqual(tableCellProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
 tableCellProcessor.destroy();
 
+const tableRowUnmatchedFormattingCloserProcessor = WP_HTML_Processor.create_fragment("<table><tr></strong><td>cell");
+assert.equal(tableRowUnmatchedFormattingCloserProcessor.next_tag("td"), true);
+assert.deepEqual(
+	tableRowUnmatchedFormattingCloserProcessor.get_breadcrumbs(),
+	["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"],
+);
+tableRowUnmatchedFormattingCloserProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tr></strong><td>cell"),
+	"<table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
+const tableRowUnmatchedEndTagProcessor = WP_HTML_Processor.create_fragment("<table><tr></blink><td>cell");
+assert.equal(tableRowUnmatchedEndTagProcessor.next_tag("td"), true);
+assert.deepEqual(
+	tableRowUnmatchedEndTagProcessor.get_breadcrumbs(),
+	["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"],
+);
+tableRowUnmatchedEndTagProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tr></blink><td>cell"),
+	"<table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 const ignoredTableEndTagsProcessor = WP_HTML_Processor.create_fragment(
 	"<table></body></caption></col></colgroup></html></tbody></td></tfoot></th></thead></tr><td>",
 );
