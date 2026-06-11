@@ -2906,6 +2906,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForEndTag(tagName) {
+			if ((tagName === "BR" || tagName === "P") && this.#queueForeignContentBreakoutForEndTag()) {
+				return true;
+			}
+
 			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
 				return false;
 			}
@@ -2969,6 +2973,20 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#queueForeignContentBreakoutForEndTag() {
+			if (this.current_namespace === "html") {
+				return false;
+			}
+
+			const firstForeignIndex = this.#firstForeignElementToPopForHtmlBreakout();
+			if (firstForeignIndex === -1) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(firstForeignIndex);
+			return true;
 		}
 
 		#queueVirtualOpenersForStartTag(tagName) {

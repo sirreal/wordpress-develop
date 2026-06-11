@@ -1213,6 +1213,29 @@ assert.equal(
 assert.equal(WP_HTML_Processor.normalize("<svg><font color=red>text"), '<svg></svg><font color="red">text</font>');
 assert.equal(WP_HTML_Processor.normalize("<svg><font>text"), "<svg><font>text</font></svg>");
 
+const foreignEndTagBreakoutProcessor = WP_HTML_Processor.create_fragment("<svg></p><span>x");
+assert.equal(foreignEndTagBreakoutProcessor.next_token(), true);
+assert.equal(foreignEndTagBreakoutProcessor.get_tag(), "SVG");
+assert.equal(foreignEndTagBreakoutProcessor.get_namespace(), "svg");
+assert.equal(foreignEndTagBreakoutProcessor.next_token(), true);
+assert.equal(foreignEndTagBreakoutProcessor.get_tag(), "SVG");
+assert.equal(foreignEndTagBreakoutProcessor.is_virtual(), true);
+assert.equal(foreignEndTagBreakoutProcessor.is_tag_closer(), true);
+assert.deepEqual(foreignEndTagBreakoutProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(foreignEndTagBreakoutProcessor.next_token(), true);
+assert.equal(foreignEndTagBreakoutProcessor.get_tag(), "P");
+assert.equal(foreignEndTagBreakoutProcessor.is_virtual(), true);
+assert.equal(foreignEndTagBreakoutProcessor.is_tag_closer(), false);
+assert.deepEqual(foreignEndTagBreakoutProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+assert.equal(foreignEndTagBreakoutProcessor.next_token(), true);
+assert.equal(foreignEndTagBreakoutProcessor.get_tag(), "P");
+assert.equal(foreignEndTagBreakoutProcessor.is_virtual(), true);
+assert.equal(foreignEndTagBreakoutProcessor.is_tag_closer(), true);
+assert.deepEqual(foreignEndTagBreakoutProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+foreignEndTagBreakoutProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<svg></p><span>x"), "<svg></svg><p></p><span>x</span>");
+assert.equal(WP_HTML_Processor.normalize("<svg><g></p><span>x"), "<svg><g></g></svg><p></p><span>x</span>");
+
 const qualifiedSvgProcessor = WP_HTML_Processor.create_fragment('<svg /><svg><lineargradient gradientunits="userSpaceOnUse"></lineargradient></svg>');
 assert.equal(qualifiedSvgProcessor.next_tag("svg"), true);
 assert.equal(qualifiedSvgProcessor.get_namespace(), "svg");
