@@ -844,7 +844,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * Because a closing token is visited for every opener (implicit and
 	 * end-of-input closes included), the closer-driven flush in this
-	 * shape is reliable even for malformed input.
+	 * shape is reliable even for malformed input. It also handles empty
+	 * regions naturally: an empty element (`<dt></dt>`) produces its
+	 * opener and closer back-to-back with no `#text` between, so the
+	 * flush records an empty string rather than skipping the region.
 	 *
 	 * Example:
 	 *
@@ -1327,7 +1330,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * element whose opener reported depth N, every token inside it reports
 	 * a depth of at least N, the closers of its child elements included.
 	 * The first token to report a depth less than N is the element's own
-	 * closing token, at depth N - 1.
+	 * closing token, at depth N - 1. Note the equality case: a child
+	 * element's closing token reports a depth EQUAL to the matched
+	 * ancestor's opening-token depth (`</em>` below reports the same
+	 * depth as `<h1>` did). That equality is precisely why a subtree
+	 * walk's guard must be `>=` — a `>` guard exits at the first child
+	 * closer and drops everything after it.
 	 *
 	 * This gives a reliable way to visit every token inside an element:
 	 * record the depth when matched on its opening tag and continue while
