@@ -143,11 +143,46 @@ assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("dat
 assert.equal(duplicateAttributeNameTags.get_attribute("data-x"), "1");
 duplicateAttributeNameTags.destroy();
 
+const noAttributePrefixMatches = new WP_HTML_Tag_Processor("<div id=x>");
+assert.equal(noAttributePrefixMatches.next_tag("div"), true);
+assert.deepEqual(noAttributePrefixMatches.get_attribute_names_with_prefix("data-"), []);
+assert.deepEqual(noAttributePrefixMatches.get_attribute_names_with_prefix(""), ["id"]);
+noAttributePrefixMatches.destroy();
+
 const decodedClassQueryTags = new WP_HTML_Tag_Processor('<div class="&notin;-class &lt;egg&gt; &#xff03;">');
 assert.equal(decodedClassQueryTags.next_tag({ class_name: "<egg>" }), true);
 assert.equal(decodedClassQueryTags.get_tag(), "DIV");
 assert.deepEqual(decodedClassQueryTags.class_list(), ["∉-class", "<egg>", "＃"]);
 decodedClassQueryTags.destroy();
+
+const duplicateDecodedClassList = new WP_HTML_Tag_Processor('<div class="one one &#x6f;ne">');
+assert.equal(duplicateDecodedClassList.next_tag("div"), true);
+assert.deepEqual(duplicateDecodedClassList.class_list(), ["one"]);
+duplicateDecodedClassList.destroy();
+
+const addClassBeforeSetClassAttribute = new WP_HTML_Tag_Processor('<div class="main with-border" id="first"><span></span></div>');
+assert.equal(addClassBeforeSetClassAttribute.next_tag("div"), true);
+assert.equal(addClassBeforeSetClassAttribute.add_class("add_class"), true);
+assert.equal(addClassBeforeSetClassAttribute.set_attribute("class", "set_attribute"), true);
+assert.equal(addClassBeforeSetClassAttribute.get_attribute("class"), "set_attribute");
+assert.equal(addClassBeforeSetClassAttribute.get_updated_html(), '<div class="set_attribute" id="first"><span></span></div>');
+addClassBeforeSetClassAttribute.destroy();
+
+const addClassAfterSetClassAttribute = new WP_HTML_Tag_Processor('<div class="main with-border" id="first"><span></span></div>');
+assert.equal(addClassAfterSetClassAttribute.next_tag("div"), true);
+assert.equal(addClassAfterSetClassAttribute.set_attribute("class", "set_attribute"), true);
+assert.equal(addClassAfterSetClassAttribute.add_class("add_class"), true);
+assert.equal(addClassAfterSetClassAttribute.get_attribute("class"), "set_attribute add_class");
+assert.equal(addClassAfterSetClassAttribute.get_updated_html(), '<div class="set_attribute add_class" id="first"><span></span></div>');
+addClassAfterSetClassAttribute.destroy();
+
+const addClassAfterBooleanClassAttribute = new WP_HTML_Tag_Processor('<div id="first"><span></span></div>');
+assert.equal(addClassAfterBooleanClassAttribute.next_tag("div"), true);
+assert.equal(addClassAfterBooleanClassAttribute.set_attribute("class", true), true);
+assert.equal(addClassAfterBooleanClassAttribute.add_class("add_class"), true);
+assert.equal(addClassAfterBooleanClassAttribute.get_attribute("class"), "add_class");
+assert.equal(addClassAfterBooleanClassAttribute.get_updated_html(), '<div class="add_class" id="first"><span></span></div>');
+addClassAfterBooleanClassAttribute.destroy();
 
 const rawClassNameUpdates = new WP_HTML_Tag_Processor('<div class="x\uFFFDy">');
 assert.equal(rawClassNameUpdates.next_tag("div"), true);
