@@ -91,6 +91,10 @@ export interface WP_HTML_Doctype_Info_Constructor {
 	from_doctype_token(doctypeHtml: string): WP_HTML_Doctype_Info | null;
 }
 
+export interface WP_HTML_Unsupported_Exception {
+	message: string;
+}
+
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
 	compat_mode: "no-quirks-mode" | "quirks-mode";
@@ -195,7 +199,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	next_token(): boolean;
 	step(nodeToProcess?: ProcessorStepMode): boolean;
 	get_last_error(): string | null;
-	get_unsupported_exception(): unknown;
+	get_unsupported_exception(): WP_HTML_Unsupported_Exception | null;
 	is_virtual(): boolean;
 	is_tag_closer(): boolean;
 	get_namespace(): HtmlNamespace;
