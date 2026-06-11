@@ -2794,6 +2794,27 @@ export function createHtmlApi(wasm) {
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
+				if (tagName === "P" && closingNamespace === "html") {
+					existingIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+					if (existingIndex === -1) {
+						this.current_token_namespace = this.current_namespace;
+						this.breadcrumbs = [...this.open_elements];
+						this.virtual_tokens.push(
+							{
+								operation: "push",
+								tagName: "P",
+								namespaceName: "html",
+							},
+							{
+								operation: "pop",
+								tagName: "P",
+								namespaceName: "html",
+							},
+						);
+						this.skip_current_token = true;
+						return;
+					}
+				}
 
 				if (!this.is_full_parser && existingIndex !== -1 && existingIndex < this.base_open_element_count) {
 					this.current_token_namespace = this.current_namespace;
@@ -2929,25 +2950,6 @@ export function createHtmlApi(wasm) {
 					this.#queueVirtualPopsFrom(existingIndex + 1);
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
-					return;
-				}
-
-				if (tagName === "P" && closingNamespace === "html" && existingIndex === -1) {
-					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
-					this.virtual_tokens.push(
-						{
-							operation: "push",
-							tagName: "P",
-							namespaceName: "html",
-						},
-						{
-							operation: "pop",
-							tagName: "P",
-							namespaceName: "html",
-						},
-					);
-					this.skip_current_token = true;
 					return;
 				}
 
