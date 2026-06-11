@@ -1023,6 +1023,13 @@ export function createHtmlApi(wasm) {
 	}
 
 	class WP_HTML_Processor extends WP_HTML_Tag_Processor {
+		static PROCESS_NEXT_NODE = "process-next-node";
+		static REPROCESS_CURRENT_NODE = "reprocess-current-node";
+		static PROCESS_CURRENT_NODE = "process-current-node";
+		static ERROR_UNSUPPORTED = "unsupported";
+		static ERROR_EXCEEDED_MAX_BOOKMARKS = "exceeded-max-bookmarks";
+		static CONSTRUCTOR_UNLOCK_CODE = "Use WP_HTML_Processor::create_fragment() instead of calling the class constructor directly.";
+
 		constructor(html, options = {}) {
 			super(html);
 			this.last_error = null;
@@ -1058,6 +1065,11 @@ export function createHtmlApi(wasm) {
 
 		static is_void(tagName) {
 			return VOID_ELEMENTS.has(asciiUpper(String(tagName)));
+		}
+
+		static is_special(tagName) {
+			const normalized = normalizeSpecialTagInput(tagName);
+			return isSpecialBoundary(normalized.nodeName, normalized.namespaceName);
 		}
 
 		next_tag(query = null) {
@@ -1117,6 +1129,21 @@ export function createHtmlApi(wasm) {
 			}
 
 			return remaining === 0;
+		}
+
+		step(nodeToProcess = WP_HTML_Processor.PROCESS_NEXT_NODE) {
+			if (nodeToProcess === WP_HTML_Processor.PROCESS_NEXT_NODE) {
+				return this.next_token();
+			}
+
+			if (
+				nodeToProcess === WP_HTML_Processor.REPROCESS_CURRENT_NODE ||
+				nodeToProcess === WP_HTML_Processor.PROCESS_CURRENT_NODE
+			) {
+				return this.parser_state !== STATE_READY && this.parser_state !== STATE_COMPLETE;
+			}
+
+			return false;
 		}
 
 		next_token() {
@@ -1834,6 +1861,29 @@ function hasSpecialBoundaryAfter(openElements, namespaces, index) {
 		}
 	}
 	return false;
+}
+
+function normalizeSpecialTagInput(tagName) {
+	if (tagName && typeof tagName === "object") {
+		return {
+			nodeName: asciiUpper(String(tagName.node_name ?? tagName.nodeName ?? tagName.tagName ?? "")),
+			namespaceName: String(tagName.namespace ?? tagName.namespaceName ?? "html").toLowerCase(),
+		};
+	}
+
+	const value = String(tagName);
+	const match = value.trim().match(/^(html|math|svg)\s+(.+)$/i);
+	if (match) {
+		return {
+			nodeName: asciiUpper(match[2]),
+			namespaceName: asciiLower(match[1]),
+		};
+	}
+
+	return {
+		nodeName: asciiUpper(value),
+		namespaceName: "html",
+	};
 }
 
 function isSpecialBoundary(nodeName, namespaceName) {

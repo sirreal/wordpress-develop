@@ -73,6 +73,28 @@ assert.equal(processor.expects_closer(), true);
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 
+assert.equal(WP_HTML_Processor.PROCESS_NEXT_NODE, "process-next-node");
+assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node");
+assert.equal(WP_HTML_Processor.PROCESS_CURRENT_NODE, "process-current-node");
+assert.equal(WP_HTML_Processor.ERROR_UNSUPPORTED, "unsupported");
+assert.equal(WP_HTML_Processor.ERROR_EXCEEDED_MAX_BOOKMARKS, "exceeded-max-bookmarks");
+assert.equal(WP_HTML_Processor.is_special("div"), true);
+assert.equal(WP_HTML_Processor.is_special("span"), false);
+assert.equal(WP_HTML_Processor.is_special("math mi"), true);
+assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
+
+const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
+assert.equal(stepProcessor.step(), true);
+assert.equal(stepProcessor.get_tag(), "DIV");
+assert.equal(stepProcessor.step(WP_HTML_Processor.PROCESS_CURRENT_NODE), true);
+assert.equal(stepProcessor.get_tag(), "DIV");
+assert.equal(stepProcessor.step(), true);
+assert.equal(stepProcessor.get_token_type(), "#text");
+assert.equal(stepProcessor.step(), true);
+assert.equal(stepProcessor.get_tag(), "DIV");
+assert.equal(stepProcessor.is_tag_closer(), true);
+stepProcessor.destroy();
+
 const nestedProcessor = WP_HTML_Processor.create_fragment("<div><span><figure><img></figure></span></div>");
 assert.equal(nestedProcessor.next_tag({ breadcrumbs: ["FIGURE", "IMG"] }), true);
 assert.equal(nestedProcessor.get_tag(), "IMG");
