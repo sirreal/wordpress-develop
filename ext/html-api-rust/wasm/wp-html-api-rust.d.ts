@@ -342,6 +342,7 @@ export interface WP_HTML_Tag_Processor {
 	paused_at_incomplete_token(): boolean;
 	subdivide_text_appropriately(): boolean;
 	get_modifiable_text(): string;
+	native_get_script_content_type(): "javascript" | "json" | null;
 	set_modifiable_text(text: string): boolean;
 	get_comment_type(): CommentType | null;
 	get_doctype_info(): WP_HTML_Doctype_Info | null;

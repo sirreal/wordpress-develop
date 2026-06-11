@@ -337,6 +337,7 @@ for (const method of [
 	"get_full_comment_text",
 	"subdivide_text_appropriately",
 	"get_modifiable_text",
+	"native_get_script_content_type",
 	"set_modifiable_text",
 	"set_attribute",
 	"remove_attribute",
@@ -636,6 +637,24 @@ assert.equal(textarea.get_modifiable_text(), "One");
 assert.equal(textarea.set_modifiable_text("Two"), true);
 assert.equal(textarea.get_updated_html(), "<textarea>Two</textarea>");
 textarea.destroy();
+
+for (const [html, expectedContentType] of [
+	["<script>one</script>", "javascript"],
+	['<script type="module">one</script>', "javascript"],
+	['<script type="application/json">{"one":1}</script>', "json"],
+	['<script type="importmap">{"imports":{}}</script>', "json"],
+	['<script type="text/plain">one</script>', null],
+]) {
+	const script = new WP_HTML_Tag_Processor(html);
+	assert.equal(script.next_tag("script"), true);
+	assert.equal(script.native_get_script_content_type(), expectedContentType);
+	script.destroy();
+}
+
+const processorScript = WP_HTML_Processor.create_fragment('<script type="application/json">{"one":1}</script>');
+assert.equal(processorScript.next_tag("script"), true);
+assert.equal(processorScript.native_get_script_content_type(), "json");
+processorScript.destroy();
 
 const legacyNamedCharacterReference = new WP_HTML_Tag_Processor("<div>ZZ&AElig=</div>");
 assert.equal(legacyNamedCharacterReference.next_token(), true);

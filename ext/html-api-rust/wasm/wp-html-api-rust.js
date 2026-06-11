@@ -1628,6 +1628,18 @@ export function createHtmlApi(wasm) {
 			)) ?? "";
 		}
 
+		native_get_script_content_type() {
+			this.#ensureLive();
+			switch (wasm.wp_html_api_rust_tag_processor_script_content_type(this.pointer)) {
+				case 1:
+					return "javascript";
+				case 2:
+					return "json";
+				default:
+					return null;
+			}
+		}
+
 		set_modifiable_text(text) {
 			this.#ensureLive();
 			if (![STATE_MATCHED_TAG, STATE_TEXT_NODE, STATE_COMMENT].includes(this.parser_state)) {
