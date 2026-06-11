@@ -324,6 +324,7 @@ const P_CLOSING_START_TAGS = new Set([
 	"HGROUP",
 	"HR",
 	"LI",
+	"LISTING",
 	"MAIN",
 	"MENU",
 	"NAV",

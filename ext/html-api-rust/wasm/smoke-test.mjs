@@ -680,6 +680,13 @@ assert.deepEqual(paragraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 assert.equal(paragraphProcessor.get_attribute("target"), true);
 paragraphProcessor.destroy();
 
+const listingClosesParagraphProcessor = WP_HTML_Processor.create_full_parser("<!doctype html><p>foo<listing>bar<p>baz");
+assert.equal(listingClosesParagraphProcessor.next_tag("listing"), true);
+assert.deepEqual(listingClosesParagraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "LISTING"]);
+assert.equal(listingClosesParagraphProcessor.next_tag("p"), true);
+assert.deepEqual(listingClosesParagraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "LISTING", "P"]);
+listingClosesParagraphProcessor.destroy();
+
 const articleProcessor = WP_HTML_Processor.create_fragment("<p><p><article target>");
 assert.equal(articleProcessor.next_tag("article"), true);
 assert.deepEqual(articleProcessor.get_breadcrumbs(), ["HTML", "BODY", "ARTICLE"]);
