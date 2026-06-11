@@ -4350,6 +4350,12 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (tagName === "NOBR" && this.#currentHtmlElementIs("NOBR")) {
+				this.#removeActiveFormattingElementsForClose("NOBR");
+				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
+				return true;
+			}
+
 			if (CAPTION_CLOSING_START_TAGS.has(tagName)) {
 				const captionIndex = this.#findElementInTableScope("CAPTION");
 				if (captionIndex !== -1) {
