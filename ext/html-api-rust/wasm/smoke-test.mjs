@@ -1621,6 +1621,17 @@ assert.equal(qualifiedSvgProcessor.get_qualified_tag_name(), "linearGradient");
 assert.equal(qualifiedSvgProcessor.get_qualified_attribute_name("gradientunits"), "gradientUnits");
 qualifiedSvgProcessor.destroy();
 
+const qualifiedForeignAttributeProcessor = WP_HTML_Processor.create_fragment(
+	'<svg><use xlink:href="#icon" xml:lang="en" xmlns:xlink="http://www.w3.org/1999/xlink" custom:attr="v"></use></svg>',
+);
+assert.equal(qualifiedForeignAttributeProcessor.next_tag("use"), true);
+assert.equal(qualifiedForeignAttributeProcessor.get_namespace(), "svg");
+assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xlink:href"), "xlink href");
+assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xml:lang"), "xml lang");
+assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xmlns:xlink"), "xmlns xlink");
+assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("custom:attr"), "custom:attr");
+qualifiedForeignAttributeProcessor.destroy();
+
 const foreignObjectProcessor = WP_HTML_Processor.create_fragment("<svg><foreignObject><div></div></foreignObject></svg>");
 assert.equal(foreignObjectProcessor.next_tag("div"), true);
 assert.equal(foreignObjectProcessor.get_namespace(), "html");
@@ -1656,6 +1667,16 @@ assert.equal(mathQualifiedProcessor.next_tag("mi"), true);
 assert.equal(mathQualifiedProcessor.get_namespace(), "math");
 assert.equal(mathQualifiedProcessor.get_qualified_attribute_name("definitionurl"), "definitionURL");
 mathQualifiedProcessor.destroy();
+
+const mathQualifiedForeignAttributeProcessor = WP_HTML_Processor.create_fragment(
+	'<math><mi definitionurl="x" xlink:show="new" viewbox="raw"></mi></math>',
+);
+assert.equal(mathQualifiedForeignAttributeProcessor.next_tag("mi"), true);
+assert.equal(mathQualifiedForeignAttributeProcessor.get_namespace(), "math");
+assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("definitionurl"), "definitionURL");
+assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("xlink:show"), "xlink show");
+assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("viewbox"), "viewbox");
+mathQualifiedForeignAttributeProcessor.destroy();
 
 const mathIntegrationEndTagProcessor = WP_HTML_Processor.create_fragment("<math><mi>x</mi><mn>1</mn></math>");
 assert.equal(mathIntegrationEndTagProcessor.next_tag("mn"), true);
