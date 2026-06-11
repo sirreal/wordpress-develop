@@ -229,6 +229,7 @@ export interface HtmlApi {
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;
 	scanNextTag(html: unknown, offset?: number | string | boolean | null): ScanNextTagResult | false;
 	version(): string;
+	wasm: WebAssembly.Exports;
 }
 
 export function loadWasm(input?: WasmInput): Promise<HtmlApi>;

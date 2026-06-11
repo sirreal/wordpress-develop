@@ -8,9 +8,11 @@ const {
 	WP_HTML_Processor,
 	scanNextTag,
 	version,
+	wasm,
 } = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 
 assert.equal(version(), "0.1.0");
+assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
