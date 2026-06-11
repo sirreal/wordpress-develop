@@ -159,6 +159,17 @@ const COLGROUP_CLOSING_START_TAGS = new Set([
 	"THEAD",
 	"TR",
 ]);
+const CAPTION_CLOSING_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -2524,6 +2535,14 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (CAPTION_CLOSING_START_TAGS.has(tagName)) {
+				const captionIndex = this.#findElementInTableScope("CAPTION");
+				if (captionIndex !== -1) {
+					this.#queueVirtualPopsFrom(captionIndex);
+					return true;
+				}
+			}
+
 			if (COLGROUP_CLOSING_START_TAGS.has(tagName) && this.#currentHtmlElementIs("COLGROUP")) {
 				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
 				return true;
@@ -2681,6 +2700,14 @@ export function createHtmlApi(wasm) {
 			) {
 				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
 				return true;
+			}
+
+			if (tagName === "TABLE") {
+				const captionIndex = this.#findElementInTableScope("CAPTION");
+				if (captionIndex !== -1) {
+					this.#queueVirtualPopsFrom(captionIndex);
+					return true;
+				}
 			}
 
 			if (SELECT_IN_TABLE_BREAKOUT_TAGS.has(tagName) && this.#hasElementInTableScope(tagName)) {

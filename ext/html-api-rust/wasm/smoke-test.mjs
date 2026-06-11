@@ -764,6 +764,24 @@ assert.equal(
 	"<table><colgroup></colgroup><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
+const tableCaptionProcessor = WP_HTML_Processor.create_fragment("<table><caption><p>cap<tr><td>cell");
+assert.equal(tableCaptionProcessor.next_tag("tr"), true);
+assert.deepEqual(tableCaptionProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+tableCaptionProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><caption><p>cap<tr><td>cell"),
+	"<table><caption><p>cap</p></caption><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
+const tableCaptionEndProcessor = WP_HTML_Processor.create_fragment("<table><caption>cap</table><p>after");
+assert.equal(tableCaptionEndProcessor.next_tag("p"), true);
+assert.deepEqual(tableCaptionEndProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+tableCaptionEndProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><caption>cap</table><p>after"),
+	"<table><caption>cap</caption></table><p>after</p>",
+);
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");
