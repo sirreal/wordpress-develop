@@ -1042,6 +1042,7 @@ export function createHtmlApi(wasm) {
 			this.last_error = null;
 			this.unsupported_exception = null;
 			this.current_virtual = null;
+			this.virtual_tokens = [];
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
 			this.context_node = options.contextNode ?? "BODY";
@@ -1154,6 +1155,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		next_token() {
+			if (this.virtual_tokens.length > 0) {
+				return this.#consumeVirtualToken();
+			}
+
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
@@ -1182,6 +1187,78 @@ export function createHtmlApi(wasm) {
 
 		is_tag_closer() {
 			return this.is_virtual() ? this.current_virtual.operation === "pop" : super.is_tag_closer();
+		}
+
+		get_tag() {
+			return this.is_virtual() ? this.current_virtual.tagName : super.get_tag();
+		}
+
+		get_attribute(name) {
+			return this.is_virtual() ? null : super.get_attribute(name);
+		}
+
+		get_attribute_names_with_prefix(prefix) {
+			return this.is_virtual() ? null : super.get_attribute_names_with_prefix(prefix);
+		}
+
+		set_attribute(name, value) {
+			return this.is_virtual() ? false : super.set_attribute(name, value);
+		}
+
+		remove_attribute(name) {
+			return this.is_virtual() ? false : super.remove_attribute(name);
+		}
+
+		add_class(className) {
+			return this.is_virtual() ? false : super.add_class(className);
+		}
+
+		remove_class(className) {
+			return this.is_virtual() ? false : super.remove_class(className);
+		}
+
+		has_class(className) {
+			return this.is_virtual() ? null : super.has_class(className);
+		}
+
+		class_list() {
+			return this.is_virtual() ? null : super.class_list();
+		}
+
+		has_self_closing_flag() {
+			return this.is_virtual() ? false : super.has_self_closing_flag();
+		}
+
+		get_token_name() {
+			return this.is_virtual() ? this.current_virtual.tagName : super.get_token_name();
+		}
+
+		get_token_type() {
+			return this.is_virtual() ? "#tag" : super.get_token_type();
+		}
+
+		get_comment_type() {
+			return this.is_virtual() ? null : super.get_comment_type();
+		}
+
+		get_doctype_info() {
+			return this.is_virtual() ? null : super.get_doctype_info();
+		}
+
+		subdivide_text_appropriately() {
+			return this.is_virtual() ? false : super.subdivide_text_appropriately();
+		}
+
+		get_modifiable_text() {
+			return this.is_virtual() ? null : super.get_modifiable_text();
+		}
+
+		set_modifiable_text(text) {
+			return this.is_virtual() ? false : super.set_modifiable_text(text);
+		}
+
+		set_bookmark(name) {
+			return this.is_virtual() ? false : super.set_bookmark(name);
 		}
 
 		get_namespace() {
@@ -1337,7 +1414,68 @@ export function createHtmlApi(wasm) {
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			} else {
 				this.#setCurrentNamespace(childNamespaceForTag(tagName, this.current_token_namespace));
+				if (this.#shouldPopTableFormImmediately(tagName, this.current_token_namespace)) {
+					this.virtual_tokens.push({
+						operation: "pop",
+						tagName,
+						namespaceName: this.current_token_namespace,
+					});
+				}
 			}
+		}
+
+		#consumeVirtualToken() {
+			const token = this.virtual_tokens.shift();
+			this.current_virtual = token;
+			this.skip_current_token = false;
+			this.parser_state = STATE_MATCHED_TAG;
+			this.current_token_namespace = token.namespaceName;
+
+			if (token.operation === "pop") {
+				const existingIndex = this.#lastOpenElementIndex(token.tagName, token.namespaceName);
+				if (existingIndex !== -1) {
+					this.open_elements = this.open_elements.slice(0, existingIndex);
+					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+					this.#setCurrentNamespace(this.#namespaceForStackTop());
+				}
+				this.breadcrumbs = [...this.open_elements];
+			}
+
+			return true;
+		}
+
+		#lastOpenElementIndex(tagName, namespaceName) {
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				if (
+					this.open_elements[i] === tagName &&
+					this.open_element_namespaces[i] === namespaceName
+				) {
+					return i;
+				}
+			}
+			return -1;
+		}
+
+		#shouldPopTableFormImmediately(tagName, namespaceName) {
+			if (tagName !== "FORM" || namespaceName !== "html") {
+				return false;
+			}
+
+			const tableIndex = this.open_elements.lastIndexOf("TABLE");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			for (let i = tableIndex + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] === "html" &&
+					(this.open_elements[i] === "TD" || this.open_elements[i] === "TH")
+				) {
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		#applySimpleHtmlSemanticClosures(tagName) {

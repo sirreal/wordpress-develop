@@ -223,6 +223,34 @@ assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
 assert.equal(hrProcessor.expects_closer(), false);
 hrProcessor.destroy();
 
+const brEndTagProcessor = WP_HTML_Processor.create_fragment('</br id="an-opener" html>');
+assert.equal(brEndTagProcessor.next_tag(), true);
+assert.equal(brEndTagProcessor.get_tag(), "BR");
+assert.equal(brEndTagProcessor.is_tag_closer(), false);
+assert.equal(brEndTagProcessor.get_attribute_names_with_prefix(""), null);
+assert.deepEqual(brEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "BR"]);
+brEndTagProcessor.destroy();
+
+const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
+assert.equal(tableFormProcessor.next_tag("form"), true);
+assert.equal(tableFormProcessor.get_tag(), "FORM");
+assert.equal(tableFormProcessor.is_virtual(), false);
+assert.deepEqual(tableFormProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "FORM"]);
+assert.equal(tableFormProcessor.next_token(), true);
+assert.equal(tableFormProcessor.get_token_name(), "FORM");
+assert.equal(tableFormProcessor.get_token_type(), "#tag");
+assert.equal(tableFormProcessor.is_virtual(), true);
+assert.equal(tableFormProcessor.is_tag_closer(), true);
+assert.equal(tableFormProcessor.get_attribute_names_with_prefix(""), null);
+assert.equal(tableFormProcessor.set_attribute("id", "ignored"), false);
+assert.equal(tableFormProcessor.set_bookmark("virtual-form"), false);
+assert.equal(tableFormProcessor.get_comment_type(), null);
+assert.deepEqual(tableFormProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableFormProcessor.next_token(), true);
+assert.equal(tableFormProcessor.get_token_name(), "#comment");
+assert.deepEqual(tableFormProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "#comment"]);
+tableFormProcessor.destroy();
+
 const unexpectedCloserProcessor = WP_HTML_Processor.create_fragment("<div>Test</button></div>");
 assert.equal(unexpectedCloserProcessor.next_token(), true);
 assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
