@@ -348,6 +348,22 @@ assert.equal(
 	'<p><em class="tone">One</em></p><p><em class="tone">Two</em></p>',
 );
 
+const repeatedFormattingProcessor = WP_HTML_Processor.create_full_parser("<p><b><b><b><b><p>x");
+while (repeatedFormattingProcessor.next_token()) {
+	if (
+		repeatedFormattingProcessor.get_token_type() === "#text" &&
+		repeatedFormattingProcessor.get_modifiable_text() === "x"
+	) {
+		break;
+	}
+}
+assert.deepEqual(repeatedFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "P", "B", "B", "B", "#text"]);
+repeatedFormattingProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<p><b><b><b><b><p>x"),
+	"<p><b><b><b><b></b></b></b></b></p><p><b><b><b>x</b></b></b></p>",
+);
+
 const closedFormattingProcessor = WP_HTML_Processor.create_fragment("<b>one</b><p>two");
 assert.equal(closedFormattingProcessor.next_tag("b"), true);
 assert.equal(closedFormattingProcessor.next_tag({ tag_name: "b", tag_closers: "visit" }), true);

@@ -2023,7 +2023,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
-				this.active_formatting_elements.push(this.#createActiveFormattingElement(tagName));
+				this.#insertActiveFormattingElement(this.#createActiveFormattingElement(tagName));
 			}
 			this.breadcrumbs = [...this.open_elements];
 
@@ -2193,6 +2193,54 @@ export function createHtmlApi(wasm) {
 				namespaceName: this.current_token_namespace,
 				attributes: this.#currentTokenAttributes(),
 			};
+		}
+
+		#insertActiveFormattingElement(entry) {
+			let equivalentEntries = 0;
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				if (!this.#activeFormattingElementsAreEquivalent(entry, this.active_formatting_elements[i])) {
+					continue;
+				}
+
+				equivalentEntries += 1;
+				if (equivalentEntries === 3) {
+					this.active_formatting_elements.splice(i, 1);
+					break;
+				}
+			}
+
+			this.active_formatting_elements.push(entry);
+		}
+
+		#activeFormattingElementsAreEquivalent(left, right) {
+			if (
+				left.tagName !== right.tagName ||
+				left.namespaceName !== right.namespaceName ||
+				left.attributes.length !== right.attributes.length
+			) {
+				return false;
+			}
+
+			const rightAttributes = new Map();
+			for (const attribute of right.attributes) {
+				rightAttributes.set(
+					this.#activeFormattingAttributeName(right, attribute),
+					attribute.value,
+				);
+			}
+
+			for (const attribute of left.attributes) {
+				const attributeName = this.#activeFormattingAttributeName(left, attribute);
+				if (!rightAttributes.has(attributeName) || rightAttributes.get(attributeName) !== attribute.value) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		#activeFormattingAttributeName(entry, attribute) {
+			return entry.namespaceName === "html" ? asciiLower(attribute.name) : attribute.name;
 		}
 
 		#cloneActiveFormattingElement(entry) {
