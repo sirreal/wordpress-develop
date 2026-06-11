@@ -2368,6 +2368,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			const isCloser = tokenType === "#tag" && this.is_tag_closer();
+			if (this.#shouldIgnoreDocumentStartTagInTemplateContent(tokenType, tagName, isCloser)) {
+				this.skip_current_token = true;
+				return true;
+			}
+
 			if (this.#shouldIgnoreFrameStartTagInTemplateContent(tokenType, tagName, isCloser)) {
 				this.skip_current_token = true;
 				return true;
@@ -3629,6 +3634,15 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#shouldIgnoreDocumentStartTagInTemplateContent(tokenType, tagName, isCloser) {
+			return (
+				tokenType === "#tag" &&
+				!isCloser &&
+				(tagName === "HTML" || tagName === "BODY") &&
+				this.#hasOpenHtmlElement("TEMPLATE")
+			);
 		}
 
 		#shouldIgnoreFrameStartTagInTemplateContent(tokenType, tagName, isCloser) {

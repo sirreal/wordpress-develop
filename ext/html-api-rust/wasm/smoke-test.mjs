@@ -562,6 +562,18 @@ assert.deepEqual(fullParserTemplateIgnoredFramesetSpans, [
 ]);
 fullParserTemplateIgnoredFrameset.destroy();
 
+const fullParserTemplateIgnoresHtmlStart = WP_HTML_Processor.create_full_parser(
+	"<html a=b><template><div><html b=c><span></template>",
+);
+assert.equal(fullParserTemplateIgnoresHtmlStart.next_tag("span"), true);
+assert.deepEqual(fullParserTemplateIgnoresHtmlStart.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE", "DIV", "SPAN"]);
+fullParserTemplateIgnoresHtmlStart.destroy();
+
+const fullParserTemplateIgnoresBodyStart = WP_HTML_Processor.create_full_parser("<template><body><span></template>");
+assert.equal(fullParserTemplateIgnoresBodyStart.next_tag("span"), true);
+assert.deepEqual(fullParserTemplateIgnoresBodyStart.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE", "SPAN"]);
+fullParserTemplateIgnoresBodyStart.destroy();
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );
