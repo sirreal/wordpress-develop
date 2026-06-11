@@ -90,6 +90,52 @@ const HEAD_CONTENT_ELEMENTS = new Set([
 	"TITLE",
 ]);
 
+const FOREIGN_CONTENT_HTML_BREAKOUT_START_TAGS = new Set([
+	"B",
+	"BIG",
+	"BLOCKQUOTE",
+	"BODY",
+	"BR",
+	"CENTER",
+	"CODE",
+	"DD",
+	"DIV",
+	"DL",
+	"DT",
+	"EM",
+	"EMBED",
+	"H1",
+	"H2",
+	"H3",
+	"H4",
+	"H5",
+	"H6",
+	"HEAD",
+	"HR",
+	"I",
+	"IMG",
+	"LI",
+	"LISTING",
+	"MENU",
+	"META",
+	"NOBR",
+	"OL",
+	"P",
+	"PRE",
+	"RUBY",
+	"S",
+	"SMALL",
+	"SPAN",
+	"STRIKE",
+	"STRONG",
+	"SUB",
+	"SUP",
+	"TABLE",
+	"TT",
+	"U",
+	"UL",
+	"VAR",
+]);
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 const FORMATTING_ELEMENTS = new Set([
 	"A",
@@ -2652,6 +2698,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
+			if (this.#queueForeignContentBreakoutForStartTag(tagName)) {
+				return true;
+			}
+
 			if (CAPTION_CLOSING_START_TAGS.has(tagName)) {
 				const captionIndex = this.#findElementInTableScope("CAPTION");
 				if (captionIndex !== -1) {
@@ -2801,6 +2851,49 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#queueForeignContentBreakoutForStartTag(tagName) {
+			if (
+				this.current_namespace === "html" ||
+				(
+					!FOREIGN_CONTENT_HTML_BREAKOUT_START_TAGS.has(tagName) &&
+					!this.#isFontBreakoutStartTag(tagName)
+				)
+			) {
+				return false;
+			}
+
+			const firstForeignIndex = this.#firstForeignElementToPopForHtmlBreakout();
+			if (firstForeignIndex === -1) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(firstForeignIndex);
+			return true;
+		}
+
+		#isFontBreakoutStartTag(tagName) {
+			return (
+				tagName === "FONT" &&
+				(
+					this.get_attribute("color") !== null ||
+					this.get_attribute("face") !== null ||
+					this.get_attribute("size") !== null
+				)
+			);
+		}
+
+		#firstForeignElementToPopForHtmlBreakout() {
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				const namespaceName = this.open_element_namespaces[i];
+				const childNamespace = childNamespaceForTag(this.open_elements[i], namespaceName);
+				if (namespaceName === "html" || childNamespace === "html") {
+					return i + 1;
+				}
+			}
+
+			return 0;
 		}
 
 		#lastActiveFormattingElementIndex(tagName) {

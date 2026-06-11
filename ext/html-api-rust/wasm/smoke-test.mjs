@@ -1189,6 +1189,30 @@ assert.equal(svgProcessor.get_namespace(), "html");
 assert.deepEqual(svgProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 svgProcessor.destroy();
 
+const foreignHtmlBreakoutProcessor = WP_HTML_Processor.create_fragment("<svg><img>text");
+assert.equal(foreignHtmlBreakoutProcessor.next_token(), true);
+assert.equal(foreignHtmlBreakoutProcessor.get_tag(), "SVG");
+assert.equal(foreignHtmlBreakoutProcessor.get_namespace(), "svg");
+assert.equal(foreignHtmlBreakoutProcessor.next_token(), true);
+assert.equal(foreignHtmlBreakoutProcessor.get_tag(), "SVG");
+assert.equal(foreignHtmlBreakoutProcessor.is_virtual(), true);
+assert.equal(foreignHtmlBreakoutProcessor.is_tag_closer(), true);
+assert.deepEqual(foreignHtmlBreakoutProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(foreignHtmlBreakoutProcessor.next_token(), true);
+assert.equal(foreignHtmlBreakoutProcessor.get_tag(), "IMG");
+assert.equal(foreignHtmlBreakoutProcessor.get_namespace(), "html");
+assert.equal(foreignHtmlBreakoutProcessor.expects_closer(), false);
+assert.deepEqual(foreignHtmlBreakoutProcessor.get_breadcrumbs(), ["HTML", "BODY", "IMG"]);
+foreignHtmlBreakoutProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<svg><img>text"), "<svg></svg><img>text");
+assert.equal(WP_HTML_Processor.normalize("<svg><span>text"), "<svg></svg><span>text</span>");
+assert.equal(
+	WP_HTML_Processor.normalize("<svg><foreignObject><svg><img>text"),
+	"<svg><foreignObject><svg></svg><img>text</foreignObject></svg>",
+);
+assert.equal(WP_HTML_Processor.normalize("<svg><font color=red>text"), '<svg></svg><font color="red">text</font>');
+assert.equal(WP_HTML_Processor.normalize("<svg><font>text"), "<svg><font>text</font></svg>");
+
 const qualifiedSvgProcessor = WP_HTML_Processor.create_fragment('<svg /><svg><lineargradient gradientunits="userSpaceOnUse"></lineargradient></svg>');
 assert.equal(qualifiedSvgProcessor.next_tag("svg"), true);
 assert.equal(qualifiedSvgProcessor.get_namespace(), "svg");
