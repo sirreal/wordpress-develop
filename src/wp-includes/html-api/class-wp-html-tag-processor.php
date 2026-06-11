@@ -170,6 +170,37 @@
  * of these methods are safe to call without knowing if a given attribute
  * exists beforehand.
  *
+ * ### Building markup from a template
+ *
+ * The Tag Processor can safely fill untrusted values into a known markup
+ * shape: write the shape as a literal template, then replace its
+ * attribute values and text through the API, which handles all of the
+ * necessary encoding. Two rules make the output exact:
+ *
+ *  - Include the attributes in the template (with empty values) so that
+ *    updates preserve their written order. Attributes ADDED to a tag are
+ *    placed after the tag name sorted by name, not in call order — see
+ *    {@see WP_HTML_Tag_Processor::set_attribute}.
+ *  - Include placeholder text inside elements that need text content; an
+ *    empty element contains no text node for
+ *    {@see WP_HTML_Tag_Processor::set_modifiable_text} to replace.
+ *
+ * Example:
+ *
+ *     $processor = new WP_HTML_Tag_Processor( '<a href="" title="">.</a>' );
+ *     $processor->next_tag();
+ *     $processor->set_attribute( 'href', $url );
+ *     $processor->set_attribute( 'title', $title );
+ *     while ( $processor->next_token() ) {
+ *         if ( '#text' === $processor->get_token_type() ) {
+ *             $processor->set_modifiable_text( $link_text );
+ *             break;
+ *         }
+ *     }
+ *     $html = $processor->get_updated_html();
+ *     // <a href="…" title="…">…</a> with every value safely encoded,
+ *     // attributes in template order, and the placeholder replaced.
+ *
  * ### Modifying CSS classes for a found tag
  *
  * The tag processor treats the `class` attribute as a special case.
