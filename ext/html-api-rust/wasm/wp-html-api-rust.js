@@ -138,7 +138,7 @@ const TABLE_SECTION_BOUNDARY_START_TAGS = new Set([
 	"THEAD",
 ]);
 const SELECT_BREAKOUT_START_TAGS = new Set(["INPUT", "KEYGEN", "TEXTAREA"]);
-const SELECT_IN_TABLE_BREAKOUT_START_TAGS = new Set([
+const SELECT_IN_TABLE_BREAKOUT_TAGS = new Set([
 	"CAPTION",
 	"TABLE",
 	"TBODY",
@@ -2513,7 +2513,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
-			if (this.current_namespace === "html" && SELECT_IN_TABLE_BREAKOUT_START_TAGS.has(tagName)) {
+			if (this.current_namespace === "html" && SELECT_IN_TABLE_BREAKOUT_TAGS.has(tagName)) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1 && this.#openHtmlElementBefore("TABLE", selectIndex)) {
 					this.#queueVirtualPopsFrom(selectIndex);
@@ -2655,6 +2655,14 @@ export function createHtmlApi(wasm) {
 		#queueVirtualPreclosuresForEndTag(tagName) {
 			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
 				return false;
+			}
+
+			if (SELECT_IN_TABLE_BREAKOUT_TAGS.has(tagName) && this.#hasElementInTableScope(tagName)) {
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (selectIndex !== -1 && this.#openHtmlElementBefore("TABLE", selectIndex)) {
+					this.#queueVirtualPopsFrom(selectIndex);
+					return true;
+				}
 			}
 
 			if (tagName === "TR" && !this.#hasElementInTableScope("TR")) {
