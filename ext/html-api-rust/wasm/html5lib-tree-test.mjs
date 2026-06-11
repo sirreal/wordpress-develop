@@ -4,9 +4,34 @@ import { loadWasm } from "./wp-html-api-rust.js";
 
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
-const supportedFragmentContexts = new Set(["body", "div", "select"]);
+const supportedFragmentContexts = new Set([
+	"body",
+	"div",
+	"math math",
+	"math mi",
+	"math mn",
+	"math mo",
+	"math ms",
+	"math mtext",
+	"select",
+	"svg path",
+	"svg svg",
+]);
 
 const skippedTests = new Set([
+	"foreign-fragment/line0001",
+	"foreign-fragment/line0032",
+	"foreign-fragment/line0169",
+	"foreign-fragment/line0211",
+	"foreign-fragment/line0253",
+	"foreign-fragment/line0295",
+	"foreign-fragment/line0337",
+	"foreign-fragment/line0453",
+	"foreign-fragment/line0590",
+	"foreign-fragment/line0602",
+	"foreign-fragment/line0614",
+	"foreign-fragment/line0625",
+	"foreign-fragment/line0636",
 	"noscript01/line0014",
 	"tests14/line0022",
 	"tests14/line0055",
@@ -62,11 +87,33 @@ function html5libTreeIndentLevel(path, baseDepth) {
 }
 
 function html5libFragmentContextMarkup(fragmentContext) {
+	if (fragmentContext.startsWith("math ")) {
+		const tagName = fragmentContext.slice("math ".length);
+		return tagName === "math" ? "<math>" : `<math><${tagName}>`;
+	}
+
+	if (fragmentContext.startsWith("svg ")) {
+		const tagName = fragmentContext.slice("svg ".length);
+		return tagName === "svg" ? "<svg>" : `<svg><${tagName}>`;
+	}
+
 	return `<${fragmentContext}>`;
 }
 
 function html5libFragmentBaseDepth(fragmentContext) {
-	return fragmentContext === null ? 0 : 2;
+	if (fragmentContext === null) {
+		return 0;
+	}
+
+	if (fragmentContext.startsWith("math ")) {
+		return fragmentContext === "math math" ? 2 : 3;
+	}
+
+	if (fragmentContext.startsWith("svg ")) {
+		return fragmentContext === "svg svg" ? 2 : 3;
+	}
+
+	return 2;
 }
 
 function buildHtml5libTree(fragmentContext, html) {
