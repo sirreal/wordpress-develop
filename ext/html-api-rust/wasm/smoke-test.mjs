@@ -97,15 +97,21 @@ tags.destroy();
 
 const text = new WP_HTML_Tag_Processor(" \0<p>Hi</p>");
 assert.equal(text.get_modifiable_text(), "");
+assert.equal(text.get_qualified_attribute_name("data-id"), null);
 assert.equal(text.next_token(), true);
 assert.equal(text.get_token_type(), "#text");
+assert.equal(text.get_qualified_attribute_name("data-id"), null);
 assert.equal(text.subdivide_text_appropriately(), true);
 assert.equal(text.text_node_classification, WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE);
 text.destroy();
 
 const nonText = new WP_HTML_Tag_Processor("<div></div>");
 assert.equal(nonText.next_tag("div"), true);
+assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "data-id");
 assert.equal(nonText.get_modifiable_text(), "");
+assert.equal(nonText.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
+assert.equal(nonText.is_tag_closer(), true);
+assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "data-id");
 nonText.destroy();
 
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");

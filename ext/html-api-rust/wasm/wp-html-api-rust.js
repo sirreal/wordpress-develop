@@ -902,6 +902,10 @@ export function createHtmlApi(wasm) {
 		}
 
 		get_qualified_attribute_name(attributeName) {
+			if (this.parser_state !== STATE_MATCHED_TAG) {
+				return null;
+			}
+
 			if (this.parsing_namespace === "html") {
 				return asciiLower(attributeName);
 			}
