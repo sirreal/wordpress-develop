@@ -802,6 +802,15 @@ for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 }
 processorBookmarkLimit.destroy();
 
+const processorBookmarkRelease = WP_HTML_Processor.create_fragment("<div><span>");
+assert.equal(processorBookmarkRelease.next_tag("div"), true);
+assert.equal(processorBookmarkRelease.set_bookmark("mark"), true);
+assert.equal(processorBookmarkRelease.has_bookmark("mark"), true);
+assert.equal(processorBookmarkRelease.release_bookmark("mark"), true);
+assert.equal(processorBookmarkRelease.has_bookmark("mark"), false);
+assert.equal(processorBookmarkRelease.seek("mark"), false);
+processorBookmarkRelease.destroy();
+
 for (const html of [
 	"<i>".repeat(WP_HTML_Processor.MAX_BOOKMARKS + 1),
 	"<table><td>".repeat(Math.ceil(WP_HTML_Processor.MAX_BOOKMARKS / 4) + 1),
