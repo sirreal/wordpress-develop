@@ -69,7 +69,12 @@
 > review panels. Belongs to the open invalid-UTF-8 input policy decision
 > (handoff item 5): per spec, input preprocessing operates on decoded code
 > points, so byte-level decode errors should arguably become U+FFFD before
-> tokenization rather than leak `mb_substitute_character`.
+> tokenization rather than leak `mb_substitute_character`. A red suite for
+> the fix is in place (2026-06-11): `wpCssSelectorParserMatcher.php` pins
+> `mb_substitute_character()` to a U+2603 canary in set_up()/tear_down(),
+> and its seven invalid-byte escape pins (plus a dedicated offset-overrun
+> test) assert the leak's damage — swallowed characters, offset past end
+> of input. Decoding to U+FFFD per maximal subpart flips every one.
 >
 > **HTML case-insensitive attribute value list — IMPLEMENTED (2026-06-10):**
 > per https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
