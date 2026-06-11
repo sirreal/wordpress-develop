@@ -2178,9 +2178,21 @@ assert.equal(WP_HTML_Processor.normalize("<table><tr><td>a<tr><td>b"), "<table><
 assert.equal(WP_HTML_Processor.normalize("<table><tbody><tr><td>a<tbody><tr><td>b"), "<table><tbody><tr><td>a</td></tr></tbody><tbody><tr><td>b</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><tbody><tr><td>a</table><p>b"), "<table><tbody><tr><td>a</td></tr></tbody></table><p>b</p>");
 assert.equal(WP_HTML_Processor.normalize("<div></p>fun<table><td>cell</div>"), "<div><p></p>fun<table><tbody><tr><td>cell</td></tr></tbody></table></div>");
-assert.equal(WP_HTML_Processor.normalize("<img id='5\0'>"), '<img id="5\uFFFD">');
 assert.equal(WP_HTML_Processor.normalize("<div><span></div>"), "<div><span></span></div>");
 assert.equal(WP_HTML_Processor.normalize("<svg><g><g /></svg>"), "<svg><g><g /></g></svg>");
+
+for (const [htmlWithNulls, expected] of [
+	["<img\0id=5>", "<img\uFFFDid=5></img\uFFFDid=5>"],
+	["<img/\0id=5>", '<img \uFFFDid="5">'],
+	["<img id='5\0'>", '<img id="5\uFFFD">'],
+	["one\0two", "onetwo"],
+	["<svg>one\0two</svg>", "<svg>one\uFFFDtwo</svg>"],
+	["<script>alert(\0)</script>", "<script>alert(\uFFFD)</script>"],
+	["<style>\0 {}</style>", "<style>\uFFFD {}</style>"],
+	["<!-- \0 -->", "<!-- \uFFFD -->"],
+]) {
+	assert.equal(WP_HTML_Processor.normalize(htmlWithNulls), expected);
+}
 
 for (const [doctypeInput, doctypeOutput] of [
 	["", ""],
@@ -2189,9 +2201,12 @@ for (const [doctypeInput, doctypeOutput] of [
 	["<!DOCTYPE WordPress>", "<!DOCTYPE wordpress>"],
 	['<!DOCTYPE html PUBLIC "x">', '<!DOCTYPE html PUBLIC "x">'],
 	['<!DOCTYPE html SYSTEM "y">', '<!DOCTYPE html SYSTEM "y">'],
+	['<!DOCTYPE html PUBLIC "x" "y">', '<!DOCTYPE html PUBLIC "x" "y">'],
 	['<!docType HtmL pubLIc\'xxx\'"yyy" all this is ignored>', '<!DOCTYPE html PUBLIC "xxx" "yyy">'],
 	['<!DOCTYPE html PUBLIC "\'quoted\'">', '<!DOCTYPE html PUBLIC "\'quoted\'">'],
 	['<!DOCTYPE html PUBLIC \'"quoted"\'>', '<!DOCTYPE html PUBLIC \'"quoted"\'>'],
+	['<!DOCTYPE html SYSTEM "\'quoted\'">', '<!DOCTYPE html SYSTEM "\'quoted\'">'],
+	['<!DOCTYPE html SYSTEM \'"quoted"\'>', '<!DOCTYPE html SYSTEM \'"quoted"\'>'],
 ]) {
 	const fullParserSerializeDoctype = WP_HTML_Processor.create_full_parser(`${doctypeInput}👌`);
 	assert.equal(
