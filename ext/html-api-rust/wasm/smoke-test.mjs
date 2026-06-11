@@ -577,6 +577,19 @@ assert.equal(processorQualifiedNames.get_qualified_attribute_name("definitionurl
 assert.equal(processorQualifiedNames.get_qualified_attribute_name("xlink:title"), "xlink title");
 processorQualifiedNames.destroy();
 
+const processorManualNamespace = WP_HTML_Processor.create_fragment("<rect />");
+assert.equal(processorManualNamespace.get_namespace(), "html");
+assert.equal(processorManualNamespace.change_parsing_namespace("svg"), true);
+assert.equal(processorManualNamespace.get_namespace(), "svg");
+assert.equal(processorManualNamespace.change_parsing_namespace("invalid"), false);
+assert.equal(processorManualNamespace.get_namespace(), "svg");
+assert.equal(processorManualNamespace.next_tag("rect"), true);
+assert.equal(processorManualNamespace.get_namespace(), "svg");
+assert.equal(processorManualNamespace.get_qualified_tag_name(), "rect");
+assert.equal(processorManualNamespace.has_self_closing_flag(), true);
+assert.equal(processorManualNamespace.expects_closer(), false);
+processorManualNamespace.destroy();
+
 assert.equal(WP_HTML_Processor.PROCESS_NEXT_NODE, "process-next-node");
 assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node");
 assert.equal(WP_HTML_Processor.PROCESS_CURRENT_NODE, "process-current-node");

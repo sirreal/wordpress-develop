@@ -1775,6 +1775,22 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		change_parsing_namespace(namespaceName) {
+			if (!super.change_parsing_namespace(namespaceName)) {
+				return false;
+			}
+
+			this.current_namespace = namespaceName;
+			if (
+				this.parser_state === STATE_READY ||
+				this.parser_state === STATE_COMPLETE ||
+				this.parser_state === STATE_INCOMPLETE_INPUT
+			) {
+				this.current_token_namespace = namespaceName;
+			}
+			return true;
+		}
+
 		get_namespace() {
 			return this.current_token_namespace;
 		}
