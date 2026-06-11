@@ -383,6 +383,42 @@ assert.equal(
 	"<p><b><b><b><b></b></b></b></b></p><p><b><b><b>x</b></b></b></p>",
 );
 
+const staleFormattingCloserProcessor = WP_HTML_Processor.create_full_parser("<p id=a><b><p id=b></b>TEST");
+while (
+	staleFormattingCloserProcessor.next_token() &&
+	(
+		staleFormattingCloserProcessor.get_token_type() !== "#text" ||
+		staleFormattingCloserProcessor.get_modifiable_text() !== "TEST"
+	)
+) {}
+assert.equal(staleFormattingCloserProcessor.get_modifiable_text(), "TEST");
+assert.deepEqual(staleFormattingCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "P", "#text"]);
+staleFormattingCloserProcessor.destroy();
+
+const nestedStaleFormattingCloserProcessor = WP_HTML_Processor.create_full_parser("<b id=a><p><b id=b></p></b>TEST");
+while (
+	nestedStaleFormattingCloserProcessor.next_token() &&
+	(
+		nestedStaleFormattingCloserProcessor.get_token_type() !== "#text" ||
+		nestedStaleFormattingCloserProcessor.get_modifiable_text() !== "TEST"
+	)
+) {}
+assert.equal(nestedStaleFormattingCloserProcessor.get_modifiable_text(), "TEST");
+assert.deepEqual(nestedStaleFormattingCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+nestedStaleFormattingCloserProcessor.destroy();
+
+const reconstructedAfterParagraphCloseProcessor = WP_HTML_Processor.create_full_parser("<p><b></p>text");
+while (
+	reconstructedAfterParagraphCloseProcessor.next_token() &&
+	(
+		reconstructedAfterParagraphCloseProcessor.get_token_type() !== "#text" ||
+		reconstructedAfterParagraphCloseProcessor.get_modifiable_text() !== "text"
+	)
+) {}
+assert.equal(reconstructedAfterParagraphCloseProcessor.get_modifiable_text(), "text");
+assert.deepEqual(reconstructedAfterParagraphCloseProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "#text"]);
+reconstructedAfterParagraphCloseProcessor.destroy();
+
 const menuitemReconstructsFormattingProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><p><b></p><menuitem>");
 assert.equal(menuitemReconstructsFormattingProcessor.next_tag("menuitem"), true);
 assert.deepEqual(menuitemReconstructsFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "B", "MENUITEM"]);
