@@ -1900,6 +1900,13 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
+				if (this.#shouldIgnoreEndTagClosingOutsideTemplate(tagName, closingNamespace, existingIndex)) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					tagName === "FORM" &&
@@ -3509,6 +3516,15 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#shouldIgnoreEndTagClosingOutsideTemplate(tagName, namespaceName, existingIndex) {
+			if (namespaceName !== "html" || tagName === "TEMPLATE") {
+				return false;
+			}
+
+			const templateIndex = this.#lastOpenElementIndex("TEMPLATE", "html");
+			return templateIndex !== -1 && existingIndex !== -1 && existingIndex < templateIndex;
 		}
 
 		#popLastMatchingBeforeBoundary(match, boundaries) {

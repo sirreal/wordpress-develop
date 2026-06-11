@@ -487,6 +487,15 @@ assert.equal(fullParserExplicitHeadTemplate.next_tag("body"), true);
 assert.deepEqual(fullParserExplicitHeadTemplate.get_breadcrumbs(), ["HTML", "BODY"]);
 fullParserExplicitHeadTemplate.destroy();
 
+const fullParserBodyTemplateOuterCloser = WP_HTML_Processor.create_full_parser("<div><template></div>Hello");
+assert.equal(fullParserBodyTemplateOuterCloser.next_tag("template"), true);
+assert.deepEqual(fullParserBodyTemplateOuterCloser.get_breadcrumbs(), ["HTML", "BODY", "DIV", "TEMPLATE"]);
+assert.equal(fullParserBodyTemplateOuterCloser.next_token(), true);
+assert.equal(fullParserBodyTemplateOuterCloser.get_token_type(), "#text");
+assert.equal(fullParserBodyTemplateOuterCloser.get_modifiable_text(), "Hello");
+assert.deepEqual(fullParserBodyTemplateOuterCloser.get_breadcrumbs(), ["HTML", "BODY", "DIV", "TEMPLATE", "#text"]);
+fullParserBodyTemplateOuterCloser.destroy();
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );
