@@ -116,6 +116,56 @@ const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"THEAD",
 	"TR",
 ]);
+const TABLE_MODE_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"FORM",
+	"INPUT",
+	"SCRIPT",
+	"SELECT",
+	"STYLE",
+	"TABLE",
+	"TBODY",
+	"TD",
+	"TEMPLATE",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
+const TABLE_MODE_IGNORED_END_TAGS = new Set([
+	"BODY",
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"HTML",
+	"TBODY",
+	"TD",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TR",
+]);
+const TABLE_BODY_MODE_IGNORED_END_TAGS = new Set([
+	"BODY",
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"HTML",
+	"TD",
+	"TH",
+	"TR",
+]);
+const TABLE_ROW_MODE_IGNORED_END_TAGS = new Set([
+	"BODY",
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"HTML",
+	"TD",
+	"TH",
+]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
 const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
 	"CAPTION",
@@ -1721,6 +1771,11 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+					this.#bailUnsupported("Foster parenting is not supported.");
+					return;
+				}
+
 				let existingIndex = this.#lastOpenElementIndex(tagName, closingNamespace);
 				if (tagName === "LI" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
@@ -1808,6 +1863,11 @@ export function createHtmlApi(wasm) {
 			) {
 				this.pending_real_token = true;
 				this.pending_real_parser_state = this.parser_state;
+				return;
+			}
+
+			if (this.#shouldBailUnsupportedTableFosterParenting(tagName, false)) {
+				this.#bailUnsupported("Foster parenting is not supported.");
 				return;
 			}
 
@@ -3059,6 +3119,84 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.open_elements[topIndex] === "TABLE" || this.#openHtmlElementBefore("TABLE", topIndex);
+		}
+
+		#shouldBailUnsupportedTableFosterParenting(tagName, isCloser) {
+			if (this.current_namespace !== "html") {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (topIndex < 0 || this.open_element_namespaces[topIndex] !== "html") {
+				return false;
+			}
+
+			const currentNode = this.open_elements[topIndex];
+			if (currentNode === "TABLE") {
+				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
+			}
+
+			if (TABLE_SECTION_ELEMENTS.has(currentNode)) {
+				return (
+					!this.#isHandledInTableBodyMode(tagName, isCloser) &&
+					this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser)
+				);
+			}
+
+			if (currentNode === "TR") {
+				return (
+					!this.#isHandledInTableRowMode(tagName, isCloser) &&
+					this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser)
+				);
+			}
+
+			return false;
+		}
+
+		#wouldUseUnsupportedTableFosterParenting(tagName, isCloser) {
+			if (isCloser) {
+				return !(
+					tagName === "TABLE" ||
+					tagName === "TEMPLATE" ||
+					TABLE_MODE_IGNORED_END_TAGS.has(tagName)
+				);
+			}
+
+			if (!TABLE_MODE_START_TAGS.has(tagName)) {
+				return true;
+			}
+
+			if (tagName !== "INPUT") {
+				return false;
+			}
+
+			const typeAttribute = this.get_attribute("type");
+			return !(typeof typeAttribute === "string" && typeAttribute.toLowerCase() === "hidden");
+		}
+
+		#isHandledInTableBodyMode(tagName, isCloser) {
+			if (isCloser) {
+				return (
+					tagName === "TABLE" ||
+					TABLE_SECTION_ELEMENTS.has(tagName) ||
+					TABLE_BODY_MODE_IGNORED_END_TAGS.has(tagName)
+				);
+			}
+
+			return tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName) || TABLE_SECTION_BOUNDARY_START_TAGS.has(tagName);
+		}
+
+		#isHandledInTableRowMode(tagName, isCloser) {
+			if (isCloser) {
+				return (
+					tagName === "TABLE" ||
+					tagName === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(tagName) ||
+					TABLE_ROW_MODE_IGNORED_END_TAGS.has(tagName)
+				);
+			}
+
+			return TABLE_CELL_ELEMENTS.has(tagName) || TABLE_ROW_BOUNDARY_START_TAGS.has(tagName);
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {
