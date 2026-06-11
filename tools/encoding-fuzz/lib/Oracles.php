@@ -8,9 +8,9 @@ namespace EncodingFuzz;
  * Scrub oracles answer "what does maximal-subpart replacement produce?".
  * Encode oracles answer "what is this ISO-8859-1 text as UTF-8?".
  * Decode oracles answer "what is this UTF-8 text as ISO-8859-1?".
- * Noncharacter oracles answer "does this VALID UTF-8 text contain a
- * Unicode noncharacter?" (U+FDD0–U+FDEF, or any code point whose low
- * sixteen bits are FFFE or FFFF). They are defined on valid input only.
+ * Noncharacter oracles answer "do these bytes contain the UTF-8 encoding
+ * of a Unicode noncharacter?" (U+FDD0–U+FDEF, or any code point whose low
+ * sixteen bits are FFFE or FFFF).
  *
  *  - mbstring:  `mb_check_encoding()` / `mb_scrub()` (maximal subpart
  *               since PHP 8.1.6), `mb_convert_encoding()` for the
@@ -66,7 +66,7 @@ class Oracles {
 	/** @var array<string, bool> Decode oracles trusted on valid UTF-8 input only. */
 	private array $decode_valid_only = array();
 
-	/** @var array<string, callable(string): bool> Defined on valid UTF-8 input only. */
+	/** @var array<string, callable(string): bool> */
 	private array $noncharacters = array();
 
 	/** @var ExternalOracle[] */
@@ -120,12 +120,36 @@ class Oracles {
 			? 'mb_ord'
 			: ( function_exists( '_mb_ord' ) ? '_mb_ord' : null );
 
+		$oracles->noncharacters['bytes'] = static function ( string $bytes ): bool {
+			static $noncharacter_sequences = null;
+			if ( null === $noncharacter_sequences ) {
+				$noncharacter_sequences = array();
+
+				for ( $code_point = 0xFDD0; $code_point <= 0xFDEF; $code_point++ ) {
+					$noncharacter_sequences[] = Generator::encode_code_point( $code_point );
+				}
+
+				for ( $plane = 0; $plane <= 0x10; $plane++ ) {
+					$final                     = ( $plane << 16 ) | 0xFFFF;
+					$noncharacter_sequences[] = Generator::encode_code_point( $final - 1 );
+					$noncharacter_sequences[] = Generator::encode_code_point( $final );
+				}
+			}
+
+			foreach ( $noncharacter_sequences as $sequence ) {
+				if ( str_contains( $bytes, $sequence ) ) {
+					return true;
+				}
+			}
+
+			return false;
+		};
+
 		if ( function_exists( 'mb_str_split' ) && null !== $mb_ord ) {
 			/*
 			 * Trivial decode-and-test reference for noncharacter detection,
-			 * independent of both implementations under test (the PCRE
-			 * character-class regex and the `_wp_scan_utf8()`-based scan).
-			 * Callers must pass valid UTF-8.
+			 * independent of the byte-sequence search. Callers must pass
+			 * valid UTF-8.
 			 */
 			$oracles->noncharacters['mb'] = static function ( string $valid_utf8 ) use ( $mb_ord ): bool {
 				foreach ( mb_str_split( $valid_utf8, 1, 'UTF-8' ) as $character ) {
@@ -327,11 +351,9 @@ class Oracles {
 
 	/**
 	 * Known-answer vectors for the noncharacter oracles. All inputs are
-	 * valid UTF-8 (the question is only defined there) and cover the
-	 * boundaries AND interior of the U+FDD0–U+FDEF block plus the final
-	 * two code points of EVERY plane with their U+xFFFD neighbors — the
-	 * PCRE implementation under test enumerates each plane as a separate
-	 * hand-typed escape, exactly where a single-plane typo would hide.
+	 * valid UTF-8 and ill-formed surrounds, covering the boundaries AND
+	 * interior of the U+FDD0–U+FDEF block plus the final two code points
+	 * of EVERY plane with their U+xFFFD neighbors.
 	 *
 	 * Expectations are hand-derived from the Unicode definition; bytes
 	 * for the looped vectors come from the pure-arithmetic
@@ -339,12 +361,16 @@ class Oracles {
 	 * against `mb_chr()` by `tests/code-point-to-utf8-exhaustive.php`),
 	 * keeping the encoding independent of the mbstring-backed oracle.
 	 *
-	 * @return array<int, array{0: string, 1: bool}> [valid utf8 bytes, has noncharacters]
+	 * @return array<int, array{0: string, 1: bool}> [bytes, has noncharacters]
 	 */
 	public static function noncharacter_battery(): array {
 		$vectors = array(
 			array( '', false ),
 			array( 'abc', false ),
+			array( "\xC0abc", false ),
+			array( "\xC0\xEF\xBF\xBE", true ),
+			array( "\xC0a\xEF\xB7\x90b", true ),
+			array( "\xC0\xEF\xB7\x8F", false ),
 			array( "\u{FDCF}", false ),       // Last code point before the contiguous block.
 			array( "\u{FDD0}", true ),        // First of the contiguous block.
 			array( "\u{FDDA}", true ),        // Interior of the block: a lookup-table bug
@@ -423,6 +449,10 @@ class Oracles {
 			list( $bytes, $expected ) = $vector;
 
 			foreach ( $this->noncharacters as $name => $check ) {
+				if ( 'mb' === $name && ( ! function_exists( 'mb_check_encoding' ) || ! mb_check_encoding( $bytes, 'UTF-8' ) ) ) {
+					continue;
+				}
+
 				$got = $check( $bytes );
 				if ( $got !== $expected ) {
 					$this->disable( $name, sprintf(
@@ -514,7 +544,7 @@ class Oracles {
 		return $this->decode_valid_only[ $name ] ?? false;
 	}
 
-	/** @return array<string, callable(string): bool> Defined on valid UTF-8 input only. */
+	/** @return array<string, callable(string): bool> */
 	public function noncharacter_oracles(): array {
 		return $this->noncharacters;
 	}

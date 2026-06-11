@@ -5,7 +5,7 @@ Differential fuzzer for the WordPress UTF-8 functions:
 - `wp_is_valid_utf8()` / `_wp_is_valid_utf8_fallback()`
 - `wp_scrub_utf8()` / `_wp_scrub_utf8_fallback()`
 - `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
-- `wp_has_noncharacters()` / `_wp_has_noncharacters_fallback()` (valid input only)
+- `wp_has_noncharacters()` / `_wp_has_noncharacters_fallback()`
 - `_mb_chr()` / `_mb_ord()`
 - `_mb_substr()`
 - `_wp_utf8_codepoint_count()`, `_wp_utf8_codepoint_span()`, and the
@@ -23,7 +23,8 @@ Every result is compared against independent known-good implementations:
 
 | Oracle    | Backing                              | Validity | Scrub | Encode | Decode | Nonchars |
 |-----------|--------------------------------------|----------|-------|--------|--------|----------|
-| `mb`      | `mb_check_encoding()` / `mb_scrub()` / `mb_convert_encoding()` / `mb_str_split()`+`mb_ord()` | ✓ | ✓ (primary) | ✓ (primary) | ✓ (primary) | ✓ (valid input only) |
+| `bytes`   | independent UTF-8 noncharacter byte-sequence list | | | | | ✓ (primary) |
+| `mb`      | `mb_check_encoding()` / `mb_scrub()` / `mb_convert_encoding()` / `mb_str_split()`+`mb_ord()` | ✓ | ✓ (primary) | ✓ (primary) | ✓ (primary) | ✓ (valid UTF-8 cross-check) |
 | `pcre`    | PCRE2 strict UTF validation          | ✓        |       |        |        |          |
 | `intl`    | ICU `UConverter::transcode()`        |          | ✓     |        |        |          |
 | `python3` | CPython codec, persistent subprocess | ✓        | ✓     |        |        |          |
@@ -46,14 +47,14 @@ the PHP 9 polyfill in `compat.php` prefers `mb_convert_encoding()`
 with `_wp_utf8_decode_fallback()` as its mbstring-less shadow
 (ticket #63863).
 
-The `mb` noncharacter oracle (a trivial decode-and-test over
-`mb_str_split()` / `mb_ord()`) backs the `wp_has_noncharacters()`
-differential. Like every oracle it must pass a hand-derived battery,
-which covers the boundaries and interior of the U+FDD0–U+FDEF block
-and the final two code points of every plane with their neighbors —
-the PCRE implementation under test enumerates each plane as a separate
-hand-typed escape, so per-plane coverage is the point. It is defined
-on valid input only — see the noncharacter policy under Checks.
+The primary noncharacter oracle is an independent list of UTF-8 byte
+sequences for U+FDD0–U+FDEF and the final two code points of every
+plane. It is defined over arbitrary bytes, matching the public
+function's byte-sequence contract. On valid UTF-8, a trivial mb
+decode-and-test oracle (`mb_str_split()` / `mb_ord()`) cross-checks the
+byte oracle. The battery covers boundaries and interior points of the
+U+FDD0–U+FDEF block, every plane-final pair with neighbors, and
+ill-formed surrounds.
 
 Because native and mb decoding agree on *every* valid code point
 (verified exhaustively over U+0000–U+10FFFF), the valid-input-only
@@ -86,22 +87,10 @@ decode oracle on valid input only). Oracle-vs-oracle disagreements
 are reported separately (`oracle-disagreement`) so they don't masquerade
 as WordPress bugs.
 
-Noncharacter detection is a three-way differential on **valid input
-only**: `wp_has_noncharacters()` (the PCRE branch on hosts with
-PCRE-u; without PCRE-u the public function aliases the fallback and
-the differential degenerates to two distinct implementations — the
-worker records which branch loaded as `pcre_u` in its environment
-metadata), `_wp_has_noncharacters_fallback()`, and the trivial mb
-reference must agree. On ill-formed input the public function's answer
-depends on which environment branch of `utf8.php` loaded — the PCRE
-branch returns false for any ill-formed input because `preg_match`
-fails, while the fallback skips invalid spans and reports the
-noncharacters around them (`"\xC0\xEF\xBF\xBE"`: PCRE false, fallback
-true). The fuzzer's stance is that behavior is undefined unless
-`wp_is_valid_utf8()`; the divergence itself is pinned by a fixed
-regression vector in the smoke test, and aligning the implementations
-(or documenting the stance in core) is an open upstream question for
-the function author.
+Noncharacter detection is checked on arbitrary bytes:
+`wp_has_noncharacters()`, the deprecated `_wp_has_noncharacters_fallback()`
+wrapper, and the independent byte-sequence reference must agree. On
+valid UTF-8, the mb decode-and-test reference must also agree.
 
 Internal invariants:
 
@@ -142,17 +131,12 @@ Internal invariants:
 
 ## Invalid-Input Noncharacter Policy
 
-Noncharacter differentials intentionally remain valid-input-only. The
-current invalid-input divergence is pinned by smoke, not fuzz-expanded:
-on hosts using the PCRE-u branch,
-`wp_has_noncharacters( "\xC0\xEF\xBF\xBE" )` returns false because the
-regular expression fails on ill-formed UTF-8, while
-`_wp_has_noncharacters_fallback( "\xC0\xEF\xBF\xBE" )` returns true
-because the fallback scanner skips the invalid byte and finds U+FFFE.
-
-Do not add invalid-input noncharacter fuzzing until Core decides whether
-`wp_has_noncharacters()` is documented as valid-input-only or the public
-and fallback paths are aligned on ill-formed input.
+Trunk aligned the invalid-input behavior: `wp_has_noncharacters()`
+matches the UTF-8 byte sequences for noncharacters directly, so
+malformed bytes elsewhere in the string do not suppress detection.
+`_wp_has_noncharacters_fallback()` is deprecated and delegates to the
+public function. The fuzzer therefore includes invalid-input
+noncharacter cases in the normal differential.
 
 ## Inputs
 
@@ -274,8 +258,7 @@ noncharacter-leaking `_wp_scan_utf8()`, noncharacter-missing
 stale-noncharacter-flag `_wp_scan_utf8()`)
 must all be caught. It also asserts generator determinism, the
 valid/invalid input mix, the deterministic short-boundary corpus, and
-the documented `wp_has_noncharacters()` divergence stance on ill-formed
-input.
+the aligned `wp_has_noncharacters()` behavior on ill-formed input.
 
 For end-to-end pipeline testing while the real implementations are
 healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale|substr-byte-level|substr-scrub|substr-no-neg-len|substr-force-utf8|count-invalid-bytes|count-range-minus1|count-ignore-offset|scan-ignore-bytes|scan-nonchars-leak|scan-miss-nonchars|scan-ascii-overrun|scan-stale-nonchars`

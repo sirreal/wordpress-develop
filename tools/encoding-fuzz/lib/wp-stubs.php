@@ -25,3 +25,7 @@ if ( ! function_exists( 'get_option' ) ) {
 		return 'blog_charset' === $option ? 'UTF-8' : $default_value;
 	}
 }
+
+if ( ! function_exists( '_deprecated_function' ) ) {
+	function _deprecated_function( $function_name, $version, $replacement = '' ): void {}
+}

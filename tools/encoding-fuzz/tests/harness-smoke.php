@@ -71,27 +71,31 @@ foreach ( $battery_vectors as $i => $bytes ) {
 check( 'real targets clean on battery', array() === $battery_fails, implode( '; ', $battery_fails ) );
 
 /*
- * Documented stance: `wp_has_noncharacters()` is undefined on ill-formed
- * input. On hosts with PCRE-u the public function answers false on ANY
- * ill-formed input (`preg_match` fails) while the fallback skips invalid
- * spans and reports the noncharacters around them. This regression
- * vector pins the divergence; if it ever changes, the semantics were
- * touched and the valid-input-only fuzzing policy must be revisited.
+ * Trunk aligned invalid-input behavior by making the public function search
+ * for noncharacter UTF-8 byte sequences directly and deprecating the old
+ * private fallback into a wrapper.
  */
 $nonchar_probe = "\xC0\xEF\xBF\xBE"; // Invalid byte, then U+FFFE.
-if ( _wp_can_use_pcre_u() ) {
-	check(
-		'documented wp_has_noncharacters divergence on ill-formed input unchanged',
-		false === wp_has_noncharacters( $nonchar_probe ) && true === _wp_has_noncharacters_fallback( $nonchar_probe ),
-		sprintf(
-			'public: %s, fallback: %s',
-			var_export( wp_has_noncharacters( $nonchar_probe ), true ),
-			var_export( _wp_has_noncharacters_fallback( $nonchar_probe ), true )
-		)
-	);
-} else {
-	echo "SKIP documented wp_has_noncharacters divergence (no PCRE-u: public function aliases the fallback)\n";
-}
+check(
+	'wp_has_noncharacters detects noncharacters inside ill-formed input',
+	true === wp_has_noncharacters( $nonchar_probe ) && true === _wp_has_noncharacters_fallback( $nonchar_probe ),
+	sprintf(
+		'public: %s, fallback: %s',
+		var_export( wp_has_noncharacters( $nonchar_probe ), true ),
+		var_export( _wp_has_noncharacters_fallback( $nonchar_probe ), true )
+	)
+);
+
+$nonchar_absent_probe = "\xC0abc";
+check(
+	'wp_has_noncharacters ignores ill-formed input without noncharacters',
+	false === wp_has_noncharacters( $nonchar_absent_probe ) && false === _wp_has_noncharacters_fallback( $nonchar_absent_probe ),
+	sprintf(
+		'public: %s, fallback: %s',
+		var_export( wp_has_noncharacters( $nonchar_absent_probe ), true ),
+		var_export( _wp_has_noncharacters_fallback( $nonchar_absent_probe ), true )
+	)
+);
 
 // ---------------------------------------------------------------------
 // 3. Broken implementations must be caught.

@@ -28,11 +28,10 @@ namespace EncodingFuzz;
  *    chunks reconstructs the same scrubbed text and always makes
  *    forward progress
  *
- * Noncharacter detection (VALID input only — the public function's
- * answer on ill-formed input depends on which environment branch of
- * `utf8.php` loaded, a documented divergence pinned by the smoke test):
+ * Noncharacter detection:
  *  - `wp_has_noncharacters()` and `_wp_has_noncharacters_fallback()` vs
- *    a trivial decode-and-test reference.
+ *    an independent UTF-8 noncharacter byte-sequence oracle, with an mb
+ *    decode-and-test cross-check on valid UTF-8.
  *
  * Legacy `utf8_encode()` / `utf8_decode()` fallbacks:
  *  - `_wp_utf8_encode_fallback()` vs every encode oracle on arbitrary
@@ -293,7 +292,7 @@ class Checks {
 			$failures[] = $failure;
 		}
 
-		// 11. Noncharacter detection, on valid input only.
+		// 11. Noncharacter detection.
 		foreach ( $this->check_noncharacters( $input, $ref_valid ) as $failure ) {
 			$failures[] = $failure;
 		}
@@ -1065,37 +1064,24 @@ class Checks {
 	}
 
 	/**
-	 * Three-way differential for noncharacter detection on VALID input:
-	 * the public `wp_has_noncharacters()` (the PCRE branch on hosts with
-	 * PCRE-u; otherwise it aliases the fallback and this degenerates to
-	 * two distinct implementations), the `_wp_scan_utf8()`-based
-	 * fallback, and the trivial mb reference must all agree.
-	 *
-	 * Ill-formed input is deliberately skipped: the PCRE branch answers
-	 * false on any ill-formed input (`preg_match` fails) while the
-	 * fallback skips invalid spans and reports noncharacters around
-	 * them, so the same public function answers differently depending
-	 * on which environment branch loaded. That stance — behavior is
-	 * undefined unless `wp_is_valid_utf8()` — is pinned by a fixed
-	 * regression vector in the smoke test, not fuzzed.
+	 * Differential for noncharacter detection over arbitrary bytes. The
+	 * primary oracle searches for the UTF-8 byte sequences that encode
+	 * Unicode noncharacters. On valid UTF-8 input, the trivial mb
+	 * decode-and-test oracle is also cross-checked.
 	 *
 	 * @return array<int, array{check: string, signature: string, detail: array}>
 	 */
 	private function check_noncharacters( string $input, bool $ref_valid ): array {
-		if ( ! $ref_valid ) {
-			return array();
-		}
-
 		$oracles = $this->oracles->noncharacter_oracles();
-		if ( ! isset( $oracles['mb'] ) ) {
+		if ( ! isset( $oracles['bytes'] ) ) {
 			return array();
 		}
 
 		$failures = array();
-		$expected = $oracles['mb']( $input );
+		$expected = $oracles['bytes']( $input );
 
 		foreach ( $oracles as $name => $oracle ) {
-			if ( 'mb' === $name ) {
+			if ( 'bytes' === $name || ( 'mb' === $name && ! $ref_valid ) ) {
 				continue;
 			}
 
@@ -1138,7 +1124,7 @@ class Checks {
 						'target'        => $key,
 						'got'           => $result,
 						'expected'      => $expected,
-						'oracle'        => 'mb',
+						'oracle'        => 'bytes',
 						'input_preview' => self::preview( $input ),
 					)
 				);
