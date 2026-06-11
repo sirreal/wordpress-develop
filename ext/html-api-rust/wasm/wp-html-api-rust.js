@@ -1321,7 +1321,17 @@ export function createHtmlApi(wasm) {
 		}
 
 		set_modifiable_text(text) {
-			return this.is_virtual() ? false : super.set_modifiable_text(text);
+			if (
+				this.is_virtual() ||
+				(
+					this.parser_state === STATE_MATCHED_TAG &&
+					this.get_namespace() !== "html"
+				)
+			) {
+				return false;
+			}
+
+			return super.set_modifiable_text(text);
 		}
 
 		set_bookmark(name) {

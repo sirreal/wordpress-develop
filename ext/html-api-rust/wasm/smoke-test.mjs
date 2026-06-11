@@ -500,6 +500,14 @@ assert.equal(foreignObjectProcessor.get_namespace(), "html");
 assert.deepEqual(foreignObjectProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "FOREIGNOBJECT", "DIV"]);
 foreignObjectProcessor.destroy();
 
+const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
+assert.equal(foreignModifiableTextProcessor.next_tag("title"), true);
+assert.equal(foreignModifiableTextProcessor.get_namespace(), "svg");
+assert.equal(foreignModifiableTextProcessor.get_modifiable_text(), "");
+assert.equal(foreignModifiableTextProcessor.set_modifiable_text("Two"), false);
+assert.equal(foreignModifiableTextProcessor.get_updated_html(), "<svg><title>One</title></svg>");
+foreignModifiableTextProcessor.destroy();
+
 const templateNamespaceProcessor = WP_HTML_Processor.create_fragment("<template><svg><template><foreignObject><div></template><div target>");
 assert.equal(templateNamespaceProcessor.next_tag("div"), true);
 assert.deepEqual(
