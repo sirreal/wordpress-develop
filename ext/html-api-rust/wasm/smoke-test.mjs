@@ -621,6 +621,32 @@ assert.equal(customFullParser.next_tag("p"), true);
 customFullParser.destroy();
 assert.equal(Custom_HTML_Processor.normalize("<div>"), "<div></div>");
 
+class Token_Counting_HTML_Processor extends WP_HTML_Processor {
+	token_seen_count = new Map();
+
+	next_token() {
+		if (!super.next_token()) {
+			return false;
+		}
+
+		this.token_seen_count.set(
+			this.get_token_name(),
+			(this.token_seen_count.get(this.get_token_name()) ?? 0) + 1,
+		);
+		return true;
+	}
+}
+const tokenCountingProcessor = Token_Counting_HTML_Processor.create_full_parser(
+	"<!DOCTYPE html><html><head><title>One</title></head><body><p>Two</p></body></html>",
+);
+while (tokenCountingProcessor.next_tag()) {
+}
+assert.ok(tokenCountingProcessor.token_seen_count.get("HTML") >= 1);
+assert.ok(tokenCountingProcessor.token_seen_count.get("HEAD") >= 1);
+assert.ok(tokenCountingProcessor.token_seen_count.get("BODY") >= 1);
+assert.ok(tokenCountingProcessor.token_seen_count.get("P") >= 1);
+tokenCountingProcessor.destroy();
+
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("dialog"), false);
