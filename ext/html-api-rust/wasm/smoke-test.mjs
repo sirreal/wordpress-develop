@@ -198,16 +198,13 @@ assert.equal(comment.get_tag(), "xml-stylesheet");
 assert.equal(comment.get_full_comment_text(), "?xml-stylesheet href='x'?");
 comment.destroy();
 
-const eofClosedComment = new WP_HTML_Tag_Processor("FOO<!-- BAR --! >BAZ");
-assert.equal(eofClosedComment.next_token(), true);
-assert.equal(eofClosedComment.get_token_type(), "#text");
-assert.equal(eofClosedComment.get_modifiable_text(), "FOO");
-assert.equal(eofClosedComment.next_token(), true);
-assert.equal(eofClosedComment.get_token_type(), "#comment");
-assert.equal(eofClosedComment.get_full_comment_text(), " BAR --! >BAZ");
-assert.equal(eofClosedComment.next_token(), false);
-assert.equal(eofClosedComment.paused_at_incomplete_token(), false);
-eofClosedComment.destroy();
+const incompleteComment = new WP_HTML_Tag_Processor("FOO<!-- BAR --! >BAZ");
+assert.equal(incompleteComment.next_token(), true);
+assert.equal(incompleteComment.get_token_type(), "#text");
+assert.equal(incompleteComment.get_modifiable_text(), "FOO");
+assert.equal(incompleteComment.next_token(), false);
+assert.equal(incompleteComment.paused_at_incomplete_token(), true);
+incompleteComment.destroy();
 
 const tagBookmarkLimit = new WP_HTML_Tag_Processor("<div>");
 assert.equal(tagBookmarkLimit.next_tag("div"), true);
@@ -1783,6 +1780,9 @@ assert.equal(WP_HTML_Processor.normalize("<div></p>fun<table><td>cell</div>"), "
 assert.equal(WP_HTML_Processor.normalize("<img id='5\0'>"), '<img id="5\uFFFD">');
 assert.equal(WP_HTML_Processor.normalize("<div><span></div>"), "<div><span></span></div>");
 assert.equal(WP_HTML_Processor.normalize("<svg><g><g /></svg>"), "<svg><g><g /></g></svg>");
+for (const incompleteToken of ["<!--", "<!--x", "<!--x--", "<!--x--!", "<!--x--! >"]) {
+	assert.equal(WP_HTML_Processor.normalize(`content${incompleteToken}`), "content");
+}
 
 const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
 assert.equal(serializationProcessor.next_token(), true);

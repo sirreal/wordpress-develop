@@ -2167,7 +2167,7 @@ fn scan_comment(html: &[u8], tag_start: usize) -> ScanResult {
     }
 
     let Some(token_end) = find_comment_end(html, tag_start + 4) else {
-        return ScanResult::Token(non_tag_scan(tag_start, html.len(), TOKEN_TYPE_COMMENT));
+        return ScanResult::Incomplete;
     };
 
     ScanResult::Token(non_tag_scan(tag_start, token_end, TOKEN_TYPE_COMMENT))
@@ -2689,9 +2689,9 @@ fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)
 #[cfg(test)]
 mod tests {
     use super::{
-        find_script_closer, scan_next_tag, scan_next_token_in_namespace, AttributeValue,
-        ScanResult, TagProcessor, TagScan, COMMENT_TYPE_HTML, COMMENT_TYPE_INVALID,
-        NAMESPACE_FOREIGN, NAMESPACE_HTML, TOKEN_TYPE_TAG,
+        find_script_closer, scan_next_tag, scan_next_token, scan_next_token_in_namespace,
+        AttributeValue, ScanResult, TagProcessor, TagScan, COMMENT_TYPE_INVALID, NAMESPACE_FOREIGN,
+        NAMESPACE_HTML, TOKEN_TYPE_TAG,
     };
     use std::ptr;
 
@@ -2878,7 +2878,7 @@ mod tests {
     }
 
     #[test]
-    fn scanner_closes_comments_at_eof() {
+    fn scanner_reports_unclosed_comments_incomplete() {
         let html = b"FOO<!-- BAR --! >BAZ";
         let mut processor = TagProcessor {
             html: html.to_vec(),
@@ -2898,19 +2898,18 @@ mod tests {
             b"FOO"
         );
 
-        assert!(unsafe {
-            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
-        });
-        let scan = processor.current.unwrap();
-        assert_eq!(processor.comment_type(scan), COMMENT_TYPE_HTML);
-        assert_eq!(
-            processor.current_modifiable_text(scan).unwrap(),
-            b" BAR --! >BAZ"
-        );
-        assert!(!unsafe {
-            super::wp_html_api_rust_tag_processor_next_token(&mut processor)
-        });
-        assert!(!processor.paused_at_incomplete);
+        assert!(!unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        assert!(processor.paused_at_incomplete);
+
+        for html in [
+            &b"<!--"[..],
+            &b"<!--x"[..],
+            &b"<!--x--"[..],
+            &b"<!--x--!"[..],
+            &b"<!--x--! >"[..],
+        ] {
+            assert!(matches!(scan_next_token(html, 0), ScanResult::Incomplete));
+        }
     }
 
     #[test]
