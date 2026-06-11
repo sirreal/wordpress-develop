@@ -107,6 +107,10 @@ const FORMATTING_ELEMENTS = new Set([
 	"TT",
 	"U",
 ]);
+const ADOPTION_AGENCY_END_TAGS = new Set([
+	...FORMATTING_ELEMENTS,
+	"NOBR",
+]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"TABLE",
@@ -1809,6 +1813,11 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldBailUnsupportedAdoptionAgencyFallback(tagName, closingNamespace)) {
+					this.#bailUnsupported('Cannot run adoption agency when "any other end tag" is required.');
+					return;
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					existingIndex !== -1 &&
@@ -3274,13 +3283,21 @@ export function createHtmlApi(wasm) {
 			return (
 				namespaceName === "html" &&
 				formattingElementIndex !== -1 &&
-				FORMATTING_ELEMENTS.has(tagName) &&
+				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
 				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
 				hasSpecialBoundaryAfter(
 					this.open_elements,
 					this.open_element_namespaces,
 					formattingElementIndex,
 				)
+			);
+		}
+
+		#shouldBailUnsupportedAdoptionAgencyFallback(tagName, namespaceName) {
+			return (
+				namespaceName === "html" &&
+				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex(tagName) === -1
 			);
 		}
 

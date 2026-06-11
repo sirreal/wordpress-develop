@@ -357,6 +357,27 @@ assert.equal(closedFormattingProcessor.next_tag("p"), true);
 assert.deepEqual(closedFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 closedFormattingProcessor.destroy();
 
+assert.equal(
+	WP_HTML_Processor.normalize("<b><i></b><p>x"),
+	"<b><i></i></b><p><i>x</i></p>",
+);
+
+for (const html of [
+	"</b><p>x",
+	"<b></b></b><p>x",
+]) {
+	const unsupportedAdoptionFallbackProcessor = WP_HTML_Processor.create_fragment(html);
+	while (unsupportedAdoptionFallbackProcessor.next_token()) {
+	}
+	assert.equal(unsupportedAdoptionFallbackProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(
+		unsupportedAdoptionFallbackProcessor.get_unsupported_exception().message,
+		'Cannot run adoption agency when "any other end tag" is required.',
+	);
+	unsupportedAdoptionFallbackProcessor.destroy();
+	assert.equal(WP_HTML_Processor.normalize(html), null);
+}
+
 for (const html of [
 	"<b><div></b><p>x",
 	"<a><div></a><p>x",
