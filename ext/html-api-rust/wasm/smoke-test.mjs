@@ -213,6 +213,22 @@ assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
 
+for (const html of [
+	'<!DOCTYPE html><meta charset="utf8">',
+	'<!DOCTYPE html><meta http-equiv="content-type" content="">',
+]) {
+	const unsupportedMetaProcessor = WP_HTML_Processor.create_full_parser(html);
+	assert.equal(unsupportedMetaProcessor.next_tag("meta"), false);
+	assert.equal(unsupportedMetaProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.notEqual(unsupportedMetaProcessor.get_unsupported_exception(), null);
+	unsupportedMetaProcessor.destroy();
+}
+
+const fragmentMetaProcessor = WP_HTML_Processor.create_fragment('<meta charset="utf8">');
+assert.equal(fragmentMetaProcessor.next_tag("meta"), true);
+assert.equal(fragmentMetaProcessor.get_last_error(), null);
+fragmentMetaProcessor.destroy();
+
 const processorBookmarkLimit = WP_HTML_Processor.create_fragment("<div>");
 assert.equal(processorBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {

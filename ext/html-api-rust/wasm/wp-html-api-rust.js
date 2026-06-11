@@ -1705,6 +1705,16 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (
+				this.is_full_parser &&
+				this.current_namespace === "html" &&
+				tagName === "META" &&
+				this.#isUnsupportedEncodingMeta()
+			) {
+				this.#bailUnsupported("Cannot yet process META tags to determine encoding.");
+				return;
+			}
+
 			this.#applySimpleHtmlSemanticClosures(tagName);
 			if (FORMATTING_ELEMENTS.has(tagName) && !this.#canReconstructActiveFormattingElements()) {
 				this.#bailUnsupported("Cannot reconstruct active formatting elements when advancing and rewinding is required.");
@@ -1824,6 +1834,20 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = true;
+		}
+
+		#isUnsupportedEncodingMeta() {
+			if (typeof this.get_attribute("charset") === "string") {
+				return true;
+			}
+
+			const httpEquiv = this.get_attribute("http-equiv");
+			const content = this.get_attribute("content");
+			return (
+				typeof httpEquiv === "string" &&
+				typeof content === "string" &&
+				httpEquiv.toLowerCase() === "content-type"
+			);
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
