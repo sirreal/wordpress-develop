@@ -4,13 +4,13 @@ This directory contains a standalone oracle binary for comparing the WordPress
 HTML API against a source-built Lexbor checkout instead of PHP's bundled
 `Dom\HTMLDocument` runtime.
 
-Build the pinned upstream commit:
+Build upstream `master`:
 
 ```sh
 tools/html-api-fuzz/oracles/lexbor/build.sh
 ```
 
-The script clones Lexbor under `.cache/lexbor/<commit>/source`, builds and
+The script clones Lexbor under `.cache/lexbor/<ref>/source`, builds and
 installs a static Lexbor library under the same cache entry, then writes:
 
 ```text
@@ -33,6 +33,9 @@ php tools/html-api-fuzz/runner.php \
 Pass `--lexbor-oracle-bin PATH` or set `HTML_API_FUZZ_LEXBOR_ORACLE` when the
 binary is not at the default build path above. Replays preserve the selected
 oracle and binary path.
+
+The binary records the resolved Lexbor commit in its JSON metadata, even when
+building from a moving ref such as `master`.
 
 Use a different checkout or commit when bisecting upstream behavior:
 
