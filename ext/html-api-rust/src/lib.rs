@@ -1271,7 +1271,11 @@ impl TagProcessor {
         let mut end = scan.tag_end.saturating_sub(1);
         let comparable_prefix = comparable_attribute_name(prefix);
 
-        if scan.has_self_closing_flag {
+        if tag_ends_with_syntactic_self_closing_flag(
+            &self.html,
+            scan.name_start + scan.name_len,
+            scan.tag_end,
+        ) {
             end = end.saturating_sub(1);
         }
 
@@ -1323,7 +1327,7 @@ impl TagProcessor {
                         at += 1;
                     }
                 } else {
-                    while at < end && !is_html_whitespace(self.html[at]) && self.html[at] != b'/' {
+                    while at < end && !is_html_whitespace(self.html[at]) {
                         at += 1;
                     }
                 }
@@ -1338,7 +1342,11 @@ impl TagProcessor {
         let mut end = scan.tag_end.saturating_sub(1);
         let comparable_wanted_name = comparable_attribute_name(wanted_name);
 
-        if scan.has_self_closing_flag {
+        if tag_ends_with_syntactic_self_closing_flag(
+            &self.html,
+            scan.name_start + scan.name_len,
+            scan.tag_end,
+        ) {
             end = end.saturating_sub(1);
         }
 
@@ -1387,7 +1395,7 @@ impl TagProcessor {
                     }
                 } else {
                     let value_start = at;
-                    while at < end && !is_html_whitespace(self.html[at]) && self.html[at] != b'/' {
+                    while at < end && !is_html_whitespace(self.html[at]) {
                         at += 1;
                     }
                     value = Some((value_start, at));
@@ -1913,6 +1921,71 @@ fn scan_next_token_in_namespace(html: &[u8], offset: usize, namespace: u8) -> Sc
     }
 
     ScanResult::Token(scan)
+}
+
+fn tag_ends_with_syntactic_self_closing_flag(
+    html: &[u8],
+    name_end: usize,
+    tag_end: usize,
+) -> bool {
+    if tag_end < 2 || html.get(tag_end - 2) != Some(&b'/') {
+        return false;
+    }
+
+    let mut at = name_end;
+    let end = tag_end - 1;
+
+    while at < end {
+        while at < end && is_html_whitespace(html[at]) {
+            at += 1;
+        }
+
+        if at >= end {
+            break;
+        }
+
+        if html[at] == b'/' {
+            return at == tag_end - 2;
+        }
+
+        let name_start = at;
+        while at < end && !is_attribute_name_delimiter(html[at]) {
+            at += 1;
+        }
+
+        if name_start == at {
+            at += 1;
+            continue;
+        }
+
+        while at < end && is_html_whitespace(html[at]) {
+            at += 1;
+        }
+
+        if at < end && html[at] == b'=' {
+            at += 1;
+            while at < end && is_html_whitespace(html[at]) {
+                at += 1;
+            }
+
+            if at < end && (html[at] == b'\'' || html[at] == b'"') {
+                let quote = html[at];
+                at += 1;
+                while at < end && html[at] != quote {
+                    at += 1;
+                }
+                if at < end {
+                    at += 1;
+                }
+            } else {
+                while at < end && !is_html_whitespace(html[at]) {
+                    at += 1;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn find_next_token_start(html: &[u8], offset: usize) -> Option<usize> {
@@ -2909,6 +2982,33 @@ mod tests {
             super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
         });
         assert!(unsafe { super::wp_html_api_rust_tag_processor_has_self_closing_flag(&processor) });
+    }
+
+    #[test]
+    fn tag_processor_keeps_trailing_slash_in_unquoted_attribute_value() {
+        let mut processor = TagProcessor {
+            html: b"<foo bar=qux/><foo bar=qux />".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
+        });
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_has_self_closing_flag(&processor) });
+        assert!(matches!(processor.get_attribute(b"bar"), AttributeValue::String));
+        assert_eq!(processor.scratch, b"qux/");
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
+        });
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_has_self_closing_flag(&processor) });
+        assert!(matches!(processor.get_attribute(b"bar"), AttributeValue::String));
+        assert_eq!(processor.scratch, b"qux");
     }
 
     #[test]
