@@ -1319,9 +1319,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor = WP_HTML_Processor::create_fragment( $html );
 	 *     if ( $processor->next_tag( 'UL' ) ) {
 	 *         $depth_inside_ul = $processor->get_current_depth();
-	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_ul ) {
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_ul ) { // >= and not >.
 	 *             // Matched on each token inside the UL, including the
-	 *             // openers and closers of nested elements. The loop ends
+	 *             // openers and closers of nested elements (a nested
+	 *             // closer reports the same depth as its surrounding
+	 *             // sibling text — both stay in the loop). The loop ends
 	 *             // at the UL's own closing token, whose depth is lower.
 	 *         }
 	 *     }
@@ -5706,6 +5708,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * avoid needless crashing or type errors. An empty string does not mean
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
+	 *
+	 * For `#text` nodes and for elements whose contents allow character
+	 * references (TEXTAREA, TITLE), the returned text is DECODED: character
+	 * references have been replaced by the characters they represent. Do
+	 * not decode it again. Raw text contents (SCRIPT, STYLE) and comment
+	 * interiors are returned verbatim.
+	 *
+	 * Note that for elements which cannot contain markup (SCRIPT, STYLE,
+	 * TEXTAREA, TITLE), the text is carried by the ELEMENT's own token —
+	 * there is no separate `#text` child to visit. Read it while matched
+	 * on the element's opening tag:
+	 *
+	 *     $processor = WP_HTML_Processor::create_full_parser( $html );
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'TITLE' === $processor->get_token_name() && ! $processor->is_tag_closer() ) {
+	 *             $title = $processor->get_modifiable_text();
+	 *             break;
+	 *         }
+	 *     }
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *

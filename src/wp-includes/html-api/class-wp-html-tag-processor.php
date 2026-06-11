@@ -1216,6 +1216,17 @@ class WP_HTML_Tag_Processor {
 	 *     false      === $processor->next_tag();
 	 *     true       === $processor->paused_at_incomplete_token();
 	 *
+	 * In a longer document, drain all tokens first; this method reports
+	 * the state at the point scanning stopped, so it answers "did the
+	 * input end mid-token?" only after the processor has scanned to the
+	 * end of the input:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( $html );
+	 *     while ( $processor->next_token() ) {
+	 *         continue;
+	 *     }
+	 *     $was_truncated = $processor->paused_at_incomplete_token();
+	 *
 	 * @since 6.5.0
 	 *
 	 * @return bool Whether the parse paused at the start of an incomplete token.
@@ -4694,7 +4705,12 @@ class WP_HTML_Tag_Processor {
 	 * @since 6.2.0
 	 *
 	 * @param string $class_name The class name to add.
-	 * @return bool Whether the class was set to be added.
+	 * @return bool Whether the update was enqueued: `true` whenever the
+	 *              processor is matched on a tag, even if the class was
+	 *              already present (the no-op case); `false` only when
+	 *              there is no matched tag to operate on. There is no
+	 *              need to inspect it in the usual add-then-
+	 *              get_updated_html() flow.
 	 */
 	public function add_class( $class_name ): bool {
 		if (
