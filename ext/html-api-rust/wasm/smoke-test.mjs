@@ -137,6 +137,31 @@ assert.equal(unicodeAttributeNameTags.set_attribute("data-\u00E9", "ok"), true);
 assert.equal(unicodeAttributeNameTags.get_attribute("data-\u00E9"), "ok");
 unicodeAttributeNameTags.destroy();
 
+const escapedAttributeValueTags = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(escapedAttributeValueTags.next_tag("div"), true);
+assert.equal(
+	escapedAttributeValueTags.set_attribute("test", "\" onclick=\"alert('1');\"><script>alert(\"1\")</script>"),
+	true,
+);
+assert.equal(
+	escapedAttributeValueTags.get_updated_html(),
+	'<div test="&quot; onclick=&quot;alert(&apos;1&apos;);&quot;&gt;&lt;script&gt;alert(&quot;1&quot;)&lt;/script&gt;"></div>',
+);
+escapedAttributeValueTags.destroy();
+
+const removedBooleanAttributeTags = new WP_HTML_Tag_Processor('<input checked type="checkbox">');
+assert.equal(removedBooleanAttributeTags.next_tag("input"), true);
+assert.equal(removedBooleanAttributeTags.set_attribute("checked", false), true);
+assert.equal(removedBooleanAttributeTags.get_attribute("checked"), null);
+assert.equal(removedBooleanAttributeTags.get_updated_html(), '<input  type="checkbox">');
+removedBooleanAttributeTags.destroy();
+
+const missingFalseAttributeTags = new WP_HTML_Tag_Processor('<input type="checkbox">');
+assert.equal(missingFalseAttributeTags.next_tag("input"), true);
+assert.equal(missingFalseAttributeTags.set_attribute("checked", false), false);
+assert.equal(missingFalseAttributeTags.get_updated_html(), '<input type="checkbox">');
+missingFalseAttributeTags.destroy();
+
 const duplicateAttributeNameTags = new WP_HTML_Tag_Processor("<div DATA-x=1 data-x=2 data-y=3>");
 assert.equal(duplicateAttributeNameTags.next_tag("div"), true);
 assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("data-"), ["data-x", "data-y"]);
