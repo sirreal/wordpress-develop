@@ -2723,8 +2723,8 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
-				if (this.#shouldBailUnsupportedAdoptionAgencyFallback(tagName, closingNamespace, existingIndex)) {
-					this.#bailUnsupported('Cannot run adoption agency when "any other end tag" is required.');
+				if (this.#shouldIgnoreAdoptionAgencyEndTagFallback(tagName, closingNamespace, existingIndex)) {
+					this.#ignoreCurrentToken();
 					return;
 				}
 
@@ -5141,7 +5141,7 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
-		#shouldBailUnsupportedAdoptionAgencyFallback(tagName, namespaceName, formattingElementIndex) {
+		#shouldIgnoreAdoptionAgencyEndTagFallback(tagName, namespaceName, formattingElementIndex) {
 			return (
 				namespaceName === "html" &&
 				formattingElementIndex === -1 &&

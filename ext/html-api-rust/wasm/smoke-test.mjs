@@ -564,6 +564,10 @@ for (const [html, expectedTree] of [
 		'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    <font>\n      <table>\n\n',
 	],
 	[
+		"<b>Test</i>Test",
+		'<html>\n  <head>\n  <body>\n    <b>\n      "TestTest"\n\n',
+	],
+	[
 		"<div a=1 b><span>Hi</span></div>",
 		'<html>\n  <head>\n  <body>\n    <div>\n      a="1"\n      b=""\n      <span>\n        "Hi"\n\n',
 	],
@@ -1889,21 +1893,9 @@ assert.equal(
 	"<b><i></i></b><p><i>x</i></p>",
 );
 
-for (const html of [
-	"</b><p>x",
-	"<b></b></b><p>x",
-]) {
-	const unsupportedAdoptionFallbackProcessor = WP_HTML_Processor.create_fragment(html);
-	while (unsupportedAdoptionFallbackProcessor.next_token()) {
-	}
-	assert.equal(unsupportedAdoptionFallbackProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(
-		unsupportedAdoptionFallbackProcessor.get_unsupported_exception().message,
-		'Cannot run adoption agency when "any other end tag" is required.',
-	);
-	unsupportedAdoptionFallbackProcessor.destroy();
-	assert.equal(WP_HTML_Processor.normalize(html), null);
-}
+assert.equal(WP_HTML_Processor.normalize("</b><p>x"), "<p>x</p>");
+assert.equal(WP_HTML_Processor.normalize("<b></b></b><p>x"), "<b></b><p>x</p>");
+assert.equal(WP_HTML_Processor.normalize("<b>Test</i>Test"), "<b>TestTest</b>");
 
 for (const html of [
 	"<b><div></b><p>x",
