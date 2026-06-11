@@ -1506,6 +1506,12 @@ enum NullTransform {
     Replace,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DecodeContext {
+    Data,
+    Attribute,
+}
+
 #[derive(Clone, Copy)]
 enum ScriptContentType {
     JavaScript,
@@ -1554,7 +1560,9 @@ fn transform_text(input: &[u8], decode_entities: bool, null_transform: NullTrans
         }
 
         if decode_entities && input[at] == b'&' {
-            if let Some((decoded, consumed)) = decode_character_reference(&input[at..]) {
+            if let Some((decoded, consumed)) =
+                decode_character_reference(DecodeContext::Data, &input[at..])
+            {
                 if decoded == '\0' {
                     match null_transform {
                         NullTransform::Remove => {}
@@ -1585,7 +1593,7 @@ fn strip_initial_newline(input: &[u8]) -> &[u8] {
         return &input[1..];
     }
 
-    if let Some(('\n', consumed)) = decode_character_reference(input) {
+    if let Some(('\n', consumed)) = decode_character_reference(DecodeContext::Data, input) {
         return &input[consumed..];
     }
 
@@ -2292,7 +2300,9 @@ fn decode_html_attribute(input: &[u8]) -> Vec<u8> {
             continue;
         }
 
-        let Some((decoded, consumed)) = decode_character_reference(&input[at..]) else {
+        let Some((decoded, consumed)) =
+            decode_character_reference(DecodeContext::Attribute, &input[at..])
+        else {
             output.push(input[at]);
             at += 1;
             continue;
@@ -2306,7 +2316,7 @@ fn decode_html_attribute(input: &[u8]) -> Vec<u8> {
     output
 }
 
-fn decode_character_reference(input: &[u8]) -> Option<(char, usize)> {
+fn decode_character_reference(context: DecodeContext, input: &[u8]) -> Option<(char, usize)> {
     if input.len() < 3 || input[0] != b'&' {
         return None;
     }
@@ -2319,50 +2329,125 @@ fn decode_character_reference(input: &[u8]) -> Option<(char, usize)> {
         } else {
             10
         };
+        let max_digits = if radix == 16 { 6 } else { 7 };
 
         let digits_start = at;
-        while at < input.len() && input[at].is_ascii_hexdigit() {
-            if radix == 10 && !input[at].is_ascii_digit() {
-                break;
-            }
+        while at < input.len() && input[at] == b'0' {
             at += 1;
         }
+        let zero_count = at - digits_start;
+        let significant_digits_start = at;
+        while at < input.len()
+            && if radix == 16 {
+                input[at].is_ascii_hexdigit()
+            } else {
+                input[at].is_ascii_digit()
+            }
+        {
+            at += 1;
+        }
+        let digit_count = at - significant_digits_start;
 
-        if at == digits_start {
+        if 0 == zero_count && 0 == digit_count {
             return None;
         }
 
-        let digits = std::str::from_utf8(&input[digits_start..at]).ok()?;
-        let value = u32::from_str_radix(digits, radix).ok()?;
         let consumed = if at < input.len() && input[at] == b';' { at + 1 } else { at };
-        return char::from_u32(value).map(|decoded| (decoded, consumed));
+        if 0 == digit_count || digit_count > max_digits {
+            return Some(('\u{FFFD}', consumed));
+        }
+
+        let digits = std::str::from_utf8(&input[significant_digits_start..at]).ok()?;
+        let value = u32::from_str_radix(digits, radix).ok()?;
+        return Some((character_reference_code_point(value), consumed));
     }
 
-    let mut at = 1;
-    while at < input.len() && input[at].is_ascii_alphanumeric() {
-        at += 1;
+    let (decoded, name_len) = named_character_reference(&input[1..])?;
+    let after_name = 1 + name_len;
+    let has_semicolon = input[after_name - 1] == b';';
+
+    if has_semicolon {
+        return Some((decoded, after_name));
     }
 
-    if at == 1 {
+    let ambiguous_follower = after_name < input.len()
+        && (input[after_name].is_ascii_alphanumeric() || input[after_name] == b'=');
+
+    if DecodeContext::Attribute == context && ambiguous_follower {
         return None;
     }
 
-    let has_semicolon = at < input.len() && input[at] == b';';
-    let name = std::str::from_utf8(&input[1..at]).ok()?;
-    let decoded = match name {
-        "amp" => '&',
-        "apos" => '\'',
-        "dagger" => '†',
-        "gt" => '>',
-        "hellip" => '…',
-        "lt" => '<',
-        "nbsp" => '\u{00a0}',
-        "notin" => '∉',
-        "quot" => '"',
-        _ => return None,
+    Some((decoded, after_name))
+}
+
+fn character_reference_code_point(code_point: u32) -> char {
+    let code_point = match code_point {
+        0x80 => 0x20AC,
+        0x82 => 0x201A,
+        0x83 => 0x0192,
+        0x84 => 0x201E,
+        0x85 => 0x2026,
+        0x86 => 0x2020,
+        0x87 => 0x2021,
+        0x88 => 0x02C6,
+        0x89 => 0x2030,
+        0x8A => 0x0160,
+        0x8B => 0x2039,
+        0x8C => 0x0152,
+        0x8E => 0x017D,
+        0x91 => 0x2018,
+        0x92 => 0x2019,
+        0x93 => 0x201C,
+        0x94 => 0x201D,
+        0x95 => 0x2022,
+        0x96 => 0x2013,
+        0x97 => 0x2014,
+        0x98 => 0x02DC,
+        0x99 => 0x2122,
+        0x9A => 0x0161,
+        0x9B => 0x203A,
+        0x9C => 0x0153,
+        0x9E => 0x017E,
+        0x9F => 0x0178,
+        other => other,
     };
 
-    Some((decoded, at + usize::from(has_semicolon)))
+    char::from_u32(code_point).unwrap_or('\u{FFFD}')
+}
+
+fn named_character_reference(input: &[u8]) -> Option<(char, usize)> {
+    const NAMED: &[(&[u8], char)] = &[
+        (b"amp;", '&'),
+        (b"amp", '&'),
+        (b"apos;", '\''),
+        (b"apos", '\''),
+        (b"copy;", '©'),
+        (b"copy", '©'),
+        (b"dagger;", '†'),
+        (b"dagger", '†'),
+        (b"gt;", '>'),
+        (b"gt", '>'),
+        (b"hellip;", '…'),
+        (b"hellip", '…'),
+        (b"lt;", '<'),
+        (b"lt", '<'),
+        (b"nbsp;", '\u{00a0}'),
+        (b"nbsp", '\u{00a0}'),
+        (b"notin;", '∉'),
+        (b"not;", '¬'),
+        (b"not", '¬'),
+        (b"quot;", '"'),
+        (b"quot", '"'),
+    ];
+
+    let mut best = None;
+    for (name, decoded) in NAMED {
+        if input.starts_with(name) && best.map(|(_, len)| name.len() > len).unwrap_or(true) {
+            best = Some((*decoded, name.len()));
+        }
+    }
+
+    best
 }
 
 #[cfg(test)]
@@ -2567,6 +2652,36 @@ mod tests {
         let scan = processor.current.unwrap();
         assert_eq!(processor.comment_type(scan), COMMENT_TYPE_INVALID);
         assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"xml foo ");
+    }
+
+    #[test]
+    fn data_character_references_use_legacy_prefix_matches() {
+        assert_eq!(
+            super::transform_text(
+                b"FOO&gtBAR I'm &notit; I tell you",
+                true,
+                super::NullTransform::Replace
+            ),
+            "FOO>BAR I'm ¬it; I tell you".as_bytes()
+        );
+    }
+
+    #[test]
+    fn attribute_character_references_preserve_ambiguous_legacy_matches() {
+        assert_eq!(super::decode_html_attribute(b"&notit;"), b"&notit;");
+        assert_eq!(super::decode_html_attribute(b"&not;"), "¬".as_bytes());
+    }
+
+    #[test]
+    fn numeric_character_references_follow_html_replacement_rules() {
+        assert_eq!(
+            super::transform_text(
+                b"FOO&#x0000;ZOO &#x0080; &#xD800; &#x110000; &#11111111111",
+                true,
+                super::NullTransform::Replace
+            ),
+            "FOO�ZOO € � � �".as_bytes()
+        );
     }
 
     #[test]
