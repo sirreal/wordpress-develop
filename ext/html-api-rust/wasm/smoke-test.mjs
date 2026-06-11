@@ -782,6 +782,30 @@ assert.equal(
 	"<table><caption>cap</caption></table><p>after</p>",
 );
 
+const tableTextProcessor = WP_HTML_Processor.create_fragment("<table>text<tr><td>cell");
+while (tableTextProcessor.next_token()) {
+}
+assert.equal(tableTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(tableTextProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+tableTextProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<table>text<tr><td>cell"), null);
+
+const tableWhitespaceProcessor = WP_HTML_Processor.create_fragment("<table> \n <tr><td>cell");
+assert.equal(tableWhitespaceProcessor.next_token(), true);
+assert.equal(tableWhitespaceProcessor.get_tag(), "TABLE");
+assert.equal(tableWhitespaceProcessor.next_token(), true);
+assert.equal(tableWhitespaceProcessor.get_token_name(), "#text");
+assert.deepEqual(tableWhitespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "#text"]);
+assert.equal(tableWhitespaceProcessor.next_tag("td"), true);
+assert.equal(tableWhitespaceProcessor.get_last_error(), null);
+tableWhitespaceProcessor.destroy();
+
+const tableNullTextProcessor = WP_HTML_Processor.create_fragment("<table>\0<tr><td>cell");
+assert.equal(tableNullTextProcessor.next_tag("tr"), true);
+assert.deepEqual(tableNullTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+assert.equal(tableNullTextProcessor.get_last_error(), null);
+tableNullTextProcessor.destroy();
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");

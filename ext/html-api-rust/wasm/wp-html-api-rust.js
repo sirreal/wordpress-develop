@@ -108,6 +108,14 @@ const FORMATTING_ELEMENTS = new Set([
 	"U",
 ]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
+const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
+	"TABLE",
+	"TBODY",
+	"TEMPLATE",
+	"TFOOT",
+	"THEAD",
+	"TR",
+]);
 const TABLE_CELL_ELEMENTS = new Set(["TD", "TH"]);
 const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
 	"CAPTION",
@@ -1669,6 +1677,18 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tokenType !== "#tag") {
+				if (tokenType === "#text" && this.#isInTableTextContext()) {
+					if (this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE) {
+						this.skip_current_token = true;
+						return;
+					}
+
+					if (this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE) {
+						this.#bailUnsupported("Foster parenting is not supported.");
+						return;
+					}
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					tokenType === "#text" &&
@@ -3026,6 +3046,19 @@ export function createHtmlApi(wasm) {
 				this.open_elements[topIndex] === tagName &&
 				this.open_element_namespaces[topIndex] === "html"
 			);
+		}
+
+		#isInTableTextContext() {
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				!TABLE_TEXT_CURRENT_NODE_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			return this.open_elements[topIndex] === "TABLE" || this.#openHtmlElementBefore("TABLE", topIndex);
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {
