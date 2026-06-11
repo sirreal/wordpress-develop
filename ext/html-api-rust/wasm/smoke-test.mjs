@@ -348,6 +348,31 @@ assert.equal(
 	'<p><em class="tone">One</em></p><p><em class="tone">Two</em></p>',
 );
 
+const closedFormattingProcessor = WP_HTML_Processor.create_fragment("<b>one</b><p>two");
+assert.equal(closedFormattingProcessor.next_tag("b"), true);
+assert.equal(closedFormattingProcessor.next_tag({ tag_name: "b", tag_closers: "visit" }), true);
+assert.equal(closedFormattingProcessor.is_tag_closer(), true);
+assert.deepEqual(closedFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(closedFormattingProcessor.next_tag("p"), true);
+assert.deepEqual(closedFormattingProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+closedFormattingProcessor.destroy();
+
+for (const html of [
+	"<b><div></b><p>x",
+	"<a><div></a><p>x",
+]) {
+	const unsupportedAdoptionAgencyProcessor = WP_HTML_Processor.create_fragment(html);
+	while (unsupportedAdoptionAgencyProcessor.next_token()) {
+	}
+	assert.equal(unsupportedAdoptionAgencyProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(
+		unsupportedAdoptionAgencyProcessor.get_unsupported_exception().message,
+		"Cannot extract common ancestor in adoption agency algorithm.",
+	);
+	unsupportedAdoptionAgencyProcessor.destroy();
+	assert.equal(WP_HTML_Processor.normalize(html), null);
+}
+
 for (const html of [
 	'<a><strong>Click <span supported><a unsupported><big>Here</big></a></strong></a>',
 	'<a><div supported><a unsupported></div></a>',

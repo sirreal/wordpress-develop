@@ -1804,6 +1804,11 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldBailUnsupportedAdoptionAgency(tagName, closingNamespace, existingIndex)) {
+					this.#bailUnsupported("Cannot extract common ancestor in adoption agency algorithm.");
+					return;
+				}
+
 				if (
 					allowVirtualPreclosures &&
 					existingIndex !== -1 &&
@@ -3263,6 +3268,20 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {
+			return (
+				namespaceName === "html" &&
+				formattingElementIndex !== -1 &&
+				FORMATTING_ELEMENTS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
+				hasSpecialBoundaryAfter(
+					this.open_elements,
+					this.open_element_namespaces,
+					formattingElementIndex,
+				)
+			);
 		}
 
 		#findOpenElementBeforeBoundary(match, boundaries) {
