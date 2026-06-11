@@ -843,6 +843,34 @@ assert.equal(processorZeroBreadcrumbMatchOffset.next_tag({ breadcrumbs: ["DIV", 
 assert.equal(processorZeroBreadcrumbMatchOffset.get_tag(), null);
 processorZeroBreadcrumbMatchOffset.destroy();
 
+for (const [html, expectedBreadcrumbs] of [
+	["<p><p><p><p><article target>", ["HTML", "BODY", "ARTICLE"]],
+	["<li><li><blockquote><li target>", ["HTML", "BODY", "LI", "BLOCKQUOTE", "LI"]],
+	["<dt><dt><div><dt target>", ["HTML", "BODY", "DT"]],
+	["<dd><dd><p><button><p><dd target>", ["HTML", "BODY", "DD", "P", "BUTTON", "DD"]],
+]) {
+	const semanticRuleProcessor = WP_HTML_Processor.create_fragment(html);
+	while (semanticRuleProcessor.next_tag() && semanticRuleProcessor.get_attribute("target") === null) {
+	}
+	assert.equal(semanticRuleProcessor.get_attribute("target"), true, html);
+	assert.deepEqual(semanticRuleProcessor.get_breadcrumbs(), expectedBreadcrumbs, html);
+	semanticRuleProcessor.destroy();
+}
+
+const semanticButtonProcessor = WP_HTML_Processor.create_fragment(
+	'<div><button one><p>Click <span><button two>here</button>!</span></p></div><button three>done</button>',
+);
+assert.equal(semanticButtonProcessor.next_tag("BUTTON"), true);
+assert.equal(semanticButtonProcessor.get_attribute("one"), true);
+assert.deepEqual(semanticButtonProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "BUTTON"]);
+assert.equal(semanticButtonProcessor.next_tag("BUTTON"), true);
+assert.equal(semanticButtonProcessor.get_attribute("two"), true);
+assert.deepEqual(semanticButtonProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "BUTTON"]);
+assert.equal(semanticButtonProcessor.next_tag("BUTTON"), true);
+assert.equal(semanticButtonProcessor.get_attribute("three"), true);
+assert.deepEqual(semanticButtonProcessor.get_breadcrumbs(), ["HTML", "BODY", "BUTTON"]);
+semanticButtonProcessor.destroy();
+
 const imageNamespaceProcessor = WP_HTML_Processor.create_fragment("<image/><svg><image/></svg>");
 assert.equal(imageNamespaceProcessor.next_tag(), true);
 assert.equal(imageNamespaceProcessor.get_tag(), "IMG");
