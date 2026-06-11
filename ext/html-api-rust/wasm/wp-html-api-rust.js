@@ -1963,6 +1963,8 @@ export function createHtmlApi(wasm) {
 			this.last_error = null;
 			this.unsupported_exception = null;
 			this.current_virtual = null;
+			this.current_synthetic_token = null;
+			this.synthetic_eof_comment_consumed = false;
 			this.virtual_tokens = [];
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
@@ -2182,6 +2184,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.current_synthetic_token !== null) {
+				this.current_synthetic_token = null;
+			}
+
 			if (this.virtual_tokens.length > 0) {
 				return this.#consumeVirtualToken();
 			}
@@ -2241,6 +2247,10 @@ export function createHtmlApi(wasm) {
 				return this.#consumeVirtualToken();
 			}
 
+			if (this.#consumeFullParserEofComment()) {
+				return true;
+			}
+
 			if (this.#queueEofVirtualClosers()) {
 				return this.#consumeVirtualToken();
 			}
@@ -2261,8 +2271,15 @@ export function createHtmlApi(wasm) {
 			return this.current_virtual !== null;
 		}
 
+		#isSyntheticToken() {
+			return this.current_synthetic_token !== null;
+		}
+
 		is_tag_closer() {
-			return this.is_virtual() ? this.current_virtual.operation === "pop" : super.is_tag_closer();
+			if (this.is_virtual()) {
+				return this.current_virtual.operation === "pop";
+			}
+			return this.#isSyntheticToken() ? false : super.is_tag_closer();
 		}
 
 		get_tag() {
@@ -2270,72 +2287,109 @@ export function createHtmlApi(wasm) {
 				return this.current_virtual.tagName;
 			}
 
+			if (this.#isSyntheticToken()) {
+				return null;
+			}
+
 			return normalizeTagNameForNamespace(super.get_tag(), this.current_token_namespace);
 		}
 
 		get_attribute(name) {
-			return this.is_virtual() ? this.#getVirtualAttribute(name) : super.get_attribute(name);
+			if (this.is_virtual()) {
+				return this.#getVirtualAttribute(name);
+			}
+			return this.#isSyntheticToken() ? null : super.get_attribute(name);
 		}
 
 		get_attribute_names_with_prefix(prefix) {
-			return this.is_virtual() ? this.#getVirtualAttributeNamesWithPrefix(prefix) : super.get_attribute_names_with_prefix(prefix);
+			if (this.is_virtual()) {
+				return this.#getVirtualAttributeNamesWithPrefix(prefix);
+			}
+			return this.#isSyntheticToken() ? null : super.get_attribute_names_with_prefix(prefix);
 		}
 
 		set_attribute(name, value) {
-			return this.is_virtual() ? false : super.set_attribute(name, value);
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.set_attribute(name, value);
 		}
 
 		remove_attribute(name) {
-			return this.is_virtual() ? false : super.remove_attribute(name);
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.remove_attribute(name);
 		}
 
 		add_class(className) {
-			return this.is_virtual() ? false : super.add_class(className);
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.add_class(className);
 		}
 
 		remove_class(className) {
-			return this.is_virtual() ? false : super.remove_class(className);
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.remove_class(className);
 		}
 
 		has_class(className) {
-			return this.is_virtual() ? this.#virtualHasClass(className) : super.has_class(className);
+			if (this.is_virtual()) {
+				return this.#virtualHasClass(className);
+			}
+			return this.#isSyntheticToken() ? null : super.has_class(className);
 		}
 
 		class_list() {
-			return this.is_virtual() ? this.#virtualClassList() : super.class_list();
+			if (this.is_virtual()) {
+				return this.#virtualClassList();
+			}
+			return this.#isSyntheticToken() ? null : super.class_list();
 		}
 
 		has_self_closing_flag() {
-			return this.is_virtual() ? false : super.has_self_closing_flag();
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.has_self_closing_flag();
 		}
 
 		get_token_name() {
-			return this.is_virtual() ? this.current_virtual.tagName : super.get_token_name();
+			if (this.is_virtual()) {
+				return this.current_virtual.tagName;
+			}
+			return this.#isSyntheticToken() ? this.current_synthetic_token.tokenName : super.get_token_name();
 		}
 
 		get_token_type() {
-			return this.is_virtual() ? "#tag" : super.get_token_type();
+			if (this.is_virtual()) {
+				return "#tag";
+			}
+			return this.#isSyntheticToken() ? this.current_synthetic_token.tokenType : super.get_token_type();
+		}
+
+		paused_at_incomplete_token() {
+			return this.synthetic_eof_comment_consumed ? false : super.paused_at_incomplete_token();
 		}
 
 		get_comment_type() {
-			return this.is_virtual() ? null : super.get_comment_type();
+			if (this.is_virtual()) {
+				return null;
+			}
+			return this.#isSyntheticToken() ? WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT : super.get_comment_type();
+		}
+
+		get_full_comment_text() {
+			return this.#isSyntheticToken() ? this.current_synthetic_token.commentText : super.get_full_comment_text();
 		}
 
 		get_doctype_info() {
-			return this.is_virtual() ? null : super.get_doctype_info();
+			return this.is_virtual() || this.#isSyntheticToken() ? null : super.get_doctype_info();
 		}
 
 		subdivide_text_appropriately() {
-			return this.is_virtual() ? false : super.subdivide_text_appropriately();
+			return this.is_virtual() || this.#isSyntheticToken() ? false : super.subdivide_text_appropriately();
 		}
 
 		get_modifiable_text() {
-			return this.is_virtual() ? "" : super.get_modifiable_text();
+			if (this.is_virtual()) {
+				return "";
+			}
+			return this.#isSyntheticToken() ? this.current_synthetic_token.commentText : super.get_modifiable_text();
 		}
 
 		set_modifiable_text(text) {
 			if (
 				this.is_virtual() ||
+				this.#isSyntheticToken() ||
 				(
 					this.parser_state === STATE_MATCHED_TAG &&
 					this.get_namespace() !== "html"
@@ -2348,7 +2402,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		set_bookmark(name) {
-			if (this.is_virtual()) {
+			if (this.is_virtual() || this.#isSyntheticToken()) {
 				return false;
 			}
 
@@ -4531,6 +4585,46 @@ export function createHtmlApi(wasm) {
 			this.full_parser_insertion_mode = "in_body";
 			this.#queueVirtualPush("BODY");
 			return true;
+		}
+
+		#consumeFullParserEofComment() {
+			if (
+				!this.is_full_parser ||
+				this.synthetic_eof_comment_consumed ||
+				!super.paused_at_incomplete_token()
+			) {
+				return false;
+			}
+
+			const span = this.#nativeCurrentSpan();
+			const searchStart = span === null ? 0 : span.start + span.length;
+			const commentStart = this.html.indexOf("<!--", searchStart);
+			if (commentStart === -1) {
+				return false;
+			}
+
+			this.synthetic_eof_comment_consumed = true;
+			this.current_synthetic_token = {
+				tokenType: "#comment",
+				tokenName: "#comment",
+				commentText: this.html.slice(commentStart + 4),
+			};
+			this.parser_state = STATE_COMMENT;
+			this.current_token_namespace = this.current_namespace;
+			this.breadcrumbs = [...this.open_elements, "#comment"];
+			return true;
+		}
+
+		#nativeCurrentSpan() {
+			return runtime.withOutPair((startPtr, lengthPtr) => {
+				if (!wasm.wp_html_api_rust_tag_processor_current_span(this.pointer, startPtr, lengthPtr)) {
+					return null;
+				}
+				return {
+					start: runtime.readU32(startPtr),
+					length: runtime.readU32(lengthPtr),
+				};
+			});
 		}
 
 		#queueEofVirtualClosers() {

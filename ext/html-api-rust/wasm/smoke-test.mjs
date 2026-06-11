@@ -532,6 +532,10 @@ for (const [html, expectedTree] of [
 		'<html>\n  <head>\n  <body>\n    "FOO"\n    <!--  BAR  -->\n    "BAZ"\n\n',
 	],
 	[
+		"FOO<!-- BAR --! >BAZ",
+		'<html>\n  <head>\n  <body>\n    "FOO"\n    <!--  BAR --! >BAZ -->\n\n',
+	],
+	[
 		"<frame>test",
 		'<html>\n  <head>\n  <body>\n    "test"\n\n',
 	],
