@@ -979,7 +979,7 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			if (this.is_tag_closer()) {
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
 				return false;
 			}
 
@@ -995,7 +995,7 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			if (this.is_tag_closer()) {
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
 				return [];
 			}
 
@@ -1275,6 +1275,11 @@ export function createHtmlApi(wasm) {
 		#currentTokenString() {
 			const token = this.#currentTokenBytes();
 			return token === null ? "" : textDecoder.decode(token);
+		}
+
+		#isRawTagCloser() {
+			const token = this.#currentTokenBytes();
+			return token !== null && token.length >= 2 && token[0] === 0x3c && token[1] === 0x2f;
 		}
 
 		#mutateCurrentToken(callback) {

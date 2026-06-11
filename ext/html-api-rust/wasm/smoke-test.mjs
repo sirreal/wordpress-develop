@@ -179,6 +179,13 @@ assert.equal(nonText.add_class("active"), false);
 assert.equal(nonText.get_updated_html(), "<div></div>");
 nonText.destroy();
 
+const tagProcessorBrEndTag = new WP_HTML_Tag_Processor("</br class=x>");
+assert.equal(tagProcessorBrEndTag.next_tag({ tag_name: "br", tag_closers: "visit" }), true);
+assert.equal(tagProcessorBrEndTag.is_tag_closer(), false);
+assert.equal(tagProcessorBrEndTag.has_class("x"), false);
+assert.deepEqual(tagProcessorBrEndTag.class_list(), []);
+tagProcessorBrEndTag.destroy();
+
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
 assert.equal(textarea.next_token(), true);
 assert.equal(textarea.get_modifiable_text(), "One");
@@ -1134,6 +1141,8 @@ const brEndTagProcessor = WP_HTML_Processor.create_fragment('</br id="an-opener"
 assert.equal(brEndTagProcessor.next_tag(), true);
 assert.equal(brEndTagProcessor.get_tag(), "BR");
 assert.equal(brEndTagProcessor.is_tag_closer(), false);
+assert.equal(brEndTagProcessor.has_class("html"), false);
+assert.deepEqual(brEndTagProcessor.class_list(), []);
 assert.equal(brEndTagProcessor.get_attribute_names_with_prefix(""), null);
 assert.deepEqual(brEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "BR"]);
 brEndTagProcessor.destroy();
