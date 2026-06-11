@@ -668,6 +668,67 @@ export class WP_HTML_Stack_Event {
 	}
 }
 
+export class WP_HTML_Active_Formatting_Elements {
+	#stack = [];
+
+	contains_node(token) {
+		for (const item of this.walk_up()) {
+			if (token.bookmark_name === item.bookmark_name) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	count() {
+		return this.#stack.length;
+	}
+
+	current_node() {
+		return this.#stack.at(-1) ?? null;
+	}
+
+	insert_marker() {
+		this.push(new WP_HTML_Token(null, "marker", false));
+	}
+
+	push(token) {
+		this.#stack.push(token);
+	}
+
+	remove_node(token) {
+		for (let i = this.#stack.length - 1; i >= 0; i -= 1) {
+			if (token.bookmark_name !== this.#stack[i].bookmark_name) {
+				continue;
+			}
+			this.#stack.splice(i, 1);
+			return true;
+		}
+		return false;
+	}
+
+	*walk_down() {
+		for (const item of this.#stack) {
+			yield item;
+		}
+	}
+
+	*walk_up() {
+		for (let i = this.#stack.length - 1; i >= 0; i -= 1) {
+			yield this.#stack[i];
+		}
+	}
+
+	clear_up_to_last_marker() {
+		while (this.#stack.length > 0) {
+			const item = this.#stack.pop();
+			if (item.node_name === "marker") {
+				break;
+			}
+		}
+	}
+}
+
 export class WP_HTML_Doctype_Info {
 	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
 		this.name = name;
@@ -4499,6 +4560,7 @@ export function createHtmlApi(wasm) {
 		WP_HTML_Attribute_Token,
 		WP_HTML_Token,
 		WP_HTML_Stack_Event,
+		WP_HTML_Active_Formatting_Elements,
 		WP_HTML_Tag_Processor,
 		WP_HTML_Processor,
 		WP_HTML_Doctype_Info,

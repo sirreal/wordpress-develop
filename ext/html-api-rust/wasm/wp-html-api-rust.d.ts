@@ -221,6 +221,24 @@ export interface WP_HTML_Stack_Event_Constructor {
 
 export const WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
 
+export interface WP_HTML_Active_Formatting_Elements {
+	contains_node(token: WP_HTML_Token): boolean;
+	count(): number;
+	current_node(): WP_HTML_Token | null;
+	insert_marker(): void;
+	push(token: WP_HTML_Token): void;
+	remove_node(token: WP_HTML_Token): boolean;
+	walk_down(): IterableIterator<WP_HTML_Token>;
+	walk_up(): IterableIterator<WP_HTML_Token>;
+	clear_up_to_last_marker(): void;
+}
+
+export interface WP_HTML_Active_Formatting_Elements_Constructor {
+	new (): WP_HTML_Active_Formatting_Elements;
+}
+
+export const WP_HTML_Active_Formatting_Elements: WP_HTML_Active_Formatting_Elements_Constructor;
+
 export interface WP_HTML_Tag_Processor {
 	parser_state: ParserState;
 	compat_mode: "no-quirks-mode" | "quirks-mode";
@@ -363,6 +381,7 @@ export interface HtmlApi {
 	WP_HTML_Attribute_Token: WP_HTML_Attribute_Token_Constructor;
 	WP_HTML_Token: WP_HTML_Token_Constructor;
 	WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
+	WP_HTML_Active_Formatting_Elements: WP_HTML_Active_Formatting_Elements_Constructor;
 	WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
 	WP_HTML_Tag_Processor: WP_HTML_Tag_Processor_Constructor;
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;

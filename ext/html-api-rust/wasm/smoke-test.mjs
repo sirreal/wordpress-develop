@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
 	loadWasm,
+	WP_HTML_Active_Formatting_Elements as Exported_WP_HTML_Active_Formatting_Elements,
 	WP_HTML_Attribute_Token as Exported_WP_HTML_Attribute_Token,
 	WP_HTML_Doctype_Info as Exported_WP_HTML_Doctype_Info,
 	WP_HTML_Span as Exported_WP_HTML_Span,
@@ -17,6 +18,7 @@ const {
 	WP_HTML_Attribute_Token,
 	WP_HTML_Token,
 	WP_HTML_Stack_Event,
+	WP_HTML_Active_Formatting_Elements,
 	WP_HTML_Doctype_Info,
 	WP_HTML_Tag_Processor,
 	WP_HTML_Processor,
@@ -32,6 +34,7 @@ assert.equal(Exported_WP_HTML_Span, WP_HTML_Span);
 assert.equal(Exported_WP_HTML_Text_Replacement, WP_HTML_Text_Replacement);
 assert.equal(Exported_WP_HTML_Attribute_Token, WP_HTML_Attribute_Token);
 assert.equal(Exported_WP_HTML_Stack_Event, WP_HTML_Stack_Event);
+assert.equal(Exported_WP_HTML_Active_Formatting_Elements, WP_HTML_Active_Formatting_Elements);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
 assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
 assert.equal(typeof WP_HTML_Span, "function");
@@ -39,6 +42,7 @@ assert.equal(typeof WP_HTML_Text_Replacement, "function");
 assert.equal(typeof WP_HTML_Attribute_Token, "function");
 assert.equal(typeof WP_HTML_Token, "function");
 assert.equal(typeof WP_HTML_Stack_Event, "function");
+assert.equal(typeof WP_HTML_Active_Formatting_Elements, "function");
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -133,6 +137,26 @@ assert.equal(stackEvent.provenance, "real");
 token.destroy();
 assert.equal(destroyedTokenBookmark, "mark");
 token.free();
+
+const activeFormattingElements = new WP_HTML_Active_Formatting_Elements();
+const activeEm = new WP_HTML_Token("em-bookmark", "EM", false);
+const activeStrong = new WP_HTML_Token("strong-bookmark", "STRONG", false);
+const activeAnchor = new WP_HTML_Token("anchor-bookmark", "A", false);
+activeFormattingElements.push(activeEm);
+activeFormattingElements.push(activeStrong);
+activeFormattingElements.push(activeAnchor);
+assert.equal(activeFormattingElements.count(), 3);
+assert.equal(activeFormattingElements.current_node(), activeAnchor);
+assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "STRONG", "A"]);
+assert.deepEqual([...activeFormattingElements.walk_up()].map(({ node_name }) => node_name), ["A", "STRONG", "EM"]);
+assert.equal(activeFormattingElements.contains_node(new WP_HTML_Token("strong-bookmark", "B", false)), true);
+assert.equal(activeFormattingElements.remove_node(new WP_HTML_Token("strong-bookmark", "B", false)), true);
+assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A"]);
+activeFormattingElements.insert_marker();
+activeFormattingElements.push(new WP_HTML_Token("after-marker", "B", false));
+assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A", "marker", "B"]);
+activeFormattingElements.clear_up_to_last_marker();
+assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A"]);
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
