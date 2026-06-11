@@ -2941,7 +2941,7 @@ export function createHtmlApi(wasm) {
 			if (
 				RUBY_IMPLIED_END_TAG_START_TAGS.has(tagName) &&
 				this.#hasOpenHtmlElement("RUBY") &&
-				this.#currentHtmlElementHasImpliedEndTag()
+				this.#currentHtmlElementHasRubyImpliedEndTagForStartTag(tagName)
 			) {
 				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
 				return true;
@@ -3376,7 +3376,7 @@ export function createHtmlApi(wasm) {
 				RUBY_IMPLIED_END_TAG_START_TAGS.has(tagName) &&
 				this.#hasOpenHtmlElement("RUBY")
 			) {
-				while (this.#currentHtmlElementHasImpliedEndTag()) {
+				while (this.#currentHtmlElementHasRubyImpliedEndTagForStartTag(tagName)) {
 					this.open_elements.pop();
 					this.open_element_namespaces.pop();
 				}
@@ -3401,6 +3401,23 @@ export function createHtmlApi(wasm) {
 				topIndex >= 0 &&
 				this.open_element_namespaces[topIndex] === "html" &&
 				IMPLIED_END_TAG_ELEMENTS.has(this.open_elements[topIndex])
+			);
+		}
+
+		#currentHtmlElementHasRubyImpliedEndTagForStartTag(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				!IMPLIED_END_TAG_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			return (
+				this.open_elements[topIndex] !== "RTC" ||
+				tagName === "RB" ||
+				tagName === "RTC"
 			);
 		}
 

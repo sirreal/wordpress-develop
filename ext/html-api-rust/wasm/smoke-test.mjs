@@ -788,6 +788,13 @@ assert.equal(rubyImpliedEndTagsProcessor.next_tag("rt"), true);
 assert.deepEqual(rubyImpliedEndTagsProcessor.get_breadcrumbs(), ["HTML", "BODY", "RUBY", "RT"]);
 rubyImpliedEndTagsProcessor.destroy();
 
+const rubyRtcChildrenProcessor = WP_HTML_Processor.create_full_parser("<html><ruby>a<rtc>b<rt>c<rt>d</ruby></html>");
+assert.equal(rubyRtcChildrenProcessor.next_tag("rt"), true);
+assert.deepEqual(rubyRtcChildrenProcessor.get_breadcrumbs(), ["HTML", "BODY", "RUBY", "RTC", "RT"]);
+assert.equal(rubyRtcChildrenProcessor.next_tag("rt"), true);
+assert.deepEqual(rubyRtcChildrenProcessor.get_breadcrumbs(), ["HTML", "BODY", "RUBY", "RTC", "RT"]);
+rubyRtcChildrenProcessor.destroy();
+
 const hrProcessor = WP_HTML_Processor.create_fragment("<p><hr>");
 assert.equal(hrProcessor.next_tag("hr"), true);
 assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
