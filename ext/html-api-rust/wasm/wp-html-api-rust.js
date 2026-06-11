@@ -314,6 +314,12 @@ const IMPLIED_END_TAG_ELEMENTS = new Set([
 	"RT",
 	"RTC",
 ]);
+const RUBY_IMPLIED_END_TAG_START_TAGS = new Set([
+	"RB",
+	"RP",
+	"RT",
+	"RTC",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -2932,6 +2938,15 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (
+				RUBY_IMPLIED_END_TAG_START_TAGS.has(tagName) &&
+				this.#hasOpenHtmlElement("RUBY") &&
+				this.#currentHtmlElementHasImpliedEndTag()
+			) {
+				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
+				return true;
+			}
+
 			if (tagName === "LI") {
 				const listItemIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				if (listItemIndex !== -1) {
@@ -3354,6 +3369,18 @@ export function createHtmlApi(wasm) {
 					(nodeName) => nodeName === "DD" || nodeName === "DT",
 					LIST_ITEM_SCOPE_BOUNDARIES,
 				);
+				return;
+			}
+
+			if (
+				RUBY_IMPLIED_END_TAG_START_TAGS.has(tagName) &&
+				this.#hasOpenHtmlElement("RUBY")
+			) {
+				while (this.#currentHtmlElementHasImpliedEndTag()) {
+					this.open_elements.pop();
+					this.open_element_namespaces.pop();
+				}
+				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			}
 		}
 
@@ -3365,6 +3392,15 @@ export function createHtmlApi(wasm) {
 			return (
 				P_CLOSING_START_TAGS.has(tagName) &&
 				(tagName !== "TABLE" || this.compat_mode !== WP_HTML_Tag_Processor.QUIRKS_MODE)
+			);
+		}
+
+		#currentHtmlElementHasImpliedEndTag() {
+			const topIndex = this.open_elements.length - 1;
+			return (
+				topIndex >= 0 &&
+				this.open_element_namespaces[topIndex] === "html" &&
+				IMPLIED_END_TAG_ELEMENTS.has(this.open_elements[topIndex])
 			);
 		}
 

@@ -783,6 +783,11 @@ assert.deepEqual(unexpectedListCloserProcessor.get_breadcrumbs(), ["HTML", "BODY
 assert.equal(unexpectedListCloserProcessor.get_attribute("target"), true);
 unexpectedListCloserProcessor.destroy();
 
+const rubyImpliedEndTagsProcessor = WP_HTML_Processor.create_full_parser("<html><ruby>a<rb>b<rt></ruby></html>");
+assert.equal(rubyImpliedEndTagsProcessor.next_tag("rt"), true);
+assert.deepEqual(rubyImpliedEndTagsProcessor.get_breadcrumbs(), ["HTML", "BODY", "RUBY", "RT"]);
+rubyImpliedEndTagsProcessor.destroy();
+
 const hrProcessor = WP_HTML_Processor.create_fragment("<p><hr>");
 assert.equal(hrProcessor.next_tag("hr"), true);
 assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
