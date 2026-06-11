@@ -1269,6 +1269,7 @@ impl TagProcessor {
         self.scratch.clear();
         let mut at = scan.name_start + scan.name_len;
         let mut end = scan.tag_end.saturating_sub(1);
+        let comparable_prefix = comparable_attribute_name(prefix);
 
         if scan.has_self_closing_flag {
             end = end.saturating_sub(1);
@@ -1294,15 +1295,12 @@ impl TagProcessor {
             }
 
             let name_end = at;
-            if starts_with_ignore_ascii_case(&self.html[name_start..name_end], prefix) {
+            let comparable_name = comparable_attribute_name(&self.html[name_start..name_end]);
+            if comparable_name.starts_with(&comparable_prefix) {
                 if !self.scratch.is_empty() {
                     self.scratch.push(0);
                 }
-                self.scratch.extend(
-                    self.html[name_start..name_end]
-                        .iter()
-                        .map(u8::to_ascii_lowercase),
-                );
+                self.scratch.extend(comparable_name);
             }
 
             while at < end && is_html_whitespace(self.html[at]) {
@@ -1338,6 +1336,7 @@ impl TagProcessor {
     fn find_attribute(&self, scan: TagScan, wanted_name: &[u8]) -> Option<AttributeSpan> {
         let mut at = scan.name_start + scan.name_len;
         let mut end = scan.tag_end.saturating_sub(1);
+        let comparable_wanted_name = comparable_attribute_name(wanted_name);
 
         if scan.has_self_closing_flag {
             end = end.saturating_sub(1);
@@ -1396,7 +1395,7 @@ impl TagProcessor {
                 full_end = at;
             }
 
-            if eq_ignore_ascii_case(&self.html[name_start..name_end], wanted_name) {
+            if comparable_attribute_name(&self.html[name_start..name_end]) == comparable_wanted_name {
                 return Some(AttributeSpan {
                     name_start,
                     full_end,
@@ -2225,6 +2224,20 @@ fn comparable_class_bytes(class_name: &[u8], quirks_mode: bool) -> Vec<u8> {
     }
 }
 
+fn comparable_attribute_name(name: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(name.len());
+
+    for &byte in name {
+        if byte == 0 {
+            output.extend_from_slice("\u{fffd}".as_bytes());
+        } else {
+            output.push(byte.to_ascii_lowercase());
+        }
+    }
+
+    output
+}
+
 fn ascii_lowercase_vec(value: &[u8]) -> Vec<u8> {
     value.iter().map(u8::to_ascii_lowercase).collect()
 }
@@ -2714,6 +2727,31 @@ mod tests {
         assert!(matches!(processor.get_attribute(b"b"), AttributeValue::Boolean));
         assert!(matches!(processor.get_attribute(b"c"), AttributeValue::String));
         assert_eq!(processor.scratch, b"test");
+    }
+
+    #[test]
+    fn tag_processor_normalizes_nulls_in_attribute_names() {
+        let mut processor = TagProcessor {
+            html: b"<img/\0id=5>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
+        });
+
+        assert!(processor.get_attribute_names_with_prefix(b""));
+        assert_eq!(processor.scratch, "\u{FFFD}id".as_bytes());
+        assert!(matches!(
+            processor.get_attribute("\u{FFFD}id".as_bytes()),
+            AttributeValue::String
+        ));
+        assert_eq!(processor.scratch, b"5");
     }
 
     #[test]
