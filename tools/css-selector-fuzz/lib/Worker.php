@@ -22,9 +22,15 @@ namespace CssSelectorFuzz;
  *                             from the reference matcher.
  *  - match-mismatch-tag:      WP_HTML_Tag_Processor::select() match set
  *                             differs from the reference matcher.
- *  - doing-it-wrong-unexpected: _doing_it_wrong fired for a selector that parsed.
- *  - doing-it-wrong-missing:  _doing_it_wrong did not fire ( or fired the wrong
- *                             number of times ) for an unparseable selector.
+ *  - doing-it-wrong-unexpected: the _doing_it_wrong calls during matching did
+ *                             not equal the expected set ( exactly one scrub
+ *                             notice for an invalid-UTF-8 selector, none
+ *                             otherwise ).
+ *  - doing-it-wrong-missing:  the _doing_it_wrong calls for an unparseable
+ *                             selector did not equal the expected set ( one
+ *                             select() notice per call, plus one leading
+ *                             scrub notice when the selector is invalid
+ *                             UTF-8 ).
  *  - select-on-null:          select() returned true for an unparseable selector.
  *  - processor-error:         the processor entered an error/unsupported state.
  *  - case-determinism:        running the full case twice gave different digests.
@@ -673,6 +679,33 @@ class Worker {
 	}
 
 	/**
+	 * Flushes the select() parse caches.
+	 *
+	 * Both select() implementations memoize the most recently parsed selector
+	 * string in a function-static cache, so whether a select() call re-parses
+	 * — and therefore whether parse-time notices ( the invalid-UTF-8 scrub
+	 * notice from from_selectors() ) fire — depends on what the worker
+	 * happened to parse before. Parsing a sentinel selector first makes the
+	 * next select() call for the case selector deterministic: it always
+	 * re-parses, so exactly one parse happens inside each notice-assertion
+	 * window regardless of worker history or case re-runs.
+	 */
+	private static function flush_select_parse_caches(): void {
+		( new \WP_HTML_Tag_Processor( '' ) )->select( '#-fuzz-cache-flush-' );
+		\WP_HTML_Processor::create_full_parser( '' )->select( '#-fuzz-cache-flush-' );
+	}
+
+	/**
+	 * The _doing_it_wrong() name under which from_selectors() reports that an
+	 * invalid-UTF-8 selector string was scrubbed to U+FFFD before parsing.
+	 *
+	 * @param string $target 'html' or 'tag'.
+	 */
+	private static function scrub_notice_name( string $target ): string {
+		return ( 'tag' === $target ? 'WP_CSS_Compound_Selector_List' : 'WP_CSS_Complex_Selector_List' ) . '::from_selectors';
+	}
+
+	/**
 	 * Runs a select() loop on a parseable selector and compares the match set
 	 * against the reference matcher.
 	 *
@@ -680,6 +713,7 @@ class Worker {
 	 * @return string[]|null The actual match set, or null when matching failed.
 	 */
 	private static function check_select_matches( string $target, string $selector_string, array $document, array $expected, callable $record ): ?array {
+		self::flush_select_parse_caches();
 		Bootstrap::reset_doing_it_wrong();
 
 		list( $actual, $error ) = self::collect_matches( $target, $selector_string, $document );
@@ -695,13 +729,28 @@ class Worker {
 			return null;
 		}
 
+		/*
+		 * A selector string containing invalid UTF-8 is scrubbed to U+FFFD by
+		 * from_selectors(), which reports the replacement with exactly one
+		 * notice on the (single, cache-flushed) parse. Anything else is
+		 * unexpected for a selector that parses.
+		 */
+		$expected_calls = \wp_is_valid_utf8( $selector_string )
+			? array()
+			: array(
+				array(
+					'function' => self::scrub_notice_name( $target ),
+				),
+			);
+
 		$doing_it_wrong = Bootstrap::doing_it_wrong_calls();
-		if ( array() !== $doing_it_wrong ) {
+		if ( ! self::notices_match( $expected_calls, $doing_it_wrong ) ) {
 			$record(
 				'doing-it-wrong-unexpected',
 				array(
-					'target' => $target,
-					'calls'  => $doing_it_wrong,
+					'target'        => $target,
+					'expectedCalls' => $expected_calls,
+					'calls'         => $doing_it_wrong,
 				)
 			);
 		}
@@ -754,7 +803,10 @@ class Worker {
 		 * matching semantics, while byte-level parsing (escapes, whitespace,
 		 * modifier case — lexbor e.g. rejects uppercase I/S modifiers) is
 		 * covered by the AST round-trip and metamorphic invariants. ASTs
-		 * containing invalid UTF-8 cannot be re-rendered and are skipped.
+		 * containing invalid UTF-8 cannot be re-rendered; since
+		 * from_selectors() scrubs input to U+FFFD before parsing, none should
+		 * exist and this skip is defensive ( a nonzero skipped-utf8 tally
+		 * indicates a normalization bypass ).
 		 */
 		if ( ! ast_strings_are_utf8( $complex_ast ) ) {
 			return 'skipped-utf8';
@@ -946,6 +998,7 @@ class Worker {
 	 * processor usable, and report misuse exactly once per call.
 	 */
 	private static function check_select_rejection( string $target, string $selector_string, array $document, callable $record ): void {
+		self::flush_select_parse_caches();
 		Bootstrap::reset_doing_it_wrong();
 
 		$context = ( $document['fragment'] ?? false ) ? $document['context'] : null;
@@ -986,17 +1039,54 @@ class Worker {
 			);
 		}
 
+		/*
+		 * Two select() calls report the unparseable selector once each; the
+		 * parse cache only skips re-parsing, never the per-call notice. An
+		 * invalid-UTF-8 selector additionally reports the U+FFFD scrub once,
+		 * on the first call ( the only one that parses after the flush ).
+		 */
+		$select_notice_name = ( 'tag' === $target ? 'WP_HTML_Tag_Processor' : 'WP_HTML_Processor' ) . '::select';
+		$expected_calls     = array(
+			array( 'function' => $select_notice_name ),
+			array( 'function' => $select_notice_name ),
+		);
+		if ( ! \wp_is_valid_utf8( $selector_string ) ) {
+			array_unshift( $expected_calls, array( 'function' => self::scrub_notice_name( $target ) ) );
+		}
+
 		$doing_it_wrong = Bootstrap::doing_it_wrong_calls();
-		if ( 2 !== count( $doing_it_wrong ) ) {
+		if ( ! self::notices_match( $expected_calls, $doing_it_wrong ) ) {
 			$record(
 				'doing-it-wrong-missing',
 				array(
 					'target'        => $target,
-					'expectedCalls' => 2,
+					'expectedCalls' => $expected_calls,
 					'calls'         => $doing_it_wrong,
 				)
 			);
 		}
+	}
+
+	/**
+	 * Compares recorded _doing_it_wrong() calls against expectations: same
+	 * count, in order, matching on every key the expectation specifies
+	 * ( recorded calls also carry 'message', which expectations omit ).
+	 *
+	 * @param array[] $expected_calls Expected calls, each a subset of record keys.
+	 * @param array[] $actual_calls   Recorded calls.
+	 */
+	private static function notices_match( array $expected_calls, array $actual_calls ): bool {
+		if ( count( $expected_calls ) !== count( $actual_calls ) ) {
+			return false;
+		}
+		foreach ( $expected_calls as $i => $expected_call ) {
+			foreach ( $expected_call as $key => $value ) {
+				if ( ( $actual_calls[ $i ][ $key ] ?? null ) !== $value ) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/*

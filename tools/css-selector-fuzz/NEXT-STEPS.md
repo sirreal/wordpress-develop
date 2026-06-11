@@ -61,20 +61,36 @@
 > `eof-truncated` edge-escape kind and the invalid corpus was reshuffled
 > along the new validity boundary; COVERAGE.md regenerated.
 >
-> **Escape decode of invalid UTF-8 bytes (recorded 2026-06-10, not fixed):**
-> `\` followed by an invalid UTF-8 byte decodes through `mb_substr()`'s
-> substitution character — `?` by default — instead of U+FFFD
-> (`consume_escaped_codepoint()`, identity-escape arm). Pre-existing,
-> byte-identical before/after the EOF fixes; flagged independently by both
-> review panels. Belongs to the open invalid-UTF-8 input policy decision
-> (handoff item 5): per spec, input preprocessing operates on decoded code
-> points, so byte-level decode errors should arguably become U+FFFD before
-> tokenization rather than leak `mb_substitute_character`. A red suite for
-> the fix is in place (2026-06-11): `wpCssSelectorParserMatcher.php` pins
-> `mb_substitute_character()` to a U+2603 canary in set_up()/tear_down(),
-> and its seven invalid-byte escape pins (plus a dedicated offset-overrun
-> test) assert the leak's damage — swallowed characters, offset past end
-> of input. Decoding to U+FFFD per maximal subpart flips every one.
+> **Invalid-UTF-8 input policy — IMPLEMENTED as scrub (2026-06-11):**
+> selector strings are UTF-8 text; `normalize_selector_input()` now decodes
+> the byte stream first via `wp_scrub_utf8()` (WP 6.9, maximal-subpart
+> U+FFFD replacement, matching the WHATWG decoder CSS Syntax §3.2 invokes),
+> and reports a `_doing_it_wrong()` (named `<class>::from_selectors`) when
+> the input changed. The `mb_substitute_character()` leak in
+> `consume_escaped_codepoint()` is gone structurally: the identity arm's
+> `mb_substr()` fallback is replaced by "consume the maximal subpart the
+> `_wp_scan_utf8()` scan already reported, return one U+FFFD" — reachable
+> only via direct `parse()` calls with un-normalized input, and consistent
+> with the scrub when it is. Decision history: reject (`wp_is_valid_utf8()`
+> → null) and raw passthrough were rejected after a three-persona
+> adversarial panel; scrub is the unique option stable under both the
+> current raw value getters and their likely scrubbed future. The U+2603
+> canary in `wpCssSelectorParserMatcher.php` set_up() is retained
+> permanently — its job inverted from documenting the leak to proving
+> setting-independence. Worker.php learned the notice contract (scrub
+> notice expected iff `!wp_is_valid_utf8(selector)`) and flushes the
+> `select()` parse caches before each notice-assertion window so the
+> once-per-parse notice is deterministic under case re-runs.
+> **Linked obligation:** the select-level pin
+> `test_select_scrubbed_selector_does_not_match_raw_invalid_document_bytes`
+> documents that scrubbed selectors cannot match raw invalid document
+> bytes; if the HTML API value getters (`get_attribute()`, `class_list()`,
+> …) are ever changed to scrub their return values, that case flips to a
+> match and the pin must be updated in the same change.
+> **Optional follow-up:** tightening the `parse()` prototype from public to
+> protected (the classes are `@access private`) would make un-normalized
+> input structurally impossible and let the defensive escape arm be
+> deleted.
 >
 > **HTML case-insensitive attribute value list — IMPLEMENTED (2026-06-10):**
 > per https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
@@ -128,12 +144,19 @@
 > the natural helper but passes `max_bytes = null`, making its ASCII
 > fast-path O(tail) per call — quadratic again. Escape pin coverage grew to
 > 14 cases (2/3/4-byte chars incl. at-EOF, NUL, each invalid-byte class).
+> (Superseded the same day for invalid bytes: the `mb_substr()` fallback and
+> its quadratic tail were removed by the scrub implementation — see the
+> invalid-UTF-8 policy entry above.)
 >
-> **Still open from the original follow-up list:** the invalid-UTF-8 input
-> policy (contract decision; see the escape-decode note above), plus the
-> tooling items in this file's hardening notes (self-check decoupling,
-> class-NUL injection, vacuous-assertion rate, quirks-mode single-oracle
-> gap).
+> **Still open from the original follow-up list:** the tooling items in
+> this file's hardening notes (self-check decoupling, class-NUL injection,
+> vacuous-assertion rate, quirks-mode single-oracle gap), plus deferred
+> fuzzer coverage for the scrub surface (dedicated invalid-UTF-8 generator
+> bucket with maximal-subpart AST expectations, raw-byte mutation class,
+> explicit lexbor invalid-byte probe — handoff drafted 2026-06-11; note
+> the chaos/mutated buckets already produce invalid-UTF-8 selectors
+> organically and lexbor agreed with the scrubbed results across a clean
+> 5000-seed run).
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` (trunk + merged `html-api/add-css-selector-parser`).

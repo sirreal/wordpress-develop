@@ -35,11 +35,11 @@ class Metamorph {
 	 */
 	public static function variants( array $list_ast, Prng $prng ): array {
 		/*
-		 * The WP parser passes raw bytes through: a selector that is not
-		 * valid UTF-8 yields AST names that are not valid UTF-8 (it does
-		 * not substitute U+FFFD). The renderer can only round-trip valid
-		 * UTF-8 names, so such ASTs (only reachable from chaos/mutated
-		 * inputs) are not transformable.
+		 * from_selectors() scrubs invalid UTF-8 to U+FFFD before parsing, so
+		 * parsed AST names are always valid UTF-8 and this guard should be
+		 * unreachable. It stays as defense in depth: the renderer can only
+		 * round-trip valid UTF-8 names, and a future AST source that skips
+		 * normalization would otherwise corrupt the variants silently.
 		 */
 		if ( ! ast_strings_are_utf8( $list_ast ) ) {
 			return array();
