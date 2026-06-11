@@ -90,6 +90,15 @@ const TABLE_CELL_BOUNDARY_START_TAGS = new Set([
 	"THEAD",
 	"TR",
 ]);
+const TABLE_ROW_BOUNDARY_START_TAGS = new Set([
+	"CAPTION",
+	"COL",
+	"COLGROUP",
+	"TBODY",
+	"TFOOT",
+	"THEAD",
+	"TR",
+]);
 
 const P_CLOSING_START_TAGS = new Set([
 	"ADDRESS",
@@ -1193,7 +1202,10 @@ export function createHtmlApi(wasm) {
 					this.pending_real_parser_state = null;
 				}
 				this.skip_current_token = false;
-				this.#updateTreeStateForCurrentToken(false);
+				this.#updateTreeStateForCurrentToken(true);
+				if (this.pending_real_token && this.virtual_tokens.length > 0) {
+					return this.#consumeVirtualToken();
+				}
 				return !this.skip_current_token;
 			}
 
@@ -1687,6 +1699,14 @@ export function createHtmlApi(wasm) {
 				const cellIndex = this.#findElementInTableScope((nodeName) => TABLE_CELL_ELEMENTS.has(nodeName));
 				if (cellIndex !== -1) {
 					this.#queueVirtualPopsFrom(cellIndex);
+					return true;
+				}
+			}
+
+			if (TABLE_ROW_BOUNDARY_START_TAGS.has(tagName)) {
+				const rowIndex = this.#findElementInTableScope("TR");
+				if (rowIndex !== -1) {
+					this.#queueVirtualPopsFrom(rowIndex);
 					return true;
 				}
 			}
