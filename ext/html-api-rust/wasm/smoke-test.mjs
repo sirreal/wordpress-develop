@@ -985,6 +985,56 @@ for (const [name, html, update, expectedHtml] of [
 	scriptTextUpdate.destroy();
 }
 
+const complexScriptEscaping = new WP_HTML_Tag_Processor("<script></script>\n<script></script>\n<hr>");
+assert.equal(complexScriptEscaping.next_tag("SCRIPT"), true);
+assert.equal(complexScriptEscaping.set_attribute("type", "importmap"), true);
+const importmapData = {
+	imports: {
+		[String.raw`</SCRIPT>\<!--\<script>`]: "./script",
+	},
+};
+complexScriptEscaping.set_modifiable_text(`\n${JSON.stringify(importmapData)}\n`);
+assert.deepEqual(JSON.parse(complexScriptEscaping.get_modifiable_text()), importmapData);
+assert.equal(complexScriptEscaping.next_tag("SCRIPT"), true);
+assert.equal(complexScriptEscaping.set_attribute("type", "module"), true);
+complexScriptEscaping.set_modifiable_text(String.raw`
+import '</SCRIPT>\\<!--\\<script>';
+`);
+assert.equal(
+	complexScriptEscaping.get_updated_html(),
+	String.raw`<script type="importmap">
+{"imports":{"</\u0053CRIPT>\\<!--\\<\u0073cript>":"./script"}}
+</script>
+<script type="module">
+import '</\u0053CRIPT>\\<!--\\<\u0073cript>';
+</script>
+<hr>`,
+);
+const complexScriptRoundTrip = new WP_HTML_Tag_Processor(complexScriptEscaping.get_updated_html());
+assert.equal(complexScriptRoundTrip.next_tag("SCRIPT"), true);
+assert.equal(complexScriptRoundTrip.get_attribute("type"), "importmap");
+assert.deepEqual(JSON.parse(complexScriptRoundTrip.get_modifiable_text()), importmapData);
+complexScriptRoundTrip.destroy();
+complexScriptEscaping.destroy();
+
+const jsonScriptEscaping = new WP_HTML_Tag_Processor('<script type="application/json"></script>');
+assert.equal(jsonScriptEscaping.next_tag("SCRIPT"), true);
+const jsonText = String.raw`"Escaped BS: \\; Escaped BS+LT: \\<; Unescaped LT: <; Script closer: </script>"`;
+const expectedDecodedJson = String.raw`Escaped BS: \; Escaped BS+LT: \<; Unescaped LT: <; Script closer: </script>`;
+assert.equal(JSON.parse(jsonText), expectedDecodedJson);
+assert.equal(jsonScriptEscaping.set_modifiable_text(`\n${jsonText}\n`), true);
+assert.equal(
+	jsonScriptEscaping.get_updated_html(),
+	String.raw`<script type="application/json">
+"Escaped BS: \\; Escaped BS+LT: \\<; Unescaped LT: <; Script closer: </\u0073cript>"
+</script>`,
+);
+const jsonScriptRoundTrip = new WP_HTML_Tag_Processor(jsonScriptEscaping.get_updated_html());
+assert.equal(jsonScriptRoundTrip.next_tag("SCRIPT"), true);
+assert.equal(JSON.parse(jsonScriptRoundTrip.get_modifiable_text()), expectedDecodedJson);
+jsonScriptRoundTrip.destroy();
+jsonScriptEscaping.destroy();
+
 for (const [html, expectedContentType] of [
 	["<script>one</script>", "javascript"],
 	['<script type="module">one</script>', "javascript"],
