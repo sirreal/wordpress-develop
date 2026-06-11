@@ -27,7 +27,7 @@ $oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 );
 $metadata = $oracle->metadata();
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $metadata['kind'] ?? null ), 'Expected Lexbor source oracle metadata.' );
-html_api_fuzz_lexbor_smoke_assert( '481c444261a132190a3fb746d6d2f60824af3717' === ( $metadata['lexborCommit'] ?? null ), 'Expected the pinned Lexbor commit in oracle metadata.' );
+html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['lexborCommit'] ?? null ) && 1 === preg_match( '/^[0-9a-f]{40}$/', $metadata['lexborCommit'] ), 'Expected the resolved Lexbor commit in oracle metadata.' );
 
 $limits = array(
 	'maxTokens' => 200,
@@ -93,7 +93,7 @@ html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOUR
 $worker_replay_372 = \HtmlApiFuzz\read_json_file( $work_dir . '/issue-372/replay.json' );
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $worker_replay_372['options']['domOracle'] ?? null ), 'Expected replay options to preserve the Lexbor source oracle kind.' );
 html_api_fuzz_lexbor_smoke_assert( $binary === ( $worker_replay_372['options']['lexborOracleBin'] ?? null ), 'Expected replay options to preserve the Lexbor source oracle binary.' );
-html_api_fuzz_lexbor_smoke_assert( '481c444261a132190a3fb746d6d2f60824af3717' === ( $worker_replay_372['oracle']['lexborCommit'] ?? null ), 'Expected replay metadata to preserve the Lexbor source commit.' );
+html_api_fuzz_lexbor_smoke_assert( ( $metadata['lexborCommit'] ?? null ) === ( $worker_replay_372['oracle']['lexborCommit'] ?? null ), 'Expected replay metadata to preserve the Lexbor source commit.' );
 
 $replay_dir = $work_dir . '/issue-372-replay';
 $proc = \HtmlApiFuzz\run_php_process(

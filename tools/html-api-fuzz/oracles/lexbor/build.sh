@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
-commit="${LEXBOR_COMMIT:-481c444261a132190a3fb746d6d2f60824af3717}"
+ref="${LEXBOR_COMMIT:-master}"
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repo_root="$(CDPATH= cd -- "$script_dir/../../../.." && pwd)"
-cache_dir="${LEXBOR_CACHE_DIR:-$repo_root/.cache/lexbor/$commit}"
+cache_dir="${LEXBOR_CACHE_DIR:-$repo_root/.cache/lexbor/$ref}"
 source_dir="${LEXBOR_SOURCE_DIR:-$cache_dir/source}"
 build_dir="${LEXBOR_BUILD_DIR:-$cache_dir/build}"
 install_dir="${LEXBOR_INSTALL_DIR:-$cache_dir/install}"
@@ -16,11 +16,14 @@ if [ ! -d "$source_dir/.git" ]; then
 	git clone https://github.com/lexbor/lexbor.git "$source_dir"
 fi
 
-current_commit="$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)"
-if [ "$current_commit" != "$commit" ]; then
-	git -C "$source_dir" fetch --tags origin
-	git -C "$source_dir" checkout "$commit"
+git -C "$source_dir" fetch --tags origin
+
+checkout_ref="$ref"
+if git -C "$source_dir" rev-parse --verify --quiet "origin/$ref^{commit}" >/dev/null; then
+	checkout_ref="origin/$ref"
 fi
+git -C "$source_dir" checkout --detach "$checkout_ref"
+commit="$(git -C "$source_dir" rev-parse HEAD)"
 
 cmake -S "$source_dir" -B "$build_dir" \
 	-DLEXBOR_BUILD_SHARED=OFF \
