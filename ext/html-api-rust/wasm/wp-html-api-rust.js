@@ -3075,7 +3075,7 @@ export function createHtmlApi(wasm) {
 			this.open_element_namespaces.push(this.current_token_namespace);
 			this.open_element_integration_node_types.push(currentTokenIntegrationNodeType);
 			if (this.current_token_namespace === "html" && tagName === "TEMPLATE") {
-				this.template_insertion_modes.push("in_body");
+				this.template_insertion_modes.push("in_template");
 			}
 			if (this.current_token_namespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingMarker();
@@ -3463,11 +3463,17 @@ export function createHtmlApi(wasm) {
 
 			const isCloser = tokenType === "#tag" && this.is_tag_closer();
 			if (this.#shouldIgnoreDocumentStartTagInTemplateContent(tokenType, tagName, isCloser)) {
+				if (this.#currentTemplateInsertionMode() === "in_template") {
+					this.#setCurrentTemplateInsertionMode("in_body");
+				}
 				this.skip_current_token = true;
 				return true;
 			}
 
 			if (this.#shouldIgnoreFrameStartTagInTemplateContent(tokenType, tagName, isCloser)) {
+				if (this.#currentTemplateInsertionMode() === "in_template") {
+					this.#setCurrentTemplateInsertionMode("in_body");
+				}
 				this.skip_current_token = true;
 				return true;
 			}
@@ -4050,6 +4056,31 @@ export function createHtmlApi(wasm) {
 			}
 
 			const mode = this.#currentTemplateInsertionMode();
+			if (mode === "in_template") {
+				if (TEMPLATE_TABLE_WRAPPER_START_TAGS.has(tagName)) {
+					this.#setCurrentTemplateInsertionMode("in_table");
+					return this.#applyTemplateInsertionModeForStartTag(tagName);
+				}
+
+				if (tagName === "COL") {
+					this.#setCurrentTemplateInsertionMode("in_column_group");
+					return this.#applyTemplateInsertionModeForStartTag(tagName);
+				}
+
+				if (tagName === "TR") {
+					this.#setCurrentTemplateInsertionMode("in_table_body");
+					return this.#applyTemplateInsertionModeForStartTag(tagName);
+				}
+
+				if (TABLE_CELL_ELEMENTS.has(tagName)) {
+					this.#setCurrentTemplateInsertionMode("in_row");
+					return this.#applyTemplateInsertionModeForStartTag(tagName);
+				}
+
+				this.#setCurrentTemplateInsertionMode("in_body");
+				return this.#applyTemplateInsertionModeForStartTag(tagName);
+			}
+
 			if (mode === "in_column_group") {
 				if (tagName === "COL") {
 					return false;
@@ -4119,20 +4150,9 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			if (!this.#currentHtmlElementIs("TEMPLATE")) {
-				if (tagName === "COL" || tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
-					this.#ignoreCurrentToken();
-					return true;
-				}
-				return false;
-			}
-
-			if (tagName === "COL") {
-				this.#setCurrentTemplateInsertionMode("in_column_group");
-			} else if (tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
-				this.#setCurrentTemplateInsertionMode("in_row");
-			} else if (TABLE_SECTION_ELEMENTS.has(tagName)) {
-				this.#setCurrentTemplateInsertionMode("in_table_body");
+			if (IN_BODY_IGNORED_START_TAGS.has(tagName)) {
+				this.#ignoreCurrentToken();
+				return true;
 			}
 
 			return false;
