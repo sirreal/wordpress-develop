@@ -25,7 +25,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 3 item 18: assert attribute no-amp identity in oracle mode.
 - [x] Tier 3 item 19: add tab, LF, and FF to the oracle-safe generator alphabet.
 - [x] Tier 3 item 20: assert reader reconstruction walks input without gaps or overlaps.
-- [ ] Tier 3 items 21-26.
+- [x] Tier 3 item 21: assert invalid numeric references decode to exactly U+FFFD.
+- [ ] Tier 3 items 22-26.
 - [ ] Cross-cutting concerns.
 
 ## Verification
@@ -130,6 +131,9 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the gapless reader-walk invariant.
 - 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-gapless-drop-span php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-gapless-fault-check` reported `reader-walk-not-gapless` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
 - 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding gapless reader-walk coverage.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the invalid numeric replacement invariant.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=numeric-invalid-not-replacement php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-invalid-numeric-fault-check` reported `numeric-invalid-not-replacement` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding invalid numeric replacement coverage.
 
 ## Review Log
 
@@ -213,3 +217,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Carson: APPROVE, gapless reader-walk invariant semantics and failure signature stability.
   - Herschel: APPROVE, span-drop fault target, smoke pipeline, and docs.
   - Bernoulli: APPROVE, integration/progress scope and commit boundaries.
+- Tier 3 item 21:
+  - Einstein: APPROVE, invalid numeric replacement invariant semantics and signature stability.
+  - Confucius: APPROVE, invalid numeric fault target, smoke pipeline, and docs.
+  - Aristotle: APPROVE, integration/progress scope and commit boundaries.

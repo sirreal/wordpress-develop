@@ -8,6 +8,7 @@ class Checks {
 	public const PREVIEW_BYTES = 64;
 	private const ATTRIBUTE_SEARCH_PREFIX_BYTES = 32;
 	private const MATCH_BYTE_LENGTH_SENTINEL = '__html_decoder_fuzz_match_length_unset__';
+	private const REPLACEMENT_CHARACTER = "\u{FFFD}";
 
 	private Oracles $oracles;
 
@@ -325,6 +326,25 @@ class Checks {
 			$walk_at      = $amp_at + $match_byte_length;
 
 			$reference = substr( $payload, $amp_at, $match_byte_length );
+			$invalid_numeric_reason = self::invalid_numeric_replacement_reason( $reference );
+			if ( null !== $invalid_numeric_reason && self::REPLACEMENT_CHARACTER !== $chunk ) {
+				$failures[] = self::failure(
+					'numeric-invalid-not-replacement',
+					$context,
+					array_merge(
+						array(
+							'context'               => $context,
+							'at'                    => $amp_at,
+							'reason'                => $invalid_numeric_reason,
+							'expected_base64'       => base64_encode( self::REPLACEMENT_CHARACTER ),
+							'got_base64'            => base64_encode( $chunk ),
+							'match_byte_length'     => $match_byte_length,
+						),
+						self::byte_detail( 'reference', $reference )
+					)
+				);
+			}
+
 			$local_match_byte_length = null;
 			try {
 				$local_chunk = ( $this->targets['read_character_reference'] )( $decoder_context, $reference, 0, $local_match_byte_length );
@@ -757,6 +777,37 @@ class Checks {
 	 */
 	private static function attribute_search_extensions(): array {
 		return array( "\x7F", 'x', 'A', '0', ':' );
+	}
+
+	private static function invalid_numeric_replacement_reason( string $reference ): ?string {
+		if ( 1 !== preg_match( '/^&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?$/', $reference, $match ) ) {
+			return null;
+		}
+
+		$is_hex             = '' !== ( $match[1] ?? '' );
+		$digits             = $is_hex ? $match[2] : $match[3];
+		$base               = $is_hex ? 16 : 10;
+		$max_digits         = $is_hex ? 6 : 7;
+		$significant_digits = substr( $digits, strspn( $digits, '0' ) );
+
+		if ( '' === $significant_digits ) {
+			return 'zero';
+		}
+
+		if ( strlen( $significant_digits ) > $max_digits ) {
+			return null;
+		}
+
+		$value = intval( $significant_digits, $base );
+		if ( $value >= 0xD800 && $value <= 0xDFFF ) {
+			return 'surrogate';
+		}
+
+		if ( $value > 0x10FFFF ) {
+			return 'above-unicode';
+		}
+
+		return null;
 	}
 
 	private static function byte_detail( string $name, string $bytes ): array {

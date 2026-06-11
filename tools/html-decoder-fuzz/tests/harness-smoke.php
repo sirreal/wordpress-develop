@@ -739,6 +739,9 @@ check( 'fault target reader-non-amp-match exposes non-amp reader matches', in_ar
 $seen = fault_run( $oracles, 'reader-gapless-drop-span', 'a&amp;b' );
 check( 'fault target reader-gapless-drop-span exposes non-gapless reader walks', in_array( 'reader-walk-not-gapless', $seen, true ), implode( ',', $seen ) );
 
+$seen = fault_run( $oracles, 'numeric-invalid-not-replacement', 'a&#0;b' );
+check( 'fault target numeric-invalid-not-replacement exposes invalid numeric replacements', in_array( 'numeric-invalid-not-replacement', $seen, true ), implode( ',', $seen ) );
+
 $seen = broken_run(
 	$oracles,
 	$real_targets,
@@ -2117,6 +2120,11 @@ $reader_fault_pipelines = array(
 		'fault'     => 'reader-gapless-drop-span',
 		'case'      => 0,
 		'signature' => 'reader-walk-not-gapless:text',
+	),
+	array(
+		'fault'     => 'numeric-invalid-not-replacement',
+		'case'      => 0,
+		'signature' => 'numeric-invalid-not-replacement:text',
 	),
 	array(
 		'fault'     => 'attribute-no-amp-identity',

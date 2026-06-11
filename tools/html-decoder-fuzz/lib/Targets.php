@@ -97,6 +97,16 @@ class Targets {
 				};
 				break;
 
+			case 'numeric-invalid-not-replacement':
+				$targets['read_character_reference'] = static function ( string $context, string $text, int $at, &$match_byte_length = null ): ?string {
+					$result = \WP_HTML_Decoder::read_character_reference( $context, $text, $at, $match_byte_length );
+					if ( null !== $result && is_int( $match_byte_length ) && self::is_invalid_numeric_replacement_reference( substr( $text, $at, $match_byte_length ) ) ) {
+						return '?';
+					}
+					return $result;
+				};
+				break;
+
 			case 'byte-no-amp-identity':
 				$targets['decode_text']      = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_text_node( $text ) );
 				$targets['decode_attribute'] = static fn( string $text ): string => str_replace( "\x00", '', \WP_HTML_Decoder::decode_attribute( $text ) );
@@ -167,5 +177,28 @@ class Targets {
 
 	private static function undo_c1_remap( string $decoded ): string {
 		return str_replace( "\u{20AC}", "\u{0080}", $decoded );
+	}
+
+	private static function is_invalid_numeric_replacement_reference( string $reference ): bool {
+		if ( 1 !== preg_match( '/^&#(?:([xX])([0-9A-Fa-f]+)|([0-9]+));?$/', $reference, $match ) ) {
+			return false;
+		}
+
+		$is_hex             = '' !== ( $match[1] ?? '' );
+		$digits             = $is_hex ? $match[2] : $match[3];
+		$base               = $is_hex ? 16 : 10;
+		$max_digits         = $is_hex ? 6 : 7;
+		$significant_digits = substr( $digits, strspn( $digits, '0' ) );
+
+		if ( '' === $significant_digits ) {
+			return true;
+		}
+
+		if ( strlen( $significant_digits ) > $max_digits ) {
+			return false;
+		}
+
+		$value = intval( $significant_digits, $base );
+		return ( $value >= 0xD800 && $value <= 0xDFFF ) || $value > 0x10FFFF;
 	}
 }
