@@ -326,6 +326,25 @@ assert.equal(tagProcessorBrEndTag.has_class("x"), false);
 assert.deepEqual(tagProcessorBrEndTag.class_list(), []);
 tagProcessorBrEndTag.destroy();
 
+const svgQualifiedNames = new WP_HTML_Tag_Processor('<foreignobject attributeName=1 xlink:href=2 viewbox=3>');
+assert.equal(svgQualifiedNames.change_parsing_namespace("svg"), true);
+assert.equal(svgQualifiedNames.next_tag("foreignobject"), true);
+assert.equal(svgQualifiedNames.get_namespace(), "svg");
+assert.equal(svgQualifiedNames.get_qualified_tag_name(), "foreignObject");
+assert.equal(svgQualifiedNames.get_qualified_attribute_name("attributeName"), "attributeName");
+assert.equal(svgQualifiedNames.get_qualified_attribute_name("xlink:href"), "xlink href");
+assert.equal(svgQualifiedNames.get_qualified_attribute_name("viewbox"), "viewBox");
+svgQualifiedNames.destroy();
+
+const mathQualifiedNames = new WP_HTML_Tag_Processor("<mi definitionurl=1 xlink:title=2>");
+assert.equal(mathQualifiedNames.change_parsing_namespace("math"), true);
+assert.equal(mathQualifiedNames.next_tag("mi"), true);
+assert.equal(mathQualifiedNames.get_namespace(), "math");
+assert.equal(mathQualifiedNames.get_qualified_tag_name(), "mi");
+assert.equal(mathQualifiedNames.get_qualified_attribute_name("definitionurl"), "definitionURL");
+assert.equal(mathQualifiedNames.get_qualified_attribute_name("xlink:title"), "xlink title");
+mathQualifiedNames.destroy();
+
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
 assert.equal(textarea.next_token(), true);
 assert.equal(textarea.get_modifiable_text(), "One");
@@ -542,6 +561,21 @@ assert.equal(imageNamespaceProcessor.get_namespace(), "svg");
 assert.equal(imageNamespaceProcessor.expects_closer(), false);
 assert.deepEqual(imageNamespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG", "IMAGE"]);
 imageNamespaceProcessor.destroy();
+
+const processorQualifiedNames = WP_HTML_Processor.create_fragment(
+	"<svg><foreignobject attributeName=1 xlink:href=2 viewbox=3><math><mi definitionurl=4 xlink:title=5></mi></math></foreignobject></svg>",
+);
+assert.equal(processorQualifiedNames.next_tag("foreignobject"), true);
+assert.equal(processorQualifiedNames.get_namespace(), "svg");
+assert.equal(processorQualifiedNames.get_qualified_tag_name(), "foreignObject");
+assert.equal(processorQualifiedNames.get_qualified_attribute_name("xlink:href"), "xlink href");
+assert.equal(processorQualifiedNames.get_qualified_attribute_name("viewbox"), "viewBox");
+assert.equal(processorQualifiedNames.next_tag("mi"), true);
+assert.equal(processorQualifiedNames.get_namespace(), "math");
+assert.equal(processorQualifiedNames.get_qualified_tag_name(), "mi");
+assert.equal(processorQualifiedNames.get_qualified_attribute_name("definitionurl"), "definitionURL");
+assert.equal(processorQualifiedNames.get_qualified_attribute_name("xlink:title"), "xlink title");
+processorQualifiedNames.destroy();
 
 assert.equal(WP_HTML_Processor.PROCESS_NEXT_NODE, "process-next-node");
 assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node");
