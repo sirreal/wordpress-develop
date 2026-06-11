@@ -91,6 +91,42 @@ assert.deepEqual(paragraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 assert.equal(paragraphProcessor.get_attribute("target"), true);
 paragraphProcessor.destroy();
 
+const articleProcessor = WP_HTML_Processor.create_fragment("<p><p><article target>");
+assert.equal(articleProcessor.next_tag("article"), true);
+assert.deepEqual(articleProcessor.get_breadcrumbs(), ["HTML", "BODY", "ARTICLE"]);
+assert.equal(articleProcessor.get_attribute("target"), true);
+articleProcessor.destroy();
+
+const buttonProcessor = WP_HTML_Processor.create_fragment("<div><button one><p><span><button two>Two</button></span></p></div><button three>");
+assert.equal(buttonProcessor.next_tag("button"), true);
+assert.deepEqual(buttonProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "BUTTON"]);
+assert.equal(buttonProcessor.get_attribute("one"), true);
+assert.equal(buttonProcessor.next_tag("button"), true);
+assert.deepEqual(buttonProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "BUTTON"]);
+assert.equal(buttonProcessor.get_attribute("two"), true);
+assert.equal(buttonProcessor.next_tag("button"), true);
+assert.deepEqual(buttonProcessor.get_breadcrumbs(), ["HTML", "BODY", "BUTTON"]);
+assert.equal(buttonProcessor.get_attribute("three"), true);
+buttonProcessor.destroy();
+
+const listBoundaryProcessor = WP_HTML_Processor.create_fragment("<li><li><blockquote><li target>");
+assert.equal(listBoundaryProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.deepEqual(listBoundaryProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI", "BLOCKQUOTE", "LI"]);
+assert.equal(listBoundaryProcessor.get_attribute("target"), true);
+listBoundaryProcessor.destroy();
+
+const listImpliedProcessor = WP_HTML_Processor.create_fragment("<li><li><div><li target>");
+assert.equal(listImpliedProcessor.next_tag({ tag_name: "li", match_offset: 3 }), true);
+assert.deepEqual(listImpliedProcessor.get_breadcrumbs(), ["HTML", "BODY", "LI"]);
+assert.equal(listImpliedProcessor.get_attribute("target"), true);
+listImpliedProcessor.destroy();
+
+const hrProcessor = WP_HTML_Processor.create_fragment("<p><hr>");
+assert.equal(hrProcessor.next_tag("hr"), true);
+assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
+assert.equal(hrProcessor.expects_closer(), false);
+hrProcessor.destroy();
+
 const svgProcessor = WP_HTML_Processor.create_fragment("<svg><image /><rect></rect></svg><p>");
 assert.equal(svgProcessor.next_tag("image"), true);
 assert.equal(svgProcessor.get_namespace(), "svg");

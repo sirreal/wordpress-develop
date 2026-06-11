@@ -78,6 +78,69 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 
 const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 
+const P_CLOSING_START_TAGS = new Set([
+	"ADDRESS",
+	"ARTICLE",
+	"ASIDE",
+	"BLOCKQUOTE",
+	"CENTER",
+	"DETAILS",
+	"DIALOG",
+	"DIR",
+	"DIV",
+	"DL",
+	"FIELDSET",
+	"FIGCAPTION",
+	"FIGURE",
+	"FOOTER",
+	"HEADER",
+	"HGROUP",
+	"HR",
+	"MAIN",
+	"MENU",
+	"NAV",
+	"OL",
+	"P",
+	"PRE",
+	"SEARCH",
+	"SECTION",
+	"SUMMARY",
+	"TABLE",
+	"UL",
+	...HEADING_ELEMENTS,
+]);
+
+const BUTTON_SCOPE_BOUNDARIES = new Set([
+	"APPLET",
+	"BUTTON",
+	"CAPTION",
+	"HTML",
+	"MARQUEE",
+	"OBJECT",
+	"TABLE",
+	"TD",
+	"TEMPLATE",
+	"TH",
+]);
+
+const LIST_ITEM_SCOPE_BOUNDARIES = new Set([
+	"ADDRESS",
+	"APPLET",
+	"BLOCKQUOTE",
+	"BUTTON",
+	"CAPTION",
+	"FIELDSET",
+	"HTML",
+	"MARQUEE",
+	"OBJECT",
+	"OL",
+	"TABLE",
+	"TD",
+	"TEMPLATE",
+	"TH",
+	"UL",
+]);
+
 const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
 	"+//silmaril//dtd html pro v0r11 19970101//",
 	"-//as//dtd html 3.0 aswedit + extensions//",
@@ -1106,9 +1169,12 @@ export function createHtmlApi(wasm) {
 		}
 
 		#applySimpleHtmlSemanticClosures(tagName) {
-			if (tagName === "P") {
-				this.#popLastMatching("P");
-				return;
+			if (P_CLOSING_START_TAGS.has(tagName)) {
+				this.#closePInButtonScope();
+			}
+
+			if (tagName === "BUTTON") {
+				this.#popLastMatchingBeforeBoundary("BUTTON", BUTTON_SCOPE_BOUNDARIES);
 			}
 
 			if (HEADING_ELEMENTS.has(tagName)) {
@@ -1117,13 +1183,38 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tagName === "LI") {
-				this.#popLastMatching("LI");
+				this.#popLastMatchingBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				return;
 			}
 
 			if (tagName === "DD" || tagName === "DT") {
-				this.#popLastMatching((nodeName) => nodeName === "DD" || nodeName === "DT");
+				this.#popLastMatchingBeforeBoundary(
+					(nodeName) => nodeName === "DD" || nodeName === "DT",
+					LIST_ITEM_SCOPE_BOUNDARIES,
+				);
 			}
+		}
+
+		#closePInButtonScope() {
+			return this.#popLastMatchingBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+		}
+
+		#popLastMatchingBeforeBoundary(match, boundaries) {
+			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				const nodeName = this.open_elements[i];
+				if (predicate(nodeName)) {
+					this.open_elements = this.open_elements.slice(0, i);
+					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
+					this.#setCurrentNamespace(this.#namespaceForStackTop());
+					return true;
+				}
+
+				if (boundaries.has(nodeName)) {
+					return false;
+				}
+			}
+			return false;
 		}
 
 		#popLastMatching(match) {
