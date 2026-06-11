@@ -19,14 +19,23 @@ export interface ScanNextTagResult {
 	token_type: number;
 }
 
-export interface NextTagQuery {
+export interface NextTagBaseQuery {
 	tag_name?: string | null;
 	class_name?: string | null;
 	tag_closers?: "visit" | "skip";
 	visit_closers?: boolean;
+}
+
+export interface TagNextTagQuery extends NextTagBaseQuery {
+	match_offset?: number | null;
+}
+
+export interface ProcessorNextTagQuery extends NextTagBaseQuery {
 	match_offset?: number | string | boolean | null;
 	breadcrumbs?: string[];
 }
+
+export type NextTagQuery = ProcessorNextTagQuery;
 
 export type CommentType =
 	| "COMMENT_AS_ABRUPTLY_CLOSED_COMMENT"
@@ -89,7 +98,7 @@ export interface WP_HTML_Tag_Processor {
 	text_node_classification: TextNodeClassification;
 	destroy(): void;
 	free(): void;
-	next_tag(query?: string | NextTagQuery | null): boolean;
+	next_tag(query?: string | TagNextTagQuery | null): boolean;
 	next_token(): boolean;
 	get_tag(): string | null;
 	get_attribute(name: string): string | true | null;
@@ -182,7 +191,7 @@ export interface WP_HTML_Processor_Options {
 }
 
 export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
-	next_tag(query?: string | NextTagQuery | null): boolean;
+	next_tag(query?: string | ProcessorNextTagQuery | null): boolean;
 	next_token(): boolean;
 	step(nodeToProcess?: ProcessorStepMode): boolean;
 	get_last_error(): string | null;

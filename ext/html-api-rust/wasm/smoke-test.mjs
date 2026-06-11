@@ -98,6 +98,11 @@ assert.deepEqual(tags.class_list(), ["active"]);
 assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" data-id="8">Hi</span></div>');
 tags.destroy();
 
+const tagMatchOffset = new WP_HTML_Tag_Processor("<div one></div><div two></div>");
+assert.equal(tagMatchOffset.next_tag({ tag_name: "div", match_offset: 2 }), true);
+assert.equal(tagMatchOffset.get_attribute("two"), true);
+tagMatchOffset.destroy();
+
 for (const invalidHtml of [null, 123]) {
 	const invalidTags = new WP_HTML_Tag_Processor(invalidHtml);
 	assert.equal(invalidTags.get_updated_html(), "");
