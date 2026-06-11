@@ -5342,8 +5342,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|null Name of the matched token.
 	 */
 	public function get_token_name(): ?string {
-		return $this->is_virtual()
-			? $this->current_element->token->node_name
+		if ( $this->is_virtual() ) {
+			return $this->current_element->token->node_name;
+		}
+
+		return '#tag' === parent::get_token_type()
+			? $this->get_tag()
 			: parent::get_token_name();
 	}
 
