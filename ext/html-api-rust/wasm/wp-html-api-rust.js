@@ -3720,7 +3720,7 @@ export function createHtmlApi(wasm) {
 
 						if (tokenType === "#text" && !isWhitespaceText && !isNullText) {
 							this.frameset_ok = false;
-						} else if (tokenType === "#tag" && !isCloser) {
+						} else if (tokenType === "#tag" && !isCloser && !this.#isHiddenInputStartTag(tagName)) {
 							this.frameset_ok = false;
 						}
 
@@ -4411,6 +4411,15 @@ export function createHtmlApi(wasm) {
 					this.get_attribute("size") !== null
 				)
 			);
+		}
+
+		#isHiddenInputStartTag(tagName) {
+			if (tagName !== "INPUT") {
+				return false;
+			}
+
+			const typeAttribute = this.get_attribute("type");
+			return typeof typeAttribute === "string" && typeAttribute.toLowerCase() === "hidden";
 		}
 
 		#firstForeignElementToPopForHtmlBreakout() {
