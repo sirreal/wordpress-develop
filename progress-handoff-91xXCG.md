@@ -14,7 +14,8 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - [x] Tier 2 item 7: add exhaustive deterministic name sweep lane.
 - [x] Tier 2 item 8: add edit-distance-1 lookalike generation.
 - [x] Tier 2 item 9: add full follower-byte sweep after legacy names.
-- [ ] Tier 2 items 10-15.
+- [x] Tier 2 item 10: add prefix-family stress generation.
+- [ ] Tier 2 items 11-15.
 - [ ] Tier 3 items 16-26.
 - [ ] Cross-cutting concerns.
 
@@ -71,6 +72,9 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
 - 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, `tests/harness-smoke.php`, `class-wp-html-decoder.php`, and `wpHtmlDecoder.php` after adding the legacy-follower sweep and ASCII-only ambiguous follower fix.
 - 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode legacy-followers --seed 1 --case 124` initially reproduced a real attribute decode mismatch for `&Aacute\xC2\x80`; after replacing locale-sensitive `ctype_alnum()` with ASCII byte checks, the replay passed.
 - 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php`, `php tools/html-decoder-fuzz/worker.php --mode legacy-followers --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode legacy-followers --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-legacy-followers-check-fixed`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, and `tests/harness-smoke.php` after adding the prefix-family sweep mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting prefix-family full-period mapping over the exact expected reference set, reference splits, and ambiguous followers plus worker, runner, replay, seed-replay fault, and failure-manifest fault-pipeline coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode prefix-families --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-prefix-families-runner-check`, `php tools/html-decoder-fuzz/replay.php --mode prefix-families --seed 1 --case 37`, `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --start-case 37 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-prefix-families-fault-check`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
 
 ## Review Log
 
@@ -110,3 +114,7 @@ Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG
   - Chandrasekhar: APPROVE, `legacy-followers` generator/mode semantics and deterministic sharding.
   - Linnaeus: APPROVE, ASCII-only ambiguous follower decoder fix and PHPUnit coverage.
   - Leibniz: APPROVE, smoke/integration coverage for full-period sweep, runner windows, and fault pipeline.
+- Tier 2 item 10:
+  - Gauss: APPROVE, prefix-family generator semantics after exact reference-set and replay smoke tightening.
+  - Peirce: APPROVE, CLI/worker/replay/runner integration and oracle-backed deterministic sharding.
+  - Noether: APPROVE, smoke coverage after requested exact reference and seed/case replay checks.

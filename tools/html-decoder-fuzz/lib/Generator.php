@@ -163,6 +163,26 @@ class Generator {
 		return count( $this->legacy_names ) * count( self::legacy_follower_sweep_followers() );
 	}
 
+	/**
+	 * @return array{context: string, strategy: string, payload: string}
+	 */
+	public function generate_prefix_family_sweep( int $case_index ): array {
+		$cases      = $this->prefix_family_sweep_cases();
+		$case_index = max( 0, $case_index ) % count( $cases );
+		$case       = $cases[ $case_index ];
+		$prefix     = substr( $case['reference'], 0, $case['split'] );
+
+		return array(
+			'context'  => 'both',
+			'strategy' => 'prefix-family-sweep',
+			'payload'  => self::trim_to_safe_max( $prefix . $case['follower'], $this->max_bytes ),
+		);
+	}
+
+	public function prefix_family_sweep_period(): int {
+		return count( $this->prefix_family_sweep_cases() );
+	}
+
 	public static function is_oracle_safe_payload( string $payload ): bool {
 		return (
 			mb_check_encoding( $payload, 'UTF-8' ) &&
@@ -584,6 +604,59 @@ class Generator {
 
 		$followers = array_values( array_unique( $followers ) );
 		return $followers;
+	}
+
+	/**
+	 * @return array<int, array{reference: string, split: int, follower: string}>
+	 */
+	private function prefix_family_sweep_cases(): array {
+		$name_set = $this->name_sweep_base_name_set();
+		$cases    = array();
+
+		foreach ( self::prefix_family_sweep_references() as $reference ) {
+			$base = rtrim( $reference, ';' );
+			if ( ! isset( $name_set[ $base ] ) ) {
+				continue;
+			}
+
+			$full_reference = '&' . $reference;
+			for ( $split = 1; $split < strlen( $full_reference ); $split++ ) {
+				foreach ( self::prefix_family_sweep_followers() as $follower ) {
+					$cases[] = array(
+						'reference' => $full_reference,
+						'split'     => $split,
+						'follower'  => $follower,
+					);
+				}
+			}
+		}
+
+		return $cases;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function prefix_family_sweep_references(): array {
+		return array(
+			'not',
+			'not;',
+			'notin;',
+			'notinva;',
+			'ngt;',
+			'nGt;',
+			'nGtv;',
+			'nge;',
+			'ngeq;',
+			'ngeqq;',
+		);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function prefix_family_sweep_followers(): array {
+		return array( '', 'x', 'X', '0', '=', "\u{00E9}" );
 	}
 
 	private function numeric_reference( bool $allow_missing_digits = false ): string {

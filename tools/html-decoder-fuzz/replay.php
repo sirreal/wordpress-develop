@@ -73,6 +73,8 @@ if ( '' !== $options['failure'] ) {
 		$generated = $generator->generate_name_sweep( $options['case'] );
 	} elseif ( 'legacy-followers' === $mode ) {
 		$generated = $generator->generate_legacy_follower_sweep( $options['case'] );
+	} elseif ( 'prefix-families' === $mode ) {
+		$generated = $generator->generate_prefix_family_sweep( $options['case'] );
 	} else {
 		$generated = $generator->generate();
 	}

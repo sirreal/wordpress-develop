@@ -112,6 +112,10 @@ follower class; the same payload still runs in both text and attribute contexts.
 name followed by each oracle-safe ASCII byte, plus valid UTF-8 sequences
 covering multibyte lead and continuation byte values.
 
+`prefix-families` mode deterministically sweeps known named-reference prefix
+families such as `&not`/`&notin;`/`&notinva;` and `&nGt;`/`&ngt;`, truncating
+each reference at every byte split and appending ambiguous followers.
+
 ## Common Commands
 
 Run the smoke test:
@@ -142,6 +146,12 @@ Run one deterministic legacy-follower sweep batch:
 
 ```sh
 php tools/html-decoder-fuzz/worker.php --mode legacy-followers --seed 1 --cases 5000
+```
+
+Run one deterministic prefix-family sweep batch:
+
+```sh
+php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --cases 5000
 ```
 
 Run parallel lanes for one minute:

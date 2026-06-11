@@ -342,6 +342,59 @@ function legacy_follower_sweep_followers(): array {
 }
 
 /**
+ * @return string[]
+ */
+function prefix_family_sweep_references(): array {
+	return array(
+		'not',
+		'not;',
+		'notin;',
+		'notinva;',
+		'ngt;',
+		'nGt;',
+		'nGtv;',
+		'nge;',
+		'ngeq;',
+		'ngeqq;',
+	);
+}
+
+/**
+ * @return string[]
+ */
+function prefix_family_sweep_followers(): array {
+	return array( '', 'x', 'X', '0', '=', "\u{00E9}" );
+}
+
+/**
+ * @param string[] $base_names
+ * @return array<int, array{reference: string, split: int, follower: string}>
+ */
+function prefix_family_sweep_cases( array $base_names ): array {
+	$base_set = array_fill_keys( $base_names, true );
+	$cases    = array();
+
+	foreach ( prefix_family_sweep_references() as $reference ) {
+		if ( ! isset( $base_set[ rtrim( $reference, ';' ) ] ) ) {
+			continue;
+		}
+
+		$full_reference = '&' . $reference;
+		for ( $split = 1; $split < strlen( $full_reference ); $split++ ) {
+			foreach ( prefix_family_sweep_followers() as $follower ) {
+				$cases[] = array(
+					'reference' => $full_reference,
+					'split'     => $split,
+					'follower'  => $follower,
+				);
+			}
+		}
+	}
+
+	return $cases;
+}
+
+/**
  * @param string[] $base_names
  * @return array{base_set: array<string, true>, delete: array<string, true>, substitution: array<int, array<string, true>>, transpose: array<string, true>}
  */
@@ -697,6 +750,54 @@ check( 'legacy-follower covers every oracle-safe ASCII follower byte', array() =
 check( 'legacy-follower covers valid UTF-8 lead bytes', array() === array_diff( range( 0xC2, 0xF4 ), array_keys( $legacy_utf8_leads ) ), implode( ',', array_map( static fn( int $byte ): string => dechex( $byte ), array_keys( $legacy_utf8_leads ) ) ) );
 check( 'legacy-follower covers UTF-8 continuation bytes', array() === array_diff( range( 0x80, 0xBF ), array_keys( $legacy_utf8_continuations ) ), implode( ',', array_map( static fn( int $byte ): string => dechex( $byte ), array_keys( $legacy_utf8_continuations ) ) ) );
 
+$prefix_family_generator = new Generator( new Prng( 'prefix-family-sweep' ), 4096, $names );
+$prefix_family_cases = prefix_family_sweep_cases( $name_sweep_base_names );
+$prefix_family_mismatch = '';
+$prefix_family_contexts = array();
+$prefix_family_strategies = array();
+$prefix_family_unsafe = 0;
+$prefix_family_references = array();
+$prefix_family_split_keys = array();
+$prefix_family_followers = array();
+for ( $i = 0; $i < count( $prefix_family_cases ); $i++ ) {
+	$generated = $prefix_family_generator->generate_prefix_family_sweep( $i );
+	$case      = $prefix_family_cases[ $i ];
+	$expected  = substr( $case['reference'], 0, $case['split'] ) . $case['follower'];
+
+	$prefix_family_contexts[ $generated['context'] ] = true;
+	$prefix_family_strategies[ $generated['strategy'] ] = true;
+	$prefix_family_references[ $case['reference'] ] = true;
+	$prefix_family_split_keys[ $case['reference'] . ':' . $case['split'] ] = true;
+	$prefix_family_followers[ $case['follower'] ] = true;
+	if ( ! Generator::is_oracle_safe_payload( $generated['payload'] ) ) {
+		++$prefix_family_unsafe;
+	}
+	if ( '' === $prefix_family_mismatch && $expected !== $generated['payload'] ) {
+		$prefix_family_mismatch = "case {$i}: expected " . bin2hex( $expected ) . ' got ' . bin2hex( $generated['payload'] );
+	}
+}
+$expected_prefix_split_count = 0;
+foreach ( array_keys( $prefix_family_references ) as $reference ) {
+	$expected_prefix_split_count += strlen( $reference ) - 1;
+}
+check(
+	'prefix-family period covers every reference split and follower',
+	$prefix_family_generator->prefix_family_sweep_period() === count( $prefix_family_cases ) &&
+		array() === array_diff(
+			array_map( static fn( string $reference ): string => '&' . $reference, prefix_family_sweep_references() ),
+			array_keys( $prefix_family_references )
+		) &&
+		count( $prefix_family_references ) === count( prefix_family_sweep_references() ) &&
+		count( $prefix_family_split_keys ) === $expected_prefix_split_count &&
+		count( $prefix_family_followers ) === count( prefix_family_sweep_followers() ),
+	(string) count( $prefix_family_cases ) . ' ' . implode( ',', array_keys( $prefix_family_references ) )
+);
+check( 'prefix-family generator maps cases deterministically', '' === $prefix_family_mismatch, $prefix_family_mismatch );
+check( 'prefix-family cases run both contexts', array( 'both' ) === array_keys( $prefix_family_contexts ), implode( ',', array_keys( $prefix_family_contexts ) ) );
+check( 'prefix-family uses one strategy label', array( 'prefix-family-sweep' ) === array_keys( $prefix_family_strategies ), implode( ',', array_keys( $prefix_family_strategies ) ) );
+check( 'prefix-family payloads are oracle-safe', 0 === $prefix_family_unsafe, (string) $prefix_family_unsafe );
+check( 'prefix-family covers expected ambiguous followers', array() === array_diff( prefix_family_sweep_followers(), array_keys( $prefix_family_followers ) ), implode( ',', array_keys( $prefix_family_followers ) ) );
+
 $lookalike_indexes    = lookalike_mutation_indexes( $name_sweep_base_names );
 $lookalike_candidates = array();
 for ( $i = 0; $i < 6000; $i++ ) {
@@ -943,6 +1044,13 @@ check(
 	$legacy_follower_worker['stdout'] . $legacy_follower_worker['stderr']
 );
 
+$prefix_family_worker = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--mode', 'prefix-families', '--seed', '1', '--cases', '300', '--progress-every', '300' ) );
+check(
+	'300-case prefix-family worker clean',
+	0 === $prefix_family_worker['code'] && str_contains( $prefix_family_worker['stdout'], '"prefix-family-sweep":300' ),
+	$prefix_family_worker['stdout'] . $prefix_family_worker['stderr']
+);
+
 $byte_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-byte-runner-' . getmypid();
 remove_tree( $byte_runner_dir );
 $byte_runner = run_process(
@@ -1059,11 +1167,67 @@ check(
 );
 remove_tree( $legacy_runner_dir );
 
+$prefix_runner_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-prefix-family-runner-' . getmypid();
+remove_tree( $prefix_runner_dir );
+$prefix_runner = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../runner.php',
+		'--mode',
+		'prefix-families',
+		'--lanes',
+		'2',
+		'--duration-seconds',
+		'0',
+		'--max-cases',
+		'200',
+		'--cases-per-batch',
+		'100',
+		'--summary-mode',
+		'all',
+		'--output-dir',
+		$prefix_runner_dir,
+	)
+);
+$prefix_runner_state = is_file( $prefix_runner_dir . '/state.json' )
+	? json_decode( (string) file_get_contents( $prefix_runner_dir . '/state.json' ), true )
+	: array();
+check(
+	'prefix-family runner clean',
+	0 === $prefix_runner['code'] &&
+		( $prefix_runner_state['cases'] ?? 0 ) >= 200 &&
+		( $prefix_runner_state['cases'] ?? null ) === ( $prefix_runner_state['by_strategy']['prefix-family-sweep'] ?? null ) &&
+		( $prefix_runner_state['cases'] ?? null ) === ( $prefix_runner_state['by_context']['both'] ?? null ),
+	$prefix_runner['stdout'] . $prefix_runner['stderr'] . json_encode( $prefix_runner_state )
+);
+$prefix_runner_windows = summary_start_windows( $prefix_runner_dir, 'prefix-families' );
+check(
+	'prefix-family runner uses distinct start-case windows',
+	start_windows_are_distinct( $prefix_runner_windows, 100 ),
+	json_encode( $prefix_runner_windows )
+);
+remove_tree( $prefix_runner_dir );
+
 $name_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'names', '--seed', '1', '--case', '0' ) );
 check( 'name-sweep replay regenerates clean case', 0 === $name_replay['code'], $name_replay['stdout'] . $name_replay['stderr'] );
 
 $legacy_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'legacy-followers', '--seed', '1', '--case', '0' ) );
 check( 'legacy-follower replay regenerates clean case', 0 === $legacy_replay['code'], $legacy_replay['stdout'] . $legacy_replay['stderr'] );
+
+$prefix_replay = run_process( array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'prefix-families', '--seed', '1', '--case', '37' ) );
+check(
+	'prefix-family replay regenerates clean case',
+	0 === $prefix_replay['code'] &&
+		str_contains( $prefix_replay['stdout'], 'mode prefix-families, strategy prefix-family-sweep' ) &&
+		str_contains( $prefix_replay['stdout'], 'Hex preview: 266e6f7478' ),
+	$prefix_replay['stdout'] . $prefix_replay['stderr']
+);
+
+$prefix_fault_seed_replay = run_process(
+	array( PHP_BINARY, __DIR__ . '/../replay.php', '--mode', 'prefix-families', '--seed', '1', '--case', '37' ),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+);
+check( 'faulted prefix-family seed replay reproduces generated case', 1 === $prefix_fault_seed_replay['code'], $prefix_fault_seed_replay['stdout'] . $prefix_fault_seed_replay['stderr'] );
 
 $name_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-name-fault-' . getmypid();
 remove_tree( $name_pipeline_dir );
@@ -1167,6 +1331,58 @@ if ( null !== $legacy_failure_file ) {
 	check( 'faulted legacy-follower minimizer preserves signature', 0 === $legacy_fault_minimize['code'], $legacy_fault_minimize['stdout'] . $legacy_fault_minimize['stderr'] );
 }
 remove_tree( $legacy_pipeline_dir );
+
+$prefix_pipeline_dir = sys_get_temp_dir() . '/html-decoder-fuzz-smoke-prefix-family-fault-' . getmypid();
+remove_tree( $prefix_pipeline_dir );
+$faulted_prefix_worker = run_process(
+	array(
+		PHP_BINARY,
+		__DIR__ . '/../worker.php',
+		'--mode',
+		'prefix-families',
+		'--seed',
+		'1',
+		'--start-case',
+		'37',
+		'--cases',
+		'1',
+		'--output-dir',
+		$prefix_pipeline_dir,
+		'--progress-every',
+		'1',
+	),
+	array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+);
+check( 'faulted prefix-family worker reports findings', 1 === $faulted_prefix_worker['code'], $faulted_prefix_worker['stdout'] . $faulted_prefix_worker['stderr'] );
+
+$prefix_failure_files = glob( $prefix_pipeline_dir . '/failure-*/failure.json' );
+check( 'faulted prefix-family worker writes failure artifact', is_array( $prefix_failure_files ) && array() !== $prefix_failure_files );
+
+$prefix_failure_file = is_array( $prefix_failure_files ) && array() !== $prefix_failure_files ? $prefix_failure_files[0] : null;
+if ( null !== $prefix_failure_file ) {
+	$prefix_manifest = json_decode( (string) file_get_contents( $prefix_failure_file ), true );
+	check(
+		'prefix-family failure artifact records mode and signature',
+		'prefix-families' === ( $prefix_manifest['mode'] ?? null ) &&
+			'prefix-family-sweep' === ( $prefix_manifest['strategy'] ?? null ) &&
+			37 === ( $prefix_manifest['case'] ?? null ) &&
+			in_array( 'decode-mismatch:attribute', $prefix_manifest['signatures'] ?? array(), true ),
+		json_encode( $prefix_manifest )
+	);
+
+	$prefix_fault_replay = run_process(
+		array( PHP_BINARY, __DIR__ . '/../replay.php', '--failure', $prefix_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted prefix-family replay reproduces finding', 1 === $prefix_fault_replay['code'], $prefix_fault_replay['stdout'] . $prefix_fault_replay['stderr'] );
+
+	$prefix_fault_minimize = run_process(
+		array( PHP_BINARY, __DIR__ . '/../minimize.php', '--failure', $prefix_failure_file ),
+		array( 'HTML_DECODER_FUZZ_FAULT' => 'attribute-semicolonless' )
+	);
+	check( 'faulted prefix-family minimizer preserves signature', 0 === $prefix_fault_minimize['code'], $prefix_fault_minimize['stdout'] . $prefix_fault_minimize['stderr'] );
+}
+remove_tree( $prefix_pipeline_dir );
 
 $zero_cases = run_process( array( PHP_BINARY, __DIR__ . '/../worker.php', '--cases', '0' ) );
 check( 'worker rejects zero cases', 2 === $zero_cases['code'], $zero_cases['stdout'] . $zero_cases['stderr'] );
