@@ -127,6 +127,47 @@ assert.deepEqual(hrProcessor.get_breadcrumbs(), ["HTML", "BODY", "HR"]);
 assert.equal(hrProcessor.expects_closer(), false);
 hrProcessor.destroy();
 
+const unexpectedCloserProcessor = WP_HTML_Processor.create_fragment("<div>Test</button></div>");
+assert.equal(unexpectedCloserProcessor.next_token(), true);
+assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
+assert.equal(unexpectedCloserProcessor.is_tag_closer(), false);
+assert.equal(unexpectedCloserProcessor.next_token(), true);
+assert.equal(unexpectedCloserProcessor.get_token_type(), "#text");
+assert.equal(unexpectedCloserProcessor.next_token(), true);
+assert.equal(unexpectedCloserProcessor.get_tag(), "DIV");
+assert.equal(unexpectedCloserProcessor.is_tag_closer(), true);
+unexpectedCloserProcessor.destroy();
+
+const specialEndTagProcessor = WP_HTML_Processor.create_fragment("<div><span><p></span><div target>");
+assert.equal(specialEndTagProcessor.next_tag("p"), true);
+assert.deepEqual(specialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN", "P"]);
+assert.equal(specialEndTagProcessor.next_tag("div"), true);
+assert.deepEqual(specialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN", "DIV"]);
+assert.equal(specialEndTagProcessor.get_attribute("target"), true);
+specialEndTagProcessor.destroy();
+
+const nonSpecialEndTagProcessor = WP_HTML_Processor.create_fragment("<div><span><code></span><div target>");
+assert.equal(nonSpecialEndTagProcessor.next_tag("code"), true);
+assert.deepEqual(nonSpecialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN", "CODE"]);
+assert.equal(nonSpecialEndTagProcessor.next_tag({ tag_name: "span", tag_closers: "visit" }), true);
+assert.equal(nonSpecialEndTagProcessor.is_tag_closer(), true);
+assert.deepEqual(nonSpecialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
+assert.equal(nonSpecialEndTagProcessor.next_tag("div"), true);
+assert.deepEqual(nonSpecialEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "DIV"]);
+assert.equal(nonSpecialEndTagProcessor.get_attribute("target"), true);
+nonSpecialEndTagProcessor.destroy();
+
+const modeledScopedEndTagProcessor = WP_HTML_Processor.create_fragment("<div><p></div><span target>");
+assert.equal(modeledScopedEndTagProcessor.next_tag("p"), true);
+assert.deepEqual(modeledScopedEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "P"]);
+assert.equal(modeledScopedEndTagProcessor.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
+assert.equal(modeledScopedEndTagProcessor.is_tag_closer(), true);
+assert.deepEqual(modeledScopedEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY"]);
+assert.equal(modeledScopedEndTagProcessor.next_tag("span"), true);
+assert.deepEqual(modeledScopedEndTagProcessor.get_breadcrumbs(), ["HTML", "BODY", "SPAN"]);
+assert.equal(modeledScopedEndTagProcessor.get_attribute("target"), true);
+modeledScopedEndTagProcessor.destroy();
+
 const svgProcessor = WP_HTML_Processor.create_fragment("<svg><image /><rect></rect></svg><p>");
 assert.equal(svgProcessor.next_tag("image"), true);
 assert.equal(svgProcessor.get_namespace(), "svg");

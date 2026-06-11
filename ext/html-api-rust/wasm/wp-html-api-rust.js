@@ -141,6 +141,129 @@ const LIST_ITEM_SCOPE_BOUNDARIES = new Set([
 	"UL",
 ]);
 
+const END_TAG_SPECIAL_BOUNDARIES = new Set([
+	"ADDRESS",
+	"APPLET",
+	"AREA",
+	"ARTICLE",
+	"ASIDE",
+	"BASE",
+	"BASEFONT",
+	"BGSOUND",
+	"BLOCKQUOTE",
+	"BODY",
+	"BR",
+	"BUTTON",
+	"CAPTION",
+	"CENTER",
+	"COL",
+	"COLGROUP",
+	"DD",
+	"DETAILS",
+	"DIALOG",
+	"DIR",
+	"DIV",
+	"DL",
+	"DT",
+	"EMBED",
+	"FIELDSET",
+	"FIGCAPTION",
+	"FIGURE",
+	"FOOTER",
+	"FORM",
+	"FRAME",
+	"FRAMESET",
+	...HEADING_ELEMENTS,
+	"HEAD",
+	"HEADER",
+	"HGROUP",
+	"HR",
+	"HTML",
+	"IFRAME",
+	"IMG",
+	"INPUT",
+	"KEYGEN",
+	"LI",
+	"LINK",
+	"LISTING",
+	"MAIN",
+	"MARQUEE",
+	"MENU",
+	"META",
+	"NAV",
+	"NOEMBED",
+	"NOFRAMES",
+	"NOSCRIPT",
+	"OBJECT",
+	"OL",
+	"P",
+	"PARAM",
+	"PLAINTEXT",
+	"PRE",
+	"SCRIPT",
+	"SEARCH",
+	"SECTION",
+	"SELECT",
+	"SOURCE",
+	"STYLE",
+	"SUMMARY",
+	"TABLE",
+	"TBODY",
+	"TD",
+	"TEMPLATE",
+	"TEXTAREA",
+	"TFOOT",
+	"TH",
+	"THEAD",
+	"TITLE",
+	"TR",
+	"TRACK",
+	"UL",
+	"WBR",
+	"XMP",
+]);
+
+const MODELED_SCOPED_END_TAGS = new Set([
+	"ADDRESS",
+	"APPLET",
+	"ARTICLE",
+	"ASIDE",
+	"BLOCKQUOTE",
+	"BODY",
+	"BUTTON",
+	"CENTER",
+	"DD",
+	"DETAILS",
+	"DIALOG",
+	"DIR",
+	"DIV",
+	"DL",
+	"DT",
+	"FIELDSET",
+	"FIGCAPTION",
+	"FIGURE",
+	"FOOTER",
+	"FORM",
+	"HEADER",
+	"HGROUP",
+	"HTML",
+	"LI",
+	"LISTING",
+	"MAIN",
+	"MARQUEE",
+	"MENU",
+	"NAV",
+	"OBJECT",
+	"OL",
+	"P",
+	"PRE",
+	"SEARCH",
+	"SECTION",
+	"SUMMARY",
+	"UL",
+	...HEADING_ELEMENTS,
+]);
+
 const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
 	"+//silmaril//dtd html pro v0r11 19970101//",
 	"-//as//dtd html 3.0 aswedit + extensions//",
@@ -905,6 +1028,7 @@ export function createHtmlApi(wasm) {
 			this.last_error = null;
 			this.unsupported_exception = null;
 			this.current_virtual = null;
+			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
@@ -997,13 +1121,17 @@ export function createHtmlApi(wasm) {
 
 		next_token() {
 			this.current_virtual = null;
-			if (!super.next_token()) {
-				this.breadcrumbs = [...this.open_elements];
-				return false;
+			while (super.next_token()) {
+				this.skip_current_token = false;
+				this.#updateTreeStateForCurrentToken();
+				if (!this.skip_current_token) {
+					return true;
+				}
+				this.current_virtual = null;
 			}
 
-			this.#updateTreeStateForCurrentToken();
-			return true;
+			this.breadcrumbs = [...this.open_elements];
+			return false;
 		}
 
 		get_last_error() {
@@ -1138,18 +1266,28 @@ export function createHtmlApi(wasm) {
 
 			if (this.is_tag_closer()) {
 				const existingIndex = this.open_elements.lastIndexOf(tagName);
-				this.current_token_namespace = existingIndex === -1
-					? this.current_namespace
-					: this.open_element_namespaces[existingIndex];
-				this.breadcrumbs = existingIndex === -1
-					? [...this.open_elements, tagName]
-					: [...this.open_elements.slice(0, existingIndex + 1)];
-
-				if (existingIndex !== -1) {
-					this.open_elements = this.open_elements.slice(0, existingIndex);
-					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
-					this.#setCurrentNamespace(this.#namespaceForStackTop());
+				if (
+					existingIndex === -1 ||
+					(
+						!MODELED_SCOPED_END_TAGS.has(tagName) &&
+						hasSpecialBoundaryAfter(
+							this.open_elements,
+							this.open_element_namespaces,
+							existingIndex,
+						)
+					)
+				) {
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = [...this.open_elements];
+					this.skip_current_token = true;
+					return;
 				}
+
+				this.current_token_namespace = this.open_element_namespaces[existingIndex];
+				this.open_elements = this.open_elements.slice(0, existingIndex);
+				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+				this.breadcrumbs = [...this.open_elements];
+				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
 			}
 
@@ -1687,6 +1825,31 @@ function tokenExpectsCloser(tokenName, namespaceName, hasSelfClosingFlag) {
 	}
 
 	return !hasSelfClosingFlag;
+}
+
+function hasSpecialBoundaryAfter(openElements, namespaces, index) {
+	for (let i = index + 1; i < openElements.length; i += 1) {
+		if (isSpecialBoundary(openElements[i], namespaces[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isSpecialBoundary(nodeName, namespaceName) {
+	if (namespaceName === "html") {
+		return END_TAG_SPECIAL_BOUNDARIES.has(nodeName);
+	}
+
+	if (namespaceName === "math") {
+		return ["MI", "MO", "MN", "MS", "MTEXT", "ANNOTATION-XML"].includes(nodeName);
+	}
+
+	if (namespaceName === "svg") {
+		return ["DESC", "FOREIGNOBJECT", "TITLE"].includes(nodeName);
+	}
+
+	return false;
 }
 
 function serializeDoctype(doctype) {
