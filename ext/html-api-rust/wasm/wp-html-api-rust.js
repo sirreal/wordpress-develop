@@ -3060,6 +3060,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#shouldIgnoreCaptionContextBoundaryStartTag(tagName)) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
 			if (
 				allowVirtualPreclosures &&
 				(
@@ -5317,6 +5322,16 @@ export function createHtmlApi(wasm) {
 				this.context_namespace === "html" &&
 				TABLE_SECTION_ELEMENTS.has(this.context_node) &&
 				this.#currentHtmlElementIs(this.context_node)
+			);
+		}
+
+		#shouldIgnoreCaptionContextBoundaryStartTag(tagName) {
+			return (
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				this.context_node === "CAPTION" &&
+				(tagName === "HTML" || CAPTION_CLOSING_START_TAGS.has(tagName)) &&
+				this.#lastOpenElementIndex("CAPTION", "html") !== -1
 			);
 		}
 

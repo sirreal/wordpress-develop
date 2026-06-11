@@ -6,6 +6,7 @@ const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tr
 const treeIndent = "  ";
 const supportedFragmentContexts = new Set([
 	"body",
+	"caption",
 	"colgroup",
 	"div",
 	"frameset",
