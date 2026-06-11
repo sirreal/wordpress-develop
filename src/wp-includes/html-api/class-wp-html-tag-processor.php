@@ -878,7 +878,7 @@ class WP_HTML_Tag_Processor {
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
 	 *     @type string|null $class_name   Tag must contain this whole class name to match.
-	 *     @type string|null $tag_closers  "visit" or "skip": whether to stop on tag closers, e.g. </div>.
+	 *     @type string|null $tag_closers  "visit" or "skip" (default): whether to stop on tag closers, e.g. </div>.
 	 * }
 	 * @return bool Whether a tag was matched.
 	 *
@@ -1327,6 +1327,15 @@ class WP_HTML_Tag_Processor {
 	 * names, such as "li_{$index}" with some loop. As a general
 	 * rule they should only be created with string-literal names
 	 * like "start-of-section" or "last-paragraph".
+	 *
+	 * Setting a bookmark with a name that is already in use MOVES that
+	 * bookmark to the current location; it does not leak the old one or
+	 * require releasing it first. Re-setting the same name on every match
+	 * is the supported idiom for remembering "the last X seen so far" —
+	 * the example above moves the `last-li` bookmark to each LI it
+	 * visits, and only the final position survives to be used. This is
+	 * how to track the last occurrence of something in a single pass
+	 * without hitting the bookmark limit.
 	 *
 	 * Bookmarks are a powerful tool to enable complicated behavior.
 	 * Consider double-checking that you need this tool if you are
