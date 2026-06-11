@@ -3407,6 +3407,11 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (tokenType === "#tag" && !isCloser && tagName === "FRAME") {
+							this.skip_current_token = true;
+							return true;
+						}
+
 						if (tokenType === "#tag" && !isCloser && tagName === "FRAMESET") {
 							if (this.open_elements.length <= 1 || this.open_elements[1] !== "BODY" || !this.frameset_ok) {
 								this.skip_current_token = true;
