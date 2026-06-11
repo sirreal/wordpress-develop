@@ -2472,8 +2472,37 @@ export function createHtmlApi(wasm) {
 			}
 
 			let html = "";
+			let preserveLeadingNewlineFor = null;
 			while (this.next_token()) {
+				const tokenType = this.get_token_type();
+				const tokenName = this.get_token_name();
+
+				if (
+					preserveLeadingNewlineFor !== null &&
+					tokenType === "#text"
+				) {
+					if (
+						this.get_namespace() === "html" &&
+						this.breadcrumbs.at(-2) === preserveLeadingNewlineFor &&
+						this.get_modifiable_text().startsWith("\n")
+					) {
+						html += "\n";
+					}
+					preserveLeadingNewlineFor = null;
+				} else if (preserveLeadingNewlineFor !== null) {
+					preserveLeadingNewlineFor = null;
+				}
+
 				html += this.serialize_token();
+
+				if (
+					tokenType === "#tag" &&
+					!this.is_tag_closer() &&
+					this.get_namespace() === "html" &&
+					(tokenName === "PRE" || tokenName === "LISTING")
+				) {
+					preserveLeadingNewlineFor = tokenName;
+				}
 			}
 
 			return this.get_last_error() === null ? html : null;
@@ -4917,16 +4946,15 @@ export function createHtmlApi(wasm) {
 
 			html += ">";
 
-			if (tagName === "TEXTAREA" || tagName === "PRE" || tagName === "LISTING") {
-				html += "\n";
-			}
-
 			if (inHtml && SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
 				let text = this.get_modifiable_text() ?? "";
 				if (tagName === "IFRAME" || tagName === "NOEMBED" || tagName === "NOFRAMES") {
 					text = "";
 				} else if (tagName !== "SCRIPT" && tagName !== "STYLE") {
 					text = htmlEscape(text);
+				}
+				if (tagName === "TEXTAREA" && text.startsWith("\n")) {
+					html += "\n";
 				}
 				html += `${text}</${qualifiedName}>`;
 			}

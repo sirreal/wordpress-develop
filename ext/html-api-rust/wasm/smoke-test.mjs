@@ -2750,6 +2750,21 @@ assert.equal(WP_HTML_Processor.normalize("<script>apples > or\0anges</script>"),
 assert.equal(WP_HTML_Processor.normalize("<style>apples > or\0anges</style>"), "<style>apples > or\uFFFDanges</style>");
 assert.equal(WP_HTML_Processor.normalize("one</div>two</span>three"), "onetwothree");
 assert.equal(WP_HTML_Processor.normalize("<div><p>One"), "<div><p>One</p></div>");
+for (const [input, expected] of [
+	["<pre>\nline 1\nline 2</pre>", "<pre>line 1\nline 2</pre>"],
+	["<pre>\n\nline 2\nline 3</pre>", "<pre>\n\nline 2\nline 3</pre>"],
+	["<pre>\nline 1<!--comment--> still line 1</pre>", "<pre>line 1<!--comment--> still line 1</pre>"],
+	["<pre>\n\nline 2<!--comment--> still line 2</pre>", "<pre>\n\nline 2<!--comment--> still line 2</pre>"],
+	["<listing>\nline 1\nline 2</listing>", "<listing>line 1\nline 2</listing>"],
+	["<listing>\n\nline 2\nline 3</listing>", "<listing>\n\nline 2\nline 3</listing>"],
+	["<listing>\nline 1<!--comment--> still line 1</listing>", "<listing>line 1<!--comment--> still line 1</listing>"],
+	["<listing>\n\nline 2<!--comment--> still line 2</listing>", "<listing>\n\nline 2<!--comment--> still line 2</listing>"],
+	["<textarea>\nline 1\nline 2</textarea>", "<textarea>line 1\nline 2</textarea>"],
+	["<textarea>\n\nline 2\nline 3</textarea>", "<textarea>\n\nline 2\nline 3</textarea>"],
+]) {
+	assert.equal(WP_HTML_Processor.normalize(input), expected);
+	assert.equal(WP_HTML_Processor.normalize(expected), expected);
+}
 assert.equal(WP_HTML_Processor.normalize("<table><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><tr><td>cell"), "<table><tbody><tr><td>cell</td></tr></tbody></table>");
 assert.equal(WP_HTML_Processor.normalize("<table><td>a<td>b"), "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>");
@@ -2802,7 +2817,7 @@ for (const incompleteToken of ["<!--", "<!--x", "<!--x--", "<!--x--!", "<!--x--!
 const serializationProcessor = WP_HTML_Processor.create_fragment("<textarea>One & Two</textarea>");
 assert.equal(serializationProcessor.next_token(), true);
 assert.equal(serializationProcessor.serialize(), null);
-assert.equal(serializationProcessor.serialize_token(), "<textarea>\nOne &amp; Two</textarea>");
+assert.equal(serializationProcessor.serialize_token(), "<textarea>One &amp; Two</textarea>");
 serializationProcessor.destroy();
 
 console.log("WASM smoke tests passed.");
