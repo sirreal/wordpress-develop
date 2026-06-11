@@ -1550,6 +1550,12 @@ fn transform_text(input: &[u8], decode_entities: bool, null_transform: NullTrans
     let mut at = 0;
 
     while at < input.len() {
+        if input[at] == b'\r' {
+            output.push(b'\n');
+            at += if input.get(at + 1) == Some(&b'\n') { 2 } else { 1 };
+            continue;
+        }
+
         if input[at] == 0 {
             match null_transform {
                 NullTransform::Remove => {}
@@ -1587,6 +1593,10 @@ fn transform_text(input: &[u8], decode_entities: bool, null_transform: NullTrans
 fn strip_initial_newline(input: &[u8]) -> &[u8] {
     if input.starts_with(b"\r\n") {
         return &input[2..];
+    }
+
+    if input.starts_with(b"\r") {
+        return &input[1..];
     }
 
     if input.starts_with(b"\n") {
@@ -2681,6 +2691,64 @@ mod tests {
                 super::NullTransform::Replace
             ),
             "FOO�ZOO € � � �".as_bytes()
+        );
+    }
+
+    #[test]
+    fn text_transform_normalizes_line_endings() {
+        assert_eq!(
+            super::transform_text(
+                b"one\r\ntwo\rthree\nfour",
+                false,
+                super::NullTransform::Replace
+            ),
+            b"one\ntwo\nthree\nfour"
+        );
+    }
+
+    #[test]
+    fn pre_text_strips_initial_carriage_return() {
+        let mut processor = TagProcessor {
+            html: b"<pre>\rA\r\nB\rC</pre>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+
+        let scan = processor.current.unwrap();
+        assert_eq!(
+            processor.current_modifiable_text(scan).unwrap(),
+            b"A\nB\nC"
+        );
+    }
+
+    #[test]
+    fn foreign_cdata_normalizes_line_endings() {
+        let processor = TagProcessor {
+            html: b"<![CDATA[A\r\nB\rC]]>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_FOREIGN,
+        };
+
+        let ScanResult::Token(scan) =
+            scan_next_token_in_namespace(&processor.html, 0, NAMESPACE_FOREIGN)
+        else {
+            panic!("Expected CDATA token.");
+        };
+
+        assert_eq!(
+            processor.current_modifiable_text(scan).unwrap(),
+            b"A\nB\nC"
         );
     }
 
