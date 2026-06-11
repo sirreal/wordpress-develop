@@ -912,6 +912,11 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			const attributeName = String(name);
+			if (!isValidAttributeName(attributeName)) {
+				return false;
+			}
+
 			let valueKind = 2;
 			let encodedValue = new Uint8Array();
 			if (value === false) {
@@ -922,7 +927,7 @@ export function createHtmlApi(wasm) {
 				encodedValue = runtime.encode(value);
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(name, (nameBytes) => (
+			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, (nameBytes) => (
 				runtime.withBytes(encodedValue, (valueBytes) => (
 					wasm.wp_html_api_rust_tag_processor_set_attribute(
 						this.pointer,
@@ -4590,6 +4595,42 @@ function asciiStartsWithAt(value, needle, at) {
 
 function replaceNulls(value) {
 	return value.replace(/\0/g, "\uFFFD");
+}
+
+function isValidAttributeName(value) {
+	if (value.length === 0) {
+		return false;
+	}
+
+	for (let i = 0; i < value.length; i += 1) {
+		const code = value.codePointAt(i);
+		if (code > 0xffff) {
+			i += 1;
+		}
+
+		if (
+			code <= 0x20 ||
+			code === 0x22 ||
+			code === 0x26 ||
+			code === 0x27 ||
+			code === 0x2f ||
+			code === 0x3c ||
+			code === 0x3d ||
+			code === 0x3e ||
+			isUnicodeNoncharacter(code)
+		) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function isUnicodeNoncharacter(code) {
+	return (
+		(code >= 0xfdd0 && code <= 0xfdef) ||
+		(code <= 0x10ffff && (code & 0xfffe) === 0xfffe)
+	);
 }
 
 function phpIntegerCast(value) {

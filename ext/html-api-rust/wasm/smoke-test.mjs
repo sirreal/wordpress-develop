@@ -105,6 +105,37 @@ assert.deepEqual(tags.class_list(), ["active"]);
 assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" data-id="8">Hi</span></div>');
 tags.destroy();
 
+const invalidAttributeNameTags = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(invalidAttributeNameTags.next_tag("div"), true);
+for (const name of [
+	"",
+	"too late",
+	'too"late',
+	"too&late",
+	"too'late",
+	"too/late",
+	"too<late",
+	"too=late",
+	"too>late",
+	"shut\0down",
+	"shut\u001Fdown",
+	"shut\uFDD0down",
+	"shut\uFFFEdown",
+	"shut\uFFFFdown",
+	"shut\u{1FFFE}down",
+	"shut\u{10FFFF}down",
+]) {
+	assert.equal(invalidAttributeNameTags.set_attribute(name, true), false, `Should reject ${JSON.stringify(name)}`);
+}
+assert.equal(invalidAttributeNameTags.get_updated_html(), "<div></div>");
+invalidAttributeNameTags.destroy();
+
+const unicodeAttributeNameTags = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(unicodeAttributeNameTags.next_tag("div"), true);
+assert.equal(unicodeAttributeNameTags.set_attribute("data-\u00E9", "ok"), true);
+assert.equal(unicodeAttributeNameTags.get_attribute("data-\u00E9"), "ok");
+unicodeAttributeNameTags.destroy();
+
 const tagMatchOffset = new WP_HTML_Tag_Processor("<div one></div><div two></div>");
 assert.equal(tagMatchOffset.next_tag({ tag_name: "div", match_offset: 2 }), true);
 assert.equal(tagMatchOffset.get_attribute("two"), true);
