@@ -164,6 +164,16 @@ export interface SpecialTagInput {
 	namespaceName?: HtmlNamespace;
 }
 
+export interface HtmlTokenInput {
+	node_name?: string | null;
+	nodeName?: string | null;
+	tagName?: string | null;
+	namespace?: HtmlNamespace;
+	namespaceName?: HtmlNamespace;
+	has_self_closing_flag?: boolean;
+	hasSelfClosingFlag?: boolean;
+}
+
 export interface WP_HTML_Processor_Options {
 	contextNode?: string;
 	fullParser?: boolean;
@@ -179,7 +189,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	is_virtual(): boolean;
 	is_tag_closer(): boolean;
 	get_namespace(): HtmlNamespace;
-	expects_closer(): boolean | null;
+	expects_closer(node?: HtmlTokenInput | null): boolean | null;
 	get_breadcrumbs(): string[];
 	get_current_depth(): number;
 	matches_breadcrumbs(breadcrumbs: string[]): boolean;

@@ -213,6 +213,24 @@ assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
 
+const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({ nodeName: "DIV", namespaceName: "html" }), true);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "TITLE", namespace: "html" }), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "#text", namespace: "html" }), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "html", namespace: "html" }), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({
+	node_name: "rect",
+	namespace: "svg",
+	has_self_closing_flag: true,
+}), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({
+	node_name: "rect",
+	namespace: "svg",
+	has_self_closing_flag: false,
+}), true);
+explicitTokenExpectationsProcessor.destroy();
+
 for (const html of [
 	'<!DOCTYPE html><meta charset="utf8">',
 	'<!DOCTYPE html><meta http-equiv="content-type" content="">',

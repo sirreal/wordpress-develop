@@ -1494,17 +1494,54 @@ export function createHtmlApi(wasm) {
 				: qualifyForeignAttributeName(this.get_namespace(), lower);
 		}
 
-		expects_closer() {
-			const tokenName = this.get_token_name();
+		expects_closer(node = null) {
+			const token = this.#normalizeExpectsCloserToken(node);
+			const tokenName = token.nodeName;
 			if (tokenName === null) {
 				return null;
 			}
 
 			return tokenExpectsCloser(
 				tokenName,
-				this.get_namespace(),
-				this.has_self_closing_flag(),
+				token.namespaceName,
+				token.hasSelfClosingFlag,
 			);
+		}
+
+		#normalizeExpectsCloserToken(node) {
+			let tokenName;
+			let namespaceName;
+			let hasSelfClosingFlag;
+
+			if (node && typeof node === "object") {
+				tokenName = node.node_name ?? node.nodeName ?? node.tagName ?? this.get_token_name();
+				namespaceName = node.namespace ?? node.namespaceName ?? this.get_namespace();
+				hasSelfClosingFlag = node.has_self_closing_flag ?? node.hasSelfClosingFlag ?? this.has_self_closing_flag();
+			} else {
+				tokenName = this.get_token_name();
+				namespaceName = this.get_namespace();
+				hasSelfClosingFlag = this.has_self_closing_flag();
+			}
+
+			if (tokenName === null || tokenName === undefined) {
+				return {
+					nodeName: null,
+					namespaceName: null,
+					hasSelfClosingFlag: false,
+				};
+			}
+
+			const normalizedNamespace = asciiLower(String(namespaceName ?? "html"));
+			let normalizedTokenName = String(tokenName);
+			if (normalizedNamespace === "html" && normalizedTokenName !== "html" && normalizedTokenName[0] !== "#") {
+				normalizedTokenName = asciiUpper(normalizedTokenName);
+			}
+
+			return {
+				nodeName: normalizedTokenName,
+				namespaceName: normalizedNamespace,
+				hasSelfClosingFlag: Boolean(hasSelfClosingFlag),
+			};
 		}
 
 		get_breadcrumbs() {
