@@ -157,6 +157,35 @@ for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 }
 processorBookmarkLimit.destroy();
 
+const processorSeekBreadcrumbs = WP_HTML_Processor.create_fragment("<div><img></div><div><hr></div>");
+assert.equal(processorSeekBreadcrumbs.next_tag("img"), true);
+assert.deepEqual(processorSeekBreadcrumbs.get_breadcrumbs(), ["HTML", "BODY", "DIV", "IMG"]);
+assert.equal(processorSeekBreadcrumbs.set_bookmark("first"), true);
+assert.equal(processorSeekBreadcrumbs.next_tag("hr"), true);
+assert.deepEqual(processorSeekBreadcrumbs.get_breadcrumbs(), ["HTML", "BODY", "DIV", "HR"]);
+assert.equal(processorSeekBreadcrumbs.seek("first"), true);
+assert.equal(processorSeekBreadcrumbs.get_tag(), "IMG");
+assert.deepEqual(processorSeekBreadcrumbs.get_breadcrumbs(), ["HTML", "BODY", "DIV", "IMG"]);
+processorSeekBreadcrumbs.destroy();
+
+const processorSeekNamespace = WP_HTML_Processor.create_fragment("<custom-element /><svg><rect />");
+assert.equal(processorSeekNamespace.next_tag("custom-element"), true);
+assert.equal(processorSeekNamespace.has_self_closing_flag(), true);
+assert.equal(processorSeekNamespace.expects_closer(), true);
+assert.equal(processorSeekNamespace.set_bookmark("custom"), true);
+assert.equal(processorSeekNamespace.next_tag("rect"), true);
+assert.equal(processorSeekNamespace.get_namespace(), "svg");
+assert.equal(processorSeekNamespace.has_self_closing_flag(), true);
+assert.equal(processorSeekNamespace.expects_closer(), false);
+assert.equal(processorSeekNamespace.seek("custom"), true);
+assert.equal(processorSeekNamespace.get_tag(), "CUSTOM-ELEMENT");
+assert.equal(processorSeekNamespace.get_namespace(), "html");
+assert.equal(processorSeekNamespace.has_self_closing_flag(), true);
+assert.equal(processorSeekNamespace.expects_closer(), true);
+assert.equal(processorSeekNamespace.next_tag("rect"), true);
+assert.deepEqual(processorSeekNamespace.get_breadcrumbs(), ["HTML", "BODY", "CUSTOM-ELEMENT", "SVG", "RECT"]);
+processorSeekNamespace.destroy();
+
 const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
 assert.equal(stepProcessor.step(), true);
 assert.equal(stepProcessor.get_tag(), "DIV");

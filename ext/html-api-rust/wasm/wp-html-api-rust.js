@@ -1276,7 +1276,31 @@ export function createHtmlApi(wasm) {
 		}
 
 		set_bookmark(name) {
-			return this.is_virtual() ? false : super.set_bookmark(name);
+			if (this.is_virtual()) {
+				return false;
+			}
+
+			if (!super.set_bookmark(name)) {
+				return false;
+			}
+
+			this.bookmarks.set(name, {
+				...this.bookmarks.get(name),
+				processorState: this.#snapshotProcessorState(),
+			});
+			return true;
+		}
+
+		seek(name) {
+			const bookmark = this.bookmarks.get(name);
+			if (!bookmark || !super.seek(name)) {
+				return false;
+			}
+
+			if (bookmark.processorState) {
+				this.#restoreProcessorState(bookmark.processorState);
+			}
+			return true;
 		}
 
 		get_namespace() {
@@ -1493,6 +1517,29 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#snapshotProcessorState() {
+			return {
+				openElements: [...this.open_elements],
+				openElementNamespaces: [...this.open_element_namespaces],
+				breadcrumbs: [...this.breadcrumbs],
+				currentNamespace: this.current_namespace,
+				currentTokenNamespace: this.current_token_namespace,
+			};
+		}
+
+		#restoreProcessorState(state) {
+			this.current_virtual = null;
+			this.virtual_tokens = [];
+			this.pending_real_token = false;
+			this.skip_current_token = false;
+			this.open_elements = [...state.openElements];
+			this.open_element_namespaces = [...state.openElementNamespaces];
+			this.breadcrumbs = [...state.breadcrumbs];
+			this.current_namespace = state.currentNamespace;
+			this.current_token_namespace = state.currentTokenNamespace;
+			super.change_parsing_namespace(this.current_namespace);
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
