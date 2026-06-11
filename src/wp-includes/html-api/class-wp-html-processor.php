@@ -93,22 +93,31 @@
  *
  * ### Supported elements
  *
- * If any unsupported element appears in the HTML input the HTML Processor
+ * If any unsupported markup appears in the HTML input the HTML Processor
  * will abort early and stop all processing. This draconian measure ensures
  * that the HTML Processor won't break any HTML it doesn't fully understand.
+ * When this happens, {@see WP_HTML_Processor::get_last_error} returns a
+ * non-null value and {@see WP_HTML_Processor::get_unsupported_exception}
+ * describes what was encountered; methods which produce output (such as
+ * `serialize()` and `normalize()`) return `null`.
  *
- * The HTML Processor supports all elements other than a specific set:
+ * The HTML Processor parses the broad majority of real-world HTML,
+ * including well-formed tables (TABLE, THEAD, TBODY, TR, TD, TH and
+ * markup inside cells), foreign content (SVG and MathML), TEMPLATE
+ * elements, and — with {@see WP_HTML_Processor::create_full_parser} —
+ * complete documents with doctype and HEAD content. Only specific
+ * constructs cause it to abort:
  *
- *  - Any element inside a TABLE.
- *  - Any element inside foreign content, including SVG and MATH.
- *  - Any element outside the IN BODY insertion mode, e.g. doctype declarations, meta, links.
+ *  - Content the HTML specification relocates in the DOM ("foster
+ *    parenting"), e.g. a DIV placed directly inside a TABLE rather
+ *    than inside a cell — such a DIV belongs _before_ the table in
+ *    the DOM, and the HTML Processor stops rather than relocate it.
+ *  - Mis-nested formatting elements whose reconstruction would require
+ *    advancing and rewinding through the document, e.g.
+ *    `<b>one<i>two</b>three</i>`. Simple mis-nesting which can be
+ *    handled in a single pass, e.g. `<b><i>x</b></i>`, is supported.
  *
  * ### Supported markup
- *
- * Some kinds of non-normative HTML involve reconstruction of formatting elements and
- * re-parenting of mis-nested elements. For example, a DIV tag found inside a TABLE
- * may in fact belong _before_ the table in the DOM. If the HTML Processor encounters
- * such a case it will stop processing.
  *
  * The following list illustrates some common examples of unexpected HTML inputs that
  * the HTML Processor properly parses and represents:
