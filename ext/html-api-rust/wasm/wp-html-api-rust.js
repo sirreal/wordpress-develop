@@ -4829,17 +4829,8 @@ function normalizeSpecialTagInput(tagName) {
 		};
 	}
 
-	const value = String(tagName);
-	const match = value.trim().match(/^(html|math|svg)\s+(.+)$/i);
-	if (match) {
-		return {
-			nodeName: asciiUpper(match[2]),
-			namespaceName: asciiLower(match[1]),
-		};
-	}
-
 	return {
-		nodeName: asciiUpper(value),
+		nodeName: asciiUpper(String(tagName)),
 		namespaceName: "html",
 	};
 }

@@ -420,7 +420,8 @@ assert.equal(WP_HTML_Processor.normalize(null), null);
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("dialog"), false);
-assert.equal(WP_HTML_Processor.is_special("math mi"), true);
+assert.equal(WP_HTML_Processor.is_special("math mi"), false);
+assert.equal(WP_HTML_Processor.is_special({ namespace: "math", node_name: "mi" }), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
 
 for (const [html, context, expected] of [
