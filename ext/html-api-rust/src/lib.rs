@@ -918,8 +918,9 @@ impl TagProcessor {
         } else if eq_ignore_ascii_case(tag_name, b"STYLE") {
             escape_rawtext_closer(plaintext, b"style", b"\\3c\\2f")
         } else if eq_ignore_ascii_case(tag_name, b"TEXTAREA") {
-            let mut escaped = escape_rcdata_closer(plaintext, b"textarea");
-            if matches!(escaped.first(), Some(b'\n' | b'\r')) {
+            let normalized = normalize_newlines(plaintext);
+            let mut escaped = escape_rcdata_closer(&normalized, b"textarea");
+            if matches!(escaped.first(), Some(b'\n')) {
                 let mut with_extra_newline = Vec::with_capacity(escaped.len() + 1);
                 with_extra_newline.push(b'\n');
                 with_extra_newline.extend_from_slice(&escaped);
@@ -1557,6 +1558,24 @@ fn strip_initial_newline(input: &[u8]) -> &[u8] {
     }
 
     input
+}
+
+fn normalize_newlines(input: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(input.len());
+    let mut at = 0;
+
+    while at < input.len() {
+        if input[at] == b'\r' {
+            normalized.push(b'\n');
+            at += if input.get(at + 1) == Some(&b'\n') { 2 } else { 1 };
+            continue;
+        }
+
+        normalized.push(input[at]);
+        at += 1;
+    }
+
+    normalized
 }
 
 fn pi_target_span(html: &[u8], scan: TagScan) -> Option<(usize, usize)> {
@@ -2386,6 +2405,46 @@ mod tests {
             processor.current_modifiable_text(scan).unwrap(),
             b"different text"
         );
+    }
+
+    #[test]
+    fn set_modifiable_text_normalizes_textarea_newlines() {
+        for (plaintext, expected_html, expected_text) in [
+            (
+                &b"\rCR"[..],
+                &b"<textarea>\n\nCR</textarea>"[..],
+                &b"\nCR"[..],
+            ),
+            (
+                &b"\r\nCR-N"[..],
+                &b"<textarea>\n\nCR-N</textarea>"[..],
+                &b"\nCR-N"[..],
+            ),
+        ] {
+            let mut processor = TagProcessor {
+                html: b"<textarea></textarea>".to_vec(),
+                offset: 0,
+                current: None,
+                scratch: Vec::new(),
+                paused_at_incomplete: false,
+                inserted_attributes: Vec::new(),
+                parsing_namespace: NAMESPACE_HTML,
+            };
+
+            assert!(unsafe {
+                super::wp_html_api_rust_tag_processor_next_tag(
+                    &mut processor,
+                    b"textarea".as_ptr(),
+                    b"textarea".len(),
+                    false,
+                )
+            });
+            assert!(processor.set_modifiable_text(plaintext));
+
+            let scan = processor.current.unwrap();
+            assert_eq!(&processor.html, expected_html);
+            assert_eq!(processor.current_modifiable_text(scan).unwrap(), expected_text);
+        }
     }
 
     #[test]
