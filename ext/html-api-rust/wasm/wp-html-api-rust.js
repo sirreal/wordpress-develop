@@ -2921,6 +2921,18 @@ export function createHtmlApi(wasm) {
 
 				if (
 					allowVirtualPreclosures &&
+					closingNamespace !== "html" &&
+					existingIndex !== -1 &&
+					existingIndex < this.open_elements.length - 1
+				) {
+					this.#queueVirtualPopsFrom(existingIndex + 1);
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
+				if (
+					allowVirtualPreclosures &&
 					existingIndex !== -1 &&
 					existingIndex < this.open_elements.length - 1 &&
 					tagName !== "HTML" &&
