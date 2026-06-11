@@ -228,6 +228,26 @@ assert.equal(fullParserDoctype.get_tag(), "P");
 assert.deepEqual(fullParserDoctype.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 fullParserDoctype.destroy();
 
+const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
+assert.equal(noQuirksClasses.next_tag("span"), true);
+assert.equal(noQuirksClasses.compat_mode, WP_HTML_Tag_Processor.NO_QUIRKS_MODE);
+assert.equal(noQuirksClasses.has_class("upper"), false);
+assert.equal(noQuirksClasses.has_class("UPPER"), true);
+assert.equal(noQuirksClasses.add_class("upper"), true);
+assert.equal(noQuirksClasses.get_updated_html(), '<!DOCTYPE html><span class="UPPER upper">');
+noQuirksClasses.destroy();
+
+const quirksClasses = WP_HTML_Processor.create_full_parser('<span class="UPPER">');
+assert.equal(quirksClasses.next_tag("span"), true);
+assert.equal(quirksClasses.compat_mode, WP_HTML_Tag_Processor.QUIRKS_MODE);
+assert.equal(quirksClasses.has_class("upper"), true);
+assert.equal(quirksClasses.has_class("UPPER"), true);
+assert.equal(quirksClasses.add_class("upper"), true);
+assert.equal(quirksClasses.get_updated_html(), '<span class="UPPER">');
+assert.equal(quirksClasses.remove_class("upPer"), true);
+assert.equal(quirksClasses.get_updated_html(), "<span >");
+quirksClasses.destroy();
+
 const stepProcessor = WP_HTML_Processor.create_fragment("<div>Step</div>");
 assert.equal(stepProcessor.step(), true);
 assert.equal(stepProcessor.get_tag(), "DIV");

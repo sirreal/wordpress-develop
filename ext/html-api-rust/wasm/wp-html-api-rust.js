@@ -1055,6 +1055,7 @@ export function createHtmlApi(wasm) {
 			this.skip_current_token = false;
 			this.is_full_parser = Boolean(options.fullParser);
 			this.full_parser_scaffolded = !this.is_full_parser;
+			this.full_parser_seen_doctype = false;
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
@@ -1187,9 +1188,21 @@ export function createHtmlApi(wasm) {
 				if (
 					this.is_full_parser &&
 					!this.full_parser_scaffolded &&
+					this.get_token_type() === "#doctype"
+				) {
+					this.full_parser_seen_doctype = true;
+					this.#setCompatModeFromCurrentDoctype();
+				}
+
+				if (
+					this.is_full_parser &&
+					!this.full_parser_scaffolded &&
 					this.get_token_type() !== "#doctype"
 				) {
 					this.full_parser_scaffolded = true;
+					if (!this.full_parser_seen_doctype) {
+						this.compat_mode = WP_HTML_Tag_Processor.QUIRKS_MODE;
+					}
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
 					this.#queueFullParserScaffold();
@@ -1211,6 +1224,9 @@ export function createHtmlApi(wasm) {
 
 			if (this.is_full_parser && !this.full_parser_scaffolded) {
 				this.full_parser_scaffolded = true;
+				if (!this.full_parser_seen_doctype) {
+					this.compat_mode = WP_HTML_Tag_Processor.QUIRKS_MODE;
+				}
 				this.#queueFullParserScaffold();
 				return this.#consumeVirtualToken();
 			}
@@ -1560,6 +1576,7 @@ export function createHtmlApi(wasm) {
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
 				fullParserScaffolded: this.full_parser_scaffolded,
+				fullParserSeenDoctype: this.full_parser_seen_doctype,
 			};
 		}
 
@@ -1570,12 +1587,20 @@ export function createHtmlApi(wasm) {
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
+			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.breadcrumbs = [...state.breadcrumbs];
 			this.current_namespace = state.currentNamespace;
 			this.current_token_namespace = state.currentTokenNamespace;
 			super.change_parsing_namespace(this.current_namespace);
+		}
+
+		#setCompatModeFromCurrentDoctype() {
+			const doctype = this.get_doctype_info();
+			this.compat_mode = doctype?.indicated_compatibility_mode === "quirks"
+				? WP_HTML_Tag_Processor.QUIRKS_MODE
+				: WP_HTML_Tag_Processor.NO_QUIRKS_MODE;
 		}
 
 		#queueVirtualPreclosuresForStartTag(tagName) {
