@@ -16,6 +16,10 @@ namespace EncodingFuzz;
  *  - scrub is idempotent
  *  - `_wp_utf8_codepoint_count()` equals `mb_strlen()` of the scrubbed
  *    text (each maximal subpart counts as one code point)
+ *  - `_wp_utf8_codepoint_span()` reports the original byte span for a
+ *    requested number of code points, with invalid maximal subparts
+ *    counted as one code point and `found_code_points` reporting the
+ *    available/requested count
  *  - scanning with `_wp_scan_utf8()` in pseudo-random `max_code_points`
  *    chunks reconstructs the same scrubbed text and always makes
  *    forward progress
@@ -281,28 +285,192 @@ class Checks {
 			);
 		}
 
-		// 7. Chunked scan reconstruction.
+		// 7. Code point span agrees with valid-text and maximal-subpart references.
+		foreach ( $this->check_codepoint_span( $input, $ref_scrub ) as $failure ) {
+			$failures[] = $failure;
+		}
+
+		// 8. Chunked scan reconstruction.
 		$chunk_failure = $this->check_chunked_scan( $input, $ref_scrub );
 		if ( null !== $chunk_failure ) {
 			$failures[] = $chunk_failure;
 		}
 
-		// 8. Legacy utf8_encode()/utf8_decode() fallback differentials.
+		// 9. Legacy utf8_encode()/utf8_decode() fallback differentials.
 		foreach ( $this->check_utf8_encode_decode( $input, $ref_valid, $mb_validity ) as $failure ) {
 			$failures[] = $failure;
 		}
 
-		// 9. Noncharacter detection, on valid input only.
+		// 10. Noncharacter detection, on valid input only.
 		foreach ( $this->check_noncharacters( $input, $ref_valid ) as $failure ) {
 			$failures[] = $failure;
 		}
 
-		// 10. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
+		// 11. mb_chr()/mb_ord() polyfill differentials and isomorphisms.
 		foreach ( $this->check_mb_chr_ord( $input ) as $failure ) {
 			$failures[] = $failure;
 		}
 
 		return $failures;
+	}
+
+	/**
+	 * Tests `_wp_utf8_codepoint_span()` from known boundaries only.
+	 *
+	 * Starts inside a continuation byte or inside an invalid maximal subpart
+	 * are deliberately outside this property: `_mb_substr()` reaches this
+	 * helper by first computing a boundary with the same maximal-subpart model.
+	 *
+	 * @return array<int, array{check: string, signature: string, detail: array}>
+	 */
+	private function check_codepoint_span( string $input, string $ref_scrub ): array {
+		if ( ! isset( $this->targets['codepoint_span'] ) ) {
+			return array();
+		}
+
+		$failures = array();
+
+		list( $offsets, $reference_scrub ) = self::reference_utf8_offsets_and_scrub( $input );
+		if ( $reference_scrub !== $ref_scrub ) {
+			return array(
+				self::failure(
+					'span-reference-disagreement',
+					'maximal-subpart-reference',
+					self::diff_detail( 'maximal-subpart-reference', $ref_scrub, $reference_scrub )
+				),
+			);
+		}
+
+		$segment_count = count( $offsets ) - 1;
+		foreach ( self::span_probe_indices( $segment_count, $input ) as $segment_index ) {
+			$byte_offset = $offsets[ $segment_index ];
+			$available   = $segment_count - $segment_index;
+
+			foreach ( self::span_probe_counts( $available, $input . ":{$segment_index}" ) as $max_code_points ) {
+				$expected_found = min( $max_code_points, $available );
+				$expected_span  = $offsets[ $segment_index + $expected_found ] - $byte_offset;
+
+				$failure = $this->assert_codepoint_span(
+					$input,
+					$byte_offset,
+					$max_code_points,
+					$expected_span,
+					$expected_found,
+					'arbitrary-boundary'
+				);
+
+				if ( null !== $failure ) {
+					$failures[] = $failure;
+				}
+			}
+		}
+
+		$scrubbed_code_points = mb_strlen( $ref_scrub, 'UTF-8' );
+		foreach ( self::span_probe_indices( $scrubbed_code_points, $ref_scrub ) as $start_code_point ) {
+			$byte_offset = strlen( mb_substr( $ref_scrub, 0, $start_code_point, 'UTF-8' ) );
+			$available   = $scrubbed_code_points - $start_code_point;
+
+			foreach ( self::span_probe_counts( $available, $ref_scrub . ":scrubbed:{$start_code_point}" ) as $max_code_points ) {
+				$expected_found = min( $max_code_points, $available );
+				$expected_span  = strlen( mb_substr( $ref_scrub, $start_code_point, $max_code_points, 'UTF-8' ) );
+
+				$failure = $this->assert_codepoint_span(
+					$ref_scrub,
+					$byte_offset,
+					$max_code_points,
+					$expected_span,
+					$expected_found,
+					'scrubbed-mb-substr'
+				);
+
+				if ( null !== $failure ) {
+					$failures[] = $failure;
+				}
+			}
+		}
+
+		return $failures;
+	}
+
+	private function assert_codepoint_span( string $input, int $byte_offset, int $max_code_points, int $expected_span, int $expected_found, string $property ): ?array {
+		$found_code_points = -1;
+
+		try {
+			$actual_span = ( $this->targets['codepoint_span'] )( $input, $byte_offset, $max_code_points, $found_code_points );
+		} catch ( \Throwable $error ) {
+			return self::failure(
+				'target-exception',
+				'codepoint_span',
+				array(
+					'target'          => 'codepoint_span',
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_code_points' => $max_code_points,
+					'message'         => $error->getMessage(),
+					'class'           => get_class( $error ),
+				)
+			);
+		}
+
+		if ( ! is_int( $actual_span ) ) {
+			return self::failure(
+				'codepoint-span-bad-return',
+				'codepoint_span',
+				array(
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_code_points' => $max_code_points,
+					'type'            => get_debug_type( $actual_span ),
+				)
+			);
+		}
+
+		if ( ! is_int( $found_code_points ) ) {
+			return self::failure(
+				'codepoint-span-found-bad-return',
+				'codepoint_span',
+				array(
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_code_points' => $max_code_points,
+					'type'            => get_debug_type( $found_code_points ),
+				)
+			);
+		}
+
+		if ( $actual_span !== $expected_span ) {
+			return self::failure(
+				'codepoint-span-mismatch',
+				'codepoint_span',
+				array(
+					'property'          => $property,
+					'byte_offset'       => $byte_offset,
+					'max_code_points'   => $max_code_points,
+					'got'               => $actual_span,
+					'expected'          => $expected_span,
+					'found_code_points' => $found_code_points,
+					'input_preview'     => self::preview( $input, $byte_offset ),
+				)
+			);
+		}
+
+		if ( $found_code_points !== $expected_found ) {
+			return self::failure(
+				'codepoint-span-found-mismatch',
+				'codepoint_span',
+				array(
+					'property'        => $property,
+					'byte_offset'     => $byte_offset,
+					'max_code_points' => $max_code_points,
+					'got'             => $found_code_points,
+					'expected'        => $expected_found,
+					'span'            => $actual_span,
+					'input_preview'   => self::preview( $input, $byte_offset ),
+				)
+			);
+		}
+
+		return null;
 	}
 
 	/**
@@ -855,6 +1023,149 @@ class Checks {
 		}
 
 		return array_values( array_unique( $probes ) );
+	}
+
+	/**
+	 * Builds a small boundary table from an independent UTF-8 maximal-subpart
+	 * parser. `$offsets[$i]` is the byte offset before logical code point `$i`.
+	 *
+	 * @return array{0: int[], 1: string} Boundary offsets and scrubbed text.
+	 */
+	private static function reference_utf8_offsets_and_scrub( string $bytes ): array {
+		$length  = strlen( $bytes );
+		$offsets = array( 0 );
+		$scrub   = '';
+		$at      = 0;
+
+		while ( $at < $length ) {
+			list( $segment_length, $valid ) = self::reference_utf8_segment( $bytes, $at );
+			$scrub                        .= $valid ? substr( $bytes, $at, $segment_length ) : "\u{FFFD}";
+			$at                           += $segment_length;
+			$offsets[]                     = $at;
+		}
+
+		return array( $offsets, $scrub );
+	}
+
+	/**
+	 * @return array{0: int, 1: bool} Byte length and whether the segment is well-formed.
+	 */
+	private static function reference_utf8_segment( string $bytes, int $at ): array {
+		$remaining = strlen( $bytes ) - $at;
+		$b1        = ord( $bytes[ $at ] );
+
+		if ( $b1 <= 0x7F ) {
+			return array( 1, true );
+		}
+
+		$b2 = $remaining >= 2 ? ord( $bytes[ $at + 1 ] ) : null;
+		if ( $b1 >= 0xC2 && $b1 <= 0xDF ) {
+			return self::is_continuation( $b2 ) ? array( 2, true ) : array( 1, false );
+		}
+
+		$b3 = $remaining >= 3 ? ord( $bytes[ $at + 2 ] ) : null;
+		if (
+			self::is_continuation( $b3 ) &&
+			(
+				( 0xE0 === $b1 && null !== $b2 && $b2 >= 0xA0 && $b2 <= 0xBF ) ||
+				( $b1 >= 0xE1 && $b1 <= 0xEC && self::is_continuation( $b2 ) ) ||
+				( 0xED === $b1 && null !== $b2 && $b2 >= 0x80 && $b2 <= 0x9F ) ||
+				( $b1 >= 0xEE && $b1 <= 0xEF && self::is_continuation( $b2 ) )
+			)
+		) {
+			return array( 3, true );
+		}
+
+		$b4 = $remaining >= 4 ? ord( $bytes[ $at + 3 ] ) : null;
+		if (
+			self::is_continuation( $b3 ) &&
+			self::is_continuation( $b4 ) &&
+			(
+				( 0xF0 === $b1 && null !== $b2 && $b2 >= 0x90 && $b2 <= 0xBF ) ||
+				( $b1 >= 0xF1 && $b1 <= 0xF3 && self::is_continuation( $b2 ) ) ||
+				( 0xF4 === $b1 && null !== $b2 && $b2 >= 0x80 && $b2 <= 0x8F )
+			)
+		) {
+			return array( 4, true );
+		}
+
+		if ( $b1 >= 0xE0 && $b1 <= 0xEF && self::is_valid_three_byte_second( $b1, $b2 ) ) {
+			return array( min( $remaining, 2 ), false );
+		}
+
+		if ( $b1 >= 0xF0 && $b1 <= 0xF4 && self::is_valid_four_byte_second( $b1, $b2 ) ) {
+			return array( min( $remaining, self::is_continuation( $b3 ) ? 3 : 2 ), false );
+		}
+
+		return array( 1, false );
+	}
+
+	private static function is_continuation( ?int $byte ): bool {
+		return null !== $byte && $byte >= 0x80 && $byte <= 0xBF;
+	}
+
+	private static function is_valid_three_byte_second( int $b1, ?int $b2 ): bool {
+		return (
+			( 0xE0 === $b1 && null !== $b2 && $b2 >= 0xA0 && $b2 <= 0xBF ) ||
+			( $b1 >= 0xE1 && $b1 <= 0xEC && self::is_continuation( $b2 ) ) ||
+			( 0xED === $b1 && null !== $b2 && $b2 >= 0x80 && $b2 <= 0x9F ) ||
+			( $b1 >= 0xEE && $b1 <= 0xEF && self::is_continuation( $b2 ) )
+		);
+	}
+
+	private static function is_valid_four_byte_second( int $b1, ?int $b2 ): bool {
+		return (
+			( 0xF0 === $b1 && null !== $b2 && $b2 >= 0x90 && $b2 <= 0xBF ) ||
+			( $b1 >= 0xF1 && $b1 <= 0xF3 && self::is_continuation( $b2 ) ) ||
+			( 0xF4 === $b1 && null !== $b2 && $b2 >= 0x80 && $b2 <= 0x8F )
+		);
+	}
+
+	/**
+	 * @return int[] Segment/code point indices to use as start boundaries.
+	 */
+	private static function span_probe_indices( int $code_points, string $salt ): array {
+		$indices = array(
+			0,
+			min( 1, $code_points ),
+			min( 2, $code_points ),
+			intdiv( $code_points, 2 ),
+			max( 0, $code_points - 1 ),
+			$code_points,
+		);
+
+		$hash = hash( 'sha256', $salt, true );
+		for ( $i = 0; $i < 4; $i++ ) {
+			$indices[] = ord( $hash[ $i ] ) % ( $code_points + 1 );
+		}
+
+		sort( $indices );
+		return array_values( array_unique( $indices ) );
+	}
+
+	/**
+	 * @return int[] Requested code point counts to probe from a start boundary.
+	 */
+	private static function span_probe_counts( int $available, string $salt ): array {
+		$counts = array(
+			0,
+			1,
+			2,
+			3,
+			min( 7, $available ),
+			intdiv( $available, 2 ),
+			max( 0, $available - 1 ),
+			$available,
+			$available + 1,
+		);
+
+		$hash = hash( 'sha256', $salt, true );
+		for ( $i = 0; $i < 4; $i++ ) {
+			$counts[] = ord( $hash[ $i ] ) % ( $available + 2 );
+		}
+
+		sort( $counts );
+		return array_values( array_unique( $counts ) );
 	}
 
 	/**

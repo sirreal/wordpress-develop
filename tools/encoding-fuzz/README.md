@@ -7,7 +7,8 @@ Differential fuzzer for the WordPress UTF-8 functions:
 - `_wp_utf8_encode_fallback()` / `_wp_utf8_decode_fallback()`
 - `wp_has_noncharacters()` / `_wp_has_noncharacters_fallback()` (valid input only)
 - `_mb_chr()` / `_mb_ord()`
-- `_wp_utf8_codepoint_count()` and the resumable `_wp_scan_utf8()` paths (secondary)
+- `_wp_utf8_codepoint_count()`, `_wp_utf8_codepoint_span()`, and the
+  resumable `_wp_scan_utf8()` paths (secondary)
 
 The pure-PHP fallbacks in `src/wp-includes/compat-utf8.php` are the main
 fuzz surface; the mbstring-backed public functions are checked alongside
@@ -107,6 +108,12 @@ Internal invariants:
 - scrub is idempotent
 - `_wp_utf8_codepoint_count()` equals `mb_strlen()` of the scrubbed text
   (each maximal subpart counts as one code point)
+- `_wp_utf8_codepoint_span()` reports the original byte span occupied by a
+  requested number of code points; on scrubbed valid text it matches
+  `strlen( mb_substr( ... ) )`, and on arbitrary input an independent
+  maximal-subpart parser checks that invalid subparts count as one code
+  point. Nonzero starts are probed only at known code point or
+  maximal-subpart boundaries.
 - scanning with `_wp_scan_utf8()` in pseudo-random `max_code_points`
   chunks reconstructs the same scrubbed text and always makes forward
   progress (chunk sizes derive from the input hash, so replays are exact)
@@ -193,7 +200,7 @@ php tools/encoding-fuzz/tests/harness-smoke.php
 ```
 
 Verifies the oracle battery, runs the real targets over the battery
-vectors, and — most importantly — mutation-tests the harness: nineteen
+vectors, and — most importantly — mutation-tests the harness: twenty-three
 classes of deliberately broken implementations (validator accepting
 0xC0, validator rejecting noncharacters, non-maximal-subpart scrubber,
 identity scrubber, byte-dropping scrubber, off-by-one code point count,
@@ -201,16 +208,21 @@ throwing target, cp1252-confused encoder, identity encoder, per-byte
 decoder, valid-input-mangling decoder, round-trip-violating decoder,
 null-returning encoder, sometimes-null decoder, blind noncharacter
 detector, U+FDD0-block-missing detector, over-eager noncharacter
-detector, cp1252-confused `_mb_chr()`, invalid-accepting `_mb_ord()`)
+detector, cp1252-confused `_mb_chr()`, invalid-accepting `_mb_ord()`,
+off-by-one code point span, invalid-subpart byte-counted span, and
+wrong or stale `found_code_points` span)
 must all be caught. It also asserts generator determinism, the
 valid/invalid input mix, and the documented
 `wp_has_noncharacters()` divergence stance on ill-formed input.
 
 For end-to-end pipeline testing while the real implementations are
-healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager`
+healthy, `ENCODING_FUZZ_FAULT=accept-c0|non-maximal|encode-cp1252|decode-per-byte|nonchars-miss-fdd0|nonchars-overeager|span-off-by-one|span-invalid-bytes|span-found-max|span-found-stale`
 injects a broken target into worker, replay, and minimize alike.
 Fault-injected artifacts record the fault name in their environment
-metadata so they cannot be mistaken for real findings:
+metadata so they cannot be mistaken for real findings. Replaying or
+minimizing a fault-injected artifact requires setting the same
+`ENCODING_FUZZ_FAULT`; replay without it checks the healthy targets
+against the saved input:
 
 ```sh
 ENCODING_FUZZ_FAULT=non-maximal php tools/encoding-fuzz/runner.php --lanes 2 --duration-seconds 5

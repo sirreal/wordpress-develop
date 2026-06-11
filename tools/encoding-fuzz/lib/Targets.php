@@ -15,6 +15,10 @@ namespace EncodingFuzz;
  *   ENCODING_FUZZ_FAULT=decode-per-byte    decoder emits '?' per invalid byte
  *   ENCODING_FUZZ_FAULT=nonchars-miss-fdd0 fallback detector misses U+FDD0–U+FDEF
  *   ENCODING_FUZZ_FAULT=nonchars-overeager public detector also flags U+FDCF
+ *   ENCODING_FUZZ_FAULT=span-off-by-one    code point span reports one extra byte
+ *   ENCODING_FUZZ_FAULT=span-invalid-bytes code point span counts invalid bytes individually
+ *   ENCODING_FUZZ_FAULT=span-found-max     code point span over-reports found_code_points
+ *   ENCODING_FUZZ_FAULT=span-found-stale   code point span leaves found_code_points stale
  */
 class Targets {
 	/**
@@ -33,6 +37,7 @@ class Targets {
 			'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
 			'mb_chr'          => '_mb_chr',
 			'mb_ord'          => '_mb_ord',
+			'codepoint_span'  => '_wp_utf8_codepoint_span',
 		);
 
 		switch ( getenv( 'ENCODING_FUZZ_FAULT' ) ) {
@@ -66,6 +71,22 @@ class Targets {
 
 			case 'nonchars-overeager':
 				$targets['has_nonchars'] = self::nonchars_overeager( ... );
+				break;
+
+			case 'span-off-by-one':
+				$targets['codepoint_span'] = self::codepoint_span_off_by_one( ... );
+				break;
+
+			case 'span-invalid-bytes':
+				$targets['codepoint_span'] = self::codepoint_span_counts_invalid_bytes( ... );
+				break;
+
+			case 'span-found-max':
+				$targets['codepoint_span'] = self::codepoint_span_found_max( ... );
+				break;
+
+			case 'span-found-stale':
+				$targets['codepoint_span'] = self::codepoint_span_stale_empty_found( ... );
 				break;
 		}
 
@@ -115,5 +136,66 @@ class Targets {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Deliberately broken span finder: reports the correct found count but
+	 * includes one extra byte whenever a non-empty span was found.
+	 */
+	public static function codepoint_span_off_by_one( string $text, int $byte_offset, int $max_code_points, ?int &$found_code_points = 0 ): int {
+		$span = _wp_utf8_codepoint_span( $text, $byte_offset, $max_code_points, $found_code_points );
+		return $span > 0 ? $span + 1 : $span;
+	}
+
+	/**
+	 * Deliberately broken span finder: treats each byte of an invalid maximal
+	 * subpart as its own code point, so a two-byte truncated sequence can be
+	 * split in half.
+	 */
+	public static function codepoint_span_counts_invalid_bytes( string $text, int $byte_offset, int $max_code_points, ?int &$found_code_points = 0 ): int {
+		$was_at            = $byte_offset;
+		$invalid_length    = 0;
+		$end               = strlen( $text );
+		$found_code_points = 0;
+
+		while ( $byte_offset < $end && $found_code_points < $max_code_points ) {
+			$needed      = $max_code_points - $found_code_points;
+			$chunk_count = _wp_scan_utf8( $text, $byte_offset, $invalid_length, null, $needed );
+
+			$found_code_points += $chunk_count;
+
+			if ( 0 !== $invalid_length && $found_code_points < $max_code_points ) {
+				$bytes_to_take       = min( $invalid_length, $max_code_points - $found_code_points );
+				$found_code_points  += $bytes_to_take;
+				$byte_offset        += $bytes_to_take;
+			}
+		}
+
+		return $byte_offset - $was_at;
+	}
+
+	/**
+	 * Deliberately broken span finder: returns the right byte span but always
+	 * claims it found the requested number of code points.
+	 */
+	public static function codepoint_span_found_max( string $text, int $byte_offset, int $max_code_points, ?int &$found_code_points = 0 ): int {
+		$span              = _wp_utf8_codepoint_span( $text, $byte_offset, $max_code_points, $found_code_points );
+		$found_code_points = $max_code_points;
+		return $span;
+	}
+
+	/**
+	 * Deliberately broken span finder: leaves the caller's by-reference
+	 * value untouched whenever no bytes are spanned.
+	 */
+	public static function codepoint_span_stale_empty_found( string $text, int $byte_offset, int $max_code_points, ?int &$found_code_points = 0 ): int {
+		$previous = $found_code_points;
+		$span     = _wp_utf8_codepoint_span( $text, $byte_offset, $max_code_points, $found_code_points );
+
+		if ( 0 === $span ) {
+			$found_code_points = $previous;
+		}
+
+		return $span;
 	}
 }

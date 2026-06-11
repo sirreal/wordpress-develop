@@ -106,6 +106,7 @@ $real_targets = array(
 	'has_nonchars_fb' => '_wp_has_noncharacters_fallback',
 	'mb_chr'          => '_mb_chr',
 	'mb_ord'          => '_mb_ord',
+	'codepoint_span'  => '_wp_utf8_codepoint_span',
 );
 
 /**
@@ -255,6 +256,32 @@ $seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
 	'mb_ord' => static fn( string $bytes ) => str_starts_with( $bytes, "\xC0" ) ? 0 : _mb_ord( $bytes ),
 ) );
 check( 'catches invalid-accepting _mb_ord', in_array( 'mb-ord-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3t. Code point span that reports one extra byte.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_span' => Targets::codepoint_span_off_by_one( ... ),
+) );
+check( 'catches off-by-one code point span', in_array( 'codepoint-span-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3u. Code point span that treats invalid maximal subparts as one code
+//     point per byte instead of one code point per maximal subpart.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_span' => Targets::codepoint_span_counts_invalid_bytes( ... ),
+) );
+check( 'catches byte-counted invalid code point span', in_array( 'codepoint-span-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3v. Code point span that returns the right byte span but corrupts the
+//     by-reference found count.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_span' => Targets::codepoint_span_found_max( ... ),
+) );
+check( 'catches wrong code point span found count', in_array( 'codepoint-span-found-mismatch', $seen, true ), implode( ',', $seen ) );
+
+// 3w. Code point span that leaves found_code_points stale on empty spans.
+$seen = broken_run( $oracles, $real_targets, $battery_vectors, array(
+	'codepoint_span' => Targets::codepoint_span_stale_empty_found( ... ),
+) );
+check( 'catches stale empty code point span found count', in_array( 'codepoint-span-found-mismatch', $seen, true ), implode( ',', $seen ) );
 
 // ---------------------------------------------------------------------
 // 4. Generator determinism and mix.
