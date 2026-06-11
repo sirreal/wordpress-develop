@@ -3956,6 +3956,21 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (
+				this.current_namespace === "html" &&
+				tagName === "FORM" &&
+				(
+					this.#hasOpenHtmlElement("TEMPLATE") ||
+					!this.#hasOpenHtmlElement("FORM")
+				)
+			) {
+				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
+				if (paragraphIndex !== -1) {
+					this.#queueVirtualPopsFrom(paragraphIndex);
+					return true;
+				}
+			}
+
 			if (this.#shouldClosePForStartTag(tagName)) {
 				const paragraphIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
 				if (paragraphIndex !== -1) {
