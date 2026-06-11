@@ -496,6 +496,38 @@ assert.equal(fullParserBodyTemplateOuterCloser.get_modifiable_text(), "Hello");
 assert.deepEqual(fullParserBodyTemplateOuterCloser.get_breadcrumbs(), ["HTML", "BODY", "DIV", "TEMPLATE", "#text"]);
 fullParserBodyTemplateOuterCloser.destroy();
 
+const fullParserTemplateFrames = WP_HTML_Processor.create_full_parser("<template><frame></frame></frameset><frame></frame></template>");
+const fullParserTemplateFrameTags = [];
+while (fullParserTemplateFrames.next_token()) {
+	if (fullParserTemplateFrames.get_token_type() === "#tag") {
+		fullParserTemplateFrameTags.push(fullParserTemplateFrames.get_tag());
+	}
+}
+assert.equal(fullParserTemplateFrames.get_last_error(), null);
+assert.equal(fullParserTemplateFrameTags.includes("FRAME"), false);
+assert.equal(fullParserTemplateFrameTags.includes("FRAMESET"), false);
+fullParserTemplateFrames.destroy();
+
+const fullParserTemplateIgnoredFrameset = WP_HTML_Processor.create_full_parser(
+	"<template><div><frameset><span></span></div><span></span></template>",
+);
+const fullParserTemplateIgnoredFramesetSpans = [];
+while (fullParserTemplateIgnoredFrameset.next_token()) {
+	if (
+		fullParserTemplateIgnoredFrameset.get_token_type() === "#tag" &&
+		!fullParserTemplateIgnoredFrameset.is_tag_closer() &&
+		fullParserTemplateIgnoredFrameset.get_tag() === "SPAN"
+	) {
+		fullParserTemplateIgnoredFramesetSpans.push(fullParserTemplateIgnoredFrameset.get_breadcrumbs());
+	}
+}
+assert.equal(fullParserTemplateIgnoredFrameset.get_last_error(), null);
+assert.deepEqual(fullParserTemplateIgnoredFramesetSpans, [
+	["HTML", "HEAD", "TEMPLATE", "DIV", "SPAN"],
+	["HTML", "HEAD", "TEMPLATE", "SPAN"],
+]);
+fullParserTemplateIgnoredFrameset.destroy();
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

@@ -2367,11 +2367,16 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			const isCloser = tokenType === "#tag" && this.is_tag_closer();
+			if (this.#shouldIgnoreFrameStartTagInTemplateContent(tokenType, tagName, isCloser)) {
+				this.skip_current_token = true;
+				return true;
+			}
+
 			if (this.#isInHeadTemplateContent()) {
 				return false;
 			}
 
-			const isCloser = tokenType === "#tag" && this.is_tag_closer();
 			const isWhitespaceText = (
 				tokenType === "#text" &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
@@ -3598,6 +3603,19 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#shouldIgnoreFrameStartTagInTemplateContent(tokenType, tagName, isCloser) {
+			if (
+				tokenType !== "#tag" ||
+				isCloser ||
+				(tagName !== "FRAME" && tagName !== "FRAMESET") ||
+				!this.#hasOpenHtmlElement("TEMPLATE")
+			) {
+				return false;
+			}
+
+			return this.full_parser_insertion_mode === "in_body" || this.#isInHeadTemplateContent();
 		}
 
 		#openHtmlElementBefore(tagName, beforeIndex) {
