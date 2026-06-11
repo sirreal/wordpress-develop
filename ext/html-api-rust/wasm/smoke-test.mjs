@@ -2400,6 +2400,59 @@ assert.deepEqual(templateNamespaceProcessor.get_breadcrumbs(), ["HTML", "BODY", 
 assert.equal(templateNamespaceProcessor.get_attribute("target"), true);
 templateNamespaceProcessor.destroy();
 
+function assertNormalizesToSupportedHtml(name, html) {
+	const normalized = WP_HTML_Processor.normalize(html);
+	assert.equal(typeof normalized, "string", name);
+	assert.equal(typeof WP_HTML_Processor.normalize(normalized), "string", name);
+}
+
+function assertNormalizesIdempotently(name, html) {
+	const normalized = WP_HTML_Processor.normalize(html);
+	assert.equal(typeof normalized, "string", name);
+	assert.equal(WP_HTML_Processor.normalize(normalized), normalized, name);
+}
+
+for (const [name, html] of [
+	["Unclosed SVG TITLE after P in EM", "<em><p><svg><title>"],
+	["Unclosed SVG TITLE after P in STRONG", "<strong><p><svg ><title>"],
+]) {
+	assertNormalizesToSupportedHtml(name, html);
+}
+
+for (const [name, html] of [
+	["Malformed quoted attribute boundary", '<A "/=>'],
+	["Duplicate attribute after bare attribute", '<A V=5 R V=""=>'],
+	["Duplicate DATA-ID after numeric attribute", '<E DATA-ID=1 1 DATA-ID=""=>'],
+	["Duplicate attribute before tag end", "<R V=5 R V=5 =>"],
+	["NULL byte in foreign tag name", "<SVG><L\0 D>"],
+	["Malformed closing-looking attribute", "<a </=>"],
+	["Malformed self-closing attribute", "<a h/=>"],
+	["Duplicate ID with quote boundary", '<d ID=""" ID=""=>'],
+	["Mixed-case duplicate TITLE", '<d TITLE=""\' title=""=>'],
+	["Colon before self-closing slash", "<e :/=>"],
+	["Duplicate class after bare attribute", "<e class=y d class=''=>"],
+	["Duplicate DATA-ID after hyphen", '<e data-id=1 - data-id="">'],
+	["Duplicate title after quotes", '<e title=\'\'\' title=""=>'],
+	["FORM with SVG TITLE text edge", '<form ><svg ><title "\'></form><form>'],
+	["FORM with TABLE and SCRIPT", '<form id><table te"><script></script><td srce" ID/></form><form claslicate>'],
+	["FORM with TABLE CAPTION", "<form><table><caption></form><form >"],
+	["Short malformed G attribute C", "<g c/=>"],
+	["Short malformed G attribute S", "<g s/=>"],
+	["Duplicate SRC boundary", '<g src=""g src="">'],
+	["Short malformed H attribute", "<h f/=>"],
+	["Malformed SRC equals boundary", '<i src=""= src=""=>'],
+	["Malformed slash in tag opener", "<i/t/=>"],
+	["Malformed L colon attribute", "<l :/=>"],
+	["Malformed L less-than attribute", "<l/</=>"],
+	["Malformed N less-than attribute", "<n </=>"],
+	["Unclosed SVG TITLE after P", "<p><svg><title>"],
+	["Duplicate ALT boundary", '<r alt=\'\'d alt=""=>'],
+	["NULL byte in SVG child tag", "<svg><l\0 '>"],
+	["NULL byte before slash in SVG child tag", "<svg><l\0/r>"],
+]) {
+	assertNormalizesIdempotently(name, html);
+}
+
 assert.equal(
 	WP_HTML_Processor.normalize('<a href=#anchor enabled>Tom & Jerry</a>'),
 	'<a href="#anchor" enabled>Tom &amp; Jerry</a>',
