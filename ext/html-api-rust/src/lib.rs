@@ -52,6 +52,21 @@ pub struct TagProcessor {
     parsing_namespace: u8,
 }
 
+#[no_mangle]
+pub extern "C" fn wp_html_api_rust_alloc(len: usize) -> *mut u8 {
+    let mut buffer = Vec::<u8>::with_capacity(len);
+    let ptr = buffer.as_mut_ptr();
+    std::mem::forget(buffer);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wp_html_api_rust_dealloc(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() {
+        drop(Vec::from_raw_parts(ptr, 0, len));
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct AttributeSpan {
     name_start: usize,

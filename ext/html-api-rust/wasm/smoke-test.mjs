@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import { loadWasm } from "./wp-html-api-rust.js";
+
+const {
+	WP_HTML_Tag_Processor,
+	WP_HTML_Processor,
+	scanNextTag,
+	version,
+} = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
+
+assert.equal(version(), "0.1.0");
+
+assert.deepEqual(
+	scanNextTag('<p class="intro">Hi</p>'),
+	{
+		tag_start: 0,
+		tag_end: 17,
+		name_start: 1,
+		name_len: 1,
+		tag_name: "P",
+		is_closing: false,
+		has_self_closing_flag: false,
+		token_end: 17,
+		token_type: 1,
+	},
+);
+
+const tags = new WP_HTML_Tag_Processor('<div class="one"><span data-id="7">Hi</span></div>');
+assert.equal(tags.next_tag({ tag_name: "span" }), true);
+assert.equal(tags.get_tag(), "SPAN");
+assert.equal(tags.get_attribute("data-id"), "7");
+assert.equal(tags.set_attribute("data-id", "8"), true);
+assert.equal(tags.add_class("active"), true);
+assert.equal(tags.has_class("active"), true);
+assert.deepEqual(tags.class_list(), ["active"]);
+assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" data-id="8">Hi</span></div>');
+tags.destroy();
+
+const text = new WP_HTML_Tag_Processor(" \0<p>Hi</p>");
+assert.equal(text.next_token(), true);
+assert.equal(text.get_token_type(), "#text");
+assert.equal(text.subdivide_text_appropriately(), true);
+assert.equal(text.text_node_classification, WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE);
+text.destroy();
+
+const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
+assert.equal(textarea.next_token(), true);
+assert.equal(textarea.get_modifiable_text(), "One");
+assert.equal(textarea.set_modifiable_text("Two"), true);
+assert.equal(textarea.get_updated_html(), "<textarea>Two</textarea>");
+textarea.destroy();
+
+const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
+assert.equal(processor.next_tag("p"), true);
+assert.equal(processor.expects_closer(), true);
+assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+processor.destroy();
+
+console.log("WASM smoke tests passed.");

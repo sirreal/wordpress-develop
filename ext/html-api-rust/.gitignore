@@ -1,4 +1,5 @@
 /target/
+/wasm/dist/
 /autom4te.cache/
 /build/
 /modules/
