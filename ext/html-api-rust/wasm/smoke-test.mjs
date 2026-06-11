@@ -143,6 +143,17 @@ assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("dat
 assert.equal(duplicateAttributeNameTags.get_attribute("data-x"), "1");
 duplicateAttributeNameTags.destroy();
 
+const rawClassNameUpdates = new WP_HTML_Tag_Processor('<div class="x\uFFFDy">');
+assert.equal(rawClassNameUpdates.next_tag("div"), true);
+assert.equal(rawClassNameUpdates.has_class("x\0y"), false);
+assert.equal(rawClassNameUpdates.add_class("x\0y"), true);
+assert.equal(rawClassNameUpdates.get_updated_html(), '<div class="x\uFFFDy x\0y">');
+assert.deepEqual(rawClassNameUpdates.class_list(), ["x\uFFFDy"]);
+assert.equal(rawClassNameUpdates.has_class("x\0y"), false);
+assert.equal(rawClassNameUpdates.remove_class("x\0y"), true);
+assert.equal(rawClassNameUpdates.get_updated_html(), '<div class="x\uFFFDy">');
+rawClassNameUpdates.destroy();
+
 const tagMatchOffset = new WP_HTML_Tag_Processor("<div one></div><div two></div>");
 assert.equal(tagMatchOffset.next_tag({ tag_name: "div", match_offset: 2 }), true);
 assert.equal(tagMatchOffset.get_attribute("two"), true);

@@ -1220,10 +1220,9 @@ impl TagProcessor {
             return false;
         }
 
-        let normalized_class_name = normalize_class_bytes(class_name);
-        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
+        let comparable_class_name = comparable_class_bytes(class_name, quirks_mode);
         if self
-            .current_class_entries(quirks_mode)
+            .current_raw_class_entries(quirks_mode)
             .iter()
             .any(|class| class.comparable.as_slice() == comparable_class_name.as_slice())
         {
@@ -1237,11 +1236,11 @@ impl TagProcessor {
                 if !value.is_empty() {
                     value.push(b' ');
                 }
-                value.extend_from_slice(&normalized_class_name);
+                value.extend_from_slice(class_name);
                 self.set_attribute(b"class", &value, 2)
             }
             AttributeValue::Boolean | AttributeValue::Missing => {
-                self.set_attribute(b"class", &normalized_class_name, 2)
+                self.set_attribute(b"class", class_name, 2)
             }
         }
     }
@@ -1255,9 +1254,8 @@ impl TagProcessor {
             return false;
         }
 
-        let normalized_class_name = normalize_class_bytes(class_name);
-        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
-        let entries = self.current_class_entries(quirks_mode);
+        let comparable_class_name = comparable_class_bytes(class_name, quirks_mode);
+        let entries = self.current_raw_class_entries(quirks_mode);
         let classes: Vec<Vec<u8>> = entries
             .iter()
             .filter(|class| class.comparable.as_slice() != comparable_class_name.as_slice())
@@ -1286,11 +1284,10 @@ impl TagProcessor {
             return 0;
         }
 
-        let normalized_class_name = normalize_class_bytes(class_name);
-        let comparable_class_name = comparable_class_bytes(&normalized_class_name, quirks_mode);
+        let comparable_class_name = comparable_class_bytes(class_name, quirks_mode);
 
         if self
-            .current_class_entries(quirks_mode)
+            .current_public_class_entries(quirks_mode)
             .into_iter()
             .any(|class| class.comparable.as_slice() == comparable_class_name.as_slice())
         {
@@ -1309,7 +1306,7 @@ impl TagProcessor {
             return false;
         }
 
-        let classes = self.current_class_entries(quirks_mode);
+        let classes = self.current_public_class_entries(quirks_mode);
         self.scratch.clear();
         for class in classes {
             if !self.scratch.is_empty() {
@@ -1325,7 +1322,33 @@ impl TagProcessor {
         true
     }
 
-    fn current_class_entries(&mut self, quirks_mode: bool) -> Vec<ClassEntry> {
+    fn current_raw_class_entries(&mut self, quirks_mode: bool) -> Vec<ClassEntry> {
+        let value = match self.get_attribute(b"class") {
+            AttributeValue::String => self.scratch.clone(),
+            AttributeValue::Boolean | AttributeValue::Missing => Vec::new(),
+        };
+
+        let mut classes = Vec::new();
+        for class in value.split(|byte| is_html_whitespace(*byte)) {
+            if class.is_empty() {
+                continue;
+            }
+
+            let name = class.to_vec();
+            let comparable = comparable_class_bytes(&name, quirks_mode);
+            if classes
+                .iter()
+                .any(|seen: &ClassEntry| seen.comparable.as_slice() == comparable.as_slice())
+            {
+                continue;
+            }
+            classes.push(ClassEntry { name, comparable });
+        }
+
+        classes
+    }
+
+    fn current_public_class_entries(&mut self, quirks_mode: bool) -> Vec<ClassEntry> {
         let value = match self.get_attribute(b"class") {
             AttributeValue::String => self.scratch.clone(),
             AttributeValue::Boolean | AttributeValue::Missing => Vec::new(),
@@ -3453,6 +3476,39 @@ mod tests {
         assert_eq!(
             std::str::from_utf8(&processor.html).unwrap(),
             r#"<div class="one three">"#
+        );
+    }
+
+    #[test]
+    fn tag_processor_preserves_raw_class_update_names() {
+        let mut processor = TagProcessor {
+            html: "<div class=\"x\u{FFFD}y\">".as_bytes().to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe {
+            super::wp_html_api_rust_tag_processor_next_tag(&mut processor, ptr::null(), 0, false)
+        });
+
+        assert_eq!(processor.has_class(b"x\0y", false), 1);
+        assert!(processor.add_class(b"x\0y", false));
+        assert_eq!(
+            processor.html.as_slice(),
+            "<div class=\"x\u{FFFD}y x\0y\">".as_bytes()
+        );
+        assert!(processor.class_list(false));
+        assert_eq!(processor.scratch, "x\u{FFFD}y".as_bytes());
+        assert_eq!(processor.has_class(b"x\0y", false), 1);
+
+        assert!(processor.remove_class(b"x\0y", false));
+        assert_eq!(
+            processor.html.as_slice(),
+            "<div class=\"x\u{FFFD}y\">".as_bytes()
         );
     }
 
