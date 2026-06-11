@@ -2002,10 +2002,13 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
-			this.is_full_parser = Boolean(options.fullParser);
+			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
+			this.is_full_parser = Boolean(options.fullParser || this.is_html_fragment_context);
 			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
-			this.full_parser_insertion_mode = this.is_full_parser ? "initial" : "in_body";
-			this.full_parser_scaffolded = !this.is_full_parser;
+			this.full_parser_insertion_mode = this.is_html_fragment_context
+				? "before_head"
+				: this.is_full_parser ? "initial" : "in_body";
+			this.full_parser_scaffolded = !this.is_full_parser || this.is_html_fragment_context;
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
 			this.form_element_pointer = null;
@@ -2013,19 +2016,21 @@ export function createHtmlApi(wasm) {
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
 			this.context_integration_node_type = options.contextIntegrationNodeType ?? null;
-			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
-			this.open_element_namespaces = this.is_full_parser ? [] : ["html", this.context_namespace];
-			this.open_element_integration_node_types = this.is_full_parser ? [] : [null, this.context_integration_node_type];
+			this.open_elements = this.is_html_fragment_context ? ["HTML"] : this.is_full_parser ? [] : ["HTML", this.context_node];
+			this.open_element_namespaces = this.is_html_fragment_context ? ["html"] : this.is_full_parser ? [] : ["html", this.context_namespace];
+			this.open_element_integration_node_types = this.is_html_fragment_context ? [null] : this.is_full_parser ? [] : [null, this.context_integration_node_type];
 			this.active_formatting_elements = [];
 			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
 			this.breadcrumbs = [...this.open_elements];
-			this.current_namespace = this.#childNamespaceForStackEntry(
-				this.context_node,
-				this.context_namespace,
-				this.context_integration_node_type,
-			);
+			this.current_namespace = this.is_html_fragment_context
+				? "html"
+				: this.#childNamespaceForStackEntry(
+					this.context_node,
+					this.context_namespace,
+					this.context_integration_node_type,
+				);
 			this.current_token_namespace = this.current_namespace;
 			this.compat_mode = options.compatMode ?? this.compat_mode;
 			super.change_parsing_namespace(this.current_namespace);
@@ -2072,6 +2077,18 @@ export function createHtmlApi(wasm) {
 				)
 			) {
 				return null;
+			}
+
+			if (contextNamespaceName === "html" && contextNode === "HTML") {
+				return new this(html, {
+					compatMode,
+					contextNode,
+					contextNamespace: contextNamespaceName,
+					contextIntegrationNodeType,
+					fullParser: false,
+					htmlFragmentContext: true,
+					encodingConfidence: "irrelevant",
+				});
 			}
 
 			return new this(html, {

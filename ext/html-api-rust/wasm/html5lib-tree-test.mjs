@@ -7,6 +7,7 @@ const treeIndent = "  ";
 const supportedFragmentContexts = new Set([
 	"body",
 	"div",
+	"html",
 	"math math",
 	"math mi",
 	"math mn",
@@ -103,6 +104,10 @@ function html5libFragmentContextMarkup(fragmentContext) {
 function html5libFragmentBaseDepth(fragmentContext) {
 	if (fragmentContext === null) {
 		return 0;
+	}
+
+	if (fragmentContext === "html") {
+		return 1;
 	}
 
 	if (fragmentContext.startsWith("math ")) {
