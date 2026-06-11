@@ -31,6 +31,7 @@ const supportedFragmentContexts = new Set([
 	"td",
 	"tfoot",
 	"thead",
+	"tr",
 ]);
 
 const skippedTests = new Set([

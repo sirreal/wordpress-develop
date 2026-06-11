@@ -3050,6 +3050,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#shouldIgnoreTableRowContextBoundaryStartTag(tagName)) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
 			if (
 				allowVirtualPreclosures &&
 				(
@@ -5287,6 +5292,16 @@ export function createHtmlApi(wasm) {
 				this.context_namespace === "html" &&
 				this.context_node === "TABLE" &&
 				this.#currentHtmlElementIs("TABLE")
+			);
+		}
+
+		#shouldIgnoreTableRowContextBoundaryStartTag(tagName) {
+			return (
+				!this.is_full_parser &&
+				TABLE_ROW_BOUNDARY_START_TAGS.has(tagName) &&
+				this.context_namespace === "html" &&
+				this.context_node === "TR" &&
+				this.#currentHtmlElementIs("TR")
 			);
 		}
 

@@ -1729,6 +1729,9 @@ for (const [html, context, expected] of [
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
 	["<table><tr>", "<table>", "<tbody><tr></tr></tbody>"],
 	["foo<col>", "<colgroup>", "<col>"],
+	["<caption><td>", "<tr>", "<td></td>"],
+	["<tbody><td>", "<tr>", "<td></td>"],
+	["<tr><td>", "<tr>", "<td></td>"],
 	[
 		'<template><form><input name="q"></form><div>second</div></template>',
 		"<template>",
