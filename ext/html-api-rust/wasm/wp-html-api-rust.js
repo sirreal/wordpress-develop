@@ -47,12 +47,16 @@ const TOKEN_TYPES = new Map([
 const VOID_ELEMENTS = new Set([
 	"AREA",
 	"BASE",
+	"BASEFONT",
+	"BGSOUND",
 	"BR",
 	"COL",
 	"EMBED",
+	"FRAME",
 	"HR",
 	"IMG",
 	"INPUT",
+	"KEYGEN",
 	"LINK",
 	"META",
 	"PARAM",
@@ -60,6 +64,19 @@ const VOID_ELEMENTS = new Set([
 	"TRACK",
 	"WBR",
 ]);
+
+const SPECIAL_ATOMIC_ELEMENTS = new Set([
+	"IFRAME",
+	"NOEMBED",
+	"NOFRAMES",
+	"SCRIPT",
+	"STYLE",
+	"TEXTAREA",
+	"TITLE",
+	"XMP",
+]);
+
+const HEADING_ELEMENTS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 
 const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
 	"+//silmaril//dtd html pro v0r11 19970101//",
@@ -820,34 +837,243 @@ export function createHtmlApi(wasm) {
 	}
 
 	class WP_HTML_Processor extends WP_HTML_Tag_Processor {
-		static create_fragment(html) {
-			return new this(html);
+		constructor(html, options = {}) {
+			super(html);
+			this.last_error = null;
+			this.unsupported_exception = null;
+			this.current_virtual = null;
+			this.is_full_parser = Boolean(options.fullParser);
+			this.context_node = options.contextNode ?? "BODY";
+			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
+			this.breadcrumbs = [...this.open_elements];
+		}
+
+		static create_fragment(html, context = "<body>") {
+			return new this(html, {
+				contextNode: contextNodeName(context),
+				fullParser: false,
+			});
 		}
 
 		static create_full_parser(html) {
-			return new this(html);
+			return new this(html, {
+				fullParser: true,
+			});
+		}
+
+		static is_void(tagName) {
+			return VOID_ELEMENTS.has(asciiUpper(String(tagName)));
+		}
+
+		next_tag(query = null) {
+			const visitClosers = Boolean(query && typeof query === "object" && query.tag_closers === "visit");
+
+			if (query === null) {
+				while (this.next_token()) {
+					if (this.get_token_type() !== "#tag") {
+						continue;
+					}
+
+					if (!this.is_tag_closer() || visitClosers) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+			if (typeof query === "string") {
+				query = { breadcrumbs: [query] };
+			}
+
+			if (!query || typeof query !== "object") {
+				return false;
+			}
+
+			const needsTag = typeof query.tag_name === "string" ? asciiUpper(query.tag_name) : null;
+			const needsClass = typeof query.class_name === "string" ? query.class_name : null;
+			const matchOffset = Number.isInteger(query.match_offset) && query.match_offset > 0 ? query.match_offset : 1;
+			const hasBreadcrumbs = Array.isArray(query.breadcrumbs);
+
+			let remaining = matchOffset;
+			while (remaining > 0 && this.next_token()) {
+				if (this.get_token_type() !== "#tag") {
+					continue;
+				}
+
+				if (this.is_tag_closer()) {
+					if (!visitClosers || hasBreadcrumbs) {
+						continue;
+					}
+				}
+
+				if (needsTag !== null && this.get_token_name() !== needsTag) {
+					continue;
+				}
+
+				if (needsClass !== null && this.has_class(needsClass) !== true) {
+					continue;
+				}
+
+				if (hasBreadcrumbs && !this.matches_breadcrumbs(query.breadcrumbs)) {
+					continue;
+				}
+
+				remaining -= 1;
+			}
+
+			return remaining === 0;
+		}
+
+		next_token() {
+			this.current_virtual = null;
+			if (!super.next_token()) {
+				this.breadcrumbs = [...this.open_elements];
+				return false;
+			}
+
+			this.#updateTreeStateForCurrentToken();
+			return true;
 		}
 
 		get_last_error() {
-			return null;
+			return this.last_error;
 		}
 
 		get_unsupported_exception() {
-			return null;
+			return this.unsupported_exception;
 		}
 
 		is_virtual() {
-			return false;
+			return this.current_virtual !== null;
+		}
+
+		is_tag_closer() {
+			return this.is_virtual() ? this.current_virtual.operation === "pop" : super.is_tag_closer();
 		}
 
 		expects_closer() {
-			const tagName = this.get_tag();
-			return tagName === null || this.is_tag_closer() ? null : !VOID_ELEMENTS.has(tagName);
+			const tokenName = this.get_token_name();
+			if (tokenName === null) {
+				return null;
+			}
+
+			return tokenExpectsCloser(
+				tokenName,
+				this.get_namespace(),
+				this.has_self_closing_flag(),
+			);
 		}
 
 		get_breadcrumbs() {
+			return [...this.breadcrumbs];
+		}
+
+		get_current_depth() {
+			return this.breadcrumbs.length;
+		}
+
+		matches_breadcrumbs(breadcrumbs) {
+			if (!Array.isArray(breadcrumbs)) {
+				return false;
+			}
+
+			if (breadcrumbs.length === 0) {
+				return true;
+			}
+
+			const normalized = breadcrumbs.map((crumb) => crumb === "*" ? "*" : asciiUpper(String(crumb)));
+			const lastCrumb = normalized[normalized.length - 1];
+			if (lastCrumb !== "*" && this.get_tag() !== lastCrumb) {
+				return false;
+			}
+
+			let crumbIndex = normalized.length - 1;
+			for (let nodeIndex = this.breadcrumbs.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
+				const crumb = normalized[crumbIndex];
+				if (crumb !== "*" && this.breadcrumbs[nodeIndex] !== crumb) {
+					return false;
+				}
+
+				crumbIndex -= 1;
+				if (crumbIndex < 0) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#updateTreeStateForCurrentToken() {
+			const tokenType = this.get_token_type();
+			const tokenName = this.get_token_name();
+
+			if (tokenName === null) {
+				this.breadcrumbs = [...this.open_elements];
+				return;
+			}
+
+			if (tokenType !== "#tag") {
+				this.breadcrumbs = [...this.open_elements, tokenName];
+				return;
+			}
+
 			const tagName = this.get_tag();
-			return tagName === null ? [] : ["HTML", "BODY", tagName];
+			if (tagName === null) {
+				this.breadcrumbs = [...this.open_elements];
+				return;
+			}
+
+			if (this.is_tag_closer()) {
+				const existingIndex = this.open_elements.lastIndexOf(tagName);
+				this.breadcrumbs = existingIndex === -1
+					? [...this.open_elements, tagName]
+					: [...this.open_elements.slice(0, existingIndex + 1)];
+
+				if (existingIndex !== -1) {
+					this.open_elements = this.open_elements.slice(0, existingIndex);
+				}
+				return;
+			}
+
+			this.#applySimpleHtmlSemanticClosures(tagName);
+			this.open_elements.push(tagName);
+			this.breadcrumbs = [...this.open_elements];
+
+			if (!tokenExpectsCloser(tagName, this.get_namespace(), this.has_self_closing_flag())) {
+				this.open_elements.pop();
+			}
+		}
+
+		#applySimpleHtmlSemanticClosures(tagName) {
+			if (tagName === "P") {
+				this.#popLastMatching("P");
+				return;
+			}
+
+			if (HEADING_ELEMENTS.has(tagName)) {
+				this.#popLastMatching((nodeName) => HEADING_ELEMENTS.has(nodeName));
+				return;
+			}
+
+			if (tagName === "LI") {
+				this.#popLastMatching("LI");
+				return;
+			}
+
+			if (tagName === "DD" || tagName === "DT") {
+				this.#popLastMatching((nodeName) => nodeName === "DD" || nodeName === "DT");
+			}
+		}
+
+		#popLastMatching(match) {
+			const predicate = typeof match === "function" ? match : (nodeName) => nodeName === match;
+			for (let i = this.open_elements.length - 1; i >= 0; i -= 1) {
+				if (predicate(this.open_elements[i])) {
+					this.open_elements = this.open_elements.slice(0, i);
+					return true;
+				}
+			}
+			return false;
 		}
 	}
 
@@ -1176,6 +1402,27 @@ function asciiStartsWithAt(value, needle, at) {
 
 function replaceNulls(value) {
 	return value.replace(/\0/g, "\uFFFD");
+}
+
+function contextNodeName(context) {
+	if (typeof context !== "string") {
+		return "BODY";
+	}
+
+	const match = context.match(/^<\s*([A-Za-z][^\s/>]*)/);
+	return match ? asciiUpper(match[1]) : "BODY";
+}
+
+function tokenExpectsCloser(tokenName, namespaceName, hasSelfClosingFlag) {
+	if (!tokenName || tokenName[0] === "#" || tokenName === "html") {
+		return false;
+	}
+
+	if (namespaceName === "html") {
+		return !VOID_ELEMENTS.has(tokenName) && !SPECIAL_ATOMIC_ELEMENTS.has(tokenName);
+	}
+
+	return !hasSelfClosingFlag;
 }
 
 function qualifySvgTagName(lowerTagName) {

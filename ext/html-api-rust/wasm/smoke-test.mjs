@@ -73,4 +73,22 @@ assert.equal(processor.expects_closer(), true);
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 
+const nestedProcessor = WP_HTML_Processor.create_fragment("<div><span><figure><img></figure></span></div>");
+assert.equal(nestedProcessor.next_tag({ breadcrumbs: ["FIGURE", "IMG"] }), true);
+assert.equal(nestedProcessor.get_tag(), "IMG");
+assert.equal(nestedProcessor.expects_closer(), false);
+assert.deepEqual(nestedProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN", "FIGURE", "IMG"]);
+nestedProcessor.destroy();
+
+const voidProcessor = WP_HTML_Processor.create_fragment("<img><div>");
+assert.equal(voidProcessor.next_tag("div"), true);
+assert.deepEqual(voidProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
+voidProcessor.destroy();
+
+const paragraphProcessor = WP_HTML_Processor.create_fragment("<p><p target>");
+assert.equal(paragraphProcessor.next_tag({ tag_name: "p", match_offset: 2 }), true);
+assert.deepEqual(paragraphProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+assert.equal(paragraphProcessor.get_attribute("target"), true);
+paragraphProcessor.destroy();
+
 console.log("WASM smoke tests passed.");

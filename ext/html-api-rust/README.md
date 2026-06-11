@@ -26,8 +26,9 @@ node wasm/smoke-test.mjs
 ```
 
 The JavaScript wrapper is an ES module in `wasm/wp-html-api-rust.js`. It exposes
-`loadWasm()`, `WP_HTML_Tag_Processor`, a shallow `WP_HTML_Processor` facade,
-`scanNextTag()`, and `version()`. The tag processor methods call the same Rust
-core used by the PHP extension. The processor facade currently exposes the
-constructor/static factory shape and simple token-derived helpers; full
-tree-construction behavior remains in the PHP `WP_HTML_Processor` layer.
+`loadWasm()`, `WP_HTML_Tag_Processor`, `WP_HTML_Processor`,
+`WP_HTML_Doctype_Info`, `scanNextTag()`, and `version()`. The tag processor
+methods call the same Rust core used by the PHP extension. The processor layer
+adds JavaScript-side open-element stack tracking for common HTML breadcrumbs,
+breadcrumb queries, void-element handling, and simple implied closures. Full
+HTML5 tree-construction parity remains incomplete.
