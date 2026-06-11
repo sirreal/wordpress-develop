@@ -1,0 +1,81 @@
+{
+    "id": "T11-same-html",
+    "title": "Compare two HTML fragments",
+    "difficulty": "advanced",
+    "split": "train",
+    "function": "is_same_html",
+    "cases": [
+        {
+            "id": "quoting-styles-equal",
+            "args": [
+                "<a href=x>go</a>",
+                "<a href=\"x\">go</a>"
+            ],
+            "expected": true
+        },
+        {
+            "id": "implied-closers-equal",
+            "args": [
+                "<div><p>a",
+                "<div><p>a</p></div>"
+            ],
+            "expected": true
+        },
+        {
+            "id": "tag-case-equal",
+            "args": [
+                "<DIV><P>a</P></DIV>",
+                "<div><p>a</p></div>"
+            ],
+            "expected": true
+        },
+        {
+            "id": "entity-spellings-equal",
+            "args": [
+                "<p>Fish &amp; Chips</p>",
+                "<p>Fish &AMP; Chips</p>"
+            ],
+            "expected": true
+        },
+        {
+            "id": "attribute-order-differs",
+            "args": [
+                "<a href=\"x\" id=\"y\">go</a>",
+                "<a id=\"y\" href=\"x\">go</a>"
+            ],
+            "expected": false
+        },
+        {
+            "id": "text-differs",
+            "args": [
+                "<p>a</p>",
+                "<p>b</p>"
+            ],
+            "expected": false
+        },
+        {
+            "id": "structure-differs",
+            "args": [
+                "<div><p>a</p></div>",
+                "<div><div>a</div></div>"
+            ],
+            "expected": false
+        },
+        {
+            "id": "whitespace-in-tag-equal",
+            "args": [
+                "<a  href=\"x\" >go</a>",
+                "<a href=\"x\">go</a>"
+            ],
+            "expected": true
+        },
+        {
+            "id": "misnesting-unsupported-false",
+            "args": [
+                "<b>one<i>two</b>three</i>",
+                "<b>one<i>two</i></b><i>three</i>"
+            ],
+            "expected": false
+        }
+    ]
+}

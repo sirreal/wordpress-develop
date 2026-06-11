@@ -1,0 +1,51 @@
+{
+    "id": "H01-strip-styles",
+    "title": "Strip inline styles",
+    "difficulty": "basic",
+    "split": "holdout",
+    "function": "strip_inline_styles",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<p style=\"color:red\">Hi <b style=\"x\">there</b></p>"
+            ],
+            "expected": "<p >Hi <b >there</b></p>"
+        },
+        {
+            "id": "uppercase-attribute",
+            "args": [
+                "<div STYLE=\"margin:0\">x</div>"
+            ],
+            "expected": "<div >x</div>"
+        },
+        {
+            "id": "other-attributes-preserved",
+            "args": [
+                "<p id=\"a\" style=\"x\" class=\"b\">text</p>"
+            ],
+            "expected": "<p id=\"a\"  class=\"b\">text</p>"
+        },
+        {
+            "id": "no-styles-unchanged",
+            "args": [
+                "<p class=\"clean\">nothing</p>"
+            ],
+            "expected": "<p class=\"clean\">nothing</p>"
+        },
+        {
+            "id": "comment-untouched",
+            "args": [
+                "<!-- <p style=\"x\">fake</p> --><p style=\"y\">real</p>"
+            ],
+            "expected": "<!-- <p style=\"x\">fake</p> --><p >real</p>"
+        },
+        {
+            "id": "valueless-style",
+            "args": [
+                "<p style>odd</p>"
+            ],
+            "expected": "<p >odd</p>"
+        }
+    ]
+}
