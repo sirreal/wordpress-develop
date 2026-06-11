@@ -228,6 +228,87 @@ assert.equal(doctypeInfo.system_identifier, "http://www.w3.org/TR/html4/strict.d
 assert.equal(doctypeInfo.indicated_compatibility_mode, "no-quirks");
 doctype.destroy();
 
+function assertDoctypeToken(html, expected) {
+	const info = WP_HTML_Doctype_Info.from_doctype_token(html);
+	assert.ok(info, `Expected parsed DOCTYPE for ${JSON.stringify(html)}`);
+	assert.deepEqual(
+		[
+			info.indicated_compatibility_mode,
+			info.name,
+			info.public_identifier,
+			info.system_identifier,
+		],
+		expected,
+		html,
+	);
+}
+
+for (const [html, expected] of [
+	["<!DOCTYPE>", ["quirks", null, null, null]],
+	["<!DOCTYPE html>", ["no-quirks", "html", null, null]],
+	["<!DOCTYPEhtml>", ["no-quirks", "html", null, null]],
+	[
+		'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+		["no-quirks", "html", "-//W3C//DTD HTML 4.01//EN", "http://www.w3.org/TR/html4/strict.dtd"],
+	],
+	[
+		'<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">',
+		["quirks", "svg", "-//W3C//DTD SVG 1.1//EN", "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"],
+	],
+	[
+		'<!DOCTYPE math PUBLIC "-//W3C//DTD MathML 2.0//EN" "http://www.w3.org/Math/DTD/mathml2/mathml2.dtd">',
+		["quirks", "math", "-//W3C//DTD MathML 2.0//EN", "http://www.w3.org/Math/DTD/mathml2/mathml2.dtd"],
+	],
+	["<!DOCTYPE null-\0 PUBLIC '\0' '\0\0'>", ["quirks", "null-\uFFFD", "\uFFFD", "\uFFFD\uFFFD"]],
+	["<!DOCTYPE UPPERCASE>", ["quirks", "uppercase", null, null]],
+	["<!doctype lowercase>", ["quirks", "lowercase", null, null]],
+	["<!DOCTYPE\n\thtml\f\rPUBLIC\r\n''\t''>", ["no-quirks", "html", "", ""]],
+	[
+		"<!DOCTYPE html PUBLIC '' '' Anything (except closing angle bracket) is just fine here !!!>",
+		["no-quirks", "html", "", ""],
+	],
+	["<!dOcTyPehtml\tPublIC\"pub-id\"'sysid'>", ["no-quirks", "html", "pub-id", "sysid"]],
+	["<!DOCTYPE html PUBLIC>", ["quirks", "html", null, null]],
+	["<!DOCTYPE html SYSTEM>", ["quirks", "html", null, null]],
+	["<!DOCTYPE html PUBLIC 'xyz>", ["quirks", "html", "xyz", null]],
+	["<!DOCTYPE html SYSTEM 'xyz>", ["quirks", "html", null, "xyz"]],
+	["<!DOCTYPE html PUBLIC 'abc' 'xyz>", ["quirks", "html", "abc", "xyz"]],
+	["<!DOCTYPE html FOOBAR>", ["quirks", "html", null, null]],
+	["<!DOCTYPE html PUBLIC x ''''>", ["quirks", "html", null, null]],
+	["<!DOCTYPE html SYSTEM x ''>", ["quirks", "html", null, null]],
+	[
+		'<!DOCTYPE \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} PUBLIC "\u{1F525}" "\u{1F608}">',
+		[
+			"quirks",
+			"\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
+			"\u{1F525}",
+			"\u{1F608}",
+		],
+	],
+	["<!DOCTYPE html PUBLIC ''x''>", ["quirks", "html", "", null]],
+	[
+		'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//">',
+		["quirks", "html", "-//W3C//DTD HTML 4.01 Frameset//", null],
+	],
+	[
+		'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//" "">',
+		["limited-quirks", "html", "-//W3C//DTD HTML 4.01 Frameset//", ""],
+	],
+]) {
+	assertDoctypeToken(html, expected);
+}
+
+for (const html of [
+	"",
+	"<div>",
+	"x<!DOCTYPE>",
+	"<!DOCTYPE>x",
+	"<!DOCTYPE",
+	'<!DOCTYPE html PUBLIC ">">',
+]) {
+	assert.equal(WP_HTML_Doctype_Info.from_doctype_token(html), null, html);
+}
+
 const comment = new WP_HTML_Tag_Processor("<?xml-stylesheet href='x'?>");
 assert.equal(comment.next_token(), true);
 assert.equal(comment.get_tag(), "xml-stylesheet");
