@@ -25,6 +25,12 @@ cd ext/html-api-rust
 npm --prefix wasm test
 ```
 
+Regenerate the Rust HTML5 named-character-reference table with:
+
+```sh
+node scripts/generate-html5-named-character-references.mjs
+```
+
 The JavaScript wrapper is an ES module in `wasm/wp-html-api-rust.js`. It exposes
 `loadWasm()`, `WP_HTML_Decoder`, `WP_HTML_Token`,
 `WP_HTML_Unsupported_Exception`, `WP_HTML_Tag_Processor`,

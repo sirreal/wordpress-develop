@@ -2,6 +2,8 @@ use std::ffi::c_char;
 use std::ptr;
 use std::slice;
 
+mod html5_named_character_references;
+
 static VERSION: &[u8] = b"0.1.0\0";
 
 const TOKEN_TYPE_TAG: u8 = 1;
@@ -2888,49 +2890,8 @@ fn character_reference_code_point(code_point: u32) -> char {
 }
 
 fn named_character_reference(input: &[u8]) -> Option<(CharacterReference, usize)> {
-    const NAMED: &[(&[u8], CharacterReference)] = &[
-        (b"AElig;", CharacterReference::Scalar('Æ')),
-        (b"AElig", CharacterReference::Scalar('Æ')),
-        (b"amp;", CharacterReference::Scalar('&')),
-        (b"amp", CharacterReference::Scalar('&')),
-        (b"AMP;", CharacterReference::Scalar('&')),
-        (b"AMP", CharacterReference::Scalar('&')),
-        (b"apos;", CharacterReference::Scalar('\'')),
-        (b"apos", CharacterReference::Scalar('\'')),
-        (b"colon;", CharacterReference::Scalar(':')),
-        (b"copy;", CharacterReference::Scalar('©')),
-        (b"copy", CharacterReference::Scalar('©')),
-        (b"dagger;", CharacterReference::Scalar('†')),
-        (b"dagger", CharacterReference::Scalar('†')),
-        (b"Gopf;", CharacterReference::Scalar('\u{1D53E}')),
-        (b"gt;", CharacterReference::Scalar('>')),
-        (b"gt", CharacterReference::Scalar('>')),
-        (b"hellip;", CharacterReference::Scalar('…')),
-        (b"hellip", CharacterReference::Scalar('…')),
-        (b"ImaginaryI;", CharacterReference::Scalar('ⅈ')),
-        (b"Kopf;", CharacterReference::Scalar('\u{1D542}')),
-        (b"lang;", CharacterReference::Scalar('⟨')),
-        (b"lt;", CharacterReference::Scalar('<')),
-        (b"lt", CharacterReference::Scalar('<')),
-        (b"nbsp;", CharacterReference::Scalar('\u{00a0}')),
-        (b"nbsp", CharacterReference::Scalar('\u{00a0}')),
-        (b"NotEqualTilde;", CharacterReference::Text("≂̸")),
-        (b"NotSubset;", CharacterReference::Text("⊂⃒")),
-        (b"notinva;", CharacterReference::Scalar('∉')),
-        (b"notin;", CharacterReference::Scalar('∉')),
-        (b"not;", CharacterReference::Scalar('¬')),
-        (b"not", CharacterReference::Scalar('¬')),
-        (b"pound;", CharacterReference::Scalar('£')),
-        (b"pound", CharacterReference::Scalar('£')),
-        (b"prod;", CharacterReference::Scalar('∏')),
-        (b"quot;", CharacterReference::Scalar('"')),
-        (b"quot", CharacterReference::Scalar('"')),
-        (b"rang;", CharacterReference::Scalar('⟩')),
-        (b"ThickSpace;", CharacterReference::Text("\u{205F}\u{200A}")),
-    ];
-
     let mut best = None;
-    for (name, decoded) in NAMED {
+    for (name, decoded) in html5_named_character_references::NAMED_CHARACTER_REFERENCES {
         if input.starts_with(name) && best.map(|(_, len)| name.len() > len).unwrap_or(true) {
             best = Some((*decoded, name.len()));
         }
@@ -3242,6 +3203,22 @@ mod tests {
         assert_eq!(
             super::decode_html_attribute(b"ZZ&AElig;"),
             "ZZÆ".as_bytes()
+        );
+    }
+
+    #[test]
+    fn named_character_references_cover_wordpress_html5_table() {
+        assert_eq!(
+            super::transform_text(
+                b"&reg; &trade; &mdash; &rsquo; &euro; &CounterClockwiseContourIntegral; &NotNestedGreaterGreater;",
+                true,
+                super::NullTransform::Replace
+            ),
+            "® ™ — ’ € ∳ ⪢̸".as_bytes()
+        );
+        assert_eq!(
+            super::decode_html_attribute(b"&reg=1 &reg;=1 &plusmn=1 &plusmn;=1 &apos=1 &apos;=1"),
+            "&reg=1 ®=1 &plusmn=1 ±=1 &apos=1 '=1".as_bytes()
         );
     }
 

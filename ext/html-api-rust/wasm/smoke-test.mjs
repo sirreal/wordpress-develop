@@ -29,6 +29,16 @@ assert.equal(WP_HTML_Decoder.decode_attribute("&notin"), "&notin");
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin;"), "∉");
 assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
 assert.equal(WP_HTML_Decoder.decode("attribute", "&notit;"), "&notit;");
+assert.equal(
+	WP_HTML_Decoder.decode_text_node(
+		"&reg; &trade; &mdash; &rsquo; &euro; &CounterClockwiseContourIntegral; &NotNestedGreaterGreater;",
+	),
+	"® ™ — ’ € ∳ ⪢̸",
+);
+assert.equal(
+	WP_HTML_Decoder.decode_attribute("&reg=1 &reg;=1 &plusmn=1 &plusmn;=1 &apos=1 &apos;=1"),
+	"&reg=1 ®=1 &plusmn=1 ±=1 &apos=1 '=1",
+);
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0x1f170), "🅰");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0xd83c), "�");
 
