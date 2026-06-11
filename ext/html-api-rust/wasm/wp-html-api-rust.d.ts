@@ -91,6 +91,8 @@ export interface WP_HTML_Doctype_Info_Constructor {
 	from_doctype_token(doctypeHtml: string): WP_HTML_Doctype_Info | null;
 }
 
+export const WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;
+
 export interface WP_HTML_Unsupported_Exception {
 	message: string;
 	token_name: string;
