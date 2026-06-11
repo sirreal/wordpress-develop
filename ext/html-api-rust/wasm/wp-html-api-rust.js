@@ -2105,7 +2105,7 @@ export function createHtmlApi(wasm) {
 				html += ` ${qualifiedAttributeName}`;
 				const value = this.get_attribute(attributeName);
 				if (typeof value === "string") {
-					html += `="${htmlEscape(value)}"`;
+					html += `="${htmlEscape(replaceNulls(value))}"`;
 				}
 				previousAttributeWasTrue = value === true;
 			}
