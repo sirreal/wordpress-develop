@@ -1589,6 +1589,25 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("LI", LIST_ITEM_SCOPE_BOUNDARIES);
 				}
 
+				if (
+					allowVirtualPreclosures &&
+					existingIndex !== -1 &&
+					existingIndex < this.open_elements.length - 1 &&
+					tagName !== "HTML" &&
+					tagName !== "BODY" &&
+					MODELED_SCOPED_END_TAGS.has(tagName) &&
+					hasSpecialBoundaryAfter(
+						this.open_elements,
+						this.open_element_namespaces,
+						existingIndex,
+					)
+				) {
+					this.#queueVirtualPopsFrom(existingIndex + 1);
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				if (tagName === "P" && closingNamespace === "html" && existingIndex === -1) {
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = [...this.open_elements];
