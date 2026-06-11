@@ -2723,7 +2723,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tokenType !== "#tag") {
-				if (this.#shouldIgnoreTextInTemplateColumnGroup(tokenType)) {
+				if (this.#shouldIgnoreTextInColumnGroup(tokenType)) {
 					this.skip_current_token = true;
 					return;
 				}
@@ -4308,11 +4308,21 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		#shouldIgnoreTextInTemplateColumnGroup(tokenType) {
+		#shouldIgnoreTextInColumnGroup(tokenType) {
 			return (
 				tokenType === "#text" &&
-				this.template_insertion_modes.length > 0 &&
-				this.#currentTemplateInsertionMode() === "in_column_group"
+				(
+					(
+						this.template_insertion_modes.length > 0 &&
+						this.#currentTemplateInsertionMode() === "in_column_group"
+					) ||
+					(
+						!this.is_full_parser &&
+						this.context_namespace === "html" &&
+						this.context_node === "COLGROUP" &&
+						this.#currentHtmlElementIs("COLGROUP")
+					)
+				)
 			);
 		}
 

@@ -1728,6 +1728,7 @@ for (const [html, context, expected] of [
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],
 	["<table><tr>", "<table>", "<tbody><tr></tr></tbody>"],
+	["foo<col>", "<colgroup>", "<col>"],
 	[
 		'<template><form><input name="q"></form><div>second</div></template>',
 		"<template>",
