@@ -262,6 +262,13 @@ assert.equal(processorState.form_element, null);
 assert.equal(processorState.frameset_ok, true);
 
 const wasmBytes = await readFile(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
+const wasmArrayBuffer = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength);
+const apiFromArrayBuffer = await loadWasm(wasmArrayBuffer);
+assert.equal(apiFromArrayBuffer.version(), "0.1.0");
+
+const apiFromUint8Array = await loadWasm(new Uint8Array(wasmBytes));
+assert.equal(apiFromUint8Array.version(), "0.1.0");
+
 const apiFromDataView = await loadWasm(new DataView(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength));
 assert.equal(apiFromDataView.version(), "0.1.0");
 
