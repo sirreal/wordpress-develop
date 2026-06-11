@@ -2502,25 +2502,36 @@ fn named_character_reference(input: &[u8]) -> Option<(char, usize)> {
     const NAMED: &[(&[u8], char)] = &[
         (b"amp;", '&'),
         (b"amp", '&'),
+        (b"AMP;", '&'),
+        (b"AMP", '&'),
         (b"apos;", '\''),
         (b"apos", '\''),
         (b"copy;", '©'),
         (b"copy", '©'),
         (b"dagger;", '†'),
         (b"dagger", '†'),
+        (b"Gopf;", '\u{1D53E}'),
         (b"gt;", '>'),
         (b"gt", '>'),
         (b"hellip;", '…'),
         (b"hellip", '…'),
+        (b"ImaginaryI;", 'ⅈ'),
+        (b"Kopf;", '\u{1D542}'),
+        (b"lang;", '⟨'),
         (b"lt;", '<'),
         (b"lt", '<'),
         (b"nbsp;", '\u{00a0}'),
         (b"nbsp", '\u{00a0}'),
+        (b"notinva;", '∉'),
         (b"notin;", '∉'),
         (b"not;", '¬'),
         (b"not", '¬'),
+        (b"pound;", '£'),
+        (b"pound", '£'),
+        (b"prod;", '∏'),
         (b"quot;", '"'),
         (b"quot", '"'),
+        (b"rang;", '⟩'),
     ];
 
     let mut best = None;
@@ -2764,6 +2775,26 @@ mod tests {
                 super::NullTransform::Replace
             ),
             "FOO�ZOO € � � �".as_bytes()
+        );
+    }
+
+    #[test]
+    fn additional_named_character_references_cover_html5lib_cases() {
+        assert_eq!(
+            super::transform_text(
+                b"&lang;&rang; &ImaginaryI; &Kopf; &Gopf; &notinva; &AMP",
+                true,
+                super::NullTransform::Replace
+            ),
+            "⟨⟩ ⅈ 𝕂 𝔾 ∉ &".as_bytes()
+        );
+        assert_eq!(
+            super::decode_html_attribute(b"ZZ&pound_id=23 ZZ&pound;_id=23 ZZ&prod;_id=23"),
+            "ZZ£_id=23 ZZ£_id=23 ZZ∏_id=23".as_bytes()
+        );
+        assert_eq!(
+            super::transform_text(b"ZZ&pound=23", true, super::NullTransform::Replace),
+            "ZZ£=23".as_bytes()
         );
     }
 
