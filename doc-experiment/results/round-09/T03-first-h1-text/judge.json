@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "8/8 pass. Correct choice: WP_HTML_Processor (structural text collection across nested elements). All methods documented: create_fragment, next_tag('H1') string form (doc shows next_tag('LI')), get_current_depth, next_token, get_token_type (returns '#text'), get_modifiable_text. Mirrors the documented depth-walk idiom from get_current_depth() and the next_token() LI-text example almost verbatim. Includes the null create_fragment guard (documented edge case). Edge cases all handled by following the pattern: image-only -> '' (no #text token), unclosed-h1 captured via end-of-input virtual closers, entities decoded by get_modifiable_text. Minor: the inner `$current_depth >= $h1_depth` check is dead code since the loop already breaks when depth < h1_depth -- harmless redundancy, not a misuse."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "8/8 pass. Same correct processor and idiom. Uses array-form next_tag( array('tag_name'=>'H1') ), which is the primary documented form. All API documented and used correctly; get_modifiable_text decoding and depth-walk handled all edge cases. Two minor deductions vs trial-1/3: (1) omits the `null === create_fragment` guard -- a latent fatal-error path documented in create_fragment's `static|null` return, never triggered by these valid-fragment inputs so functionally 8/8; (2) same redundant `$current_depth >= $h1_depth` re-check after the break. Self-reported confidence lowest (75) despite identical correctness."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "8/8 pass. Cleanest of the three: break when depth < h1_depth, then collect any '#text' token -- exactly the break-condition form the get_current_depth() docs describe ('break when the depth drops BELOW the depth recorded at the opener'). No redundant guard. Includes the null create_fragment guard. All methods documented; edge cases handled identically and correctly. Explanation correctly names fragment mode, depth tracking, end-of-input closers, and automatic character-reference decoding."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 8 cases (24/24). This task's documentation was highly effective because the two markdown files contain a near-isomorphic worked example for exactly this problem. The WP_HTML_Processor::next_token() docblock includes a 'Collect the text content of the first LI element' example that records get_current_depth() at the opener, walks with `next_token() && get_current_depth() >= $depth`, and accumulates get_modifiable_text() on '#text' tokens -- structurally identical to get_first_h1_text. The get_current_depth() docblock reinforces the same idiom with a UL example and, crucially, explains BOTH the continue-form (`>=`) and the break-form (`< $depth`), with an explicit warning that `>` / `<=` would terminate early at the first nested child closer and drop trailing text. Trial-3 used the break-form, trials 1 and 2 used a hybrid (break on `<`, redundant re-check on `>=`); all are covered.\\n\\nThe edge cases that typically trip up implementations were each pre-empted by a documented fact:\\n- image-only -> '' (not null): an empty H1 produces no '#text' token, so the accumulator stays '' and is returned; the task requires '' here, and the docs' pattern naturally yields it. The Tag Processor 'Building markup from a template' note ('an empty element contains no text node') plus get_modifiable_text returning '' for non-text tokens make this behavior discoverable.\\n- unclosed-h1 -> full text: the next_token() docblock states the HTML Processor 'visits a closing token for every element it opens, including ... elements left unclosed at the end of the input,' and the LI example explicitly says 'The unclosed LI and UL still produce closing tokens at the end of the input.' This told subjects the depth-walk terminates cleanly even on truncated input, so none of them special-cased it.\\n- entities-decoded -> '&', em-dash: get_modifiable_text() and the special-elements section document that text/character references are decoded; the get_attribute() note 'String values are returned DECODED ... Do not decode the returned value again' generalizes the decoding contract, so no subject double-decoded or hand-rolled html_entity_decode.\\n- first-of-two / nested-in-div: next_tag('H1') stops at the first match and the breadcrumbs/depth machinery handles arbitrary nesting; the get_breadcrumbs() and get_current_depth() examples cover deep nesting.\\n\\nNear-misses in code (not failures): trials 1 and 2 carry a redundant `current_depth >= h1_depth` condition that is unreachable as written (the loop already breaks when depth < h1_depth). This is harmless dead code, suggesting slight uncertainty about whether the depth filter and the loop guard are the same invariant -- the docs present both the continue-form and break-form but a reader could conflate them into a belief that both a guard AND a per-token check are needed. Trial-2 also dropped the documented `null === create_fragment` guard; create_fragment's return type is documented as `static|null`, so the omission is a code-quality lapse rather than a doc gap (the inputs never trigger null).\"}",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and the next_token() 'collect text' example",
+      "problem": "The empty-element case (an element containing only void/markup children, e.g. an H1 wrapping just an IMG) is never stated explicitly. Subjects got the required '' (empty string, not null) result by luck of the pattern -- there is no documented sentence guaranteeing that an element with no '#text' descendants yields an empty accumulator. A reader could reasonably wonder whether to return null in that case.",
+      "suggestion": "In the next_token() text-collection example, add one line noting the terminal state: 'If the element contains no text nodes (for example an element holding only an image), the accumulator stays the empty string -- markup contributes no text.' This generalizes the 'text content of markup-only elements is empty' rule without encoding any specific task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() / next_token() text-collection idiom",
+      "problem": "Both docblocks present the depth-walk as two interchangeable shapes -- continue-form (`while next_token() && depth >= D`) and break-form (`break when depth < D`) -- but never state that the per-token depth comparison and the loop guard are the SAME invariant. Two of three subjects wrote a redundant second depth check inside the loop (dead code), indicating the docs leave room to believe both a loop guard and an in-body depth filter are independently required.",
+      "suggestion": "Add a one-sentence clarification that the loop guard alone bounds the subtree; inside the loop you only need to test the token TYPE (e.g. '#text'), not re-test depth: 'Once the loop guard restricts iteration to depth >= D, every token the loop body sees is already inside the element -- filter only on token type, not depth again.'"
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment()",
+      "problem": "The `static|null` return is documented in the Returns row but no example shows guarding it, and the inline usage examples (e.g. `$processor = WP_HTML_Processor::create_fragment(...); if ($processor->next_tag(...))`) call methods on the result without a null check. One subject (trial-2) followed that example shape and omitted the guard, leaving a latent fatal-error path on null.",
+      "suggestion": "Make at least one create_fragment usage example null-safe, e.g. `$processor = WP_HTML_Processor::create_fragment($html); if (null === $processor) { return; }` followed by use, and add a short note that create_fragment returns null for unsupported contexts/encodings so callers must check before invoking methods."
+    }
+  ]
+}

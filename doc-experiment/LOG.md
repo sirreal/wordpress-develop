@@ -2,6 +2,20 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 9 — Haiku, checkpoint: train 98.66 (high), shared-cursor fix lands
+
+**All-19 96.58 / train 98.66 (+1.0, new high) / held-out 88.79.**
+T08 +8.7 → 86.8 with no sub-50% trials (one-cursor contract +
+state-machine example); T10 +2.6; 17/19 tasks functionally perfect.
+N05 (58.2) is the only weak task left anywhere: subjects now apply the
+well-taught walk-for-#text recipe to TITLE, where it silently returns
+'' (RCDATA has no #text children — verified). The exception lived only
+in get_modifiable_text(), off the walk path.
+
+Round-10 hypothesis (committed): the RCDATA exception stated inside
+next_token()'s walk guidance + the unguarded-walk-runs-to-EOF caveat
+(train-licensed via T05 round-7 and T08 round-9 gaps).
+
 ## Round 8 — Haiku, UTF-8 fix lands; T08 isolated as the last functional gap
 
 **Train 97.70 — new high.** T05 +14.0 → 99.3 (UTF-8/mb-encoding

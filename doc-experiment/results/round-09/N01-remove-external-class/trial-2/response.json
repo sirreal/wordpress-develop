@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to iterate through all anchor tags in the HTML document. For each A tag found using next_tag() with a tag_name query, it calls remove_class() with the class name 'external'. According to the documentation, remove_class() handles case-sensitive matching and automatically removes the class attribute entirely when 'external' is the only class. Finally, get_updated_html() returns the modified HTML with all changes applied.",
+  "confidence": 92
+}

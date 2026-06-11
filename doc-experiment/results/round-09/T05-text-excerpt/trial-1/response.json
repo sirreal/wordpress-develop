@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML processor fragment to parse the HTML safely. It iterates through every token in the HTML, checking if each is a text node (token type `#text`). For text nodes, the modifiable text is already decoded and is concatenated together. I measure Unicode code points using `mb_strlen` and `mb_substr` with UTF-8 encoding, as documented. When the limit is reached, the final text is truncated to exactly `$max_codepoints` code points without cutting multi-byte characters. Text from SCRIPT/STYLE elements are naturally excluded since they aren't text nodes.",
+  "confidence": 82
+}

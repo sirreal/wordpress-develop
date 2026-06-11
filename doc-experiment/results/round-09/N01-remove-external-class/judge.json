@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "WP_HTML_Tag_Processor is the correct choice for class manipulation (full processor-choice). Every method is documented: constructor (line 39), next_tag with array tag_name query (lines 47/58), has_class (line 1078), remove_class (line 2247), get_updated_html (line 2289). No _doing_it_wrong records; 7/7 pass. Token-walking while-loop + final get_updated_html is idiomatic. Minor deduction: the has_class('external') guard before remove_class is redundant — remove_class is already a safe no-op when the class is absent (narrative line 189, return-value note line 2245), so the guard adds nothing. Notably the guard relied on has_class, whose docblock claims 'ASCII case-insensitive' (lines 1084/1094) — had that documented behavior been real, has_class('external') would have wrongly matched class=\"EXTERNAL\" and broken the case-sensitive test. It passed only because the actual API is case-sensitive (probe-confirmed), contradicting the doc. The explanation correctly asserts case-sensitive matching, i.e. the subject described real behavior over the documented behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical reference form exactly: new WP_HTML_Tag_Processor, while(next_tag(['tag_name'=>'a'])) { remove_class('external'); }, return get_updated_html(). All methods documented; no guards, no redundancy, no hallucinated API; no _doing_it_wrong; 7/7 pass. Lowercase 'a' in tag_name query is fine — next_tag tag_name matching is ASCII case-insensitive per line 952. Explanation grounds the 'only-class -> remove attribute' behavior in the docs (narrative lines 189/210-212) and the byte-exact preservation in get_updated_html (line 2297). Fully idiomatic; correct edge-case handling."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical implementation to trial-2 (same canonical form). All methods documented, no hallucinated API, no _doing_it_wrong, 7/7 pass. Explanation is accurate and cites the byte-exact preservation guarantee of get_updated_html (line 2297). Fully idiomatic token-walk; correct handling of only-class-removal and case-sensitivity edge cases."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial (21/21 passes across the three trials). Diagnosis therefore covers what the docs did well and the latent near-miss.\n\nWhat the docs did well: The narrative \"class as a special case\" section (html-tag-processor.md lines 186-217) directly teaches the two behaviors this task hinges on. Lines 189 and 210-212 explicitly state and demonstrate that removing the only class removes the whole class attribute (covering the only-class-removes-attribute test), and the safe-operation note (\"doesn't require checking if the attribute or class exists\") plus the remove_class return-value note (line 2245) tell subjects the guard in trial-1 is unnecessary. The whitespace/ordering-preservation guarantee (line 328) and the byte-exact get_updated_html contract (line 2297) gave subjects accurate language for the leftover-space and untouched-markup tests (only-class-removes-attribute, no-class-untouched, non-link-untouched). next_tag's documented query forms (lines 58-61, 952) made the tag-filtering trivial. All three subjects converged on essentially the reference solution.\n\nThe one near-miss — a documentation defect that did not cause failure only by luck: has_class() is documented as 'Returns if a matched tag contains the given ASCII case-insensitive class name' (lines 1084, 1094), and remove_class() says nothing about case at all (lines 2247-2267). The case-sensitive-not-removed test (class=\\\"EXTERNAL\\\" must keep its class when removing 'external') requires CASE-SENSITIVE class matching. Probes confirm the actual API is case-sensitive: has_class('external') returns false on class=\\\"EXTERNAL\\\", remove_class('external') leaves class=\\\"EXTERNAL\\\" intact, and even next_tag class_name matching is case-sensitive. So the documented 'ASCII case-insensitive' claim for has_class is simply wrong. Trial-1 built a has_class('external') guard on top of that false claim; if the docs had been accurate to themselves the guard would have stripped 'external' from EXTERNAL and failed the test. It passed because the real API contradicts its own docblock and happens to align with the task's case-sensitive requirement. The subjects' explanations (trials 1 and 2) asserted case-sensitive matching — describing real behavior rather than the documented behavior, suggesting they either inferred from the task examples or got lucky. This is the highest-value gap to fix: a future task that genuinely needs case-INsensitive class matching, or one that depends on has_class for control flow, would be actively misled by the current docblock.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::has_class() (html-tag-processor.md ~line 1078-1098)",
+      "problem": "The summary and parameter description state class matching is 'ASCII case-insensitive', but the actual implementation is case-SENSITIVE: has_class('external') returns false for class=\"EXTERNAL\" (probe-confirmed). Any subject relying on this docblock for case-insensitive matching would write incorrect control flow.",
+      "suggestion": "Correct the wording to state that CSS class-name matching is case-sensitive (a class token is matched by exact byte sequence). If there is genuine ASCII-case folding somewhere (e.g. for the tag name vs. the class), name precisely which part is case-insensitive and which is not, so the two are never conflated."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_class() and add_class() (html-tag-processor.md ~line 2247-2267 and narrative ~line 186-217)",
+      "problem": "remove_class()/add_class() never state the case sensitivity of the class name being matched. Subjects had to guess; correctness here depended on the real (case-sensitive) behavior, not on documentation.",
+      "suggestion": "Add one sentence to the class-helper narrative and to each method's docblock stating that class-name matching/comparison is case-sensitive, with a tiny contrasting example (remove_class('external') does not affect class=\"EXTERNAL\"). This generalizes to any class task and removes reliance on luck."
+    },
+    {
+      "location": "next_tag() $query class_name parameter (html-tag-processor.md ~line 952 and 2326)",
+      "problem": "The $query docblock specifies that tag_name matching is 'ASCII case-insensitive' but is silent on the case behavior of class_name. Probing shows class_name matching is case-sensitive, creating an asymmetry that is easy to get wrong (tag names fold case, class names do not).",
+      "suggestion": "In the $query parameter description, explicitly state that class_name matching is case-sensitive while tag_name matching is ASCII case-insensitive, so readers do not assume both follow the same rule."
+    }
+  ]
+}

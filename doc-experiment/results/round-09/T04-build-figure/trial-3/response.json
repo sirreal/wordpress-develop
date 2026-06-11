@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely construct the figure element. A template with the desired structure and empty placeholders is created, then the IMG tag is located and its src and alt attributes are set using set_attribute() (which ensures proper encoding and preserves attribute order since they exist in the template). Next, next_token() iterates through the HTML to find the text node inside the figcaption element, and set_modifiable_text() replaces the placeholder with the caption (safely encoding special characters). Finally, get_updated_html() returns the fully constructed and encoded HTML fragment.",
+  "confidence": 92
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially the reference solution. create_fragment for structural awareness; next_tag(array('tag_name'=>'A')) (documented at html-tag-processor.md:58); get_attribute null-check to skip hrefless anchors (semantics documented at html-processor.md:1857-1862); depth-walk with get_current_depth()/next_token() and the '>= depth' guard — the exact idiom the get_current_depth docblock recommends (html-processor.md:865+, example at 913-914 with the '>= and not >' note). Accumulates get_modifiable_text() for #text tokens, which the docs state is already entity-decoded (html-processor.md:1838). All 8 hidden cases pass. Edge handling complete: valueless href -> true, entity-decoded href and text, image-only -> '', unclosed link captured because the closer never drops below the opener's depth. Confidence 72 was understated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Passes 8/8 with only documented API, but less idiomatic than the alternatives. Drives the outer loop with bare next_token() and hand-rolls tag matching: 'A' === get_token_name() && '#tag' === get_token_type() && !is_tag_closer(). Every piece is documented — get_token_type() lists '#tag' explicitly (html-tag-processor.md:1692), is_tag_closer and get_token_name both present — so no hallucination. But the docs show next_tag('A') for exactly this opener-finding job (html-tag-processor.md:58-59), making the manual reconstruction redundant. The inner depth-walk and get_modifiable_text usage are correct and match the documented pattern. Edge cases all handled identically to trial 1. Deduction is purely for choosing a more verbose path over the documented next_tag shortcut, not for any error. The mixing of outer next_token() with an inner next_token() walk is correct here only because the parser auto-closes nested A elements; the explanation does not show awareness of that subtlety, but no test exercises it."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical in substance to trial 1; uses the string short form next_tag('A') (documented at html-tag-processor.md:59) rather than the array form. Correct create_fragment null-guard, get_attribute null-skip, depth-recorded token walk with the '>= depth' guard, get_modifiable_text accumulation on #text. All 8 cases pass. Explanation is the most accurate of the three: correctly states get_attribute auto-decodes, get_modifiable_text decodes per documented behavior, and that nested <em> markup is skipped while its text is concatenated. Confidence 85 was well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: 24/24 across the three trials. The documentation was sufficient and, for this task, notably strong. The decisive passages: (1) get_current_depth()'s docblock (html-processor.md:865+) spells out the exact subtree-text idiom — \"record the depth when matched on its opening tag and continue while the depth remains at or above that value\" — and the worked UL example at lines 913-914 even annotates \"// >= and not >.\" All three trials reproduced this guard verbatim, which is why the unclosed-link case (the closer/end never reports a depth below the opener) and the image-only case (no #text descendant) both came out right without special handling. (2) get_attribute()'s signature `string|true|null` plus the inline examples (enabled === true, aria-label === null, html-processor.md:1857-1862) directly drove the two attribute-edge cases: null -> exclude the anchor, true -> emit 'href' => true for `<a href>`. (3) get_modifiable_text()'s note that \"&amp; is returned as &. Do not decode the returned string again\" (html-processor.md:1838) and get_attribute returning the decoded value covered both entity cases (href and text) with no manual html_entity_decode, which would have double-decoded. (4) get_token_type() enumerating '#text' and '#tag' (html-tag-processor.md:1692-1694) supported both the inner #text filter (all trials) and trial 2's manual #tag opener detection. Near-misses in the explanations: trial 1 under-reported confidence (72) despite a flawless reference-grade solution. Trial 2's explanation does not acknowledge that interleaving an inner next_token() walk under an outer next_token() loop is only safe because A elements cannot nest (the parser auto-closes them); a probe with literally nested anchors confirms correct behavior, but no test covers it, so the gap in understanding went unpenalized by the suite. The only adherence cost was trial 2 rebuilding next_tag('A')'s functionality by hand — a style/idiom issue, not a correctness one.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_current_depth() / next_token() — html-processor.md token-walking section",
+      "problem": "The documented subtree-walk idiom (record opener depth, continue while depth >= that value) is shown only with a single A-tag-free example (UL/LI). It does not state explicitly that this loop, when the outer iteration is also next_token()-driven, re-enters correctly because each inner advance leaves the cursor positioned for the outer loop to resume. Trial 2 nested next_token() loops and got lucky; a reader could reasonably fear the inner walk would skip the next opener.",
+      "suggestion": "Add one sentence to the get_current_depth walk example noting that after the inner 'while depth >= N' loop exits, the cursor is already positioned on the first token at depth < N, so an enclosing next_token()/next_tag() loop continues correctly from there without re-reading or skipping a token."
+    },
+    {
+      "location": "WP_HTML_Processor — structural-awareness overview / next_tag()",
+      "problem": "Nothing in the docs states that certain elements (notably A) cannot nest and are auto-closed by the HTML parser when a second opener appears inside an open one. A reader counting on raw depth to bound a subtree could mis-handle apparently-nested anchors. Trial 2's pattern depends on this auto-closing behavior for correctness yet the docs never surface it.",
+      "suggestion": "In the structural-awareness section, add a short note that the HTML Processor follows HTML's tree-construction rules, so some elements implicitly close earlier ones (e.g., a new <a> or <p> auto-closes an open one of the same type). Cross-reference get_current_depth() so readers know depth reflects the spec-corrected tree, not the literal source nesting."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text()",
+      "problem": "The docblock thoroughly explains decoding and which token types carry modifiable text, but does not give a ready pattern for the very common 'concatenate all text inside an element' task — readers must infer that container elements (P, DIV, A) return false/no text and that text lives only in descendant #text tokens. This inference is correct but every trial had to derive it.",
+      "suggestion": "Add a brief 'Collecting an element's text content' note pointing readers to combine the get_current_depth walk with a '#text' === get_token_type() filter and get_modifiable_text() accumulation, stating plainly that container elements carry no text of their own so the text must be gathered from #text descendants."
+    }
+  ]
+}

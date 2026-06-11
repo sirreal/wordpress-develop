@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to safely build the figure HTML. It starts with a template containing the exact structure needed (figure > img with src/alt in order > figcaption), then uses set_attribute() to update the img attributes and set_modifiable_text() to update the figcaption content. The API handles all HTML encoding automatically, ensuring special characters are properly escaped. The template approach preserves attribute order as documented.",
+  "confidence": 72
+}

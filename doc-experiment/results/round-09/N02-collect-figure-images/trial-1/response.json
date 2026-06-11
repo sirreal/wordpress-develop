@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and walk through all IMG elements. For each IMG tag, it checks if 'FIGURE' appears anywhere in the breadcrumbs array (which tracks the element hierarchy from root to current element). The src attribute is retrieved with get_attribute(), which returns the decoded value. Only IMG tags with non-empty string src values are included. The function returns the src values as a numeric array in document order.",
+  "confidence": 82
+}
