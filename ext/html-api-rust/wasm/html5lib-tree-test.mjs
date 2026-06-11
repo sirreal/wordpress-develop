@@ -26,6 +26,9 @@ const supportedFragmentContexts = new Set([
 	"svg svg",
 	"svg title",
 	"template",
+	"td",
+	"tfoot",
+	"thead",
 ]);
 
 const skippedTests = new Set([
