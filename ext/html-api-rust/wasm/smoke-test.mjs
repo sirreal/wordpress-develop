@@ -134,6 +134,29 @@ assert.deepEqual(
 );
 assert.equal(scanNextTag("<span>", -10).tag_name, "SPAN");
 assert.equal(scanNextTag("plain text"), false);
+assert.deepEqual(
+	scanNextTag("<p>text</p>", 3),
+	{
+		tag_start: 7,
+		tag_end: 11,
+		name_start: 9,
+		name_len: 1,
+		name_length: 1,
+		tag_name: "P",
+		is_closing: true,
+		has_self_closing_flag: false,
+		token_end: 11,
+		token_type: 1,
+	},
+);
+assert.equal(scanNextTag("1 < 2 <!-- comment --> <span>").tag_start, 23);
+assert.equal(scanNextTag('<div title="1 > 0">ok</div>').tag_end, 19);
+assert.equal(scanNextTag('<div title="unterminated'), false);
+
+const scriptScanHtml = "<script><!--<script></script><script></script><span></span></script><div>";
+const scriptScan = scanNextTag(scriptScanHtml);
+assert.equal(scriptScan.tag_name, "SCRIPT");
+assert.equal(scanNextTag(scriptScanHtml, scriptScan.token_end).tag_name, "DIV");
 
 const tags = new WP_HTML_Tag_Processor('<div class="one"><span data-id="7">Hi</span></div>');
 assert.equal(tags.next_tag({ tag_name: "span" }), true);
