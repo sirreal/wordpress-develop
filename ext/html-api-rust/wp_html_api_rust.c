@@ -326,6 +326,101 @@ static zend_string *wp_html_api_rust_svg_qualified_tag_name(zend_string *lower_t
 	return zend_string_copy(lower_tag_name);
 }
 
+static zend_string *wp_html_api_rust_svg_qualified_attribute_name(zend_string *lower_attribute_name)
+{
+#define WP_HTML_API_RUST_SVG_ATTRIBUTE(adjusted, canonical) \
+	if (wp_html_api_rust_zend_string_equals_literal(lower_attribute_name, adjusted, sizeof(adjusted) - 1)) { \
+		return zend_string_init(canonical, sizeof(canonical) - 1, 0); \
+	}
+
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("attributename", "attributeName")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("attributetype", "attributeType")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("basefrequency", "baseFrequency")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("baseprofile", "baseProfile")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("calcmode", "calcMode")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("clippathunits", "clipPathUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("diffuseconstant", "diffuseConstant")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("edgemode", "edgeMode")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("filterunits", "filterUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("glyphref", "glyphRef")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("gradienttransform", "gradientTransform")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("gradientunits", "gradientUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("kernelmatrix", "kernelMatrix")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("kernelunitlength", "kernelUnitLength")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("keypoints", "keyPoints")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("keysplines", "keySplines")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("keytimes", "keyTimes")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("lengthadjust", "lengthAdjust")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("limitingconeangle", "limitingConeAngle")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("markerheight", "markerHeight")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("markerunits", "markerUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("markerwidth", "markerWidth")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("maskcontentunits", "maskContentUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("maskunits", "maskUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("numoctaves", "numOctaves")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("pathlength", "pathLength")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("patterncontentunits", "patternContentUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("patterntransform", "patternTransform")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("patternunits", "patternUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("pointsatx", "pointsAtX")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("pointsaty", "pointsAtY")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("pointsatz", "pointsAtZ")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("preservealpha", "preserveAlpha")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("preserveaspectratio", "preserveAspectRatio")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("primitiveunits", "primitiveUnits")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("refx", "refX")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("refy", "refY")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("repeatcount", "repeatCount")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("repeatdur", "repeatDur")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("requiredextensions", "requiredExtensions")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("requiredfeatures", "requiredFeatures")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("specularconstant", "specularConstant")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("specularexponent", "specularExponent")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("spreadmethod", "spreadMethod")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("startoffset", "startOffset")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("stddeviation", "stdDeviation")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("stitchtiles", "stitchTiles")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("surfacescale", "surfaceScale")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("systemlanguage", "systemLanguage")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("tablevalues", "tableValues")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("targetx", "targetX")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("targety", "targetY")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("textlength", "textLength")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("viewbox", "viewBox")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("viewtarget", "viewTarget")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("xchannelselector", "xChannelSelector")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("ychannelselector", "yChannelSelector")
+	WP_HTML_API_RUST_SVG_ATTRIBUTE("zoomandpan", "zoomAndPan")
+
+#undef WP_HTML_API_RUST_SVG_ATTRIBUTE
+
+	return NULL;
+}
+
+static zend_string *wp_html_api_rust_foreign_qualified_attribute_name(zend_string *lower_attribute_name)
+{
+#define WP_HTML_API_RUST_FOREIGN_ATTRIBUTE(adjusted, canonical) \
+	if (wp_html_api_rust_zend_string_equals_literal(lower_attribute_name, adjusted, sizeof(adjusted) - 1)) { \
+		return zend_string_init(canonical, sizeof(canonical) - 1, 0); \
+	}
+
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:actuate", "xlink actuate")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:arcrole", "xlink arcrole")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:href", "xlink href")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:role", "xlink role")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:show", "xlink show")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:title", "xlink title")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xlink:type", "xlink type")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xml:lang", "xml lang")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xml:space", "xml space")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xmlns", "xmlns")
+	WP_HTML_API_RUST_FOREIGN_ATTRIBUTE("xmlns:xlink", "xmlns xlink")
+
+#undef WP_HTML_API_RUST_FOREIGN_ATTRIBUTE
+
+	return NULL;
+}
+
 static bool wp_html_api_rust_ascii_eq_ci(const unsigned char *left, size_t left_len, const char *right)
 {
 	size_t i;
@@ -2305,10 +2400,53 @@ PHP_METHOD(WP_HTML_Tag_Processor, get_qualified_attribute_name)
 {
 	char *attribute_name;
 	size_t attribute_name_len;
+	zval namespace_name;
+	zend_string *lower_attribute_name;
+	zend_string *qualified_attribute_name = NULL;
 
 	ZEND_PARSE_PARAMETERS_START(1, 1)
 		Z_PARAM_STRING(attribute_name, attribute_name_len)
 	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_NULL(&namespace_name);
+	if (NULL == zend_call_method_with_0_params(Z_OBJ_P(ZEND_THIS), Z_OBJCE_P(ZEND_THIS), NULL, "get_namespace", &namespace_name)) {
+		RETURN_STRINGL(attribute_name, attribute_name_len);
+	}
+
+	if (EG(exception)) {
+		zval_ptr_dtor(&namespace_name);
+		RETURN_THROWS();
+	}
+
+	if (
+		IS_STRING != Z_TYPE(namespace_name) ||
+		wp_html_api_rust_zend_string_equals_literal(Z_STR(namespace_name), "html", sizeof("html") - 1)
+	) {
+		zval_ptr_dtor(&namespace_name);
+		RETURN_STRINGL(attribute_name, attribute_name_len);
+	}
+
+	lower_attribute_name = wp_html_api_rust_lowercase_ascii_slice((const unsigned char *) attribute_name, attribute_name_len);
+
+	if (
+		wp_html_api_rust_zend_string_equals_literal(Z_STR(namespace_name), "math", sizeof("math") - 1) &&
+		wp_html_api_rust_zend_string_equals_literal(lower_attribute_name, "definitionurl", sizeof("definitionurl") - 1)
+	) {
+		qualified_attribute_name = zend_string_init("definitionURL", sizeof("definitionURL") - 1, 0);
+	} else if (wp_html_api_rust_zend_string_equals_literal(Z_STR(namespace_name), "svg", sizeof("svg") - 1)) {
+		qualified_attribute_name = wp_html_api_rust_svg_qualified_attribute_name(lower_attribute_name);
+	}
+
+	if (NULL == qualified_attribute_name) {
+		qualified_attribute_name = wp_html_api_rust_foreign_qualified_attribute_name(lower_attribute_name);
+	}
+
+	zend_string_release(lower_attribute_name);
+	zval_ptr_dtor(&namespace_name);
+
+	if (NULL != qualified_attribute_name) {
+		RETURN_STR(qualified_attribute_name);
+	}
 
 	RETURN_STRINGL(attribute_name, attribute_name_len);
 }
