@@ -1129,6 +1129,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_insertion_mode = this.is_full_parser ? "initial" : "in_body";
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
+			this.frameset_ok = true;
 			this.context_node = options.contextNode ?? "BODY";
 			this.open_elements = this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.open_elements.map(() => "html");
@@ -1850,6 +1851,7 @@ export function createHtmlApi(wasm) {
 				fullParserInsertionMode: this.full_parser_insertion_mode,
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
+				framesetOk: this.frameset_ok,
 			};
 		}
 
@@ -1862,6 +1864,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
+			this.frameset_ok = state.framesetOk;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
@@ -2027,6 +2030,10 @@ export function createHtmlApi(wasm) {
 				tokenType === "#text" &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
 			);
+			const isNullText = (
+				tokenType === "#text" &&
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE
+			);
 
 			while (true) {
 				switch (this.full_parser_insertion_mode) {
@@ -2162,6 +2169,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "BODY") {
+							this.frameset_ok = false;
 							this.full_parser_insertion_mode = "in_body";
 							return false;
 						}
@@ -2197,7 +2205,20 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && (tagName === "HTML" || tagName === "BODY")) {
+							if (tagName === "BODY") {
+								this.frameset_ok = false;
+							}
 							this.skip_current_token = true;
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && tagName === "FRAMESET") {
+							if (this.open_elements.length <= 1 || this.open_elements[1] !== "BODY" || !this.frameset_ok) {
+								this.skip_current_token = true;
+								return true;
+							}
+
+							this.#bailUnsupported("Cannot process non-ignored FRAMESET tags.");
 							return true;
 						}
 
@@ -2209,6 +2230,12 @@ export function createHtmlApi(wasm) {
 						if (isCloser && tagName === "HTML") {
 							this.full_parser_insertion_mode = "after_body";
 							continue;
+						}
+
+						if (tokenType === "#text" && !isWhitespaceText && !isNullText) {
+							this.frameset_ok = false;
+						} else if (tokenType === "#tag" && !isCloser) {
+							this.frameset_ok = false;
 						}
 
 						return false;

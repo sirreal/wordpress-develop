@@ -440,6 +440,24 @@ for (const [html, message] of [
 	framesetTextProcessor.destroy();
 }
 
+for (const html of [
+	"<body><frameset></frameset><p>x</p>",
+	"text<frameset></frameset><p>x</p>",
+	"<div><frameset></frameset><p>x</p>",
+]) {
+	const ignoredFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
+	const visitedFramesetTags = [];
+	while (ignoredFramesetProcessor.next_token()) {
+		if (ignoredFramesetProcessor.get_token_type() === "#tag") {
+			visitedFramesetTags.push(ignoredFramesetProcessor.get_tag());
+		}
+	}
+	assert.equal(ignoredFramesetProcessor.get_last_error(), null);
+	assert.equal(visitedFramesetTags.includes("FRAMESET"), false);
+	assert.equal(visitedFramesetTags.includes("P"), true);
+	ignoredFramesetProcessor.destroy();
+}
+
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");
 while (fullParserCommentAfterBody.next_token()) {
 }
