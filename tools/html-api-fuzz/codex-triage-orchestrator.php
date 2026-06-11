@@ -3,6 +3,12 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 const HTML_API_FUZZ_CODEX_CLASSIFICATIONS = array(
+	'wordpress-bug',
+	'oracle-bug',
+	'oracle-limitation',
+	'harness-bug',
+	'expected-unsupported',
+	'scalar-tolerance',
 	'WordPress HTML API bug',
 	'harness bug',
 	'DOM/oracle behavior',
@@ -397,6 +403,10 @@ function html_api_fuzz_codex_prompt_for_signature( array $args, string $signatur
 	$artifact_lines       = implode( "\n", array_map( static fn( string $path ): string => '- ' . $path, $existing_paths ) );
 	$classification_lines = implode( "\n", array_map( static fn( string $classification ): string => '- ' . $classification, HTML_API_FUZZ_CODEX_CLASSIFICATIONS ) );
 	$failure_class        = html_api_fuzz_codex_safe_prompt_line( $signature['failureClass'] ?? '', 'failureClass' );
+	$triage_kind          = html_api_fuzz_codex_safe_prompt_line( $signature['triageKind'] ?? 'failure', 'triageKind' );
+	$oracle_type          = html_api_fuzz_codex_safe_prompt_line( $signature['oracleFindingType'] ?? '', 'oracleFindingType' );
+	$suspected_owner      = html_api_fuzz_codex_safe_prompt_line( $signature['suspectedOwner'] ?? '', 'suspectedOwner' );
+	$upstream_issue       = html_api_fuzz_codex_safe_prompt_line( $signature['upstreamIssueUrl'] ?? '', 'upstreamIssueUrl' );
 
 	return <<<PROMPT
 Diagnose HTML API fuzz signature {$signature_hash}.
@@ -409,6 +419,18 @@ Diagnostics report path:
 
 Failure class from watcher:
 {$failure_class}
+
+Triage kind:
+{$triage_kind}
+
+Oracle finding type:
+{$oracle_type}
+
+Suspected owner:
+{$suspected_owner}
+
+Upstream issue:
+{$upstream_issue}
 
 Mode:
 {$args['mode']}
@@ -432,7 +454,7 @@ Return a concise Markdown report with:
 - classification
 - minimized input summary
 - evidence from the rendered trees/result JSON
-- whether this is actionable
+- suspected owner and whether this is actionable
 - recommended next step
 
 If this is a likely WordPress HTML API bug or harness bug, include a proposed focused regression test.

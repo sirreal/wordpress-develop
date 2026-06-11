@@ -45,16 +45,51 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 		return array( 'accepted' => false, 'result' => null, 'process' => $proc );
 	}
 
-	$accepted = $any_failure
-		? ! ( $result['ok'] ?? true )
-		: ( ( $result['signature']['hash'] ?? null ) === $base['targetHash'] );
+	$accepted = 'oracle-finding' === $base['targetKind']
+		? ( ( $result['oracleFinding']['signature']['hash'] ?? null ) === $base['targetHash'] )
+		: ( $any_failure ? ! ( $result['ok'] ?? true ) : ( ( $result['signature']['hash'] ?? null ) === $base['targetHash'] ) );
 	return array( 'accepted' => $accepted, 'result' => $result, 'process' => $proc );
+}
+
+function html_api_fuzz_min_target( array $replay, array $options ): array {
+	$target_hash = \HtmlApiFuzz\option_string( $options, 'target-hash', null );
+	if ( null !== $target_hash ) {
+		$target_kind = \HtmlApiFuzz\option_string( $options, 'target-kind', 'failure' );
+		if ( ! in_array( $target_kind, array( 'failure', 'oracle-finding' ), true ) ) {
+			throw new InvalidArgumentException( 'Expected --target-kind to be failure or oracle-finding.' );
+		}
+		return array(
+			'kind' => $target_kind,
+			'hash' => $target_hash,
+		);
+	}
+
+	$failure_hash = $replay['signature']['hash'] ?? $replay['result']['signature']['hash'] ?? null;
+	if ( is_string( $failure_hash ) && '' !== $failure_hash ) {
+		return array(
+			'kind' => 'failure',
+			'hash' => $failure_hash,
+		);
+	}
+
+	$oracle_hash = $replay['oracleFinding']['signature']['hash'] ?? $replay['result']['oracleFinding']['signature']['hash'] ?? null;
+	if ( is_string( $oracle_hash ) && '' !== $oracle_hash ) {
+		return array(
+			'kind' => 'oracle-finding',
+			'hash' => $oracle_hash,
+		);
+	}
+
+	return array(
+		'kind' => null,
+		'hash' => null,
+	);
 }
 
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR]\n";
+	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH]\n";
 	exit( null === $replay_path ? 1 : 0 );
 }
 
@@ -64,9 +99,10 @@ if ( ! $replay || ! array_key_exists( 'inputBase64', $replay ) ) {
 	exit( 1 );
 }
 
-$target_hash = $replay['signature']['hash'] ?? $replay['result']['signature']['hash'] ?? null;
+$target      = html_api_fuzz_min_target( $replay, $options );
+$target_hash = $target['hash'];
 if ( null === $target_hash && ! \HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ) {
-	fwrite( STDERR, "Replay does not contain a target signature. Use --any-failure to minimize any failure.\n" );
+	fwrite( STDERR, "Replay does not contain a target failure or oracle-finding signature. Use --any-failure to minimize any failure.\n" );
 	exit( 1 );
 }
 
@@ -89,6 +125,7 @@ $base = array(
 	'originalGenerator' => $original_generator,
 	'seed'              => (int) ( $replay['seed'] ?? 1 ),
 	'targetHash'        => $target_hash,
+	'targetKind'        => $target['kind'] ?? 'failure',
 	'sourceReplay'      => $source_replay,
 	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
 	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
@@ -238,9 +275,11 @@ $summary = array(
 	'schemaVersion'     => 1,
 	'kind'              => 'html-api-fuzz-minimize-result',
 	'createdAt'         => gmdate( 'c' ),
-	'ok'                => null !== $final_result && ( $any_failure ? ! ( $final_result['ok'] ?? true ) : ( ( $final_result['signature']['hash'] ?? null ) === $target_hash ) ),
+	'ok'                => null !== $final_result && ( 'oracle-finding' === $base['targetKind'] ? ( ( $final_result['oracleFinding']['signature']['hash'] ?? null ) === $target_hash ) : ( $any_failure ? ! ( $final_result['ok'] ?? true ) : ( ( $final_result['signature']['hash'] ?? null ) === $target_hash ) ) ),
 	'targetHash'        => $target_hash,
+	'targetKind'        => $base['targetKind'],
 	'finalHash'         => $final_result['signature']['hash'] ?? null,
+	'finalOracleHash'   => $final_result['oracleFinding']['signature']['hash'] ?? null,
 	'profile'           => $base['profile'],
 	'mode'              => $base['mode'],
 	'payloadPolicy'     => $base['payloadPolicy'],

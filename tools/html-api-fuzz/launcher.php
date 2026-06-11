@@ -3,9 +3,10 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
 	echo "Create OUTPUT_DIR/STOP (see stop.php) to stop all lanes gracefully: each finishes its current batch and exits.\n";
 	echo "--max-keep-per-signature is applied per lane; a signature seen in every lane keeps up to N x lanes exemplar directories.\n";
+	echo "--triage-oracle-findings passes oracle findings to the watcher/minimizer when --watcher is used.\n";
 }
 
 function html_api_fuzz_launcher_validate_generator_options( string $profile, string $mode, string $payload_policy ): void {
@@ -118,6 +119,7 @@ $max_nodes        = \HtmlApiFuzz\option_int( $options, 'max-nodes', 3000 );
 $stop_on_failure  = \HtmlApiFuzz\option_bool( $options, 'stop-on-failure', false );
 $fail_unsupported = \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', false );
 $run_watcher      = \HtmlApiFuzz\option_bool( $options, 'watcher', false );
+$triage_oracle_findings = \HtmlApiFuzz\option_bool( $options, 'triage-oracle-findings', false );
 $max_keep_per_signature = \HtmlApiFuzz\option_int( $options, 'max-keep-per-signature', 5 );
 $keep_all_artifacts     = \HtmlApiFuzz\option_bool( $options, 'keep-all-artifacts', false );
 if ( $max_keep_per_signature < 1 ) {
@@ -277,6 +279,7 @@ $aggregate = array(
 	'oracleParseErrors' => 0,
 	'oracleUnsupported' => 0,
 	'oracleTolerated'   => 0,
+	'oracleFindings'    => 0,
 );
 foreach ( $state['laneResults'] as $lane ) {
 	$runner_state = $lane['runnerState'] ?? array();
@@ -316,6 +319,7 @@ if ( $run_watcher ) {
 			array_key_exists( 'max-minimize', $options ) ? (string) \HtmlApiFuzz\option_int( $options, 'max-minimize', 0 ) : null,
 			\HtmlApiFuzz\option_bool( $options, 'no-minimize', false ) ? '--no-minimize' : null,
 			\HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ? '--any-failure' : null,
+			$triage_oracle_findings ? '--triage-oracle-findings' : null,
 				),
 				static function ( $value ) {
 					return null !== $value;

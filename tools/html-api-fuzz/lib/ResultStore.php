@@ -44,6 +44,11 @@ class ResultStore {
 				failure_class TEXT,
 				signature_hash TEXT,
 				family_key TEXT,
+				oracle_finding_class TEXT,
+				oracle_finding_type TEXT,
+				oracle_suspected_owner TEXT,
+				oracle_signature_hash TEXT,
+				oracle_family_key TEXT,
 				profile TEXT,
 				mode TEXT,
 				payload_policy TEXT,
@@ -54,16 +59,48 @@ class ResultStore {
 				worker_code INTEGER,
 				worker_timed_out INTEGER NOT NULL DEFAULT 0,
 				artifacts_retained INTEGER NOT NULL DEFAULT 0,
+				failure_artifacts_retained INTEGER,
+				oracle_artifacts_retained INTEGER,
 				summary_json TEXT,
 				result_json TEXT,
 				replay_json TEXT
 			)'
 		);
-		$this->db->exec( 'PRAGMA user_version = 1' );
+		$this->ensure_column( 'attempts', 'oracle_finding_class', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_finding_type', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_suspected_owner', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_signature_hash', 'TEXT' );
+		$this->ensure_column( 'attempts', 'oracle_family_key', 'TEXT' );
+		$this->ensure_column( 'attempts', 'failure_artifacts_retained', 'INTEGER' );
+		$this->ensure_column( 'attempts', 'oracle_artifacts_retained', 'INTEGER' );
+		if ( (int) $this->db->querySingle( 'PRAGMA user_version' ) < 2 ) {
+			$this->db->exec( 'PRAGMA user_version = 2' );
+		}
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_signature_hash ON attempts ( signature_hash )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_family_key ON attempts ( family_key )' );
+		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_oracle_signature_hash ON attempts ( oracle_signature_hash )' );
+		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_oracle_family_key ON attempts ( oracle_family_key )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_ok ON attempts ( ok )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_seed ON attempts ( seed )' );
+	}
+
+	private function ensure_column( string $table, string $column, string $definition ): void {
+		if ( $this->has_column( $table, $column ) ) {
+			return;
+		}
+
+		$this->db->exec( "ALTER TABLE {$table} ADD COLUMN {$column} {$definition}" );
+	}
+
+	private function has_column( string $table, string $column ): bool {
+		$result = $this->db->query( 'PRAGMA table_info(' . $table . ')' );
+		while ( false !== ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) ) {
+			if ( $column === ( $row['name'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -72,17 +109,30 @@ class ResultStore {
 	 * summary, result, and replay JSON documents.
 	 */
 	public function record_attempt( array $summary, ?array $result = null, ?array $replay = null ): int {
-		$ok        = (bool) ( $summary['ok'] ?? false );
+		$ok             = (bool) ( $summary['ok'] ?? false );
+		$oracle_finding = is_array( $summary['oracleFinding'] ?? null ) ? $summary['oracleFinding'] : null;
+		$store_json     = ! $ok || null !== $oracle_finding;
+		$artifacts_retained = (bool) ( $summary['artifactsRetained'] ?? false );
+		$failure_artifacts_retained = array_key_exists( 'failureArtifactsRetained', $summary )
+			? (bool) $summary['failureArtifactsRetained']
+			: ( ! $ok && $artifacts_retained );
+		$oracle_artifacts_retained = array_key_exists( 'oracleArtifactsRetained', $summary )
+			? (bool) $summary['oracleArtifactsRetained']
+			: ( null !== $oracle_finding && $artifacts_retained );
 		$statement = $this->db->prepare(
 			'INSERT INTO attempts (
 				created_at, seed, ok, status, failure_class, signature_hash, family_key,
+				oracle_finding_class, oracle_finding_type, oracle_suspected_owner, oracle_signature_hash, oracle_family_key,
 				profile, mode, payload_policy, input_source, input_sha1, input_length,
 				duration_ms, worker_code, worker_timed_out, artifacts_retained,
+				failure_artifacts_retained, oracle_artifacts_retained,
 				summary_json, result_json, replay_json
 			) VALUES (
 				:created_at, :seed, :ok, :status, :failure_class, :signature_hash, :family_key,
+				:oracle_finding_class, :oracle_finding_type, :oracle_suspected_owner, :oracle_signature_hash, :oracle_family_key,
 				:profile, :mode, :payload_policy, :input_source, :input_sha1, :input_length,
 				:duration_ms, :worker_code, :worker_timed_out, :artifacts_retained,
+				:failure_artifacts_retained, :oracle_artifacts_retained,
 				:summary_json, :result_json, :replay_json
 			)'
 		);
@@ -105,6 +155,15 @@ class ResultStore {
 					'seed'        => (int) ( $summary['seed'] ?? 0 ),
 					'status'      => (string) ( $summary['status'] ?? 'unknown' ),
 					'signature'   => array( 'hash' => $summary['signature']['hash'] ?? null ),
+					'oracleFinding' => array(
+						'classification' => $summary['oracleFinding']['classification'] ?? null,
+						'type'           => $summary['oracleFinding']['type'] ?? null,
+						'suspectedOwner' => $summary['oracleFinding']['suspectedOwner'] ?? null,
+						'signature'      => array(
+							'hash'      => $summary['oracleFinding']['signature']['hash'] ?? null,
+							'familyKey' => $summary['oracleFinding']['signature']['familyKey'] ?? null,
+						),
+					),
 				),
 				JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
 			);
@@ -119,6 +178,16 @@ class ResultStore {
 		$statement->bindValue( ':signature_hash', $signature_hash, null === $signature_hash ? SQLITE3_NULL : SQLITE3_TEXT );
 		$family_key = $summary['signature']['familyKey'] ?? null;
 		$statement->bindValue( ':family_key', $family_key, null === $family_key ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_finding_class = $oracle_finding['classification'] ?? null;
+		$statement->bindValue( ':oracle_finding_class', $oracle_finding_class, null === $oracle_finding_class ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_finding_type = $oracle_finding['type'] ?? null;
+		$statement->bindValue( ':oracle_finding_type', $oracle_finding_type, null === $oracle_finding_type ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_suspected_owner = $oracle_finding['suspectedOwner'] ?? null;
+		$statement->bindValue( ':oracle_suspected_owner', $oracle_suspected_owner, null === $oracle_suspected_owner ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_signature_hash = $oracle_finding['signature']['hash'] ?? null;
+		$statement->bindValue( ':oracle_signature_hash', $oracle_signature_hash, null === $oracle_signature_hash ? SQLITE3_NULL : SQLITE3_TEXT );
+		$oracle_family_key = $oracle_finding['signature']['familyKey'] ?? null;
+		$statement->bindValue( ':oracle_family_key', $oracle_family_key, null === $oracle_family_key ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':profile', $summary['profile'] ?? null, null === ( $summary['profile'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':mode', $summary['mode'] ?? null, null === ( $summary['mode'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':payload_policy', $summary['payloadPolicy'] ?? null, null === ( $summary['payloadPolicy'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
@@ -128,10 +197,12 @@ class ResultStore {
 		$statement->bindValue( ':duration_ms', $summary['durationMs'] ?? null, null === ( $summary['durationMs'] ?? null ) ? SQLITE3_NULL : SQLITE3_INTEGER );
 		$statement->bindValue( ':worker_code', $summary['workerCode'] ?? null, null === ( $summary['workerCode'] ?? null ) ? SQLITE3_NULL : SQLITE3_INTEGER );
 		$statement->bindValue( ':worker_timed_out', ( $summary['workerTimedOut'] ?? false ) ? 1 : 0, SQLITE3_INTEGER );
-		$statement->bindValue( ':artifacts_retained', ( $summary['artifactsRetained'] ?? false ) ? 1 : 0, SQLITE3_INTEGER );
-		$statement->bindValue( ':summary_json', $ok ? null : $encode( $summary ), $ok ? SQLITE3_NULL : SQLITE3_TEXT );
-		$statement->bindValue( ':result_json', $ok ? null : $encode( $result ), ( $ok || null === $result ) ? SQLITE3_NULL : SQLITE3_TEXT );
-		$statement->bindValue( ':replay_json', $ok ? null : $encode( $replay ), ( $ok || null === $replay ) ? SQLITE3_NULL : SQLITE3_TEXT );
+		$statement->bindValue( ':artifacts_retained', $artifacts_retained ? 1 : 0, SQLITE3_INTEGER );
+		$statement->bindValue( ':failure_artifacts_retained', $failure_artifacts_retained ? 1 : 0, SQLITE3_INTEGER );
+		$statement->bindValue( ':oracle_artifacts_retained', $oracle_artifacts_retained ? 1 : 0, SQLITE3_INTEGER );
+		$statement->bindValue( ':summary_json', $store_json ? $encode( $summary ) : null, $store_json ? SQLITE3_TEXT : SQLITE3_NULL );
+		$statement->bindValue( ':result_json', $store_json ? $encode( $result ) : null, ( ! $store_json || null === $result ) ? SQLITE3_NULL : SQLITE3_TEXT );
+		$statement->bindValue( ':replay_json', $store_json ? $encode( $replay ) : null, ( ! $store_json || null === $replay ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->execute();
 		$statement->close();
 
@@ -144,7 +215,31 @@ class ResultStore {
 	 * exemplar cap survives runner restarts that re-record the same seeds.
 	 */
 	public function retained_seeds( string $signature_hash ): array {
-		$statement = $this->db->prepare( 'SELECT DISTINCT seed FROM attempts WHERE signature_hash = :hash AND artifacts_retained = 1' );
+		$retained_column = $this->has_column( 'attempts', 'failure_artifacts_retained' )
+			? 'COALESCE(failure_artifacts_retained, artifacts_retained)'
+			: 'artifacts_retained';
+		$statement = $this->db->prepare( "SELECT DISTINCT seed FROM attempts WHERE signature_hash = :hash AND {$retained_column} = 1" );
+		$statement->bindValue( ':hash', $signature_hash, SQLITE3_TEXT );
+		$result = $statement->execute();
+
+		$seeds = array();
+		while ( false !== ( $row = $result->fetchArray( SQLITE3_NUM ) ) ) {
+			$seeds[] = (int) $row[0];
+		}
+		$statement->close();
+
+		return $seeds;
+	}
+
+	public function oracle_retained_seeds( string $signature_hash ): array {
+		if ( ! $this->has_column( 'attempts', 'oracle_signature_hash' ) ) {
+			return array();
+		}
+
+		$retained_column = $this->has_column( 'attempts', 'oracle_artifacts_retained' )
+			? 'COALESCE(oracle_artifacts_retained, artifacts_retained)'
+			: 'artifacts_retained';
+		$statement = $this->db->prepare( "SELECT DISTINCT seed FROM attempts WHERE oracle_signature_hash = :hash AND {$retained_column} = 1" );
 		$statement->bindValue( ':hash', $signature_hash, SQLITE3_TEXT );
 		$result = $statement->execute();
 
@@ -191,6 +286,34 @@ class ResultStore {
 		return is_array( $replay ) ? $replay : null;
 	}
 
+	public function replay_for_attempt_id( int $id ): ?array {
+		$statement = $this->db->prepare( 'SELECT replay_json FROM attempts WHERE id = :id AND replay_json IS NOT NULL LIMIT 1' );
+		$statement->bindValue( ':id', $id, SQLITE3_INTEGER );
+		$result = $statement->execute();
+		$row    = $result->fetchArray( SQLITE3_NUM );
+		$statement->close();
+
+		if ( false === $row || ! is_string( $row[0] ?? null ) ) {
+			return null;
+		}
+		$replay = json_decode( $row[0], true );
+
+		return is_array( $replay ) ? $replay : null;
+	}
+
+	public function update_replay_for_attempt( int $id, array $replay ): void {
+		$json = json_encode( $replay, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+		if ( false === $json ) {
+			throw new \RuntimeException( 'Could not encode replay JSON: ' . json_last_error_msg() );
+		}
+
+		$statement = $this->db->prepare( 'UPDATE attempts SET replay_json = :replay_json WHERE id = :id' );
+		$statement->bindValue( ':replay_json', $json, SQLITE3_TEXT );
+		$statement->bindValue( ':id', $id, SQLITE3_INTEGER );
+		$statement->execute();
+		$statement->close();
+	}
+
 	public function max_id(): int {
 		$row = $this->db->querySingle( 'SELECT MAX(id) FROM attempts' );
 
@@ -204,6 +327,34 @@ class ResultStore {
 	public function failures_after( int $after_id, int $up_to_id ): array {
 		$statement = $this->db->prepare(
 			'SELECT id, summary_json FROM attempts WHERE id > :after AND id <= :up_to AND ok = 0 ORDER BY id'
+		);
+		$statement->bindValue( ':after', $after_id, SQLITE3_INTEGER );
+		$statement->bindValue( ':up_to', $up_to_id, SQLITE3_INTEGER );
+		$result = $statement->execute();
+
+		$rows = array();
+		while ( false !== ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) ) {
+			$record = null === $row['summary_json'] ? null : json_decode( $row['summary_json'], true );
+			if ( ! is_array( $record ) ) {
+				continue;
+			}
+			$rows[] = array(
+				'id'     => (int) $row['id'],
+				'record' => $record,
+			);
+		}
+		$statement->close();
+
+		return $rows;
+	}
+
+	public function oracle_findings_after( int $after_id, int $up_to_id ): array {
+		if ( ! $this->has_column( 'attempts', 'oracle_signature_hash' ) ) {
+			return array();
+		}
+
+		$statement = $this->db->prepare(
+			'SELECT id, summary_json FROM attempts WHERE id > :after AND id <= :up_to AND oracle_signature_hash IS NOT NULL ORDER BY id'
 		);
 		$statement->bindValue( ':after', $after_id, SQLITE3_INTEGER );
 		$statement->bindValue( ':up_to', $up_to_id, SQLITE3_INTEGER );
