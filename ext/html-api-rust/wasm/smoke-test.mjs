@@ -797,6 +797,194 @@ assert.equal(textarea.set_modifiable_text("Two"), true);
 assert.equal(textarea.get_updated_html(), "<textarea>Two</textarea>");
 textarea.destroy();
 
+for (const [name, html, advanceTokenCount, replacement, expectedHtml] of [
+	["Text node (start)", "Text", 1, "Blubber", "Blubber"],
+	["Text node (middle)", "<em>Bold move</em>", 2, "yo", "<em>yo</em>"],
+	["Text node (end)", "<img>of a dog", 2, "of a cat", "<img>of a cat"],
+	[
+		"Encoded text node",
+		"<figcaption>birds and dogs</figcaption>",
+		2,
+		"<birds> & <dogs>",
+		"<figcaption>&lt;birds&gt; &amp; &lt;dogs&gt;</figcaption>",
+	],
+	[
+		"SCRIPT tag",
+		"before<script></script>after",
+		2,
+		'const img = "<img> & <br>";',
+		'before<script>const img = "<img> & <br>";</script>after',
+	],
+	[
+		"STYLE tag",
+		"<style></style>",
+		1,
+		'p::before { content: "<img> & </style>"; }',
+		'<style>p::before { content: "<img> & \\3c\\2fstyle>"; }</style>',
+	],
+	[
+		"TEXTAREA tag",
+		"a<textarea>has no need to escape</textarea>b",
+		2,
+		"so it <doesn't>",
+		"a<textarea>so it <doesn't></textarea>b",
+	],
+	[
+		"TEXTAREA (escape)",
+		"a<textarea>has no need to escape</textarea>b",
+		2,
+		"but it does for </textarea>",
+		"a<textarea>but it does for &lt;/textarea></textarea>b",
+	],
+	[
+		"TEXTAREA (escape+attrs)",
+		"a<textarea>has no need to escape</textarea>b",
+		2,
+		'but it does for </textarea not an="attribute">',
+		'a<textarea>but it does for &lt;/textarea not an="attribute"></textarea>b',
+	],
+	[
+		"TITLE tag",
+		"a<title>has no need to escape</title>b",
+		2,
+		"so it <doesn't>",
+		"a<title>so it <doesn't></title>b",
+	],
+	[
+		"TITLE (escape)",
+		"a<title>has no need to escape</title>b",
+		2,
+		"but it does for </title>",
+		"a<title>but it does for &lt;/title></title>b",
+	],
+	[
+		"TITLE (escape+attrs)",
+		"a<title>has no need to escape</title>b",
+		2,
+		'but it does for </title not an="attribute">',
+		'a<title>but it does for &lt;/title not an="attribute"></title>b',
+	],
+]) {
+	const modifiableText = new WP_HTML_Tag_Processor(html);
+	for (let i = 0; i < advanceTokenCount; i++) {
+		assert.equal(modifiableText.next_token(), true, name);
+	}
+	assert.equal(modifiableText.set_modifiable_text(replacement), true, name);
+	assert.equal(modifiableText.get_updated_html(), expectedHtml, name);
+	modifiableText.destroy();
+}
+
+for (const [name, html, invalidUpdate] of [
+	["Comment with -->", "<!-- this is a comment -->", "Comments end in -->"],
+	["Comment with --!>", "<!-- this is a comment -->", "Invalid but legitimate comments end in --!>"],
+	[
+		"Non-JS SCRIPT with <script>",
+		'<script type="text/html">Replace me</script>',
+		"<!-- Just a <script>",
+	],
+	[
+		"Non-JS SCRIPT with </script>",
+		'<script type="text/plain">Replace me</script>',
+		"Just a </script>",
+	],
+	[
+		"Non-JS SCRIPT with <script attributes>",
+		'<script language="text">Replace me</script>',
+		"<!-- <script sneaky>after",
+	],
+	[
+		"Non-JS SCRIPT with </script attributes>",
+		'<script language="text">Replace me</script>',
+		"before</script sneaky>after",
+	],
+]) {
+	const dangerousTextUpdate = new WP_HTML_Tag_Processor(html);
+	while (dangerousTextUpdate.get_modifiable_text() === "" && dangerousTextUpdate.next_token()) {
+		continue;
+	}
+	const originalText = dangerousTextUpdate.get_modifiable_text();
+	assert.notEqual(originalText, "", name);
+	assert.equal(dangerousTextUpdate.set_modifiable_text(invalidUpdate), false, name);
+	assert.equal(dangerousTextUpdate.get_updated_html(), html, name);
+	assert.equal(dangerousTextUpdate.get_modifiable_text(), originalText, name);
+	dangerousTextUpdate.destroy();
+}
+
+for (const [name, html, update, expectedHtml] of [
+	["Simple update", "<script></script>", "{}", "<script>{}</script>"],
+	["Needs no replacement", "<script></script>", "<!--<scriptish>", "<script><!--<scriptish></script>"],
+	[
+		"var script;1<script>0",
+		"<script></script>",
+		"var script;1<script>0",
+		"<script>var script;1<\\u0073cript>0</script>",
+	],
+	["1</script>/", "<script></script>", "1</script>/", "<script>1</\\u0073cript>/</script>"],
+	[
+		"var SCRIPT;1<SCRIPT>0",
+		"<script></script>",
+		"var SCRIPT;1<SCRIPT>0",
+		"<script>var SCRIPT;1<\\u0053CRIPT>0</script>",
+	],
+	["1</SCRIPT>/", "<script></script>", "1</SCRIPT>/", "<script>1</\\u0053CRIPT>/</script>"],
+	['"</script>"', "<script></script>", '"</script>"', '<script>"</\\u0073cript>"</script>'],
+	['"</ScRiPt>"', "<script></script>", '"</ScRiPt>"', '<script>"</\\u0053cRiPt>"</script>'],
+	[
+		"Tricky script open tag with CR",
+		"<script></script>",
+		"<!-- <script\r>",
+		"<script><!-- <\\u0073cript\r></script>",
+	],
+	[
+		"Tricky script open tag with CRLF",
+		"<script></script>",
+		"<!-- <script\r\n>",
+		"<script><!-- <\\u0073cript\r\n></script>",
+	],
+	[
+		"Tricky script close tag with CR",
+		"<script></script>",
+		"// </script\r>",
+		"<script>// </\\u0073cript\r></script>",
+	],
+	[
+		"Tricky script close tag with CRLF",
+		"<script></script>",
+		"// </script\r\n>",
+		"<script>// </\\u0073cript\r\n></script>",
+	],
+	[
+		"Module tag",
+		'<script type="module"></script>',
+		'"<script>"',
+		'<script type="module">"<\\u0073cript>"</script>',
+	],
+	[
+		"Tag with type",
+		'<script type="text/javascript"></script>',
+		'"<script>"',
+		'<script type="text/javascript">"<\\u0073cript>"</script>',
+	],
+	[
+		"Tag with language",
+		'<script language="javascript"></script>',
+		'"<script>"',
+		'<script language="javascript">"<\\u0073cript>"</script>',
+	],
+	[
+		"Non-JS script, save HTML-like content",
+		'<script type="text/html"></script>',
+		"<h1>This & that</h1>",
+		'<script type="text/html"><h1>This & that</h1></script>',
+	],
+]) {
+	const scriptTextUpdate = new WP_HTML_Tag_Processor(html);
+	assert.equal(scriptTextUpdate.next_tag("SCRIPT"), true, name);
+	assert.equal(scriptTextUpdate.set_modifiable_text(update), true, name);
+	assert.equal(scriptTextUpdate.get_updated_html(), expectedHtml, name);
+	scriptTextUpdate.destroy();
+}
+
 for (const [html, expectedContentType] of [
 	["<script>one</script>", "javascript"],
 	['<script type="module">one</script>', "javascript"],
