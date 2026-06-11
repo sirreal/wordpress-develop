@@ -2017,6 +2017,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = !this.is_full_parser;
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
+			this.form_element_pointer = false;
 			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
@@ -2874,6 +2875,14 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (tagName === "FORM" && closingNamespace === "html" && this.form_element_pointer) {
+					this.form_element_pointer = false;
+					if (existingIndex === -1) {
+						this.#ignoreCurrentToken();
+						return;
+					}
+				}
+
 				if (this.#shouldBailUnsupportedFormCloser(tagName, closingNamespace, existingIndex)) {
 					this.#bailUnsupported("Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.");
 					return;
@@ -3082,7 +3091,7 @@ export function createHtmlApi(wasm) {
 				this.current_namespace === "html" &&
 				tagName === "FORM" &&
 				!this.#hasOpenHtmlElement("TEMPLATE") &&
-				this.#hasOpenHtmlElement("FORM")
+				this.form_element_pointer
 			) {
 				this.current_token_namespace = this.current_namespace;
 				this.breadcrumbs = [...this.open_elements];
@@ -3148,6 +3157,13 @@ export function createHtmlApi(wasm) {
 			}
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingElement(this.#createActiveFormattingElement(tagName));
+			}
+			if (
+				this.current_token_namespace === "html" &&
+				tagName === "FORM" &&
+				!this.#hasOpenHtmlElement("TEMPLATE")
+			) {
+				this.form_element_pointer = true;
 			}
 			this.breadcrumbs = [...this.open_elements];
 
@@ -3236,6 +3252,7 @@ export function createHtmlApi(wasm) {
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
 				framesetOk: this.frameset_ok,
+				formElementPointer: this.form_element_pointer,
 			};
 		}
 
@@ -3249,6 +3266,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.frameset_ok = state.framesetOk;
+			this.form_element_pointer = state.formElementPointer;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
