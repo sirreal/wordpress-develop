@@ -1150,7 +1150,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.parsing_namespace === "html") {
-				return asciiLower(attributeName);
+				return attributeName;
 			}
 			return qualifyForeignAttributeName(this.parsing_namespace, asciiLower(attributeName));
 		}
@@ -1705,7 +1705,7 @@ export function createHtmlApi(wasm) {
 
 			const lower = asciiLower(attributeName);
 			return this.get_namespace() === "html"
-				? lower
+				? attributeName
 				: qualifyForeignAttributeName(this.get_namespace(), lower);
 		}
 

@@ -129,11 +129,11 @@ text.destroy();
 
 const nonText = new WP_HTML_Tag_Processor("<div></div>");
 assert.equal(nonText.next_tag("div"), true);
-assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "data-id");
+assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 assert.equal(nonText.get_modifiable_text(), "");
 assert.equal(nonText.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
 assert.equal(nonText.is_tag_closer(), true);
-assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "data-id");
+assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 nonText.destroy();
 
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
@@ -189,6 +189,7 @@ tagBookmarkLimit.destroy();
 const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
+assert.equal(processor.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 
