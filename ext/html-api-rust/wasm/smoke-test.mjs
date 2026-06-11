@@ -2185,6 +2185,11 @@ assert.equal(fullParserTemplateIgnoresTextAfterCol.get_token_name(), "TEMPLATE")
 assert.equal(fullParserTemplateIgnoresTextAfterCol.is_tag_closer(), true);
 fullParserTemplateIgnoresTextAfterCol.destroy();
 
+assert.equal(
+	buildFullParserHtml5libTree("<body><template><thead></thead><template><tr></tr></template><tr></tr><tfoot></tfoot></template>"),
+	"<html>\n  <head>\n  <body>\n    <template>\n      content\n        <thead>\n        <template>\n          content\n            <tr>\n        <tbody>\n          <tr>\n        <tfoot>\n\n",
+);
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

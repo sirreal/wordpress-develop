@@ -4059,8 +4059,38 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
+			if (mode === "in_table") {
+				if (tagName === "COL") {
+					this.#setCurrentTemplateInsertionMode("in_column_group");
+					this.#queueVirtualPush("COLGROUP");
+					return this.#reprocessCurrentTokenAfterVirtualTokens();
+				}
+
+				if (tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
+					this.#setCurrentTemplateInsertionMode("in_table_body");
+					this.#queueVirtualPush("TBODY");
+					return this.#reprocessCurrentTokenAfterVirtualTokens();
+				}
+
+				if (TABLE_SECTION_ELEMENTS.has(tagName)) {
+					this.#setCurrentTemplateInsertionMode("in_table_body");
+				}
+				return false;
+			}
+
 			if (mode === "in_table_body") {
 				if (TEMPLATE_TABLE_WRAPPER_START_TAGS.has(tagName)) {
+					const topIndex = this.open_elements.length - 1;
+					if (
+						topIndex >= 0 &&
+						this.open_element_namespaces[topIndex] === "html" &&
+						TABLE_SECTION_ELEMENTS.has(this.open_elements[topIndex])
+					) {
+						this.#setCurrentTemplateInsertionMode("in_table");
+						this.#queueVirtualPopsFrom(topIndex);
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+					}
+
 					this.#ignoreCurrentToken();
 					return true;
 				}
@@ -4115,7 +4145,9 @@ export function createHtmlApi(wasm) {
 
 			if (tagName === "TR") {
 				this.#setCurrentTemplateInsertionMode("in_table_body");
-			} else if (TABLE_SECTION_ELEMENTS.has(tagName) || tagName === "CAPTION") {
+			} else if (TABLE_SECTION_ELEMENTS.has(tagName)) {
+				this.#setCurrentTemplateInsertionMode("in_table");
+			} else if (tagName === "CAPTION") {
 				this.#setCurrentTemplateInsertionMode("in_body");
 			}
 		}
