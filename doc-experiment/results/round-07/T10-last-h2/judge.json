@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (Tag Processor for flat attribute/class edit). Every method called exists and has its own heading in html-tag-processor.md: next_tag, set_bookmark, has_bookmark, seek, add_class, release_bookmark, get_updated_html. Uses the canonical re-set-same-name bookmark idiom that set_bookmark() explicitly documents for 'remembering the last X seen so far' — the most idiomatic of the three trials. Adds a belt-and-suspenders `$found_h2 && has_bookmark()` guard and a release_bookmark() cleanup; both are harmless and documented. 6/6 hidden cases pass. Edge cases handled: no-H2 returns input unchanged, single H2 marked, comment-H2 correctly ignored (relies on documented next_tag semantics, not manual filtering), existing class appended via add_class per documented behavior. Confidence 85 was well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. No hallucinated methods — next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html all documented. 6/6 cases pass. The deduction is for an anti-idiomatic bookmark strategy: it generates a unique name per iteration with uniqid() ('last-h2-' . uniqid()) and releases the previous one each loop. This directly contradicts set_bookmark()'s explicit guidance to 'only be created with string-literal names' and to 'avoid creating mark_{$index}', and ignores the documented simpler idiom (re-setting the same name moves the bookmark) which solves exactly this 'last X' problem. Functionally correct and stays within the bookmark limit (one live at a time, verified by probe), but it reflects not absorbing the bookmarks section. Lower self-reported confidence (75) shows appropriate uncertainty."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. No hallucinated methods — all of next_tag, is_tag_closer, set_bookmark, has_bookmark, seek, add_class, get_updated_html are documented. 6/6 cases pass. Uses the canonical re-set-same-name bookmark idiom (good). Deduction for a conceptual error: an `if ( is_tag_closer() ) continue;` guard whose comment claims it 'Skip[s] H2 tags inside HTML comments'. This conflates three distinct concepts — tag closers, HTML comments, and matching. next_tag('h2') defaults to skipping closers and never matches comment content at all (verified: matches=1 on '<h2>x</h2>', never a closer), so the guard is a dead no-op resting on a misunderstanding of both is_tag_closer() and next_tag's comment handling. Harmless to output but indicates the docs didn't make the default closer-skipping and comment-as-text behavior salient enough to this subject. Confidence 85."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 6/6, so this analyzes near-misses and how the docs steered (or failed to steer) behavior.\n\nWhat the docs did well: (1) The 'comment-h2-not-counted' case was passed by all three without any manual comment-skipping logic, because next_tag()'s 'What this matches' bullets state plainly that 'Tag-like text inside comments... is text, not tags, and is never matched or modified.' This documentation directly prevented over-engineered comment filtering. (2) The 'existing-class' case passed because the add_class section's worked examples show class appending to an existing class attribute, so no subject tried to read-modify-write the class attribute manually. (3) The core 'last H2' algorithm was nailed by trials 1 and 3 because set_bookmark()'s docblock contains an explicit, on-point passage: 'Setting a bookmark with a name that is already in use MOVES that bookmark to the current location... Re-setting the same name on every match is the supported idiom for remembering the last X seen so far... This is how to track the last occurrence of something in a single pass.' That paragraph is essentially the solution template, and it worked.\n\nNear-miss 1 (trial-2): Despite the explicit 're-set the same name' guidance and the explicit warning against programmatic names ('avoid creating mark_{$index}', 'only... string-literal names'), the subject still reached for uniqid()-generated names plus per-iteration release. The guidance is present but is buried in a long prose block; the anti-pattern warning and the positive idiom are several sentences apart, and there is no compact 'track the last match' code recipe a skimming model can lift. The subject evidently read enough to use bookmarks correctly but not enough to internalize the naming/idiom guidance.\n\nNear-miss 2 (trial-3): The dead is_tag_closer() guard with a comment about comments shows the subject conflated 'tag closer' with 'comment' and was unsure whether next_tag() skips closers by default. The next_tag() $query docs do state tag_closers defaults to 'skip', but only inside a dense inline @type blob in the parameter table; there is no prose sentence or example stating 'by default next_tag() visits only openers, never closers.' is_tag_closer()'s own heading in the Tag Processor doc has no description text at all (only the method index line), so a subject has no place to learn that closers are irrelevant here. The subject hedged with a no-op rather than trusting the default.\n\nNo misconception caused an actual failure; the documentation's targeted bookmark/comment passages were strong enough to produce correct output in all trials. The residual issues are idiomaticity (trial-2) and a harmless dead guard from under-documented defaults (trial-3).",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark()",
+      "problem": "The crucial 're-set the same name to track the last X' idiom and the warning against programmatically-generated bookmark names are both correct but live in long prose paragraphs that are several sentences apart, with no compact lift-able code recipe. Trial-2 read the section, used bookmarks correctly, yet still chose uniqid()-generated names with per-iteration release — the exact anti-pattern the prose warns against.",
+      "suggestion": "Add a short, self-contained code example immediately adjacent to the 'MOVES that bookmark' sentence showing the full last-occurrence loop with a single literal name: `while ( $p->next_tag('X') ) { $p->set_bookmark('last-x'); } if ( $p->has_bookmark('last-x') ) { $p->seek('last-x'); ... }`. A skimming reader copies the example rather than inventing dynamic names."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag()",
+      "problem": "That next_tag() visits only tag openers by default (tag_closers => 'skip') is stated only inside the dense inline @type description in the $query parameter table. There is no plain prose sentence or example asserting the default. Trial-3 was unsure and added a dead `if (is_tag_closer()) continue;` guard, mistakenly believing it related to skipping comment content.",
+      "suggestion": "Add one sentence to the next_tag() description prose: 'By default next_tag() stops only on opening tags; tag closers like </div> are skipped unless you pass tag_closers => visit.' This removes the uncertainty that leads to defensive no-op guards."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::is_tag_closer()",
+      "problem": "The method has a heading and signature in html-tag-processor.md but no description text — only the one-line method-index entry. A subject reaching for it (trial-3) had nothing to read, and conflated 'tag closer' with 'HTML comment', producing a guard whose comment misdescribes what the method does.",
+      "suggestion": "Add a one-line description and a tiny example under the is_tag_closer() heading clarifying it distinguishes </div> from <div> and is meaningful only when tag_closers => visit (otherwise it is always false). Cross-reference that comment content is never a tag at all, so is_tag_closer() is unrelated to comments."
+    }
+  ]
+}

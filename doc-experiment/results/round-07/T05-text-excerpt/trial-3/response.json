@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all tokens with next_token(), checking for '#text' tokens and accumulating their decoded text content. It correctly handles Unicode code points (not bytes) by using mb_strlen() and mb_substr() with the 'UTF-32BE' encoding, which operates on code points rather than bytes. It truncates precisely at code point boundaries when the limit is reached, never cutting through multi-byte characters, and naturally excludes non-text content like SCRIPT and STYLE elements since they don't produce text nodes.",
+  "confidence": 75
+}

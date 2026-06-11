@@ -2,6 +2,20 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 7 — Haiku, RCDATA + drain idioms land
+
+**Train 97.51 (statistically flat vs round-6 train 97.84; nothing near
+the revert threshold).** N03 → 100 (drain idiom), failure-handling
+concept 100, 13/15 tasks functionally perfect across all trials.
+Remaining wobbles: one T05 trial 5/9 (sliced multibyte text without an
+explicit mb encoding — docs never said output is UTF-8) and T08's
+boundary confusion resurfacing in break-form code that the
+continue-form-only `>=` warning misses.
+
+Round-8 hypotheses (committed): UTF-8 output statement + explicit
+mb-encoding idiom on get_modifiable_text() in both classes; the
+break-form boundary equivalence (break at `< depth`, never `<=`).
+
 ## Round 6 — Haiku, checkpoint: held-out generalization confirmed
 
 **All-19 95.92 / train 97.84 (+3.1) / held-out 88.69** (vs 87.38 at the

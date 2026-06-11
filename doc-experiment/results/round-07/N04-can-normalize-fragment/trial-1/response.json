@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize(), which is designed for exactly this purpose: normalizing HTML fragments in a BODY context. The method returns a normalized HTML string on success and null if the HTML contains unsupported constructs (such as certain misnested formatting elements or foster parenting). By checking whether the return value is not null, we directly determine whether normalization is possible.",
+  "confidence": 92
+}

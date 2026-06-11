@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize() to parse and normalize both HTML fragments. This method handles all the structural normalization requirements: it implicitly closes tags as a browser would, normalizes tag/attribute casing to lowercase, normalizes attribute quoting to double quotes, handles character reference decoding, and returns null if the input cannot be fully parsed or contains unsupported markup. By comparing the normalized outputs, we determine if the fragments represent the same DOM structure.",
+  "confidence": 82
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor) for depth-aware text extraction. Every method documented: create_fragment, next_tag (bare-string form, html-tag-processor.md:59), get_current_depth, next_token, get_token_type, get_modifiable_text. Token walk mirrors the documented idiom at html-processor.md:624-631 verbatim, including the combined `next_token() && get_current_depth() >= $depth` loop condition (the docs even annotate `>= and not >`). Relies correctly on get_modifiable_text decoding character references (documented at html-processor.md:2077) and returning '' for the image-only H1. 8/8 passed. Only gap: skips the documented `static|null` return of create_fragment (html-processor.md:383) and calls next_tag on the result unchecked. Latent only -- no test input triggers a null fragment -- so it costs nothing functionally but is the one documented edge case left unhandled. Confidence 88, well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and fully documented API set. Uses the array query form next_tag( array('tag_name'=>'H1') ), which is documented (html-tag-processor.md:58, 61). Uses a `break` when depth drops below the H1 depth plus a redundant `&& $current_depth >= $h1_depth` guard on the text branch -- harmless but slightly noisier than the reference's single combined condition. Leading-backslash \\WP_HTML_Processor is valid. 8/8 passed. Same single edge-case gap as the others: no null-check on create_fragment before next_tag (documented static|null at html-processor.md:383). Confidence 78."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and documented API. Clean `break`-on-depth-drop variant of the documented token walk; behaviorally identical to the reference's combined-condition loop for text collection. All methods present in the two markdown files. 8/8 passed. Same lone gap: create_fragment result used without the documented null-check (html-processor.md:383). Confidence 78, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8. The docs were strongly load-bearing here and did their job. Three passages were decisive: (1) the depth-bounded token-walk idiom in next_token() / get_current_depth() (html-processor.md:624-631 and the get_current_depth example at 888-892, which even annotates `// >= and not >.`) -- all three subjects reproduced this almost verbatim, which is why nested-markup, nested-in-div, first-of-two, and unclosed-h1 all passed; (2) the get_modifiable_text() statement that for #text nodes the returned text is DECODED, do not decode again (html-processor.md:2077) -- this directly produced the entities-decoded pass and prevented anyone from double-decoding or trying to decode manually; (3) the same method's guarantee that a token with no modifiable text yields '' and the surrounding note that markup-only content contributes nothing -- combined with filtering on get_token_type() === '#text', this yielded the image-only-empty-string '' (not null) result correctly. The Tag-vs-Processor split note (html-tag-processor.md:20: get_current_depth/get_breadcrumbs do not exist on the Tag Processor) steered all three to the correct class on the first try; none reached for the Tag Processor.\\n\\nNear-miss in the explanations rather than the code: all three subjects' write-ups say get_modifiable_text \\\"returns null only when no H1 exists\\\" or conflate the decoding behavior with the null-return logic. That is a misreading -- get_modifiable_text() returns a string (never null; '' when empty per html-processor.md:2075-2076), and the null comes from the no-H1 branch via next_tag() returning false. The code is correct, but the prose reveals a shaky mental model of which call produces null. The one real but latent weakness in all three is the omitted null-check on create_fragment(), whose documented signature is `static|null` (html-processor.md:351, 383). No test input forces a null fragment (the only supported context is <body>/UTF-8), so it never surfaced; the reference guards it, the subjects did not. The docs document the null return but do not motivate WHEN it happens, so subjects reasonably treated it as impossible.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() -- Returns section (html-processor.md:381-383)",
+      "problem": "The signature and Returns note say the method yields `static|null` but never say WHAT causes null, so subjects across all three trials assumed it could not happen and called next_tag() on the result unchecked. The reference solution guards `if ( null === $processor ) return null;`; none of the subjects did. It stayed latent only because no test input forces a null fragment.",
+      "suggestion": "Add one sentence enumerating the null conditions (e.g. an unsupported context or non-UTF-8 encoding) and a one-line idiom showing the guard, e.g. `$p = WP_HTML_Processor::create_fragment( $html ); if ( null === $p ) { /* unsupported input */ }`. This generalizes to every create_fragment/create_full_parser caller."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() -- description (html-processor.md:2071-2077)",
+      "problem": "The method clearly documents the empty-string-vs-content semantics and that #text is decoded, but it never states the return type is always string (never null). All three subjects' explanations wrongly attributed the function's null-return to get_modifiable_text rather than to next_tag() returning false. The code happened to be correct, but the prose shows the docs let a wrong mental model survive.",
+      "suggestion": "State explicitly that the return is always a string and never null, contrasting it with methods like get_modifiable_html or attribute getters that can return null/true. A single 'Returns a string and never null' line next to the existing empty-string note would prevent the conflation."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() / get_current_depth() -- depth-walk example (html-processor.md:624-631, 888-892)",
+      "problem": "The canonical 'walk children of the current element' pattern is shown only as the combined loop condition `next_token() && get_current_depth() >= $depth`. Two of three subjects instead wrote a `break` when depth < start-depth, which is equivalent for read-only text collection but subtly different when the loop body must also process the boundary token (e.g. when serializing or counting). The docs do not flag this equivalence or its one caveat: the combined-condition form skips the first out-of-scope token entirely, whereas a break form has already advanced onto it.",
+      "suggestion": "Add a sentence noting both forms are valid for scoping a subtree, and that the difference matters only when you need to act on the token that exits the subtree (the combined condition never enters the body for it; a `break` form does). This generalizes to any 'process descendants of the current node' task."
+    }
+  ]
+}

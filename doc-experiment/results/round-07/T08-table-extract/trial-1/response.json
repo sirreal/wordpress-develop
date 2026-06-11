@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML, then finds the first TABLE element with next_tag(). It uses next_token() with get_current_depth() to iterate through all tokens within the table. When a TD/TH opener is found, it begins collecting text from subsequent #text tokens. When the TD/TH closer is found, the accumulated text is saved to the current row. When a TR closer is found, the complete row is added to the result array. This approach properly handles optional closing tags (</td>, </tr>) through the HTML Processor's browser-compliant parsing rules.",
+  "confidence": 72
+}

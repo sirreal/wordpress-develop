@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor, the documented API for byte-precise attribute edits. The processor scans linearly through the HTML finding IMG tags (case-insensitive), uses add_class() to append 'wp-image' to each matched tag's class attribute (preserving existing classes per documentation), and returns the modified HTML via get_updated_html(). HTML comments are automatically skipped because WP_HTML_Tag_Processor only matches \"real HTML tags\" and ignores \"tag-like text inside comments.\"",
+  "confidence": 92
+}
