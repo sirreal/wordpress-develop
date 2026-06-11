@@ -225,6 +225,38 @@ assert.equal(missingFalseAttributeTags.set_attribute("checked", false), false);
 assert.equal(missingFalseAttributeTags.get_updated_html(), '<input type="checkbox">');
 missingFalseAttributeTags.destroy();
 
+const unselectedAttributePrefixTags = new WP_HTML_Tag_Processor('<div data-foo="bar">Test</div>');
+assert.equal(unselectedAttributePrefixTags.get_attribute_names_with_prefix("data-"), null);
+unselectedAttributePrefixTags.destroy();
+
+const missingAttributePrefixTags = new WP_HTML_Tag_Processor('<div data-foo="bar">Test</div>');
+assert.equal(missingAttributePrefixTags.next_tag("p"), false);
+assert.equal(missingAttributePrefixTags.get_attribute_names_with_prefix("data-"), null);
+missingAttributePrefixTags.destroy();
+
+const closingAttributePrefixTags = new WP_HTML_Tag_Processor('<div data-foo="bar">Test</div>');
+assert.equal(closingAttributePrefixTags.next_tag("div"), true);
+assert.equal(closingAttributePrefixTags.next_tag({ tag_closers: "visit" }), true);
+assert.equal(closingAttributePrefixTags.get_attribute_names_with_prefix("data-"), null);
+closingAttributePrefixTags.destroy();
+
+const emptyAttributePrefixTags = new WP_HTML_Tag_Processor("<div>Test</div>");
+assert.equal(emptyAttributePrefixTags.next_tag("div"), true);
+assert.deepEqual(emptyAttributePrefixTags.get_attribute_names_with_prefix("data-"), []);
+emptyAttributePrefixTags.destroy();
+
+const mixedCaseAttributePrefixTags = new WP_HTML_Tag_Processor('<div DATA-enabled class="test" data-test-ID="14">Test</div>');
+assert.equal(mixedCaseAttributePrefixTags.next_tag(), true);
+assert.deepEqual(mixedCaseAttributePrefixTags.get_attribute_names_with_prefix("data-"), ["data-enabled", "data-test-id"]);
+mixedCaseAttributePrefixTags.destroy();
+
+const addedAttributePrefixTags = new WP_HTML_Tag_Processor('<div data-foo="bar">Test</div>');
+assert.equal(addedAttributePrefixTags.next_tag(), true);
+assert.equal(addedAttributePrefixTags.set_attribute("data-test-id", "14"), true);
+assert.equal(addedAttributePrefixTags.get_updated_html(), '<div data-test-id="14" data-foo="bar">Test</div>');
+assert.deepEqual(addedAttributePrefixTags.get_attribute_names_with_prefix("data-"), ["data-test-id", "data-foo"]);
+addedAttributePrefixTags.destroy();
+
 const duplicateAttributeNameTags = new WP_HTML_Tag_Processor("<div DATA-x=1 data-x=2 data-y=3>");
 assert.equal(duplicateAttributeNameTags.next_tag("div"), true);
 assert.deepEqual(duplicateAttributeNameTags.get_attribute_names_with_prefix("data-"), ["data-x", "data-y"]);
