@@ -212,6 +212,15 @@ discoverability without a clean regression.
 
 ## 5. Aggregate and record
 
+Before aggregation, validate result completeness:
+
+```sh
+python3 doc-experiment/tools/validate-round.py round-NN
+```
+
+It should report `judged` before aggregation. After aggregation, rerun it with
+`--require-scored`; it should report `scored` before the score is trusted.
+
 ```sh
 python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN
 ```

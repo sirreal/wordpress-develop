@@ -75,6 +75,8 @@ python3 render-docs-markdown.py \
 - `tools/verify-scratch-isolation.py` — checks a scratch directory exposes only
   rendered docs and selected task prompts, never references, tests, plans, or
   source files.
+- `tools/validate-round.py` — reports whether a round is prepared, partially
+  trialed, trial-complete, judged, or scored, and lists missing artifacts.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
   `prepare-round.py` and manual scratch variants.
 - `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject

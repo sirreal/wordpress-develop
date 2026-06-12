@@ -12,6 +12,10 @@ Scratch isolation passed: only the two rendered docs and selected task prompts
 are exposed. No subject trials, hidden-test executions, judge verdicts, or
 round summary exist yet, so round 18 is not a trusted score.
 
+Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
+round is prepared, partially trialed, trial-complete, judged, or scored, and it
+lists missing trial, judge, or summary files before a score can be trusted.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
