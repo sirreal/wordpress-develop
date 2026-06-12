@@ -4229,7 +4229,6 @@ for (const html of ["<param><frameset></frameset>", "<source> <frameset></frames
 for (const html of [
 	"<svg></svg><frameset><frame>",
 	"<math></math><frameset><frame>",
-	"<svg>\0 </svg><frameset><frame>",
 	"<svg><path></path></svg><frameset><frame>",
 ]) {
 	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
@@ -4247,7 +4246,7 @@ for (const html of [
 	fullParserFramesetAfterEmptyForeign.destroy();
 }
 
-for (const html of ["<svg>\0</svg><frameset>", "<svg> </svg><frameset>"]) {
+for (const html of ["<svg> </svg><frameset>"]) {
 	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
 	const fullParserFramesetAfterEmptyForeignTags = [];
 	while (fullParserFramesetAfterEmptyForeign.next_token()) {
@@ -4261,6 +4260,26 @@ for (const html of ["<svg>\0</svg><frameset>", "<svg> </svg><frameset>"]) {
 	assert.equal(fullParserFramesetAfterEmptyForeign.get_last_error(), null);
 	assert.equal(fullParserFramesetAfterEmptyForeign.get_unsupported_exception(), null);
 	fullParserFramesetAfterEmptyForeign.destroy();
+}
+
+for (const [html, expectedTags] of [
+	["<div><frameset>", ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]],
+	["<svg><p><frameset>", ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]],
+	["<svg><foreignObject><div> <frameset><frame>", ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "+FRAME", "-FRAMESET", "-HTML"]],
+]) {
+	const fullParserFramesetAfterIgnoredOpenChain = WP_HTML_Processor.create_full_parser(html);
+	const fullParserFramesetAfterIgnoredOpenChainTags = [];
+	while (fullParserFramesetAfterIgnoredOpenChain.next_token()) {
+		if (fullParserFramesetAfterIgnoredOpenChain.get_token_type() === "#tag") {
+			fullParserFramesetAfterIgnoredOpenChainTags.push(
+				`${fullParserFramesetAfterIgnoredOpenChain.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterIgnoredOpenChain.get_tag()}`,
+			);
+		}
+	}
+	assert.deepEqual(fullParserFramesetAfterIgnoredOpenChainTags, expectedTags);
+	assert.equal(fullParserFramesetAfterIgnoredOpenChain.get_last_error(), null);
+	assert.equal(fullParserFramesetAfterIgnoredOpenChain.get_unsupported_exception(), null);
+	fullParserFramesetAfterIgnoredOpenChain.destroy();
 }
 
 for (const html of ["</html><frameset></frameset>", "</body> <frameset></frameset>"]) {
@@ -4357,18 +4376,16 @@ for (const html of [
 	ignoredFramesetProcessor.destroy();
 }
 
-for (const html of [
-	"<div><frameset>",
-]) {
-	const nonIgnoredFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
-	while (nonIgnoredFramesetProcessor.next_token()) {
+for (const html of ["<svg>\0</svg><frameset>", "<svg>\0 </svg><frameset>"]) {
+	const nonIgnoredFramesetAfterForeignTextProcessor = WP_HTML_Processor.create_full_parser(html);
+	while (nonIgnoredFramesetAfterForeignTextProcessor.next_token()) {
 	}
-	assert.equal(nonIgnoredFramesetProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	assert.equal(nonIgnoredFramesetAfterForeignTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
 	assert.equal(
-		nonIgnoredFramesetProcessor.get_unsupported_exception().message,
+		nonIgnoredFramesetAfterForeignTextProcessor.get_unsupported_exception().message,
 		"Cannot process non-ignored FRAMESET tags.",
 	);
-	nonIgnoredFramesetProcessor.destroy();
+	nonIgnoredFramesetAfterForeignTextProcessor.destroy();
 }
 
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");

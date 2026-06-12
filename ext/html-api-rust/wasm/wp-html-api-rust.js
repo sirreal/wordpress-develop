@@ -223,6 +223,7 @@ const IN_BODY_IGNORED_START_TAGS = new Set([
 ]);
 const AFTER_HEAD_FRAMESET_IGNORED_START_TAGS = new Set(["PARAM", "SOURCE", "TRACK"]);
 const AFTER_HEAD_FRAMESET_IGNORED_CLOSED_START_TAGS = new Set(["MATH", "SVG"]);
+const AFTER_HEAD_FRAMESET_IGNORED_OPEN_START_TAGS = new Set(["DIV", "FOREIGNOBJECT", "P", "SVG"]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", "MTEXT"]);
 const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
@@ -4617,6 +4618,12 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (tokenType === "#tag" && !isCloser && this.#openElementChainPrecedesFrameset(tagName)) {
+							this.pre_frameset_paragraph_ignored = true;
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
 						if (tokenType === "#tag" && !isCloser && this.#closedElementPrecedesFrameset(tagName)) {
 							this.pre_frameset_ignored_element_depth = 1;
 							this.#ignoreCurrentToken();
@@ -5568,7 +5575,7 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
-				if (!this.#isIgnorablePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
+				if (!this.#isWhitespacePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
 					return false;
 				}
 
@@ -5583,6 +5590,43 @@ export function createHtmlApi(wasm) {
 					}
 				} else if (!VOID_ELEMENTS.has(nextTag.tag_name) && !nextTag.has_self_closing_flag) {
 					depth += 1;
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#openElementChainPrecedesFrameset(tagName) {
+			if (!AFTER_HEAD_FRAMESET_IGNORED_OPEN_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!this.#isWhitespacePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
+					return false;
+				}
+
+				if (nextTag.is_closing) {
+					return false;
+				}
+
+				if (nextTag.tag_name === "FRAMESET") {
+					return true;
+				}
+
+				if (!AFTER_HEAD_FRAMESET_IGNORED_OPEN_START_TAGS.has(nextTag.tag_name)) {
+					return false;
 				}
 
 				at = nextTag.token_end;
@@ -5620,6 +5664,10 @@ export function createHtmlApi(wasm) {
 				const code = char.charCodeAt(0);
 				return code === 0 || isHtmlWhitespaceCode(code);
 			});
+		}
+
+		#isWhitespacePreFramesetText(text) {
+			return text.split("").every((char) => isHtmlWhitespaceCode(char.charCodeAt(0)));
 		}
 
 		#paragraphPrecedesFrameset(tagName) {
