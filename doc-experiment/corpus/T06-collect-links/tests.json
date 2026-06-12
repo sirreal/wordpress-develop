@@ -54,12 +54,7 @@
             "args": [
                 "<a href>empty</a>"
             ],
-            "expected": [
-                {
-                    "href": true,
-                    "text": "empty"
-                }
-            ]
+            "expected": []
         },
         {
             "id": "image-link-empty-text",

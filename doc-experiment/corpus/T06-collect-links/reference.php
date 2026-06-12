@@ -9,7 +9,7 @@ function collect_links( string $html ): array {
 	$links = array();
 	while ( $processor->next_tag( 'A' ) ) {
 		$href = $processor->get_attribute( 'href' );
-		if ( null === $href ) {
+		if ( ! is_string( $href ) ) {
 			continue;
 		}
 
