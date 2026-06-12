@@ -4423,6 +4423,31 @@ export function createHtmlApi(wasm) {
 				}
 
 				const formattingTagName = this.open_elements[i];
+				if (formattingTagName === "I") {
+					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
+					const activeFormattingElement = this.active_formatting_elements[activeFormattingElementIndex];
+					const followingEntries = this.#activeFormattingElementsAfterIndex(activeFormattingElementIndex);
+					if (
+						activeFormattingElementIndex !== -1 &&
+						followingEntries.length === 1 &&
+						followingEntries[0].tagName === "B" &&
+						followingEntries[0].namespaceName === "html" &&
+						this.#hasOnlyOpenFormattingElementsAfterIndex(i) &&
+						!hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) &&
+						this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+					) {
+						this.#queueVirtualPopsFrom(i);
+						this.#queueActiveFormattingElementsAfterIndexAsEmpty(activeFormattingElementIndex);
+						this.#replaceActiveFormattingElementsFromIndex(activeFormattingElementIndex, [
+							...followingEntries,
+							activeFormattingElement,
+						]);
+						return true;
+					}
+
+					continue;
+				}
+
 				if (formattingTagName === "B") {
 					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
 					const followingEntries = this.#activeFormattingElementsAfterIndex(activeFormattingElementIndex);
@@ -4677,6 +4702,22 @@ export function createHtmlApi(wasm) {
 				this.#clearParagraphAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
 				this.#clearSpecialStartAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
 			}
+		}
+
+		#replaceActiveFormattingElementsFromIndex(index, entries) {
+			let endIndex = index;
+			while (
+				endIndex < this.active_formatting_elements.length &&
+				!this.#isActiveFormattingMarker(this.active_formatting_elements[endIndex])
+			) {
+				endIndex += 1;
+			}
+
+			this.active_formatting_elements.splice(
+				index,
+				endIndex - index,
+				...entries.map((entry) => this.#cloneActiveFormattingElement(entry)),
+			);
 		}
 
 		#replaceActiveFormattingElementsAfterIndex(index, entries) {
