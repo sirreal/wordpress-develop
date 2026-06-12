@@ -2938,6 +2938,16 @@ assert.equal(WP_HTML_Processor.is_special("dialog"), false);
 assert.equal(WP_HTML_Processor.is_special("math mi"), false);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "math", node_name: "mi" }), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
+assert.equal(WP_HTML_Processor.is_special({ namespace: "math", node_name: 1 }), false);
+assert.equal(WP_HTML_Processor.is_special({ namespaceName: "svg", tagName: "foreignObject" }), true);
+assert.throws(
+	() => WP_HTML_Processor.is_special({ namespace: "math", node_name: {} }),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Processor.is_special({ namespace: {}, node_name: "MI" }),
+	TypeError,
+);
 
 for (const [html, context, expected] of [
 	["<span>x", "<div>", "<span>x</span>"],

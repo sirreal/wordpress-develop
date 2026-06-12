@@ -536,11 +536,11 @@ export type ProcessorStepMode =
 	| "process-current-node";
 
 export interface SpecialTagInput {
-	node_name?: string;
-	nodeName?: string;
-	tagName?: string;
-	namespace?: HtmlNamespace;
-	namespaceName?: HtmlNamespace;
+	node_name?: PhpStringParameter | null;
+	nodeName?: PhpStringParameter | null;
+	tagName?: PhpStringParameter | null;
+	namespace?: PhpStringParameter | null;
+	namespaceName?: PhpStringParameter | null;
 }
 
 export interface HtmlTokenInput {

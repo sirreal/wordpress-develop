@@ -7883,9 +7883,18 @@ function hasSpecialBoundaryAfter(openElements, namespaces, index) {
 
 function normalizeSpecialTagInput(tagName) {
 	if (tagName && typeof tagName === "object") {
+		const nodeName = phpStringParameterCoerce(
+			tagName.node_name ?? tagName.nodeName ?? tagName.tagName ?? "",
+			"node_name",
+		);
+		const namespaceName = phpStringParameterCoerce(
+			tagName.namespace ?? tagName.namespaceName ?? "html",
+			"namespace",
+		);
+
 		return {
-			nodeName: asciiUpper(String(tagName.node_name ?? tagName.nodeName ?? tagName.tagName ?? "")),
-			namespaceName: String(tagName.namespace ?? tagName.namespaceName ?? "html").toLowerCase(),
+			nodeName: asciiUpper(nodeName),
+			namespaceName: asciiLower(namespaceName),
 		};
 	}
 
