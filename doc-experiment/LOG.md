@@ -91,6 +91,11 @@ the expected trial verdicts, integer adherence scores, string
 hallucinated-method entries, non-empty notes, non-empty failure analysis, and
 structured doc-gap fields.
 
+Trial ingestion now rejects subject `code` payloads that do not start with
+`<?php` instead of silently adding an opening PHP tag. Candidate files therefore
+record the subject's actual structured answer, and malformed trial output
+cannot be repaired by ingestion before scoring.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

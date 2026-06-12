@@ -73,6 +73,8 @@ def validate_trials(entries: list[dict], meta: dict) -> list[str]:
         code = entry.get("code")
         if not isinstance(code, str) or not code.strip():
             errors.append(f"{task_id}/trial-{trial}: code must be a non-empty string")
+        elif not code.lstrip().startswith("<?php"):
+            errors.append(f"{task_id}/trial-{trial}: code must start with <?php")
         explanation = entry.get("explanation")
         if not isinstance(explanation, str) or not explanation.strip():
             errors.append(

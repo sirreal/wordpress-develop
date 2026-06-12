@@ -24,6 +24,7 @@ const SCHEMA = {
     code: {
       type: 'string',
       minLength: 1,
+      pattern: '^\\s*<\\?php',
       description: 'Complete PHP file contents defining exactly the requested function, starting with <?php',
     },
     explanation: {

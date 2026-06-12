@@ -17,6 +17,30 @@ from pathlib import Path
 EXPERIMENT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def validate_trial_payloads(trials: list[dict]) -> list[str]:
+    errors = []
+    for entry in trials:
+        task_id = entry.get("id")
+        trial = entry.get("trial")
+        label = f"{task_id}/trial-{trial}"
+
+        code = entry.get("code")
+        if not isinstance(code, str) or not code.strip():
+            errors.append(f"{label}: code must be a non-empty string")
+        elif not code.lstrip().startswith("<?php"):
+            errors.append(f"{label}: code must start with <?php")
+
+        explanation = entry.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            errors.append(f"{label}: explanation must be a non-empty string")
+
+        confidence = entry.get("confidence")
+        if not isinstance(confidence, int) or confidence < 0 or confidence > 100:
+            errors.append(f"{label}: confidence must be integer 0-100")
+
+    return errors
+
+
 def validate_against_metadata(results_dir: Path, trials: list[dict]) -> list[str]:
     metadata_file = results_dir / "round-metadata.json"
     if not metadata_file.exists():
@@ -77,7 +101,10 @@ def main() -> int:
 
     results_dir = Path(sys.argv[1])
     trials = json.load(sys.stdin)
-    errors = validate_against_metadata(results_dir, trials)
+    errors = [
+        *validate_trial_payloads(trials),
+        *validate_against_metadata(results_dir, trials),
+    ]
     if errors:
         for error in errors:
             print(f"persist-trials.py: {error}", file=sys.stderr)
@@ -101,17 +128,7 @@ def main() -> int:
             + "\n"
         )
 
-        code = trial.get("code")
-        if not code:
-            (trial_dir / "execution.json").write_text(
-                json.dumps({"passed": 0, "total": 0, "error": "no code returned"}) + "\n"
-            )
-            summary.setdefault(task_id, []).append("no-code")
-            continue
-
-        if not code.lstrip().startswith("<?php"):
-            code = "<?php\n" + code
-        (trial_dir / "candidate.php").write_text(code)
+        (trial_dir / "candidate.php").write_text(trial["code"])
 
         tests = EXPERIMENT_ROOT / "corpus" / task_id / "tests.json"
         proc = subprocess.run(

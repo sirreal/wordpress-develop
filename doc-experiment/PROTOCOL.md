@@ -201,8 +201,10 @@ php doc-experiment/harness/run-tests.php \
 For metadata-backed rounds, `ingest-trials.py` rejects workflow outputs whose
 task IDs, trial numbers, or structured-output fields do not match
 `round-metadata.json`. Trial entries must include non-empty `code` and
-`explanation` strings plus integer `confidence` 0-100; incomplete agent
-responses are rejected before result files are written. You can run the same
+`explanation` strings plus integer `confidence` 0-100, and `code` must be a
+complete PHP file starting with `<?php`. Incomplete or malformed agent
+responses are rejected before result files are written; ingestion does not
+repair subject code. You can run the same
 preflight without writing files:
 
 ```sh

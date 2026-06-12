@@ -89,7 +89,8 @@ python3 render-docs-markdown.py \
   hand; it checks scratch isolation and hashes before emitting launch args, and
   can emit a full launch manifest.
 - `tools/validate-workflow-output.py` — preflights trials or judges workflow
-  JSON against round metadata before ingestion writes files.
+  JSON against round metadata and required payload shape before ingestion
+  writes files.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
   `prepare-round.py` and manual scratch variants.
 - `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject
