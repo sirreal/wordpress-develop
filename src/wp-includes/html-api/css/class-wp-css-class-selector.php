@@ -44,28 +44,26 @@ final class WP_CSS_Class_Selector extends WP_CSS_Selector_Parser_Matcher {
 	}
 
 	/**
-	 * Parses a selector string to create a selector instance.
+	 * Parses CSS selector tokens to create a selector instance.
 	 *
 	 * To create an instance of this class, use the {@see WP_CSS_Compound_Selector_List::from_selectors()} method.
 	 *
-	 * @param string $input The selector string.
-	 * @param int    $offset The offset into the string. The offset is passed by reference and
-	 *                       will be updated if the parse is successful.
+	 * @param WP_CSS_Selector_Token_Stream $tokens The selector token stream.
 	 * @return static|null The selector instance, or null if the parse was unsuccessful.
 	 */
-	public static function parse( string $input, int &$offset ) {
-		if ( $offset + 1 >= strlen( $input ) || '.' !== $input[ $offset ] ) {
+	public static function parse( WP_CSS_Selector_Token_Stream $tokens ) {
+		$bookmark = $tokens->bookmark();
+
+		if ( ! $tokens->consume_delim( '.' ) ) {
 			return null;
 		}
 
-		$updated_offset = $offset + 1;
-		$result         = self::parse_ident( $input, $updated_offset );
-
+		$result = $tokens->consume_ident();
 		if ( null === $result ) {
+			$tokens->seek( $bookmark );
 			return null;
 		}
 
-		$offset = $updated_offset;
 		return new self( $result );
 	}
 }

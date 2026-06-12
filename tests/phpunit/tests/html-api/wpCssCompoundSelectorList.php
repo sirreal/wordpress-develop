@@ -41,6 +41,16 @@ class Tests_HtmlApi_WpCssCompoundSelectorList extends WP_UnitTestCase {
 	}
 
 	/**
+	 * @ticket 62653
+	 *
+	 * @dataProvider data_invalid_trailing_attribute_selectors
+	 */
+	public function test_parse_invalid_trailing_attribute_selector_rejects_whole_selector_list( string $selector ) {
+		$result = WP_CSS_Compound_Selector_List::from_selectors( $selector );
+		$this->assertNull( $result );
+	}
+
+	/**
 	 * An escaped whitespace code point at the end of input belongs to the
 	 * ident and must survive input normalization: `.foo\ ` is the valid
 	 * class `foo ` (with a space), not a backslash at the end of input.
@@ -139,5 +149,19 @@ class Tests_HtmlApi_WpCssCompoundSelectorList extends WP_UnitTestCase {
 	public function test_invalid_utf8_notice_fires_even_when_selector_is_rejected() {
 		$result = WP_CSS_Compound_Selector_List::from_selectors( "\x80 div" );
 		$this->assertNull( $result, 'Descendant combinators are unsupported by the compound list; the scrubbed selector should still be rejected.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array<string, array{string}>
+	 */
+	public static function data_invalid_trailing_attribute_selectors(): array {
+		return array(
+			'missing attribute value before close' => array( '.ok[a=]' ),
+			'missing attribute value at EOF'       => array( '.ok[a=' ),
+			'unsupported matcher'                  => array( '.ok[att+=val]' ),
+			'bad modifier remainder'               => array( '.ok[att="val"ix]' ),
+		);
 	}
 }

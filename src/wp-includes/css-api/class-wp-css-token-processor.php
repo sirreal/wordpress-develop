@@ -101,6 +101,8 @@ class WP_CSS_Token_Processor {
 	 */
 	public const TOKEN_BAD_STRING    = 'bad-string-token';
 	public const TOKEN_HASH          = 'hash-token';
+	public const HASH_TOKEN_ID       = 'id';
+	public const HASH_TOKEN_UNRESTRICTED = 'unrestricted';
 	public const TOKEN_DELIM         = 'delim-token';
 	public const TOKEN_NUMBER        = 'number-token';
 	public const TOKEN_PERCENTAGE    = 'percentage-token';
@@ -207,6 +209,15 @@ class WP_CSS_Token_Processor {
 	 * @phpstan-var self::TOKEN_*|null
 	 */
 	private $token_type = null;
+
+	/**
+	 * The type flag for the current token, if it has one.
+	 *
+	 * Hash tokens have either the "id" or "unrestricted" type flag.
+	 *
+	 * @var string|null
+	 */
+	private $token_type_flag = null;
 
 	/**
 	 * The byte offset at which the current token starts.
@@ -407,9 +418,11 @@ class WP_CSS_Token_Processor {
 					// Create a <hash-token>.
 					++$this->at;
 
-					// We skip this check as we don't track the type flag:
 					// > If the next 3 input code points would start an ident sequence,
 					// > set the <hash-token>'s type flag to "id".
+					$this->token_type_flag = $this->check_if_3_code_points_start_an_ident_sequence( $this->at )
+						? self::HASH_TOKEN_ID
+						: self::HASH_TOKEN_UNRESTRICTED;
 
 					// Consume an ident sequence, and set the <hash-token>'s value to the returned string.
 					$this->consume_ident_sequence();
@@ -606,6 +619,18 @@ class WP_CSS_Token_Processor {
 	 */
 	public function get_token_type(): ?string {
 		return $this->token_type;
+	}
+
+	/**
+	 * Gets the current token's type flag, if it has one.
+	 *
+	 * Hash tokens expose the CSS Syntax hash-token type flag. Other token
+	 * flags are not currently tracked and return null.
+	 *
+	 * @return string|null
+	 */
+	public function get_token_type_flag(): ?string {
+		return $this->token_type_flag;
 	}
 
 	/**
@@ -916,6 +941,7 @@ class WP_CSS_Token_Processor {
 	 */
 	private function after_token(): void {
 		$this->token_type            = null;
+		$this->token_type_flag       = null;
 		$this->token_starts_at       = null;
 		$this->token_length          = null;
 		$this->token_value           = null;

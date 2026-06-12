@@ -280,6 +280,7 @@ require ABSPATH . WPINC . '/html-api/class-wp-html-processor.php';
 require ABSPATH . WPINC . '/css-api/class-wp-css-builder.php';
 require ABSPATH . WPINC . '/css-api/class-wp-css-token-processor.php';
 require ABSPATH . WPINC . '/class-wp-block-processor.php';
+require ABSPATH . WPINC . '/html-api/css/class-wp-css-selector-token-stream.php';
 require ABSPATH . WPINC . '/html-api/css/class-wp-css-selector-parser-matcher.php';
 require ABSPATH . WPINC . '/html-api/css/class-wp-css-attribute-selector.php';
 require ABSPATH . WPINC . '/html-api/css/class-wp-css-class-selector.php';

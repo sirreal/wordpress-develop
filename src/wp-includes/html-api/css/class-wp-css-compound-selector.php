@@ -71,36 +71,31 @@ final class WP_CSS_Compound_Selector extends WP_CSS_Selector_Parser_Matcher {
 	}
 
 	/**
-	 * Parses a selector string to create a selector instance.
+	 * Parses CSS selector tokens to create a selector instance.
 	 *
 	 * To create an instance of this class, use the {@see WP_CSS_Compound_Selector_List::from_selectors()} method.
 	 *
-	 * @param string $input The selector string.
-	 * @param int    $offset The offset into the string. The offset is passed by reference and
-	 *                       will be updated if the parse is successful.
+	 * @param WP_CSS_Selector_Token_Stream $tokens The selector token stream.
 	 * @return static|null The selector instance, or null if the parse was unsuccessful.
 	 */
-	public static function parse( string $input, int &$offset ) {
-		if ( $offset >= strlen( $input ) ) {
-			return null;
-		}
+	public static function parse( WP_CSS_Selector_Token_Stream $tokens ) {
+		$bookmark = $tokens->bookmark();
 
-		$updated_offset = $offset;
-		$type_selector  = WP_CSS_Type_Selector::parse( $input, $updated_offset );
+		$type_selector = WP_CSS_Type_Selector::parse( $tokens );
 
 		$subclass_selectors            = array();
-		$last_parsed_subclass_selector = self::parse_subclass_selector( $input, $updated_offset );
+		$last_parsed_subclass_selector = self::parse_subclass_selector( $tokens );
 		while ( null !== $last_parsed_subclass_selector ) {
 			$subclass_selectors[]          = $last_parsed_subclass_selector;
-			$last_parsed_subclass_selector = self::parse_subclass_selector( $input, $updated_offset );
+			$last_parsed_subclass_selector = self::parse_subclass_selector( $tokens );
 		}
 
 		// There must be at least one selector.
 		if ( null === $type_selector && array() === $subclass_selectors ) {
+			$tokens->seek( $bookmark );
 			return null;
 		}
 
-		$offset = $updated_offset;
 		return new self( $type_selector, $subclass_selectors );
 	}
 
@@ -111,18 +106,18 @@ final class WP_CSS_Compound_Selector extends WP_CSS_Selector_Parser_Matcher {
 	 *
 	 * @return WP_CSS_ID_Selector|WP_CSS_Class_Selector|WP_CSS_Attribute_Selector|null
 	 */
-	private static function parse_subclass_selector( string $input, int &$offset ) {
-		if ( $offset >= strlen( $input ) ) {
-			return null;
-		}
-
-		switch ( $input[ $offset ] ) {
-			case '.':
-				return WP_CSS_Class_Selector::parse( $input, $offset );
-			case '#':
-				return WP_CSS_ID_Selector::parse( $input, $offset );
-			case '[':
-				return WP_CSS_Attribute_Selector::parse( $input, $offset );
+	private static function parse_subclass_selector( WP_CSS_Selector_Token_Stream $tokens ) {
+		foreach (
+			array(
+				WP_CSS_Class_Selector::class,
+				WP_CSS_ID_Selector::class,
+				WP_CSS_Attribute_Selector::class,
+			) as $selector_class
+		) {
+			$selector = $selector_class::parse( $tokens );
+			if ( null !== $selector ) {
+				return $selector;
+			}
 		}
 
 		return null;

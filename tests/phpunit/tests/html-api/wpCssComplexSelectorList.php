@@ -42,6 +42,16 @@ class Tests_HtmlApi_WpCssComplexSelectorList extends WP_UnitTestCase {
 
 	/**
 	 * @ticket 62653
+	 *
+	 * @dataProvider data_invalid_trailing_attribute_selectors
+	 */
+	public function test_parse_invalid_trailing_attribute_selector_rejects_whole_selector_list( string $selector ) {
+		$result = WP_CSS_Complex_Selector_List::from_selectors( $selector );
+		$this->assertNull( $result );
+	}
+
+	/**
+	 * @ticket 62653
 	 */
 	public function test_parse_empty_selector_list() {
 		$input  = " \t   \t\n\r\f";
@@ -61,5 +71,19 @@ class Tests_HtmlApi_WpCssComplexSelectorList extends WP_UnitTestCase {
 	public function test_invalid_utf8_scrub_notice_reports_the_called_class() {
 		$result = WP_CSS_Complex_Selector_List::from_selectors( "el \xC2.child" );
 		$this->assertNotNull( $result, 'Selector with invalid UTF-8 should parse after scrubbing.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array<string, array{string}>
+	 */
+	public static function data_invalid_trailing_attribute_selectors(): array {
+		return array(
+			'missing attribute value before close' => array( 'ancestor .ok[a=]' ),
+			'missing attribute value at EOF'       => array( 'ancestor .ok[a=' ),
+			'unsupported matcher'                  => array( 'ancestor .ok[att+=val]' ),
+			'bad modifier remainder'               => array( 'ancestor .ok[att="val"ix]' ),
+		);
 	}
 }

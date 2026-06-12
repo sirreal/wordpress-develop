@@ -18,10 +18,10 @@ class Tests_HtmlApi_WpCssComplexSelector extends WP_UnitTestCase {
 	 */
 	public function test_parse_complex_selector() {
 		$input  = 'el1 el2 > .child#bar[baz=quux] , rest';
-		$offset = 0;
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( $input, WP_CSS_Complex_Selector::class );
 
 		/** @var WP_CSS_Complex_Selector|null */
-		$sel = WP_CSS_Complex_Selector::parse( $input, $offset );
+		$sel = WP_CSS_Complex_Selector::parse( $tokens );
 
 		$this->assertSame( 2, count( $sel->context_selectors ) );
 
@@ -36,16 +36,15 @@ class Tests_HtmlApi_WpCssComplexSelector extends WP_UnitTestCase {
 		$this->assertNull( $sel->self_selector->type_selector );
 		$this->assertSame( 'child', $sel->self_selector->subclass_selectors[0]->class_name );
 
-		$this->assertSame( ', rest', substr( $input, $offset ) );
+		$this->assertSame( ', rest', $tokens->get_remaining_text() );
 	}
 
 	/**
 	 * @ticket 62653
 	 */
 	public function test_parse_invalid_complex_selector() {
-		$input  = 'el.foo#bar[baz=quux] > , rest';
-		$offset = 0;
-		$result = WP_CSS_Complex_Selector::parse( $input, $offset );
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( 'el.foo#bar[baz=quux] > , rest', WP_CSS_Complex_Selector::class );
+		$result = WP_CSS_Complex_Selector::parse( $tokens );
 		$this->assertNull( $result );
 	}
 
@@ -53,9 +52,8 @@ class Tests_HtmlApi_WpCssComplexSelector extends WP_UnitTestCase {
 	 * @ticket 62653
 	 */
 	public function test_parse_invalid_complex_selector_nonfinal_subclass() {
-		$input  = 'el.foo#bar[baz=quux] > final, rest';
-		$offset = 0;
-		$result = WP_CSS_Complex_Selector::parse( $input, $offset );
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( 'el.foo#bar[baz=quux] > final, rest', WP_CSS_Complex_Selector::class );
+		$result = WP_CSS_Complex_Selector::parse( $tokens );
 		$this->assertNull( $result );
 	}
 
@@ -63,9 +61,8 @@ class Tests_HtmlApi_WpCssComplexSelector extends WP_UnitTestCase {
 	 * @ticket 62653
 	 */
 	public function test_parse_empty_complex_selector() {
-		$input  = '';
-		$offset = 0;
-		$result = WP_CSS_Complex_Selector::parse( $input, $offset );
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( '', WP_CSS_Complex_Selector::class );
+		$result = WP_CSS_Complex_Selector::parse( $tokens );
 		$this->assertNull( $result );
 	}
 }

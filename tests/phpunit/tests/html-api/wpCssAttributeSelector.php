@@ -26,8 +26,8 @@ class Tests_HtmlApi_WpCssAttributeSelector extends WP_UnitTestCase {
 		?string $expected_modifier = null,
 		?string $rest = null
 	) {
-		$offset = 0;
-		$result = WP_CSS_Attribute_Selector::parse( $input, $offset );
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( $input, WP_CSS_Attribute_Selector::class );
+		$result = WP_CSS_Attribute_Selector::parse( $tokens );
 		if ( null === $expected_name ) {
 			$this->assertNull( $result );
 		} else {
@@ -36,8 +36,18 @@ class Tests_HtmlApi_WpCssAttributeSelector extends WP_UnitTestCase {
 			$this->assertSame( $expected_matcher, $result->matcher );
 			$this->assertSame( $expected_value, $result->value );
 			$this->assertSame( $expected_modifier, $result->modifier );
-			$this->assertSame( $rest, substr( $input, $offset ) );
+			$this->assertSame( $rest, $tokens->get_remaining_text() );
 		}
+	}
+
+	/**
+	 * @ticket 62653
+	 */
+	public function test_parse_invalid_attribute_selector_restores_token_stream() {
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( '[a=', WP_CSS_Attribute_Selector::class );
+
+		$this->assertNull( WP_CSS_Attribute_Selector::parse( $tokens ) );
+		$this->assertSame( '[a=', $tokens->get_remaining_text() );
 	}
 
 	/**

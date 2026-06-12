@@ -95,6 +95,33 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * @ticket 62653
+	 */
+	public function test_hash_token_type_flag(): void {
+		$processor = WP_CSS_Token_Processor::create( '#id #1id .' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_HASH, $processor->get_token_type() );
+		$this->assertSame( WP_CSS_Token_Processor::HASH_TOKEN_ID, $processor->get_token_type_flag() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_WHITESPACE, $processor->get_token_type() );
+		$this->assertNull( $processor->get_token_type_flag() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_HASH, $processor->get_token_type() );
+		$this->assertSame( WP_CSS_Token_Processor::HASH_TOKEN_UNRESTRICTED, $processor->get_token_type_flag() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_WHITESPACE, $processor->get_token_type() );
+		$this->assertNull( $processor->get_token_type_flag() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_DELIM, $processor->get_token_type() );
+		$this->assertNull( $processor->get_token_type_flag() );
+	}
+
+	/**
 	 * Tests handling of non-UTF-8 byte sequences in identifiers.
 	 *
 	 * Invalid UTF-8 sequences should be replaced with U+FFFD replacement characters
