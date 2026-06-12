@@ -4994,7 +4994,8 @@ export function createHtmlApi(wasm) {
 				tagName === "DIV" &&
 				formattingTagName !== "NOBR" &&
 				this.deferred_table_opener !== null &&
-				this.#currentFosterParentedTableIndex() !== null
+				this.#currentFosterParentedTableIndex() !== null &&
+				!this.#formattingEndTagPrecedesTableModeStart(formattingTagName)
 			) {
 				return false;
 			}
@@ -5054,6 +5055,38 @@ export function createHtmlApi(wasm) {
 			return followingFormattingEndPrecedesElementClose
 				? "empty-following-then-self"
 				: "wrap-following";
+		}
+
+		#formattingEndTagPrecedesTableModeStart(formattingTagName) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing) {
+					if (nextTag.tag_name === formattingTagName) {
+						return true;
+					}
+					if (nextTag.tag_name === "DIV") {
+						return false;
+					}
+					at = nextTag.token_end;
+					continue;
+				}
+
+				if (TABLE_MODE_START_TAGS.has(nextTag.tag_name)) {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
 		}
 
 		#queueActiveFormattingElementsAfterIndex(index) {
