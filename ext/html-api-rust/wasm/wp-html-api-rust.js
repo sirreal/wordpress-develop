@@ -1272,6 +1272,8 @@ export class WP_HTML_Doctype_Info {
 }
 
 async function bytesFromInput(input) {
+	input = await input;
+
 	if (input instanceof WebAssembly.Module) {
 		return input;
 	}

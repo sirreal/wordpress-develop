@@ -1,4 +1,4 @@
-export type WasmInput =
+export type WasmInputSource =
 	| URL
 	| Request
 	| Response
@@ -6,6 +6,8 @@ export type WasmInput =
 	| ArrayBuffer
 	| ArrayBufferView
 	| WebAssembly.Module;
+
+export type WasmInput = WasmInputSource | PromiseLike<WasmInputSource>;
 
 export interface ScanNextTagResult {
 	tag_start: number;
