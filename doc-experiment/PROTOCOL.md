@@ -39,6 +39,11 @@ Pick exactly one round mode:
 sh doc-experiment/tools/stage-round.sh <N>   # prints /tmp/html-api-docs-eval/round-NN
 ```
 
+If the trial orchestration needs task files, copy only each active task's
+`task.md` into the scratch directory, such as `<scratch>/tasks/<task-id>.md`.
+Do not expose corpus directories, `reference.php`, or `tests.json` to test
+subjects.
+
 If docs were edited since the last round, first run the docs-only guard:
 
 ```sh
@@ -174,6 +179,23 @@ re-run the docs-only guard, and stage the next round. For calibration,
 discoverability, or shadow-doc rounds, record the outcome and whether any
 variant should be promoted; do not commit source docblock changes as part of
 the same hypothesis.
+
+Before committing a source documentation hypothesis that includes examples,
+verify the examples through `doc-experiment/harness/bootstrap.php` where
+applicable.
+
+## Operational hazards
+
+- Workflow `args` may arrive as a JSON string; orchestration scripts should
+  parse defensively.
+- Strong-judge session limits can kill a judge fan-out, sometimes returning an
+  empty result set with failures listed. Trial executions are already
+  persisted, so relaunch judges after reset rather than rerunning trials.
+- Expected outputs are frozen. Regenerate them only when a reference
+  implementation intentionally changes, and review the diff before trusting the
+  new fixtures.
+- Historical logs may use legacy labels such as "opus", "sonnet", or "haiku".
+  Treat those as historical role labels, not current model choices.
 
 ## Storage layout
 

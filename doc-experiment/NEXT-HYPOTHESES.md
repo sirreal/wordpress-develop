@@ -410,3 +410,11 @@ confirmed hypothesis, not a style cleanup.
 The main risk now is overfitting the train set or adding enough prose that the
 right line becomes harder to find. The next phase should measure signal
 density, not only factual completeness.
+
+## Future API/design observations
+
+Use this section for repeated patterns that look like surprising API behavior,
+recurring hallucinated methods, or missing API affordances. These notes are not
+documentation hypotheses by themselves. Keep them distinct from source
+docblock edits until the project decides whether they represent API design
+work, task-design drift, or documentation usability gaps.

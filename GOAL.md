@@ -24,7 +24,6 @@ At the start of every run, determine the active phase and next action from:
 - `doc-experiment/PROTOCOL.md` - operational runbook
 - `doc-experiment/NEXT-HYPOTHESES.md` - current hypothesis backlog
 - `doc-experiment/LOG.md` - latest experiment narrative
-- `HANDOFF.md`, if present - recent operational handoff
 - `doc-experiment/results/round-*` - persisted measurements
 - `git status` - unresolved local drift
 
@@ -37,7 +36,8 @@ Before making edits or running a score:
 
 1. Inspect the worktree and preserve existing user changes.
 2. Identify the latest completed trusted round and its score.
-3. Identify the current round mode from `PROTOCOL.md`.
+3. Identify the current round mode using the modes defined in `PROTOCOL.md`
+   and the state in `LOG.md`, results, and the worktree.
 4. Identify the current model policy, subject tier, judge tier, and whether the
    subject tier has a no-edit baseline.
 5. Check whether source docs, tooling, corpus, or results changed since the last
