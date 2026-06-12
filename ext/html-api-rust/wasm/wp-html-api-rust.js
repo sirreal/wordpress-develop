@@ -208,7 +208,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
-const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "CENTER", "DIV", "LI"]);
+const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
@@ -4415,8 +4415,12 @@ export function createHtmlApi(wasm) {
 					return true;
 				}
 
+				if (nextTag.is_closing && nextTag.tag_name === "A") {
+					return true;
+				}
+
 				if (
-					(nextTag.is_closing && (nextTag.tag_name === "A" || nextTag.tag_name === tagName)) ||
+					(nextTag.is_closing && nextTag.tag_name === tagName) ||
 					(!nextTag.is_closing && nextTag.tag_name === "TABLE")
 				) {
 					return false;
@@ -4427,10 +4431,20 @@ export function createHtmlApi(wasm) {
 		}
 
 		#shouldReconstructActiveAnchorForStartTag(tagName) {
+			if (
+				this.#lastActiveFormattingElementIndex("A") === -1 ||
+				this.#lastOpenElementIndex("A", "html") !== -1
+			) {
+				return false;
+			}
+
 			return (
-				NESTED_ANCHOR_RECONSTRUCTING_START_TAGS.has(tagName) &&
-				this.#lastActiveFormattingElementIndex("A") !== -1 &&
-				this.#lastOpenElementIndex("A", "html") === -1
+				NESTED_ANCHOR_RECONSTRUCTING_START_TAGS.has(tagName) ||
+				(
+					tagName === "P" &&
+					!this.#hasParagraphAdoptionPreclosedFormattingElement("A", "html") &&
+					this.#formattingEndTagPrecedesParagraphClose("A")
+				)
 			);
 		}
 
@@ -4518,6 +4532,12 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#hasParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName) {
+			return this.paragraph_adoption_preclosed_formatting_elements.some((entry) => (
+				entry.tagName === tagName && entry.namespaceName === namespaceName
+			));
 		}
 
 		#clearParagraphAdoptionPreclosedFormattingElements(tagName, namespaceName) {

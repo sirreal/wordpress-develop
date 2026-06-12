@@ -3795,6 +3795,18 @@ assert.equal(
 	"<a>1</a><p><a>2</a>3</p>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<a>1<button>2</a>3</button>"),
+	"<a>1</a><button><a>2</a>3</button>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a>1<div>2<div>3</a>4</div>5</div>"),
+	"<a>1</a><div><a>2</a><div><a>3</a>4</div>5</div>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><div><p></a>"),
+	"<a></a><div><a></a><p><a></a></p></div>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<a><p>text"),
 	"<a><p>text</p></a>",
 );
@@ -3850,7 +3862,6 @@ assert.equal(WP_HTML_Processor.normalize("<b>Test</i>Test"), "<b>TestTest</b>");
 
 for (const html of [
 	"<b><div></b><p>x",
-	"<a><div></a><p>x",
 ]) {
 	const unsupportedAdoptionAgencyProcessor = WP_HTML_Processor.create_fragment(html);
 	while (unsupportedAdoptionAgencyProcessor.next_token()) {
@@ -3871,6 +3882,10 @@ for (const html of [
 	unsupportedAdoptionAgencyProcessor.destroy();
 	assert.equal(WP_HTML_Processor.normalize(html), null);
 }
+assert.equal(
+	WP_HTML_Processor.normalize("<a><div></a><p>x"),
+	"<a></a><div><p>x</p></div>",
+);
 
 for (const html of [
 	"<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
