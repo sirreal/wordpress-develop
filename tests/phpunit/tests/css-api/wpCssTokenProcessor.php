@@ -80,6 +80,21 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A backslash followed by a newline inside a string consumes both code
+	 * points without adding anything to the string token value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_string_token_escaped_newline_does_not_appear_in_value(): void {
+		$processor = WP_CSS_Token_Processor::create( "\"a\\\nb\"" );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( 'ab', $processor->get_token_value() );
+		$this->assertFalse( $processor->next_token() );
+	}
+
+	/**
 	 * Tests handling of non-UTF-8 byte sequences in identifiers.
 	 *
 	 * Invalid UTF-8 sequences should be replaced with U+FFFD replacement characters
