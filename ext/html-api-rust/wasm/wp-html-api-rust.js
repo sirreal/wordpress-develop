@@ -7971,6 +7971,9 @@ function phpNumberToString(value) {
 	if (value === 0) {
 		return "0";
 	}
+	if (Number.isSafeInteger(value)) {
+		return String(value);
+	}
 	return phpFloatToString(value);
 }
 
