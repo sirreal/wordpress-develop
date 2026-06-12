@@ -3414,6 +3414,11 @@ export function createHtmlApi(wasm) {
 						if (this.#representFosteredTextBeforeDeferredTable()) {
 							return;
 						}
+						if (this.#queueReconstructActiveFormattingElementsBeforeDeferredTable()) {
+							this.pending_real_token = true;
+							this.pending_real_parser_state = this.parser_state;
+							return;
+						}
 						this.#bailUnsupported("Foster parenting is not supported.");
 						return;
 					}
@@ -4652,6 +4657,43 @@ export function createHtmlApi(wasm) {
 					continue;
 				}
 				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+			}
+
+			return true;
+		}
+
+		#queueReconstructActiveFormattingElementsBeforeDeferredTable() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			let firstMissingIndex = this.active_formatting_elements.length;
+			while (firstMissingIndex > 0) {
+				const entry = this.active_formatting_elements[firstMissingIndex - 1];
+				if (this.#isActiveFormattingMarker(entry)) {
+					break;
+				}
+				if (this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) !== -1) {
+					break;
+				}
+				firstMissingIndex -= 1;
+			}
+
+			if (firstMissingIndex === this.active_formatting_elements.length) {
+				return false;
+			}
+
+			for (let i = firstMissingIndex; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					continue;
+				}
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes, null, tableIndex);
 			}
 
 			return true;
@@ -6230,13 +6272,19 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
-		#queueVirtualPush(tagName, namespaceName = "html", attributes = [], integrationNodeType = null) {
+		#queueVirtualPush(
+			tagName,
+			namespaceName = "html",
+			attributes = [],
+			integrationNodeType = null,
+			fosterParentedTableIndex = this.#currentFosterParentedTableIndex(),
+		) {
 			this.virtual_tokens.push({
 				operation: "push",
 				tagName,
 				namespaceName,
 				integrationNodeType,
-				fosterParentedTableIndex: this.#currentFosterParentedTableIndex(),
+				fosterParentedTableIndex,
 				attributes: attributes.map((attribute) => ({
 					name: attribute.name,
 					value: attribute.value,
@@ -8259,10 +8307,16 @@ export function createHtmlApi(wasm) {
 				this.deferred_table_opener !== null &&
 				namespaceName === "html" &&
 				(
-					this.#isDeferredTableChildOpenerTag(tagName) ||
+					(
+						this.#isDeferredTableChildOpenerTag(tagName) &&
+						this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+					) ||
+					(
+						tagName === "TR" &&
+						this.#currentTableRowStartPrecedesFosteredTextAfterCell()
+					) ||
 					this.#isDeferredTableHiddenInputChildOpener(tagName)
-				) &&
-				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+				)
 			);
 		}
 
@@ -8327,7 +8381,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.#currentFosterParentedTableIndex() !== null) {
-				if (TABLE_CELL_ELEMENTS.has(tagName)) {
+				if (tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
 					return this.#queueFosteredElementPopsBeforeDeferredTable();
 				}
 				return false;
@@ -8339,6 +8393,13 @@ export function createHtmlApi(wasm) {
 					this.#isDeferredTableHiddenInputChildOpener(tagName)
 				) &&
 				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+			) {
+				return false;
+			}
+
+			if (
+				tagName === "TR" &&
+				this.#currentTableRowStartPrecedesFosteredTextAfterCell()
 			) {
 				return false;
 			}
@@ -8470,6 +8531,45 @@ export function createHtmlApi(wasm) {
 				TABLE_CELL_ELEMENTS.has(nextTag.tag_name) &&
 				this.#tableStructureEndTagsPrecedeFosteredText(nextTag.token_end)
 			);
+		}
+
+		#currentTableRowStartPrecedesFosteredTextAfterCell() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			let sawCellStart = false;
+			let sawStructureEndTag = false;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
+				if (!this.#isIgnorableTableText(text) && sawStructureEndTag) {
+					return true;
+				}
+
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					if (!sawCellStart && TABLE_CELL_ELEMENTS.has(nextTag.tag_name)) {
+						sawCellStart = true;
+						at = nextTag.token_end;
+						continue;
+					}
+
+					return false;
+				}
+
+				if (!sawCellStart || !this.#isTableStructureFosterLookaheadEndTag(nextTag.tag_name)) {
+					return false;
+				}
+
+				sawStructureEndTag = true;
+				at = nextTag.token_end;
+			}
 		}
 
 		#currentTokenIsFollowedByFosteredTableContent(allowedWrapperTags) {
@@ -8827,7 +8927,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "A" || tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+			return tagName === "A" || tagName === "B" || tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
