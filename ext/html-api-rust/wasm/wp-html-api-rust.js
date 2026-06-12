@@ -2981,7 +2981,9 @@ export function createHtmlApi(wasm) {
 				return "";
 			}
 			if (this.#isSyntheticToken() && this.current_synthetic_token.tokenType === "#tag") {
-				return "";
+				return SPECIAL_ATOMIC_ELEMENTS.has(this.current_synthetic_token.tagName)
+					? this.current_synthetic_token.modifiableText ?? ""
+					: "";
 			}
 			return this.#isSyntheticToken()
 				? this.current_synthetic_token.modifiableText ?? this.current_synthetic_token.commentText ?? ""
@@ -4012,6 +4014,7 @@ export function createHtmlApi(wasm) {
 					attributes: this.#currentTokenAttributes(),
 					breadcrumbs: [...this.breadcrumbs],
 					hasSelfClosingFlag: this.has_self_closing_flag(),
+					modifiableText: SPECIAL_ATOMIC_ELEMENTS.has(tagName) ? this.#currentSpecialAtomicText(tagName) : "",
 				});
 				this.skip_current_token = true;
 			}
@@ -6516,6 +6519,26 @@ export function createHtmlApi(wasm) {
 			return html === null ? "" : textDecoder.decode(html.slice(span.start, span.start + span.length));
 		}
 
+		#currentSpecialAtomicText(tagName) {
+			const tokenMarkup = this.#currentRealTokenString();
+			const startTag = completeStartTagAt(tokenMarkup, 0);
+			if (startTag === null) {
+				return this.get_modifiable_text() ?? "";
+			}
+
+			const closerEnd = findSpecialAtomicCloserEnd(tokenMarkup, startTag.end, tagName);
+			if (closerEnd === null) {
+				return this.get_modifiable_text() ?? "";
+			}
+
+			const closerStart = tokenMarkup.lastIndexOf("</", closerEnd - 1);
+			if (closerStart < startTag.end) {
+				return this.get_modifiable_text() ?? "";
+			}
+
+			return replaceNulls(tokenMarkup.slice(startTag.end, closerStart));
+		}
+
 		#bailIfExceededMaxBookmarks() {
 			const maxBookmarks = this.constructor.MAX_BOOKMARKS ?? WP_HTML_Processor.MAX_BOOKMARKS;
 			if (this.open_elements.length <= maxBookmarks) {
@@ -8238,19 +8261,22 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
-				if (this.#isFosteredAtomicTableStartTag(tagName)) {
-					return false;
-				}
-				this.#bailUnsupported("Foster parenting is not supported.");
-				return true;
-			}
-
 			if (
 				this.#isDeferredTableChildOpenerTag(tagName) &&
 				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
 			) {
 				return false;
+			}
+
+			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				if (this.#isFosteredAtomicTableStartTag(tagName)) {
+					return false;
+				}
+				if (TABLE_MODE_START_TAGS.has(tagName)) {
+					return this.#queueDeferredTableOpener();
+				}
+				this.#bailUnsupported("Foster parenting is not supported.");
+				return true;
 			}
 
 			if (this.#isFosteredInputTableStartTag(tagName)) {
@@ -8369,6 +8395,15 @@ export function createHtmlApi(wasm) {
 				) {
 					return true;
 				}
+				if (this.#isDeferredTableAtomicChildOpenerTag(nextTag.tag_name)) {
+					const atomicEnd = this.#specialAtomicTagEnd(nextTag);
+					if (atomicEnd === null) {
+						return false;
+					}
+					wrappers = this.#deferredTableChildLookaheadTags(nextTag.tag_name);
+					at = atomicEnd;
+					continue;
+				}
 				if (!wrappers.has(nextTag.tag_name)) {
 					return false;
 				}
@@ -8413,11 +8448,34 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isDeferredTableChildOpenerTag(tagName) {
-			return tagName === "COLGROUP" || tagName === "TEMPLATE" || tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
+			return (
+				tagName === "COLGROUP" ||
+				tagName === "TEMPLATE" ||
+				tagName === "TR" ||
+				TABLE_SECTION_ELEMENTS.has(tagName) ||
+				this.#isDeferredTableAtomicChildOpenerTag(tagName)
+			);
 		}
 
 		#deferredTableChildLookaheadTags(tagName) {
 			return TABLE_SECTION_ELEMENTS.has(tagName) ? new Set(["TR"]) : new Set();
+		}
+
+		#isDeferredTableAtomicChildOpenerTag(tagName) {
+			return (
+				!this.#hasOpenHtmlElement("SELECT") &&
+				SPECIAL_ATOMIC_ELEMENTS.has(tagName) &&
+				TABLE_MODE_START_TAGS.has(tagName)
+			);
+		}
+
+		#specialAtomicTagEnd(nextTag) {
+			const startTag = completeStartTagAt(this.html, nextTag.tag_start);
+			if (startTag === null) {
+				return null;
+			}
+
+			return findSpecialAtomicCloserEnd(this.html, startTag.end, nextTag.tag_name);
 		}
 
 		#hasDeferredTableChildOpener(tagName) {

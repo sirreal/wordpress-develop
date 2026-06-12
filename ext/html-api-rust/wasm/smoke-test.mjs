@@ -5165,6 +5165,29 @@ assert.deepEqual(tablePlaintextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TA
 assert.equal(tablePlaintextProcessor.get_last_error(), null);
 tablePlaintextProcessor.destroy();
 
+const tableStyleProcessor = WP_HTML_Processor.create_full_parser("<table><tr><style></script></style>abc");
+let sawTableStyleFosteredText = false;
+let sawTableStyle = false;
+while (tableStyleProcessor.next_token()) {
+	if (tableStyleProcessor.get_token_type() === "#text" && tableStyleProcessor.get_modifiable_text() === "abc") {
+		assert.deepEqual(tableStyleProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+		sawTableStyleFosteredText = true;
+	}
+	if (
+		tableStyleProcessor.get_token_type() === "#tag" &&
+		!tableStyleProcessor.is_tag_closer() &&
+		tableStyleProcessor.get_tag() === "STYLE"
+	) {
+		assert.equal(sawTableStyleFosteredText, true);
+		assert.deepEqual(tableStyleProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "STYLE"]);
+		assert.equal(tableStyleProcessor.get_modifiable_text(), "</script>");
+		sawTableStyle = true;
+	}
+}
+assert.equal(sawTableStyle, true);
+assert.equal(tableStyleProcessor.get_last_error(), null);
+tableStyleProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
