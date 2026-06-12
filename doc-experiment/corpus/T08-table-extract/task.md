@@ -12,8 +12,7 @@ its cells' text content in order. Both `TD` and `TH` cells count. A cell's
 text content is the concatenation of all text nodes inside it, character
 references decoded, markup contributing nothing.
 
-Tables may omit optional closing tags (`</td>`, `</tr>`) and may or may not
-use `<tbody>`/`<thead>` — handle these like a browser would. You may assume
+Handle ordinary HTML table structure as a browser would. You may assume
 tables are not nested. Return an empty array when there is no table.
 
 Example:
