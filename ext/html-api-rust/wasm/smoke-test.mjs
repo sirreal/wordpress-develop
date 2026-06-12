@@ -3052,6 +3052,12 @@ assert.equal(selectTextareaProcessor.next_tag("p"), true);
 assert.deepEqual(selectTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 selectTextareaProcessor.destroy();
 
+const selectFragmentIncompleteTextareaProcessor = WP_HTML_Processor.create_fragment("<textarea><option>", "<select>");
+assert.equal(selectFragmentIncompleteTextareaProcessor.next_tag("option"), true);
+assert.deepEqual(selectFragmentIncompleteTextareaProcessor.get_breadcrumbs(), ["HTML", "SELECT", "OPTION"]);
+assert.equal(selectFragmentIncompleteTextareaProcessor.paused_at_incomplete_token(), false);
+selectFragmentIncompleteTextareaProcessor.destroy();
+
 for (const html of [
 	"<table><select><option>one<tr><td>cell",
 	"<table><select><option>one</table><p>after",

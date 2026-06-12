@@ -2444,6 +2444,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (super.paused_at_incomplete_token() && !this.#incompleteTokenIsEofComment()) {
+				if (this.#skipIncompleteSelectBreakoutStartTag()) {
+					return this.next_token();
+				}
+
 				this.breadcrumbs = this.#breadcrumbStack();
 				return false;
 			}
@@ -5372,6 +5376,31 @@ export function createHtmlApi(wasm) {
 			return span === null ? 0 : span.start + span.length;
 		}
 
+		#skipIncompleteSelectBreakoutStartTag() {
+			const tokenStart = this.#incompleteTokenStart();
+			if (tokenStart === null) {
+				return false;
+			}
+
+			const startTag = completeStartTagAt(this.html, tokenStart);
+			if (startTag === null || !SELECT_BREAKOUT_START_TAGS.has(startTag.tagName)) {
+				return false;
+			}
+
+			const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+			if (selectIndex === -1 || selectIndex >= this.base_open_element_count) {
+				return false;
+			}
+
+			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, startTag.end);
+			this.parser_state = STATE_READY;
+			this.current_virtual = null;
+			this.current_synthetic_token = null;
+			this.skip_current_token = false;
+			this.breadcrumbs = this.#breadcrumbStack();
+			return true;
+		}
+
 		#nativeCurrentSpan() {
 			return runtime.withOutPair((startPtr, lengthPtr) => {
 				if (!wasm.wp_html_api_rust_tag_processor_current_span(this.pointer, startPtr, lengthPtr)) {
@@ -6732,8 +6761,64 @@ function skipHtmlWhitespace(value, at, end) {
 	return at;
 }
 
+function completeStartTagAt(value, at) {
+	const end = value.length;
+	if (value.charCodeAt(at) !== 0x3c /* < */) {
+		return null;
+	}
+
+	let nameStart = at + 1;
+	if (nameStart >= end || !isAsciiAlphaCode(value.charCodeAt(nameStart))) {
+		return null;
+	}
+
+	let nameEnd = nameStart + 1;
+	while (nameEnd < end && !isTagNameDelimiterCode(value.charCodeAt(nameEnd))) {
+		nameEnd += 1;
+	}
+
+	let quote = null;
+	for (let i = nameEnd; i < end; i += 1) {
+		const code = value.charCodeAt(i);
+		if (quote !== null) {
+			if (code === quote) {
+				quote = null;
+			}
+			continue;
+		}
+
+		if (code === 0x22 /* " */ || code === 0x27 /* ' */) {
+			quote = code;
+			continue;
+		}
+
+		if (code === 0x3e /* > */) {
+			return {
+				tagName: asciiUpper(value.slice(nameStart, nameEnd)),
+				end: i + 1,
+			};
+		}
+	}
+
+	return null;
+}
+
 function isHtmlWhitespaceCode(code) {
 	return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d;
+}
+
+function isAsciiAlphaCode(code) {
+	return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+}
+
+function isTagNameDelimiterCode(code) {
+	return code === 0x20 ||
+		code === 0x09 ||
+		code === 0x0a ||
+		code === 0x0c ||
+		code === 0x0d ||
+		code === 0x2f ||
+		code === 0x3e;
 }
 
 function splitHtmlWhitespace(value) {
