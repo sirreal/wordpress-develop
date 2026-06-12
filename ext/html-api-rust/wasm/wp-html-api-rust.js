@@ -4405,12 +4405,35 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const nextTag = runtime.scanNextTag(this.html, span.start + span.length);
-			if (nextTag === false) {
-				return false;
+			if (tagName !== "A") {
+				const nextTag = runtime.scanNextTag(this.html, span.start + span.length);
+				return nextTag !== false && nextTag.is_closing && nextTag.tag_name === tagName;
 			}
 
-			return nextTag.is_closing && nextTag.tag_name === tagName;
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing && nextTag.tag_name === tagName) {
+					return true;
+				}
+
+				if (
+					(nextTag.is_closing && nextTag.tag_name === "P") ||
+					(!nextTag.is_closing && this.#shouldClosePForStartTag(nextTag.tag_name))
+				) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					return tagName === "A" && nextTag.tag_name === "A";
+				}
+
+				at = nextTag.token_end;
+			}
 		}
 
 		#markParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName) {
@@ -4429,6 +4452,12 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#clearParagraphAdoptionPreclosedFormattingElements(tagName, namespaceName) {
+			this.paragraph_adoption_preclosed_formatting_elements = this.paragraph_adoption_preclosed_formatting_elements.filter((entry) => (
+				entry.tagName !== tagName || entry.namespaceName !== namespaceName
+			));
 		}
 
 		#applyFullParserInsertionMode(tokenType, tokenName) {
@@ -5092,6 +5121,7 @@ export function createHtmlApi(wasm) {
 
 				if (this.active_formatting_elements[i].tagName === tagName) {
 					this.active_formatting_elements.splice(i, 1);
+					this.#clearParagraphAdoptionPreclosedFormattingElements(tagName, "html");
 					return true;
 				}
 			}
@@ -5119,6 +5149,7 @@ export function createHtmlApi(wasm) {
 				}
 				if (entry.tagName === tagName && entry.namespaceName === "html") {
 					this.active_formatting_elements.splice(i, 1);
+					this.#clearParagraphAdoptionPreclosedFormattingElements(tagName, "html");
 					activeCount -= 1;
 					removed = true;
 				}

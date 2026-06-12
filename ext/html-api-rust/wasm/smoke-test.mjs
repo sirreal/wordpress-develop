@@ -3802,6 +3802,14 @@ assert.equal(
 	WP_HTML_Processor.normalize("<b><p></b>TEST"),
 	"<b></b><p><b></b>TEST</p>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<a><p>X<a>Y</a>Z</p></a>"),
+	"<a></a><p><a>X</a><a>Y</a>Z</p>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><p><a></a></p></a>"),
+	"<a></a><p><a></a><a></a></p>",
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<a><b>1<a>2"),
