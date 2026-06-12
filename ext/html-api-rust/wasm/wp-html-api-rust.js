@@ -208,7 +208,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
-const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "CENTER", "DIV"]);
+const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
@@ -4405,7 +4405,13 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
-				if (!nextTag.is_closing && nextTag.tag_name === "A") {
+				if (
+					!nextTag.is_closing &&
+					(
+						nextTag.tag_name === "A" ||
+						NESTED_ANCHOR_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name)
+					)
+				) {
 					return true;
 				}
 
