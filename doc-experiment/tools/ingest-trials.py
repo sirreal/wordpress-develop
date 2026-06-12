@@ -19,6 +19,22 @@ def main() -> int:
     results_dir = EXPERIMENT_ROOT / "results" / round_name
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    validate = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "validate-workflow-output.py"),
+            "trials",
+            output_file,
+            round_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if validate.returncode != 0:
+        print(validate.stdout, end="")
+        print(validate.stderr, file=sys.stderr)
+        return validate.returncode
+
     proc = subprocess.run(
         ["python3", str(EXPERIMENT_ROOT / "tools" / "persist-trials.py"), str(results_dir)],
         input=json.dumps(trials),

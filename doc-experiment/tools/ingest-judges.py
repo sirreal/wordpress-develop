@@ -48,6 +48,22 @@ def main() -> int:
     results_dir = EXPERIMENT_ROOT / "results" / round_name
 
     verdicts = json.load(open(output_file))["result"]
+    validate_output = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "validate-workflow-output.py"),
+            "judges",
+            output_file,
+            round_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if validate_output.returncode != 0:
+        print(validate_output.stdout, end="")
+        print(validate_output.stderr, file=sys.stderr)
+        return validate_output.returncode
+
     errors = validate_verdicts(results_dir, verdicts)
     if errors:
         for error in errors:

@@ -80,6 +80,8 @@ python3 render-docs-markdown.py \
 - `tools/workflow-args.py` — emits trials or judges workflow JSON from
   `round-metadata.json` so model policy and task IDs are not transcribed by
   hand.
+- `tools/validate-workflow-output.py` — preflights trials or judges workflow
+  JSON against round metadata before ingestion writes files.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
   `prepare-round.py` and manual scratch variants.
 - `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject

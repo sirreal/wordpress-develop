@@ -31,6 +31,11 @@ task prompt. Round 18 metadata was backfilled with hashes for the staged
 current-corpus baseline scratch files so the exact docs/prompts can be audited
 without trusting the transient `/tmp` path alone.
 
+Added `validate-workflow-output.py` and wired it into trial/judge ingestion.
+Workflow output files are now checked against round metadata and structured
+output shape before any candidate, execution, judge, or summary file is
+written.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
