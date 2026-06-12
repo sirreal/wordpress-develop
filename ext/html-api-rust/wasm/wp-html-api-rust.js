@@ -1248,14 +1248,19 @@ export class WP_HTML_Processor_State {
 
 export class WP_HTML_Doctype_Info {
 	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
-		this.name = name;
-		this.public_identifier = publicIdentifier;
-		this.system_identifier = systemIdentifier;
+		const normalizedName = phpStringParameterCoerce(name, "name", true);
+		const normalizedPublicIdentifier = phpStringParameterCoerce(publicIdentifier, "public_identifier", true);
+		const normalizedSystemIdentifier = phpStringParameterCoerce(systemIdentifier, "system_identifier", true);
+		const normalizedForceQuirksFlag = phpBooleanParameterCoerce(forceQuirksFlag, "force_quirks_flag");
+
+		this.name = normalizedName;
+		this.public_identifier = normalizedPublicIdentifier;
+		this.system_identifier = normalizedSystemIdentifier;
 		this.indicated_compatibility_mode = doctypeCompatibilityMode(
-			name,
-			publicIdentifier,
-			systemIdentifier,
-			forceQuirksFlag,
+			normalizedName,
+			normalizedPublicIdentifier,
+			normalizedSystemIdentifier,
+			normalizedForceQuirksFlag,
 		);
 	}
 
@@ -7611,6 +7616,7 @@ function phpStringParameterCoerce(value, parameterName, nullable = false) {
 
 function phpBooleanParameterCoerce(value, parameterName) {
 	if (
+		value === null ||
 		typeof value === "object" ||
 		typeof value === "function" ||
 		typeof value === "symbol" ||
