@@ -388,6 +388,106 @@ HTML
 	}
 
 	/**
+	 * Ensures that reading the text node immediately following a PRE or
+	 * LISTING opener continues to ignore its leading newline after enqueued
+	 * updates have been applied and document offsets have shifted.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::get_updated_html
+	 * @covers WP_HTML_Tag_Processor::get_modifiable_text
+	 *
+	 * @dataProvider data_pre_and_listing_tags
+	 *
+	 * @param string $tag_name Tag name of the element which ignores a leading newline.
+	 */
+	public function test_get_modifiable_text_ignores_leading_newline_after_applying_updates( string $tag_name ) {
+		$tag       = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<{$tag} class=\"pad\">\nfoo" );
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the tag: check test setup.' );
+		$this->assertSame( $tag_name, $processor->get_token_name(), 'Failed to find the tag: check test setup.' );
+		$processor->remove_attribute( 'class' );
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the text node: check test setup.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Failed to find the text node: check test setup.' );
+
+		$before_applying = $processor->get_modifiable_text();
+		$this->assertSame( 'foo', $before_applying, 'Should have ignored the leading newline before applying updates.' );
+
+		$processor->get_updated_html();
+		$this->assertSame( $before_applying, $processor->get_modifiable_text(), 'Should have ignored the leading newline after applying updates.' );
+	}
+
+	/**
+	 * Ensures that reading the text node immediately following a PRE or
+	 * LISTING opener continues to ignore its leading newline after applying
+	 * multiple enqueued updates of different sizes in a single pass.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::get_updated_html
+	 * @covers WP_HTML_Tag_Processor::get_modifiable_text
+	 *
+	 * @dataProvider data_pre_and_listing_tags
+	 *
+	 * @param string $tag_name Tag name of the element which ignores a leading newline.
+	 */
+	public function test_get_modifiable_text_ignores_leading_newline_after_applying_multiple_updates( string $tag_name ) {
+		$tag       = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<div class=\"aaaaaaaaaaaaaaaaaaaa\">x</div><{$tag} aaaaaaaaaaaaaaaaaaaaaaaa=\"x\" b=\"y\">\nfoo" );
+
+		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the DIV: check test setup.' );
+		$processor->remove_attribute( 'class' );
+
+		$this->assertTrue( $processor->next_tag( $tag_name ), 'Failed to find the tag: check test setup.' );
+		$processor->remove_attribute( 'aaaaaaaaaaaaaaaaaaaaaaaa' );
+		$processor->remove_attribute( 'b' );
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the text node: check test setup.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Failed to find the text node: check test setup.' );
+
+		$before_applying = $processor->get_modifiable_text();
+		$this->assertSame( 'foo', $before_applying, 'Should have ignored the leading newline before applying updates.' );
+
+		$processor->get_updated_html();
+		$this->assertSame( $before_applying, $processor->get_modifiable_text(), 'Should have ignored the leading newline after applying updates.' );
+	}
+
+	/**
+	 * Ensures that the text node immediately following a PRE or LISTING opener
+	 * continues to ignore its leading newline after applying an attribute
+	 * update on the opener together with a replacement of the text itself.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::get_updated_html
+	 * @covers WP_HTML_Tag_Processor::get_modifiable_text
+	 *
+	 * @dataProvider data_pre_and_listing_tags
+	 *
+	 * @param string $tag_name Tag name of the element which ignores a leading newline.
+	 */
+	public function test_get_modifiable_text_ignores_leading_newline_after_growing_opener_and_replacing_text( string $tag_name ) {
+		$tag       = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<{$tag}>\nfoo" );
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the tag: check test setup.' );
+		$this->assertSame( $tag_name, $processor->get_token_name(), 'Failed to find the tag: check test setup.' );
+		$processor->set_attribute( 'class', 'wide' );
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the text node: check test setup.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Failed to find the text node: check test setup.' );
+		$this->assertTrue( $processor->set_modifiable_text( "\nlonger" ), 'Failed to replace the modifiable text: check test setup.' );
+
+		$before_applying = $processor->get_modifiable_text();
+		$this->assertSame( 'longer', $before_applying, 'Should have ignored the leading newline before applying updates.' );
+
+		$processor->get_updated_html();
+		$this->assertSame( $before_applying, $processor->get_modifiable_text(), 'Should have ignored the leading newline after applying updates.' );
+	}
+
+	/**
 	 * Ensures that seeking directly to a text node immediately following a PRE
 	 * or LISTING opener continues to ignore its leading newline when document
 	 * offsets have shifted from applying enqueued attribute updates.

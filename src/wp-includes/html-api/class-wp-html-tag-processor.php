@@ -2530,6 +2530,7 @@ class WP_HTML_Tag_Processor {
 	 * @since 6.2.0
 	 * @since 6.2.1 Accumulates shift for internal cursor and passed pointer.
 	 * @since 6.3.0 Invalidate any bookmarks whose targets are overwritten.
+	 * @since 7.1.0 Accumulates shift for the ignored-newline position after LISTING and PRE opening tags.
 	 * @ignore
 	 *
 	 * @param int $shift_this_point Accumulate and return shift for this position.
@@ -2540,7 +2541,8 @@ class WP_HTML_Tag_Processor {
 			return 0;
 		}
 
-		$accumulated_shift_for_given_point = 0;
+		$accumulated_shift_for_given_point  = 0;
+		$accumulated_shift_for_skip_newline = 0;
 
 		/*
 		 * Attribute updates can be enqueued in any order but updates
@@ -2564,6 +2566,11 @@ class WP_HTML_Tag_Processor {
 				$this->bytes_already_parsed += $shift;
 			}
 
+			// Accumulate shift of the ignored-newline position within this function call.
+			if ( null !== $this->skip_newline_at && $diff->start < $this->skip_newline_at ) {
+				$accumulated_shift_for_skip_newline += $shift;
+			}
+
 			// Accumulate shift of the given pointer within this function call.
 			if ( $diff->start < $shift_this_point ) {
 				$accumulated_shift_for_given_point += $shift;
@@ -2575,6 +2582,11 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
+
+		// Adjust the ignored-newline position by however much the updates moved it.
+		if ( null !== $this->skip_newline_at ) {
+			$this->skip_newline_at += $accumulated_shift_for_skip_newline;
+		}
 
 		/*
 		 * Adjust bookmark locations to account for how the text
@@ -3680,7 +3692,8 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * @since 6.5.0
 	 * @since 6.7.0 Replaces NULL bytes (U+0000) and newlines appropriately.
-	 * @since 7.1.0 Ignores the leading newline after LISTING and PRE opening tags even after seeking.
+	 * @since 7.1.0 Ignores the leading newline after LISTING and PRE opening tags even after
+	 *              seeking or applying enqueued updates.
 	 *
 	 * @return string
 	 */
