@@ -21,8 +21,10 @@ Build the WebAssembly module and JavaScript API wrapper with:
 
 ```sh
 cd ext/html-api-rust
-./build-wasm.sh
+npm --prefix wasm run build
+npm --prefix wasm run check
 npm --prefix wasm test
+npm --prefix wasm run test:html5lib
 ```
 
 Regenerate the Rust HTML5 named-character-reference table with:
