@@ -2688,6 +2688,7 @@ assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 assert.equal(processor.matches_breadcrumbs([]), true);
 assert.equal(processor.matches_breadcrumbs([true]), false);
 assert.equal(processor.matches_breadcrumbs([1]), false);
+assert.equal(processor.matches_breadcrumbs([null]), false);
 assert.throws(
 	() => processor.matches_breadcrumbs("P"),
 	TypeError,
@@ -2783,6 +2784,10 @@ assert.equal(processorBreadcrumbMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPA
 assert.equal(processorBreadcrumbMatchOffset.get_attribute("one"), null);
 assert.equal(processorBreadcrumbMatchOffset.get_attribute("two"), true);
 processorBreadcrumbMatchOffset.destroy();
+
+const processorNullBreadcrumb = WP_HTML_Processor.create_fragment("<div><span></span></div>");
+assert.equal(processorNullBreadcrumb.next_tag({ breadcrumbs: [null] }), false);
+processorNullBreadcrumb.destroy();
 
 const processorBreadcrumbIgnoresTagName = WP_HTML_Processor.create_fragment("<span></span><div></div>");
 assert.equal(processorBreadcrumbIgnoresTagName.next_tag({ tag_name: "span", breadcrumbs: ["DIV"] }), true);

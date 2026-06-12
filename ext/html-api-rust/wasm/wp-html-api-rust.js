@@ -3034,7 +3034,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			const normalized = normalizedBreadcrumbs.map((crumb) => {
-				const normalizedCrumb = phpStringParameterCoerce(crumb, "breadcrumbs");
+				const normalizedCrumb = phpInternalStringCoerce(crumb, "breadcrumbs");
 				return normalizedCrumb === "*" ? "*" : asciiUpper(normalizedCrumb);
 			});
 			const lastCrumb = normalized[normalized.length - 1];

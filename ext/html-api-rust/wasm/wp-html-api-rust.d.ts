@@ -165,7 +165,7 @@ export interface TagNextTagQuery extends NextTagBaseQuery {
 export interface ProcessorNextTagQuery extends NextTagBaseQuery {
 	tag_name?: string | number | boolean | null;
 	match_offset?: number | string | boolean | null;
-	breadcrumbs?: PhpStringParameter[];
+	breadcrumbs?: PhpInternalStringParameter[];
 }
 
 export type NextTagQuery = ProcessorNextTagQuery;
@@ -578,7 +578,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	expects_closer(node?: HtmlTokenInput | null): boolean | null;
 	get_breadcrumbs(): string[];
 	get_current_depth(): number;
-	matches_breadcrumbs(breadcrumbs: PhpStringParameter[]): boolean;
+	matches_breadcrumbs(breadcrumbs: PhpInternalStringParameter[]): boolean;
 	serialize(): string | null;
 	serialize_token(): string;
 }
