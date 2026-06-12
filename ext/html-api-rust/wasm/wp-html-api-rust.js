@@ -1298,11 +1298,7 @@ async function bytesFromInput(input) {
 	}
 
 	if (input instanceof URL && input.protocol === "file:") {
-		const [{ readFile }, { fileURLToPath }] = await Promise.all([
-			import("node:fs/promises"),
-			import("node:url"),
-		]);
-		return readFile(fileURLToPath(input));
+		return nodeFileUrlBytes(input);
 	}
 
 	if (typeof Response === "function" && input instanceof Response) {
@@ -1310,6 +1306,10 @@ async function bytesFromInput(input) {
 	}
 
 	if (typeof input === "string") {
+		if (/^file:\/\//.test(input) && isNodeLikeRuntime()) {
+			return nodeFileUrlBytes(input);
+		}
+
 		if (typeof fetch === "function" && (/^https?:\/\//.test(input) || !isNodeLikeRuntime())) {
 			return fetchBytes(input);
 		}
@@ -1323,6 +1323,14 @@ async function bytesFromInput(input) {
 	}
 
 	throw new TypeError("Unsupported WASM input.");
+}
+
+async function nodeFileUrlBytes(input) {
+	const [{ readFile }, { fileURLToPath }] = await Promise.all([
+		import("node:fs/promises"),
+		import("node:url"),
+	]);
+	return readFile(fileURLToPath(input));
 }
 
 function isWebAssemblyInstantiatedSource(input) {
