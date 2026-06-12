@@ -4087,6 +4087,28 @@ assert.equal(fullParserOpenHeadTemplate.next_tag("body"), true);
 assert.deepEqual(fullParserOpenHeadTemplate.get_breadcrumbs(), ["HTML", "BODY"]);
 fullParserOpenHeadTemplate.destroy();
 
+const fullParserTemplateNestedAnchorTable = WP_HTML_Processor.create_full_parser("<template><a><table><a>");
+const fullParserTemplateNestedAnchorTableStarts = [];
+while (fullParserTemplateNestedAnchorTable.next_token()) {
+	if (
+		fullParserTemplateNestedAnchorTable.get_token_type() === "#tag" &&
+		!fullParserTemplateNestedAnchorTable.is_tag_closer() &&
+		["A", "TABLE"].includes(fullParserTemplateNestedAnchorTable.get_tag())
+	) {
+		fullParserTemplateNestedAnchorTableStarts.push([
+			fullParserTemplateNestedAnchorTable.get_tag(),
+			fullParserTemplateNestedAnchorTable.get_breadcrumbs(),
+		]);
+	}
+}
+assert.equal(fullParserTemplateNestedAnchorTable.get_last_error(), null);
+assert.deepEqual(fullParserTemplateNestedAnchorTableStarts, [
+	["A", ["HTML", "HEAD", "TEMPLATE", "A"]],
+	["A", ["HTML", "HEAD", "TEMPLATE", "A", "A"]],
+	["TABLE", ["HTML", "HEAD", "TEMPLATE", "A", "TABLE"]],
+]);
+fullParserTemplateNestedAnchorTable.destroy();
+
 const fullParserExplicitHeadTemplate = WP_HTML_Processor.create_full_parser("<head><template><div></div></template></head>");
 assert.equal(fullParserExplicitHeadTemplate.next_tag("div"), true);
 assert.deepEqual(fullParserExplicitHeadTemplate.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE", "DIV"]);

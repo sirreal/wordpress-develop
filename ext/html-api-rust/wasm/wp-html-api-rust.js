@@ -9751,8 +9751,17 @@ export function createHtmlApi(wasm) {
 				this.current_namespace === "html" &&
 				this.#lastOpenElementIndex("TABLE", "html") !== -1 &&
 				this.#currentFosterParentedTableIndex() === null &&
-				this.#nestedAnchorFosteredBeforeDeferredTablePrecedesTableContent()
+				(
+					this.#nestedAnchorFosteredBeforeDeferredTablePrecedesTableContent() ||
+					this.#nestedAnchorFosteredBeforeTemplateDeferredTable()
+				)
 			);
+		}
+
+		#nestedAnchorFosteredBeforeTemplateDeferredTable() {
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			const templateIndex = this.#lastOpenElementIndex("TEMPLATE", "html");
+			return templateIndex !== -1 && tableIndex > templateIndex;
 		}
 
 		#nestedAnchorFosteredBeforeDeferredTablePrecedesTableContent() {
