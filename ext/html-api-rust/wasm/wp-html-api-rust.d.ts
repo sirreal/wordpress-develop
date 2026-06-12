@@ -542,13 +542,13 @@ export interface SpecialTagInput {
 }
 
 export interface HtmlTokenInput {
-	node_name?: string | null;
-	nodeName?: string | null;
-	tagName?: string | null;
-	namespace?: HtmlNamespace;
-	namespaceName?: HtmlNamespace;
-	has_self_closing_flag?: boolean;
-	hasSelfClosingFlag?: boolean;
+	node_name?: PhpStringParameter | null;
+	nodeName?: PhpStringParameter | null;
+	tagName?: PhpStringParameter | null;
+	namespace?: PhpStringParameter;
+	namespaceName?: PhpStringParameter;
+	has_self_closing_flag?: PhpBooleanParameter;
+	hasSelfClosingFlag?: PhpBooleanParameter;
 }
 
 export interface WP_HTML_Processor_Options {

@@ -3034,6 +3034,29 @@ assert.equal(explicitTokenExpectationsProcessor.expects_closer({
 	namespace: "svg",
 	has_self_closing_flag: false,
 }), true);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({
+	node_name: "rect",
+	namespace: "svg",
+	has_self_closing_flag: "0",
+}), true);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({
+	node_name: "rect",
+	namespace: "svg",
+	hasSelfClosingFlag: "1",
+}), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer({
+	node_name: true,
+	namespace: "html",
+	has_self_closing_flag: false,
+}), true);
+assert.throws(
+	() => explicitTokenExpectationsProcessor.expects_closer({
+		node_name: "rect",
+		namespace: "svg",
+		has_self_closing_flag: {},
+	}),
+	TypeError,
+);
 explicitTokenExpectationsProcessor.destroy();
 
 for (const [html, expected] of [

@@ -2962,8 +2962,8 @@ export function createHtmlApi(wasm) {
 				};
 			}
 
-			const normalizedNamespace = asciiLower(String(namespaceName ?? "html"));
-			let normalizedTokenName = String(tokenName);
+			const normalizedNamespace = asciiLower(phpStringParameterCoerce(namespaceName ?? "html", "namespace"));
+			let normalizedTokenName = phpStringParameterCoerce(tokenName, "node_name");
 			if (normalizedNamespace === "html" && normalizedTokenName !== "html" && normalizedTokenName[0] !== "#") {
 				normalizedTokenName = asciiUpper(normalizedTokenName);
 			}
@@ -2971,7 +2971,7 @@ export function createHtmlApi(wasm) {
 			return {
 				nodeName: normalizedTokenName,
 				namespaceName: normalizedNamespace,
-				hasSelfClosingFlag: Boolean(hasSelfClosingFlag),
+				hasSelfClosingFlag: phpBooleanParameterCoerce(hasSelfClosingFlag, "has_self_closing_flag"),
 			};
 		}
 
