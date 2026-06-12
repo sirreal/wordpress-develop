@@ -8048,8 +8048,7 @@ export function createHtmlApi(wasm) {
 				tokenType === "#funky-comment" ||
 				tokenType === "#presumptuous-tag"
 			) {
-				this.#bailUnsupported("Foster parenting is not supported.");
-				return true;
+				return this.#queueDeferredTableOpener();
 			}
 
 			if (tokenType !== "#tag") {
@@ -8113,9 +8112,7 @@ export function createHtmlApi(wasm) {
 			let wrappers = allowedWrapperTags;
 			while (true) {
 				const nextTag = runtime.scanNextTag(this.html, at);
-				const text = nextTag === false
-					? this.html.slice(at)
-					: this.html.slice(at, nextTag.tag_start);
+				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
 				if (!this.#isIgnorableTableText(text)) {
 					return true;
 				}
@@ -8192,10 +8189,20 @@ export function createHtmlApi(wasm) {
 
 			const afterToken = span.start + span.length;
 			const nextTag = runtime.scanNextTag(this.html, afterToken);
-			const text = nextTag === false
-				? this.html.slice(afterToken)
-				: this.html.slice(afterToken, nextTag.tag_start);
+			const text = this.html.slice(
+				afterToken,
+				this.#fosterLookaheadTextEnd(afterToken, nextTag),
+			);
 			return !this.#isIgnorableTableText(text);
+		}
+
+		#fosterLookaheadTextEnd(at, nextTag) {
+			let end = nextTag === false ? this.html.length : nextTag.tag_start;
+			const commentStart = this.html.indexOf("<!--", at);
+			if (commentStart !== -1 && commentStart < end) {
+				end = commentStart;
+			}
+			return end;
 		}
 
 		#isIgnorableTableText(text) {
