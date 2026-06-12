@@ -4462,7 +4462,10 @@ export function createHtmlApi(wasm) {
 					tagName === "DIV" &&
 					this.#hasOpenFormattingElementBeforeIndex(topIndex)
 				) ||
-				!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+				(
+					!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName) &&
+					(tagName !== "NOBR" || !this.#currentTokenHasNoFollowingTags())
+				)
 			) {
 				return false;
 			}
@@ -4486,6 +4489,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#currentTokenHasNoFollowingTags() {
+			const span = this.#currentRealTokenSpan();
+			return span !== null && runtime.scanNextTag(this.html, span.start + span.length) === false;
 		}
 
 		#formattingEndTagPrecedesElementClose(formattingTagName, elementTagName) {

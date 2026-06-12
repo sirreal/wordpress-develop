@@ -3908,6 +3908,10 @@ assert.equal(
 	WP_HTML_Processor.normalize("<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3"),
 	"<b><nobr>1</nobr><nobr></nobr></b><nobr><i></i></nobr><i><nobr>2</nobr><nobr></nobr></i><nobr>3</nobr>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<!DOCTYPE html><body><b><nobr>1<nobr><ins></b><i><nobr>"),
+	"<b><nobr>1</nobr><nobr><ins></ins></nobr></b><nobr><i></i></nobr><i><nobr></nobr></i>",
+);
 
 for (const html of [
 	"<!DOCTYPE html><body><b><nobr>1<table><nobr></b><i><nobr>2<nobr></i>3",
