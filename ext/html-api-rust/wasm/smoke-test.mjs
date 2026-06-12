@@ -3787,6 +3787,14 @@ assert.equal(
 	"<b><i></i></b><p><i>x</i></p>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<b><button>foo</b>bar"),
+	"<b></b><button><b>foo</b>bar</button>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<b><button></b></button></b>"),
+	"<b></b><button><b></b></button>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<a><p></a></p>"),
 	"<a></a><p><a></a></p>",
 );

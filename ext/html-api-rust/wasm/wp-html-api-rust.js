@@ -208,6 +208,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
+const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
@@ -2372,6 +2373,7 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.paragraph_adoption_preclosed_formatting_elements = [];
+			this.special_start_adoption_preclosed_formatting_elements = [];
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
@@ -3518,6 +3520,16 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (
+					allowVirtualPreclosures &&
+					this.#consumeSpecialStartAdoptionReconstructionForEndTag(tagName, closingNamespace, existingIndex)
+				) {
+					this.#queueReconstructActiveFormattingElements();
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				if (this.#shouldIgnoreAdoptionAgencyEndTagWithStaleEntry(tagName, closingNamespace)) {
 					this.#removeStaleActiveFormattingElementsForClose(tagName);
 					this.current_token_namespace = this.current_namespace;
@@ -3694,6 +3706,7 @@ export function createHtmlApi(wasm) {
 				allowVirtualPreclosures &&
 				(
 					this.#queueNestedAnchorBlockAdoptionPreclosure(tagName) ||
+					this.#queueFormattingElementSpecialStartPreclosure(tagName) ||
 					this.#queueParagraphAdoptionFormattingPreclosure(tagName) ||
 					this.#queueVirtualPreclosuresForStartTag(tagName) ||
 					this.#queueVirtualOpenersForStartTag(tagName)
@@ -3977,6 +3990,7 @@ export function createHtmlApi(wasm) {
 				})),
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
+				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				ignoredSelectFormattingElements: [...this.ignored_select_formatting_elements.entries()],
 				templateInsertionModes: [...this.template_insertion_modes],
 				encodingConfidence: this.encoding_confidence,
@@ -4014,6 +4028,7 @@ export function createHtmlApi(wasm) {
 			this.detached_breadcrumbs = (state.detachedBreadcrumbs ?? []).map((breadcrumb) => ({ ...breadcrumb }));
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.paragraph_adoption_preclosed_formatting_elements = (state.paragraphAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
+			this.special_start_adoption_preclosed_formatting_elements = (state.specialStartAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
 			this.encoding_confidence = state.encodingConfidence;
@@ -4372,6 +4387,61 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#queueFormattingElementSpecialStartPreclosure(tagName) {
+			if (!FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				!FORMATTING_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			const formattingTagName = this.open_elements[topIndex];
+			if (
+				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
+				!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+			) {
+				return false;
+			}
+
+			this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
+			this.#queueVirtualPopsFrom(topIndex);
+			return true;
+		}
+
+		#formattingEndTagPrecedesElementClose(formattingTagName, elementTagName) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing && nextTag.tag_name === formattingTagName) {
+					return true;
+				}
+
+				if (
+					(nextTag.is_closing && nextTag.tag_name === elementTagName) ||
+					(!nextTag.is_closing && nextTag.tag_name === "TABLE")
+				) {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
 		#queueNestedAnchorBlockAdoptionPreclosure(tagName) {
 			if (!NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS.has(tagName)) {
 				return false;
@@ -4542,6 +4612,34 @@ export function createHtmlApi(wasm) {
 
 		#clearParagraphAdoptionPreclosedFormattingElements(tagName, namespaceName) {
 			this.paragraph_adoption_preclosed_formatting_elements = this.paragraph_adoption_preclosed_formatting_elements.filter((entry) => (
+				entry.tagName !== tagName || entry.namespaceName !== namespaceName
+			));
+		}
+
+		#markSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName) {
+			this.special_start_adoption_preclosed_formatting_elements.push({ tagName, namespaceName, containerTagName });
+		}
+
+		#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName) {
+			for (let i = this.special_start_adoption_preclosed_formatting_elements.length - 1; i >= 0; i -= 1) {
+				const entry = this.special_start_adoption_preclosed_formatting_elements[i];
+				if (
+					entry.tagName !== tagName ||
+					entry.namespaceName !== namespaceName ||
+					entry.containerTagName !== containerTagName
+				) {
+					continue;
+				}
+
+				this.special_start_adoption_preclosed_formatting_elements.splice(i, 1);
+				return true;
+			}
+
+			return false;
+		}
+
+		#clearSpecialStartAdoptionPreclosedFormattingElements(tagName, namespaceName) {
+			this.special_start_adoption_preclosed_formatting_elements = this.special_start_adoption_preclosed_formatting_elements.filter((entry) => (
 				entry.tagName !== tagName || entry.namespaceName !== namespaceName
 			));
 		}
@@ -5208,6 +5306,7 @@ export function createHtmlApi(wasm) {
 				if (this.active_formatting_elements[i].tagName === tagName) {
 					this.active_formatting_elements.splice(i, 1);
 					this.#clearParagraphAdoptionPreclosedFormattingElements(tagName, "html");
+					this.#clearSpecialStartAdoptionPreclosedFormattingElements(tagName, "html");
 					return true;
 				}
 			}
@@ -5236,6 +5335,7 @@ export function createHtmlApi(wasm) {
 				if (entry.tagName === tagName && entry.namespaceName === "html") {
 					this.active_formatting_elements.splice(i, 1);
 					this.#clearParagraphAdoptionPreclosedFormattingElements(tagName, "html");
+					this.#clearSpecialStartAdoptionPreclosedFormattingElements(tagName, "html");
 					activeCount -= 1;
 					removed = true;
 				}
@@ -7208,6 +7308,20 @@ export function createHtmlApi(wasm) {
 				this.open_element_namespaces.at(-1) === "html" &&
 				this.open_elements.at(-1) === "P" &&
 				this.#consumeParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName)
+			);
+		}
+
+		#consumeSpecialStartAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
+			const containerTagName = this.open_elements.at(-1);
+
+			return (
+				namespaceName === "html" &&
+				formattingElementIndex === -1 &&
+				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
+				this.open_element_namespaces.at(-1) === "html" &&
+				FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(containerTagName) &&
+				this.#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName)
 			);
 		}
 
