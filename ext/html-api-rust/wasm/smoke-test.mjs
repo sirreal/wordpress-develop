@@ -3297,17 +3297,33 @@ for (const html of [
 	"<form><div></form><p>x",
 	"<form><button></form><p>x",
 ]) {
-	const unsupportedFormCloserProcessor = WP_HTML_Processor.create_fragment(html);
-	while (unsupportedFormCloserProcessor.next_token()) {
+	const detachedFormCloserProcessor = WP_HTML_Processor.create_fragment(html);
+	assert.equal(detachedFormCloserProcessor.next_tag("form"), true);
+	assert.equal(detachedFormCloserProcessor.is_tag_closer(), false);
+	assert.equal(detachedFormCloserProcessor.next_tag(), true);
+	const descendantTag = detachedFormCloserProcessor.get_tag();
+	assert.equal(detachedFormCloserProcessor.next_tag({ tag_name: "form", tag_closers: "visit" }), true);
+	assert.equal(detachedFormCloserProcessor.is_tag_closer(), true);
+	assert.deepEqual(detachedFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "FORM", descendantTag]);
+	assert.equal(detachedFormCloserProcessor.next_tag("p"), true);
+	assert.deepEqual(detachedFormCloserProcessor.get_breadcrumbs(), ["HTML", "BODY", "FORM", descendantTag, "P"]);
+	while (detachedFormCloserProcessor.next_token()) {
 	}
-	assert.equal(unsupportedFormCloserProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(
-		unsupportedFormCloserProcessor.get_unsupported_exception().message,
-		"Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.",
-	);
-	unsupportedFormCloserProcessor.destroy();
-	assert.equal(WP_HTML_Processor.normalize(html), null);
+	assert.equal(detachedFormCloserProcessor.get_last_error(), null);
+	detachedFormCloserProcessor.destroy();
+	assert.notEqual(WP_HTML_Processor.normalize(html), null);
 }
+
+const detachedFormPointerProcessor = WP_HTML_Processor.create_fragment("<form><div></form><form><span>");
+assert.equal(detachedFormPointerProcessor.next_tag("form"), true);
+assert.equal(detachedFormPointerProcessor.next_tag("div"), true);
+assert.equal(detachedFormPointerProcessor.next_tag({ tag_name: "form", tag_closers: "visit" }), true);
+assert.equal(detachedFormPointerProcessor.is_tag_closer(), true);
+assert.deepEqual(detachedFormPointerProcessor.get_breadcrumbs(), ["HTML", "BODY", "FORM", "DIV"]);
+assert.equal(detachedFormPointerProcessor.next_tag("form"), true);
+assert.equal(detachedFormPointerProcessor.is_tag_closer(), false);
+assert.deepEqual(detachedFormPointerProcessor.get_breadcrumbs(), ["HTML", "BODY", "FORM", "DIV", "FORM"]);
+detachedFormPointerProcessor.destroy();
 
 assert.equal(
 	WP_HTML_Processor.normalize('<form id><table te"><script></script><td srce" ID/></form><form claslicate>'),

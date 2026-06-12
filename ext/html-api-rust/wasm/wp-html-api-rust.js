@@ -2107,6 +2107,7 @@ export function createHtmlApi(wasm) {
 			this.open_element_namespaces = this.is_html_fragment_context ? ["html"] : this.is_full_parser ? [] : ["html", this.context_namespace];
 			this.open_element_integration_node_types = this.is_html_fragment_context ? [null] : this.is_full_parser ? [] : [null, this.context_integration_node_type];
 			this.detached_context_breadcrumbs = [];
+			this.detached_breadcrumbs = [];
 			this.active_formatting_elements = [];
 			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
@@ -2813,13 +2814,25 @@ export function createHtmlApi(wasm) {
 		}
 
 		#breadcrumbStack(tokenName = null) {
-			const stack = this.detached_context_breadcrumbs.length > 0 && this.open_elements[0] === "HTML"
-				? [
-					this.open_elements[0],
-					...this.detached_context_breadcrumbs,
-					...this.open_elements.slice(1),
-				]
-				: [...this.open_elements];
+			this.#pruneDetachedBreadcrumbs();
+			const stack = [];
+			for (let i = 0; i < this.open_elements.length; i += 1) {
+				for (const detached of this.detached_breadcrumbs) {
+					if (detached.index === i) {
+						stack.push(detached.tagName);
+					}
+				}
+
+				stack.push(this.open_elements[i]);
+
+				if (
+					i === 0 &&
+					this.detached_context_breadcrumbs.length > 0 &&
+					this.open_elements[0] === "HTML"
+				) {
+					stack.push(...this.detached_context_breadcrumbs);
+				}
+			}
 
 			if (tokenName !== null) {
 				stack.push(tokenName);
@@ -3130,8 +3143,8 @@ export function createHtmlApi(wasm) {
 					}
 				}
 
-				if (this.#shouldBailUnsupportedFormCloser(tagName, closingNamespace, existingIndex)) {
-					this.#bailUnsupported("Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.");
+				if (this.#shouldDetachFormCloser(tagName, closingNamespace, existingIndex)) {
+					this.#detachFormElementFromOpenStack(existingIndex);
 					return;
 				}
 
@@ -3564,6 +3577,7 @@ export function createHtmlApi(wasm) {
 				openElementNamespaces: [...this.open_element_namespaces],
 				openElementIntegrationNodeTypes: [...this.open_element_integration_node_types],
 				detachedContextBreadcrumbs: [...this.detached_context_breadcrumbs],
+				detachedBreadcrumbs: this.detached_breadcrumbs.map((breadcrumb) => ({ ...breadcrumb })),
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
@@ -3604,6 +3618,7 @@ export function createHtmlApi(wasm) {
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
 			this.detached_context_breadcrumbs = [...state.detachedContextBreadcrumbs];
+			this.detached_breadcrumbs = (state.detachedBreadcrumbs ?? []).map((breadcrumb) => ({ ...breadcrumb }));
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
@@ -6254,7 +6269,7 @@ export function createHtmlApi(wasm) {
 			return this.#lastOpenElementIndex("TABLE", "html");
 		}
 
-		#shouldBailUnsupportedFormCloser(tagName, namespaceName, formIndex) {
+		#shouldDetachFormCloser(tagName, namespaceName, formIndex) {
 			if (tagName !== "FORM" || namespaceName !== "html" || formIndex === -1) {
 				return false;
 			}
@@ -6269,6 +6284,25 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#detachFormElementFromOpenStack(formIndex) {
+			this.current_token_namespace = this.open_element_namespaces[formIndex];
+			this.detached_breadcrumbs.push({
+				index: formIndex,
+				tagName: this.open_elements[formIndex],
+			});
+			this.open_elements.splice(formIndex, 1);
+			this.open_element_namespaces.splice(formIndex, 1);
+			this.open_element_integration_node_types.splice(formIndex, 1);
+			this.breadcrumbs = this.#breadcrumbStack();
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
+		}
+
+		#pruneDetachedBreadcrumbs() {
+			this.detached_breadcrumbs = this.detached_breadcrumbs.filter(
+				(breadcrumb) => breadcrumb.index < this.open_elements.length,
+			);
 		}
 
 		#hasOnlyTableElementsAfter(index) {
