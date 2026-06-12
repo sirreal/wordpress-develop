@@ -208,7 +208,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
-const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "MENU"]);
+const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "DIV", "MENU"]);
 const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
@@ -4449,6 +4449,10 @@ export function createHtmlApi(wasm) {
 			const formattingTagName = this.open_elements[topIndex];
 			if (
 				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
+				(
+					tagName === "DIV" &&
+					this.#hasOpenFormattingElementBeforeIndex(topIndex)
+				) ||
 				!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
 			) {
 				return false;
@@ -4457,6 +4461,22 @@ export function createHtmlApi(wasm) {
 			this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
 			this.#queueVirtualPopsFrom(topIndex);
 			return true;
+		}
+
+		#hasOpenFormattingElementBeforeIndex(index) {
+			for (let i = index - 1; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					return false;
+				}
+				if (FORMATTING_ELEMENTS.has(this.open_elements[i])) {
+					return true;
+				}
+				if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
+					return false;
+				}
+			}
+
+			return false;
 		}
 
 		#formattingEndTagPrecedesElementClose(formattingTagName, elementTagName) {
