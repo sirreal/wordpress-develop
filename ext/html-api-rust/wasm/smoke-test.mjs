@@ -3686,6 +3686,10 @@ assert.equal(
 	WP_HTML_Processor.normalize("<nobr>1<nobr>2"),
 	"<nobr>1</nobr><nobr>2</nobr>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<b>1<nobr></b><i><nobr>2</i>"),
+	"<b>1<nobr></nobr></b><nobr><i></i></nobr><i><nobr>2</nobr></i>",
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<p><b id=a><b id=a><b id=a><b><object><b id=a><b id=a>X</object><p>Y"),
@@ -3900,9 +3904,13 @@ assert.equal(
 	WP_HTML_Processor.normalize("<label><a><div>Hello<div>World</div></a></label>  "),
 	"<label><a></a><div><a>Hello<div>World</div></a>  </div></label>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3"),
+	"<b><nobr>1</nobr><nobr></nobr></b><nobr><i></i></nobr><i><nobr>2</nobr><nobr></nobr></i><nobr>3</nobr>",
+);
 
 for (const html of [
-	"<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
+	"<!DOCTYPE html><body><b><nobr>1<table><nobr></b><i><nobr>2<nobr></i>3",
 ]) {
 	const unsupportedAdoptionProcessor = WP_HTML_Processor.create_fragment(html);
 	while (unsupportedAdoptionProcessor.next_token() && unsupportedAdoptionProcessor.get_attribute("supported") === null) {

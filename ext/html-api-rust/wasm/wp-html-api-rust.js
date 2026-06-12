@@ -202,13 +202,14 @@ const ADOPTION_AGENCY_END_TAGS = new Set([
 ]);
 const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"APPLET",
+	"BR",
 	"MARQUEE",
 	"MENUITEM",
 	"OBJECT",
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
-const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "DIV", "MENU"]);
+const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "DIV", "MENU", "NOBR"]);
 const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
@@ -4450,7 +4451,12 @@ export function createHtmlApi(wasm) {
 			}
 
 			const formattingTagName = this.open_elements[topIndex];
+			const openNobrIndex = tagName === "NOBR" ? this.#lastOpenElementIndex("NOBR", "html") : -1;
 			if (
+				(
+					tagName === "NOBR" &&
+					(openNobrIndex === -1 || openNobrIndex >= topIndex)
+				) ||
 				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
 				(
 					tagName === "DIV" &&
@@ -5879,7 +5885,7 @@ export function createHtmlApi(wasm) {
 						(
 							tagName === "NOBR" &&
 							activeFormattingElementIndex !== -1 &&
-							activeFormattingElementIndex < this.active_formatting_elements.length - 1
+							this.#hasOpenActiveFormattingElementAfterIndex(activeFormattingElementIndex)
 						) ||
 						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, formattingElementIndex)
 					) {
@@ -6178,6 +6184,20 @@ export function createHtmlApi(wasm) {
 				}
 			}
 			return -1;
+		}
+
+		#hasOpenActiveFormattingElementAfterIndex(index) {
+			for (let i = index + 1; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return false;
+				}
+				if (this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) !== -1) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#queueVirtualPreclosuresForEndTag(tagName) {
