@@ -5266,6 +5266,42 @@ assert.deepEqual(nestedTableMetaProcessor.get_breadcrumbs(), ["HTML", "BODY", "T
 assert.equal(nestedTableMetaProcessor.get_last_error(), null);
 nestedTableMetaProcessor.destroy();
 
+const tableCellFosterTextProcessor = WP_HTML_Processor.create_full_parser("<table>A<td>B</td>C</table>");
+assert.equal(tableCellFosterTextProcessor.next_tag("body"), true);
+assert.equal(tableCellFosterTextProcessor.next_token(), true);
+assert.equal(tableCellFosterTextProcessor.get_token_type(), "#text");
+assert.equal(tableCellFosterTextProcessor.get_modifiable_text(), "A");
+assert.deepEqual(tableCellFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(tableCellFosterTextProcessor.next_token(), true);
+assert.equal(tableCellFosterTextProcessor.get_token_type(), "#text");
+assert.equal(tableCellFosterTextProcessor.get_modifiable_text(), "C");
+assert.deepEqual(tableCellFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(tableCellFosterTextProcessor.next_tag("table"), true);
+assert.deepEqual(tableCellFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCellFosterTextProcessor.next_tag("td"), true);
+assert.deepEqual(tableCellFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(tableCellFosterTextProcessor.next_token(), true);
+assert.equal(tableCellFosterTextProcessor.get_token_type(), "#text");
+assert.equal(tableCellFosterTextProcessor.get_modifiable_text(), "B");
+assert.deepEqual(tableCellFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "#text"]);
+assert.equal(tableCellFosterTextProcessor.get_last_error(), null);
+tableCellFosterTextProcessor.destroy();
+
+const tableRowFosterTextProcessor = WP_HTML_Processor.create_full_parser("A<table><tr> B</tr> B</table>");
+assert.equal(tableRowFosterTextProcessor.next_tag("body"), true);
+for (const text of ["A", " ", "B", " ", "B"]) {
+	assert.equal(tableRowFosterTextProcessor.next_token(), true);
+	assert.equal(tableRowFosterTextProcessor.get_token_type(), "#text");
+	assert.equal(tableRowFosterTextProcessor.get_modifiable_text(), text);
+	assert.deepEqual(tableRowFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+}
+assert.equal(tableRowFosterTextProcessor.next_tag("table"), true);
+assert.deepEqual(tableRowFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableRowFosterTextProcessor.next_tag("tr"), true);
+assert.deepEqual(tableRowFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+assert.equal(tableRowFosterTextProcessor.get_last_error(), null);
+tableRowFosterTextProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }

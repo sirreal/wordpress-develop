@@ -3420,6 +3420,13 @@ export function createHtmlApi(wasm) {
 				}
 
 				if (
+					tokenType === "#text" &&
+					this.#shouldDeferCurrentTextInsideDeferredTable()
+				) {
+					return;
+				}
+
+				if (
 					allowVirtualPreclosures &&
 					tokenType === "#text" &&
 					this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE &&
@@ -3516,6 +3523,10 @@ export function createHtmlApi(wasm) {
 						this.skip_current_token = true;
 						return;
 					}
+				}
+
+				if (this.#skipDeferredTableStructureCloserBeforeFosteredText(tagName, closingNamespace, existingIndex)) {
+					return;
 				}
 
 				if (!this.is_full_parser && existingIndex !== -1 && existingIndex < this.base_open_element_count) {
@@ -8292,6 +8303,10 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
+				if (this.#currentTableStructureCloserPrecedesFosteredTableText(tagName)) {
+					return false;
+				}
+
 				return (
 					(tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) &&
 					this.#queueDeferredTableOpener()
@@ -8366,6 +8381,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#hasUnreconstructedActiveFormattingElement()) {
+				return false;
+			}
+
 			this.current_token_namespace = "html";
 			this.breadcrumbs = this.#breadcrumbStack("#text", tableIndex);
 			this.frameset_ok = false;
@@ -8374,6 +8393,21 @@ export function createHtmlApi(wasm) {
 
 		#currentFosterParentedTableIndex() {
 			return this.open_element_foster_parented_table_indices.at(-1) ?? null;
+		}
+
+		#hasUnreconstructedActiveFormattingElement() {
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return false;
+				}
+
+				if (this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#queueFosteredElementPopsBeforeDeferredTable() {
@@ -8519,6 +8553,7 @@ export function createHtmlApi(wasm) {
 				tagName === "FORM" ||
 				tagName === "TEMPLATE" ||
 				tagName === "TR" ||
+				TABLE_CELL_ELEMENTS.has(tagName) ||
 				TABLE_SECTION_ELEMENTS.has(tagName) ||
 				this.#isDeferredTableAtomicChildOpenerTag(tagName)
 			);
@@ -8586,6 +8621,30 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#skipDeferredTableStructureCloserBeforeFosteredText(tagName, namespaceName, existingIndex) {
+			if (
+				namespaceName !== "html" ||
+				existingIndex === -1 ||
+				!this.#currentTableStructureCloserPrecedesFosteredTableText(tagName)
+			) {
+				return false;
+			}
+
+			this.current_token_namespace = this.open_element_namespaces[existingIndex];
+			this.#applyTemplateInsertionModeForEndTag(tagName);
+			this.open_elements = this.open_elements.slice(0, existingIndex);
+			this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
+			this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
+			this.open_element_foster_parented_table_indices = this.open_element_foster_parented_table_indices.slice(0, existingIndex);
+			if (TABLE_CELL_ELEMENTS.has(tagName)) {
+				this.#clearActiveFormattingElementsUpToLastMarker();
+			}
+			this.breadcrumbs = this.#breadcrumbStack();
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
+			this.skip_current_token = true;
+			return true;
+		}
+
 		#deferCurrentTextAsTableChild() {
 			this.deferred_table_child_openers.push({
 				tokenType: "#text",
@@ -8598,6 +8657,74 @@ export function createHtmlApi(wasm) {
 			});
 			this.skip_current_token = true;
 			return true;
+		}
+
+		#shouldDeferCurrentTextInsideDeferredTable() {
+			if (
+				this.deferred_table_opener === null ||
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE ||
+				this.#currentFosterParentedTableIndex() !== null
+			) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			const topIndex = this.open_elements.length - 1;
+			return (
+				tableIndex !== -1 &&
+				topIndex > tableIndex &&
+				this.#deferCurrentTextAsTableChild()
+			);
+		}
+
+		#currentTableStructureCloserPrecedesFosteredTableText(tagName) {
+			if (
+				this.deferred_table_opener === null ||
+				!(
+					TABLE_CELL_ELEMENTS.has(tagName) ||
+					tagName === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(tagName)
+				)
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(
+					at,
+					this.#fosterLookaheadTextEnd(at, nextTag),
+				);
+				if (!this.#isIgnorableTableText(text)) {
+					return true;
+				}
+
+				if (nextTag === false || !nextTag.is_closing) {
+					return false;
+				}
+
+				if (nextTag.tag_name === "TABLE") {
+					return false;
+				}
+
+				if (
+					TABLE_CELL_ELEMENTS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(nextTag.tag_name) ||
+					this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
+
+				return false;
+			}
 		}
 
 		#isFosteredVoidTableStartTag(tagName) {
