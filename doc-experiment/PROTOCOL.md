@@ -156,6 +156,9 @@ php doc-experiment/harness/run-tests.php \
 
 (`run-tests.php` exits non-zero on failures; the JSON is still complete.)
 
+For metadata-backed rounds, `ingest-trials.py` rejects workflow outputs whose
+task IDs or trial numbers do not exactly match `round-metadata.json`.
+
 Skip this section for `discoverability-probe` rounds. For `shadow-doc-a/b`,
 execute control and variant candidates separately and keep result directories
 clearly labeled.
@@ -219,6 +222,10 @@ python3 doc-experiment/tools/validate-round.py round-NN
 
 It should report `judged` before aggregation. After aggregation, rerun it with
 `--require-scored`; it should report `scored` before the score is trusted.
+`ingest-judges.py` validates trial completeness before writing judges and
+judged-state completeness before writing a summary. `aggregate-round.py`
+refuses metadata-backed rounds with missing judges, missing trial executions,
+or mismatched task sets.
 
 ```sh
 python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN

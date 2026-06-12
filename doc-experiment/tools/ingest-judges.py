@@ -17,18 +17,79 @@ from pathlib import Path
 EXPERIMENT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def validate_verdicts(results_dir: Path, verdicts: list[dict]) -> list[str]:
+    metadata_file = results_dir / "round-metadata.json"
+    if not metadata_file.exists():
+        return []
+
+    metadata = json.loads(metadata_file.read_text())
+    expected = set(metadata.get("task_ids", []))
+    actual_list = [entry.get("id") for entry in verdicts]
+    actual = set(actual_list)
+    errors = []
+
+    duplicates = sorted({task_id for task_id in actual_list if actual_list.count(task_id) > 1})
+    if duplicates:
+        errors.append("duplicate judge verdicts: " + ", ".join(duplicates))
+
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if missing:
+        errors.append("missing judge verdicts: " + ", ".join(missing))
+    if unexpected:
+        errors.append("unexpected judge verdicts: " + ", ".join(unexpected))
+
+    return errors
+
+
 def main() -> int:
     output_file, round_name = sys.argv[1], sys.argv[2]
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
     results_dir = EXPERIMENT_ROOT / "results" / round_name
 
     verdicts = json.load(open(output_file))["result"]
+    errors = validate_verdicts(results_dir, verdicts)
+    if errors:
+        for error in errors:
+            print(f"ingest-judges.py: {error}", file=sys.stderr)
+        return 1
+
+    validate_trials = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "validate-round.py"),
+            round_name,
+            "--require-trials-complete",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if validate_trials.returncode != 0:
+        print(validate_trials.stdout, end="")
+        print(validate_trials.stderr, file=sys.stderr)
+        return validate_trials.returncode
+
     for entry in verdicts:
         tid, v = entry["id"], entry["verdict"]
         (results_dir / tid / "judge.json").write_text(
             json.dumps(v, indent=2, ensure_ascii=False) + "\n"
         )
     print(f"{len(verdicts)} verdicts persisted")
+
+    validate = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "validate-round.py"),
+            round_name,
+            "--require-judged",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if validate.returncode != 0:
+        print(validate.stdout, end="")
+        print(validate.stderr, file=sys.stderr)
+        return validate.returncode
 
     proc = subprocess.run(
         ["python3", str(EXPERIMENT_ROOT / "tools" / "aggregate-round.py"), str(results_dir)],

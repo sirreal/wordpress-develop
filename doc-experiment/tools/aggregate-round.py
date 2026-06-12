@@ -19,33 +19,81 @@ import sys
 from pathlib import Path
 
 
+def load_metadata(results_dir: Path) -> dict | None:
+    metadata_file = results_dir / "round-metadata.json"
+    if not metadata_file.exists():
+        return None
+    return json.loads(metadata_file.read_text())
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: aggregate-round.py <results-dir>", file=sys.stderr)
         return 2
 
     results_dir = Path(sys.argv[1])
+    metadata = load_metadata(results_dir)
+    expected_task_ids = metadata.get("task_ids", []) if metadata else None
+    expected_trials = metadata.get("trials_per_task") if metadata else None
     task_scores = {}
+    errors = []
 
-    for task_dir in sorted(p for p in results_dir.iterdir() if p.is_dir()):
+    if expected_task_ids is not None:
+        task_dirs = [results_dir / task_id for task_id in expected_task_ids]
+        unexpected_dirs = sorted(
+            p.name
+            for p in results_dir.iterdir()
+            if p.is_dir() and p.name not in set(expected_task_ids)
+        )
+        if unexpected_dirs:
+            errors.append("unexpected task result directories: " + ", ".join(unexpected_dirs))
+    else:
+        task_dirs = sorted(p for p in results_dir.iterdir() if p.is_dir())
+
+    for task_dir in task_dirs:
+        if not task_dir.exists():
+            errors.append(f"missing task result directory: {task_dir.name}")
+            continue
         judge_file = task_dir / "judge.json"
         adherence_by_trial = {}
         if judge_file.exists():
             judge = json.loads(judge_file.read_text())
             for trial in judge.get("trials", []):
                 adherence_by_trial[trial["trial_id"]] = trial["adherence"]
+        elif metadata is not None:
+            errors.append(f"{task_dir.name}: missing judge.json")
 
         trial_scores = []
         trial_details = []
-        for trial_dir in sorted(p for p in task_dir.iterdir() if p.is_dir()):
+        trial_dirs = sorted(p for p in task_dir.iterdir() if p.is_dir())
+        if expected_trials is not None:
+            expected_trial_names = {f"trial-{i}" for i in range(1, expected_trials + 1)}
+            actual_trial_names = {p.name for p in trial_dirs}
+            missing_trials = sorted(expected_trial_names - actual_trial_names)
+            unexpected_trials = sorted(actual_trial_names - expected_trial_names)
+            if missing_trials:
+                errors.append(f"{task_dir.name}: missing trials: {', '.join(missing_trials)}")
+            if unexpected_trials:
+                errors.append(f"{task_dir.name}: unexpected trials: {', '.join(unexpected_trials)}")
+            trial_dirs = [task_dir / name for name in sorted(expected_trial_names)]
+
+        for trial_dir in trial_dirs:
             execution_file = trial_dir / "execution.json"
             if not execution_file.exists():
+                if metadata is not None:
+                    errors.append(f"{task_dir.name}/{trial_dir.name}: missing execution.json")
                 continue
             execution = json.loads(execution_file.read_text())
             total = execution["total"]
             passed = execution["passed"] or 0
             pass_fraction = passed / total if total else 0.0
-            adherence = adherence_by_trial.get(trial_dir.name, 0)
+            if trial_dir.name not in adherence_by_trial:
+                if metadata is not None:
+                    errors.append(f"{task_dir.name}/{trial_dir.name}: missing judge adherence")
+                    continue
+                adherence = 0
+            else:
+                adherence = adherence_by_trial[trial_dir.name]
             score = 0.7 * pass_fraction * 100 + 0.3 * adherence
             trial_scores.append(score)
             trial_details.append(
@@ -64,14 +112,14 @@ def main() -> int:
                 "trials": trial_details,
             }
 
+    if errors:
+        for error in errors:
+            print(f"aggregate-round.py: {error}", file=sys.stderr)
+        return 1
+
     if not task_scores:
         print("No results found.", file=sys.stderr)
         return 1
-
-    metadata = None
-    metadata_file = results_dir / "round-metadata.json"
-    if metadata_file.exists():
-        metadata = json.loads(metadata_file.read_text())
 
     # Per-category breakdowns from corpus labels (concept, role, split).
     corpus_dir = Path(__file__).resolve().parent.parent / "corpus"

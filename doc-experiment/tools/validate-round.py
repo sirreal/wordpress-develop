@@ -237,6 +237,16 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero unless the round is fully scored",
     )
+    parser.add_argument(
+        "--require-judged",
+        action="store_true",
+        help="Exit non-zero unless the round has complete trials and judges",
+    )
+    parser.add_argument(
+        "--require-trials-complete",
+        action="store_true",
+        help="Exit non-zero unless every expected trial has execution results",
+    )
     args = parser.parse_args()
 
     report = validate_round(round_dir(args.round))
@@ -246,6 +256,14 @@ def main() -> int:
         print_text(report)
 
     if report["errors"]:
+        return 1
+    if args.require_trials_complete and report["lifecycle"] not in {
+        "trials-complete",
+        "judged",
+        "scored",
+    }:
+        return 1
+    if args.require_judged and report["lifecycle"] not in {"judged", "scored"}:
         return 1
     if args.require_scored and report["lifecycle"] != "scored":
         return 1

@@ -20,6 +20,12 @@ Added `workflow-args.py` to emit trial and judge workflow JSON directly from
 `round-metadata.json`, avoiding hand transcription of task IDs, scratch paths,
 and model policy when the runner becomes available.
 
+Hardened trial and judge ingestion plus aggregation for metadata-backed rounds:
+trial outputs must match the recorded task/trial matrix, judge outputs must
+cover the recorded task set, and aggregation now refuses missing judges,
+missing executions, or mismatched task directories instead of silently scoring
+them.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
