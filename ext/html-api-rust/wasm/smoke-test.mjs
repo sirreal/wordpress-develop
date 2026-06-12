@@ -613,6 +613,7 @@ const coercedToken = new WP_HTML_Token(123, 456, "0");
 assert.equal(coercedToken.bookmark_name, "123");
 assert.equal(coercedToken.node_name, "456");
 assert.equal(coercedToken.has_self_closing_flag, false);
+assert.equal(new WP_HTML_Token("mark", "DIV", NaN).has_self_closing_flag, true);
 assert.equal(new WP_HTML_Token(null, "DIV", "1").bookmark_name, null);
 assert.throws(
 	() => new WP_HTML_Token("mark", null, false),

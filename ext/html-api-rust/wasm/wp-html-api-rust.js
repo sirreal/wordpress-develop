@@ -7927,6 +7927,10 @@ function phpBooleanParameterCoerce(value, parameterName) {
 		return value !== "" && value !== "0";
 	}
 
+	if (typeof value === "number" && Number.isNaN(value)) {
+		return true;
+	}
+
 	return Boolean(value);
 }
 
