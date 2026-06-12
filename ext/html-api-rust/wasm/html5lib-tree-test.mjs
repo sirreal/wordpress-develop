@@ -9,6 +9,7 @@ const testHtmlFilter = process.env.HTML5LIB_TEST_HTML_FILTER ?? "";
 const testContextFilter = process.env.HTML5LIB_TEST_CONTEXT_FILTER ?? "";
 const includeKnownSkippedTests = process.env.HTML5LIB_INCLUDE_KNOWN_SKIPS === "1";
 const unsupportedSampleLimit = Number.parseInt(process.env.HTML5LIB_UNSUPPORTED_SAMPLES ?? "0", 10);
+const maxBroadUnsupportedTests = 152;
 const supportedFragmentContexts = new Set([
 	"body",
 	"caption",
@@ -503,6 +504,10 @@ for (const file of files) {
 assert.deepEqual(staleSkippedTests, [], "Remove passing tests from skippedTests.");
 if (testFilter === "" && testHtmlFilter === "" && testContextFilter === "") {
 	assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
+	assert.ok(
+		summary.skippedUnsupported <= maxBroadUnsupportedTests,
+		`Expected at most ${maxBroadUnsupportedTests} unsupported html5lib tests, found ${summary.skippedUnsupported}.`,
+	);
 }
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
 if (unsupportedSampleLimit > 0) {
