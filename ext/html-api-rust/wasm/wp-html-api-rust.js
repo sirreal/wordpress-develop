@@ -1664,7 +1664,8 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			return runtime.withEncoded(name, ({ ptr, len }) => runtime.withOutSlice((out) => {
+			const attributeName = phpStringParameterCoerce(name, "name");
+			return runtime.withEncoded(attributeName, ({ ptr, len }) => runtime.withOutSlice((out) => {
 				const result = wasm.wp_html_api_rust_tag_processor_get_attribute(this.pointer, ptr, len, out);
 				if (result === 0) {
 					return null;
@@ -1682,7 +1683,8 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			return runtime.withEncoded(prefix, ({ ptr, len }) => runtime.withOutSlice((out) => {
+			const attributePrefix = phpStringParameterCoerce(prefix, "prefix");
+			return runtime.withEncoded(attributePrefix, ({ ptr, len }) => runtime.withOutSlice((out) => {
 				const result = wasm.wp_html_api_rust_tag_processor_get_attribute_names_with_prefix(this.pointer, ptr, len, out);
 				if (result === 0) {
 					return null;
@@ -1698,7 +1700,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const attributeName = String(name);
+			const attributeName = phpStringParameterCoerce(name, "name");
 			if (!isValidAttributeName(attributeName)) {
 				return false;
 			}
@@ -1710,7 +1712,7 @@ export function createHtmlApi(wasm) {
 			} else if (value === true) {
 				valueKind = 1;
 			} else {
-				encodedValue = runtime.encode(value);
+				encodedValue = runtime.encode(phpStringParameterCoerce(value, "value"));
 			}
 
 			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, (nameBytes) => (
@@ -1733,7 +1735,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(name, ({ ptr, len }) => (
+			const attributeName = phpStringParameterCoerce(name, "name");
+			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_attribute(this.pointer, ptr, len)
 			)));
 		}
@@ -1744,7 +1747,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(className, ({ ptr, len }) => (
+			const normalizedClassName = phpStringParameterCoerce(className, "class_name");
+			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_add_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
 		}
@@ -1755,7 +1759,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(className, ({ ptr, len }) => (
+			const normalizedClassName = phpStringParameterCoerce(className, "class_name");
+			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
 		}
@@ -1770,7 +1775,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return runtime.withEncoded(className, ({ ptr, len }) => {
+			const wantedClass = phpStringParameterCoerce(className, "wanted_class");
+			return runtime.withEncoded(wantedClass, ({ ptr, len }) => {
 				const result = wasm.wp_html_api_rust_tag_processor_has_class(this.pointer, ptr, len, this.#isQuirksMode());
 				return result === 0 ? null : result === 2;
 			});
@@ -3953,7 +3959,7 @@ export function createHtmlApi(wasm) {
 
 		#getVirtualAttribute(name) {
 			const attributes = this.current_virtual?.attributes ?? [];
-			const wantedName = String(name);
+			const wantedName = phpStringParameterCoerce(name, "name");
 			const normalizedWantedName = this.current_token_namespace === "html" ? asciiLower(wantedName) : wantedName;
 
 			for (const attribute of attributes) {
@@ -3968,7 +3974,7 @@ export function createHtmlApi(wasm) {
 
 		#getVirtualAttributeNamesWithPrefix(prefix) {
 			const attributes = this.current_virtual?.attributes ?? [];
-			const wantedPrefix = String(prefix);
+			const wantedPrefix = phpStringParameterCoerce(prefix, "prefix");
 			const normalizedWantedPrefix = this.current_token_namespace === "html" ? asciiLower(wantedPrefix) : wantedPrefix;
 			const names = [];
 
@@ -3983,7 +3989,8 @@ export function createHtmlApi(wasm) {
 		}
 
 		#virtualHasClass(className) {
-			const comparableClassName = this.#comparableClassName(String(className).replaceAll("\0", "\uFFFD"));
+			const wantedClass = phpStringParameterCoerce(className, "wanted_class");
+			const comparableClassName = this.#comparableClassName(wantedClass.replaceAll("\0", "\uFFFD"));
 			return this.#virtualClassEntries().some((entry) => entry.comparable === comparableClassName);
 		}
 

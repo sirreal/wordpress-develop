@@ -1680,6 +1680,29 @@ assert.deepEqual(tags.class_list(), ["active"]);
 assert.equal(tags.get_updated_html(), '<div class="one"><span class="active" data-id="8">Hi</span></div>');
 tags.destroy();
 
+const coercedAttributeTags = new WP_HTML_Tag_Processor('<div 1="one" class="1 0" data-=x data-1=y></div>');
+assert.equal(coercedAttributeTags.next_tag("div"), true);
+assert.equal(coercedAttributeTags.get_attribute(true), "one");
+assert.equal(coercedAttributeTags.get_attribute(false), null);
+assert.deepEqual(coercedAttributeTags.get_attribute_names_with_prefix(true), ["1"]);
+assert.deepEqual(coercedAttributeTags.get_attribute_names_with_prefix(false), ["1", "class", "data-", "data-1"]);
+assert.equal(coercedAttributeTags.has_class(true), true);
+assert.equal(coercedAttributeTags.has_class(false), false);
+assert.equal(coercedAttributeTags.add_class(true), true);
+assert.equal(coercedAttributeTags.remove_class(false), true);
+assert.equal(coercedAttributeTags.set_attribute(false, "v"), false);
+assert.equal(coercedAttributeTags.set_attribute("data-num", 123), true);
+assert.equal(coercedAttributeTags.get_attribute("data-num"), "123");
+assert.throws(
+	() => coercedAttributeTags.get_attribute({ name: "class" }),
+	TypeError,
+);
+assert.throws(
+	() => coercedAttributeTags.set_attribute("data-object", {}),
+	TypeError,
+);
+coercedAttributeTags.destroy();
+
 const invalidAttributeNameTags = new WP_HTML_Tag_Processor("<div></div>");
 assert.equal(invalidAttributeNameTags.next_tag("div"), true);
 for (const name of [
