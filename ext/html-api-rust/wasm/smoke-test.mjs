@@ -3810,6 +3810,18 @@ assert.equal(
 	WP_HTML_Processor.normalize("<a><p><a></a></p></a>"),
 	"<a></a><p><a></a><a></a></p>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<a><div><style></style><address><a>"),
+	"<a></a><div><a><style></style></a><address><a></a><a></a></address></div>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><div supported><a unsupported></div></a>"),
+	"<a></a><div supported><a></a><a unsupported></a></div>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><center><title></title><a>"),
+	"<a></a><center><a><title></title></a><a></a></center>",
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<a><b>1<a>2"),
@@ -3853,15 +3865,10 @@ for (const html of [
 }
 
 for (const html of [
-	'<a><div supported><a unsupported></div></a>',
 	"<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
 ]) {
 	const unsupportedAdoptionProcessor = WP_HTML_Processor.create_fragment(html);
 	while (unsupportedAdoptionProcessor.next_token() && unsupportedAdoptionProcessor.get_attribute("supported") === null) {
-	}
-	if (html.includes("supported")) {
-		assert.equal(unsupportedAdoptionProcessor.get_attribute("supported"), true);
-		assert.equal(unsupportedAdoptionProcessor.get_last_error(), null);
 	}
 	assert.equal(unsupportedAdoptionProcessor.next_token(), false);
 	assert.equal(unsupportedAdoptionProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);

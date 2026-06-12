@@ -208,6 +208,8 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
+const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "CENTER", "DIV"]);
+const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
 	"COL",
@@ -3691,6 +3693,7 @@ export function createHtmlApi(wasm) {
 			if (
 				allowVirtualPreclosures &&
 				(
+					this.#queueNestedAnchorBlockAdoptionPreclosure(tagName) ||
 					this.#queueParagraphAdoptionFormattingPreclosure(tagName) ||
 					this.#queueVirtualPreclosuresForStartTag(tagName) ||
 					this.#queueVirtualOpenersForStartTag(tagName)
@@ -3815,7 +3818,8 @@ export function createHtmlApi(wasm) {
 				allowVirtualPreclosures &&
 				(
 					FORMATTING_ELEMENTS.has(tagName) ||
-					ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(tagName)
+					ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(tagName) ||
+					this.#shouldReconstructActiveAnchorForStartTag(tagName)
 				) &&
 				this.#queueReconstructActiveFormattingElements()
 			) {
@@ -4366,6 +4370,62 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#queueNestedAnchorBlockAdoptionPreclosure(tagName) {
+			if (!NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_elements[topIndex] !== "A" ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				this.#lastActiveFormattingElementIndex("A") === -1 ||
+				!this.#nestedAnchorStartPrecedesBlockEnd(tagName)
+			) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(topIndex);
+			return true;
+		}
+
+		#nestedAnchorStartPrecedesBlockEnd(tagName) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!nextTag.is_closing && nextTag.tag_name === "A") {
+					return true;
+				}
+
+				if (
+					(nextTag.is_closing && (nextTag.tag_name === "A" || nextTag.tag_name === tagName)) ||
+					(!nextTag.is_closing && nextTag.tag_name === "TABLE")
+				) {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#shouldReconstructActiveAnchorForStartTag(tagName) {
+			return (
+				NESTED_ANCHOR_RECONSTRUCTING_START_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex("A") !== -1 &&
+				this.#lastOpenElementIndex("A", "html") === -1
+			);
 		}
 
 		#queueParagraphAdoptionFormattingPreclosure(tagName) {
