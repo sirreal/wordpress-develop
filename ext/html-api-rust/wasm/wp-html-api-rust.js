@@ -5037,20 +5037,24 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
-			if (tagName === "A") {
-				const anchorIndex = this.#lastOpenElementIndex("A", "html");
-				if (anchorIndex !== -1) {
-					const activeAnchorIndex = this.#lastActiveFormattingElementIndex("A");
+			if (tagName === "A" || tagName === "NOBR") {
+				const formattingElementIndex = this.#lastOpenElementIndex(tagName, "html");
+				if (formattingElementIndex !== -1) {
+					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(tagName);
 					if (
-						(activeAnchorIndex !== -1 && activeAnchorIndex < this.active_formatting_elements.length - 1) ||
-						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, anchorIndex)
+						(activeFormattingElementIndex !== -1 && activeFormattingElementIndex < this.active_formatting_elements.length - 1) ||
+						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, formattingElementIndex)
 					) {
-						this.#bailUnsupported("Cannot process nested A elements which require adoption agency reconstruction.");
+						this.#bailUnsupported(
+							tagName === "A"
+								? "Cannot process nested A elements which require adoption agency reconstruction."
+								: "Cannot process nested NOBR elements which require adoption agency reconstruction.",
+						);
 						return true;
 					}
 
-					this.#queueVirtualPopsFrom(anchorIndex);
-					this.#removeActiveFormattingElement("A");
+					this.#queueVirtualPopsFrom(formattingElementIndex);
+					this.#removeActiveFormattingElement(tagName);
 					return true;
 				}
 			}
