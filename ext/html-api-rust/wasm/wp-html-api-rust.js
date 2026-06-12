@@ -7934,7 +7934,171 @@ function phpNumberToString(value) {
 	if (value === -Infinity) {
 		return "-INF";
 	}
-	return String(value);
+	if (Object.is(value, -0)) {
+		return "-0";
+	}
+	if (value === 0) {
+		return "0";
+	}
+	return phpFloatToString(value);
+}
+
+const PHP_FLOAT_STRING_PRECISION = 14;
+
+const cachedPowersOfTen = new Map([[0, 1n]]);
+
+function powerOfTen(exponent) {
+	let power = cachedPowersOfTen.get(exponent);
+	if (power === undefined) {
+		power = 10n ** BigInt(exponent);
+		cachedPowersOfTen.set(exponent, power);
+	}
+	return power;
+}
+
+function doubleParts(value) {
+	const buffer = new ArrayBuffer(8);
+	const view = new DataView(buffer);
+	view.setFloat64(0, Math.abs(value), false);
+
+	const high = view.getUint32(0, false);
+	const low = view.getUint32(4, false);
+	const exponentBits = (high >>> 20) & 0x7ff;
+	const significandBits = (BigInt(high & 0xfffff) << 32n) | BigInt(low);
+
+	if (exponentBits === 0) {
+		return {
+			exponent: -1074,
+			significand: significandBits,
+		};
+	}
+
+	return {
+		exponent: exponentBits - 1023 - 52,
+		significand: (1n << 52n) | significandBits,
+	};
+}
+
+function compareDoublePartsToPowerOfTen(parts, decimalExponent) {
+	let leftNumerator = parts.significand;
+	let leftDenominator = 1n;
+	let rightNumerator = 1n;
+	let rightDenominator = 1n;
+
+	if (parts.exponent >= 0) {
+		leftNumerator <<= BigInt(parts.exponent);
+	} else {
+		leftDenominator <<= BigInt(-parts.exponent);
+	}
+
+	if (decimalExponent >= 0) {
+		rightNumerator = powerOfTen(decimalExponent);
+	} else {
+		rightDenominator = powerOfTen(-decimalExponent);
+	}
+
+	const left = leftNumerator * rightDenominator;
+	const right = rightNumerator * leftDenominator;
+
+	return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function decimalExponentForDouble(value, parts) {
+	let decimalExponent = Math.floor(Math.log10(Math.abs(value)));
+
+	while (compareDoublePartsToPowerOfTen(parts, decimalExponent) < 0) {
+		decimalExponent -= 1;
+	}
+	while (compareDoublePartsToPowerOfTen(parts, decimalExponent + 1) >= 0) {
+		decimalExponent += 1;
+	}
+
+	return decimalExponent;
+}
+
+function roundQuotientToEven(numerator, denominator) {
+	const quotient = numerator / denominator;
+	const doubledRemainder = (numerator % denominator) * 2n;
+
+	if (
+		doubledRemainder > denominator ||
+		(doubledRemainder === denominator && quotient % 2n === 1n)
+	) {
+		return quotient + 1n;
+	}
+
+	return quotient;
+}
+
+function roundedFloatSignificand(parts, decimalExponent) {
+	const scale = PHP_FLOAT_STRING_PRECISION - 1 - decimalExponent;
+	let numerator = parts.significand;
+	let denominator = 1n;
+
+	if (parts.exponent >= 0) {
+		numerator <<= BigInt(parts.exponent);
+	} else {
+		denominator <<= BigInt(-parts.exponent);
+	}
+
+	if (scale >= 0) {
+		numerator *= powerOfTen(scale);
+	} else {
+		denominator *= powerOfTen(-scale);
+	}
+
+	return roundQuotientToEven(numerator, denominator);
+}
+
+function trimTrailingZeros(value) {
+	return value.replace(/0+$/, "");
+}
+
+function formatPhpScientificFloat(sign, significand, decimalExponent) {
+	const digits = significand.toString().padStart(PHP_FLOAT_STRING_PRECISION, "0");
+	const fraction = trimTrailingZeros(digits.slice(1)) || "0";
+	const exponentSign = decimalExponent >= 0 ? "+" : "";
+
+	return `${sign}${digits[0]}.${fraction}E${exponentSign}${decimalExponent}`;
+}
+
+function formatPhpFixedFloat(sign, significand, decimalExponent) {
+	const digits = significand.toString().padStart(PHP_FLOAT_STRING_PRECISION, "0");
+	const decimalPoint = decimalExponent + 1;
+	let integer;
+	let fraction;
+
+	if (decimalPoint <= 0) {
+		integer = "0";
+		fraction = `${"0".repeat(-decimalPoint)}${digits}`;
+	} else if (decimalPoint >= digits.length) {
+		integer = `${digits}${"0".repeat(decimalPoint - digits.length)}`;
+		fraction = "";
+	} else {
+		integer = digits.slice(0, decimalPoint);
+		fraction = digits.slice(decimalPoint);
+	}
+
+	fraction = trimTrailingZeros(fraction);
+
+	return fraction === "" ? `${sign}${integer}` : `${sign}${integer}.${fraction}`;
+}
+
+function phpFloatToString(value) {
+	const sign = value < 0 ? "-" : "";
+	const parts = doubleParts(value);
+	let decimalExponent = decimalExponentForDouble(value, parts);
+	let significand = roundedFloatSignificand(parts, decimalExponent);
+	const significandLimit = powerOfTen(PHP_FLOAT_STRING_PRECISION);
+
+	if (significand >= significandLimit) {
+		significand /= 10n;
+		decimalExponent += 1;
+	}
+
+	return decimalExponent < -4 || decimalExponent >= PHP_FLOAT_STRING_PRECISION
+		? formatPhpScientificFloat(sign, significand, decimalExponent)
+		: formatPhpFixedFloat(sign, significand, decimalExponent);
 }
 
 function phpBooleanParameterCoerce(value, parameterName) {

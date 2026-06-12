@@ -422,6 +422,8 @@ assert.equal(WP_HTML_Decoder.decode_text_node("&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode_text_node(false), "");
 assert.equal(WP_HTML_Decoder.decode_text_node(true), "1");
 assert.equal(WP_HTML_Decoder.decode_text_node(NaN), "NAN");
+assert.equal(WP_HTML_Decoder.decode_text_node(-0), "-0");
+assert.equal(WP_HTML_Decoder.decode_text_node(1.23456789012345), "1.2345678901235");
 assert.throws(
 	() => WP_HTML_Decoder.decode_text_node({ text: "&copy;" }),
 	TypeError,
@@ -429,9 +431,11 @@ assert.throws(
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin"), "&notin");
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin;"), "∉");
 assert.equal(WP_HTML_Decoder.decode_attribute(true), "1");
+assert.equal(WP_HTML_Decoder.decode_attribute(1e-5), "1.0E-5");
 assert.equal(WP_HTML_Decoder.decode_attribute(Infinity), "INF");
 assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
 assert.equal(WP_HTML_Decoder.decode("data", false), "");
+assert.equal(WP_HTML_Decoder.decode("data", 1e20), "1.0E+20");
 assert.equal(WP_HTML_Decoder.decode("data", -Infinity), "-INF");
 assert.equal(WP_HTML_Decoder.decode(false, "&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode(null, "&notin"), "¬in");
@@ -1760,6 +1764,14 @@ assert.equal(coercedAttributeTags.set_attribute(false, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute(null, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute("data-num", 123), true);
 assert.equal(coercedAttributeTags.get_attribute("data-num"), "123");
+assert.equal(coercedAttributeTags.set_attribute("data-round", 1.23456789012345), true);
+assert.equal(coercedAttributeTags.get_attribute("data-round"), "1.2345678901235");
+assert.equal(coercedAttributeTags.set_attribute("data-small", 1e-5), true);
+assert.equal(coercedAttributeTags.get_attribute("data-small"), "1.0E-5");
+assert.equal(coercedAttributeTags.set_attribute("data-large", 1e20), true);
+assert.equal(coercedAttributeTags.get_attribute("data-large"), "1.0E+20");
+assert.equal(coercedAttributeTags.set_attribute("data-negative-zero", -0), true);
+assert.equal(coercedAttributeTags.get_attribute("data-negative-zero"), "-0");
 assert.equal(coercedAttributeTags.set_attribute("data-nan", NaN), true);
 assert.equal(coercedAttributeTags.get_attribute("data-nan"), "NAN");
 assert.equal(coercedAttributeTags.set_attribute("data-inf", Infinity), true);
@@ -3453,6 +3465,15 @@ assert.equal(processorBookmarkScalarNames.release_bookmark("NAN"), true);
 assert.equal(processorBookmarkScalarNames.set_bookmark(Infinity), true);
 assert.equal(processorBookmarkScalarNames.has_bookmark("INF"), true);
 assert.equal(processorBookmarkScalarNames.release_bookmark("INF"), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(1e-5), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("1.0E-5"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark("1.0E-5"), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(1e20), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("1.0E+20"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark("1.0E+20"), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(-0), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("-0"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark("-0"), true);
 assert.throws(
 	() => processorBookmarkScalarNames.set_bookmark({}),
 	TypeError,
