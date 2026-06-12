@@ -4036,6 +4036,13 @@ export function createHtmlApi(wasm) {
 			this.parser_state = token.tokenType === "#comment"
 				? STATE_COMMENT
 				: token.tokenType === "#tag" ? STATE_MATCHED_TAG : STATE_TEXT_NODE;
+			if (token.tokenType === "#text") {
+				this.text_node_classification = token.textClassification ?? (
+					splitHtmlWhitespace(token.modifiableText ?? "").length === 0
+						? WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
+						: WP_HTML_Tag_Processor.TEXT_IS_GENERIC
+				);
+			}
 			this.current_token_namespace = token.namespaceName ?? this.current_namespace;
 			this.breadcrumbs = [...token.breadcrumbs];
 			return true;
@@ -8151,7 +8158,9 @@ export function createHtmlApi(wasm) {
 					)
 				)
 			) {
-				return false;
+				return this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+					!this.#currentTextHasLeadingIgnorableTableText() &&
+					this.#deferCurrentTextAsTableChild();
 			}
 
 			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
@@ -8238,6 +8247,20 @@ export function createHtmlApi(wasm) {
 
 		#hasDeferredTableChildOpener(tagName) {
 			return this.deferred_table_child_openers.some((token) => token.tagName === tagName);
+		}
+
+		#deferCurrentTextAsTableChild() {
+			this.deferred_table_child_openers.push({
+				tokenType: "#text",
+				tokenName: "#text",
+				modifiableText: this.get_modifiable_text() ?? "",
+				namespaceName: this.current_namespace,
+				breadcrumbs: this.#breadcrumbStack("#text"),
+				attributes: [],
+				textClassification: this.text_node_classification,
+			});
+			this.skip_current_token = true;
+			return true;
 		}
 
 		#isFosteredVoidTableStartTag(tagName) {
