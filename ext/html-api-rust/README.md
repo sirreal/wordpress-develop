@@ -67,5 +67,6 @@ breadcrumbs, breadcrumb queries, void-element handling, namespaces, scoped end
 tags, frameset handling, implied closures, foster parenting, and adoption-agency
 reconstruction. The html5lib tree-construction harness runs with zero
 unsupported cases, aside from the known WordPress duplicate shell-attribute
-skips. Some direct fragment and normalization paths still deliberately surface
-`WP_HTML_Unsupported_Exception` diagnostics for guarded parser states.
+skips. `WP_HTML_Unsupported_Exception` remains part of the public API for
+guarded parser states, such as tentative encoding detection from unsupported
+META tags.
