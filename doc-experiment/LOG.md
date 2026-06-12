@@ -80,6 +80,11 @@ Round validation now verifies recorded HTML API source digests against their
 recorded git ref, in addition to staged scratch hashes. This makes round 18's
 metadata provenance check executable instead of merely documentary.
 
+Round validation now also content-checks trial artifacts before reporting a
+round as trial-complete: candidate files must be non-empty PHP, responses must
+carry explanation/confidence, and execution files must contain harness
+pass/total/cases data.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

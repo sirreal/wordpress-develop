@@ -157,6 +157,75 @@ def validate_source_digests(metadata: dict | None) -> list[str]:
     return errors
 
 
+def validate_trial_artifacts(trial_dir: Path) -> list[str]:
+    errors = []
+    candidate_file = trial_dir / "candidate.php"
+    response_file = trial_dir / "response.json"
+    execution_file = trial_dir / "execution.json"
+
+    candidate = candidate_file.read_text()
+    if not candidate.strip():
+        errors.append(f"{trial_dir.parent.name}/{trial_dir.name}: candidate.php is empty")
+    if not candidate.lstrip().startswith("<?php"):
+        errors.append(
+            f"{trial_dir.parent.name}/{trial_dir.name}: candidate.php must start with <?php"
+        )
+
+    try:
+        response = json.loads(response_file.read_text())
+    except json.JSONDecodeError as exc:
+        errors.append(
+            f"{trial_dir.parent.name}/{trial_dir.name}: response.json is invalid JSON: {exc}"
+        )
+        response = None
+    if isinstance(response, dict):
+        if response.get("ok") is not None and not isinstance(response.get("ok"), bool):
+            errors.append(f"{trial_dir.parent.name}/{trial_dir.name}: response ok must be boolean")
+        explanation = response.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: response explanation must be non-empty"
+            )
+        confidence = response.get("confidence")
+        if not isinstance(confidence, int) or confidence < 0 or confidence > 100:
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: response confidence must be integer 0-100"
+            )
+    elif response is not None:
+        errors.append(f"{trial_dir.parent.name}/{trial_dir.name}: response.json must be an object")
+
+    try:
+        execution = json.loads(execution_file.read_text())
+    except json.JSONDecodeError as exc:
+        errors.append(
+            f"{trial_dir.parent.name}/{trial_dir.name}: execution.json is invalid JSON: {exc}"
+        )
+        execution = None
+    if isinstance(execution, dict):
+        passed = execution.get("passed")
+        total = execution.get("total")
+        if not isinstance(passed, int) or passed < 0:
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: execution passed must be a non-negative integer"
+            )
+        if not isinstance(total, int) or total < 1:
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: execution total must be a positive integer"
+            )
+        if isinstance(passed, int) and isinstance(total, int) and passed > total:
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: execution passed exceeds total"
+            )
+        if not isinstance(execution.get("cases"), list):
+            errors.append(
+                f"{trial_dir.parent.name}/{trial_dir.name}: execution cases must be an array"
+            )
+    elif execution is not None:
+        errors.append(f"{trial_dir.parent.name}/{trial_dir.name}: execution.json must be an object")
+
+    return errors
+
+
 def validate_round(results_dir: Path) -> dict:
     metadata, metadata_tasks, metadata_trials = expected_from_metadata(results_dir)
     summary, summary_tasks, summary_trials = expected_from_summary(results_dir)
@@ -210,6 +279,7 @@ def validate_round(results_dir: Path) -> dict:
                     {"trial": trial_name, "missing_files": missing_files}
                 )
             else:
+                errors.extend(validate_trial_artifacts(trial_dir))
                 complete_trials += 1
 
         judge_file = task_dir / "judge.json"
