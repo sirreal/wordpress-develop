@@ -279,6 +279,9 @@ assert.equal(apiFromDataView.version(), "0.1.0");
 const apiFromModule = await loadWasm(await WebAssembly.compile(wasmBytes));
 assert.equal(apiFromModule.version(), "0.1.0");
 
+const apiFromDefaultLocation = await loadWasm();
+assert.equal(apiFromDefaultLocation.version(), "0.1.0");
+
 const originalProcessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
 const originalFetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
 try {
