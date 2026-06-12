@@ -3438,7 +3438,10 @@ export function createHtmlApi(wasm) {
 					(
 						this.#queueSpecialStartAdoptionPreclosedFormattingElementsForText() ||
 						this.#queueParagraphAdoptionPreclosedFormattingElementsForText() ||
-						this.#queueReconstructActiveFormattingElements()
+						(
+							!this.#isInTableTextContext() &&
+							this.#queueReconstructActiveFormattingElements()
+						)
 					)
 				) {
 					this.pending_real_token = true;
@@ -3802,6 +3805,16 @@ export function createHtmlApi(wasm) {
 			}
 
 			const fosterParentedTableIndex = this.#fosterParentedStartTableIndex(tagName);
+
+			if (
+				allowVirtualPreclosures &&
+				this.#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) &&
+				this.#queueReconstructActiveFormattingElementsBeforeDeferredTable()
+			) {
+				this.pending_real_token = true;
+				this.pending_real_parser_state = this.parser_state;
+				return;
+			}
 
 			if (this.#representFosteredVoidStartBeforeDeferredTable(tagName)) {
 				return;
@@ -8927,7 +8940,25 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "A" || tagName === "B" || tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+		}
+
+		#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) {
+			if (
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html" ||
+				!this.#hasUnreconstructedActiveFormattingElement()
+			) {
+				return false;
+			}
+
+			return (
+				FOREIGN_CONTENT_START_TAGS.has(tagName) ||
+				tagName === "SELECT" ||
+				this.#isFosteredVoidTableStartTag(tagName) ||
+				this.#isFosteredInputTableStartTag(tagName) ||
+				this.#isFosteredAtomicTableStartTag(tagName)
+			);
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
@@ -8971,7 +9002,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.current_token_namespace = this.#namespaceForCurrentStartTag(super.get_tag());
-			this.breadcrumbs = this.#breadcrumbStack(tagName, tableIndex);
+			const endIndex = this.#currentFosterParentedTableIndex() === tableIndex
+				? this.open_elements.length
+				: tableIndex;
+			this.breadcrumbs = this.#breadcrumbStack(tagName, endIndex);
 			return true;
 		}
 
@@ -8991,7 +9025,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.current_token_namespace = "html";
-			this.breadcrumbs = this.#breadcrumbStack(tagName, tableIndex);
+			const endIndex = this.#currentFosterParentedTableIndex() === tableIndex
+				? this.open_elements.length
+				: tableIndex;
+			this.breadcrumbs = this.#breadcrumbStack(tagName, endIndex);
 			return true;
 		}
 

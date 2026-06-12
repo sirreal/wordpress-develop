@@ -5379,6 +5379,72 @@ assert.deepEqual(tableAnchorFosterTextProcessor.get_breadcrumbs(), ["HTML", "BOD
 assert.equal(tableAnchorFosterTextProcessor.get_last_error(), null);
 tableAnchorFosterTextProcessor.destroy();
 
+const tableCenterFontFosterProcessor = WP_HTML_Processor.create_full_parser(
+	"<table><center> <font>a</center> <img> <tr><td> </td> </tr> </table>",
+);
+assert.equal(tableCenterFontFosterProcessor.next_tag("center"), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "CENTER"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "CENTER", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.next_tag("font"), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "CENTER", "FONT"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), "a");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "CENTER", "FONT", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "FONT");
+assert.equal(tableCenterFontFosterProcessor.is_virtual(), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "CENTER"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "CENTER");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "FONT");
+assert.equal(tableCenterFontFosterProcessor.is_virtual(), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "FONT"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "IMG");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "FONT", "IMG"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "FONT", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "FONT");
+assert.equal(tableCenterFontFosterProcessor.is_virtual(), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "TABLE");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.next_tag("td"), true);
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#tag");
+assert.equal(tableCenterFontFosterProcessor.get_tag(), "TD");
+assert.equal(tableCenterFontFosterProcessor.next_token(), true);
+assert.equal(tableCenterFontFosterProcessor.get_token_type(), "#text");
+assert.equal(tableCenterFontFosterProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableCenterFontFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "#text"]);
+assert.equal(tableCenterFontFosterProcessor.get_last_error(), null);
+tableCenterFontFosterProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
