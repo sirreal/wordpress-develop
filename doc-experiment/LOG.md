@@ -18,6 +18,10 @@ drift, the latest completed score, current corpus task IDs, source/tooling/corpu
 changes since that score, whether a current-corpus no-edit baseline exists for
 the active subject tier, and the protocol-safe next action.
 
+Added `verify-scratch-isolation.py` and wired it into `prepare-round.py` so
+round staging fails before model launch if scratch contains anything beyond
+the two rendered docs and selected task prompts.
+
 ## Post-round-17 corpus refresh — comparability reset before next score
 
 Start-of-run reconciliation found that the current worktree is clean but the

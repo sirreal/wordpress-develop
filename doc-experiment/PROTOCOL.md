@@ -60,10 +60,18 @@ This regenerates the rendered docs, copies only the selected tasks'
 `doc-experiment/results/round-NN/round-metadata.json` with the mode, selected
 tasks, trial count, model policy, git head, and scratch path. It must not copy
 corpus directories, `reference.php`, or `tests.json` into scratch. Use
-`--dry-run` first when reconciling task selection.
+`--dry-run` first when reconciling task selection. The preparation script runs
+`verify-scratch-isolation.py` before writing metadata.
 
 `stage-round.sh <N>` remains the low-level docs-only staging command for
 manual scratch variants and shadow-doc A/B setup.
+
+For a manually edited scratch variant, run:
+
+```sh
+python3 doc-experiment/tools/verify-scratch-isolation.py <scratch> \
+  --task-id T01-add-image-class
+```
 
 If docs were edited since the last round, first run the docs-only guard:
 

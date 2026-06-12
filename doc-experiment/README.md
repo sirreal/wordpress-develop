@@ -72,6 +72,9 @@ python3 render-docs-markdown.py \
 - `tools/prepare-round.py` — preferred current entry point for a round. It
   stages rendered docs, copies only selected `task.md` prompts into scratch,
   and writes `results/round-NN/round-metadata.json`.
+- `tools/verify-scratch-isolation.py` — checks a scratch directory exposes only
+  rendered docs and selected task prompts, never references, tests, plans, or
+  source files.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
   `prepare-round.py` and manual scratch variants.
 - `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject
