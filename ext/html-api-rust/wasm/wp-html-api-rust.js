@@ -3505,6 +3505,16 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (
+					allowVirtualPreclosures &&
+					this.#shouldReconstructFormattingElementForEndTag(tagName, closingNamespace, existingIndex)
+				) {
+					this.#queueReconstructActiveFormattingElements();
+					this.pending_real_token = true;
+					this.pending_real_parser_state = this.parser_state;
+					return;
+				}
+
 				if (this.#shouldIgnoreAdoptionAgencyEndTagWithStaleEntry(tagName, closingNamespace)) {
 					this.#removeStaleActiveFormattingElementsForClose(tagName);
 					this.current_token_namespace = this.current_namespace;
@@ -3680,6 +3690,7 @@ export function createHtmlApi(wasm) {
 			if (
 				allowVirtualPreclosures &&
 				(
+					this.#queueParagraphAdoptionFormattingPreclosure(tagName) ||
 					this.#queueVirtualPreclosuresForStartTag(tagName) ||
 					this.#queueVirtualOpenersForStartTag(tagName)
 				)
@@ -4352,6 +4363,69 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#queueParagraphAdoptionFormattingPreclosure(tagName) {
+			if (tagName !== "P" || this.current_namespace !== "html") {
+				return false;
+			}
+
+			if (this.#findClosablePInButtonScopeForStartTag(tagName) !== -1) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				!FORMATTING_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			const formattingTagName = this.open_elements[topIndex];
+			if (
+				formattingTagName !== "A" ||
+				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
+				!this.#formattingEndTagPrecedesParagraphClose(formattingTagName)
+			) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(topIndex);
+			return true;
+		}
+
+		#formattingEndTagPrecedesParagraphClose(tagName) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing && nextTag.tag_name === tagName) {
+					return true;
+				}
+
+				if (
+					(nextTag.is_closing && nextTag.tag_name === "P") ||
+					(!nextTag.is_closing && this.#shouldClosePForStartTag(nextTag.tag_name))
+				) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
 		}
 
 		#applyFullParserInsertionMode(tokenType, tokenName) {
@@ -6997,6 +7071,18 @@ export function createHtmlApi(wasm) {
 			}
 
 			return activeCount > this.#countOpenHtmlElements(tagName);
+		}
+
+		#shouldReconstructFormattingElementForEndTag(tagName, namespaceName, formattingElementIndex) {
+			return (
+				namespaceName === "html" &&
+				tagName === "A" &&
+				formattingElementIndex === -1 &&
+				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
+				this.open_element_namespaces.at(-1) === "html" &&
+				this.open_elements.at(-1) === "P"
+			);
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {

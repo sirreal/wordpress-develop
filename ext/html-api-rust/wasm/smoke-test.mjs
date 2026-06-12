@@ -3786,6 +3786,18 @@ assert.equal(
 	WP_HTML_Processor.normalize("<b><i></b><p>x"),
 	"<b><i></i></b><p><i>x</i></p>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<a><p></a></p>"),
+	"<a></a><p><a></a></p>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a>1<p>2</a>3</p>"),
+	"<a>1</a><p><a>2</a>3</p>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><p>text"),
+	"<a><p>text</p></a>",
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<a><b>1<a>2"),
