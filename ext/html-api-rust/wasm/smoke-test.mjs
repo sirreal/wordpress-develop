@@ -3725,6 +3725,24 @@ assert.equal(
 );
 assert.equal(WP_HTML_Processor.normalize("<svg><!DOCTYPE html></svg>"), "<svg></svg>");
 
+const tableRowMathFragmentProcessor = WP_HTML_Processor.create_fragment("<math><tr><td><mo><tr>", "<tr>");
+assert.equal(tableRowMathFragmentProcessor.next_tag("math"), true);
+assert.equal(tableRowMathFragmentProcessor.get_namespace(), "math");
+assert.deepEqual(tableRowMathFragmentProcessor.get_breadcrumbs(), ["HTML", "TR", "MATH"]);
+assert.equal(tableRowMathFragmentProcessor.next_tag("tr"), true);
+assert.equal(tableRowMathFragmentProcessor.get_namespace(), "math");
+assert.deepEqual(tableRowMathFragmentProcessor.get_breadcrumbs(), ["HTML", "TR", "MATH", "TR"]);
+tableRowMathFragmentProcessor.destroy();
+
+const tableSectionSvgFragmentProcessor = WP_HTML_Processor.create_fragment("<svg><thead><title><tbody>", "<thead>");
+assert.equal(tableSectionSvgFragmentProcessor.next_tag("svg"), true);
+assert.equal(tableSectionSvgFragmentProcessor.get_namespace(), "svg");
+assert.deepEqual(tableSectionSvgFragmentProcessor.get_breadcrumbs(), ["HTML", "THEAD", "SVG"]);
+assert.equal(tableSectionSvgFragmentProcessor.next_tag("thead"), true);
+assert.equal(tableSectionSvgFragmentProcessor.get_namespace(), "svg");
+assert.deepEqual(tableSectionSvgFragmentProcessor.get_breadcrumbs(), ["HTML", "THEAD", "SVG", "THEAD"]);
+tableSectionSvgFragmentProcessor.destroy();
+
 const foreignModifiableTextProcessor = WP_HTML_Processor.create_fragment("<svg><title>One</title></svg>");
 assert.equal(foreignModifiableTextProcessor.next_tag("title"), true);
 assert.equal(foreignModifiableTextProcessor.get_namespace(), "svg");

@@ -223,6 +223,7 @@ const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", 
 const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
 const SVG_HTML_INTEGRATION_POINT_ELEMENTS = new Set(["DESC", "FOREIGNOBJECT", "TITLE"]);
 const MATHML_HTML_INTEGRATION_POINT_ENCODINGS = new Set(["application/xhtml+xml", "text/html"]);
+const FOREIGN_CONTENT_START_TAGS = new Set(["MATH", "SVG"]);
 const TABLE_TEXT_CURRENT_NODE_ELEMENTS = new Set([
 	"COLGROUP",
 	"TABLE",
@@ -6101,6 +6102,13 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				!isCloser &&
+				this.#isRepresentableForeignStartInTableFragment(tagName, topIndex)
+			) {
+				return false;
+			}
+
 			const currentNode = this.open_elements[topIndex];
 			if (currentNode === "TABLE") {
 				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
@@ -6128,6 +6136,20 @@ export function createHtmlApi(wasm) {
 			}
 
 			return false;
+		}
+
+		#isRepresentableForeignStartInTableFragment(tagName, topIndex) {
+			return (
+				FOREIGN_CONTENT_START_TAGS.has(tagName) &&
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				(
+					this.context_node === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(this.context_node)
+				) &&
+				topIndex === this.base_open_element_count - 1 &&
+				this.open_elements[topIndex] === this.context_node
+			);
 		}
 
 		#wouldUseUnsupportedTableFosterParenting(tagName, isCloser) {
