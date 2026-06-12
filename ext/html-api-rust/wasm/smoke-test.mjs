@@ -1853,6 +1853,10 @@ assert.equal(nonText.has_class("active"), false);
 assert.deepEqual(nonText.class_list(), []);
 assert.equal(nonText.set_attribute("id", "x"), false);
 assert.equal(nonText.add_class("active"), false);
+assert.throws(
+	() => nonText.set_modifiable_text(null),
+	TypeError,
+);
 assert.equal(nonText.get_updated_html(), "<div></div>");
 nonText.destroy();
 
@@ -1893,7 +1897,28 @@ for (const [completedTextHtml, completedTextAdvance, expectedText] of [
 	completedTextProcessor.destroy();
 }
 
+const coercedModifiableText = new WP_HTML_Tag_Processor("abc");
+assert.equal(coercedModifiableText.next_token(), true);
+assert.equal(coercedModifiableText.set_modifiable_text(123), true);
+assert.equal(coercedModifiableText.get_updated_html(), "123");
+assert.equal(coercedModifiableText.set_modifiable_text(false), true);
+assert.equal(coercedModifiableText.get_updated_html(), "");
+assert.throws(
+	() => coercedModifiableText.set_modifiable_text(null),
+	TypeError,
+);
+assert.throws(
+	() => coercedModifiableText.set_modifiable_text({ text: "object" }),
+	TypeError,
+);
+coercedModifiableText.destroy();
+
 const svgQualifiedNames = new WP_HTML_Tag_Processor('<foreignobject attributeName=1 xlink:href=2 viewbox=3>');
+assert.equal(svgQualifiedNames.change_parsing_namespace(true), false);
+assert.throws(
+	() => svgQualifiedNames.change_parsing_namespace(null),
+	TypeError,
+);
 assert.equal(svgQualifiedNames.change_parsing_namespace("svg"), true);
 assert.equal(svgQualifiedNames.next_tag("foreignobject"), true);
 assert.equal(svgQualifiedNames.get_namespace(), "svg");
@@ -2668,6 +2693,10 @@ assert.equal(processorManualNamespace.get_namespace(), "html");
 assert.equal(processorManualNamespace.change_parsing_namespace("svg"), true);
 assert.equal(processorManualNamespace.get_namespace(), "svg");
 assert.equal(processorManualNamespace.change_parsing_namespace("invalid"), false);
+assert.throws(
+	() => processorManualNamespace.change_parsing_namespace(null),
+	TypeError,
+);
 assert.equal(processorManualNamespace.get_namespace(), "svg");
 assert.equal(processorManualNamespace.next_tag("rect"), true);
 assert.equal(processorManualNamespace.get_namespace(), "svg");
@@ -2675,6 +2704,17 @@ assert.equal(processorManualNamespace.get_qualified_tag_name(), "rect");
 assert.equal(processorManualNamespace.has_self_closing_flag(), true);
 assert.equal(processorManualNamespace.expects_closer(), false);
 processorManualNamespace.destroy();
+
+const processorCoercedModifiableText = WP_HTML_Processor.create_fragment("abc");
+assert.equal(processorCoercedModifiableText.next_token(), true);
+assert.equal(processorCoercedModifiableText.get_token_type(), "#text");
+assert.equal(processorCoercedModifiableText.set_modifiable_text(456), true);
+assert.equal(processorCoercedModifiableText.get_updated_html(), "456");
+assert.throws(
+	() => processorCoercedModifiableText.set_modifiable_text(null),
+	TypeError,
+);
+processorCoercedModifiableText.destroy();
 
 assert.equal(WP_HTML_Processor.PROCESS_NEXT_NODE, "process-next-node");
 assert.equal(WP_HTML_Processor.REPROCESS_CURRENT_NODE, "reprocess-current-node");

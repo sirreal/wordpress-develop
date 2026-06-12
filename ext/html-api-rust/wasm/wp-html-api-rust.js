@@ -1879,11 +1879,12 @@ export function createHtmlApi(wasm) {
 
 		set_modifiable_text(text) {
 			this.#ensureLive();
+			const plaintextContent = phpStringParameterCoerce(text, "plaintext_content");
 			if (![STATE_MATCHED_TAG, STATE_TEXT_NODE, STATE_COMMENT].includes(this.parser_state)) {
 				return false;
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(text, ({ ptr, len }) => (
+			return this.#mutateCurrentToken(() => runtime.withEncoded(plaintextContent, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_set_modifiable_text(this.pointer, ptr, len)
 			)));
 		}
@@ -1974,12 +1975,13 @@ export function createHtmlApi(wasm) {
 
 		change_parsing_namespace(namespaceName) {
 			this.#ensureLive();
-			if (!["html", "math", "svg"].includes(namespaceName)) {
+			const normalizedNamespaceName = phpStringParameterCoerce(namespaceName, "new_namespace");
+			if (!["html", "math", "svg"].includes(normalizedNamespaceName)) {
 				return false;
 			}
 
-			this.parsing_namespace = namespaceName;
-			wasm.wp_html_api_rust_tag_processor_set_namespace(this.pointer, namespaceName === "html" ? 0 : 1);
+			this.parsing_namespace = normalizedNamespaceName;
+			wasm.wp_html_api_rust_tag_processor_set_namespace(this.pointer, normalizedNamespaceName === "html" ? 0 : 1);
 			return true;
 		}
 
@@ -2790,6 +2792,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		set_modifiable_text(text) {
+			const plaintextContent = phpStringParameterCoerce(text, "plaintext_content");
 			if (this.#isSyntheticToken()) {
 				if (
 					this.current_synthetic_token.tokenType !== "#text" ||
@@ -2798,7 +2801,7 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
-				this.current_synthetic_token.modifiableText = replaceNulls(String(text));
+				this.current_synthetic_token.modifiableText = replaceNulls(plaintextContent);
 				if (this.raw_text_fragment_context !== null) {
 					this.raw_text_fragment_updated_html = this.#serializeTextToken();
 				}
@@ -2818,7 +2821,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return super.set_modifiable_text(text);
+			return super.set_modifiable_text(plaintextContent);
 		}
 
 		get_updated_html() {
@@ -2857,11 +2860,12 @@ export function createHtmlApi(wasm) {
 		}
 
 		change_parsing_namespace(namespaceName) {
-			if (!super.change_parsing_namespace(namespaceName)) {
+			const normalizedNamespaceName = phpStringParameterCoerce(namespaceName, "new_namespace");
+			if (!super.change_parsing_namespace(normalizedNamespaceName)) {
 				return false;
 			}
 
-			this.current_namespace = namespaceName;
+			this.current_namespace = normalizedNamespaceName;
 			if (
 				this.parser_state === STATE_READY ||
 				this.parser_state === STATE_COMPLETE ||

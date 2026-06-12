@@ -481,14 +481,14 @@ export interface WP_HTML_Tag_Processor {
 	subdivide_text_appropriately(): boolean;
 	get_modifiable_text(): string;
 	native_get_script_content_type(): "javascript" | "json" | null;
-	set_modifiable_text(text: string): boolean;
+	set_modifiable_text(text: PhpStringParameter): boolean;
 	get_comment_type(): CommentType | null;
 	get_doctype_info(): WP_HTML_Doctype_Info | null;
 	set_bookmark(name: string): boolean;
 	release_bookmark(name: string): boolean;
 	has_bookmark(name: string): boolean;
 	seek(name: string): boolean;
-	change_parsing_namespace(namespaceName: HtmlNamespace): boolean;
+	change_parsing_namespace(namespaceName: PhpStringParameter): boolean;
 	get_namespace(): HtmlNamespace;
 	get_qualified_tag_name(): string | null;
 	get_qualified_attribute_name(attributeName: string): string | null;
