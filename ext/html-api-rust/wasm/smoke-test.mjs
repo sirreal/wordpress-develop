@@ -4210,6 +4210,22 @@ assert.equal(fullParserFramesetAfterHiddenInput.get_last_error(), null);
 assert.equal(fullParserFramesetAfterHiddenInput.get_unsupported_exception(), null);
 fullParserFramesetAfterHiddenInput.destroy();
 
+for (const html of ["<param><frameset></frameset>", "<source> <frameset></frameset>", "<track><frameset></frameset>"]) {
+	const fullParserFramesetAfterIgnoredStart = WP_HTML_Processor.create_full_parser(html);
+	const fullParserFramesetAfterIgnoredStartTags = [];
+	while (fullParserFramesetAfterIgnoredStart.next_token()) {
+		if (fullParserFramesetAfterIgnoredStart.get_token_type() === "#tag") {
+			fullParserFramesetAfterIgnoredStartTags.push(
+				`${fullParserFramesetAfterIgnoredStart.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterIgnoredStart.get_tag()}`,
+			);
+		}
+	}
+	assert.deepEqual(fullParserFramesetAfterIgnoredStartTags, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]);
+	assert.equal(fullParserFramesetAfterIgnoredStart.get_last_error(), null);
+	assert.equal(fullParserFramesetAfterIgnoredStart.get_unsupported_exception(), null);
+	fullParserFramesetAfterIgnoredStart.destroy();
+}
+
 for (const html of ["</html><frameset></frameset>", "</body> <frameset></frameset>"]) {
 	const fullParserFramesetAfterIgnoredCloser = WP_HTML_Processor.create_full_parser(html);
 	const fullParserFramesetAfterIgnoredCloserTags = [];

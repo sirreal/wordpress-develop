@@ -221,6 +221,7 @@ const IN_BODY_IGNORED_START_TAGS = new Set([
 	"THEAD",
 	"TR",
 ]);
+const AFTER_HEAD_FRAMESET_IGNORED_START_TAGS = new Set(["PARAM", "SOURCE", "TRACK"]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", "MTEXT"]);
 const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
@@ -4595,6 +4596,11 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (tokenType === "#tag" && !isCloser && this.#ignoredStartTagPrecedesFrameset(tagName)) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
 						if (tokenType === "#tag" && !isCloser && this.#paragraphPrecedesFrameset(tagName)) {
 							this.pre_frameset_paragraph_ignored = true;
 							this.#ignoreCurrentToken();
@@ -5515,6 +5521,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.#currentTokenPrecedesStartTag("FRAMESET");
+		}
+
+		#ignoredStartTagPrecedesFrameset(tagName) {
+			return AFTER_HEAD_FRAMESET_IGNORED_START_TAGS.has(tagName) &&
+				this.#currentTokenPrecedesStartTag("FRAMESET");
 		}
 
 		#paragraphPrecedesFrameset(tagName) {
