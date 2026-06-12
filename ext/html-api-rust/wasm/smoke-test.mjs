@@ -3116,44 +3116,27 @@ for (const [context, expectedUpdatedHtml] of [
 }
 
 const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({ nodeName: "DIV", namespaceName: "html" }), true);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "img", false)), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "div", false)), true);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "TITLE", namespace: "html" }), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "#text", namespace: "html" }), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "html", namespace: "html" }), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({
-	node_name: "rect",
-	namespace: "svg",
-	has_self_closing_flag: true,
-}), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({
-	node_name: "rect",
-	namespace: "svg",
-	has_self_closing_flag: false,
-}), true);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({
-	node_name: "rect",
-	namespace: "svg",
-	has_self_closing_flag: "0",
-}), true);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({
-	node_name: "rect",
-	namespace: "svg",
-	hasSelfClosingFlag: "1",
-}), false);
-assert.equal(explicitTokenExpectationsProcessor.expects_closer({
-	node_name: true,
-	namespace: "html",
-	has_self_closing_flag: false,
-}), true);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "TITLE", false)), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "#text", false)), false);
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(new WP_HTML_Token(null, "html", false)), false);
+const selfClosingSvgToken = new WP_HTML_Token(null, "rect", true);
+selfClosingSvgToken.namespace = "svg";
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(selfClosingSvgToken), false);
+const openSvgToken = new WP_HTML_Token(null, "rect", false);
+openSvgToken.namespace = "svg";
+assert.equal(explicitTokenExpectationsProcessor.expects_closer(openSvgToken), true);
 assert.throws(
-	() => explicitTokenExpectationsProcessor.expects_closer({
-		node_name: "rect",
-		namespace: "svg",
-		has_self_closing_flag: {},
-	}),
+	() => explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }),
+	TypeError,
+);
+assert.throws(
+	() => explicitTokenExpectationsProcessor.expects_closer(["img"]),
+	TypeError,
+);
+assert.throws(
+	() => explicitTokenExpectationsProcessor.expects_closer(true),
 	TypeError,
 );
 explicitTokenExpectationsProcessor.destroy();

@@ -2969,10 +2969,11 @@ export function createHtmlApi(wasm) {
 			let namespaceName;
 			let hasSelfClosingFlag;
 
-			if (node && typeof node === "object") {
-				tokenName = node.node_name ?? node.nodeName ?? node.tagName ?? this.get_token_name();
-				namespaceName = node.namespace ?? node.namespaceName ?? this.get_namespace();
-				hasSelfClosingFlag = node.has_self_closing_flag ?? node.hasSelfClosingFlag ?? this.has_self_closing_flag();
+			if (node !== null) {
+				const token = phpTokenParameterCoerce(node, "node");
+				tokenName = token.node_name ?? this.get_token_name();
+				namespaceName = token.namespace ?? this.get_namespace();
+				hasSelfClosingFlag = token.has_self_closing_flag ?? this.has_self_closing_flag();
 			} else {
 				tokenName = this.get_token_name();
 				namespaceName = this.get_namespace();
