@@ -3798,6 +3798,10 @@ assert.equal(
 	WP_HTML_Processor.normalize("<a><p>text"),
 	"<a><p>text</p></a>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<b><p></b>TEST"),
+	"<b></b><p><b></b>TEST</p>",
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<a><b>1<a>2"),
