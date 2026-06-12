@@ -222,6 +222,7 @@ const IN_BODY_IGNORED_START_TAGS = new Set([
 	"TR",
 ]);
 const AFTER_HEAD_FRAMESET_IGNORED_START_TAGS = new Set(["PARAM", "SOURCE", "TRACK"]);
+const AFTER_HEAD_FRAMESET_IGNORED_CLOSED_START_TAGS = new Set(["MATH", "SVG"]);
 const TABLE_SECTION_ELEMENTS = new Set(["TBODY", "TFOOT", "THEAD"]);
 const MATHML_TEXT_INTEGRATION_POINT_ELEMENTS = new Set(["MI", "MO", "MN", "MS", "MTEXT"]);
 const MATHML_TEXT_INTEGRATION_FOREIGN_START_TAGS = new Set(["MALIGNMARK", "MGLYPH"]);
@@ -2385,6 +2386,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
 			this.pre_frameset_paragraph_ignored = false;
+			this.pre_frameset_ignored_element_depth = 0;
 			this.form_element_pointer = null;
 			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
@@ -3965,6 +3967,7 @@ export function createHtmlApi(wasm) {
 				fullParserScaffolded: this.full_parser_scaffolded,
 				fullParserSeenDoctype: this.full_parser_seen_doctype,
 				framesetOk: this.frameset_ok,
+				preFramesetIgnoredElementDepth: this.pre_frameset_ignored_element_depth,
 				formElementPointer: this.form_element_pointer,
 			};
 		}
@@ -3983,6 +3986,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.frameset_ok = state.framesetOk;
+			this.pre_frameset_ignored_element_depth = state.preFramesetIgnoredElementDepth ?? 0;
 			this.form_element_pointer = state.formElementPointer;
 			this.temporary_reopened_head = false;
 			this.open_elements = [...state.openElements];
@@ -4556,6 +4560,18 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (this.pre_frameset_ignored_element_depth > 0) {
+							const skipped = this.#skipIgnoredElementBeforeFrameset(
+								tokenType,
+								tagName,
+								isCloser,
+								isIgnorablePreBodyText,
+							);
+							if (skipped) {
+								return true;
+							}
+						}
+
 						if (
 							this.pre_frameset_paragraph_ignored &&
 							isWhitespaceText &&
@@ -4597,6 +4613,12 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && this.#ignoredStartTagPrecedesFrameset(tagName)) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && this.#closedElementPrecedesFrameset(tagName)) {
+							this.pre_frameset_ignored_element_depth = 1;
 							this.#ignoreCurrentToken();
 							return true;
 						}
@@ -5526,6 +5548,78 @@ export function createHtmlApi(wasm) {
 		#ignoredStartTagPrecedesFrameset(tagName) {
 			return AFTER_HEAD_FRAMESET_IGNORED_START_TAGS.has(tagName) &&
 				this.#currentTokenPrecedesStartTag("FRAMESET");
+		}
+
+		#closedElementPrecedesFrameset(tagName) {
+			if (!AFTER_HEAD_FRAMESET_IGNORED_CLOSED_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let depth = 1;
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!this.#isIgnorablePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
+					return false;
+				}
+
+				if (nextTag.is_closing) {
+					depth -= 1;
+					if (depth === 0) {
+						const followingTag = runtime.scanNextTag(this.html, nextTag.token_end);
+						return followingTag !== false &&
+							!followingTag.is_closing &&
+							followingTag.tag_name === "FRAMESET" &&
+							this.#isIgnorablePreFramesetText(this.html.slice(nextTag.token_end, followingTag.tag_start));
+					}
+				} else if (!VOID_ELEMENTS.has(nextTag.tag_name) && !nextTag.has_self_closing_flag) {
+					depth += 1;
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#skipIgnoredElementBeforeFrameset(tokenType, tagName, isCloser, isIgnorablePreBodyText) {
+			if (tokenType === "#text") {
+				if (!isIgnorablePreBodyText) {
+					this.pre_frameset_ignored_element_depth = 0;
+					return false;
+				}
+
+				this.#ignoreCurrentToken();
+				return true;
+			}
+
+			if (tokenType !== "#tag") {
+				this.pre_frameset_ignored_element_depth = 0;
+				return false;
+			}
+
+			if (isCloser) {
+				this.pre_frameset_ignored_element_depth -= 1;
+			} else if (!VOID_ELEMENTS.has(tagName) && !this.has_self_closing_flag()) {
+				this.pre_frameset_ignored_element_depth += 1;
+			}
+
+			this.#ignoreCurrentToken();
+			return true;
+		}
+
+		#isIgnorablePreFramesetText(text) {
+			return text.split("").every((char) => {
+				const code = char.charCodeAt(0);
+				return code === 0 || isHtmlWhitespaceCode(code);
+			});
 		}
 
 		#paragraphPrecedesFrameset(tagName) {

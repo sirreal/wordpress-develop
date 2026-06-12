@@ -4226,6 +4226,43 @@ for (const html of ["<param><frameset></frameset>", "<source> <frameset></frames
 	fullParserFramesetAfterIgnoredStart.destroy();
 }
 
+for (const html of [
+	"<svg></svg><frameset><frame>",
+	"<math></math><frameset><frame>",
+	"<svg>\0 </svg><frameset><frame>",
+	"<svg><path></path></svg><frameset><frame>",
+]) {
+	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
+	const fullParserFramesetAfterEmptyForeignTags = [];
+	while (fullParserFramesetAfterEmptyForeign.next_token()) {
+		if (fullParserFramesetAfterEmptyForeign.get_token_type() === "#tag") {
+			fullParserFramesetAfterEmptyForeignTags.push(
+				`${fullParserFramesetAfterEmptyForeign.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterEmptyForeign.get_tag()}`,
+			);
+		}
+	}
+	assert.deepEqual(fullParserFramesetAfterEmptyForeignTags, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "+FRAME", "-FRAMESET", "-HTML"]);
+	assert.equal(fullParserFramesetAfterEmptyForeign.get_last_error(), null);
+	assert.equal(fullParserFramesetAfterEmptyForeign.get_unsupported_exception(), null);
+	fullParserFramesetAfterEmptyForeign.destroy();
+}
+
+for (const html of ["<svg>\0</svg><frameset>", "<svg> </svg><frameset>"]) {
+	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
+	const fullParserFramesetAfterEmptyForeignTags = [];
+	while (fullParserFramesetAfterEmptyForeign.next_token()) {
+		if (fullParserFramesetAfterEmptyForeign.get_token_type() === "#tag") {
+			fullParserFramesetAfterEmptyForeignTags.push(
+				`${fullParserFramesetAfterEmptyForeign.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterEmptyForeign.get_tag()}`,
+			);
+		}
+	}
+	assert.deepEqual(fullParserFramesetAfterEmptyForeignTags, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]);
+	assert.equal(fullParserFramesetAfterEmptyForeign.get_last_error(), null);
+	assert.equal(fullParserFramesetAfterEmptyForeign.get_unsupported_exception(), null);
+	fullParserFramesetAfterEmptyForeign.destroy();
+}
+
 for (const html of ["</html><frameset></frameset>", "</body> <frameset></frameset>"]) {
 	const fullParserFramesetAfterIgnoredCloser = WP_HTML_Processor.create_full_parser(html);
 	const fullParserFramesetAfterIgnoredCloserTags = [];
@@ -4322,8 +4359,6 @@ for (const html of [
 
 for (const html of [
 	"<div><frameset>",
-	"<svg>\0</svg><frameset>",
-	"<svg> </svg><frameset>",
 ]) {
 	const nonIgnoredFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
 	while (nonIgnoredFramesetProcessor.next_token()) {
