@@ -65,6 +65,10 @@ Contract to test:
   `normalize()`, `get_last_error()`, or `get_unsupported_exception()`.
 - Callers promising normalized output should not return raw input as a fallback
   when processing fails.
+- Reference implementations should get extra credit for explicit incomplete
+  token and last-error handling where relevant: Tag Processor and HTML Processor
+  loops can stop at an incomplete tail, while HTML Processor walks can also
+  encounter unsupported parser states after construction.
 
 Why this is strong: repeated judge notes across N04, T09, T11, T12, and N05
 show invented null branches, wrong fallback choices, and cross-class factory
