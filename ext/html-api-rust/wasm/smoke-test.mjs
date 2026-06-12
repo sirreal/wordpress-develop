@@ -279,6 +279,15 @@ assert.equal(apiFromDataView.version(), "0.1.0");
 const apiFromModule = await loadWasm(await WebAssembly.compile(wasmBytes));
 assert.equal(apiFromModule.version(), "0.1.0");
 
+if (typeof Response === "function") {
+	const apiFromResponse = await loadWasm(new Response(wasmArrayBuffer.slice(0)));
+	assert.equal(apiFromResponse.version(), "0.1.0");
+	await assert.rejects(
+		() => loadWasm(new Response("", { status: 503, statusText: "Unavailable" })),
+		/Failed to load WASM: 503 Unavailable/,
+	);
+}
+
 const apiFromDefaultLocation = await loadWasm();
 assert.equal(apiFromDefaultLocation.version(), "0.1.0");
 

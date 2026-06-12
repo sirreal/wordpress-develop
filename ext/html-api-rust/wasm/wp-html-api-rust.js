@@ -1294,6 +1294,10 @@ async function bytesFromInput(input) {
 		return readFile(fileURLToPath(input));
 	}
 
+	if (typeof Response === "function" && input instanceof Response) {
+		return responseBytes(input);
+	}
+
 	if (typeof input === "string") {
 		if (typeof fetch === "function" && (/^https?:\/\//.test(input) || !isNodeLikeRuntime())) {
 			return fetchBytes(input);
@@ -1315,7 +1319,10 @@ function isNodeLikeRuntime() {
 }
 
 async function fetchBytes(input) {
-	const response = await fetch(input);
+	return responseBytes(await fetch(input));
+}
+
+async function responseBytes(response) {
 	if (!response.ok) {
 		throw new Error(`Failed to load WASM: ${response.status} ${response.statusText}`);
 	}

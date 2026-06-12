@@ -1,6 +1,7 @@
 export type WasmInput =
 	| URL
 	| Request
+	| Response
 	| string
 	| ArrayBuffer
 	| ArrayBufferView
