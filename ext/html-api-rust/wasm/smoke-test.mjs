@@ -467,6 +467,8 @@ for (const unsupportedWasmInput of [null, 123, {}, Promise.resolve({})]) {
 
 const originalProcessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
 const originalFetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+const defaultWasmUrl = new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url);
+const browserFetchInputs = [];
 try {
 	Object.defineProperty(globalThis, "process", {
 		configurable: true,
@@ -476,7 +478,12 @@ try {
 	Object.defineProperty(globalThis, "fetch", {
 		configurable: true,
 		value: async (input) => {
-			assert.equal(input, "./dist/wp_html_api_rust_core.wasm");
+			browserFetchInputs.push(input);
+			if (input instanceof URL) {
+				assert.equal(input.href, defaultWasmUrl.href);
+			} else {
+				assert.equal(input, "./dist/wp_html_api_rust_core.wasm");
+			}
 			return {
 				ok: true,
 				arrayBuffer: async () => wasmBytes.buffer.slice(
@@ -489,6 +496,9 @@ try {
 	});
 	const apiFromBrowserString = await loadWasm("./dist/wp_html_api_rust_core.wasm");
 	assert.equal(apiFromBrowserString.version(), "0.1.0");
+	const apiFromBrowserDefaultLocation = await loadWasm();
+	assert.equal(apiFromBrowserDefaultLocation.version(), "0.1.0");
+	assert.deepEqual(browserFetchInputs, ["./dist/wp_html_api_rust_core.wasm", defaultWasmUrl]);
 } finally {
 	if (originalProcessDescriptor) {
 		Object.defineProperty(globalThis, "process", originalProcessDescriptor);
