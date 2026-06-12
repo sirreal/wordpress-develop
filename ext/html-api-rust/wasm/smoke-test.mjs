@@ -6379,6 +6379,15 @@ assert.equal(
 );
 fullParserFosteredParagraphsBeforeTable.destroy();
 
+const fullParserFosteredItalicDivBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table><i>a<b>b<div>c</i>",
+);
+assert.equal(
+	fullParserFosteredItalicDivBeforeTable.serialize(),
+	"<!DOCTYPE html><html><head></head><body><i>a<b>b</b></i><b><div><i>c</i></div></b><table></table></body></html>",
+);
+fullParserFosteredItalicDivBeforeTable.destroy();
+
 const fullParserFosteredTextBeforeTableColgroup = WP_HTML_Processor.create_full_parser(
 	"<table><colgroup>foo",
 );

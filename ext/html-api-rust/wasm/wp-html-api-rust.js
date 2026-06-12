@@ -4753,7 +4753,14 @@ export function createHtmlApi(wasm) {
 						this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
 					) {
 						this.#queueVirtualPopsFrom(i);
-						this.#queueActiveFormattingElementsAfterIndexAsEmpty(activeFormattingElementIndex);
+						if (
+							this.deferred_table_opener !== null &&
+							this.#currentFosterParentedTableIndex() !== null
+						) {
+							this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+						} else {
+							this.#queueActiveFormattingElementsAfterIndexAsEmpty(activeFormattingElementIndex);
+						}
 						this.#replaceActiveFormattingElementsFromIndex(activeFormattingElementIndex, [
 							...followingEntries,
 							activeFormattingElement,
@@ -4919,6 +4926,15 @@ export function createHtmlApi(wasm) {
 
 			const formattingTagName = this.open_elements[topIndex];
 			const openNobrIndex = tagName === "NOBR" ? this.#lastOpenElementIndex("NOBR", "html") : -1;
+			if (
+				tagName === "DIV" &&
+				formattingTagName !== "NOBR" &&
+				this.deferred_table_opener !== null &&
+				this.#currentFosterParentedTableIndex() !== null
+			) {
+				return false;
+			}
+
 			if (
 				(
 					tagName === "NOBR" &&
@@ -8322,7 +8338,11 @@ export function createHtmlApi(wasm) {
 				(
 					(
 						this.#isDeferredTableChildOpenerTag(tagName) &&
-						this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+						(
+							TABLE_CELL_ELEMENTS.has(tagName)
+								? this.#currentTableCellStartIsFollowedByFosteredTableContent()
+								: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+						)
 					) ||
 					(
 						tagName === "TR" &&
@@ -8405,7 +8425,11 @@ export function createHtmlApi(wasm) {
 					this.#isDeferredTableChildOpenerTag(tagName) ||
 					this.#isDeferredTableHiddenInputChildOpener(tagName)
 				) &&
-				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+				(
+					TABLE_CELL_ELEMENTS.has(tagName)
+						? this.#currentTableCellStartIsFollowedByFosteredTableContent()
+						: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+				)
 			) {
 				return false;
 			}
@@ -8659,6 +8683,77 @@ export function createHtmlApi(wasm) {
 
 				wrappers = this.#deferredTableChildLookaheadTags(nextTag.tag_name);
 				at = nextTag.token_end;
+			}
+		}
+
+		#currentTableCellStartIsFollowedByFosteredTableContent() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			let sawCellBoundary = false;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
+				if (!this.#isIgnorableTableText(text)) {
+					if (sawCellBoundary) {
+						return true;
+					}
+					if (
+						nextTag !== false &&
+						nextTag.is_closing &&
+						(
+							TABLE_CELL_ELEMENTS.has(nextTag.tag_name) ||
+							TABLE_SECTION_ELEMENTS.has(nextTag.tag_name) ||
+							nextTag.tag_name === "TABLE" ||
+							nextTag.tag_name === "TR"
+						)
+					) {
+						sawCellBoundary = true;
+						at = nextTag.token_end;
+						continue;
+					}
+					return false;
+				}
+
+				if (
+					nextTag !== false &&
+					nextTag.is_closing &&
+					this.#isSkippedFosterLookaheadEndTag(nextTag.tag_name)
+				) {
+					sawCellBoundary = true;
+					at = nextTag.token_end;
+					continue;
+				}
+
+				if (nextTag === false || nextTag.is_closing) {
+					if (
+						nextTag !== false &&
+						(
+							TABLE_CELL_ELEMENTS.has(nextTag.tag_name) ||
+							TABLE_SECTION_ELEMENTS.has(nextTag.tag_name) ||
+							nextTag.tag_name === "TABLE" ||
+							nextTag.tag_name === "TR"
+						)
+					) {
+						sawCellBoundary = true;
+						at = nextTag.token_end;
+						continue;
+					}
+
+					return false;
+				}
+
+				return sawCellBoundary && (
+					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "SELECT" ||
+					this.#isFosteredVoidTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredInputStartTag(nextTag) ||
+					this.#isFosteredAtomicTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredElementTableStartTag(nextTag.tag_name)
+				);
 			}
 		}
 
@@ -8940,7 +9035,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "I" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
 		}
 
 		#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) {
