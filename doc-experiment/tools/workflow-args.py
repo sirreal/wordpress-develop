@@ -77,6 +77,11 @@ def launch_manifest(metadata: dict) -> dict:
         "round": round_name,
         "mode": metadata.get("mode"),
         "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
+        "subject_isolation": {
+            "required_agent_type": "docs-test-subject",
+            "allowed_tools": ["Read", "Grep"],
+            "trusted_only_if_enforced": True,
+        },
         "scripts": {
             "trials": str(EXPERIMENT_ROOT / "tools" / "trials-workflow.js"),
             "judges": str(EXPERIMENT_ROOT / "tools" / "judge-workflow.js"),

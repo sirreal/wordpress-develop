@@ -121,6 +121,11 @@ older than the definition, fall back to a general agent with the
 prompt-level restrictions below and spot-check transcripts for isolation
 violations. Substitute `{SCRATCH}` and `{TASK_MD}`:
 
+For trusted scored rounds, the runner must enforce the `docs-test-subject`
+tool boundary or an equivalent Read+Grep-only boundary. A prompt-only fallback
+is diagnostic unless transcripts are inspected and the isolation risk is
+explicitly recorded.
+
 ````text
 You are implementing a PHP function for WordPress using the HTML API.
 

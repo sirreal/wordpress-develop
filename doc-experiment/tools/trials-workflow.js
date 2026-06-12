@@ -1,6 +1,8 @@
 export const meta = {
   name: 'html-api-docs-trials',
   description: 'Run documentation-only test-subject trials for one evaluation round',
+  requiredAgentType: 'docs-test-subject',
+  requiredTools: ['Read', 'Grep'],
   phases: [
     { title: 'Trials', detail: 'one agent per task-trial, docs-only' },
   ],
@@ -47,6 +49,8 @@ for (const id of taskIds) {
 const results = await parallel(pairs.map(p => () =>
   agent(
     `You are a test subject in a documentation-quality experiment, implementing a PHP function for WordPress using the HTML API.
+
+This workflow is trusted only when run with the docs-test-subject agent type or an equivalent agent restricted to Read and Grep. If your runner cannot enforce those restrictions, stop and report that the trial is not valid for scoring.
 
 Read your task description from: ${scratch}/tasks/${p.id}.md
 

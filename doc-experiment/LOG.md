@@ -67,6 +67,11 @@ incomplete subject responses before writing partial trial directories: every
 trial output must include non-empty `code` and `explanation` strings plus
 integer `confidence` 0-100.
 
+Made the trial launch isolation contract explicit in both the workflow script
+and manifest: trusted scored trials require the `docs-test-subject` agent type
+or an equivalent Read+Grep-only tool boundary. Prompt-only fallback must be
+treated as diagnostic unless transcript isolation is recorded.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
