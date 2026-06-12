@@ -132,8 +132,16 @@ def validate_judge_verdict(entry: dict, expected_trials: int) -> list[str]:
             errors.append(f"{task_id}/{trial_id}: adherence must be integer 0-100")
         if not isinstance(trial.get("hallucinated_methods"), list):
             errors.append(f"{task_id}/{trial_id}: hallucinated_methods must be an array")
-        if not isinstance(trial.get("notes"), str):
-            errors.append(f"{task_id}/{trial_id}: notes must be a string")
+        else:
+            for index, method in enumerate(trial.get("hallucinated_methods")):
+                if not isinstance(method, str):
+                    errors.append(
+                        f"{task_id}/{trial_id}: hallucinated_methods[{index}] "
+                        "must be a string"
+                    )
+        notes = trial.get("notes")
+        if not isinstance(notes, str) or not notes.strip():
+            errors.append(f"{task_id}/{trial_id}: notes must be a non-empty string")
 
     missing_trials = sorted(expected_trial_ids - set(actual_trial_ids))
     duplicate_trials = sorted({
@@ -144,8 +152,9 @@ def validate_judge_verdict(entry: dict, expected_trials: int) -> list[str]:
     if duplicate_trials:
         errors.append(f"{task_id}: duplicate trial verdicts: " + ", ".join(duplicate_trials))
 
-    if not isinstance(verdict.get("failure_analysis"), str):
-        errors.append(f"{task_id}: failure_analysis must be a string")
+    failure_analysis = verdict.get("failure_analysis")
+    if not isinstance(failure_analysis, str) or not failure_analysis.strip():
+        errors.append(f"{task_id}: failure_analysis must be a non-empty string")
     doc_gaps = verdict.get("doc_gaps")
     if not isinstance(doc_gaps, list):
         errors.append(f"{task_id}: doc_gaps must be an array")
@@ -155,8 +164,10 @@ def validate_judge_verdict(entry: dict, expected_trials: int) -> list[str]:
                 errors.append(f"{task_id}: doc_gaps[{index}] must be an object")
                 continue
             for key in ("location", "problem", "suggestion"):
-                if not isinstance(gap.get(key), str):
-                    errors.append(f"{task_id}: doc_gaps[{index}].{key} must be a string")
+                if not isinstance(gap.get(key), str) or not gap.get(key).strip():
+                    errors.append(
+                        f"{task_id}: doc_gaps[{index}].{key} must be a non-empty string"
+                    )
 
     return errors
 

@@ -251,6 +251,12 @@ The judge returns JSON:
 }
 ```
 
+For metadata-backed rounds, judge workflow preflight rejects missing task
+coverage, missing trial verdicts, non-integer adherence, non-string
+hallucinated method entries, empty trial notes, empty failure analysis, and
+empty doc-gap fields before any `judge.json` or `round-summary.json` is
+written.
+
 Adherence rubric (0-100): correct processor choice for the job (30),
 no hallucinated/undocumented API usage (30), idiomatic use of documented
 patterns — bookmarks, breadcrumbs, token walking (25), graceful handling

@@ -23,10 +23,12 @@ const SCHEMA = {
   properties: {
     code: {
       type: 'string',
+      minLength: 1,
       description: 'Complete PHP file contents defining exactly the requested function, starting with <?php',
     },
     explanation: {
       type: 'string',
+      minLength: 1,
       description: 'One short paragraph: approach and which documented APIs were used',
     },
     confidence: {

@@ -72,6 +72,10 @@ and manifest: trusted scored trials require the `docs-test-subject` agent type
 or an equivalent Read+Grep-only tool boundary. Prompt-only fallback must be
 treated as diagnostic unless transcript isolation is recorded.
 
+Tightened judge workflow preflight and schema hints so malformed judge verdicts
+cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
+non-empty strings, and hallucinated method entries must be strings.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
