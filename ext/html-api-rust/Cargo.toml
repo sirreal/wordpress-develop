@@ -6,7 +6,7 @@ publish = false
 
 [lib]
 name = "wp_html_api_rust_core"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "cdylib"]
 
 [profile.release]
 lto = true
