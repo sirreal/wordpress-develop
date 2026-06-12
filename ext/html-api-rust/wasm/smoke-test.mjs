@@ -2139,10 +2139,18 @@ for (const html of [
 	while (unsupportedAdoptionAgencyProcessor.next_token()) {
 	}
 	assert.equal(unsupportedAdoptionAgencyProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+	const exception = unsupportedAdoptionAgencyProcessor.get_unsupported_exception();
+	assert.ok(exception instanceof WP_HTML_Unsupported_Exception);
 	assert.equal(
-		unsupportedAdoptionAgencyProcessor.get_unsupported_exception().message,
+		exception.message,
 		"Cannot extract common ancestor in adoption agency algorithm.",
 	);
+	const formattingTag = html.slice(1, 2).toUpperCase();
+	assert.equal(exception.token_name, formattingTag);
+	assert.equal(exception.token_at, html.indexOf(`</${html[1]}>`));
+	assert.equal(exception.token, `</${html[1]}>`);
+	assert.deepEqual(exception.stack_of_open_elements, ["HTML", "BODY", formattingTag, "DIV"]);
+	assert.deepEqual(exception.active_formatting_elements, [formattingTag]);
 	unsupportedAdoptionAgencyProcessor.destroy();
 	assert.equal(WP_HTML_Processor.normalize(html), null);
 }
