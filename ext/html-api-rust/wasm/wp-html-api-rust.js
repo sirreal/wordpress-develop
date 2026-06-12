@@ -4625,6 +4625,15 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (
+							isCloser &&
+							(tagName === "BODY" || tagName === "HTML") &&
+							this.#currentTokenPrecedesStartTag("FRAMESET")
+						) {
+							this.skip_current_token = true;
+							return true;
+						}
+
 						if (isCloser && tagName !== "BODY" && tagName !== "HTML") {
 							this.skip_current_token = true;
 							return true;
