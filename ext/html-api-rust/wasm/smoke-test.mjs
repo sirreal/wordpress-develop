@@ -6406,6 +6406,34 @@ assert.equal(
 );
 fullParserNestedFosteredAnchorBeforeTableRow.destroy();
 
+const fullParserNestedFosteredAnchorBeforeTableEnd = WP_HTML_Processor.create_full_parser(
+	"<a><table><a></table><p><a><div><a>",
+);
+const fullParserNestedFosteredAnchorBeforeTableEndStarts = [];
+while (fullParserNestedFosteredAnchorBeforeTableEnd.next_token()) {
+	if (
+		fullParserNestedFosteredAnchorBeforeTableEnd.get_token_type() === "#tag" &&
+		!fullParserNestedFosteredAnchorBeforeTableEnd.is_tag_closer() &&
+		["A", "DIV", "P", "TABLE"].includes(fullParserNestedFosteredAnchorBeforeTableEnd.get_tag())
+	) {
+		fullParserNestedFosteredAnchorBeforeTableEndStarts.push([
+			fullParserNestedFosteredAnchorBeforeTableEnd.get_tag(),
+			fullParserNestedFosteredAnchorBeforeTableEnd.get_breadcrumbs(),
+		]);
+	}
+}
+assert.equal(fullParserNestedFosteredAnchorBeforeTableEnd.get_last_error(), null);
+assert.deepEqual(fullParserNestedFosteredAnchorBeforeTableEndStarts, [
+	["A", ["HTML", "BODY", "A"]],
+	["A", ["HTML", "BODY", "A", "A"]],
+	["TABLE", ["HTML", "BODY", "A", "TABLE"]],
+	["P", ["HTML", "BODY", "P"]],
+	["A", ["HTML", "BODY", "P", "A"]],
+	["DIV", ["HTML", "BODY", "DIV"]],
+	["A", ["HTML", "BODY", "DIV", "A"]],
+]);
+fullParserNestedFosteredAnchorBeforeTableEnd.destroy();
+
 const fullParserFosteredDivBeforeTableRow = WP_HTML_Processor.create_full_parser(
 	"<table><tr><div>",
 );

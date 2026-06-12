@@ -2383,6 +2383,8 @@ export function createHtmlApi(wasm) {
 			this.deferred_table_child_openers = [];
 			this.pending_foreign_table_fostered_text_table_index = null;
 			this.pending_nested_anchor_outer_closer_after_deferred_table_index = null;
+			this.pending_nested_anchor_active_removal_after_deferred_table = false;
+			this.pending_nested_anchor_div_active_removal_after_deferred_table = false;
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
@@ -3825,6 +3827,15 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (
+				allowVirtualPreclosures &&
+				this.#queueNestedAnchorOuterCloserAfterDeferredTable()
+			) {
+				this.pending_real_token = true;
+				this.pending_real_parser_state = this.parser_state;
+				return;
+			}
+
 			const fosterParentedTableIndex = this.#fosterParentedStartTableIndex(tagName);
 
 			if (
@@ -4265,6 +4276,8 @@ export function createHtmlApi(wasm) {
 				})),
 				pendingForeignTableFosteredTextTableIndex: this.pending_foreign_table_fostered_text_table_index,
 				pendingNestedAnchorOuterCloserAfterDeferredTableIndex: this.pending_nested_anchor_outer_closer_after_deferred_table_index,
+				pendingNestedAnchorActiveRemovalAfterDeferredTable: this.pending_nested_anchor_active_removal_after_deferred_table,
+				pendingNestedAnchorDivActiveRemovalAfterDeferredTable: this.pending_nested_anchor_div_active_removal_after_deferred_table,
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
@@ -4307,6 +4320,8 @@ export function createHtmlApi(wasm) {
 			}));
 			this.pending_foreign_table_fostered_text_table_index = state.pendingForeignTableFosteredTextTableIndex ?? null;
 			this.pending_nested_anchor_outer_closer_after_deferred_table_index = state.pendingNestedAnchorOuterCloserAfterDeferredTableIndex ?? null;
+			this.pending_nested_anchor_active_removal_after_deferred_table = state.pendingNestedAnchorActiveRemovalAfterDeferredTable ?? false;
+			this.pending_nested_anchor_div_active_removal_after_deferred_table = state.pendingNestedAnchorDivActiveRemovalAfterDeferredTable ?? false;
 			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
@@ -6894,6 +6909,17 @@ export function createHtmlApi(wasm) {
 
 			if (tagName === "A" || tagName === "NOBR") {
 				const formattingElementIndex = this.#lastOpenElementIndex(tagName, "html");
+				if (
+					tagName === "A" &&
+					formattingElementIndex === -1 &&
+					this.#lastActiveFormattingElementIndex("A") !== -1 &&
+					this.open_elements.at(-1) === "DIV" &&
+					this.pending_nested_anchor_div_active_removal_after_deferred_table
+				) {
+					this.pending_nested_anchor_div_active_removal_after_deferred_table = false;
+					this.#removeActiveFormattingElement("A");
+					return false;
+				}
 				if (formattingElementIndex !== -1) {
 					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(tagName);
 					if (
@@ -6904,6 +6930,7 @@ export function createHtmlApi(wasm) {
 					}
 					if (this.#canRepresentNestedAnchorFosteredBeforeDeferredTable(tagName)) {
 						this.pending_nested_anchor_outer_closer_after_deferred_table_index = formattingElementIndex;
+						this.pending_nested_anchor_active_removal_after_deferred_table = this.#nestedAnchorFosteredBeforeDeferredTableEnd();
 						this.#removeActiveFormattingElement(tagName);
 						return false;
 					}
@@ -8676,6 +8703,8 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.pending_nested_anchor_outer_closer_after_deferred_table_index = null;
+			const shouldRemoveActiveAnchor = this.pending_nested_anchor_active_removal_after_deferred_table;
+			this.pending_nested_anchor_active_removal_after_deferred_table = false;
 			if (
 				index < 0 ||
 				index >= this.open_elements.length ||
@@ -8686,6 +8715,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.#queueVirtualPopsFrom(index);
+			if (shouldRemoveActiveAnchor) {
+				this.#removeActiveFormattingElement("A");
+				this.pending_nested_anchor_div_active_removal_after_deferred_table = true;
+			}
 			return true;
 		}
 
@@ -9753,6 +9786,7 @@ export function createHtmlApi(wasm) {
 				this.#currentFosterParentedTableIndex() === null &&
 				(
 					this.#nestedAnchorFosteredBeforeDeferredTablePrecedesTableContent() ||
+					this.#nestedAnchorFosteredBeforeDeferredTableEnd() ||
 					this.#nestedAnchorFosteredBeforeTemplateDeferredTable()
 				)
 			);
@@ -9762,6 +9796,20 @@ export function createHtmlApi(wasm) {
 			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
 			const templateIndex = this.#lastOpenElementIndex("TEMPLATE", "html");
 			return templateIndex !== -1 && tableIndex > templateIndex;
+		}
+
+		#nestedAnchorFosteredBeforeDeferredTableEnd() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const nextTag = this.#nextNonWhitespaceTag(span.start + span.length);
+			return (
+				nextTag !== false &&
+				nextTag.is_closing &&
+				nextTag.tag_name === "TABLE"
+			);
 		}
 
 		#nestedAnchorFosteredBeforeDeferredTablePrecedesTableContent() {
