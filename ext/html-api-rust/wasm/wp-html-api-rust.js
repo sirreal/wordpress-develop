@@ -3762,6 +3762,10 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#representFosteredAtomicStartBeforeDeferredTable(tagName)) {
+				return;
+			}
+
 			if (this.#shouldIgnoreTableContextTableStartTag(tagName)) {
 				this.#ignoreCurrentToken();
 				return;
@@ -8068,6 +8072,9 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				if (this.#isFosteredAtomicTableStartTag(tagName)) {
+					return false;
+				}
 				this.#bailUnsupported("Foster parenting is not supported.");
 				return true;
 			}
@@ -8122,7 +8129,8 @@ export function createHtmlApi(wasm) {
 				if (
 					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
 					nextTag.tag_name === "SELECT" ||
-					this.#isFosteredVoidTableStartTag(nextTag.tag_name)
+					this.#isFosteredVoidTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredAtomicTableStartTag(nextTag.tag_name)
 				) {
 					return true;
 				}
@@ -8149,6 +8157,10 @@ export function createHtmlApi(wasm) {
 
 		#isFosteredVoidTableStartTag(tagName) {
 			return VOID_ELEMENTS.has(tagName) && !TABLE_MODE_START_TAGS.has(tagName) && tagName !== "INPUT";
+		}
+
+		#isFosteredAtomicTableStartTag(tagName) {
+			return tagName === "TITLE";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
@@ -8181,6 +8193,26 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.current_token_namespace = this.#namespaceForCurrentStartTag(super.get_tag());
+			this.breadcrumbs = this.#breadcrumbStack(tagName, tableIndex);
+			return true;
+		}
+
+		#representFosteredAtomicStartBeforeDeferredTable(tagName) {
+			if (
+				!this.is_full_parser ||
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html" ||
+				!this.#isFosteredAtomicTableStartTag(tagName)
+			) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			this.current_token_namespace = "html";
 			this.breadcrumbs = this.#breadcrumbStack(tagName, tableIndex);
 			return true;
 		}

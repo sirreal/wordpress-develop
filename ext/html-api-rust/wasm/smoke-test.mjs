@@ -5991,6 +5991,15 @@ assert.equal(
 );
 fullParserFosteredMetaBeforeTable.destroy();
 
+const fullParserFosteredTitleBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table><title>X</title></table>",
+);
+assert.equal(
+	fullParserFosteredTitleBeforeTable.serialize(),
+	"<!DOCTYPE html><html><head></head><body><title>X</title><table></table></body></html>",
+);
+fullParserFosteredTitleBeforeTable.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",
