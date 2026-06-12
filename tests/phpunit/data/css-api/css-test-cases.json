@@ -273,7 +273,7 @@
 				"raw": "\"foo\\\n\"",
 				"startIndex": 0,
 				"endIndex": 7,
-				"normalized": "\"foo\\\n\"",
+				"normalized": "\"foo\"",
 				"value": "foo"
 			},
 			{
@@ -331,7 +331,7 @@
 				"raw": "\"foo\\\r\n\"",
 				"startIndex": 0,
 				"endIndex": 8,
-				"normalized": "\"foo\\\n\"",
+				"normalized": "\"foo\"",
 				"value": "foo"
 			},
 			{
@@ -1497,7 +1497,7 @@
 				"raw": "\"lQh{R5M!QyOWE}oC2{2K TIa9}zb2oXWREY]0aj5J\\\r\nBJ5CO-16W5H7noF 19䀹41H3e8Z9%tg[O5AHEY24xh'9\"",
 				"startIndex": 11,
 				"endIndex": 102,
-				"normalized": "\"lQh{R5M!QyOWE}oC2{2K TIa9}zb2oXWREY]0aj5J\\\nBJ5CO-16W5H7noF 19䀹41H3e8Z9%tg[O5AHEY24xh'9\"",
+				"normalized": "\"lQh{R5M!QyOWE}oC2{2K TIa9}zb2oXWREY]0aj5JBJ5CO-16W5H7noF 19䀹41H3e8Z9%tg[O5AHEY24xh'9\"",
 				"value": "lQh{R5M!QyOWE}oC2{2K TIa9}zb2oXWREY]0aj5JBJ5CO-16W5H7noF 19䀹41H3e8Z9%tg[O5AHEY24xh'9"
 			},
 			{
@@ -1721,7 +1721,7 @@
 				"raw": "'E{z\u0000U\u001fEG2}2Verb>nj3TVk3mu7wX1J\b.H\u000bi1Ga8f5 dserqydJ3\"xj398xy.W\" uHQbv7Bw1NtF;N3PwNY7Vx00BF o\"4CXzvP\"{594 6r}8QQKNQw135i1\\\r\nrey\thg7[5%rBK8RUC64Lu␌17O{E\\90873u}1O3vx4gHTC55Q9i4\"V3Vx4\"7r(34L]F\"ns2pPf\"V7b)EOBGH8rdC7\"\u000eVJ4OQ[ 9jtoMdINgS7o�206vo72kTcKkZR9wl30G'",
 				"startIndex": 3,
 				"endIndex": 263,
-				"normalized": "'E{z�U\u001fEG2}2Verb>nj3TVk3mu7wX1J\b.H\u000bi1Ga8f5 dserqydJ3\"xj398xy.W\" uHQbv7Bw1NtF;N3PwNY7Vx00BF o\"4CXzvP\"{594 6r}8QQKNQw135i1\\\nrey\thg7[5%rBK8RUC64Lu␌17O{E򐡳u}1O3vx4gHTC55Q9i4\"V3Vx4\"7r(34L]F\"ns2pPf\"V7b)EOBGH8rdC7\"\u000eVJ4OQ[ 9jtoMdINgS7o�206vo72kTcKkZR9wl30G'",
+				"normalized": "'E{z�U\u001fEG2}2Verb>nj3TVk3mu7wX1J\b.H\u000bi1Ga8f5 dserqydJ3\"xj398xy.W\" uHQbv7Bw1NtF;N3PwNY7Vx00BF o\"4CXzvP\"{594 6r}8QQKNQw135i1rey\thg7[5%rBK8RUC64Lu␌17O{E򐡳u}1O3vx4gHTC55Q9i4\"V3Vx4\"7r(34L]F\"ns2pPf\"V7b)EOBGH8rdC7\"\u000eVJ4OQ[ 9jtoMdINgS7o�206vo72kTcKkZR9wl30G'",
 				"value": "E{z�U\u001fEG2}2Verb>nj3TVk3mu7wX1J\b.H\u000bi1Ga8f5 dserqydJ3\"xj398xy.W\" uHQbv7Bw1NtF;N3PwNY7Vx00BF o\"4CXzvP\"{594 6r}8QQKNQw135i1rey\thg7[5%rBK8RUC64Lu␌17O{E򐡳u}1O3vx4gHTC55Q9i4\"V3Vx4\"7r(34L]F\"ns2pPf\"V7b)EOBGH8rdC7\"\u000eVJ4OQ[ 9jtoMdINgS7o�206vo72kTcKkZR9wl30G"
 			},
 			{
@@ -1893,7 +1893,7 @@
 				"raw": "'\\\r\n{X<E/9b}0nIa%eSz-vapw2GqeMsri#e1BQf3b\u001fPlEnFQg{ofB)L9b571J4!{mCN㐥a\\BgK48qgu9'",
 				"startIndex": 44,
 				"endIndex": 126,
-				"normalized": "'\\\n{X<E/9b}0nIa%eSz-vapw2GqeMsri#e1BQf3b\u001fPlEnFQg{ofB)L9b571J4!{mCN㐥a\u000bgK48qgu9'",
+				"normalized": "'{X<E/9b}0nIa%eSz-vapw2GqeMsri#e1BQf3b\u001fPlEnFQg{ofB)L9b571J4!{mCN㐥a\u000bgK48qgu9'",
 				"value": "{X<E/9b}0nIa%eSz-vapw2GqeMsri#e1BQf3b\u001fPlEnFQg{ofB)L9b571J4!{mCN㐥a\u000bgK48qgu9"
 			},
 			{
@@ -4287,7 +4287,7 @@
 				"raw": "\"fo\\\no\"",
 				"startIndex": 0,
 				"endIndex": 7,
-				"normalized": "\"fo\\\no\"",
+				"normalized": "\"foo\"",
 				"value": "foo"
 			},
 			{
@@ -4308,7 +4308,7 @@
 				"raw": "\"fo\\",
 				"startIndex": 0,
 				"endIndex": 4,
-				"normalized": "\"fo�",
+				"normalized": "\"fo",
 				"value": "fo"
 			}
 		]
