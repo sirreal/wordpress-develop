@@ -1981,6 +1981,13 @@ assert.equal(fullParserIncompleteAfterDoctypeProcessor.paused_at_incomplete_toke
 assert.deepEqual(fullParserIncompleteAfterDoctypeProcessor.get_breadcrumbs(), []);
 fullParserIncompleteAfterDoctypeProcessor.destroy();
 
+const fullParserIncompleteEndTagProcessor = WP_HTML_Processor.create_full_parser("</b test");
+while (fullParserIncompleteEndTagProcessor.next_token()) {}
+assert.equal(fullParserIncompleteEndTagProcessor.paused_at_incomplete_token(), false);
+assert.equal(fullParserIncompleteEndTagProcessor.get_last_error(), null);
+assert.deepEqual(fullParserIncompleteEndTagProcessor.get_breadcrumbs(), []);
+fullParserIncompleteEndTagProcessor.destroy();
+
 const fullParserIncompleteRawtextProcessor = WP_HTML_Processor.create_full_parser('<script type="data"><!-- foo-');
 assert.equal(fullParserIncompleteRawtextProcessor.next_tag("script"), true);
 assert.equal(fullParserIncompleteRawtextProcessor.get_modifiable_text(), "<!-- foo-");

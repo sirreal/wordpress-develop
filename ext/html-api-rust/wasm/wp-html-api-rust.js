@@ -2444,6 +2444,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (super.paused_at_incomplete_token() && !this.#incompleteTokenIsEofComment()) {
+				if (this.#skipIncompleteFullParserEndTag()) {
+					return this.next_token();
+				}
+
 				if (this.#skipIncompleteSelectBreakoutStartTag()) {
 					return this.next_token();
 				}
@@ -5404,6 +5408,25 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#skipIncompleteFullParserEndTag() {
+			if (!this.is_full_parser) {
+				return false;
+			}
+
+			const tokenStart = this.#incompleteTokenStart();
+			if (tokenStart === null || !incompleteEndTagAt(this.html, tokenStart)) {
+				return false;
+			}
+
+			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, this.html.length);
+			this.parser_state = STATE_READY;
+			this.current_virtual = null;
+			this.current_synthetic_token = null;
+			this.skip_current_token = false;
+			this.breadcrumbs = this.#breadcrumbStack();
+			return true;
+		}
+
 		#seekPastCurrentStartTag() {
 			const span = this.#nativeCurrentSpan();
 			if (span === null) {
@@ -6823,6 +6846,30 @@ function completeStartTagAt(value, at) {
 	}
 
 	return null;
+}
+
+function incompleteEndTagAt(value, at) {
+	const end = value.length;
+	if (
+		value.charCodeAt(at) !== 0x3c /* < */ ||
+		value.charCodeAt(at + 1) !== 0x2f /* / */
+	) {
+		return false;
+	}
+
+	const nameStart = at + 2;
+	if (nameStart >= end || !isAsciiAlphaCode(value.charCodeAt(nameStart))) {
+		return false;
+	}
+
+	for (let i = nameStart + 1; i < end; i += 1) {
+		const code = value.charCodeAt(i);
+		if (code === 0x3c /* < */ || code === 0x3e /* > */) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 function isHtmlWhitespaceCode(code) {
