@@ -8457,6 +8457,7 @@ export function createHtmlApi(wasm) {
 				) ||
 				this.#currentTableStartCellOpenerPrecedesFosteredText() ||
 				this.#currentTableStartCellContentPrecedesFosteredText() ||
+				this.#currentTableStartContentPrecedesFosteredStart() ||
 				this.#currentTableStartForeignCellCloserPrecedesFosteredText()
 			);
 		}
@@ -8474,6 +8475,7 @@ export function createHtmlApi(wasm) {
 								? (
 									this.#currentTableCellStartIsFollowedByFosteredTableContent() ||
 									this.#currentTableCellStartContentPrecedesFosteredText() ||
+									this.#currentTableCellStartContentPrecedesFosteredStart() ||
 									this.#currentTableCellStartPrecedesForeignCellCloserFosteredText()
 								)
 								: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
@@ -8484,6 +8486,7 @@ export function createHtmlApi(wasm) {
 						(
 							this.#currentTableRowStartPrecedesFosteredTextAfterCell() ||
 							this.#currentTableRowStartPrecedesCellContentFosteredText() ||
+							this.#currentTableRowStartPrecedesCellContentFosteredStart() ||
 							this.#currentTableRowStartPrecedesForeignCellCloserFosteredText()
 						)
 					) ||
@@ -8550,7 +8553,7 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
-				if (this.#currentTableStructureCloserPrecedesFosteredTableText(tagName)) {
+				if (this.#currentTableStructureCloserPrecedesFosteredTableContent(tagName)) {
 					return false;
 				}
 
@@ -8561,7 +8564,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.#currentFosterParentedTableIndex() !== null) {
-				if (tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
+				if (tagName === "TABLE" || tagName === "TR" || TABLE_CELL_ELEMENTS.has(tagName)) {
 					return this.#queueFosteredElementPopsBeforeDeferredTable();
 				}
 				return false;
@@ -8583,6 +8586,7 @@ export function createHtmlApi(wasm) {
 						? (
 							this.#currentTableCellStartIsFollowedByFosteredTableContent() ||
 							this.#currentTableCellStartContentPrecedesFosteredText() ||
+							this.#currentTableCellStartContentPrecedesFosteredStart() ||
 							this.#currentTableCellStartPrecedesForeignCellCloserFosteredText()
 						)
 						: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
@@ -8597,6 +8601,7 @@ export function createHtmlApi(wasm) {
 				(
 					this.#currentTableRowStartPrecedesFosteredTextAfterCell() ||
 					this.#currentTableRowStartPrecedesCellContentFosteredText() ||
+					this.#currentTableRowStartPrecedesCellContentFosteredStart() ||
 					this.#currentTableRowStartPrecedesForeignCellCloserFosteredText()
 				)
 			) {
@@ -8642,6 +8647,14 @@ export function createHtmlApi(wasm) {
 
 			if (
 				this.#currentHtmlElementIs("TABLE") &&
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+				this.#currentTextChunkPrecedesFosteredTableToken()
+			) {
+				return this.#deferCurrentTextAsTableChild();
+			}
+
+			if (
+				this.#currentHtmlElementIs("TR") &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
 				this.#currentTextChunkPrecedesFosteredTableToken()
 			) {
@@ -8806,6 +8819,25 @@ export function createHtmlApi(wasm) {
 			return this.#rowCellContentPrecedesFosteredTextAt(at);
 		}
 
+		#currentTableStartContentPrecedesFosteredStart() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			const sectionTag = this.#nextNonWhitespaceTag(at);
+			if (
+				sectionTag !== false &&
+				!sectionTag.is_closing &&
+				TABLE_SECTION_ELEMENTS.has(sectionTag.tag_name)
+			) {
+				at = sectionTag.token_end;
+			}
+
+			return this.#rowSequencePrecedesFosteredStartAt(at);
+		}
+
 		#currentTableStartForeignCellCloserPrecedesFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			if (span === null) {
@@ -8832,6 +8864,13 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
+		#currentTableRowStartPrecedesCellContentFosteredStart() {
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#rowContentPrecedesFosteredStartAt(
+				span.start + span.length,
+			);
+		}
+
 		#currentTableRowStartPrecedesForeignCellCloserFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			return span !== null && this.#foreignCellCloserPrecedesFosteredTextAt(
@@ -8843,6 +8882,13 @@ export function createHtmlApi(wasm) {
 		#currentTableCellStartContentPrecedesFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			return span !== null && this.#cellContentPrecedesFosteredTextAt(
+				span.start + span.length,
+			);
+		}
+
+		#currentTableCellStartContentPrecedesFosteredStart() {
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#cellContentPrecedesFosteredStartAt(
 				span.start + span.length,
 			);
 		}
@@ -8874,6 +8920,23 @@ export function createHtmlApi(wasm) {
 			return this.#rowContentPrecedesFosteredTextAt(rowTag.token_end);
 		}
 
+		#rowSequencePrecedesFosteredStartAt(at) {
+			const rowTag = this.#nextNonWhitespaceTag(at);
+			if (rowTag === false || rowTag.is_closing) {
+				return false;
+			}
+
+			if (this.#isFosteredTableLookaheadStartTag(rowTag)) {
+				return true;
+			}
+
+			if (rowTag.tag_name !== "TR") {
+				return false;
+			}
+
+			return this.#rowContentPrecedesFosteredStartAt(rowTag.token_end);
+		}
+
 		#rowContentPrecedesFosteredTextAt(at) {
 			const cellTag = this.#nextNonWhitespaceTag(at);
 			if (
@@ -8885,6 +8948,23 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.#cellContentPrecedesFosteredTextAt(cellTag.token_end);
+		}
+
+		#rowContentPrecedesFosteredStartAt(at) {
+			const cellTag = this.#nextNonWhitespaceTag(at);
+			if (cellTag === false || cellTag.is_closing) {
+				return false;
+			}
+
+			if (this.#isFosteredTableLookaheadStartTag(cellTag)) {
+				return true;
+			}
+
+			if (!TABLE_CELL_ELEMENTS.has(cellTag.tag_name)) {
+				return false;
+			}
+
+			return this.#cellContentPrecedesFosteredStartAt(cellTag.token_end);
 		}
 
 		#cellContentPrecedesFosteredTextAt(at) {
@@ -8913,6 +8993,67 @@ export function createHtmlApi(wasm) {
 				}
 
 				at = nextTag.token_end;
+			}
+		}
+
+		#cellContentPrecedesFosteredStartAt(at) {
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					if (TABLE_MODE_START_TAGS.has(nextTag.tag_name)) {
+						return false;
+					}
+
+					at = nextTag.token_end;
+					continue;
+				}
+
+				if (
+					TABLE_CELL_ELEMENTS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "TABLE"
+				) {
+					return this.#tableStructureEndPrecedesFosteredStart(nextTag.token_end);
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#tableStructureEndPrecedesFosteredStart(at) {
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
+				if (!this.#isIgnorableTableText(text) || nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing) {
+					if (
+						this.#isTableStructureFosterLookaheadEndTag(nextTag.tag_name) ||
+						this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+					) {
+						at = nextTag.token_end;
+						continue;
+					}
+
+					return false;
+				}
+
+				if (nextTag.tag_name === "TR") {
+					return this.#rowContentPrecedesFosteredStartAt(nextTag.token_end);
+				}
+
+				if (TABLE_SECTION_ELEMENTS.has(nextTag.tag_name)) {
+					return this.#rowSequencePrecedesFosteredStartAt(nextTag.token_end);
+				}
+
+				return this.#isFosteredTableLookaheadStartTag(nextTag);
 			}
 		}
 
@@ -9406,7 +9547,7 @@ export function createHtmlApi(wasm) {
 			if (
 				namespaceName !== "html" ||
 				existingIndex === -1 ||
-				!this.#currentTableStructureCloserPrecedesFosteredTableText(tagName)
+				!this.#currentTableStructureCloserPrecedesFosteredTableContent(tagName)
 			) {
 				return false;
 			}
@@ -9521,6 +9662,31 @@ export function createHtmlApi(wasm) {
 
 				return false;
 			}
+		}
+
+		#currentTableStructureCloserPrecedesFosteredTableContent(tagName) {
+			return (
+				this.#currentTableStructureCloserPrecedesFosteredTableText(tagName) ||
+				this.#currentTableStructureCloserPrecedesFosteredTableStart(tagName)
+			);
+		}
+
+		#currentTableStructureCloserPrecedesFosteredTableStart(tagName) {
+			if (
+				this.deferred_table_opener === null ||
+				!(
+					TABLE_CELL_ELEMENTS.has(tagName) ||
+					tagName === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(tagName)
+				)
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#tableStructureEndPrecedesFosteredStart(
+				span.start + span.length,
+			);
 		}
 
 		#tableStructureEndTagsPrecedeFosteredText(at) {
