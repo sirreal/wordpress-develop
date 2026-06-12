@@ -8199,11 +8199,27 @@ export function createHtmlApi(wasm) {
 
 		#shouldDeferCurrentTableOpener(tagName, namespaceName) {
 			return (
-				this.is_full_parser &&
+				(this.is_full_parser || this.#canDeferNestedTableInFragment()) &&
 				this.deferred_table_opener === null &&
 				tagName === "TABLE" &&
 				namespaceName === "html" &&
 				this.#currentTableStartIsFollowedByFosteredContent()
+			);
+		}
+
+		#canDeferNestedTableInFragment() {
+			return (
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				(
+					TABLE_SECTION_ELEMENTS.has(this.context_node) ||
+					this.context_node === "TR" ||
+					TABLE_CELL_ELEMENTS.has(this.context_node)
+				) &&
+				(
+					this.deferred_table_opener !== null ||
+					this.#currentHtmlElementIs("TABLE")
+				)
 			);
 		}
 
@@ -8215,7 +8231,7 @@ export function createHtmlApi(wasm) {
 
 		#shouldDeferCurrentTableChildOpener(tagName, namespaceName) {
 			return (
-				this.is_full_parser &&
+				(this.is_full_parser || this.#canDeferNestedTableInFragment()) &&
 				this.deferred_table_opener !== null &&
 				namespaceName === "html" &&
 				(
@@ -8611,7 +8627,6 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
-				!this.is_full_parser ||
 				this.deferred_table_opener === null ||
 				this.current_namespace !== "html" ||
 				(

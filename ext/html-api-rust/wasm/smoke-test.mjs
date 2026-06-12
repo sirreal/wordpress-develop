@@ -5239,6 +5239,19 @@ assert.deepEqual(tableColSelectProcessor.get_breadcrumbs(), ["HTML", "BODY", "KB
 assert.equal(tableColSelectProcessor.get_last_error(), null);
 tableColSelectProcessor.destroy();
 
+const tableFragmentAnchorFosterProcessor = WP_HTML_Processor.create_fragment(
+	"<td><table><tbody><a><tr>",
+	"<tbody>",
+);
+assert.equal(tableFragmentAnchorFosterProcessor.next_tag("a"), true);
+assert.deepEqual(tableFragmentAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "TBODY", "TR", "TD", "A"]);
+assert.equal(tableFragmentAnchorFosterProcessor.next_tag("table"), true);
+assert.deepEqual(tableFragmentAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "TBODY", "TR", "TD", "TABLE"]);
+assert.equal(tableFragmentAnchorFosterProcessor.next_tag("tr"), true);
+assert.deepEqual(tableFragmentAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "TBODY", "TR", "TD", "TABLE", "TBODY", "TR"]);
+assert.equal(tableFragmentAnchorFosterProcessor.get_last_error(), null);
+tableFragmentAnchorFosterProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
