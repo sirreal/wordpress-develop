@@ -694,14 +694,23 @@ class WP_CSS_Token_Processor {
 
 				case self::TOKEN_STRING:
 				case self::TOKEN_BAD_STRING:
+					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
+						$this->token_value = $this->decode_string_token_value(
+							$this->token_value_starts_at,
+							$this->token_value_length
+						);
+					} else {
+						$this->token_value = null;
+					}
+					break;
+
 				case self::TOKEN_URL:
-					// Decode and cache the string/URL value.
+					// Decode and cache the URL value.
 					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
 						$this->token_value = $this->decode_string_or_url(
 							$this->token_value_starts_at,
 							$this->token_value_length
 						);
-						$this->token_value = $this->token_value;
 					} else {
 						$this->token_value = null;
 					}
@@ -1543,6 +1552,93 @@ class WP_CSS_Token_Processor {
 			}
 
 			// Null bytes become U+FFFD.
+			if ( "\x00" === $char ) {
+				$decoded .= "\u{FFFD}";
+				++$at;
+				continue;
+			}
+		}
+
+		return $decoded;
+	}
+
+	/**
+	 * Decodes a string token value with string-token escape semantics.
+	 *
+	 * String tokens differ from identifiers and URLs: a backslash followed by
+	 * EOF appends nothing, and a backslash followed by a newline consumes the
+	 * newline and appends nothing.
+	 *
+	 * @param int $start  Start byte offset.
+	 * @param int $length Length of the substring to decode.
+	 * @return string Decoded/normalized string token value.
+	 */
+	private function decode_string_token_value( int $start, int $length ): string {
+		$slice         = wp_scrub_utf8( substr( $this->css, $start, $length ) );
+		$special_chars = "\\\r\f\x00";
+		if ( false === strpbrk( $slice, $special_chars ) ) {
+			return $slice;
+		}
+
+		$decoded = '';
+		$at      = $start;
+		$end     = $start + $length;
+
+		while ( $at < $end ) {
+			$normal_len = strcspn( $this->css, $special_chars, $at );
+			if ( $normal_len > 0 ) {
+				$normal_len = min( $normal_len, $end - $at );
+				$decoded   .= substr( $this->css, $at, $normal_len );
+				$at        += $normal_len;
+			}
+
+			if ( $at >= $end ) {
+				break;
+			}
+
+			$char = $this->css[ $at ];
+
+			if ( '\\' === $char ) {
+				++$at;
+
+				if ( $at >= $end ) {
+					continue;
+				}
+
+				switch ( $this->css[ $at ] ) {
+					case "\n":
+					case "\f":
+						++$at;
+						continue 2;
+
+					case "\r":
+						++$at;
+						if ( $at < $end && "\n" === $this->css[ $at ] ) {
+							++$at;
+						}
+						continue 2;
+				}
+
+				$decoded .= $this->decode_escape_at( $at, $bytes_consumed );
+				$at      += $bytes_consumed;
+				continue;
+			}
+
+			if ( "\r" === $char ) {
+				$decoded .= "\n";
+				++$at;
+				if ( $at < $end && "\n" === $this->css[ $at ] ) {
+					++$at;
+				}
+				continue;
+			}
+
+			if ( "\f" === $char ) {
+				$decoded .= "\n";
+				++$at;
+				continue;
+			}
+
 			if ( "\x00" === $char ) {
 				$decoded .= "\u{FFFD}";
 				++$at;
