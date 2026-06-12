@@ -63,6 +63,18 @@ $dom_escaped_tag_name = \HtmlApiFuzz\TreeRenderer::render_dom( '<a"b></a"b>', \H
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_escaped_tag_name['status'] ?? null ), 'Expected PHP DOM oracle to parse the quoted tag-name fixture.' );
 html_api_fuzz_lexbor_smoke_assert( $dom_escaped_tag_name['tree'] === $escaped_tag_name['tree'], 'Expected Lexbor quoted tag-name tree to match PHP DOM escaping.' );
 
+$adjusted_svg_names = '<svg><foreignobject><div></div></foreignobject><altglyph attributename=x attributetype=XML></altglyph><lineargradient gradientunits=userSpaceOnUse></lineargradient></svg>';
+$rendered_adjusted_svg_names = $oracle->render( $adjusted_svg_names, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, 'body' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $rendered_adjusted_svg_names['status'] ?? null ), 'Expected Lexbor to parse adjusted SVG names fixture.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $rendered_adjusted_svg_names['tree'] ?? '', "<svg foreignObject>\n" ), 'Expected Lexbor to render adjusted SVG foreignObject casing.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $rendered_adjusted_svg_names['tree'] ?? '', "<svg altGlyph>\n" ), 'Expected Lexbor to render adjusted SVG altGlyph casing.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $rendered_adjusted_svg_names['tree'] ?? '', "<svg linearGradient>\n" ), 'Expected Lexbor to render adjusted SVG linearGradient casing.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $rendered_adjusted_svg_names['tree'] ?? '', "attributeName=\"x\"" ), 'Expected Lexbor to render adjusted SVG attributeName casing.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $rendered_adjusted_svg_names['tree'] ?? '', "attributeType=\"XML\"" ), 'Expected Lexbor to render adjusted SVG attributeType casing.' );
+$dom_adjusted_svg_names = \HtmlApiFuzz\TreeRenderer::render_dom( $adjusted_svg_names, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, 'body' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $dom_adjusted_svg_names['status'] ?? null ), 'Expected PHP DOM oracle to parse adjusted SVG names fixture.' );
+html_api_fuzz_lexbor_smoke_assert( $dom_adjusted_svg_names['tree'] === $rendered_adjusted_svg_names['tree'], 'Expected Lexbor adjusted SVG names tree to match PHP DOM.' );
+
 $issue_372 = '<svg xlink:href=qual href=plain></svg>';
 $rendered_372 = $oracle->render( $issue_372, \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, 'body' );
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $rendered_372['status'] ?? null ), 'Expected Lexbor to parse issue 372 fixture.' );
