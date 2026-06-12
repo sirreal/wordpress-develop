@@ -3,6 +3,121 @@ export interface WasmInstantiatedSource {
 	instance: WebAssembly.Instance;
 }
 
+export interface WpHtmlApiRustWasmExports extends WebAssembly.Exports {
+	readonly __data_end: WebAssembly.Global;
+	readonly __heap_base: WebAssembly.Global;
+	readonly memory: WebAssembly.Memory;
+	wp_html_api_rust_alloc(len: number): number;
+	wp_html_api_rust_dealloc(ptr: number, len: number): void;
+	wp_html_api_rust_core_version(): number;
+	wp_html_api_rust_decoder_decode(
+		context: number,
+		text: number,
+		textLen: number,
+		outPtr: number,
+		outCapacity: number,
+		outLen: number,
+	): boolean;
+	wp_html_api_rust_decoder_read_character_reference(
+		context: number,
+		text: number,
+		textLen: number,
+		at: number,
+		outPtr: number,
+		outCapacity: number,
+		outLen: number,
+		matchLen: number,
+	): boolean;
+	wp_html_api_rust_decoder_attribute_starts_with(
+		haystack: number,
+		haystackLen: number,
+		searchText: number,
+		searchTextLen: number,
+		asciiCaseInsensitive: boolean,
+	): boolean;
+	wp_html_api_rust_decoder_code_point_to_utf8_bytes(
+		codePoint: number,
+		outPtr: number,
+		outCapacity: number,
+		outLen: number,
+	): boolean;
+	wp_html_api_rust_scan_next_tag(html: number, len: number, offset: number, out: number): boolean;
+	wp_html_api_rust_tag_processor_new(html: number, len: number): number;
+	wp_html_api_rust_tag_processor_free(processor: number): void;
+	wp_html_api_rust_tag_processor_next_tag(
+		processor: number,
+		query: number,
+		queryLen: number,
+		visitClosers: boolean,
+	): boolean;
+	wp_html_api_rust_tag_processor_next_token(processor: number): boolean;
+	wp_html_api_rust_tag_processor_seek(processor: number, offset: number): void;
+	wp_html_api_rust_tag_processor_set_namespace(processor: number, namespace: number): void;
+	wp_html_api_rust_tag_processor_apply_lexical_update(
+		processor: number,
+		start: number,
+		length: number,
+		replacement: number,
+		replacementLen: number,
+	): boolean;
+	wp_html_api_rust_tag_processor_current_span(processor: number, start: number, length: number): boolean;
+	wp_html_api_rust_tag_processor_current_token_type(processor: number): number;
+	wp_html_api_rust_tag_processor_paused_at_incomplete(processor: number): boolean;
+	wp_html_api_rust_tag_processor_subdivide_text_appropriately(processor: number): number;
+	wp_html_api_rust_tag_processor_get_modifiable_text(processor: number, out: number): boolean;
+	wp_html_api_rust_tag_processor_set_modifiable_text(
+		processor: number,
+		text: number,
+		textLen: number,
+	): boolean;
+	wp_html_api_rust_tag_processor_current_comment_type(processor: number): number;
+	wp_html_api_rust_tag_processor_script_content_type(processor: number): number;
+	wp_html_api_rust_tag_processor_get_tag(processor: number, out: number): boolean;
+	wp_html_api_rust_tag_processor_is_tag_closer(processor: number): boolean;
+	wp_html_api_rust_tag_processor_has_self_closing_flag(processor: number): boolean;
+	wp_html_api_rust_tag_processor_get_attribute(
+		processor: number,
+		name: number,
+		nameLen: number,
+		out: number,
+	): number;
+	wp_html_api_rust_tag_processor_get_attribute_names_with_prefix(
+		processor: number,
+		prefix: number,
+		prefixLen: number,
+		out: number,
+	): number;
+	wp_html_api_rust_tag_processor_set_attribute(
+		processor: number,
+		name: number,
+		nameLen: number,
+		value: number,
+		valueLen: number,
+		valueKind: number,
+	): boolean;
+	wp_html_api_rust_tag_processor_remove_attribute(processor: number, name: number, nameLen: number): boolean;
+	wp_html_api_rust_tag_processor_add_class(
+		processor: number,
+		className: number,
+		classNameLen: number,
+		quirksMode: boolean,
+	): boolean;
+	wp_html_api_rust_tag_processor_remove_class(
+		processor: number,
+		className: number,
+		classNameLen: number,
+		quirksMode: boolean,
+	): boolean;
+	wp_html_api_rust_tag_processor_has_class(
+		processor: number,
+		className: number,
+		classNameLen: number,
+		quirksMode: boolean,
+	): number;
+	wp_html_api_rust_tag_processor_class_list(processor: number, out: number, quirksMode: boolean): number;
+	wp_html_api_rust_tag_processor_get_html(processor: number, out: number): boolean;
+}
+
 export type WasmInputSource =
 	| URL
 	| Request
@@ -490,7 +605,7 @@ export interface HtmlApi {
 	WP_HTML_Processor: WP_HTML_Processor_Constructor;
 	scanNextTag(html: unknown, offset?: number | string | boolean | null): ScanNextTagResult | false;
 	version(): string;
-	wasm: WebAssembly.Exports;
+	wasm: WpHtmlApiRustWasmExports;
 }
 
 export function loadWasm(input?: WasmInput): Promise<HtmlApi>;

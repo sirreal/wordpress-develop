@@ -89,6 +89,8 @@ const wasmExportNames = [
 	"wp_html_api_rust_tag_processor_set_namespace",
 	"wp_html_api_rust_tag_processor_subdivide_text_appropriately",
 ];
+const wasmReadonlyExportNames = ["__data_end", "__heap_base", "memory"];
+const wasmFunctionExportNames = wasmExportNames.filter((name) => name.startsWith("wp_html_api_rust_"));
 
 const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
 function declaredInterfaceBody(interfaceName) {
@@ -126,6 +128,9 @@ const declaredLoadedApiExports = [
 
 assert.deepEqual(declaredModuleValueExports, directModuleExports);
 assert.deepEqual(declaredLoadedApiExports, loadedApiExports);
+assert.deepEqual(declaredReadonlyMemberNames("WpHtmlApiRustWasmExports"), wasmReadonlyExportNames);
+assert.deepEqual(declaredInterfaceMethodNames("WpHtmlApiRustWasmExports"), wasmFunctionExportNames);
+assert.match(typeDeclarations, /^\s*wasm: WpHtmlApiRustWasmExports;$/m);
 assert.deepEqual(Object.keys(HtmlApiModule).sort(), directModuleExports);
 
 const {
