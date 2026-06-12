@@ -2687,6 +2687,34 @@ assert.equal(fullParserCommentAfterFramesetNoframes.get_last_error(), null);
 assert.equal(fullParserCommentAfterFramesetNoframes.get_unsupported_exception(), null);
 fullParserCommentAfterFramesetNoframes.destroy();
 
+const fullParserDelayedFramesetComment = WP_HTML_Processor.create_full_parser(
+	"<html><frameset></frameset></html><!--before--><noframes>fallback</noframes><!--after-->",
+);
+const delayedFramesetCommentTokens = [];
+while (fullParserDelayedFramesetComment.next_token()) {
+	if (fullParserDelayedFramesetComment.get_token_type() === "#tag" && fullParserDelayedFramesetComment.get_tag() === "NOFRAMES") {
+		delayedFramesetCommentTokens.push([
+			"noframes",
+			fullParserDelayedFramesetComment.get_modifiable_text(),
+			fullParserDelayedFramesetComment.get_breadcrumbs(),
+		]);
+	} else if (fullParserDelayedFramesetComment.get_token_type() === "#comment") {
+		delayedFramesetCommentTokens.push([
+			"comment",
+			fullParserDelayedFramesetComment.get_full_comment_text(),
+			fullParserDelayedFramesetComment.get_breadcrumbs(),
+		]);
+	}
+}
+assert.deepEqual(delayedFramesetCommentTokens, [
+	["noframes", "fallback", ["HTML", "NOFRAMES"]],
+	["comment", "before", ["#comment"]],
+	["comment", "after", ["#comment"]],
+]);
+assert.equal(fullParserDelayedFramesetComment.get_last_error(), null);
+assert.equal(fullParserDelayedFramesetComment.get_unsupported_exception(), null);
+fullParserDelayedFramesetComment.destroy();
+
 const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
 assert.equal(noQuirksClasses.next_tag("span"), true);
 assert.equal(noQuirksClasses.compat_mode, WP_HTML_Tag_Processor.NO_QUIRKS_MODE);

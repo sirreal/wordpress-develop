@@ -2057,6 +2057,7 @@ export function createHtmlApi(wasm) {
 			this.current_virtual = null;
 			this.current_synthetic_token = null;
 			this.synthetic_eof_comment_consumed = false;
+			this.delayed_synthetic_tokens = [];
 			this.virtual_tokens = [];
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
@@ -2364,6 +2365,10 @@ export function createHtmlApi(wasm) {
 
 			if (this.current_synthetic_token !== null) {
 				this.current_synthetic_token = null;
+			}
+
+			if (this.delayed_synthetic_tokens.length > 0) {
+				return this.#consumeDelayedSyntheticToken();
 			}
 
 			if (this.virtual_tokens.length > 0) {
@@ -3449,6 +3454,17 @@ export function createHtmlApi(wasm) {
 			this.#bailIfExceededMaxBookmarks();
 		}
 
+		#consumeDelayedSyntheticToken() {
+			const token = this.delayed_synthetic_tokens.shift();
+			this.current_virtual = null;
+			this.current_synthetic_token = token;
+			this.skip_current_token = false;
+			this.parser_state = token.tokenType === "#comment" ? STATE_COMMENT : STATE_TEXT_NODE;
+			this.current_token_namespace = token.namespaceName ?? this.current_namespace;
+			this.breadcrumbs = [...token.breadcrumbs];
+			return true;
+		}
+
 		#consumeVirtualToken() {
 			const token = this.virtual_tokens.shift();
 			this.current_virtual = token;
@@ -3516,6 +3532,10 @@ export function createHtmlApi(wasm) {
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
+				delayedSyntheticTokens: this.delayed_synthetic_tokens.map((token) => ({
+					...token,
+					breadcrumbs: [...token.breadcrumbs],
+				})),
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				ignoredSelectFormattingElements: [...this.ignored_select_formatting_elements.entries()],
 				templateInsertionModes: [...this.template_insertion_modes],
@@ -3535,6 +3555,10 @@ export function createHtmlApi(wasm) {
 			this.pending_real_token = false;
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
+			this.delayed_synthetic_tokens = (state.delayedSyntheticTokens ?? []).map((token) => ({
+				...token,
+				breadcrumbs: [...token.breadcrumbs],
+			}));
 			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
@@ -3634,6 +3658,18 @@ export function createHtmlApi(wasm) {
 			const span = this.#nativeCurrentSpan();
 			const start = span === null ? 0 : span.start + span.length;
 			return /<\s*noframes(?:[\t\n\f\r />]|$)/i.test(super.get_updated_html().slice(start));
+		}
+
+		#delayCurrentCommentToken(breadcrumbs = this.#breadcrumbStack("#comment")) {
+			this.delayed_synthetic_tokens.push({
+				tokenType: "#comment",
+				tokenName: "#comment",
+				commentText: this.get_full_comment_text() ?? "",
+				namespaceName: this.current_namespace,
+				breadcrumbs,
+			});
+			this.skip_current_token = true;
+			return true;
 		}
 
 		#serializeTextToken() {
@@ -4382,6 +4418,10 @@ export function createHtmlApi(wasm) {
 							tokenType === "#presumptuous-tag"
 						) {
 							if (this.#hasFutureNoframesStartTag()) {
+								if (tokenType === "#comment") {
+									return this.#delayCurrentCommentToken(["#comment"]);
+								}
+
 								this.#bailUnsupported("Content outside of HTML is unsupported.");
 								return true;
 							}
