@@ -6386,6 +6386,11 @@ export function createHtmlApi(wasm) {
 					this.#ignoreCurrentToken();
 					return true;
 				}
+				if (tagName === "DIV" && this.#currentHtmlElementIs("TR")) {
+					this.#setCurrentTemplateInsertionMode("in_table_body");
+					this.#queueVirtualPopsFrom(this.open_elements.length - 1);
+					return this.#reprocessCurrentTokenAfterVirtualTokens();
+				}
 				return false;
 			}
 
@@ -8622,6 +8627,13 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				!isCloser &&
+				this.#canCloseTemplateRowForStartTag(tagName)
+			) {
+				return false;
+			}
+
 			const currentNode = this.open_elements[topIndex];
 			if (currentNode === "TABLE") {
 				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
@@ -8720,6 +8732,15 @@ export function createHtmlApi(wasm) {
 					TABLE_SECTION_ELEMENTS.has(this.context_node) &&
 					this.open_elements[topIndex] === this.context_node
 				)
+			);
+		}
+
+		#canCloseTemplateRowForStartTag(tagName) {
+			return (
+				tagName === "DIV" &&
+				this.template_insertion_modes.length > 0 &&
+				this.#currentTemplateInsertionMode() === "in_row" &&
+				this.#currentHtmlElementIs("TR")
 			);
 		}
 
