@@ -1371,7 +1371,7 @@ export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.was
 }
 
 export function createHtmlApi(wasm) {
-	const runtime = new WasmRuntime(wasm);
+	const runtime = new WasmRuntime(wasmExportsFromInput(wasm));
 
 	class WP_HTML_Decoder {
 		static attribute_starts_with(haystack, searchText, caseSensitivity = "case-sensitive") {
@@ -6460,6 +6460,18 @@ export function createHtmlApi(wasm) {
 		version: () => runtime.version(),
 		wasm,
 	};
+}
+
+function wasmExportsFromInput(input) {
+	if (isWebAssemblyInstantiatedSource(input)) {
+		return input.instance.exports;
+	}
+
+	if (input instanceof WebAssembly.Instance) {
+		return input.exports;
+	}
+
+	return input;
 }
 
 class WasmRuntime {

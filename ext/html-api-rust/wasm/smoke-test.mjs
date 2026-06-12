@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+	createHtmlApi,
 	loadWasm,
 	WP_HTML_Active_Formatting_Elements as Exported_WP_HTML_Active_Formatting_Elements,
 	WP_HTML_Attribute_Token as Exported_WP_HTML_Attribute_Token,
@@ -285,12 +286,18 @@ const apiFromInstance = await loadWasm(wasmInstance);
 assert.equal(apiFromInstance.version(), "0.1.0");
 const apiFromPromisedInstance = await loadWasm(Promise.resolve(wasmInstance));
 assert.equal(apiFromPromisedInstance.version(), "0.1.0");
+const apiCreatedFromInstance = createHtmlApi(wasmInstance);
+assert.equal(apiCreatedFromInstance.version(), "0.1.0");
+const apiCreatedFromExports = createHtmlApi(wasmInstance.exports);
+assert.equal(apiCreatedFromExports.version(), "0.1.0");
 
 const wasmInstantiatedSource = await WebAssembly.instantiate(wasmBytes, {});
 const apiFromInstantiatedSource = await loadWasm(wasmInstantiatedSource);
 assert.equal(apiFromInstantiatedSource.version(), "0.1.0");
 const apiFromPromisedInstantiatedSource = await loadWasm(Promise.resolve(wasmInstantiatedSource));
 assert.equal(apiFromPromisedInstantiatedSource.version(), "0.1.0");
+const apiCreatedFromInstantiatedSource = createHtmlApi(wasmInstantiatedSource);
+assert.equal(apiCreatedFromInstantiatedSource.version(), "0.1.0");
 
 if (typeof Response === "function") {
 	const apiFromResponse = await loadWasm(new Response(wasmArrayBuffer.slice(0)));

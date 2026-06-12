@@ -17,6 +17,11 @@ export type WasmInputSource =
 
 export type WasmInput = WasmInputSource | PromiseLike<WasmInputSource>;
 
+export type WasmExportsInput =
+	| WebAssembly.Exports
+	| WebAssembly.Instance
+	| WasmInstantiatedSource;
+
 export interface ScanNextTagResult {
 	tag_start: number;
 	tag_end: number;
@@ -488,4 +493,4 @@ export interface HtmlApi {
 }
 
 export function loadWasm(input?: WasmInput): Promise<HtmlApi>;
-export function createHtmlApi(wasm: WebAssembly.Exports): HtmlApi;
+export function createHtmlApi(wasm: WasmExportsInput): HtmlApi;
