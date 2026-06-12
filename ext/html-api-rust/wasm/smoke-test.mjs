@@ -3843,6 +3843,14 @@ assert.equal(
 	"<div> abc <b> def <i> ghi </i></b><i><p><b> jkl </b> mno</p></i></div>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<div><a><b><u><i><code><div></a>"),
+	"<div><a><b><u><i><code></code></i></u></b></a><u><i><code><div><a></a></div></code></i></u></div>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><b><big><em><strong><div>X</a>"),
+	"<a><b><big><em><strong></strong></em></big></b></a><big><em><strong><div><a>X</a></div></strong></em></big>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<font><p>hello<b>cruel</font>world"),
 	"<font></font><p><font>hello<b>cruel</b></font><b>world</b></p>",
 );

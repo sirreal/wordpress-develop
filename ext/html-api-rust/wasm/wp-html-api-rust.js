@@ -3351,6 +3351,7 @@ export function createHtmlApi(wasm) {
 					tokenType === "#text" &&
 					this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE &&
 					(
+						this.#queueSpecialStartAdoptionPreclosedFormattingElementsForText() ||
 						this.#queueParagraphAdoptionPreclosedFormattingElementsForText() ||
 						this.#queueReconstructActiveFormattingElements()
 					)
@@ -3711,6 +3712,7 @@ export function createHtmlApi(wasm) {
 				allowVirtualPreclosures &&
 				(
 					this.#queueNestedAnchorBlockAdoptionPreclosure(tagName) ||
+					this.#queueDeepFormattingElementSpecialStartPreclosure(tagName) ||
 					this.#queueFormattingElementSpecialStartPreclosure(tagName) ||
 					this.#queueFormattingElementAncestorSpecialStartPreclosure(tagName) ||
 					this.#queueParagraphAdoptionFormattingPreclosure(tagName) ||
@@ -4394,6 +4396,62 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#queueDeepFormattingElementSpecialStartPreclosure(tagName) {
+			if (tagName !== "DIV") {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 0 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				!FORMATTING_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			for (let i = topIndex - 1; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					return false;
+				}
+
+				if (!FORMATTING_ELEMENTS.has(this.open_elements[i])) {
+					if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
+						return false;
+					}
+					continue;
+				}
+
+				const formattingTagName = this.open_elements[i];
+				if (formattingTagName !== "A") {
+					continue;
+				}
+
+				if (!this.#hasOnlyOpenFormattingElementsAfterIndex(i)) {
+					return false;
+				}
+
+				const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
+				const followingEntries = this.#activeFormattingElementsAfterIndex(activeFormattingElementIndex);
+				if (
+					activeFormattingElementIndex === -1 ||
+					followingEntries.length < 4 ||
+					hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) ||
+					!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+				) {
+					return false;
+				}
+
+				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
+				this.#queueVirtualPopsFrom(i);
+				this.#queueActiveFormattingElementEntries(followingEntries.slice(-3));
+				this.#removeActiveFormattingElementsAfterIndexBeforeTail(activeFormattingElementIndex, 3);
+				return true;
+			}
+
+			return false;
+		}
+
 		#queueFormattingElementAncestorSpecialStartPreclosure(tagName) {
 			if (!FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS.has(tagName)) {
 				return false;
@@ -4531,12 +4589,54 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueActiveFormattingElementsAfterIndex(index) {
+			this.#queueActiveFormattingElementEntries(this.#activeFormattingElementsAfterIndex(index));
+		}
+
+		#queueActiveFormattingElementEntries(entries) {
+			for (const entry of entries) {
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+			}
+		}
+
+		#activeFormattingElementsAfterIndex(index) {
+			const entries = [];
 			for (let i = index + 1; i < this.active_formatting_elements.length; i += 1) {
 				const entry = this.active_formatting_elements[i];
 				if (this.#isActiveFormattingMarker(entry)) {
-					return;
+					break;
 				}
-				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+				entries.push(entry);
+			}
+			return entries;
+		}
+
+		#hasOnlyOpenFormattingElementsAfterIndex(index) {
+			for (let i = index + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" ||
+					!FORMATTING_ELEMENTS.has(this.open_elements[i])
+				) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		#removeActiveFormattingElementsAfterIndexBeforeTail(index, tailCount) {
+			let endIndex = index + 1;
+			while (
+				endIndex < this.active_formatting_elements.length &&
+				!this.#isActiveFormattingMarker(this.active_formatting_elements[endIndex])
+			) {
+				endIndex += 1;
+			}
+
+			const removeEndIndex = Math.max(index + 1, endIndex - tailCount);
+			for (let i = removeEndIndex - 1; i > index; i -= 1) {
+				const entry = this.active_formatting_elements[i];
+				this.active_formatting_elements.splice(i, 1);
+				this.#clearParagraphAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
+				this.#clearSpecialStartAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
 			}
 		}
 
@@ -4844,6 +4944,29 @@ export function createHtmlApi(wasm) {
 					return entry.reconstructionMode === "following-inside"
 						? this.#queueActiveFormattingElementWithFollowingElements(entry.tagName, entry.namespaceName)
 						: this.#queueActiveFormattingElement(entry.tagName, entry.namespaceName);
+				}
+			}
+
+			return false;
+		}
+
+		#queueSpecialStartAdoptionPreclosedFormattingElementsForText() {
+			if (
+				this.open_element_namespaces.at(-1) !== "html" ||
+				!FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(this.open_elements.at(-1))
+			) {
+				return false;
+			}
+
+			const containerTagName = this.open_elements.at(-1);
+			for (const entry of this.special_start_adoption_preclosed_formatting_elements) {
+				if (
+					entry.tagName === "A" &&
+					entry.containerTagName === containerTagName &&
+					this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1 &&
+					this.#lastActiveFormattingElementIndex(entry.tagName) !== -1
+				) {
+					return this.#queueActiveFormattingElement(entry.tagName, entry.namespaceName);
 				}
 			}
 
