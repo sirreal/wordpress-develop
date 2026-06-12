@@ -85,5 +85,7 @@ npm run test:browser
 ```
 
 The browser smoke test uses the WordPress checkout's Playwright development
-dependency to load `browser-test.html` over a local server and verify that the
-ES module can fetch and instantiate the bundled WASM asset in a browser.
+dependency when available, otherwise it falls back to an installed
+Chrome-compatible browser. It loads `browser-test.html` over a local server and
+verifies that the ES module can fetch and instantiate the bundled WASM asset in
+a browser.
