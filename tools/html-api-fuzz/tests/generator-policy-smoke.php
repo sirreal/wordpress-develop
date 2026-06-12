@@ -245,6 +245,91 @@ foreach ( $found_generator_features as $feature => $found ) {
 	html_api_fuzz_smoke_assert( $found, "generated samples should cover {$feature}." );
 }
 
+$required_comment_forms = array(
+	'comment:ordinary-simple'              => array(
+		'example' => '<!--comment-->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!--comment-->' );
+		},
+	),
+	'comment:empty'                        => array(
+		'example' => '<!---->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!---->' );
+		},
+	),
+	'comment:space'                        => array(
+		'example' => '<!-- -->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!-- -->' );
+		},
+	),
+	'comment:short-empty-end'              => array(
+		'example' => '<!-->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!-->' );
+		},
+	),
+	'comment:short-hyphen-end'             => array(
+		'example' => '<!--->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!--->' );
+		},
+	),
+	'comment:nested-hyphens'               => array(
+		'example' => '<!--a<!--b--c-->',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!--a<!--b--c-->' );
+		},
+	),
+	'comment:malformed-bang-ending'        => array(
+		'example' => '<!--x--!>',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!--x--!>' );
+		},
+	),
+	'comment:malformed-greater-than-ending' => array(
+		'example' => '<!--x>',
+		'matches' => static function ( string $input ): bool {
+			return str_ends_with( $input, '<!--x>' );
+		},
+	),
+	'comment:unterminated'                 => array(
+		'example' => '<!--x',
+		'matches' => static function ( string $input ): bool {
+			return str_ends_with( $input, '<!--x' );
+		},
+	),
+	'comment:bogus-pi'                     => array(
+		'example' => '<?target?>',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<?target?>' );
+		},
+	),
+	'comment:bogus-declaration'            => array(
+		'example' => '<!not-a-comment>',
+		'matches' => static function ( string $input ): bool {
+			return false !== strpos( $input, '<!not-a-comment>' );
+		},
+	),
+);
+$found_comment_forms = array_fill_keys( array_keys( $required_comment_forms ), false );
+for ( $seed = 1; $seed <= 1024; ++$seed ) {
+	$generated = \HtmlApiFuzz\Generator::generate( $seed, 'comments-doctype-bogus', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
+	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "comments-doctype-bogus/{$seed} comment-form sample should produce valid UTF-8 bytes." );
+	foreach ( $required_comment_forms as $feature => $form ) {
+		if ( in_array( $feature, $generated['parameters']['features'], true ) && $form['matches']( $generated['input'] ) ) {
+			$found_comment_forms[ $feature ] = true;
+		}
+	}
+	if ( ! in_array( false, $found_comment_forms, true ) ) {
+		break;
+	}
+}
+foreach ( $found_comment_forms as $feature => $found ) {
+	html_api_fuzz_smoke_assert( $found, "comments-doctype-bogus generation should cover {$feature}." );
+}
+
 $syntax_chars = array( '&', '<', '>', '"', "'", '=' );
 $found_syntax_contexts = array(
 	'standalone input'        => array_fill_keys( $syntax_chars, false ),
