@@ -93,6 +93,8 @@ const wasmReadonlyExportNames = ["__data_end", "__heap_base", "memory"];
 const wasmFunctionExportNames = wasmExportNames.filter((name) => name.startsWith("wp_html_api_rust_"));
 
 const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
+const packageJson = JSON.parse(await readFile(new URL("./package.json", import.meta.url), "utf8"));
+const cargoManifest = await readFile(new URL("../Cargo.toml", import.meta.url), "utf8");
 const phpHtmlApiDirectory = new URL("../../../src/wp-includes/html-api/", import.meta.url);
 const rustCoreSource = await readFile(new URL("../src/lib.rs", import.meta.url), "utf8");
 function declaredInterfaceBody(interfaceName) {
@@ -160,6 +162,18 @@ function rustNoMangleExportNames(source) {
 	return [...source.matchAll(/#\[no_mangle\]\s+pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+([A-Za-z_]\w*)\s*\(/g)]
 		.map((match) => match[1])
 		.sort();
+}
+
+function rustCoreVersion(source) {
+	const match = source.match(/\bstatic\s+VERSION:\s*&\[u8\]\s*=\s*b"([^"\\]+)\\0";/);
+	assert.ok(match, "Missing Rust core VERSION constant.");
+	return match[1];
+}
+
+function cargoPackageVersion(manifest) {
+	const match = manifest.match(/^\s*version\s*=\s*"([^"]+)"/m);
+	assert.ok(match, "Missing Cargo package version.");
+	return match[1];
 }
 
 function parsePhpClassConstantValue(value) {
@@ -254,7 +268,9 @@ const {
 	return api;
 });
 
-assert.equal(version(), "0.1.0");
+assert.equal(packageJson.version, cargoPackageVersion(cargoManifest));
+assert.equal(rustCoreVersion(rustCoreSource), packageJson.version);
+assert.equal(version(), packageJson.version);
 assert.deepEqual(Object.keys(wasm).sort(), wasmExportNames);
 assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
 assert.equal(Exported_WP_HTML_Doctype_Info, WP_HTML_Doctype_Info);
