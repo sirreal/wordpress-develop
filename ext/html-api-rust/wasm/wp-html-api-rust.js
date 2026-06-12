@@ -7863,6 +7863,10 @@ function phpStringParameterCoerce(value, parameterName, nullable = false) {
 		return value ? "1" : "";
 	}
 
+	if (typeof value === "number") {
+		return phpNumberToString(value);
+	}
+
 	return String(value);
 }
 
@@ -7882,6 +7886,10 @@ function phpInternalStringCoerce(value, parameterName) {
 
 	if (typeof value === "boolean") {
 		return value ? "1" : "";
+	}
+
+	if (typeof value === "number") {
+		return phpNumberToString(value);
 	}
 
 	return String(value);
@@ -7909,6 +7917,23 @@ function phpInterpolatedStringCoerce(value, parameterName) {
 		return value ? "1" : "";
 	}
 
+	if (typeof value === "number") {
+		return phpNumberToString(value);
+	}
+
+	return String(value);
+}
+
+function phpNumberToString(value) {
+	if (Number.isNaN(value)) {
+		return "NAN";
+	}
+	if (value === Infinity) {
+		return "INF";
+	}
+	if (value === -Infinity) {
+		return "-INF";
+	}
 	return String(value);
 }
 

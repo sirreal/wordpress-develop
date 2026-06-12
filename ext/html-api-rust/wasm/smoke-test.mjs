@@ -421,6 +421,7 @@ assert.equal(WP_HTML_Decoder.decode_text_node("&#x93;&#x1f604;&#x94;"), "“😄
 assert.equal(WP_HTML_Decoder.decode_text_node("&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode_text_node(false), "");
 assert.equal(WP_HTML_Decoder.decode_text_node(true), "1");
+assert.equal(WP_HTML_Decoder.decode_text_node(NaN), "NAN");
 assert.throws(
 	() => WP_HTML_Decoder.decode_text_node({ text: "&copy;" }),
 	TypeError,
@@ -428,8 +429,10 @@ assert.throws(
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin"), "&notin");
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin;"), "∉");
 assert.equal(WP_HTML_Decoder.decode_attribute(true), "1");
+assert.equal(WP_HTML_Decoder.decode_attribute(Infinity), "INF");
 assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
 assert.equal(WP_HTML_Decoder.decode("data", false), "");
+assert.equal(WP_HTML_Decoder.decode("data", -Infinity), "-INF");
 assert.equal(WP_HTML_Decoder.decode(false, "&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode(null, "&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode({}, "&notin"), "¬in");
@@ -613,6 +616,7 @@ const coercedToken = new WP_HTML_Token(123, 456, "0");
 assert.equal(coercedToken.bookmark_name, "123");
 assert.equal(coercedToken.node_name, "456");
 assert.equal(coercedToken.has_self_closing_flag, false);
+assert.equal(new WP_HTML_Token(NaN, Infinity, false).node_name, "INF");
 assert.equal(new WP_HTML_Token("mark", "DIV", NaN).has_self_closing_flag, true);
 assert.equal(new WP_HTML_Token(null, "DIV", "1").bookmark_name, null);
 assert.throws(
@@ -1756,6 +1760,10 @@ assert.equal(coercedAttributeTags.set_attribute(false, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute(null, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute("data-num", 123), true);
 assert.equal(coercedAttributeTags.get_attribute("data-num"), "123");
+assert.equal(coercedAttributeTags.set_attribute("data-nan", NaN), true);
+assert.equal(coercedAttributeTags.get_attribute("data-nan"), "NAN");
+assert.equal(coercedAttributeTags.set_attribute("data-inf", Infinity), true);
+assert.equal(coercedAttributeTags.get_attribute("data-inf"), "INF");
 assert.equal(coercedAttributeTags.set_attribute("data-null", null), false);
 assert.equal(coercedAttributeTags.get_attribute("data-null"), null);
 assert.equal(coercedAttributeTags.remove_attribute(null), false);
@@ -3439,6 +3447,12 @@ assert.equal(processorBookmarkScalarNames.seek(["different"]), true);
 assert.equal(processorBookmarkScalarNames.get_tag(), "DIV");
 assert.equal(processorBookmarkScalarNames.release_bookmark([]), true);
 assert.equal(processorBookmarkScalarNames.has_bookmark(["x"]), false);
+assert.equal(processorBookmarkScalarNames.set_bookmark(NaN), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("NAN"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark("NAN"), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(Infinity), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("INF"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark("INF"), true);
 assert.throws(
 	() => processorBookmarkScalarNames.set_bookmark({}),
 	TypeError,
