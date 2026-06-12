@@ -1769,6 +1769,28 @@ for (const [html, context, expected] of [
 	contextProcessor.destroy();
 }
 
+for (const [html, context, expectedText, expectedSerialized] of [
+	["A &amp;\0 B", "<textarea>", "A &\uFFFD B", "A &amp;\uFFFD B"],
+	["A &lt;\0 B", "<title>", "A <\uFFFD B", "A &lt;\uFFFD B"],
+	["A &amp;\0 B", "<script>", "A &amp;\uFFFD B", "A &amp;\uFFFD B"],
+	["A &amp;\0 B", "<style>", "A &amp;\uFFFD B", "A &amp;\uFFFD B"],
+	["A &amp;\0 B", "<plaintext>", "A &amp;\uFFFD B", "A &amp;\uFFFD B"],
+]) {
+	const rawTextFragmentTokenProcessor = WP_HTML_Processor.create_fragment(html, context);
+	assert.notEqual(rawTextFragmentTokenProcessor, null);
+	assert.equal(rawTextFragmentTokenProcessor.next_token(), true);
+	assert.equal(rawTextFragmentTokenProcessor.get_token_type(), "#text");
+	assert.equal(rawTextFragmentTokenProcessor.get_modifiable_text(), expectedText);
+	assert.equal(rawTextFragmentTokenProcessor.serialize_token(), expectedSerialized);
+	assert.equal(rawTextFragmentTokenProcessor.next_token(), false);
+	rawTextFragmentTokenProcessor.destroy();
+
+	const rawTextFragmentSerializeProcessor = WP_HTML_Processor.create_fragment(html, context);
+	assert.notEqual(rawTextFragmentSerializeProcessor, null);
+	assert.equal(rawTextFragmentSerializeProcessor.serialize(), expectedSerialized);
+	rawTextFragmentSerializeProcessor.destroy();
+}
+
 const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ nodeName: "DIV", namespaceName: "html" }), true);

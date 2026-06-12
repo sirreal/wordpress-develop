@@ -3444,9 +3444,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const text = RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
+			let text = RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
 				? WP_HTML_Decoder.decode_text_node(this.html)
 				: this.html;
+			text = replaceNulls(text);
 			this.raw_text_fragment_consumed = true;
 			this.current_synthetic_token = {
 				tokenType: "#text",
