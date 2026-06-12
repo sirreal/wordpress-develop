@@ -6523,6 +6523,43 @@ function wasmExportsFromInput(input) {
 	return input;
 }
 
+const REQUIRED_WASM_FUNCTION_EXPORTS = [
+	"wp_html_api_rust_alloc",
+	"wp_html_api_rust_core_version",
+	"wp_html_api_rust_dealloc",
+	"wp_html_api_rust_decoder_attribute_starts_with",
+	"wp_html_api_rust_decoder_code_point_to_utf8_bytes",
+	"wp_html_api_rust_decoder_decode",
+	"wp_html_api_rust_decoder_read_character_reference",
+	"wp_html_api_rust_scan_next_tag",
+	"wp_html_api_rust_tag_processor_add_class",
+	"wp_html_api_rust_tag_processor_class_list",
+	"wp_html_api_rust_tag_processor_current_comment_type",
+	"wp_html_api_rust_tag_processor_current_span",
+	"wp_html_api_rust_tag_processor_current_token_type",
+	"wp_html_api_rust_tag_processor_free",
+	"wp_html_api_rust_tag_processor_get_attribute",
+	"wp_html_api_rust_tag_processor_get_attribute_names_with_prefix",
+	"wp_html_api_rust_tag_processor_get_html",
+	"wp_html_api_rust_tag_processor_get_modifiable_text",
+	"wp_html_api_rust_tag_processor_get_tag",
+	"wp_html_api_rust_tag_processor_has_class",
+	"wp_html_api_rust_tag_processor_has_self_closing_flag",
+	"wp_html_api_rust_tag_processor_is_tag_closer",
+	"wp_html_api_rust_tag_processor_new",
+	"wp_html_api_rust_tag_processor_next_tag",
+	"wp_html_api_rust_tag_processor_next_token",
+	"wp_html_api_rust_tag_processor_paused_at_incomplete",
+	"wp_html_api_rust_tag_processor_remove_attribute",
+	"wp_html_api_rust_tag_processor_remove_class",
+	"wp_html_api_rust_tag_processor_script_content_type",
+	"wp_html_api_rust_tag_processor_seek",
+	"wp_html_api_rust_tag_processor_set_attribute",
+	"wp_html_api_rust_tag_processor_set_modifiable_text",
+	"wp_html_api_rust_tag_processor_set_namespace",
+	"wp_html_api_rust_tag_processor_subdivide_text_appropriately",
+];
+
 function isWebAssemblyExports(input) {
 	return input !== null &&
 		typeof input === "object" &&
@@ -6531,12 +6568,28 @@ function isWebAssemblyExports(input) {
 		typeof input.wp_html_api_rust_dealloc === "function";
 }
 
+function validateWasmExports(wasm) {
+	const missing = [];
+	if (!(wasm.memory instanceof WebAssembly.Memory)) {
+		missing.push("memory");
+	}
+	for (const exportName of REQUIRED_WASM_FUNCTION_EXPORTS) {
+		if (typeof wasm[exportName] !== "function") {
+			missing.push(exportName);
+		}
+	}
+	if (missing.length > 0) {
+		throw new Error(`WASM module is missing required HTML API exports: ${missing.join(", ")}.`);
+	}
+}
+
 class WasmRuntime {
 	constructor(wasm) {
 		this.wasm = wasm;
 		if (!isWebAssemblyExports(wasm)) {
 			throw new Error("WASM module does not expose the expected HTML API runtime functions.");
 		}
+		validateWasmExports(wasm);
 	}
 
 	version() {

@@ -368,6 +368,18 @@ const apiCreatedFromInstance = createHtmlApi(wasmInstance);
 assert.equal(apiCreatedFromInstance.version(), "0.1.0");
 const apiCreatedFromExports = createHtmlApi(wasmInstance.exports);
 assert.equal(apiCreatedFromExports.version(), "0.1.0");
+const incompleteWasmExports = {
+	...wasmInstance.exports,
+	wp_html_api_rust_scan_next_tag: undefined,
+};
+assert.throws(
+	() => createHtmlApi(incompleteWasmExports),
+	/WASM module is missing required HTML API exports: wp_html_api_rust_scan_next_tag\./,
+);
+await assert.rejects(
+	() => loadWasm(incompleteWasmExports),
+	/WASM module is missing required HTML API exports: wp_html_api_rust_scan_next_tag\./,
+);
 
 const wasmInstantiatedSource = await WebAssembly.instantiate(wasmBytes, {});
 const apiFromInstantiatedSource = await loadWasm(wasmInstantiatedSource);
