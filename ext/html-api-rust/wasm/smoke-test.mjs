@@ -543,6 +543,10 @@ const coercedStackEvent = new WP_HTML_Stack_Event(token, 123, true);
 assert.equal(coercedStackEvent.operation, "123");
 assert.equal(coercedStackEvent.provenance, "1");
 assert.throws(
+	() => new WP_HTML_Stack_Event({}, WP_HTML_Stack_Event.PUSH, "real"),
+	TypeError,
+);
+assert.throws(
 	() => new WP_HTML_Stack_Event(token, null, "real"),
 	TypeError,
 );
@@ -561,6 +565,18 @@ assert.deepEqual([...activeFormattingElements.walk_up()].map(({ node_name }) => 
 assert.equal(activeFormattingElements.contains_node(new WP_HTML_Token("strong-bookmark", "B", false)), true);
 assert.equal(activeFormattingElements.remove_node(new WP_HTML_Token("strong-bookmark", "B", false)), true);
 assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A"]);
+assert.throws(
+	() => activeFormattingElements.contains_node({ bookmark_name: "em-bookmark" }),
+	TypeError,
+);
+assert.throws(
+	() => activeFormattingElements.push({ bookmark_name: "plain", node_name: "B" }),
+	TypeError,
+);
+assert.throws(
+	() => activeFormattingElements.remove_node({ bookmark_name: "em-bookmark" }),
+	TypeError,
+);
 activeFormattingElements.insert_marker();
 activeFormattingElements.push(new WP_HTML_Token("after-marker", "B", false));
 assert.deepEqual([...activeFormattingElements.walk_down()].map(({ node_name }) => node_name), ["EM", "A", "marker", "B"]);
@@ -588,6 +604,30 @@ assert.equal(openElements.contains("BODY"), true);
 assert.equal(openElements.contains_node(openPToken), true);
 assert.equal(openElements.contains_node(new WP_HTML_Token("p", "P", false)), false);
 assert.deepEqual([...openElements.walk_up(openBodyToken)].map(({ node_name }) => node_name), ["HTML"]);
+assert.throws(
+	() => openElements.contains_node({ bookmark_name: "p", node_name: "P" }),
+	TypeError,
+);
+assert.throws(
+	() => openElements.push({ bookmark_name: "plain", node_name: "B" }),
+	TypeError,
+);
+assert.throws(
+	() => openElements.remove_node({ bookmark_name: "p", node_name: "P" }),
+	TypeError,
+);
+assert.throws(
+	() => [...openElements.walk_up({ bookmark_name: "body", node_name: "BODY" })],
+	TypeError,
+);
+assert.throws(
+	() => openElements.after_element_push({ bookmark_name: "plain", node_name: "B" }),
+	TypeError,
+);
+assert.throws(
+	() => openElements.after_element_pop({ bookmark_name: "plain", node_name: "B" }),
+	TypeError,
+);
 assert.equal(openElements.has_p_in_button_scope(), true);
 assert.equal(openElements.has_element_in_scope("P"), true);
 openElements.push(openButtonToken);

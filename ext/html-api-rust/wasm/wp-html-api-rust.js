@@ -781,7 +781,7 @@ export class WP_HTML_Stack_Event {
 	static PUSH = "push";
 
 	constructor(token, operation, provenance) {
-		this.token = token;
+		this.token = phpTokenParameterCoerce(token, "token");
 		this.operation = phpStringParameterCoerce(operation, "operation");
 		this.provenance = phpStringParameterCoerce(provenance, "provenance");
 	}
@@ -791,8 +791,9 @@ export class WP_HTML_Active_Formatting_Elements {
 	#stack = [];
 
 	contains_node(token) {
+		const normalizedToken = phpTokenParameterCoerce(token, "token");
 		for (const item of this.walk_up()) {
-			if (token.bookmark_name === item.bookmark_name) {
+			if (normalizedToken.bookmark_name === item.bookmark_name) {
 				return true;
 			}
 		}
@@ -812,12 +813,13 @@ export class WP_HTML_Active_Formatting_Elements {
 	}
 
 	push(token) {
-		this.#stack.push(token);
+		this.#stack.push(phpTokenParameterCoerce(token, "token"));
 	}
 
 	remove_node(token) {
+		const normalizedToken = phpTokenParameterCoerce(token, "token");
 		for (let i = this.#stack.length - 1; i >= 0; i -= 1) {
-			if (token.bookmark_name !== this.#stack[i].bookmark_name) {
+			if (normalizedToken.bookmark_name !== this.#stack[i].bookmark_name) {
 				continue;
 			}
 			this.#stack.splice(i, 1);
@@ -891,8 +893,9 @@ export class WP_HTML_Open_Elements {
 	}
 
 	contains_node(token) {
+		const normalizedToken = phpTokenParameterCoerce(token, "token");
 		for (const item of this.walk_up()) {
-			if (token === item) {
+			if (normalizedToken === item) {
 				return true;
 			}
 		}
@@ -1059,14 +1062,16 @@ export class WP_HTML_Open_Elements {
 	}
 
 	push(stackItem) {
-		this.stack.push(stackItem);
-		this.after_element_push(stackItem);
+		const normalizedStackItem = phpTokenParameterCoerce(stackItem, "stack_item");
+		this.stack.push(normalizedStackItem);
+		this.after_element_push(normalizedStackItem);
 	}
 
 	remove_node(token) {
+		const normalizedToken = phpTokenParameterCoerce(token, "token");
 		for (let i = this.stack.length - 1; i >= 0; i -= 1) {
 			const item = this.stack[i];
-			if (token.bookmark_name !== item.bookmark_name) {
+			if (normalizedToken.bookmark_name !== item.bookmark_name) {
 				continue;
 			}
 
@@ -1084,12 +1089,15 @@ export class WP_HTML_Open_Elements {
 	}
 
 	*walk_up(aboveThisNode = null) {
-		let hasFoundNode = aboveThisNode === null;
+		const normalizedAboveThisNode = aboveThisNode === null
+			? null
+			: phpTokenParameterCoerce(aboveThisNode, "above_this_node");
+		let hasFoundNode = normalizedAboveThisNode === null;
 		for (let i = this.stack.length - 1; i >= 0; i -= 1) {
 			const node = this.stack[i];
 
 			if (!hasFoundNode) {
-				hasFoundNode = node === aboveThisNode;
+				hasFoundNode = node === normalizedAboveThisNode;
 				continue;
 			}
 
@@ -1098,7 +1106,8 @@ export class WP_HTML_Open_Elements {
 	}
 
 	after_element_push(item) {
-		switch (openElementNamespacedName(item)) {
+		const normalizedItem = phpTokenParameterCoerce(item, "item");
+		switch (openElementNamespacedName(normalizedItem)) {
 			case "APPLET":
 			case "BUTTON":
 			case "CAPTION":
@@ -1127,12 +1136,13 @@ export class WP_HTML_Open_Elements {
 		}
 
 		if (typeof this.#pushHandler === "function") {
-			this.#pushHandler(item);
+			this.#pushHandler(normalizedItem);
 		}
 	}
 
 	after_element_pop(item) {
-		switch (openElementNamespacedName(item)) {
+		const normalizedItem = phpTokenParameterCoerce(item, "item");
+		switch (openElementNamespacedName(normalizedItem)) {
 			case "APPLET":
 			case "BUTTON":
 			case "CAPTION":
@@ -1158,7 +1168,7 @@ export class WP_HTML_Open_Elements {
 		}
 
 		if (typeof this.#popHandler === "function") {
-			this.#popHandler(item);
+			this.#popHandler(normalizedItem);
 		}
 	}
 
@@ -7617,6 +7627,14 @@ function phpArrayParameterCoerce(value, parameterName) {
 	}
 
 	return [...value];
+}
+
+function phpTokenParameterCoerce(value, parameterName) {
+	if (!(value instanceof WP_HTML_Token)) {
+		throw new TypeError(`Argument $${parameterName} must be of type WP_HTML_Token.`);
+	}
+
+	return value;
 }
 
 function contextNamespace(nodeName) {
