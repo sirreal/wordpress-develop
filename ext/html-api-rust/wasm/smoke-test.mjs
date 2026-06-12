@@ -425,6 +425,9 @@ assert.equal(WP_HTML_Decoder.decode_attribute(true), "1");
 assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
 assert.equal(WP_HTML_Decoder.decode("data", false), "");
 assert.equal(WP_HTML_Decoder.decode(false, "&notin"), "¬in");
+assert.equal(WP_HTML_Decoder.decode(null, "&notin"), "¬in");
+assert.equal(WP_HTML_Decoder.decode({}, "&notin"), "¬in");
+assert.equal(WP_HTML_Decoder.decode([], "&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode("attribute", "&notit;"), "&notit;");
 assert.throws(
 	() => WP_HTML_Decoder.decode("data", ["&copy;"]),
@@ -468,6 +471,11 @@ const legacyNotReferenceLength = {};
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "&notin", 0, legacyNotReferenceLength), "¬");
 assert.equal(legacyNotReferenceLength.value, 4);
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "x&copy;", " 1"), "©");
+const scalarDecoderContextLength = {};
+assert.equal(WP_HTML_Decoder.read_character_reference(null, "&notin", 0, scalarDecoderContextLength), "¬");
+assert.equal(scalarDecoderContextLength.value, 4);
+assert.equal(WP_HTML_Decoder.read_character_reference({}, "&notin"), "¬");
+assert.equal(WP_HTML_Decoder.read_character_reference([], "&notin"), "¬");
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "x&copy;", -1), null);
 assert.throws(
 	() => WP_HTML_Decoder.read_character_reference("data", "x&copy;", "1.0"),

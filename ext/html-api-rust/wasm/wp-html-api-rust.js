@@ -1470,14 +1470,14 @@ export function createHtmlApi(wasm) {
 
 		static decode(context, text) {
 			return runtime.decoderDecode(
-				phpStringParameterCoerce(context, "context"),
+				context,
 				phpStringParameterCoerce(text, "text"),
 			);
 		}
 
 		static read_character_reference(context, text, at = 0, matchByteLength = null) {
 			return runtime.decoderReadCharacterReference(
-				phpStringParameterCoerce(context, "context"),
+				context,
 				phpStringParameterCoerce(text, "text"),
 				at,
 				matchByteLength,

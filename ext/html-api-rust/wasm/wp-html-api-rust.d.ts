@@ -231,9 +231,9 @@ export interface WP_HTML_Decoder_Constructor {
 	): boolean;
 	decode_text_node(text: PhpStringParameter): string;
 	decode_attribute(text: PhpStringParameter): string;
-	decode(context: DecoderContext | PhpStringParameter, text: PhpStringParameter): string;
+	decode(context: unknown, text: PhpStringParameter): string;
 	read_character_reference(
-		context: DecoderContext | PhpStringParameter,
+		context: unknown,
 		text: PhpStringParameter,
 		at?: number | string | boolean | null,
 		matchByteLength?: MatchByteLength | null,
