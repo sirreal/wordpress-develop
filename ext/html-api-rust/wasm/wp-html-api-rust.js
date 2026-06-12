@@ -2410,6 +2410,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = this.is_html_fragment_context ? ["HTML"] : this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.is_html_fragment_context ? ["html"] : this.is_full_parser ? [] : ["html", this.context_namespace];
 			this.open_element_integration_node_types = this.is_html_fragment_context ? [null] : this.is_full_parser ? [] : [null, this.context_integration_node_type];
+			this.open_element_foster_parented_table_indices = this.open_elements.map(() => null);
 			this.detached_context_breadcrumbs = [];
 			this.detached_breadcrumbs = [];
 			this.active_formatting_elements = [];
@@ -3159,7 +3160,16 @@ export function createHtmlApi(wasm) {
 			this.#pruneDetachedBreadcrumbs();
 			const stack = [];
 			const boundedEndIndex = Math.max(0, Math.min(endIndex, this.open_elements.length));
+			const fosterParentedRange = this.#fosterParentedBreadcrumbRange(boundedEndIndex);
 			for (let i = 0; i < boundedEndIndex; i += 1) {
+				if (
+					fosterParentedRange !== null &&
+					i >= fosterParentedRange.tableIndex &&
+					i < fosterParentedRange.fosteredIndex
+				) {
+					continue;
+				}
+
 				for (const detached of this.detached_breadcrumbs) {
 					if (detached.index === i) {
 						stack.push(detached.tagName);
@@ -3181,6 +3191,20 @@ export function createHtmlApi(wasm) {
 				stack.push(tokenName);
 			}
 			return stack;
+		}
+
+		#fosterParentedBreadcrumbRange(endIndex) {
+			for (let i = 0; i < endIndex; i += 1) {
+				const tableIndex = this.open_element_foster_parented_table_indices[i] ?? null;
+				if (tableIndex !== null && tableIndex < i) {
+					return {
+						fosteredIndex: i,
+						tableIndex,
+					};
+				}
+			}
+
+			return null;
 		}
 
 		get_current_depth() {
@@ -3719,6 +3743,7 @@ export function createHtmlApi(wasm) {
 				this.open_elements = this.open_elements.slice(0, existingIndex);
 				this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 				this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
+				this.open_element_foster_parented_table_indices = this.open_element_foster_parented_table_indices.slice(0, existingIndex);
 				if (closingNamespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 					this.#clearActiveFormattingElementsUpToLastMarker();
 				}
@@ -3729,6 +3754,8 @@ export function createHtmlApi(wasm) {
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
 			}
+
+			const fosterParentedTableIndex = this.#fosterParentedStartTableIndex(tagName);
 
 			if (this.#representFosteredVoidStartBeforeDeferredTable(tagName)) {
 				return;
@@ -3776,7 +3803,10 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
-			if (this.#shouldBailUnsupportedTableFosterParenting(tagName, false)) {
+			if (
+				fosterParentedTableIndex === -1 &&
+				this.#shouldBailUnsupportedTableFosterParenting(tagName, false)
+			) {
 				this.#bailUnsupported("Foster parenting is not supported.");
 				return;
 			}
@@ -3903,6 +3933,11 @@ export function createHtmlApi(wasm) {
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push(this.current_token_namespace);
 			this.open_element_integration_node_types.push(currentTokenIntegrationNodeType);
+			this.open_element_foster_parented_table_indices.push(
+				fosterParentedTableIndex === -1
+					? this.#currentFosterParentedTableIndex()
+					: fosterParentedTableIndex,
+			);
 			if (this.current_token_namespace === "html" && tagName === "TEMPLATE") {
 				this.template_insertion_modes.push("in_template");
 			}
@@ -3945,6 +3980,7 @@ export function createHtmlApi(wasm) {
 				this.open_elements.pop();
 				this.open_element_namespaces.pop();
 				this.open_element_integration_node_types.pop();
+				this.open_element_foster_parented_table_indices.pop();
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			} else {
 				this.#setCurrentNamespace(this.#childNamespaceForStackEntry(
@@ -4018,6 +4054,9 @@ export function createHtmlApi(wasm) {
 				this.open_elements.push(token.tagName);
 				this.open_element_namespaces.push(token.namespaceName);
 				this.open_element_integration_node_types.push(token.integrationNodeType ?? null);
+				this.open_element_foster_parented_table_indices.push(
+					token.fosterParentedTableIndex ?? this.#currentFosterParentedTableIndex(),
+				);
 				this.breadcrumbs = this.#breadcrumbStack();
 				this.#setCurrentNamespace(this.#childNamespaceForStackEntry(
 					token.tagName,
@@ -4050,6 +4089,7 @@ export function createHtmlApi(wasm) {
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
+					this.open_element_foster_parented_table_indices = this.open_element_foster_parented_table_indices.slice(0, existingIndex);
 					if (
 						token.namespaceName === "html" &&
 						(TABLE_CELL_ELEMENTS.has(token.tagName) || ACTIVE_FORMATTING_MARKER_ELEMENTS.has(token.tagName))
@@ -4073,6 +4113,7 @@ export function createHtmlApi(wasm) {
 				openElements: [...this.open_elements],
 				openElementNamespaces: [...this.open_element_namespaces],
 				openElementIntegrationNodeTypes: [...this.open_element_integration_node_types],
+				openElementFosterParentedTableIndices: [...this.open_element_foster_parented_table_indices],
 				detachedContextBreadcrumbs: [...this.detached_context_breadcrumbs],
 				detachedBreadcrumbs: this.detached_breadcrumbs.map((breadcrumb) => ({ ...breadcrumb })),
 				breadcrumbs: [...this.breadcrumbs],
@@ -4135,6 +4176,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
+			this.open_element_foster_parented_table_indices = [...(state.openElementFosterParentedTableIndices ?? this.open_elements.map(() => null))];
 			this.detached_context_breadcrumbs = [...state.detachedContextBreadcrumbs];
 			this.detached_breadcrumbs = (state.detachedBreadcrumbs ?? []).map((breadcrumb) => ({ ...breadcrumb }));
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
@@ -6109,6 +6151,7 @@ export function createHtmlApi(wasm) {
 				tagName,
 				namespaceName,
 				integrationNodeType,
+				fosterParentedTableIndex: this.#currentFosterParentedTableIndex(),
 				attributes: attributes.map((attribute) => ({
 					name: attribute.name,
 					value: attribute.value,
@@ -7541,6 +7584,7 @@ export function createHtmlApi(wasm) {
 					this.open_elements.pop();
 					this.open_element_namespaces.pop();
 					this.open_element_integration_node_types.pop();
+					this.open_element_foster_parented_table_indices.pop();
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 				}
 				return;
@@ -7567,6 +7611,7 @@ export function createHtmlApi(wasm) {
 					this.open_elements.pop();
 					this.open_element_namespaces.pop();
 					this.open_element_integration_node_types.pop();
+					this.open_element_foster_parented_table_indices.pop();
 				}
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 			}
@@ -7746,6 +7791,7 @@ export function createHtmlApi(wasm) {
 					this.open_elements = this.open_elements.slice(0, i);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, i);
+					this.open_element_foster_parented_table_indices = this.open_element_foster_parented_table_indices.slice(0, i);
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 					return true;
 				}
@@ -7764,6 +7810,7 @@ export function createHtmlApi(wasm) {
 					this.open_elements = this.open_elements.slice(0, i);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, i);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, i);
+					this.open_element_foster_parented_table_indices = this.open_element_foster_parented_table_indices.slice(0, i);
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 					return true;
 				}
@@ -7780,6 +7827,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements.pop();
 			this.open_element_namespaces.pop();
 			this.open_element_integration_node_types.pop();
+			this.open_element_foster_parented_table_indices.pop();
 			this.#setCurrentNamespace(this.#namespaceForStackTop());
 			return true;
 		}
@@ -7824,6 +7872,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push("html");
 			this.open_element_integration_node_types.push(null);
+			this.open_element_foster_parented_table_indices.push(this.#currentFosterParentedTableIndex());
 			this.#setCurrentNamespace(this.#childNamespaceForStackEntry(tagName, "html", null));
 			return true;
 		}
@@ -7843,6 +7892,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements.splice(headIndex, 1);
 			this.open_element_namespaces.splice(headIndex, 1);
 			this.open_element_integration_node_types.splice(headIndex, 1);
+			this.open_element_foster_parented_table_indices.splice(headIndex, 1);
 			this.#setCurrentNamespace(this.#namespaceForStackTop());
 			return true;
 		}
@@ -7947,7 +7997,14 @@ export function createHtmlApi(wasm) {
 			const text = nextTag === false
 				? this.html.slice(afterToken)
 				: this.html.slice(afterToken, nextTag.tag_start);
-			return !this.#isIgnorableTableText(text);
+			return (
+				!this.#isIgnorableTableText(text) ||
+				(
+					nextTag !== false &&
+					!nextTag.is_closing &&
+					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name)
+				)
+			);
 		}
 
 		#queueDeferredTableOpenerBeforeCurrentToken(tokenType) {
@@ -8007,6 +8064,23 @@ export function createHtmlApi(wasm) {
 			this.breadcrumbs = this.#breadcrumbStack("#text", tableIndex);
 			this.frameset_ok = false;
 			return true;
+		}
+
+		#currentFosterParentedTableIndex() {
+			return this.open_element_foster_parented_table_indices.at(-1) ?? null;
+		}
+
+		#fosterParentedStartTableIndex(tagName) {
+			if (
+				!this.is_full_parser ||
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html" ||
+				!FOREIGN_CONTENT_START_TAGS.has(tagName)
+			) {
+				return -1;
+			}
+
+			return this.#lastOpenElementIndex("TABLE", "html");
 		}
 
 		#representFosteredVoidStartBeforeDeferredTable(tagName) {
@@ -8205,6 +8279,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements.splice(formIndex, 1);
 			this.open_element_namespaces.splice(formIndex, 1);
 			this.open_element_integration_node_types.splice(formIndex, 1);
+			this.open_element_foster_parented_table_indices.splice(formIndex, 1);
 			this.breadcrumbs = this.#breadcrumbStack();
 			this.#setCurrentNamespace(this.#namespaceForStackTop());
 		}
