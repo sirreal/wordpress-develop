@@ -3011,15 +3011,16 @@ export function createHtmlApi(wasm) {
 		}
 
 		matches_breadcrumbs(breadcrumbs) {
-			if (!Array.isArray(breadcrumbs)) {
-				return false;
-			}
+			const normalizedBreadcrumbs = phpArrayParameterCoerce(breadcrumbs, "breadcrumbs");
 
-			if (breadcrumbs.length === 0) {
+			if (normalizedBreadcrumbs.length === 0) {
 				return true;
 			}
 
-			const normalized = breadcrumbs.map((crumb) => crumb === "*" ? "*" : asciiUpper(String(crumb)));
+			const normalized = normalizedBreadcrumbs.map((crumb) => {
+				const normalizedCrumb = phpStringParameterCoerce(crumb, "breadcrumbs");
+				return normalizedCrumb === "*" ? "*" : asciiUpper(normalizedCrumb);
+			});
 			const lastCrumb = normalized[normalized.length - 1];
 			if (lastCrumb !== "*" && this.get_tag() !== lastCrumb) {
 				return false;

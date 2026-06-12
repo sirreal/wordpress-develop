@@ -2641,6 +2641,17 @@ assert.equal(processor.expects_closer(), true);
 assert.equal(processor.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 assert.equal(processor.get_qualified_attribute_name(null), "");
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
+assert.equal(processor.matches_breadcrumbs([]), true);
+assert.equal(processor.matches_breadcrumbs([true]), false);
+assert.equal(processor.matches_breadcrumbs([1]), false);
+assert.throws(
+	() => processor.matches_breadcrumbs("P"),
+	TypeError,
+);
+assert.throws(
+	() => processor.matches_breadcrumbs(["BODY", {}]),
+	TypeError,
+);
 processor.destroy();
 
 for (const [html, breadcrumbs, expected] of [
