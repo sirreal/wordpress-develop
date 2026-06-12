@@ -3863,6 +3863,10 @@ assert.equal(
 	"<b>A<cite>B</cite></b><div><b>C</b>D</div>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<cite><b><cite><i><cite><i><cite><i><div>X</b>TEST"),
+	"<cite><b><cite><i><cite><i><cite><i></i></cite></i></cite></i></cite></b><i><i><div><b>X</b>TEST</div></i></i></cite>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<a><p>X<a>Y</a>Z</p></a>"),
 	"<a></a><p><a>X</a><a>Y</a>Z</p>",
 );

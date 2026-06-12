@@ -4423,6 +4423,30 @@ export function createHtmlApi(wasm) {
 				}
 
 				const formattingTagName = this.open_elements[i];
+				if (formattingTagName === "B") {
+					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
+					const followingEntries = this.#activeFormattingElementsAfterIndex(activeFormattingElementIndex);
+					const preservedEntries = followingEntries.filter((entry) => (
+						entry.tagName === "I" &&
+						entry.namespaceName === "html"
+					)).slice(-2);
+					if (
+						activeFormattingElementIndex !== -1 &&
+						preservedEntries.length === 2 &&
+						this.#hasOnlyOpenFormattingOrCiteElementsAfterIndex(i) &&
+						!hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) &&
+						this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+					) {
+						this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName, "text-self");
+						this.#queueVirtualPopsFrom(i);
+						this.#queueActiveFormattingElementEntries(preservedEntries);
+						this.#replaceActiveFormattingElementsAfterIndex(activeFormattingElementIndex, preservedEntries);
+						return true;
+					}
+
+					continue;
+				}
+
 				if (formattingTagName !== "A") {
 					continue;
 				}
@@ -4622,6 +4646,21 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#hasOnlyOpenFormattingOrCiteElementsAfterIndex(index) {
+			for (let i = index + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" ||
+					(
+						this.open_elements[i] !== "CITE" &&
+						!FORMATTING_ELEMENTS.has(this.open_elements[i])
+					)
+				) {
+					return false;
+				}
+			}
+			return true;
+		}
+
 		#removeActiveFormattingElementsAfterIndexBeforeTail(index, tailCount) {
 			let endIndex = index + 1;
 			while (
@@ -4638,6 +4677,22 @@ export function createHtmlApi(wasm) {
 				this.#clearParagraphAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
 				this.#clearSpecialStartAdoptionPreclosedFormattingElements(entry.tagName, entry.namespaceName);
 			}
+		}
+
+		#replaceActiveFormattingElementsAfterIndex(index, entries) {
+			let endIndex = index + 1;
+			while (
+				endIndex < this.active_formatting_elements.length &&
+				!this.#isActiveFormattingMarker(this.active_formatting_elements[endIndex])
+			) {
+				endIndex += 1;
+			}
+
+			this.active_formatting_elements.splice(
+				index + 1,
+				endIndex - index - 1,
+				...entries.map((entry) => this.#cloneActiveFormattingElement(entry)),
+			);
 		}
 
 		#queueActiveFormattingElementsAfterIndexAsEmpty(index) {
@@ -4961,7 +5016,7 @@ export function createHtmlApi(wasm) {
 			const containerTagName = this.open_elements.at(-1);
 			for (const entry of this.special_start_adoption_preclosed_formatting_elements) {
 				if (
-					entry.tagName === "A" &&
+					(entry.tagName === "A" || entry.reconstructionMode === "text-self") &&
 					entry.containerTagName === containerTagName &&
 					this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1 &&
 					this.#lastActiveFormattingElementIndex(entry.tagName) !== -1
