@@ -6968,7 +6968,7 @@ class WasmRuntime {
 	}
 
 	decoderCodePointToUtf8Bytes(codePoint) {
-		const numericCodePoint = phpIntegerParameterCoerce(codePoint, "code_point");
+		const numericCodePoint = phpInternalIntegerParameterCoerce(codePoint, "code_point");
 		const normalizedCodePoint = Number.isFinite(numericCodePoint) && numericCodePoint >= 0
 			? Math.trunc(numericCodePoint)
 			: 0x110000;
@@ -7520,6 +7520,10 @@ function phpIntegerCast(value) {
 }
 
 function phpIntegerParameterCoerce(value, parameterName) {
+	if (value === null) {
+		throw new TypeError(`Argument $${parameterName} must be of type int.`);
+	}
+
 	if (typeof value === "string") {
 		const trimmed = value.trim();
 		if (
@@ -7531,11 +7535,24 @@ function phpIntegerParameterCoerce(value, parameterName) {
 		return Math.trunc(Number(trimmed));
 	}
 
-	if (typeof value === "object" && value !== null) {
+	if (
+		typeof value === "object" ||
+		typeof value === "function" ||
+		typeof value === "symbol" ||
+		typeof value === "undefined"
+	) {
 		throw new TypeError(`Argument $${parameterName} must be of type int.`);
 	}
 
 	return phpIntegerCast(value);
+}
+
+function phpInternalIntegerParameterCoerce(value, parameterName) {
+	if (value === null) {
+		return 0;
+	}
+
+	return phpIntegerParameterCoerce(value, parameterName);
 }
 
 function phpStringParameterCoerce(value, parameterName, nullable = false) {

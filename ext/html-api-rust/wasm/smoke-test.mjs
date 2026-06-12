@@ -351,6 +351,10 @@ assert.throws(
 	TypeError,
 );
 assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", null, "<div>", [], []),
+	TypeError,
+);
+assert.throws(
 	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", 5, null, [], []),
 	TypeError,
 );
@@ -406,6 +410,7 @@ assert.equal(
 );
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0x1f170), "🅰");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0xd83c), "�");
+assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(null), "\0");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes("65.9"), "A");
 assert.throws(
 	() => WP_HTML_Decoder.code_point_to_utf8_bytes("65abc"),
@@ -438,6 +443,10 @@ assert.throws(
 	() => new WP_HTML_Span("14px", 28),
 	TypeError,
 );
+assert.throws(
+	() => new WP_HTML_Span(null, 28),
+	TypeError,
+);
 
 const replacement = new WP_HTML_Text_Replacement(14, "28", "updated");
 assert.equal(replacement.start, 14);
@@ -450,6 +459,10 @@ assert.throws(
 );
 assert.throws(
 	() => new WP_HTML_Text_Replacement(14, 28, null),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Text_Replacement(14, null, "updated"),
 	TypeError,
 );
 
