@@ -6357,6 +6357,24 @@ assert.equal(
 );
 fullParserFosteredTextBeforeTableRow.destroy();
 
+const fullParserFosteredAnchorTextAfterTableCell = WP_HTML_Processor.create_full_parser(
+	'<a href="blah">aba<table><tr><td><a href="foo">br</td></tr>x</table>aoe',
+);
+assert.equal(
+	fullParserFosteredAnchorTextAfterTableCell.serialize(),
+	'<html><head></head><body><a href="blah">abax<table><tbody><tr><td><a href="foo">br</tbody></table>aoe</a></body></html>',
+);
+fullParserFosteredAnchorTextAfterTableCell.destroy();
+
+const fullParserReconstructedAnchorTextAfterTableCell = WP_HTML_Processor.create_full_parser(
+	'<table><a href="blah">aba<tr><td><a href="foo">br</td></tr>x</table>aoe',
+);
+assert.equal(
+	fullParserReconstructedAnchorTextAfterTableCell.serialize(),
+	'<html><head></head><body><a href="blah">aba</a><a href="blah">x</a><table><tbody><tr><td><a href="foo">br</tbody></table><a href="blah">aoe</a></body></html>',
+);
+fullParserReconstructedAnchorTextAfterTableCell.destroy();
+
 const fullParserFosteredDivBeforeTableRow = WP_HTML_Processor.create_full_parser(
 	"<table><tr><div>",
 );

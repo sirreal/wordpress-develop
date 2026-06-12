@@ -8391,6 +8391,7 @@ export function createHtmlApi(wasm) {
 					new Set(["COL", "COLGROUP", "FORM", "INPUT", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
 				) ||
 				this.#currentTableStartCellOpenerPrecedesFosteredText() ||
+				this.#currentTableStartCellContentPrecedesFosteredText() ||
 				this.#currentTableStartForeignCellCloserPrecedesFosteredText()
 			);
 		}
@@ -8407,6 +8408,7 @@ export function createHtmlApi(wasm) {
 							TABLE_CELL_ELEMENTS.has(tagName)
 								? (
 									this.#currentTableCellStartIsFollowedByFosteredTableContent() ||
+									this.#currentTableCellStartContentPrecedesFosteredText() ||
 									this.#currentTableCellStartPrecedesForeignCellCloserFosteredText()
 								)
 								: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
@@ -8416,6 +8418,7 @@ export function createHtmlApi(wasm) {
 						tagName === "TR" &&
 						(
 							this.#currentTableRowStartPrecedesFosteredTextAfterCell() ||
+							this.#currentTableRowStartPrecedesCellContentFosteredText() ||
 							this.#currentTableRowStartPrecedesForeignCellCloserFosteredText()
 						)
 					) ||
@@ -8507,6 +8510,7 @@ export function createHtmlApi(wasm) {
 					TABLE_CELL_ELEMENTS.has(tagName)
 						? (
 							this.#currentTableCellStartIsFollowedByFosteredTableContent() ||
+							this.#currentTableCellStartContentPrecedesFosteredText() ||
 							this.#currentTableCellStartPrecedesForeignCellCloserFosteredText()
 						)
 						: this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
@@ -8520,6 +8524,7 @@ export function createHtmlApi(wasm) {
 				tagName === "TR" &&
 				(
 					this.#currentTableRowStartPrecedesFosteredTextAfterCell() ||
+					this.#currentTableRowStartPrecedesCellContentFosteredText() ||
 					this.#currentTableRowStartPrecedesForeignCellCloserFosteredText()
 				)
 			) {
@@ -8655,6 +8660,25 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
+		#currentTableStartCellContentPrecedesFosteredText() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			const sectionTag = this.#nextNonWhitespaceTag(at);
+			if (
+				sectionTag !== false &&
+				!sectionTag.is_closing &&
+				TABLE_SECTION_ELEMENTS.has(sectionTag.tag_name)
+			) {
+				at = sectionTag.token_end;
+			}
+
+			return this.#rowCellContentPrecedesFosteredTextAt(at);
+		}
+
 		#currentTableStartForeignCellCloserPrecedesFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			if (span === null) {
@@ -8674,11 +8698,25 @@ export function createHtmlApi(wasm) {
 			return this.#foreignCellCloserPrecedesFosteredTextAt(at, false);
 		}
 
+		#currentTableRowStartPrecedesCellContentFosteredText() {
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#rowContentPrecedesFosteredTextAt(
+				span.start + span.length,
+			);
+		}
+
 		#currentTableRowStartPrecedesForeignCellCloserFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			return span !== null && this.#foreignCellCloserPrecedesFosteredTextAt(
 				span.start + span.length,
 				false,
+			);
+		}
+
+		#currentTableCellStartContentPrecedesFosteredText() {
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#cellContentPrecedesFosteredTextAt(
+				span.start + span.length,
 			);
 		}
 
@@ -8694,6 +8732,85 @@ export function createHtmlApi(wasm) {
 			const nextTag = runtime.scanNextTag(this.html, at);
 			const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
 			return this.#isIgnorableTableText(text) ? nextTag : false;
+		}
+
+		#rowCellContentPrecedesFosteredTextAt(at) {
+			const rowTag = this.#nextNonWhitespaceTag(at);
+			if (
+				rowTag === false ||
+				rowTag.is_closing ||
+				rowTag.tag_name !== "TR"
+			) {
+				return false;
+			}
+
+			return this.#rowContentPrecedesFosteredTextAt(rowTag.token_end);
+		}
+
+		#rowContentPrecedesFosteredTextAt(at) {
+			const cellTag = this.#nextNonWhitespaceTag(at);
+			if (
+				cellTag === false ||
+				cellTag.is_closing ||
+				!TABLE_CELL_ELEMENTS.has(cellTag.tag_name)
+			) {
+				return false;
+			}
+
+			return this.#cellContentPrecedesFosteredTextAt(cellTag.token_end);
+		}
+
+		#cellContentPrecedesFosteredTextAt(at) {
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					if (TABLE_MODE_START_TAGS.has(nextTag.tag_name)) {
+						return false;
+					}
+
+					at = nextTag.token_end;
+					continue;
+				}
+
+				if (
+					TABLE_CELL_ELEMENTS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "TR" ||
+					TABLE_SECTION_ELEMENTS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "TABLE"
+				) {
+					return this.#fosteredTextAfterTableStructureEnd(nextTag.token_end);
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#fosteredTextAfterTableStructureEnd(at) {
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
+				if (!this.#isIgnorableTableText(text)) {
+					return true;
+				}
+
+				if (
+					nextTag !== false &&
+					nextTag.is_closing &&
+					(
+						this.#isTableStructureFosterLookaheadEndTag(nextTag.tag_name) ||
+						this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+					)
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
+
+				return false;
+			}
 		}
 
 		#foreignCellCloserPrecedesFosteredTextAt(at, sawCellStart) {
@@ -8748,27 +8865,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#fosteredTextAfterForeignCellCloser(at) {
-			while (true) {
-				const nextTag = runtime.scanNextTag(this.html, at);
-				const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
-				if (!this.#isIgnorableTableText(text)) {
-					return true;
-				}
-
-				if (
-					nextTag !== false &&
-					nextTag.is_closing &&
-					(
-						this.#isTableStructureFosterLookaheadEndTag(nextTag.tag_name) ||
-						this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
-					)
-				) {
-					at = nextTag.token_end;
-					continue;
-				}
-
-				return false;
-			}
+			return this.#fosteredTextAfterTableStructureEnd(at);
 		}
 
 		#currentTableRowStartPrecedesFosteredTextAfterCell() {
@@ -9376,7 +9473,7 @@ export function createHtmlApi(wasm) {
 				this.deferred_table_opener !== null &&
 				tableIndex !== -1 &&
 				cellIndex > tableIndex &&
-				FOREIGN_CONTENT_START_TAGS.has(tagName) &&
+				!TABLE_MODE_START_TAGS.has(tagName) &&
 				this.#currentFosterParentedTableIndex() === null
 			) {
 				return -1;
