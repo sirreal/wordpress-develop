@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor — required for get_breadcrumbs ancestor info; Tag Processor explicitly lacks it per html-tag-processor.md:20). All methods documented: create_fragment (html-processor.md:349), next_tag array form (html-processor.md:576), get_breadcrumbs (html-processor.md:849), add_class (inherited, html-processor.md:193), get_updated_html (inherited, html-tag-processor.md:402). Null-guard on create_fragment present (=== null). Uses lowercase 'p' in tag_name query — valid since matching is ASCII case-insensitive (html-tag-processor.md:937); checks uppercase 'BLOCKQUOTE' against breadcrumbs, which return uppercase tag names (example html-processor.md:865). Passed 7/7. Idiomatic token walking + breadcrumb ancestor check. Minor: checks the full breadcrumbs array rather than slicing off the matched node as the reference does (array_slice(...,0,-1)); harmless here because the matched element is always P, never BLOCKQUOTE, but slightly less precise than the reference pattern."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Identical strategy to trial-1. Correct processor choice. All methods documented. Uses next_tag('P') string-shorthand — documented at html-tag-processor.md:59 and html-processor.md (next_tag accepts string|array). Null-guard via ! $processor (loose) rather than === null; create_fragment returns static|null per html-processor.md:352, so falsy check is functionally fine though === null is more precise. Passed 7/7. Same harmless full-array breadcrumb check as trial-1. Explanation correctly attributes implied-tag-closing and nested-blockquote handling to the parser's structural awareness."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Essentially the reference solution minus the array_slice. Correct processor. All methods documented. Array-form next_tag with tag_name 'P', explicit === null guard. Passed 7/7. Comment shows correct mental model ('BLOCKQUOTE anywhere in the ancestor chain'). Same harmless full-array breadcrumb check (does not exclude the matched P, but P!==BLOCKQUOTE so no false positive). Cleanest of the three in intent-signaling."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 on every case (simple, deep-ancestor, outside-untouched, implicitly-closed-paragraphs, existing-class-preserved, nested-blockquotes, mixed-document). There are no misconceptions to attribute to documentation gaps. What the docs did well, and why this task succeeded so cleanly: (1) The 'Which processor should I use?' section (html-tag-processor.md:18-20) and the Breadcrumbs section (html-processor.md:48-72, plus the get_breadcrumbs method entry at :849) made the processor choice unambiguous — the task needs ancestor info, and the Tag Processor doc explicitly states get_breadcrumbs() does not exist there, steering all three subjects to WP_HTML_Processor. (2) The get_breadcrumbs example at html-processor.md:865 returns uppercase tag names AND shows the matched node as the final array element; this let subjects correctly compare against uppercase 'BLOCKQUOTE' and reason that a P node never collides. (3) html-processor.md:54 ('breadcrumbs will always contain implicit HTML/BODY') reassured subjects that ancestor presence is reliably reported regardless of fragment context — critical for the deep-ancestor and div-wrapped (mixed-document case b) cases. (4) The Usage quickstart at html-processor.md:42-44 (next_tag breadcrumbs query then add_class) modeled the exact walk-and-add-class idiom. (5) add_class is documented to preserve existing classes and whitespace (html-tag-processor.md:184-219, 'add_class ... preserve whitespace and the class ordering'), which directly explains why existing-class-preserved passed ('lead' -> 'lead quoted'). (6) The implicitly-closed-paragraphs and nested-blockquotes cases passed because subjects relied on the parser's structural awareness rather than manual nesting logic — the docs' emphasis on 'full structural awareness' (html-processor.md:81) gave them justified confidence. Near-misses in the explanations: trial-2 and trial-3 assert the parser handles 'whitespace preservation automatically' as part of the structural-awareness claim; that conflation is benign here but slightly overstates what structural awareness covers (whitespace preservation is a Tag-Processor lexical-update property, not a parse-tree property). None of the explanations mention that get_breadcrumbs includes the matched node itself as the last element, so the reference's array_slice(...,0,-1) refinement was missed by all three — a latent gap that would bite a task searching for an ancestor whose tag name equals the matched element's tag name (e.g. 'mark P inside another P').\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() (html-processor.md:849-866) and the Breadcrumbs overview (html-processor.md:48-56)",
+      "problem": "The docs show the breadcrumbs array ends with the matched element itself (IMG in the example) but never state this explicitly in prose, nor warn that an ancestor-membership test like in_array($tag, get_breadcrumbs()) will also match the current element when you search for the element's own tag name. All three subjects checked the full array; that is correct here only because P != BLOCKQUOTE. A near-identical task (e.g. 'P nested inside another P') would silently self-match.",
+      "suggestion": "Add one sentence to get_breadcrumbs(): 'The last element of the returned array is the currently-matched node itself; the ancestors are everything before it. To test only ancestors, exclude the final element (e.g. array_slice($crumbs, 0, -1)).' This generalizes the ancestor-vs-self distinction without encoding any specific task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() (html-processor.md:849-874), Returns section",
+      "problem": "The return description ('Array of tag names representing path to matched node') does not state the casing of the returned tag names. Subjects had to infer uppercase from the single example at line 865. Cross-referencing get_tag() (returns uppercase) is required to be confident. A subject who guessed lowercase and compared in_array('blockquote', ...) would silently get zero matches with no error.",
+      "suggestion": "In the Returns block, state explicitly: 'Tag names are returned in uppercase (e.g. P, BLOCKQUOTE), matching get_tag(), regardless of the casing in the source HTML.' This is a generalizable fact that prevents silent no-match bugs in any breadcrumb-comparison code."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() / 'Modifying CSS classes' (html-tag-processor.md:184-219)",
+      "problem": "The section documents whitespace and ordering preservation and the set_attribute precedence rule, but does not explicitly state the idempotency/dedup behavior — i.e. that add_class('quoted') on a tag that already has 'quoted' will not duplicate it, and that it appends to (rather than replaces) any existing class attribute. The existing-class-preserved case relied on append behavior; subjects got it right but the contract is implied rather than stated.",
+      "suggestion": "Add an explicit sentence: 'add_class() appends the class to any existing class attribute (it never replaces it) and is idempotent — adding a class already present is a no-op.' This is a general append/dedup contract useful for any class-marking task."
+    }
+  ]
+}

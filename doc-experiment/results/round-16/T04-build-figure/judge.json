@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (Tag Processor for flat attribute/text edits, byte-exact output — exactly what docs section 'Which processor should I use?' prescribes). Every method (new WP_HTML_Tag_Processor, next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html) is documented; no hallucinations. Idiomatic: literal template with empty attribute placeholders to preserve attribute order, '.' placeholder text node, the documented next_token/#text loop, get_updated_html to read back — a near-verbatim instance of the 'Building markup from a template' idiom (docs lines 158-182). Edge cases all handled by the API: encoding of &, quotes, angle brackets, unicode, and script-as-text. Passed 6/6. The redundant next_tag('figcaption') before the token loop is harmless (verified working) and arguably makes intent clearer. Minor: no guard on next_tag('img') return, but acceptable against a known literal template and consistent with docs examples."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1, using the array query form next_tag( array( 'tag_name' => 'img' ) ) which is the canonical form shown in the docs query table. All methods documented, no hallucinations. Same idiomatic template-fill pattern, same correct processor choice, 6/6 pass. Explanation correctly cites attribute-order preservation and automatic encoding. Same harmless redundant next_tag('figcaption'); same minor lack of return-value guard."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three and closest to the reference: sets img attributes, then runs the next_token/#text loop directly without an intermediate next_tag('figcaption') — relying on the first #text node after IMG being the figcaption placeholder, which holds for this template. All methods documented, no hallucinations, idiomatic template-fill pattern, 6/6 pass. Same minor lack of a next_tag('img') return guard; acceptable for a known literal template."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. Across all three trials, every one of the six cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed) passed with byte-exact output and zero _doing_it_wrong records.\n\nWhat the docs did well, and why these succeeded:\n- Processor selection: the 'Which processor should I use?' / 'Overview' guidance (html-tag-processor.md lines 18-25) clearly steers flat attribute+text editing with byte-exact output to the Tag Processor. All three subjects picked it correctly and none reached for the HTML Processor or its serialize() machinery.\n- The 'Building markup from a template' section (lines 158-182) is almost a turnkey solution for this exact shape of task: it states the two rules that drove every passing case — (1) include attributes with empty values in the template so set_attribute preserves their written order (covers the 'src then alt' ordering requirement and the quotes-in-alt case), and (2) include placeholder text inside elements that need text content because an empty element has no #text node for set_modifiable_text to replace (covers the '.' placeholder in figcaption). Its worked example is the exact next_token/#text-loop/get_updated_html sequence all three reproduced.\n- Encoding semantics: set_attribute and set_modifiable_text docs both state plainly that they accept unescaped values and encode as needed (lines 1916-1927 for set_modifiable_text with the &/&amp; double-encoding example; the set_attribute encoding note). This directly explains why ampersand-in-caption, angle-brackets-in-caption, quotes-in-alt, and html-in-caption-not-parsed all encoded correctly: subjects passed raw strings and let the API encode, exactly as documented, rather than hand-escaping.\n- The FIGCAPTION-specific note in set_modifiable_text (line 1878: 'An ordinary container element (P, DIV, FIGCAPTION, SPAN, …) carries no text of its own … calling this method while matched on such a tag returns false') plus the empty-element placeholder example (lines 1880-1890) pre-empted the most likely failure mode — calling set_modifiable_text while matched on the FIGCAPTION opener instead of its #text child. No subject made that mistake.\n\nNear-misses in the explanations: none substantive. All three explanations correctly attribute order-preservation to the template and encoding to the API methods. Trials 1 and 2 add a redundant next_tag('figcaption') before the token loop; this is not a bug (verified: next_token continues from the figcaption opener into its text child) but it is slightly less direct than the reference/trial-3 approach. None of the subjects guarded the next_tag('img') return value, which is a latent robustness gap but irrelevant against a fixed literal template and consistent with the docs' own examples (e.g. the template example at lines 169-181 also omits such a guard).\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' section (html-tag-processor.md lines 158-182) and set_modifiable_text() example (lines 1882-1890)",
+      "problem": "Both worked examples advance to the FIRST #text node in the whole document via a bare next_token() loop and assume it is the one to fill. This works only when the target text node is the document's first text node. In a template with multiple text-bearing elements (e.g. a caption AND a separate label), this idiom silently fills the wrong node. Subjects in trials 1 and 2 independently sensed this and inserted a next_tag() to position first, but the docs never show that disambiguation step.",
+      "suggestion": "Add one sentence and a variant showing how to target a specific element's text: call next_tag() to land on the desired container first, then run the next_token()/#text loop, and stop the loop when leaving that element. State explicitly that the bare loop fills the first text node found and is only safe when that is unambiguous."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' section (html-tag-processor.md lines 158-182)",
+      "problem": "The example calls next_tag() and set_attribute() without checking next_tag()'s return value. For a trusted literal template this is fine, but the docs never note this assumption, so readers may copy the unguarded pattern into code where the markup is dynamic and a missing tag would silently no-op all subsequent set_attribute calls.",
+      "suggestion": "Add a brief note that omitting the next_tag() return check is safe only because the template is a known literal under the author's control; when the tag's presence is not guaranteed, guard on the boolean return before calling set_attribute()/set_modifiable_text()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — get_updated_html() vs WP_HTML_Processor serialize()/serialize_token()",
+      "problem": "The two markdown files each correctly tell readers to use get_updated_html() after edits (and serialize() warns it is not for retrieving modifications), but a reader who only opens html-processor.md first could plausibly reach for serialize_token() in a token loop to 'rebuild' the edited document. The cross-reference exists but is buried in the serialize_token/serialize prose.",
+      "suggestion": "In the Tag Processor's 'Building markup from a template' section, add a one-line pointer: 'Read the result with get_updated_html(); do not use the HTML Processor's serialize()/serialize_token() for retrieving edits.' This co-locates the correct read-back call with the template-building recipe where authors will look for it."
+    }
+  ]
+}

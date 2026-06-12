@@ -1,0 +1,513 @@
+{
+  "round_score": 97.78,
+  "core_score": 97.44,
+  "by_split": {
+    "train": 97.78
+  },
+  "by_concept": {
+    "attributes": 100.0,
+    "classes": 100.0,
+    "failure-handling": 100.0,
+    "namespace": 97.8,
+    "serialization": 98.63,
+    "text": 95.29,
+    "traversal": 95.72
+  },
+  "tasks": {
+    "N03-incomplete-html-tail": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "failure-handling",
+        "processor": "tag",
+        "split": "train"
+      }
+    },
+    "N04-can-normalize-fragment": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "failure-handling",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "N06-html-img-sources": {
+      "score": 97.8,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 90,
+          "score": 97.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 94,
+          "score": 98.2
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 94,
+          "score": 98.2
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "namespace",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T01-add-image-class": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "smoke",
+        "commonness": "high",
+        "concept": "classes",
+        "processor": "tag",
+        "split": "train"
+      }
+    },
+    "T02-link-targets": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "smoke",
+        "commonness": "high",
+        "concept": "attributes",
+        "processor": "tag",
+        "split": "train"
+      }
+    },
+    "T03-first-h1-text": {
+      "score": 94.88,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 8,
+          "adherence": 82,
+          "score": 85.85
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 96,
+          "score": 98.8
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "text",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T04-build-figure": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "attributes",
+        "processor": "tag",
+        "split": "train"
+      }
+    },
+    "T05-text-excerpt": {
+      "score": 96.4,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 9,
+          "total": 9,
+          "adherence": 99,
+          "score": 99.7
+        },
+        {
+          "trial": "trial-2",
+          "passed": 9,
+          "total": 9,
+          "adherence": 95,
+          "score": 98.5
+        },
+        {
+          "trial": "trial-3",
+          "passed": 9,
+          "total": 9,
+          "adherence": 70,
+          "score": 91.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "text",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T06-collect-links": {
+      "score": 94.58,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 8,
+          "adherence": 78,
+          "score": 84.65
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "text",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T07-quoted-paragraphs": {
+      "score": 99.4,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 98,
+          "score": 99.4
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "traversal",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T08-table-extract": {
+      "score": 88.37,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 8,
+          "adherence": 62,
+          "score": 71.1
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 84,
+          "score": 95.2
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "traversal",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T09-mark-keyword": {
+      "score": 97.1,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 78,
+          "score": 93.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 97,
+          "score": 99.1
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "serialization",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T10-last-h2": {
+      "score": 99.4,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 6,
+          "total": 6,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-2",
+          "passed": 6,
+          "total": 6,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 6,
+          "total": 6,
+          "adherence": 97,
+          "score": 99.1
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "traversal",
+        "processor": "tag",
+        "split": "train"
+      }
+    },
+    "T11-same-html": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 9,
+          "total": 9,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "serialization",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T12-unwrap-spans": {
+      "score": 98.8,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "serialization",
+        "processor": "html",
+        "split": "train"
+      }
+    }
+  }
+}

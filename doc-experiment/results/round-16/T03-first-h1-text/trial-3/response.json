@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element. After locating the H1, it iterates through subsequent tokens, collecting all text nodes (#text tokens) that are nested inside the H1 element. The depth tracking ensures we stop when exiting the H1. The get_modifiable_text() method automatically returns decoded character references (so &amp; becomes &). Returns null if no H1 found, empty string if H1 has no text content.",
+  "confidence": 42
+}

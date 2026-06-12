@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Processor::create_fragment() to safely parse the HTML fragment, then next_tag() to find the first TABLE element. Walked through all tokens inside the table using next_token(), tracking depth to stay within the table bounds. Accumulated text from #text tokens using get_modifiable_text() (which automatically decodes character references), and detected TR/TD/TH opening/closing tags with is_tag_closer() and get_token_name() to build the proper row and cell structure. The processor handles missing closing tags automatically through HTML5 parsing rules.",
+  "confidence": 45
+}

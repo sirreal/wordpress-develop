@@ -2,6 +2,17 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 16 — Haiku, three concepts at 100; entering hold-round protocol
+
+**Train 97.78.** Attributes/classes/failure-handling concepts all at
+100; T01 gap list empty again. Remaining variance: known single-trial
+noise modes (T03's occasional '>' sample, T06/T08 single cases, judge
+adherence spread). No new actionable gap.
+
+Round 17 runs as a HOLD round — no doc edits — to measure pure
+round-to-round variance and sharpen the noise floor against which
+future deltas are judged.
+
 ## Round 15 — Haiku, checkpoint: T05 cured; N05 one placement away
 
 **All-19 96.16 / train 97.59 / held-out 90.79 (flat vs 91.04 — N05's

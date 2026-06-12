@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a template with the exact HTML structure needed, uses WP_HTML_Tag_Processor to match the img tag and set the src and alt attributes in the correct order, then iterates through tokens to find the text node within figcaption and replaces it with the caption. The set_attribute() method handles proper escaping of special characters, and set_modifiable_text() handles escaping the caption text. Finally, get_updated_html() returns the modified HTML fragment.",
+  "confidence": 78
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor::next_token() to iterate through all tokens, collecting only #text nodes via get_token_name() and get_modifiable_text(). Character references are already decoded by get_modifiable_text(). The text is accumulated with proper Unicode code point counting using mb_strlen() and truncated to max_codepoints using mb_substr() with UTF-8 encoding. The function returns empty string for zero or negative max_codepoints values.",
+  "confidence": 82
+}

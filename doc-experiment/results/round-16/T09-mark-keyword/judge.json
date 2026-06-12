@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor::create_fragment for a BODY-context fragment (30/30). All methods documented: create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token — no hallucinations, no _doing_it_wrong (30/30). Idiomatic token-walk that mirrors the reference exactly: dispatch on get_token_type, wrap #text whose decoded get_modifiable_text contains the keyword, concatenate serialize_token for every token (25/25). Edge cases all handled via documented semantics: decoded-vs-raw match (get_modifiable_text), comment/attribute non-match (only #text wrapped), incomplete-input normalization (serialize_token canonicalizes). Minor: returns $html instead of '' on null processor; harmless because create_fragment cannot return null for a BODY fragment here, but it is a slightly looser failure contract than the reference (-4 on edge handling). Passed 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 78,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (30/30). No hallucinated/undocumented API: create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token, and static WP_HTML_Processor::normalize are all documented; htmlspecialchars is a PHP builtin (30/30). The weakness is idiomaticity: instead of using serialize_token() for #text nodes it hand-rolls re-encoding with htmlspecialchars(ENT_QUOTES, UTF-8) and then re-parses the whole emitted string through normalize() — a redundant double-parse where serialize_token already yields the canonical text encoding. This works on these cases but is not the documented pattern and is fragile: HTML5 text serialization only escapes &, <, > (and via context), whereas ENT_QUOTES also encodes quotes and apostrophes, so text containing a literal quote would diverge from canonical output; only the test selection saved it. Docked idiomatic-use (16/25). Edge cases pass but for the wrong reason on text encoding (12/15). Passed 8/8 but lowest self-confidence (35), consistent with the convoluted approach."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (30/30). All methods documented, no _doing_it_wrong (30/30). Fully idiomatic: single token-walk, dispatch on get_token_type, wrap only #text matching the keyword in decoded get_modifiable_text, serialize every token with serialize_token — identical strategy to the reference and to the doc's documented rewriting-loop recipe (25/25). Edge cases all handled through documented semantics (15/15), minus a hair for returning $html on null processor instead of '' (-3). Explanation correctly states serialize_token 'handles normalization automatically' and that only complete text nodes are wrapped. Highest self-confidence (78). Passed 8/8."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 with no _doing_it_wrong or trigger_error records. The documentation supported this task well, and the success is attributable to specific passages. (1) The serialize_token() docblock (html-processor.md ~line 1047-1076) is the load-bearing passage: it explicitly states that walking every token with next_token and concatenating serialize_token reconstructs the normalized serialization, and that 'a rewriting loop can transform the document while serializing... or emit extra markup around them to insert wrappers.' This is precisely the mark-wrapping task, and all three subjects landed on it. (2) The next_token() / get_token_type() / get_modifiable_text() docs gave subjects the decoded-vs-raw distinction needed for the entity-encoded case (get_modifiable_text returns 'Apples & Oranges' / 'Fish & Chips' decoded), the comment/attribute non-match cases (only '#text' tokens carry node text; attribute and comment content are not #text), and the split-across-elements no-match (each text node is a separate token). (3) The normalize() docblock's bullet list (omitted tags added, attributes double-quoted, text re-encoded) gave subjects the normalization contract for the unclosed-tag and &AMP; cases.\\n\\nNear-misses worth noting: Trial-2 is the only one that did not simply trust serialize_token for text nodes — it re-encoded text with htmlspecialchars and then re-normalized the entire emitted string with WP_HTML_Processor::normalize(). It passed, but only because none of the eight cases contains a literal quote or apostrophe inside a text node, where ENT_QUOTES encoding diverges from HTML5 text serialization. The docs never explicitly say 'do not hand-encode text node content; serialize_token already emits canonical text,' so this avoidable detour was not actively discouraged. The subject's own low confidence (35) reflects the uncertainty. Trials 1 and 3 also both diverge from the reference's null-processor return ('' ) by returning $html; the create_fragment() docblock documents that null is returned for unsupported contexts but does not illustrate what a caller should return in the trivial pass-through case, leaving the contract ambiguous — though untested here since BODY fragments never return null.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() (html-processor.md, ~line 1047)",
+      "problem": "The docblock explains that serialize_token reconstructs the normalized serialization and supports wrapping, but it never states the corollary that text-node content emitted by serialize_token is already canonically encoded, so callers must NOT hand-encode text (e.g. with htmlspecialchars) before or instead of it. Trial-2 built a fragile double-parse around htmlspecialchars(ENT_QUOTES) that only passed by luck of the test data.",
+      "suggestion": "Add one sentence to the serialize_token rewriting-loop section: 'For a #text token, serialize_token() already returns the canonically-escaped text; do not re-encode it yourself (e.g. with htmlspecialchars), which would over-escape characters like quotes that HTML text serialization leaves literal.' This generalizes to any token-rewriting task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / get_token_type() (both md files)",
+      "problem": "Subjects must infer that comment text and attribute values are not exposed as '#text' tokens and therefore cannot match a text-node search. This is the crux of the keyword-in-comment and keyword-in-attribute cases. It is currently only implicit in the examples; nothing states plainly which content is and is not reachable via the #text + get_modifiable_text pattern.",
+      "suggestion": "In get_token_type() or the token-walk recipe, add a short enumeration: '#text tokens carry only character-data between tags. Attribute values, comment bodies, and CDATA-like content are NOT #text tokens — match on the relevant token type and use the appropriate accessor (e.g. get_modifiable_text on a comment token, get_attribute on a tag) to read them.'"
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md, ~line 349)",
+      "problem": "The docblock notes create_fragment may return null for unsupported contexts but gives no guidance on the trivial caller contract when null occurs. Two of three trials returned the original $html on null while the reference returns '', an inconsistency the docs do not help resolve.",
+      "suggestion": "Add a one-line note clarifying when null actually occurs (e.g. unsupported context strings; the default BODY context does not return null for ordinary fragment input) so callers can reason about whether the null branch is even reachable and what a safe fallback is."
+    }
+  ]
+}

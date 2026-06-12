@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses WP_HTML_Processor::normalize($html) and returns ($normalized !== null). Correct processor: normalization requires the HTML Processor, and normalize() is the single documented static entry point (html-processor.md Method Index line 157; full docblock lines 945-996). No hallucinated or undocumented API. Null-return-on-failure is the documented contract (lines 85, 995: 'return null if unable to normalize'). All 7 hidden cases pass. The trigger_error recorded on adoption-agency-false ('Cannot serialize HTML Processor with parsing error: unsupported') is intrinsic to normalize() itself and is emitted identically by the canonical reference, so it is not a misuse and does not lower adherence. Idiomatic for the task: normalize() is precisely the right one-call tool here, so token-walking/bookmarks/serialize_token would be over-engineering. Edge cases (empty string, plain text/entities, unclosed tags, well-formed tables) all handled by deferring to normalize(), matching the docs' enumeration of supported vs unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to the canonical reference: `return null !== WP_HTML_Processor::normalize( $html );`. Correct processor and sole documented static method; no hallucinations. Highest self-reported confidence (95) of the three, with an accurate explanation citing the null-on-unsupported-markup contract. All 7 hidden cases pass; the adoption-agency trigger_error is reference-intrinsic, not a defect."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical substance to trial-1 (variable form, `$normalized !== null`). Explanation is the most complete of the three, correctly distinguishing malformed-but-supported markup (unclosed tags, implied closers, tables) from truly unsupported constructs (misnesting requiring rewind) and tying that to the null return. Every method documented; no misuse. All 7 hidden cases pass."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: 21/21 hidden cases passed (7 cases x 3 trials). All three subjects converged on the canonical solution — call the documented static `WP_HTML_Processor::normalize( $html )` and treat a null return as 'cannot normalize'. This is a clean documentation success and worth crediting specifically.\\n\\nWhat the docs did well: (1) The HTML-vs-Tag-Processor 'Which processor should I use?' framing (html-tag-processor.md lines 18-25; html-processor.md lines 74-93) steers normalization work to the HTML Processor and away from the Tag Processor, which has no normalize/serialize at all — none of the subjects reached for the wrong class. (2) The class Overview and 'HTML Support' sections (lines 84-93) state plainly that the processor aborts on unsupported markup and that output-producing methods 'such as serialize() and normalize() return null' in that case — this is the exact contract the task hinges on. (3) The normalize() docblock (lines 945-996) restates the null-on-failure return type, lists what normalization changes, and the adjacent prose distinguishes malformed-but-supported (unclosed tags, implied closers, tables) from genuinely unsupported (the `<b>one<i>two</b>three</i>` misnesting example, lines 91-92), which maps one-to-one onto the test cases. All three explanations parroted this distinction correctly, including the adoption/foster-parenting rationale.\\n\\nNear-misses worth noting: confidence was 92/95/92 rather than 100, despite the solution being a one-liner directly supported by a worked example. The residual uncertainty likely stems from the docs never stating in one place that normalize() returning null is the SUPPORTED, intended way to *test* normalizability (as opposed to a debugging signal). The null return is documented as an outcome of failure, and get_last_error()/get_unsupported_exception() are presented as the introspection path (lines 85, 523-574); a reader could reasonably wonder whether they were 'supposed' to instantiate a processor and inspect get_last_error() instead of relying on the static null return. The subjects guessed right, but the docs left room to over-think it. Also, the adoption-agency case emits an internal E_USER_WARNING from serialize() ('Cannot serialize HTML Processor with parsing error: unsupported') that surfaces in execution.json's trigger_error; the docs never warn that the documented null-returning failure path also raises a user-level warning, which could surprise a caller who treats null as a clean, silent signal.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() and ::serialize() (html-processor.md, ~lines 945-996, 997-1046)",
+      "problem": "The docblocks document that null is returned 'if unable to normalize', but never state that checking the null return is the SUPPORTED, intended way to test whether a fragment is normalizable. A reader can't tell whether they should rely on the static null return or instead build a processor and inspect get_last_error()/get_unsupported_exception(). All three subjects guessed correctly but hedged their confidence (92-95, not 100).",
+      "suggestion": "Add one sentence to the normalize()/serialize() Returns or description: a null return is the canonical, intended signal that the input contains markup the HTML Processor does not yet support; callers may branch on `null !== normalize($html)` directly without constructing a processor or calling get_last_error(). This generalizes to any 'can this be processed?' feature-detection use."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() / serialize() (html-processor.md, ~lines 945-996)",
+      "problem": "When normalization fails, the code path also emits a user-level warning (E_USER_WARNING: 'Cannot serialize HTML Processor with parsing error: unsupported'), visible in test instrumentation. The docs present null purely as a silent return value and never mention that the failure path raises a warning, which can surprise callers who treat null as a clean signal (e.g. in code where warnings are escalated to exceptions).",
+      "suggestion": "Note in the normalize()/serialize() docblock that on unsupported input these methods both return null AND emit a non-fatal warning describing the unsupported markup. Tell callers who intend null as a quiet feature-detection signal how to handle or suppress that warning. This is a general gotcha for any output-producing method that bails on unsupported HTML."
+    },
+    {
+      "location": "WP_HTML_Processor class Overview / 'HTML Support' (html-processor.md, ~lines 84-93)",
+      "problem": "The doc states output methods return null on unsupported markup, but the list of null-returning methods is given inline ('such as serialize() and normalize()') rather than as a discoverable cross-reference. A reader scanning the Method Index has no single anchor that enumerates which public methods return null specifically because of an unsupported-markup bail vs. other failures (no match, scanning already started).",
+      "suggestion": "In the class-level 'HTML Support' section, add an explicit short list of the methods whose null/false return can be caused by the unsupported-markup bail (normalize, serialize, next_tag/next_token via get_last_error) and link each to get_last_error()/get_unsupported_exception(). This helps any reader distinguish the 'aborted on unsupported HTML' failure mode from ordinary 'not found' / 'already scanned' failures across the whole API."
+    }
+  ]
+}

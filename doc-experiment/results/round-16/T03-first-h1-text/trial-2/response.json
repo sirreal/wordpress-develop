@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse HTML and extract text. It creates a fragment parser, finds the first H1 tag, records its depth, then walks through all tokens while maintaining depth >= h1_depth, accumulating text nodes via get_modifiable_text() which automatically decodes character references. The approach returns an empty string for H1 elements with only markup content, and null when no H1 exists, exactly matching the documented behavior.",
+  "confidence": 92
+}

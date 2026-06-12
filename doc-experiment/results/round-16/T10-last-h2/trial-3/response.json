@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to linearly scan the HTML, finding all H2 opening tags (not closers, and real tags not in comments). A bookmark named 'last-h2' is set and updated each time an H2 is found, tracking the position of the last one. After scanning completes, if a last H2 was found, the processor seeks back to that bookmark and adds the 'final-section' class using add_class(), then releases the bookmark and returns the updated HTML via get_updated_html().",
+  "confidence": 92
+}

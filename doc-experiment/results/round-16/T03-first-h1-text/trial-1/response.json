@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML and next_tag('H1') to locate the first H1 element, returning null if not found. It records the H1's depth with get_current_depth(), then uses next_token() to traverse tokens while the current depth remains greater than the H1's depth (ensuring we stay within its content). For each #text token encountered, it accumulates the decoded text using get_modifiable_text(), which automatically decodes character references like &amp; to &. The loop terminates when exiting the H1's closing tag.",
+  "confidence": 72
+}

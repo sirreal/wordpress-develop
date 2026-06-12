@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely build the figure fragment. It creates a template with the exact HTML structure including empty attribute placeholders and a placeholder text node. The processor then sets the src and alt attributes on the img tag (preserving their order from the template), and replaces the placeholder text in the figcaption with the provided caption. The set_attribute and set_modifiable_text methods handle all necessary HTML encoding automatically, ensuring special characters in the input strings are properly escaped.",
+  "confidence": 78
+}

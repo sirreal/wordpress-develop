@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then walks through every token with next_token(). For each token, it checks if the tag name is 'SPAN' (case-insensitive comparison against uppercase tag name from get_tag()), skipping both opening and closing SPAN tags while serializing all other tokens. The serialize_token() method produces normalized HTML. This approach mirrors the exact example in the documentation for removing elements while preserving contents.",
+  "confidence": 82
+}

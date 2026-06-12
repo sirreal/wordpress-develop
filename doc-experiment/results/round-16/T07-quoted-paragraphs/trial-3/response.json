@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor to fully parse the HTML and understand document structure. The processor creates a fragment with create_fragment(), then iterates through all P tags using next_tag(). For each P tag, I call get_breadcrumbs() which returns the complete ancestor path, and check if 'BLOCKQUOTE' exists anywhere in that array using in_array(). If found, add_class() adds the 'quoted' class. Finally, get_updated_html() returns the modified HTML with all changes applied.",
+  "confidence": 92
+}
