@@ -5937,6 +5937,15 @@ assert.equal(
 );
 fullParserFosteredTextBeforeTableHiddenInput.destroy();
 
+const fullParserFosteredTextBeforeTableMeta = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table> X<meta></table>",
+);
+assert.equal(
+	fullParserFosteredTextBeforeTableMeta.serialize(),
+	"<!DOCTYPE html><html><head></head><body> X<meta><table></table></body></html>",
+);
+fullParserFosteredTextBeforeTableMeta.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",

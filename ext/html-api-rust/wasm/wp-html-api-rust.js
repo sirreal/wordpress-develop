@@ -3368,7 +3368,10 @@ export function createHtmlApi(wasm) {
 						return;
 					}
 
-					if (this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE) {
+					if (
+						this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE ||
+						this.#currentTextChunkPrecedesFosteredTableText()
+					) {
 						if (this.#representFosteredTextBeforeDeferredTable()) {
 							return;
 						}
@@ -3724,6 +3727,10 @@ export function createHtmlApi(wasm) {
 				}
 				this.breadcrumbs = this.#breadcrumbStack();
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
+				return;
+			}
+
+			if (this.#representFosteredVoidStartBeforeDeferredTable(tagName)) {
 				return;
 			}
 
@@ -7951,6 +7958,7 @@ export function createHtmlApi(wasm) {
 			if (tokenType === "#text") {
 				return (
 					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+					!this.#currentTextChunkPrecedesFosteredTableText() &&
 					this.#queueDeferredTableOpener()
 				);
 			}
@@ -7999,6 +8007,45 @@ export function createHtmlApi(wasm) {
 			this.breadcrumbs = this.#breadcrumbStack("#text", tableIndex);
 			this.frameset_ok = false;
 			return true;
+		}
+
+		#representFosteredVoidStartBeforeDeferredTable(tagName) {
+			if (
+				!this.is_full_parser ||
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html" ||
+				!VOID_ELEMENTS.has(tagName) ||
+				TABLE_MODE_START_TAGS.has(tagName)
+			) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			this.current_token_namespace = this.#namespaceForCurrentStartTag(super.get_tag());
+			this.breadcrumbs = this.#breadcrumbStack(tagName, tableIndex);
+			return true;
+		}
+
+		#currentTextChunkPrecedesFosteredTableText() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const afterToken = span.start + span.length;
+			const nextTag = runtime.scanNextTag(this.html, afterToken);
+			const text = nextTag === false
+				? this.html.slice(afterToken)
+				: this.html.slice(afterToken, nextTag.tag_start);
+			return !this.#isIgnorableTableText(text);
 		}
 
 		#isIgnorableTableText(text) {
