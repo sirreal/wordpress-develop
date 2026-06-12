@@ -4,6 +4,7 @@ import { loadWasm } from "./wp-html-api-rust.js";
 
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
+const testFilter = process.env.HTML5LIB_TEST_FILTER ?? "";
 const supportedFragmentContexts = new Set([
 	"body",
 	"caption",
@@ -42,12 +43,6 @@ const supportedFragmentContexts = new Set([
 ]);
 
 const skippedTests = new Set([
-	"foreign-fragment/line0032",
-	"foreign-fragment/line0169",
-	"foreign-fragment/line0211",
-	"foreign-fragment/line0253",
-	"foreign-fragment/line0295",
-	"foreign-fragment/line0337",
 	"foreign-fragment/line0590",
 	"foreign-fragment/line0602",
 	"foreign-fragment/line0614",
@@ -140,6 +135,28 @@ function html5libFragmentBaseDepth(fragmentContext) {
 	return 2;
 }
 
+function html5libFragmentBasePath(fragmentContext) {
+	if (fragmentContext === null) {
+		return [];
+	}
+
+	if (fragmentContext === "html") {
+		return ["HTML"];
+	}
+
+	if (fragmentContext.startsWith("math ")) {
+		const tagName = fragmentContext.slice("math ".length).toUpperCase();
+		return tagName === "MATH" ? ["HTML", "MATH"] : ["HTML", "MATH", tagName];
+	}
+
+	if (fragmentContext.startsWith("svg ")) {
+		const tagName = fragmentContext.slice("svg ".length).toUpperCase();
+		return tagName === "SVG" ? ["HTML", "SVG"] : ["HTML", "SVG", tagName];
+	}
+
+	return ["HTML", fragmentContext.toUpperCase()];
+}
+
 function buildHtml5libTree(fragmentContext, html) {
 	const processor = fragmentContext === null
 		? WP_HTML_Processor.create_full_parser(html)
@@ -147,13 +164,27 @@ function buildHtml5libTree(fragmentContext, html) {
 	assert.notEqual(processor, null);
 
 	const baseDepth = html5libFragmentBaseDepth(fragmentContext);
+	const basePath = html5libFragmentBasePath(fragmentContext);
 	let output = "";
 	let wasText = false;
 	let textNode = "";
 	let openElementPath = [];
 	const indent = (level) => treeIndent.repeat(level);
-	const pathFromBreadcrumbs = (currentNamespace = "html", currentIsElement = false) => (
-		processor.get_breadcrumbs().map((name, index, breadcrumbs) => {
+	const expandFragmentBasePath = (breadcrumbs) => {
+		if (
+			basePath.length > 2 &&
+			breadcrumbs.length > 1 &&
+			breadcrumbs[0] === "HTML" &&
+			breadcrumbs[1] === basePath[basePath.length - 1]
+		) {
+			return [...basePath, ...breadcrumbs.slice(2)];
+		}
+
+		return breadcrumbs;
+	};
+	const pathFromBreadcrumbs = (currentNamespace = "html", currentIsElement = false) => {
+		const breadcrumbs = expandFragmentBasePath(processor.get_breadcrumbs());
+		return breadcrumbs.map((name, index) => {
 			if (openElementPath[index]?.name === name) {
 				return openElementPath[index];
 			}
@@ -162,8 +193,8 @@ function buildHtml5libTree(fragmentContext, html) {
 				name,
 				namespace: currentIsElement && index === breadcrumbs.length - 1 ? currentNamespace : "html",
 			};
-		})
-	);
+		});
+	};
 
 	while (processor.next_token()) {
 		const tokenName = processor.get_token_name();
@@ -363,12 +394,16 @@ for (const file of files) {
 	for (const test of tests) {
 		summary.total += 1;
 
+		if (testFilter !== "" && !test.name.includes(testFilter)) {
+			continue;
+		}
+
 		if (test.fragmentContext !== null && !supportedFragmentContexts.has(test.fragmentContext)) {
 			summary.skippedContext += 1;
 			continue;
 		}
 
-		if (skippedTests.has(test.name)) {
+		if (testFilter === "" && skippedTests.has(test.name)) {
 			const result = buildHtml5libTree(test.fragmentContext, test.html);
 			if (
 				result.unsupported === null &&
@@ -399,13 +434,15 @@ for (const file of files) {
 		if (result.tree !== test.expectedTree) {
 			summary.failed += 1;
 			if (failures.length < 200) {
-				failures.push(`${test.name}\n${test.html}`);
+				failures.push(`${test.name}\n${test.html}\n\nActual:\n${result.tree}\nExpected:\n${test.expectedTree}`);
 			}
 		}
 	}
 }
 
 assert.deepEqual(staleSkippedTests, [], "Remove passing tests from skippedTests.");
-assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
+if (testFilter === "") {
+	assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
+}
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
 console.log(`WASM html5lib tree tests passed: ${JSON.stringify(summary)}`);
