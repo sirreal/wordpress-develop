@@ -4226,6 +4226,37 @@ for (const html of ["<param><frameset></frameset>", "<source> <frameset></frames
 	fullParserFramesetAfterIgnoredStart.destroy();
 }
 
+const fullParserFramesetAfterIgnoredFrameNoise = WP_HTML_Processor.create_full_parser(
+	"<frame></frame></frame><frameset><frame><frameset><frame></frameset><noframes></frameset><noframes>",
+);
+const fullParserFramesetAfterIgnoredFrameNoiseTokens = [];
+while (fullParserFramesetAfterIgnoredFrameNoise.next_token()) {
+	if (fullParserFramesetAfterIgnoredFrameNoise.get_token_type() === "#tag") {
+		const tagPrefix = fullParserFramesetAfterIgnoredFrameNoise.is_tag_closer() ? "-" : "+";
+		fullParserFramesetAfterIgnoredFrameNoiseTokens.push(
+			`${tagPrefix}${fullParserFramesetAfterIgnoredFrameNoise.get_tag()}:${
+				fullParserFramesetAfterIgnoredFrameNoise.get_breadcrumbs().join("/")
+			}`,
+		);
+	}
+}
+assert.deepEqual(fullParserFramesetAfterIgnoredFrameNoiseTokens, [
+	"+HTML:HTML",
+	"+HEAD:HTML/HEAD",
+	"-HEAD:HTML",
+	"+FRAMESET:HTML/FRAMESET",
+	"+FRAME:HTML/FRAMESET/FRAME",
+	"+FRAMESET:HTML/FRAMESET/FRAMESET",
+	"+FRAME:HTML/FRAMESET/FRAMESET/FRAME",
+	"-FRAMESET:HTML/FRAMESET",
+	"+NOFRAMES:HTML/FRAMESET/NOFRAMES",
+	"-FRAMESET:HTML",
+	"-HTML:",
+]);
+assert.equal(fullParserFramesetAfterIgnoredFrameNoise.get_last_error(), null);
+assert.equal(fullParserFramesetAfterIgnoredFrameNoise.get_unsupported_exception(), null);
+fullParserFramesetAfterIgnoredFrameNoise.destroy();
+
 for (const html of [
 	"<svg></svg><frameset><frame>",
 	"<math></math><frameset><frame>",

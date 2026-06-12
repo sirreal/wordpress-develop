@@ -4618,6 +4618,11 @@ export function createHtmlApi(wasm) {
 							return true;
 						}
 
+						if (tokenType === "#tag" && !isCloser && this.#ignoredFrameNoisePrecedesFrameset(tagName)) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
 						if (tokenType === "#tag" && !isCloser && this.#openElementChainPrecedesFrameset(tagName)) {
 							this.pre_frameset_paragraph_ignored = true;
 							this.#ignoreCurrentToken();
@@ -5555,6 +5560,39 @@ export function createHtmlApi(wasm) {
 		#ignoredStartTagPrecedesFrameset(tagName) {
 			return AFTER_HEAD_FRAMESET_IGNORED_START_TAGS.has(tagName) &&
 				this.#currentTokenPrecedesStartTag("FRAMESET");
+		}
+
+		#ignoredFrameNoisePrecedesFrameset(tagName) {
+			if (tagName !== "FRAME") {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (!this.#isWhitespacePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
+					return false;
+				}
+
+				if (!nextTag.is_closing) {
+					return nextTag.tag_name === "FRAMESET";
+				}
+
+				if (nextTag.tag_name !== "FRAME") {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
 		}
 
 		#closedElementPrecedesFrameset(tagName) {
