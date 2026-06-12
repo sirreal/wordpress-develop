@@ -746,6 +746,7 @@ assert.throws(
 	() => coercedOpenElements.current_node_is([]),
 	TypeError,
 );
+assert.equal(coercedOpenElements.has_element_in_specific_scope("1", null), true);
 assert.throws(
 	() => coercedOpenElements.has_element_in_specific_scope("P", null),
 	TypeError,

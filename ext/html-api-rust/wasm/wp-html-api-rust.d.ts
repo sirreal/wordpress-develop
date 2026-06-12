@@ -385,7 +385,7 @@ export interface WP_HTML_Open_Elements {
 	count(): number;
 	current_node(): WP_HTML_Token | null;
 	current_node_is(identity: PhpStringParameter): boolean;
-	has_element_in_specific_scope(tagName: PhpStringParameter, terminationList: unknown[]): boolean;
+	has_element_in_specific_scope(tagName: PhpStringParameter, terminationList: unknown): boolean;
 	has_element_in_scope(tagName: PhpStringParameter): boolean;
 	has_element_in_list_item_scope(tagName: PhpStringParameter): boolean;
 	has_element_in_button_scope(tagName: PhpStringParameter): boolean;

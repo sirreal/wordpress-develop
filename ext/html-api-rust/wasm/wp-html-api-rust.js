@@ -928,7 +928,7 @@ export class WP_HTML_Open_Elements {
 
 	has_element_in_specific_scope(tagName, terminationList) {
 		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
-		const terminationSet = new Set(phpArrayParameterCoerce(terminationList, "termination_list"));
+		let terminationSet = null;
 		for (const node of this.walk_up()) {
 			const namespacedName = openElementNamespacedName(node);
 
@@ -941,6 +941,10 @@ export class WP_HTML_Open_Elements {
 				HEADING_ELEMENTS.has(namespacedName)
 			) {
 				return true;
+			}
+
+			if (terminationSet === null) {
+				terminationSet = new Set(phpArrayParameterCoerce(terminationList, "termination_list"));
 			}
 
 			if (terminationSet.has(namespacedName)) {
