@@ -58,6 +58,14 @@
             "expected": "beforeafter"
         },
         {
+            "id": "textarea-title-counts-script-style-excluded",
+            "args": [
+                "<textarea>form &amp; field</textarea><script>script</script><style>style</style><title>Doc &amp; Title</title><p>Body</p>",
+                1000
+            ],
+            "expected": "form & fieldDoc & TitleBody"
+        },
+        {
             "id": "interelement-whitespace",
             "args": [
                 "<p>a</p> <p>b</p>",

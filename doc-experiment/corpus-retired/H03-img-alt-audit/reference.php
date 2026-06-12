@@ -6,7 +6,7 @@ function find_images_missing_alt( string $html ): array {
 	$missing = array();
 	while ( $processor->next_tag( 'IMG' ) ) {
 		$src = $processor->get_attribute( 'src' );
-		if ( null === $src || true === $src ) {
+		if ( ! is_string( $src ) || '' === $src ) {
 			continue;
 		}
 

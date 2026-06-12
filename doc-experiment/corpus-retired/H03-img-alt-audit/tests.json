@@ -41,6 +41,15 @@
             ]
         },
         {
+            "id": "empty-and-valueless-src-skipped",
+            "args": [
+                "<img src alt=\"\"><img src=\"\" alt=\"\"><img src=\"real.jpg\" alt=\"\">"
+            ],
+            "expected": [
+                "real.jpg"
+            ]
+        },
+        {
             "id": "entity-in-src",
             "args": [
                 "<img src=\"/i?a=1&amp;b=2\">"

@@ -67,6 +67,15 @@
             ]
         },
         {
+            "id": "empty-and-valueless-src-skipped",
+            "args": [
+                "<img src><img src=\"\"><img src=\"yes.jpg\">"
+            ],
+            "expected": [
+                "yes.jpg"
+            ]
+        },
+        {
             "id": "no-images",
             "args": [
                 "<p>text</p><svg><circle r=\"1\"></circle></svg>"

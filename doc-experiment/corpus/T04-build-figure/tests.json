@@ -37,6 +37,15 @@
             "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"The &quot;best&quot; photo\"><figcaption>Caption</figcaption></figure>"
         },
         {
+            "id": "special-chars-in-url",
+            "args": [
+                "/photo?title=\"A&B\"&raw=<tag>",
+                "Alt",
+                "Caption"
+            ],
+            "expected": "<figure><img src=\"/photo?title=&quot;A&amp;B&quot;&amp;raw=&lt;tag&gt;\" alt=\"Alt\"><figcaption>Caption</figcaption></figure>"
+        },
+        {
             "id": "angle-brackets-in-caption",
             "args": [
                 "https://example.com/a.jpg",

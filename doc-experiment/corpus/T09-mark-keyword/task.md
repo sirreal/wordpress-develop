@@ -18,6 +18,9 @@ Notes:
   character references in the source still matches.
 - Keywords appearing inside attribute values, comments, or split across
   multiple text nodes do not match.
+- Text stored directly on special text-bearing elements such as
+  `<textarea>`, `<title>`, `<script>`, and `<style>` is not wrapped for
+  this task; only ordinary text nodes are wrappable.
 - The output is normalized HTML: optional tags are closed, attribute values
   are double-quoted, and text re-encodes characters like `&` canonically.
   Apart from the added `<mark>` wrappers it is exactly the normalized form

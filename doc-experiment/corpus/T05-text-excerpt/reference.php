@@ -12,7 +12,13 @@ function html_text_excerpt( string $html, int $max_codepoints ): string {
 
 	$text = '';
 	while ( $processor->next_token() ) {
-		if ( '#text' === $processor->get_token_type() ) {
+		if (
+			'#text' === $processor->get_token_type() ||
+			(
+				! $processor->is_tag_closer() &&
+				in_array( $processor->get_token_name(), array( 'TEXTAREA', 'TITLE' ), true )
+			)
+		) {
 			$text .= $processor->get_modifiable_text();
 		}
 	}

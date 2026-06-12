@@ -55,6 +55,15 @@
             ]
         },
         {
+            "id": "empty-and-valueless-src-skipped",
+            "args": [
+                "<figure><img src><img src=\"\"><img src=\"yes.jpg\"></figure>"
+            ],
+            "expected": [
+                "yes.jpg"
+            ]
+        },
+        {
             "id": "entity-decoded-src",
             "args": [
                 "<figure><img src=\"/i?a=1&amp;b=2\"></figure>"

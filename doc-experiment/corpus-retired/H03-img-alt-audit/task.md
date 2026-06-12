@@ -11,8 +11,8 @@ alternative text is missing or empty, in document order. "Missing or empty"
 means: the `alt` attribute is absent, is written without a value
 (`<img alt>`), or has the empty string as its value (`alt=""`). An `alt`
 containing only whitespace (`alt=" "`) is **present** and does not count.
-Skip `IMG` tags that have no `src` attribute. The `src` values are the
-decoded attribute values.
+Skip `IMG` tags that have no `src` attribute, or whose `src` has no value
+(`src` or `src=""`). The `src` values are the decoded attribute values.
 
 Example:
 

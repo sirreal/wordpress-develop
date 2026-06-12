@@ -57,12 +57,20 @@ function wp_kses_uri_attributes() {
 }
 
 /**
- * Minimal shim: identity. Corpus tasks must avoid expectations that
- * depend on real esc_url() semantics (protocol filtering, entity
- * encoding of ampersands).
+ * Minimal shim: HTML-escape URL attributes without WordPress' protocol
+ * filtering or other URL normalization.
  */
 function esc_url( $url, $protocols = null, $_context = 'display' ) {
-	return $url;
+	return strtr(
+		(string) $url,
+		array(
+			'<' => '&lt;',
+			'>' => '&gt;',
+			'&' => '&amp;',
+			'"' => '&quot;',
+			"'" => '&apos;',
+		)
+	);
 }
 
 $wp_includes = dirname( __DIR__, 2 ) . '/src/wp-includes';

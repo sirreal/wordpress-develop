@@ -88,7 +88,7 @@ they detect doc edits that game the train set.
 - Retired to corpus-retired/ (too close to train patterns to give
   held-out anti-overfitting value): H01, H02, H03.
 
-Every task carries labels in tests.json — role (core/smoke), commonness
+Every active task carries labels in tests.json — role (core/smoke), commonness
 (high/medium/low), concept (attributes, classes, text, traversal,
 serialization, full-document, failure-handling, namespace), and intended
 processor (tag/html/either). Rounds are reviewed per concept, not only by
@@ -111,9 +111,10 @@ before they enter a round.
 Standalone PHP CLI harness (no WordPress boot, no DB): requires the html-api
 source files directly plus small shims — real `utf8.php`, copied
 `wp_kses_uri_attributes()`, identity `__()`, recording `_doing_it_wrong()`
-(its triggering is an adherence signal), minimal `esc_url()`. Candidate and
+(its triggering is an adherence signal), minimal `esc_url()` that performs
+HTML escaping but no protocol filtering or URL normalization. Candidate and
 reference both run under the same harness so shim divergence cancels out.
-Tasks are authored to avoid `esc_url`-sensitive expectations.
+Tasks are authored to avoid protocol-filtering-sensitive expectations.
 
 ## Round flow & stopping
 
