@@ -3839,6 +3839,10 @@ assert.equal(
 	"<i>A<b>B</b></i><b></b><p><b><i></i>C</b>D</p>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<html><body>\n<p><font size=\"7\">First paragraph.</p>\n<p>Second paragraph.</p></font>\n<b><p><i>Bold and Italic</b> Italic</p>"),
+	"\n<p><font size=\"7\">First paragraph.</font></p><font size=\"7\">\n<p>Second paragraph.</p></font>\n<b></b><p><b><i>Bold and Italic</i></b><i> Italic</i></p>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<DIV> abc <B> def <I> ghi <P> jkl </B> mno"),
 	"<div> abc <b> def <i> ghi </i></b><i><p><b> jkl </b> mno</p></i></div>",
 );

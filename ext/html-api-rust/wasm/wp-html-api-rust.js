@@ -5096,7 +5096,14 @@ export function createHtmlApi(wasm) {
 				) {
 					return false;
 				}
-				if (!this.#formattingEndTagPrecedesParagraphClose(formattingTagName)) {
+				if (
+					!this.#formattingEndTagPrecedesParagraphClose(formattingTagName) &&
+					!(
+						formattingTagName === "B" &&
+						!this.#hasOpenFormattingElementBeforeIndex(i) &&
+						this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+					)
+				) {
 					continue;
 				}
 
