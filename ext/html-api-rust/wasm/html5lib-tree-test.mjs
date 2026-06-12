@@ -5,6 +5,7 @@ import { loadWasm } from "./wp-html-api-rust.js";
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
 const testFilter = process.env.HTML5LIB_TEST_FILTER ?? "";
+const unsupportedSampleLimit = Number.parseInt(process.env.HTML5LIB_UNSUPPORTED_SAMPLES ?? "0", 10);
 const supportedFragmentContexts = new Set([
 	"body",
 	"caption",
@@ -412,6 +413,7 @@ const summary = {
 };
 const failures = [];
 const staleSkippedTests = [];
+const unsupportedSamples = {};
 
 for (const file of files) {
 	const suiteName = file.slice(0, -4);
@@ -456,6 +458,17 @@ for (const file of files) {
 			const unsupportedReason = result.unsupported.message;
 			summary.skippedUnsupportedByReason[unsupportedReason] =
 				(summary.skippedUnsupportedByReason[unsupportedReason] ?? 0) + 1;
+			if (unsupportedSampleLimit > 0) {
+				const samples = unsupportedSamples[unsupportedReason] ?? [];
+				if (samples.length < unsupportedSampleLimit) {
+					samples.push({
+						name: test.name,
+						fragmentContext: test.fragmentContext,
+						html: test.html,
+					});
+					unsupportedSamples[unsupportedReason] = samples;
+				}
+			}
 			continue;
 		}
 
@@ -479,4 +492,7 @@ if (testFilter === "") {
 	assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
 }
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
+if (unsupportedSampleLimit > 0) {
+	console.log(`WASM html5lib unsupported samples: ${JSON.stringify(unsupportedSamples)}`);
+}
 console.log(`WASM html5lib tree tests passed: ${JSON.stringify(summary)}`);
