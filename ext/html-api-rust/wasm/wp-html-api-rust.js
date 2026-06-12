@@ -4441,7 +4441,10 @@ export function createHtmlApi(wasm) {
 
 				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
 				this.#queueVirtualPopsFrom(i);
-				if (tagName === "ASIDE") {
+				if (
+					tagName === "ASIDE" &&
+					this.#shouldQueueActiveFormattingElementsAfterAsidePreclosure(i)
+				) {
 					this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
 				}
 				return true;
@@ -4496,6 +4499,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#canPrecloseAsideFormattingAncestor(activeIndex, openIndex, elementTagName) {
+			const openElementsAfterIndex = this.open_elements.length - openIndex - 1;
 			let activeFormattingElementsAfterIndex = 0;
 			for (let i = activeIndex + 1; i < this.active_formatting_elements.length; i += 1) {
 				const entry = this.active_formatting_elements[i];
@@ -4503,12 +4507,19 @@ export function createHtmlApi(wasm) {
 					break;
 				}
 				activeFormattingElementsAfterIndex += 1;
-				if (this.#formattingEndTagPrecedesElementClose(entry.tagName, elementTagName)) {
+				if (
+					openElementsAfterIndex === 3 &&
+					this.#formattingEndTagPrecedesElementClose(entry.tagName, elementTagName)
+				) {
 					return false;
 				}
 			}
 
-			return activeFormattingElementsAfterIndex === 1 && this.open_elements.length - openIndex - 1 === 3;
+			return activeFormattingElementsAfterIndex === 1 && openElementsAfterIndex >= 3;
+		}
+
+		#shouldQueueActiveFormattingElementsAfterAsidePreclosure(openIndex) {
+			return this.open_elements.length - openIndex - 1 === 3;
 		}
 
 		#queueActiveFormattingElementsAfterIndex(index) {
