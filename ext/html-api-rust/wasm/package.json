@@ -8,6 +8,7 @@
 	"scripts": {
 		"build": "../build-wasm.sh",
 		"check": "node --check wp-html-api-rust.js && node --check smoke-test.mjs && node --check html5lib-tree-test.mjs",
+		"prepack": "npm run build",
 		"test": "node smoke-test.mjs",
 		"test:html5lib": "node html5lib-tree-test.mjs"
 	},
