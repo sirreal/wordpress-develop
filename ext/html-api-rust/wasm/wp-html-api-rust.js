@@ -5629,6 +5629,12 @@ export function createHtmlApi(wasm) {
 				if (formattingElementIndex !== -1) {
 					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(tagName);
 					if (
+						tagName === "A" &&
+						activeFormattingElementIndex === -1
+					) {
+						return false;
+					}
+					if (
 						(
 							tagName === "NOBR" &&
 							activeFormattingElementIndex !== -1 &&

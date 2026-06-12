@@ -3822,6 +3822,10 @@ assert.equal(
 	WP_HTML_Processor.normalize("<a><center><title></title><a>"),
 	"<a></a><center><a><title></title></a><a></a></center>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<a href=a>aa<marquee>aa<a href=b>bb</marquee>aa"),
+	'<a href="a">aa<marquee>aa<a href="b">bb</a></marquee>aa</a>',
+);
 
 assert.equal(
 	WP_HTML_Processor.normalize("<a><b>1<a>2"),
