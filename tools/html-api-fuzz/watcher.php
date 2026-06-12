@@ -354,6 +354,13 @@ function html_api_fuzz_watcher_minimize( string $hash, string $state_dir, array 
 		'--max-attempts',
 		(string) \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 ),
 	);
+	if ( array_key_exists( 'probe-mode', $options ) ) {
+		$args[] = '--probe-mode';
+		$args[] = \HtmlApiFuzz\option_string( $options, 'probe-mode', 'auto' );
+	}
+	if ( \HtmlApiFuzz\option_bool( $options, 'keep-candidate-artifacts', false ) ) {
+		$args[] = '--keep-candidate-artifacts';
+	}
 	if ( \HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ) {
 		$args[] = '--any-failure';
 	}

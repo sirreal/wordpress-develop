@@ -644,6 +644,58 @@ html_api_fuzz_smoke_assert( ! $invalid_byte_replay_proc['timedOut'] && 2 === $in
 $invalid_byte_replay_cli_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_replay_cli_dir . '/replay.json' );
 html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $invalid_byte_replay_cli_replay['payloadPolicy'] ?? null ), 'real invalid-byte replay should preserve legacy payload policy metadata.' );
 
+$invalid_byte_exact_minimize_dir = $tmp . '/invalid-byte-exact-minimize';
+$invalid_byte_exact_minimize_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/minimize.php',
+		'--replay',
+		$invalid_byte_replay_source_dir . '/replay.json',
+		'--output-dir',
+		$invalid_byte_exact_minimize_dir,
+		'--max-attempts',
+		'1',
+		'--timeout-ms',
+		'10000',
+	),
+	\HtmlApiFuzz\repo_root(),
+	20000,
+	$tmp . '/invalid-byte-exact-minimize.log'
+);
+html_api_fuzz_smoke_assert( ! $invalid_byte_exact_minimize_proc['timedOut'] && 0 === $invalid_byte_exact_minimize_proc['code'], 'exact-signature invalid-byte replay should minimize.' );
+$invalid_byte_exact_minimize_result = \HtmlApiFuzz\read_json_file( $invalid_byte_exact_minimize_dir . '/minimize-result.json' );
+html_api_fuzz_smoke_assert( true === ( $invalid_byte_exact_minimize_result['ok'] ?? null ), 'exact-signature invalid-byte minimization should preserve the target signature.' );
+html_api_fuzz_smoke_assert( 'process' === ( $invalid_byte_exact_minimize_result['probeMode'] ?? null ), 'auto exact-signature minimization should use timeout-enforced process probes by default.' );
+html_api_fuzz_smoke_assert( true === ( $invalid_byte_exact_minimize_result['candidateArtifactsRetained'] ?? null ), 'auto process minimization should report retained candidate artifacts.' );
+html_api_fuzz_smoke_assert( 1 === ( $invalid_byte_exact_minimize_result['attempts'] ?? null ), 'exact-signature smoke minimization should run the requested single probe.' );
+html_api_fuzz_smoke_assert( is_array( $invalid_byte_exact_minimize_result['probeTiming'] ?? null ), 'exact-signature minimization should report probe timing.' );
+html_api_fuzz_smoke_assert( is_dir( $invalid_byte_exact_minimize_dir . '/candidates' ), 'auto process minimization should retain per-candidate artifact directories.' );
+
+$invalid_byte_in_process_minimize_dir = $tmp . '/invalid-byte-in-process-minimize';
+$invalid_byte_in_process_minimize_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/minimize.php',
+		'--replay',
+		$invalid_byte_replay_source_dir . '/replay.json',
+		'--output-dir',
+		$invalid_byte_in_process_minimize_dir,
+		'--probe-mode',
+		'in-process',
+		'--max-attempts',
+		'1',
+		'--timeout-ms',
+		'10000',
+	),
+	\HtmlApiFuzz\repo_root(),
+	20000,
+	$tmp . '/invalid-byte-in-process-minimize.log'
+);
+html_api_fuzz_smoke_assert( ! $invalid_byte_in_process_minimize_proc['timedOut'] && 0 === $invalid_byte_in_process_minimize_proc['code'], 'explicit in-process invalid-byte replay should minimize.' );
+$invalid_byte_in_process_minimize_result = \HtmlApiFuzz\read_json_file( $invalid_byte_in_process_minimize_dir . '/minimize-result.json' );
+html_api_fuzz_smoke_assert( true === ( $invalid_byte_in_process_minimize_result['ok'] ?? null ), 'explicit in-process minimization should preserve the target signature.' );
+html_api_fuzz_smoke_assert( 'in-process' === ( $invalid_byte_in_process_minimize_result['probeMode'] ?? null ), 'explicit in-process minimization should use in-process probes.' );
+html_api_fuzz_smoke_assert( false === ( $invalid_byte_in_process_minimize_result['candidateArtifactsRetained'] ?? null ), 'in-process minimization should not retain candidate artifacts by default.' );
+html_api_fuzz_smoke_assert( ! is_dir( $invalid_byte_in_process_minimize_dir . '/candidates' ), 'in-process minimization should avoid per-candidate artifact directories by default.' );
+
 $invalid_byte_minimize_dir = $tmp . '/invalid-byte-minimize';
 $invalid_byte_minimize_proc = \HtmlApiFuzz\run_php_process(
 	array(
@@ -666,6 +718,9 @@ html_api_fuzz_smoke_assert( ! $invalid_byte_minimize_proc['timedOut'] && 0 === $
 $invalid_byte_minimize_result = \HtmlApiFuzz\read_json_file( $invalid_byte_minimize_dir . '/minimize-result.json' );
 $invalid_byte_minimize_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_minimize_result['minimizedReplay'] ?? '' );
 $invalid_byte_source_replay = \HtmlApiFuzz\read_json_file( $invalid_byte_replay_source_dir . '/replay.json' );
+html_api_fuzz_smoke_assert( 'process' === ( $invalid_byte_minimize_result['probeMode'] ?? null ), 'any-failure minimization should use process probes by default.' );
+html_api_fuzz_smoke_assert( true === ( $invalid_byte_minimize_result['candidateArtifactsRetained'] ?? null ), 'process-mode minimization should report retained candidate artifacts.' );
+html_api_fuzz_smoke_assert( is_dir( $invalid_byte_minimize_dir . '/candidates' ), 'process-mode minimization should retain per-candidate artifact directories.' );
 html_api_fuzz_smoke_assert( 'invalid-byte-heavy' === ( $invalid_byte_minimize_result['payloadPolicy'] ?? null ), 'invalid-byte minimization should preserve legacy payload policy metadata.' );
 html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoCommit'] ?? null ) === ( $invalid_byte_minimize_result['sourceReplay']['repoCommit'] ?? null ), 'minimize result should preserve source replay commit metadata.' );
 html_api_fuzz_smoke_assert( ( $invalid_byte_source_replay['repoDirty'] ?? null ) === ( $invalid_byte_minimize_result['sourceReplay']['repoDirty'] ?? null ), 'minimize result should preserve source replay dirty metadata.' );
