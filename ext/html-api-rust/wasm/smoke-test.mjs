@@ -4748,7 +4748,28 @@ for (const [doctypeInput, doctypeOutput] of [
 	fullParserSerializeDoctype.destroy();
 }
 
-for (const incompleteToken of ["<!--", "<!--x", "<!--x--", "<!--x--!", "<!--x--! >"]) {
+for (const incompleteToken of [
+	"<!--",
+	"<!--x",
+	"<!--x--",
+	"<!--x--!",
+	"<!--x--! >",
+	"<![sneaky[",
+	"</3 is not a tag",
+	"<!DOCTYPE html",
+	"<!DOCTY",
+	"<![CDATA[something inside of here needs to get out",
+	"<![CDA",
+	"<![CDATA[cannot escape]",
+	"<my-custom status=\"pending\"",
+	"<script>",
+	"<script><div>",
+	"<script><!--<script></script>",
+	"<style><div>",
+	"<textarea><div>",
+	"<title><div>",
+	"<xmp><div>",
+]) {
 	assert.equal(WP_HTML_Processor.normalize(`content${incompleteToken}`), "content");
 }
 

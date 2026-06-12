@@ -2918,7 +2918,9 @@ export function createHtmlApi(wasm) {
 					preserveLeadingNewlineFor = null;
 				}
 
-				html += this.serialize_token();
+				if (!this.#shouldOmitTrailingIncompleteSyntaxTokenFromSerialization()) {
+					html += this.serialize_token();
+				}
 
 				if (
 					tokenType === "#tag" &&
@@ -2931,6 +2933,40 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.get_last_error() === null ? html : null;
+		}
+
+		#shouldOmitTrailingIncompleteSyntaxTokenFromSerialization() {
+			const span = this.#nativeCurrentSpan();
+			if (span === null || span.start + span.length !== this.html.length) {
+				return false;
+			}
+
+			const tokenType = this.get_token_type();
+			const tokenHtml = this.html.slice(span.start);
+			if (
+				(tokenType === "#comment" || tokenType === "#funky-comment") &&
+				incompleteBogusCommentAtEof(tokenHtml)
+			) {
+				return true;
+			}
+
+			if (
+				tokenType !== "#tag" ||
+				this.get_namespace() !== "html" ||
+				this.is_tag_closer()
+			) {
+				return false;
+			}
+
+			const tagName = this.get_tag();
+			if (!SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				return false;
+			}
+
+			const startTag = completeStartTagAt(this.html, span.start);
+			return startTag !== null &&
+				startTag.tagName === tagName &&
+				findSpecialAtomicCloserEnd(this.html, startTag.end, tagName) === null;
 		}
 
 		serialize_token() {
@@ -7074,6 +7110,120 @@ function completeStartTagAt(value, at) {
 				tagName: asciiUpper(value.slice(nameStart, nameEnd)),
 				end: i + 1,
 			};
+		}
+	}
+
+	return null;
+}
+
+function incompleteBogusCommentAtEof(value) {
+	if (value.includes(">")) {
+		return false;
+	}
+
+	return value.startsWith("<!") || value.startsWith("<?") || /^<\/[^A-Za-z>]/.test(value);
+}
+
+function findSpecialAtomicCloserEnd(value, offset, tagName) {
+	if (tagName === "SCRIPT") {
+		return findScriptCloserEnd(value, offset);
+	}
+
+	let at = offset;
+	while (at + tagName.length + 2 <= value.length) {
+		const closerStart = value.indexOf("</", at);
+		if (closerStart === -1) {
+			return null;
+		}
+
+		const nameStart = closerStart + 2;
+		const nameEnd = nameStart + tagName.length;
+		if (
+			nameEnd <= value.length &&
+			asciiStartsWithAt(value, tagName, nameStart) &&
+			(nameEnd === value.length || isTagNameDelimiterCode(value.charCodeAt(nameEnd)))
+		) {
+			return completeTagEndAfterName(value, nameEnd);
+		}
+
+		at = closerStart + 2;
+	}
+
+	return null;
+}
+
+function findScriptCloserEnd(value, offset) {
+	let at = offset;
+	let escaped = false;
+	let doubleEscaped = false;
+
+	while (at < value.length) {
+		if (value.startsWith("<!-->", at)) {
+			at += 5;
+			continue;
+		}
+
+		if (value.startsWith("<!--", at)) {
+			escaped = true;
+			doubleEscaped = false;
+			at += 4;
+			continue;
+		}
+
+		if ((escaped || doubleEscaped) && value.startsWith("-->", at)) {
+			escaped = false;
+			doubleEscaped = false;
+			at += 3;
+			continue;
+		}
+
+		if (asciiStartsWithAt(value, "</script", at)) {
+			const nameEnd = at + "</script".length;
+			if (nameEnd === value.length || isTagNameDelimiterCode(value.charCodeAt(nameEnd))) {
+				if (doubleEscaped) {
+					doubleEscaped = false;
+					escaped = true;
+					at = nameEnd;
+					continue;
+				}
+
+				return completeTagEndAfterName(value, nameEnd);
+			}
+		}
+
+		if (escaped && asciiStartsWithAt(value, "<script", at)) {
+			const nameEnd = at + "<script".length;
+			if (nameEnd === value.length || isTagNameDelimiterCode(value.charCodeAt(nameEnd))) {
+				doubleEscaped = true;
+				at = nameEnd;
+				continue;
+			}
+		}
+
+		at += 1;
+	}
+
+	return null;
+}
+
+function completeTagEndAfterName(value, nameEnd) {
+	let quote = null;
+	for (let i = nameEnd; i < value.length; i += 1) {
+		const code = value.charCodeAt(i);
+		if (quote !== null) {
+			if (code === quote) {
+				quote = null;
+			}
+			continue;
+		}
+
+		if (code === 0x22 /* " */ || code === 0x27 /* ' */) {
+			quote = code;
+			continue;
+		}
+
+		if (code === 0x3e /* > */) {
+			return i + 1;
 		}
 	}
 
