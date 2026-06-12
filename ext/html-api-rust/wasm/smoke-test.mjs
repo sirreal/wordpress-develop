@@ -404,8 +404,13 @@ const replacement = new WP_HTML_Text_Replacement(14, "28", "updated");
 assert.equal(replacement.start, 14);
 assert.equal(replacement.length, 28);
 assert.equal(replacement.text, "updated");
+assert.equal(new WP_HTML_Text_Replacement(1, 2, 123).text, "123");
 assert.throws(
 	() => new WP_HTML_Text_Replacement(14, "28px", "updated"),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Text_Replacement(14, 28, null),
 	TypeError,
 );
 
@@ -457,6 +462,31 @@ assert.equal(stackEvent.provenance, "real");
 token.destroy();
 assert.equal(destroyedTokenBookmark, "mark");
 token.free();
+const coercedToken = new WP_HTML_Token(123, 456, "0");
+assert.equal(coercedToken.bookmark_name, "123");
+assert.equal(coercedToken.node_name, "456");
+assert.equal(coercedToken.has_self_closing_flag, false);
+assert.equal(new WP_HTML_Token(null, "DIV", "1").bookmark_name, null);
+assert.throws(
+	() => new WP_HTML_Token("mark", null, false),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Token([], "DIV", false),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Token("mark", "DIV", false, "not-callable"),
+	TypeError,
+);
+
+const coercedStackEvent = new WP_HTML_Stack_Event(token, 123, true);
+assert.equal(coercedStackEvent.operation, "123");
+assert.equal(coercedStackEvent.provenance, "1");
+assert.throws(
+	() => new WP_HTML_Stack_Event(token, null, "real"),
+	TypeError,
+);
 
 const activeFormattingElements = new WP_HTML_Active_Formatting_Elements();
 const activeEm = new WP_HTML_Token("em-bookmark", "EM", false);

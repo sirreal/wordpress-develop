@@ -723,7 +723,7 @@ export class WP_HTML_Text_Replacement {
 	constructor(start, length, text) {
 		this.start = phpIntegerParameterCoerce(start, "start");
 		this.length = phpIntegerParameterCoerce(length, "length");
-		this.text = String(text);
+		this.text = phpStringParameterCoerce(text, "text");
 	}
 }
 
@@ -740,11 +740,14 @@ export class WP_HTML_Attribute_Token {
 
 export class WP_HTML_Token {
 	constructor(bookmarkName, nodeName, hasSelfClosingFlag, onDestroy = null) {
-		this.bookmark_name = bookmarkName;
+		this.bookmark_name = phpStringParameterCoerce(bookmarkName, "bookmark_name", true);
 		this.namespace = "html";
-		this.node_name = nodeName;
-		this.has_self_closing_flag = Boolean(hasSelfClosingFlag);
+		this.node_name = phpStringParameterCoerce(nodeName, "node_name");
+		this.has_self_closing_flag = phpBooleanParameterCoerce(hasSelfClosingFlag, "has_self_closing_flag");
 		this.integration_node_type = null;
+		if (onDestroy !== null && typeof onDestroy !== "function") {
+			throw new TypeError("Argument $on_destroy must be callable or null.");
+		}
 		this.on_destroy = onDestroy;
 	}
 
@@ -766,8 +769,8 @@ export class WP_HTML_Stack_Event {
 
 	constructor(token, operation, provenance) {
 		this.token = token;
-		this.operation = String(operation);
-		this.provenance = String(provenance);
+		this.operation = phpStringParameterCoerce(operation, "operation");
+		this.provenance = phpStringParameterCoerce(provenance, "provenance");
 	}
 }
 
@@ -7520,6 +7523,47 @@ function phpIntegerParameterCoerce(value, parameterName) {
 	}
 
 	return phpIntegerCast(value);
+}
+
+function phpStringParameterCoerce(value, parameterName, nullable = false) {
+	if (value === null) {
+		if (nullable) {
+			return null;
+		}
+		throw new TypeError(`Argument $${parameterName} must be of type string.`);
+	}
+
+	if (
+		typeof value === "object" ||
+		typeof value === "function" ||
+		typeof value === "symbol" ||
+		typeof value === "undefined"
+	) {
+		throw new TypeError(`Argument $${parameterName} must be of type string.`);
+	}
+
+	if (typeof value === "boolean") {
+		return value ? "1" : "";
+	}
+
+	return String(value);
+}
+
+function phpBooleanParameterCoerce(value, parameterName) {
+	if (
+		typeof value === "object" ||
+		typeof value === "function" ||
+		typeof value === "symbol" ||
+		typeof value === "undefined"
+	) {
+		throw new TypeError(`Argument $${parameterName} must be of type bool.`);
+	}
+
+	if (typeof value === "string") {
+		return value !== "" && value !== "0";
+	}
+
+	return Boolean(value);
 }
 
 function contextNamespace(nodeName) {
