@@ -165,6 +165,48 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
+	public function test_invalid_utf8_in_normal_segment_combined_with_escape(): void {
+		$css = ".test\xF1\\41name";
+
+		$expected = array(
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'   => '.',
+				'value' => '.',
+			),
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'   => "test\xF1\\41name",
+				'value' => "test\u{FFFD}Aname",
+			),
+		);
+
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'value' ) );
+		$this->assertSame( $expected, $actual_tokens );
+	}
+
+	public function test_invalid_utf8_as_escaped_character(): void {
+		$css = ".a\\\xF1b";
+
+		$expected = array(
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'   => '.',
+				'value' => '.',
+			),
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'   => "a\\\xF1b",
+				'value' => "a\u{FFFD}b",
+			),
+		);
+
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'value' ) );
+		$this->assertSame( $expected, $actual_tokens );
+	}
+
 	public function test_invalid_utf8_with_valid_prefix_in_identifiers(): void {
 		// Invalid 2-byte prefix is replaced with a single U+FFFD.
 		$css = ".test\xE2\x80name";
