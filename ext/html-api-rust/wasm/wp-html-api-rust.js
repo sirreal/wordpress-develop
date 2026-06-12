@@ -1462,9 +1462,13 @@ export function createHtmlApi(wasm) {
 
 	class WP_HTML_Decoder {
 		static attribute_starts_with(haystack, searchText, caseSensitivity = "case-sensitive") {
+			if (typeof haystack !== "string" || typeof searchText !== "string") {
+				return phpAttributeStartsWithNonStringScalar(haystack, searchText);
+			}
+
 			return runtime.decoderAttributeStartsWith(
-				phpInternalStringCoerce(haystack, "haystack"),
-				phpInternalStringCoerce(searchText, "search_text"),
+				haystack,
+				searchText,
 				caseSensitivity === "ascii-case-insensitive",
 			);
 		}
@@ -7816,6 +7820,33 @@ function phpInternalIntegerParameterCoerce(value, parameterName) {
 	}
 
 	return phpIntegerParameterCoerce(value, parameterName);
+}
+
+function phpUntypedStringLength(value, parameterName) {
+	if (value === null || value === false) {
+		return 0;
+	}
+	if (value === true) {
+		return 1;
+	}
+	if (typeof value === "string") {
+		return value.length;
+	}
+	if (typeof value === "number") {
+		return phpNumberToString(value).length;
+	}
+	throw new TypeError(`Argument $${parameterName} must be of type string.`);
+}
+
+function phpAttributeStartsWithNonStringScalar(haystack, searchText) {
+	const haystackLength = phpUntypedStringLength(haystack, "haystack");
+	const searchLength = phpUntypedStringLength(searchText, "search_text");
+
+	if (searchLength === 0 || haystackLength === 0) {
+		return true;
+	}
+
+	return typeof haystack !== "string" && typeof searchText !== "string";
 }
 
 function phpStringOffsetParameterCoerce(value, parameterName) {

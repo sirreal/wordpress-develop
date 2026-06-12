@@ -592,6 +592,12 @@ assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", {}), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", []), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with(true, 1), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(123, "1"), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("1", 1), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(123, 9), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("", 1), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(false, "anything"), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(1e20, "1.0E"), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with(null, "anything"), true);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("anything", null), true);
 assert.throws(
