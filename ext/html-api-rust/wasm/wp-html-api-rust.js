@@ -8578,7 +8578,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+			return tagName === "A" || tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {

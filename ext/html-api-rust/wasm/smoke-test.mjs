@@ -5203,6 +5203,20 @@ assert.deepEqual(tableFormFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "T
 assert.equal(tableFormFosterProcessor.get_last_error(), null);
 tableFormFosterProcessor.destroy();
 
+const tableAnchorFosterProcessor = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><div><table><a>foo</a> <tr><td>bar</td></tr></table></div>",
+);
+assert.equal(tableAnchorFosterProcessor.next_tag("a"), true);
+assert.deepEqual(tableAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "A"]);
+assert.equal(tableAnchorFosterProcessor.next_token(), true);
+assert.equal(tableAnchorFosterProcessor.get_token_type(), "#text");
+assert.equal(tableAnchorFosterProcessor.get_modifiable_text(), "foo");
+assert.deepEqual(tableAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "A", "#text"]);
+assert.equal(tableAnchorFosterProcessor.next_tag("table"), true);
+assert.deepEqual(tableAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "TABLE"]);
+assert.equal(tableAnchorFosterProcessor.get_last_error(), null);
+tableAnchorFosterProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
