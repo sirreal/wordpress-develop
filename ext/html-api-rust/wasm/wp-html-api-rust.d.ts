@@ -249,12 +249,6 @@ export interface WP_HTML_Doctype_Info {
 }
 
 export interface WP_HTML_Doctype_Info_Constructor {
-	new (
-		name: PhpStringParameter | null,
-		publicIdentifier: PhpStringParameter | null,
-		systemIdentifier: PhpStringParameter | null,
-		forceQuirksFlag: PhpBooleanParameter,
-	): WP_HTML_Doctype_Info;
 	from_doctype_token(doctypeHtml: PhpStringParameter): WP_HTML_Doctype_Info | null;
 }
 

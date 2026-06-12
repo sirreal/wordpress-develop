@@ -699,6 +699,7 @@ const QUIRKS_PUBLIC_IDENTIFIER_PREFIXES = [
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const DOCTYPE_INFO_INTERNAL = Symbol("WP_HTML_Doctype_Info internal constructor");
 
 export class WP_HTML_Unsupported_Exception extends Error {
 	constructor(message, tokenName, tokenAt, token, stackOfOpenElements, activeFormattingElements) {
@@ -1247,7 +1248,11 @@ export class WP_HTML_Processor_State {
 }
 
 export class WP_HTML_Doctype_Info {
-	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
+	constructor(name, publicIdentifier, systemIdentifier, forceQuirksFlag, internalToken = null) {
+		if (internalToken !== DOCTYPE_INFO_INTERNAL) {
+			throw new TypeError("WP_HTML_Doctype_Info constructor is private.");
+		}
+
 		const normalizedName = phpStringParameterCoerce(name, "name", true);
 		const normalizedPublicIdentifier = phpStringParameterCoerce(publicIdentifier, "public_identifier", true);
 		const normalizedSystemIdentifier = phpStringParameterCoerce(systemIdentifier, "system_identifier", true);
@@ -1282,7 +1287,7 @@ export class WP_HTML_Doctype_Info {
 		at = skipHtmlWhitespace(doctype, at, end);
 
 		if (at >= end) {
-			return new WP_HTML_Doctype_Info(null, null, null, true);
+			return createDoctypeInfo(null, null, null, true);
 		}
 
 		const nameStart = at;
@@ -1293,17 +1298,17 @@ export class WP_HTML_Doctype_Info {
 
 		at = skipHtmlWhitespace(doctype, at, end);
 		if (at >= end) {
-			return new WP_HTML_Doctype_Info(name, null, null, false);
+			return createDoctypeInfo(name, null, null, false);
 		}
 
 		if (at + 6 >= end) {
-			return new WP_HTML_Doctype_Info(name, null, null, true);
+			return createDoctypeInfo(name, null, null, true);
 		}
 
 		if (asciiStartsWithAt(doctype, "PUBLIC", at)) {
 			at = skipHtmlWhitespace(doctype, at + 6, end);
 			if (at >= end) {
-				return new WP_HTML_Doctype_Info(name, null, null, true);
+				return createDoctypeInfo(name, null, null, true);
 			}
 			return parsePublicIdentifier(doctype, at, end, name);
 		}
@@ -1311,12 +1316,12 @@ export class WP_HTML_Doctype_Info {
 		if (asciiStartsWithAt(doctype, "SYSTEM", at)) {
 			at = skipHtmlWhitespace(doctype, at + 6, end);
 			if (at >= end) {
-				return new WP_HTML_Doctype_Info(name, null, null, true);
+				return createDoctypeInfo(name, null, null, true);
 			}
 			return parseSystemIdentifier(doctype, at, end, name, null);
 		}
 
-		return new WP_HTML_Doctype_Info(name, null, null, true);
+		return createDoctypeInfo(name, null, null, true);
 	}
 }
 
@@ -7187,10 +7192,20 @@ function splitNullSeparatedAscii(bytes) {
 	return parts;
 }
 
+function createDoctypeInfo(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {
+	return new WP_HTML_Doctype_Info(
+		name,
+		publicIdentifier,
+		systemIdentifier,
+		forceQuirksFlag,
+		DOCTYPE_INFO_INTERNAL,
+	);
+}
+
 function parsePublicIdentifier(doctype, at, end, name) {
 	const quote = doctype[at];
 	if (quote !== '"' && quote !== "'") {
-		return new WP_HTML_Doctype_Info(name, null, null, true);
+		return createDoctypeInfo(name, null, null, true);
 	}
 
 	at += 1;
@@ -7200,12 +7215,12 @@ function parsePublicIdentifier(doctype, at, end, name) {
 	const publicIdentifier = replaceNulls(doctype.slice(identifierStart, boundedIdentifierEnd));
 
 	if (identifierEnd === -1 || identifierEnd >= end || doctype[identifierEnd] !== quote) {
-		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, true);
+		return createDoctypeInfo(name, publicIdentifier, null, true);
 	}
 
 	at = skipHtmlWhitespace(doctype, identifierEnd + 1, end);
 	if (at >= end) {
-		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, false);
+		return createDoctypeInfo(name, publicIdentifier, null, false);
 	}
 
 	return parseSystemIdentifier(doctype, at, end, name, publicIdentifier);
@@ -7214,7 +7229,7 @@ function parsePublicIdentifier(doctype, at, end, name) {
 function parseSystemIdentifier(doctype, at, end, name, publicIdentifier) {
 	const quote = doctype[at];
 	if (quote !== '"' && quote !== "'") {
-		return new WP_HTML_Doctype_Info(name, publicIdentifier, null, true);
+		return createDoctypeInfo(name, publicIdentifier, null, true);
 	}
 
 	at += 1;
@@ -7224,10 +7239,10 @@ function parseSystemIdentifier(doctype, at, end, name, publicIdentifier) {
 	const systemIdentifier = replaceNulls(doctype.slice(identifierStart, boundedIdentifierEnd));
 
 	if (identifierEnd === -1 || identifierEnd >= end || doctype[identifierEnd] !== quote) {
-		return new WP_HTML_Doctype_Info(name, publicIdentifier, systemIdentifier, true);
+		return createDoctypeInfo(name, publicIdentifier, systemIdentifier, true);
 	}
 
-	return new WP_HTML_Doctype_Info(name, publicIdentifier, systemIdentifier, false);
+	return createDoctypeInfo(name, publicIdentifier, systemIdentifier, false);
 }
 
 function doctypeCompatibilityMode(name, publicIdentifier, systemIdentifier, forceQuirksFlag) {

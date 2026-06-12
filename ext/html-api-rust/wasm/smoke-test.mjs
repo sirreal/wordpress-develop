@@ -367,27 +367,13 @@ assert.throws(
 	TypeError,
 );
 
-const coercedDoctypeInfo = new WP_HTML_Doctype_Info(123, true, false, "1");
-assert.equal(coercedDoctypeInfo.name, "123");
-assert.equal(coercedDoctypeInfo.public_identifier, "1");
-assert.equal(coercedDoctypeInfo.system_identifier, "");
-assert.equal(coercedDoctypeInfo.indicated_compatibility_mode, "quirks");
-const nullableDoctypeInfo = new WP_HTML_Doctype_Info(null, null, null, false);
-assert.equal(nullableDoctypeInfo.name, null);
-assert.equal(nullableDoctypeInfo.public_identifier, null);
-assert.equal(nullableDoctypeInfo.system_identifier, null);
-assert.equal(nullableDoctypeInfo.indicated_compatibility_mode, "quirks");
 assert.throws(
-	() => new WP_HTML_Doctype_Info([], null, null, false),
-	TypeError,
-);
-assert.throws(
-	() => new WP_HTML_Doctype_Info("html", null, null, null),
+	() => new WP_HTML_Doctype_Info("html", null, null, false),
 	TypeError,
 );
 
 for (const [fileName, interfaceName, instance] of [
-	["class-wp-html-doctype-info.php", "WP_HTML_Doctype_Info", new WP_HTML_Doctype_Info("html", null, null, false)],
+	["class-wp-html-doctype-info.php", "WP_HTML_Doctype_Info", WP_HTML_Doctype_Info.from_doctype_token("<!DOCTYPE html>")],
 	[
 		"class-wp-html-unsupported-exception.php",
 		"WP_HTML_Unsupported_Exception",
