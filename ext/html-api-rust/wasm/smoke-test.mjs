@@ -119,6 +119,12 @@ function declaredReadonlyMemberNames(interfaceName) {
 	].map((match) => match[1]).sort();
 }
 
+function declaredInterfacePropertyNames(interfaceName) {
+	return [
+		...declaredInterfaceBody(interfaceName).matchAll(/^\s*([A-Za-z_$][\w$]*)\??\s*:/gm),
+	].map((match) => match[1]).sort();
+}
+
 function normalizePhpMethodName(methodName) {
 	return methodName === "__toString" ? "toString" : methodName;
 }
@@ -138,6 +144,13 @@ async function phpPublicMethodNames(fileName, { staticOnly = false, instanceOnly
 async function phpClassConstantNames(fileName) {
 	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
 	return [...source.matchAll(/^\s*const\s+([A-Z0-9_]+)\s*=/gm)]
+		.map((match) => match[1])
+		.sort();
+}
+
+async function phpPublicPropertyNames(fileName) {
+	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
+	return [...source.matchAll(/\bpublic\s+\$([A-Za-z_]\w*)\b/g)]
 		.map((match) => match[1])
 		.sort();
 }
@@ -185,6 +198,24 @@ const declaredModuleValueExports = [
 const declaredLoadedApiExports = [
 	...declaredInterfaceBody("HtmlApi").matchAll(/^\s*([A-Za-z_$][\w$]*)[(:]/gm),
 ].map((match) => match[1]).sort();
+const publicPropertyInterfaces = [
+	["class-wp-html-doctype-info.php", "WP_HTML_Doctype_Info"],
+	["class-wp-html-unsupported-exception.php", "WP_HTML_Unsupported_Exception"],
+	["class-wp-html-span.php", "WP_HTML_Span"],
+	["class-wp-html-text-replacement.php", "WP_HTML_Text_Replacement"],
+	["class-wp-html-attribute-token.php", "WP_HTML_Attribute_Token"],
+	["class-wp-html-token.php", "WP_HTML_Token"],
+	["class-wp-html-stack-event.php", "WP_HTML_Stack_Event"],
+	["class-wp-html-active-formatting-elements.php", "WP_HTML_Active_Formatting_Elements"],
+	["class-wp-html-open-elements.php", "WP_HTML_Open_Elements"],
+	["class-wp-html-processor-state.php", "WP_HTML_Processor_State"],
+];
+const jsOnlyInterfaceProperties = {
+	WP_HTML_Unsupported_Exception: new Set(["message"]),
+};
+const jsOnlyRuntimeProperties = {
+	WP_HTML_Unsupported_Exception: new Set(["name"]),
+};
 
 assert.deepEqual(declaredModuleValueExports, directModuleExports);
 assert.deepEqual(declaredLoadedApiExports, loadedApiExports);
@@ -238,6 +269,29 @@ assert.equal(typeof WP_HTML_Stack_Event, "function");
 assert.equal(typeof WP_HTML_Active_Formatting_Elements, "function");
 assert.equal(typeof WP_HTML_Open_Elements, "function");
 assert.equal(typeof WP_HTML_Processor_State, "function");
+
+for (const [fileName, interfaceName, instance] of [
+	["class-wp-html-doctype-info.php", "WP_HTML_Doctype_Info", new WP_HTML_Doctype_Info("html", null, null, false)],
+	[
+		"class-wp-html-unsupported-exception.php",
+		"WP_HTML_Unsupported_Exception",
+		new WP_HTML_Unsupported_Exception("Unsupported", "DIV", 5, "<div>", ["HTML", "BODY"], ["B"]),
+	],
+	["class-wp-html-span.php", "WP_HTML_Span", new WP_HTML_Span(1, 2)],
+	["class-wp-html-text-replacement.php", "WP_HTML_Text_Replacement", new WP_HTML_Text_Replacement(1, 2, "text")],
+	["class-wp-html-attribute-token.php", "WP_HTML_Attribute_Token", new WP_HTML_Attribute_Token("id", 1, 2, 3, 4, false)],
+	["class-wp-html-token.php", "WP_HTML_Token", new WP_HTML_Token("bookmark", "DIV", false)],
+	["class-wp-html-stack-event.php", "WP_HTML_Stack_Event", new WP_HTML_Stack_Event(new WP_HTML_Token("bookmark", "DIV", false), WP_HTML_Stack_Event.PUSH, "real")],
+	["class-wp-html-active-formatting-elements.php", "WP_HTML_Active_Formatting_Elements", new WP_HTML_Active_Formatting_Elements()],
+	["class-wp-html-open-elements.php", "WP_HTML_Open_Elements", new WP_HTML_Open_Elements()],
+	["class-wp-html-processor-state.php", "WP_HTML_Processor_State", new WP_HTML_Processor_State()],
+]) {
+	const excluded = jsOnlyRuntimeProperties[interfaceName] ?? new Set();
+	assert.deepEqual(
+		Object.keys(instance).filter((propertyName) => !excluded.has(propertyName)).sort(),
+		await phpPublicPropertyNames(fileName),
+	);
+}
 
 assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
@@ -744,7 +798,6 @@ const processorStateStaticMembers = [
 	"INSERTION_MODE_IN_TEMPLATE",
 	"INSERTION_MODE_INITIAL",
 ];
-
 const jsOnlyTagProcessorPrototypeMethods = new Set([
 	"destroy",
 	"free",
@@ -830,6 +883,14 @@ assert.deepEqual(
 	staticMemberValues(WP_HTML_Processor_State, processorStateStaticMembers),
 	phpProcessorStateStaticMemberValues,
 );
+
+for (const [fileName, interfaceName] of publicPropertyInterfaces) {
+	const excluded = jsOnlyInterfaceProperties[interfaceName] ?? new Set();
+	assert.deepEqual(
+		declaredInterfacePropertyNames(interfaceName).filter((propertyName) => !excluded.has(propertyName)),
+		await phpPublicPropertyNames(fileName),
+	);
+}
 
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Tag_Processor"), [...tagProcessorPrototypeMethods].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Tag_Processor_Constructor"), [...tagProcessorStaticMembers].sort());
