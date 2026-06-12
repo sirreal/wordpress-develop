@@ -2239,7 +2239,16 @@ export function createHtmlApi(wasm) {
 		static ERROR_EXCEEDED_MAX_BOOKMARKS = "exceeded-max-bookmarks";
 		static CONSTRUCTOR_UNLOCK_CODE = "Use WP_HTML_Processor::create_fragment() instead of calling the class constructor directly.";
 
-		constructor(html, options = {}) {
+		constructor(html, options = undefined) {
+			if (options === undefined || options === null) {
+				options = typeof html === "string"
+					? {
+						fullParser: true,
+						encodingConfidence: "certain",
+					}
+					: {};
+			}
+
 			super(html, { reportIncompleteTokens: false });
 			this.last_error = null;
 			this.unsupported_exception = null;
