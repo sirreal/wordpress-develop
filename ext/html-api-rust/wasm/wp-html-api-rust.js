@@ -1461,8 +1461,10 @@ export function createHtmlApi(wasm) {
 		static COMMENT_AS_HTML_COMMENT = "COMMENT_AS_HTML_COMMENT";
 		static COMMENT_AS_PI_NODE_LOOKALIKE = "COMMENT_AS_PI_NODE_LOOKALIKE";
 		static COMMENT_AS_INVALID_HTML = "COMMENT_AS_INVALID_HTML";
+		#reportIncompleteTokens = true;
+		#pausedAtJsIncompleteToken = false;
 
-		constructor(html) {
+		constructor(html, options = {}) {
 			if (typeof html !== "string") {
 				html = "";
 			}
@@ -1474,6 +1476,8 @@ export function createHtmlApi(wasm) {
 			this.comment_type = null;
 			this.bookmarks = new Map();
 			this.seek_count = 0;
+			this.#reportIncompleteTokens = options.reportIncompleteTokens !== false;
+			this.#pausedAtJsIncompleteToken = false;
 
 			const input = runtime.encode(html);
 			const allocated = runtime.allocBytes(input);
@@ -1525,9 +1529,21 @@ export function createHtmlApi(wasm) {
 				visitClosers = query.tag_closers === "visit" || query.visit_closers === true;
 			}
 
+			const normalizedTagName = tagName === null ? null : asciiUpper(tagName);
+
 			let found = 0;
-			while (this.#nativeNextTag(tagName, visitClosers)) {
-				this.#updateParserStateFromNative();
+			while (this.next_token()) {
+				if (this.get_token_type() !== "#tag") {
+					continue;
+				}
+
+				if (this.is_tag_closer() && !visitClosers) {
+					continue;
+				}
+
+				if (normalizedTagName !== null && asciiUpper(this.get_tag() ?? "") !== normalizedTagName) {
+					continue;
+				}
 
 				if (className !== null && this.has_class(className) !== true) {
 					continue;
@@ -1541,18 +1557,21 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
-			this.parser_state = wasm.wp_html_api_rust_tag_processor_paused_at_incomplete(this.pointer)
-				? STATE_INCOMPLETE_INPUT
-				: STATE_COMPLETE;
 			return false;
 		}
 
 		next_token() {
 			this.#ensureLive();
 			this.#syncLexicalUpdates();
+			this.#pausedAtJsIncompleteToken = false;
 
 			if (wasm.wp_html_api_rust_tag_processor_next_token(this.pointer)) {
 				this.#updateParserStateFromNative();
+				if (this.#reportIncompleteTokens && this.#currentTokenIsIncompleteAtEof()) {
+					this.#pausedAtJsIncompleteToken = true;
+					this.parser_state = STATE_INCOMPLETE_INPUT;
+					return false;
+				}
 				return true;
 			}
 
@@ -1747,7 +1766,8 @@ export function createHtmlApi(wasm) {
 
 		paused_at_incomplete_token() {
 			this.#ensureLive();
-			return Boolean(wasm.wp_html_api_rust_tag_processor_paused_at_incomplete(this.pointer));
+			return this.#pausedAtJsIncompleteToken ||
+				Boolean(wasm.wp_html_api_rust_tag_processor_paused_at_incomplete(this.pointer));
 		}
 
 		subdivide_text_appropriately() {
@@ -1843,6 +1863,7 @@ export function createHtmlApi(wasm) {
 
 		seek(name) {
 			this.#ensureLive();
+			this.#pausedAtJsIncompleteToken = false;
 			if (!this.bookmarks.has(name)) {
 				return false;
 			}
@@ -1951,16 +1972,6 @@ export function createHtmlApi(wasm) {
 			return this.get_updated_html();
 		}
 
-		#nativeNextTag(tagName, visitClosers) {
-			if (tagName === null) {
-				return Boolean(wasm.wp_html_api_rust_tag_processor_next_tag(this.pointer, 0, 0, visitClosers));
-			}
-
-			return runtime.withEncoded(tagName, ({ ptr, len }) => (
-				Boolean(wasm.wp_html_api_rust_tag_processor_next_tag(this.pointer, ptr, len, visitClosers))
-			));
-		}
-
 		#updateParserStateFromNative() {
 			this.text_node_classification = WP_HTML_Tag_Processor.TEXT_IS_GENERIC;
 			const tokenType = wasm.wp_html_api_rust_tag_processor_current_token_type(this.pointer);
@@ -1990,6 +2001,40 @@ export function createHtmlApi(wasm) {
 					this.parser_state = STATE_READY;
 			}
 			this.comment_type = this.get_comment_type();
+		}
+
+		#currentTokenIsIncompleteAtEof() {
+			const span = this.#currentSpan();
+			if (span === null || span.start + span.length !== this.html.length) {
+				return false;
+			}
+
+			const tokenType = this.get_token_type();
+			const tokenHtml = this.html.slice(span.start);
+			if (
+				(tokenType === "#comment" || tokenType === "#funky-comment") &&
+				incompleteBogusCommentAtEof(tokenHtml)
+			) {
+				return true;
+			}
+
+			if (
+				tokenType !== "#tag" ||
+				this.get_namespace() !== "html" ||
+				this.is_tag_closer()
+			) {
+				return false;
+			}
+
+			const tagName = this.get_tag();
+			if (!SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				return false;
+			}
+
+			const startTag = completeStartTagAt(this.html, span.start);
+			return startTag !== null &&
+				startTag.tagName === tagName &&
+				findSpecialAtomicCloserEnd(this.html, startTag.end, tagName) === null;
 		}
 
 		#currentSpan() {
@@ -2084,7 +2129,7 @@ export function createHtmlApi(wasm) {
 		static CONSTRUCTOR_UNLOCK_CODE = "Use WP_HTML_Processor::create_fragment() instead of calling the class constructor directly.";
 
 		constructor(html, options = {}) {
-			super(html);
+			super(html, { reportIncompleteTokens: false });
 			this.last_error = null;
 			this.unsupported_exception = null;
 			this.current_virtual = null;

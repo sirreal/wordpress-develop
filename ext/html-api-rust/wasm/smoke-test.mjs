@@ -2118,6 +2118,41 @@ assert.equal(incompleteComment.next_token(), false);
 assert.equal(incompleteComment.paused_at_incomplete_token(), true);
 incompleteComment.destroy();
 
+for (const incompleteSyntax of [
+	"<!--",
+	"<!--x",
+	"<!--x--",
+	"<!--x--!",
+	"<!--x--! >",
+	"<![sneaky[",
+	"</3 is not a tag",
+	"<!DOCTYPE html",
+	"<!DOCTY",
+	"<![CDATA[something inside of here needs to get out",
+	"<![CDA",
+	"<![CDATA[cannot escape]",
+	"<my-custom status=\"pending\"",
+	"<iframe><div>",
+	"<noembed><div>",
+	"<noframes><div>",
+	"<script><div>",
+	"<style><div>",
+	"<textarea><div>",
+	"<title><div>",
+	"<xmp><div>",
+	"<script><div></script",
+]) {
+	const incompleteTokenProcessor = new WP_HTML_Tag_Processor(incompleteSyntax);
+	assert.equal(incompleteTokenProcessor.next_token(), false, `${incompleteSyntax} next_token`);
+	assert.equal(incompleteTokenProcessor.paused_at_incomplete_token(), true, `${incompleteSyntax} next_token paused`);
+	incompleteTokenProcessor.destroy();
+
+	const incompleteTagProcessor = new WP_HTML_Tag_Processor(incompleteSyntax);
+	assert.equal(incompleteTagProcessor.next_tag(), false, `${incompleteSyntax} next_tag`);
+	assert.equal(incompleteTagProcessor.paused_at_incomplete_token(), true, `${incompleteSyntax} next_tag paused`);
+	incompleteTagProcessor.destroy();
+}
+
 const tagBookmarkLimit = new WP_HTML_Tag_Processor("<div>");
 assert.equal(tagBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
