@@ -5137,7 +5137,11 @@ export function createHtmlApi(wasm) {
 				if (formattingElementIndex !== -1) {
 					const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(tagName);
 					if (
-						(activeFormattingElementIndex !== -1 && activeFormattingElementIndex < this.active_formatting_elements.length - 1) ||
+						(
+							tagName === "NOBR" &&
+							activeFormattingElementIndex !== -1 &&
+							activeFormattingElementIndex < this.active_formatting_elements.length - 1
+						) ||
 						hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, formattingElementIndex)
 					) {
 						this.#bailUnsupported(

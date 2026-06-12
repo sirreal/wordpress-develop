@@ -2880,7 +2880,7 @@ assert.equal(processorSeekNamespace.next_tag("rect"), true);
 assert.deepEqual(processorSeekNamespace.get_breadcrumbs(), ["HTML", "BODY", "CUSTOM-ELEMENT", "SVG", "RECT"]);
 processorSeekNamespace.destroy();
 
-assert.equal(WP_HTML_Processor.normalize("<A><I><A>"), null);
+assert.equal(WP_HTML_Processor.normalize("<A><I><A>"), "<a><i></i></a><i><a></a></i>");
 const reconstructedFormattingProcessor = WP_HTML_Processor.create_fragment('<p><em class="tone">One<p>Two');
 assert.equal(reconstructedFormattingProcessor.next_tag("em"), true);
 assert.equal(reconstructedFormattingProcessor.get_attribute("class"), "tone");
@@ -3017,6 +3017,19 @@ assert.equal(
 	"<b><i></i></b><p><i>x</i></p>",
 );
 
+assert.equal(
+	WP_HTML_Processor.normalize("<a><b>1<a>2"),
+	"<a><b>1</b></a><b><a>2</a></b>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a X>0<b>1<a Y>2"),
+	"<a x>0<b>1</b></a><b><a y>2</a></b>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<a><strong>Click <span supported><a unsupported><big>Here</big></a></strong></a>"),
+	"<a><strong>Click <span supported></span></strong></a><strong><a unsupported><big>Here</big></a></strong>",
+);
+
 assert.equal(WP_HTML_Processor.normalize("</b><p>x"), "<p>x</p>");
 assert.equal(WP_HTML_Processor.normalize("<b></b></b><p>x"), "<b></b><p>x</p>");
 assert.equal(WP_HTML_Processor.normalize("<b>Test</i>Test"), "<b>TestTest</b>");
@@ -3046,7 +3059,6 @@ for (const html of [
 }
 
 for (const html of [
-	'<a><strong>Click <span supported><a unsupported><big>Here</big></a></strong></a>',
 	'<a><div supported><a unsupported></div></a>',
 	"<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
 ]) {
