@@ -227,7 +227,7 @@ export interface WP_HTML_Decoder_Constructor {
 	attribute_starts_with(
 		haystack: PhpStringParameter,
 		searchText: PhpStringParameter,
-		caseSensitivity?: PhpStringParameter,
+		caseSensitivity?: unknown,
 	): boolean;
 	decode_text_node(text: PhpStringParameter): string;
 	decode_attribute(text: PhpStringParameter): string;

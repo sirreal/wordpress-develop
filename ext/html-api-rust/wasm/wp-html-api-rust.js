@@ -1456,7 +1456,7 @@ export function createHtmlApi(wasm) {
 			return runtime.decoderAttributeStartsWith(
 				phpStringParameterCoerce(haystack, "haystack"),
 				phpStringParameterCoerce(searchText, "search_text"),
-				phpStringParameterCoerce(caseSensitivity, "case_sensitivity") === "ascii-case-insensitive",
+				caseSensitivity === "ascii-case-insensitive",
 			);
 		}
 

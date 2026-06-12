@@ -549,6 +549,9 @@ for (const attributeValue of [
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP"), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", "ascii-case-insensitive"), true);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "https", "ascii-case-insensitive"), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", null), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", {}), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", []), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with(true, 1), true);
 assert.throws(
 	() => WP_HTML_Decoder.attribute_starts_with({}, ""),
