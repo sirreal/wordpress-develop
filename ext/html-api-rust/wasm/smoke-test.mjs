@@ -5154,6 +5154,17 @@ assert.equal(
 );
 tablePresumptuousBrProcessor.destroy();
 
+const tablePlaintextProcessor = WP_HTML_Processor.create_full_parser("<table><plaintext><td>");
+assert.equal(tablePlaintextProcessor.next_tag("plaintext"), true);
+assert.deepEqual(tablePlaintextProcessor.get_breadcrumbs(), ["HTML", "BODY", "PLAINTEXT"]);
+assert.equal(tablePlaintextProcessor.next_token(), true);
+assert.equal(tablePlaintextProcessor.get_token_type(), "#text");
+assert.equal(tablePlaintextProcessor.get_modifiable_text(), "<td>");
+assert.equal(tablePlaintextProcessor.next_tag("table"), true);
+assert.deepEqual(tablePlaintextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tablePlaintextProcessor.get_last_error(), null);
+tablePlaintextProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }

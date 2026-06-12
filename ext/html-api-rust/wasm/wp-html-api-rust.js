@@ -2742,6 +2742,14 @@ export function createHtmlApi(wasm) {
 					return this.#consumeVirtualToken();
 				}
 
+				if (this.#queueFosteredElementPopsBeforeDeferredTable()) {
+					return this.#consumeVirtualToken();
+				}
+
+				if (this.#consumeDeferredTableOpener()) {
+					return true;
+				}
+
 				if (this.#queueEofVirtualClosers()) {
 					return this.#consumeVirtualToken();
 				}
@@ -8480,7 +8488,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "DIV" || tagName === "LI" || tagName === "P";
+			return tagName === "DIV" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
