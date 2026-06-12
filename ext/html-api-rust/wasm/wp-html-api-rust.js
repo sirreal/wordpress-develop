@@ -1867,6 +1867,13 @@ export function createHtmlApi(wasm) {
 
 		set_bookmark(name) {
 			this.#ensureLive();
+			if (
+				this.parser_state === STATE_COMPLETE ||
+				this.parser_state === STATE_INCOMPLETE_INPUT
+			) {
+				return false;
+			}
+
 			const maxBookmarks = this.constructor.MAX_BOOKMARKS ?? WP_HTML_Tag_Processor.MAX_BOOKMARKS;
 			if (this.bookmarks.size >= maxBookmarks && !this.bookmarks.has(name)) {
 				return false;

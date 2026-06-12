@@ -2203,6 +2203,20 @@ for (const incompleteSyntax of [
 	incompleteTagProcessor.destroy();
 }
 
+const completedTagBookmark = new WP_HTML_Tag_Processor("<div>");
+assert.equal(completedTagBookmark.next_tag("div"), true);
+assert.equal(completedTagBookmark.next_tag(), false);
+assert.equal(completedTagBookmark.set_bookmark("after-complete"), false);
+assert.equal(completedTagBookmark.has_bookmark("after-complete"), false);
+completedTagBookmark.destroy();
+
+const incompleteTagBookmark = new WP_HTML_Tag_Processor("<div");
+assert.equal(incompleteTagBookmark.next_tag(), false);
+assert.equal(incompleteTagBookmark.paused_at_incomplete_token(), true);
+assert.equal(incompleteTagBookmark.set_bookmark("after-incomplete"), false);
+assert.equal(incompleteTagBookmark.has_bookmark("after-incomplete"), false);
+incompleteTagBookmark.destroy();
+
 const tagBookmarkLimit = new WP_HTML_Tag_Processor("<div>");
 assert.equal(tagBookmarkLimit.next_tag("div"), true);
 for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
@@ -2843,6 +2857,20 @@ for (let i = 0; i <= WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 	assert.equal(processorBookmarkLimit.set_bookmark(`processor-${i}`), true);
 }
 processorBookmarkLimit.destroy();
+
+const completedProcessorBookmark = WP_HTML_Processor.create_fragment("<div>");
+assert.equal(completedProcessorBookmark.next_tag("div"), true);
+assert.equal(completedProcessorBookmark.next_tag(), false);
+assert.equal(completedProcessorBookmark.set_bookmark("after-complete"), false);
+assert.equal(completedProcessorBookmark.has_bookmark("after-complete"), false);
+completedProcessorBookmark.destroy();
+
+const incompleteProcessorBookmark = WP_HTML_Processor.create_fragment("<div");
+assert.equal(incompleteProcessorBookmark.next_tag(), false);
+assert.equal(incompleteProcessorBookmark.paused_at_incomplete_token(), true);
+assert.equal(incompleteProcessorBookmark.set_bookmark("after-incomplete"), false);
+assert.equal(incompleteProcessorBookmark.has_bookmark("after-incomplete"), false);
+incompleteProcessorBookmark.destroy();
 
 const processorBookmarkRelease = WP_HTML_Processor.create_fragment("<div><span>");
 assert.equal(processorBookmarkRelease.next_tag("div"), true);
