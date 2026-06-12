@@ -11,7 +11,7 @@
 > which still reproduce. The notes below are retained as the design rationale.
 >
 > **Core fixes landed:** the three FINDINGS.md bugs are fixed on this branch
-> (`CSS selector:` commits `7419a9fef6` / `0cefeb2fc8` / `16d03e2c5f`), each
+> (`CSS selector:` commits `aed6cfb4aa` / `989e18da8a` / `0a87b20178`), each
 > with PHPUnit regression tests. A post-fix 5000-seed run is clean.
 >
 > **Fuzzer-side follow-up hardening implemented (2026-06-12):**

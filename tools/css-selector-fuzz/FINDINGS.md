@@ -1,12 +1,12 @@
 # CSS Selector Fuzzer — Findings
 
-Run: branch `html-css-fuzz` @ `46334f170b`, PHP 8.4.21. 5000 deterministic
+Run: branch `html-css-fuzz` @ `5da3afedd0`, PHP 8.4.21. 5000 deterministic
 seeds, 0 crashes/timeouts. Three distinct, reproduced WordPress-core correctness
 bugs in the new HTML-API CSS selector support. Every selector below is valid,
 supported CSS that the API mis-handles **without** reporting lack of support.
 
 **Status: all three bugs are fixed on this branch** (commit prefix
-`CSS selector:` — Bug 1 `7419a9fef6`, Bug 2 `0cefeb2fc8`, Bug 3 `16d03e2c5f`),
+`CSS selector:` — Bug 1 `aed6cfb4aa`, Bug 2 `989e18da8a`, Bug 3 `0a87b20178`),
 each with PHPUnit regression tests that fail pre-fix. A post-fix 5000-seed run
 is clean (0 failures, 0 crashes). The repros below no longer trigger; they
 remain as regression anchors and Trac-ready minimal test cases.
@@ -61,7 +61,7 @@ non-hex identity-escape branch is wrong. Depending on what wrong codepoint is
 produced this also causes spurious parse failures (a valid selector returns
 `null`).
 
-**Fix (landed in `7419a9fef6`):** read the next codepoint from the byte
+**Fix (landed in `aed6cfb4aa`):** read the next codepoint from the byte
 offset: `mb_substr( substr( $input, $offset ), 0, 1, 'UTF-8' )`.
 
 ---
@@ -88,7 +88,7 @@ Reproduction against `<i x="">…</i><b x="abc">…</b><u>…</u>`:
 | `[x$=""]` | `I`    | none |
 | `[x~=""]` | none ✅ | none |
 
-**Fix (landed in `0cefeb2fc8`):** in `matches()`, return `false` for `^= $= *=`
+**Fix (landed in `989e18da8a`):** in `matches()`, return `false` for `^= $= *=`
 when `'' === $this->value`, before the `substr_compare`/`strpos` calls. `~=`
 needs no guard — a whitespace-delimited list never yields an empty item — and
 a test pins that. (No `substr_compare` length edge exists here: `-strlen('')`
@@ -123,7 +123,7 @@ character of the selector string.
 | `[a^=b]`       | parsed ✅ (2-char operator) |
 | `[a=b].c`      | parsed ✅ (trailing content) |
 
-**Fix (landed in `16d03e2c5f`):** change `>=` to `>` (need
+**Fix (landed in `0a87b20178`):** change `>=` to `>` (need
 `strlen - $updated_offset >= 3`).
 
 ---
