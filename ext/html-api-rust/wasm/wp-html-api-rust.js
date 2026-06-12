@@ -8354,6 +8354,13 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+				this.#currentTextChunkPrecedesIgnoredEndTagFosteredText()
+			) {
+				return this.#deferCurrentTextAsTableChild();
+			}
+
+			if (
 				this.#currentHtmlElementIs("TABLE") &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
 				this.#currentTextChunkPrecedesFosteredTableToken()
@@ -8844,6 +8851,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#fosteredTextFollowsIgnoredEndTag(nextTag)) {
+				return true;
+			}
+
 			if (nextTag.is_closing) {
 				return this.#isFosteredTableEndTag(nextTag.tag_name);
 			}
@@ -8876,6 +8887,62 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.#isFosteredTableLookaheadStartTag(nextTag);
+		}
+
+		#currentTextChunkPrecedesIgnoredEndTagFosteredText() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const afterToken = span.start + span.length;
+			const nextTag = runtime.scanNextTag(this.html, afterToken);
+			const text = this.html.slice(
+				afterToken,
+				this.#fosterLookaheadTextEnd(afterToken, nextTag),
+			);
+			return (
+				this.#isIgnorableTableText(text) &&
+				nextTag !== false &&
+				this.#fosteredTextFollowsIgnoredEndTag(nextTag)
+			);
+		}
+
+		#fosteredTextFollowsIgnoredEndTag(nextTag) {
+			if (
+				nextTag === false ||
+				!nextTag.is_closing ||
+				!this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+			) {
+				return false;
+			}
+
+			let at = nextTag.token_end;
+			while (true) {
+				const followingTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(
+					at,
+					this.#fosterLookaheadTextEnd(at, followingTag),
+				);
+				if (!this.#isIgnorableTableText(text)) {
+					return true;
+				}
+
+				if (
+					followingTag !== false &&
+					followingTag.is_closing &&
+					this.#isIgnoredFosterLookaheadEndTag(followingTag.tag_name)
+				) {
+					at = followingTag.token_end;
+					continue;
+				}
+
+				return false;
+			}
 		}
 
 		#isFosteredTableLookaheadStartTag(nextTag) {

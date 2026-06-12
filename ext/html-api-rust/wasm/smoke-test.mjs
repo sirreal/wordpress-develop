@@ -5302,6 +5302,25 @@ assert.deepEqual(tableRowFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY",
 assert.equal(tableRowFosterTextProcessor.get_last_error(), null);
 tableRowFosterTextProcessor.destroy();
 
+const tableRowIgnoredEndFosterTextProcessor = WP_HTML_Processor.create_full_parser("A<table><tr> B</tr> </em>C</table>");
+assert.equal(tableRowIgnoredEndFosterTextProcessor.next_tag("body"), true);
+for (const text of ["A", " ", "B", "C"]) {
+	assert.equal(tableRowIgnoredEndFosterTextProcessor.next_token(), true);
+	assert.equal(tableRowIgnoredEndFosterTextProcessor.get_token_type(), "#text");
+	assert.equal(tableRowIgnoredEndFosterTextProcessor.get_modifiable_text(), text);
+	assert.deepEqual(tableRowIgnoredEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+}
+assert.equal(tableRowIgnoredEndFosterTextProcessor.next_tag("table"), true);
+assert.deepEqual(tableRowIgnoredEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableRowIgnoredEndFosterTextProcessor.next_tag("tr"), true);
+assert.deepEqual(tableRowIgnoredEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR"]);
+assert.equal(tableRowIgnoredEndFosterTextProcessor.next_token(), true);
+assert.equal(tableRowIgnoredEndFosterTextProcessor.get_token_type(), "#text");
+assert.equal(tableRowIgnoredEndFosterTextProcessor.get_modifiable_text(), " ");
+assert.deepEqual(tableRowIgnoredEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "#text"]);
+assert.equal(tableRowIgnoredEndFosterTextProcessor.get_last_error(), null);
+tableRowIgnoredEndFosterTextProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
