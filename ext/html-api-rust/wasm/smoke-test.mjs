@@ -50,6 +50,19 @@ const loadedApiExports = [
 	"wasm",
 ];
 
+const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
+const declaredModuleValueExports = [
+	...typeDeclarations.matchAll(/^export const\s+([A-Za-z_$][\w$]*)\s*:/gm),
+	...typeDeclarations.matchAll(/^export function\s+([A-Za-z_$][\w$]*)\s*\(/gm),
+].map((match) => match[1]).sort();
+const htmlApiInterface = typeDeclarations.match(/^export interface HtmlApi \{\n([\s\S]*?)^\}/m);
+assert.ok(htmlApiInterface, "Missing HtmlApi interface declaration.");
+const declaredLoadedApiExports = [
+	...htmlApiInterface[1].matchAll(/^\s*([A-Za-z_$][\w$]*)[(:]/gm),
+].map((match) => match[1]).sort();
+
+assert.deepEqual(declaredModuleValueExports, directModuleExports);
+assert.deepEqual(declaredLoadedApiExports, loadedApiExports);
 assert.deepEqual(Object.keys(HtmlApiModule).sort(), directModuleExports);
 
 const {
