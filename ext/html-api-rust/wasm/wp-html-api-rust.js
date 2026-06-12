@@ -6939,7 +6939,7 @@ export function createHtmlApi(wasm) {
 					}
 					if (this.#canRepresentNestedAnchorFosteredBeforeDeferredTable(tagName)) {
 						this.pending_nested_anchor_outer_closer_after_deferred_table_index = formattingElementIndex;
-						this.pending_nested_anchor_active_removal_after_deferred_table = this.#nestedAnchorFosteredBeforeDeferredTableEnd();
+						this.pending_nested_anchor_active_removal_after_deferred_table = this.#shouldRemoveNestedAnchorActiveAfterDeferredTable();
 						this.#removeActiveFormattingElement(tagName);
 						return false;
 					}
@@ -8456,6 +8456,7 @@ export function createHtmlApi(wasm) {
 					new Set(["COL", "COLGROUP", "FORM", "INPUT", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
 				) ||
 				this.#currentTableStartCellOpenerPrecedesFosteredText() ||
+				this.#currentTableStartCellOpenerPrecedesFosteredStart() ||
 				this.#currentTableStartCellContentPrecedesFosteredText() ||
 				this.#currentTableStartContentPrecedesFosteredStart() ||
 				this.#currentTableStartForeignCellCloserPrecedesFosteredText()
@@ -8489,6 +8490,10 @@ export function createHtmlApi(wasm) {
 							this.#currentTableRowStartPrecedesCellContentFosteredStart() ||
 							this.#currentTableRowStartPrecedesForeignCellCloserFosteredText()
 						)
+					) ||
+					(
+						tagName === "TABLE" &&
+						this.#currentNestedTableStartPrecedesDeferredFosteredStart()
 					) ||
 					this.#isDeferredTableHiddenInputChildOpener(tagName)
 				)
@@ -8542,6 +8547,10 @@ export function createHtmlApi(wasm) {
 					if (tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) {
 						return this.#queueFosteredElementPopsBeforeDeferredTable();
 					}
+					return false;
+				}
+
+				if (tagName === "TABLE" && this.#currentDeferredNestedTableCloserPrecedesFosteredStart()) {
 					return false;
 				}
 
@@ -8620,6 +8629,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (isHtmlStart && this.#isFosteredInputTableStartTag(tagName)) {
+				return false;
+			}
+
+			if (isHtmlStart && tagName === "TABLE" && this.#currentNestedTableStartPrecedesDeferredFosteredStart()) {
 				return false;
 			}
 
@@ -8800,6 +8813,21 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
+		#currentTableStartCellOpenerPrecedesFosteredStart() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const nextTag = this.#nextNonWhitespaceTag(span.start + span.length);
+			return (
+				nextTag !== false &&
+				!nextTag.is_closing &&
+				TABLE_CELL_ELEMENTS.has(nextTag.tag_name) &&
+				this.#cellContentPrecedesFosteredStartAt(nextTag.token_end)
+			);
+		}
+
 		#currentTableStartCellContentPrecedesFosteredText() {
 			const span = this.#currentRealTokenSpan();
 			if (span === null) {
@@ -8975,6 +9003,16 @@ export function createHtmlApi(wasm) {
 				}
 
 				if (!nextTag.is_closing) {
+					if (nextTag.tag_name === "TABLE") {
+						const tableEnd = this.#matchingTableEndAfterStart(nextTag);
+						if (tableEnd === null) {
+							return false;
+						}
+
+						at = tableEnd;
+						continue;
+					}
+
 					if (TABLE_MODE_START_TAGS.has(nextTag.tag_name)) {
 						return false;
 					}
@@ -9004,6 +9042,16 @@ export function createHtmlApi(wasm) {
 				}
 
 				if (!nextTag.is_closing) {
+					if (nextTag.tag_name === "TABLE") {
+						const tableEnd = this.#matchingTableEndAfterStart(nextTag);
+						if (tableEnd === null) {
+							return false;
+						}
+
+						at = tableEnd;
+						continue;
+					}
+
 					if (TABLE_MODE_START_TAGS.has(nextTag.tag_name)) {
 						return false;
 					}
@@ -9023,6 +9071,64 @@ export function createHtmlApi(wasm) {
 
 				at = nextTag.token_end;
 			}
+		}
+
+		#matchingTableEndAfterStart(startTag) {
+			return this.#matchingTableEndAfterStartAt(startTag.token_end);
+		}
+
+		#matchingTableEndAfterStartAt(at) {
+			let depth = 1;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return null;
+				}
+
+				if (nextTag.tag_name === "TABLE") {
+					depth += nextTag.is_closing ? -1 : 1;
+					if (depth === 0) {
+						return nextTag.token_end;
+					}
+				}
+
+				at = nextTag.token_end;
+			}
+		}
+
+		#currentNestedTableStartPrecedesDeferredFosteredStart() {
+			if (
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html"
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const tableEnd = this.#matchingTableEndAfterStartAt(span.start + span.length);
+			return tableEnd !== null && this.#cellContentPrecedesFosteredStartAt(tableEnd);
+		}
+
+		#currentDeferredNestedTableCloserPrecedesFosteredStart() {
+			if (
+				this.deferred_table_opener === null ||
+				this.current_namespace !== "html"
+			) {
+				return false;
+			}
+
+			const deferredTableIndex = this.deferred_table_opener.breadcrumbs.length - 1;
+			const currentTableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (currentTableIndex <= deferredTableIndex) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.#cellContentPrecedesFosteredStartAt(span.start + span.length);
 		}
 
 		#tableStructureEndPrecedesFosteredStart(at) {
@@ -10032,6 +10138,44 @@ export function createHtmlApi(wasm) {
 				nextTag !== false &&
 				nextTag.is_closing &&
 				nextTag.tag_name === "TABLE"
+			);
+		}
+
+		#shouldRemoveNestedAnchorActiveAfterDeferredTable() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const tableCloser = this.#nextNonWhitespaceTag(span.start + span.length);
+			if (
+				tableCloser === false ||
+				!tableCloser.is_closing ||
+				tableCloser.tag_name !== "TABLE"
+			) {
+				return false;
+			}
+
+			const afterTableCloser = tableCloser.token_end;
+			const nextTag = runtime.scanNextTag(this.html, afterTableCloser);
+			const text = this.html.slice(
+				afterTableCloser,
+				this.#fosterLookaheadTextEnd(afterTableCloser, nextTag),
+			);
+			if (!this.#isIgnorableTableText(text)) {
+				return false;
+			}
+
+			return (
+				nextTag === false ||
+				nextTag.is_closing ||
+				(
+					nextTag.tag_name === "A" ||
+					(
+						!FORMATTING_ELEMENTS.has(nextTag.tag_name) &&
+						!ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name)
+					)
+				)
 			);
 		}
 
