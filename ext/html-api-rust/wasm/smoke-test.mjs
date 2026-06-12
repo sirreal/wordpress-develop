@@ -51,14 +51,37 @@ const loadedApiExports = [
 ];
 
 const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
+function declaredInterfaceBody(interfaceName) {
+	const pattern = new RegExp(`^export interface ${interfaceName}(?: extends [^{]+)? \\{\\n([\\s\\S]*?)^\\}`, "m");
+	const match = typeDeclarations.match(pattern);
+	assert.ok(match, `Missing ${interfaceName} interface declaration.`);
+	return match[1];
+}
+
+function declaredInterfaceMethodNames(interfaceName) {
+	return [
+		...declaredInterfaceBody(interfaceName).matchAll(/^\s*([A-Za-z_$][\w$]*)\(/gm),
+	].map((match) => match[1]).sort();
+}
+
+function declaredConstructorMethodNames(interfaceName) {
+	return [
+		...declaredInterfaceBody(interfaceName).matchAll(/^\s*([A-Za-z_$][\w$]*)\(/gm),
+	].map((match) => match[1]).filter((name) => name !== "new").sort();
+}
+
+function declaredReadonlyMemberNames(interfaceName) {
+	return [
+		...declaredInterfaceBody(interfaceName).matchAll(/^\s*readonly\s+([A-Za-z_$][\w$]*)\s*:/gm),
+	].map((match) => match[1]).sort();
+}
+
 const declaredModuleValueExports = [
 	...typeDeclarations.matchAll(/^export const\s+([A-Za-z_$][\w$]*)\s*:/gm),
 	...typeDeclarations.matchAll(/^export function\s+([A-Za-z_$][\w$]*)\s*\(/gm),
 ].map((match) => match[1]).sort();
-const htmlApiInterface = typeDeclarations.match(/^export interface HtmlApi \{\n([\s\S]*?)^\}/m);
-assert.ok(htmlApiInterface, "Missing HtmlApi interface declaration.");
 const declaredLoadedApiExports = [
-	...htmlApiInterface[1].matchAll(/^\s*([A-Za-z_$][\w$]*)[(:]/gm),
+	...declaredInterfaceBody("HtmlApi").matchAll(/^\s*([A-Za-z_$][\w$]*)[(:]/gm),
 ].map((match) => match[1]).sort();
 
 assert.deepEqual(declaredModuleValueExports, directModuleExports);
@@ -426,8 +449,10 @@ try {
 	}
 }
 
-for (const method of [
+const tagProcessorPrototypeMethods = [
 	"change_parsing_namespace",
+	"destroy",
+	"free",
 	"next_tag",
 	"next_token",
 	"paused_at_incomplete_token",
@@ -459,27 +484,87 @@ for (const method of [
 	"remove_class",
 	"get_updated_html",
 	"get_doctype_info",
-]) {
+	"toString",
+];
+const tagProcessorStaticMembers = [
+	"ADD_CLASS",
+	"COMMENT_AS_ABRUPTLY_CLOSED_COMMENT",
+	"COMMENT_AS_CDATA_LOOKALIKE",
+	"COMMENT_AS_HTML_COMMENT",
+	"COMMENT_AS_INVALID_HTML",
+	"COMMENT_AS_PI_NODE_LOOKALIKE",
+	"MAX_BOOKMARKS",
+	"MAX_SEEK_OPS",
+	"NO_QUIRKS_MODE",
+	"QUIRKS_MODE",
+	"REMOVE_CLASS",
+	"SKIP_CLASS",
+	"STATE_CDATA_NODE",
+	"STATE_COMMENT",
+	"STATE_COMPLETE",
+	"STATE_DOCTYPE",
+	"STATE_FUNKY_COMMENT",
+	"STATE_INCOMPLETE_INPUT",
+	"STATE_MATCHED_TAG",
+	"STATE_PRESUMPTUOUS_TAG",
+	"STATE_READY",
+	"STATE_TEXT_NODE",
+	"TEXT_IS_GENERIC",
+	"TEXT_IS_NULL_SEQUENCE",
+	"TEXT_IS_WHITESPACE",
+];
+const processorPrototypeMethods = [
+	"expects_closer",
+	"get_breadcrumbs",
+	"get_current_depth",
+	"get_last_error",
+	"get_namespace",
+	"get_unsupported_exception",
+	"is_tag_closer",
+	"is_virtual",
+	"matches_breadcrumbs",
+	"next_tag",
+	"next_token",
+	"serialize",
+	"serialize_token",
+	"step",
+];
+const processorStaticMethods = ["create_fragment", "create_full_parser", "is_special", "is_void", "normalize"];
+const processorStaticMembers = [
+	"CONSTRUCTOR_UNLOCK_CODE",
+	"ERROR_EXCEEDED_MAX_BOOKMARKS",
+	"ERROR_UNSUPPORTED",
+	"MAX_BOOKMARKS",
+	"PROCESS_CURRENT_NODE",
+	"PROCESS_NEXT_NODE",
+	"REPROCESS_CURRENT_NODE",
+];
+
+assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Tag_Processor"), [...tagProcessorPrototypeMethods].sort());
+assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Tag_Processor_Constructor"), [...tagProcessorStaticMembers].sort());
+assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Processor"), [...processorPrototypeMethods].sort());
+assert.deepEqual(declaredConstructorMethodNames("WP_HTML_Processor_Constructor"), [...processorStaticMethods].sort());
+assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Processor_Constructor"), [...processorStaticMembers].sort());
+
+for (const method of tagProcessorPrototypeMethods) {
 	assert.equal(typeof WP_HTML_Tag_Processor.prototype[method], "function", `Missing tag processor method ${method}`);
 	assert.equal(typeof WP_HTML_Processor.prototype[method], "function", `Missing inherited processor method ${method}`);
 }
 
-for (const method of [
-	"get_last_error",
-	"get_unsupported_exception",
-	"matches_breadcrumbs",
-	"expects_closer",
-	"step",
-	"get_breadcrumbs",
-	"get_current_depth",
-	"serialize",
-	"serialize_token",
-]) {
+for (const property of tagProcessorStaticMembers) {
+	assert.ok(Object.prototype.hasOwnProperty.call(WP_HTML_Tag_Processor, property), `Missing tag processor static member ${property}`);
+}
+
+for (const method of processorPrototypeMethods) {
 	assert.equal(typeof WP_HTML_Processor.prototype[method], "function", `Missing processor method ${method}`);
 }
 
-for (const method of ["create_fragment", "create_full_parser", "normalize", "is_special", "is_void"]) {
+for (const method of processorStaticMethods) {
 	assert.equal(typeof WP_HTML_Processor[method], "function", `Missing processor static method ${method}`);
+}
+
+for (const property of processorStaticMembers) {
+	assert.ok(Object.prototype.hasOwnProperty.call(WP_HTML_Processor, property), `Missing processor static member ${property}`);
 }
 
 function compareHtml5libTreeAttributes(left, right) {
