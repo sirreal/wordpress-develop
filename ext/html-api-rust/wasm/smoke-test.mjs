@@ -2826,6 +2826,13 @@ assert.ok(tokenCountingProcessor.token_seen_count.get("BODY") >= 1);
 assert.ok(tokenCountingProcessor.token_seen_count.get("P") >= 1);
 tokenCountingProcessor.destroy();
 
+assert.equal(WP_HTML_Processor.is_void("img"), true);
+assert.equal(WP_HTML_Processor.is_void(123), false);
+assert.equal(WP_HTML_Processor.is_void(null), false);
+assert.throws(
+	() => WP_HTML_Processor.is_void([]),
+	TypeError,
+);
 assert.equal(WP_HTML_Processor.is_special("div"), true);
 assert.equal(WP_HTML_Processor.is_special("span"), false);
 assert.equal(WP_HTML_Processor.is_special("dialog"), false);

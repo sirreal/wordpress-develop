@@ -2405,7 +2405,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		static is_void(tagName) {
-			return VOID_ELEMENTS.has(asciiUpper(String(tagName)));
+			return VOID_ELEMENTS.has(asciiUpper(phpInternalStringCoerce(tagName, "tag_name")));
 		}
 
 		static is_special(tagName) {
