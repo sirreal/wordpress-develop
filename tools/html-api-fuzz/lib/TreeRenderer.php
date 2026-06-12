@@ -1162,12 +1162,80 @@ class TreeRenderer {
 		return $paths;
 	}
 
-	private const KNOWN_TREE_ELEMENT_NAMES = array(
-		// HTML
-		'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'dir', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map', 'mark', 'marquee', 'menu', 'meta', 'meter', 'nav', 'nobr', 'noembed', 'noframes', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp',
-		// SVG / MathML locals the generator and real content commonly use
-		'svg', 'g', 'circle', 'rect', 'path', 'defs', 'desc', 'use', 'symbol', 'text', 'foreignObject', 'clipPath', 'linearGradient', 'radialGradient', 'stop', 'ellipse', 'line', 'polygon', 'polyline', 'image',
-		'math', 'mi', 'mo', 'mn', 'ms', 'mtext', 'mrow', 'mfrac', 'msqrt', 'annotation-xml', 'annotation', 'semantics',
+	private const KNOWN_HTML_TREE_ELEMENT_NAMES = array(
+		'a', 'abbr', 'acronym', 'address', 'applet', 'area', 'article', 'aside',
+		'audio', 'b', 'base', 'basefont', 'bdi', 'bdo', 'bgsound', 'big',
+		'blink', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption',
+		'center', 'cite', 'code', 'col', 'colgroup', 'command', 'content',
+		'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'dir',
+		'div', 'dl', 'dt', 'element', 'em', 'embed', 'fencedframe', 'fieldset',
+		'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset',
+		'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr',
+		'html', 'i', 'iframe', 'image', 'img', 'input', 'ins', 'isindex', 'kbd',
+		'keygen', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map',
+		'mark', 'marquee', 'menu', 'menuitem', 'meta', 'meter', 'multicol',
+		'nav', 'nextid', 'nobr', 'noembed', 'noframes', 'noscript', 'object',
+		'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture',
+		'plaintext', 'portal', 'pre', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc',
+		'ruby', 's', 'samp', 'script', 'search', 'section', 'select',
+		'selectedcontent', 'shadow', 'slot', 'small', 'source', 'spacer',
+		'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table',
+		'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
+		'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp',
+	);
+
+	private const KNOWN_SVG_TREE_ELEMENT_NAMES = array(
+		'a', 'altGlyph', 'altGlyphDef', 'altGlyphItem', 'animate',
+		'animateColor', 'animateMotion', 'animateTransform', 'circle', 'clipPath',
+		'color-profile', 'cursor', 'defs', 'desc', 'discard', 'ellipse',
+		'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite',
+		'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap',
+		'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB',
+		'feFuncG', 'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge',
+		'feMergeNode', 'feMorphology', 'feOffset', 'fePointLight',
+		'feSpecularLighting', 'feSpotLight', 'feTile', 'feTurbulence', 'filter',
+		'flowDiv', 'flowLine', 'flowPara', 'flowRegion', 'flowRegionBreak',
+		'flowRoot', 'flowSpan', 'font', 'font-face', 'font-face-format',
+		'font-face-name', 'font-face-src', 'font-face-uri', 'foreignObject', 'g',
+		'glyph', 'glyphRef', 'hatch', 'hatchpath', 'hkern', 'image', 'line',
+		'linearGradient', 'marker', 'mask', 'mesh', 'meshgradient', 'meshpatch',
+		'meshrow', 'metadata', 'missing-glyph', 'mpath', 'path', 'pattern',
+		'polygon', 'polyline', 'radialGradient', 'rect', 'script', 'set',
+		'solidColor', 'solidcolor', 'stop', 'style', 'svg', 'switch', 'symbol',
+		'text', 'textPath', 'title', 'tref', 'tspan', 'use', 'view', 'vkern',
+	);
+
+	private const KNOWN_MATHML_TREE_ELEMENT_NAMES = array(
+		'abs', 'and', 'annotation', 'annotation-xml', 'apply', 'approx',
+		'arccos', 'arccosh', 'arccot', 'arccoth', 'arccsc', 'arccsch', 'arcsec',
+		'arcsech', 'arcsin', 'arcsinh', 'arctan', 'arctanh', 'arg', 'bind',
+		'bvar', 'card', 'cartesianproduct', 'cbytes', 'ceiling', 'cerror',
+		'ci', 'cn', 'codomain', 'complexes', 'compose', 'condition',
+		'conjugate', 'cos', 'cosh', 'cot', 'coth', 'cs', 'csc', 'csch',
+		'csymbol', 'curl', 'declare', 'degree', 'determinant', 'diff',
+		'divergence', 'divide', 'domain', 'domainofapplication', 'emptyset',
+		'eq', 'equivalent', 'eulergamma', 'exists', 'exp', 'exponentiale',
+		'factorial', 'factorof', 'false', 'floor', 'fn', 'forall', 'gcd', 'geq',
+		'grad', 'gt', 'ident', 'image', 'imaginary', 'imaginaryi', 'implies',
+		'in', 'infinity', 'int', 'integers', 'intersect', 'interval', 'inverse',
+		'lambda', 'laplacian', 'lcm', 'leq', 'limit', 'list', 'ln', 'log',
+		'logbase', 'lowlimit', 'lt', 'maction', 'maligngroup', 'malignmark',
+		'math', 'matrix', 'matrixrow', 'max', 'mean', 'median', 'menclose',
+		'merror', 'mfenced', 'mfrac', 'mglyph', 'mi', 'min', 'minus',
+		'mlabeledtr', 'mlongdiv', 'mmultiscripts', 'mn', 'mo', 'mode', 'moment',
+		'momentabout', 'mover', 'mpadded', 'mphantom', 'mprescripts', 'mroot',
+		'mrow', 'ms', 'mscarries', 'mscarry', 'msgroup', 'msline', 'mspace',
+		'msqrt', 'msrow', 'mstack', 'mstyle', 'msub', 'msubsup', 'msup',
+		'mtable', 'mtd', 'mtext', 'mtr', 'munder', 'munderover',
+		'naturalnumbers', 'neq', 'none', 'not', 'notanumber', 'notin',
+		'notprsubset', 'notsubset', 'or', 'otherwise', 'outerproduct',
+		'partialdiff', 'pi', 'piece', 'piecewise', 'plus', 'power', 'primes',
+		'product', 'prsubset', 'quotient',
+		'rationals', 'real', 'reals', 'reln', 'rem', 'root', 'scalarproduct',
+		'sdev', 'sec', 'sech', 'selector', 'semantics', 'sep', 'set', 'setdiff',
+		'share', 'sin', 'sinh', 'subset', 'sum', 'tan', 'tanh', 'tendsto',
+		'times', 'transpose', 'true', 'union', 'uplimit', 'variance', 'vector',
+		'vectorproduct', 'xor',
 	);
 
 	public static function normalize_tree_line( ?string $line ): ?string {
@@ -1193,17 +1261,39 @@ class TreeRenderer {
 	}
 
 	private static function is_known_tree_element_name( string $display_name ): bool {
+		$namespace = 'html';
 		$local = $display_name;
-		if ( str_starts_with( $display_name, 'svg ' ) || str_starts_with( $display_name, 'math ' ) ) {
+		if ( str_starts_with( $display_name, 'svg ' ) ) {
+			$namespace = 'svg';
+			$local = substr( $display_name, strpos( $display_name, ' ' ) + 1 );
+		} elseif ( str_starts_with( $display_name, 'math ' ) ) {
+			$namespace = 'math';
 			$local = substr( $display_name, strpos( $display_name, ' ' ) + 1 );
 		}
 
-		static $known = null;
-		if ( null === $known ) {
-			$known = array_fill_keys( self::KNOWN_TREE_ELEMENT_NAMES, true );
+		$known = self::known_tree_element_names( $namespace );
+		return isset( $known[ $local ] ) || isset( $known[ strtolower( $local ) ] );
+	}
+
+	private static function known_tree_element_names( string $namespace ): array {
+		static $known = array();
+		if ( ! isset( $known[ $namespace ] ) ) {
+			if ( 'svg' === $namespace ) {
+				$names = self::KNOWN_SVG_TREE_ELEMENT_NAMES;
+			} elseif ( 'math' === $namespace ) {
+				$names = self::KNOWN_MATHML_TREE_ELEMENT_NAMES;
+			} else {
+				$names = self::KNOWN_HTML_TREE_ELEMENT_NAMES;
+			}
+
+			$known[ $namespace ] = array();
+			foreach ( $names as $name ) {
+				$known[ $namespace ][ $name ] = true;
+				$known[ $namespace ][ strtolower( $name ) ] = true;
+			}
 		}
 
-		return isset( $known[ $local ] ) || isset( $known[ strtolower( $local ) ] );
+		return $known[ $namespace ];
 	}
 
 	private static function unsupported_details( \WP_HTML_Unsupported_Exception $e ): array {

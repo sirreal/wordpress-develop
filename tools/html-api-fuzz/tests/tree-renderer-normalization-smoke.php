@@ -151,6 +151,81 @@ html_api_fuzz_tree_normalization_assert( false === ( $synthetic_long_text_nul['o
 $synthetic_long_norm = \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "  x=\"{$synthetic_long_value}\\0\"" );
 html_api_fuzz_tree_normalization_assert( 'x="<value>"' === $synthetic_long_norm, 'Line normalization should mask long attribute values rather than fail on them.' );
 
+$adjusted_svg_names = array(
+	'altGlyph',
+	'altGlyphDef',
+	'altGlyphItem',
+	'animateColor',
+	'animateMotion',
+	'animateTransform',
+	'clipPath',
+	'feBlend',
+	'feColorMatrix',
+	'feComponentTransfer',
+	'feComposite',
+	'feConvolveMatrix',
+	'feDiffuseLighting',
+	'feDisplacementMap',
+	'feDistantLight',
+	'feDropShadow',
+	'feFlood',
+	'feFuncA',
+	'feFuncB',
+	'feFuncG',
+	'feFuncR',
+	'feGaussianBlur',
+	'feImage',
+	'feMerge',
+	'feMergeNode',
+	'feMorphology',
+	'feOffset',
+	'fePointLight',
+	'feSpecularLighting',
+	'feSpotLight',
+	'feTile',
+	'feTurbulence',
+	'foreignObject',
+	'glyphRef',
+	'linearGradient',
+	'radialGradient',
+	'textPath',
+);
+foreach ( $adjusted_svg_names as $svg_name ) {
+	html_api_fuzz_tree_normalization_assert(
+		"<svg {$svg_name}>" === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "<svg {$svg_name}>" ),
+		"Adjusted SVG name {$svg_name} should not normalize to a custom element."
+	);
+	$lower_svg_name = strtolower( $svg_name );
+	html_api_fuzz_tree_normalization_assert(
+		"<svg {$lower_svg_name}>" === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "<svg {$lower_svg_name}>" ),
+		"Lowercase SVG oracle name {$lower_svg_name} should not normalize to a custom element."
+	);
+}
+foreach ( array( 'bgsound', 'isindex', 'keygen', 'selectedcontent' ) as $html_name ) {
+	html_api_fuzz_tree_normalization_assert(
+		"<{$html_name}>" === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "<{$html_name}>" ),
+		"Known HTML name {$html_name} should not normalize to a custom element."
+	);
+}
+foreach ( array( 'menclose', 'mprescripts', 'mstack', 'apply', 'csymbol', 'not', 'prsubset' ) as $mathml_name ) {
+	html_api_fuzz_tree_normalization_assert(
+		"<math {$mathml_name}>" === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( "<math {$mathml_name}>" ),
+		"Known MathML name {$mathml_name} should not normalize to a custom element."
+	);
+}
+html_api_fuzz_tree_normalization_assert(
+	'<custom-element>' === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( '<x-widget>' ),
+	'Unknown HTML custom element names should still normalize to the custom-element bucket.'
+);
+html_api_fuzz_tree_normalization_assert(
+	'<custom-element>' === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( '<svg x-widget>' ),
+	'Unknown SVG names should still normalize to the custom-element bucket.'
+);
+html_api_fuzz_tree_normalization_assert(
+	'<custom-element>' === \HtmlApiFuzz\TreeRenderer::normalize_tree_line( '<math x-widget>' ),
+	'Unknown MathML names should still normalize to the custom-element bucket.'
+);
+
 if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
 	echo "tree renderer normalization oracle smoke tests skipped: Dom\\HTMLDocument unavailable\n";
 	exit( 0 );
