@@ -3458,6 +3458,10 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#skipDeferredTableTemplateCloser(tagName, closingNamespace)) {
+					return;
+				}
+
 				if (allowVirtualPreclosures && this.#queueVirtualPreclosuresForEndTag(tagName)) {
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
@@ -8148,7 +8152,7 @@ export function createHtmlApi(wasm) {
 
 		#currentTableStartIsFollowedByFosteredContent() {
 			return this.#currentTokenIsFollowedByFosteredTableContent(
-				new Set(["COLGROUP", "TBODY", "TFOOT", "THEAD", "TR"]),
+				new Set(["COLGROUP", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
 			);
 		}
 
@@ -8201,6 +8205,10 @@ export function createHtmlApi(wasm) {
 					if (tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) {
 						return this.#queueFosteredElementPopsBeforeDeferredTable();
 					}
+					return false;
+				}
+
+				if (tagName === "TEMPLATE" && this.#hasDeferredTableChildOpener("TEMPLATE")) {
 					return false;
 				}
 
@@ -8327,6 +8335,14 @@ export function createHtmlApi(wasm) {
 				) {
 					return true;
 				}
+				if (
+					nextTag !== false &&
+					nextTag.is_closing &&
+					nextTag.tag_name === "TEMPLATE"
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
 				if (nextTag === false || nextTag.is_closing) {
 					return false;
 				}
@@ -8384,7 +8400,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isDeferredTableChildOpenerTag(tagName) {
-			return tagName === "COLGROUP" || tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
+			return tagName === "COLGROUP" || tagName === "TEMPLATE" || tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
 		}
 
 		#deferredTableChildLookaheadTags(tagName) {
@@ -8393,6 +8409,31 @@ export function createHtmlApi(wasm) {
 
 		#hasDeferredTableChildOpener(tagName) {
 			return this.deferred_table_child_openers.some((token) => token.tagName === tagName);
+		}
+
+		#skipDeferredTableTemplateCloser(tagName, namespaceName) {
+			if (
+				tagName !== "TEMPLATE" ||
+				namespaceName !== "html" ||
+				this.deferred_table_opener === null ||
+				!this.#hasDeferredTableChildOpener("TEMPLATE") ||
+				!this.#currentHtmlElementIs("TEMPLATE")
+			) {
+				return false;
+			}
+
+			const templateIndex = this.open_elements.length - 1;
+			this.#clearActiveFormattingElementsForTemplateClose(templateIndex);
+			this.#popTemplateInsertionMode();
+			this.open_elements.pop();
+			this.open_element_namespaces.pop();
+			this.open_element_integration_node_types.pop();
+			this.open_element_foster_parented_table_indices.pop();
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
+			this.current_token_namespace = namespaceName;
+			this.breadcrumbs = this.#breadcrumbStack();
+			this.skip_current_token = true;
+			return true;
 		}
 
 		#deferCurrentTextAsTableChild() {
