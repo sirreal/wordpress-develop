@@ -5227,6 +5227,18 @@ assert.deepEqual(tableAnchorFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", 
 assert.equal(tableAnchorFosterProcessor.get_last_error(), null);
 tableAnchorFosterProcessor.destroy();
 
+const tableColSelectProcessor = WP_HTML_Processor.create_full_parser("<kbd><table></kbd><col><select><tr>");
+assert.equal(tableColSelectProcessor.next_tag("select"), true);
+assert.deepEqual(tableColSelectProcessor.get_breadcrumbs(), ["HTML", "BODY", "KBD", "SELECT"]);
+assert.equal(tableColSelectProcessor.next_tag("table"), true);
+assert.deepEqual(tableColSelectProcessor.get_breadcrumbs(), ["HTML", "BODY", "KBD", "TABLE"]);
+assert.equal(tableColSelectProcessor.next_tag("col"), true);
+assert.deepEqual(tableColSelectProcessor.get_breadcrumbs(), ["HTML", "BODY", "KBD", "TABLE", "COLGROUP", "COL"]);
+assert.equal(tableColSelectProcessor.next_tag("tr"), true);
+assert.deepEqual(tableColSelectProcessor.get_breadcrumbs(), ["HTML", "BODY", "KBD", "TABLE", "TBODY", "TR"]);
+assert.equal(tableColSelectProcessor.get_last_error(), null);
+tableColSelectProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }

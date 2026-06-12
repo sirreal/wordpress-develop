@@ -8209,7 +8209,7 @@ export function createHtmlApi(wasm) {
 
 		#currentTableStartIsFollowedByFosteredContent() {
 			return this.#currentTokenIsFollowedByFosteredTableContent(
-				new Set(["COLGROUP", "FORM", "INPUT", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
+				new Set(["COL", "COLGROUP", "FORM", "INPUT", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
 			);
 		}
 
@@ -8458,6 +8458,7 @@ export function createHtmlApi(wasm) {
 				tagName === "BLINK" ||
 				tagName === "BODY" ||
 				tagName === "HTML" ||
+				tagName === "KBD" ||
 				tagName === "PRE" ||
 				tagName === "SELECT" ||
 				FORMATTING_ELEMENTS.has(tagName) ||
@@ -8490,6 +8491,7 @@ export function createHtmlApi(wasm) {
 		#isDeferredTableChildOpenerTag(tagName) {
 			return (
 				tagName === "COLGROUP" ||
+				tagName === "COL" ||
 				tagName === "FORM" ||
 				tagName === "TEMPLATE" ||
 				tagName === "TR" ||
