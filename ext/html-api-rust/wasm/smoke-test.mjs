@@ -1675,6 +1675,22 @@ assert.equal(tagProcessorBrEndTag.has_class("x"), false);
 assert.deepEqual(tagProcessorBrEndTag.class_list(), []);
 tagProcessorBrEndTag.destroy();
 
+const completedClosingTag = new WP_HTML_Tag_Processor("</div>");
+assert.equal(completedClosingTag.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
+assert.equal(completedClosingTag.is_tag_closer(), true);
+assert.equal(completedClosingTag.next_tag({ tag_name: "div", tag_closers: "visit" }), false);
+assert.equal(completedClosingTag.get_token_type(), null);
+assert.equal(completedClosingTag.is_tag_closer(), false);
+completedClosingTag.destroy();
+
+const completedSelfClosingTag = new WP_HTML_Tag_Processor("<img />");
+assert.equal(completedSelfClosingTag.next_tag("img"), true);
+assert.equal(completedSelfClosingTag.has_self_closing_flag(), true);
+assert.equal(completedSelfClosingTag.next_tag(), false);
+assert.equal(completedSelfClosingTag.get_token_type(), null);
+assert.equal(completedSelfClosingTag.has_self_closing_flag(), false);
+completedSelfClosingTag.destroy();
+
 const svgQualifiedNames = new WP_HTML_Tag_Processor('<foreignobject attributeName=1 xlink:href=2 viewbox=3>');
 assert.equal(svgQualifiedNames.change_parsing_namespace("svg"), true);
 assert.equal(svgQualifiedNames.next_tag("foreignobject"), true);

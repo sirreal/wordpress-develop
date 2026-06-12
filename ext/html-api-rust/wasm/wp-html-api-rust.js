@@ -1743,11 +1743,17 @@ export function createHtmlApi(wasm) {
 
 		is_tag_closer() {
 			this.#ensureLive();
+			if (this.parser_state !== STATE_MATCHED_TAG) {
+				return false;
+			}
 			return Boolean(wasm.wp_html_api_rust_tag_processor_is_tag_closer(this.pointer));
 		}
 
 		has_self_closing_flag() {
 			this.#ensureLive();
+			if (this.parser_state !== STATE_MATCHED_TAG) {
+				return false;
+			}
 			return Boolean(wasm.wp_html_api_rust_tag_processor_has_self_closing_flag(this.pointer));
 		}
 
