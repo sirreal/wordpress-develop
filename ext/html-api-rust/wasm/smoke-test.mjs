@@ -1984,10 +1984,30 @@ for (const [html, expectedContentType] of [
 	script.destroy();
 }
 
+const completedScriptContentType = new WP_HTML_Tag_Processor("<script>one</script>");
+assert.equal(completedScriptContentType.native_get_script_content_type(), null);
+assert.equal(completedScriptContentType.next_tag("script"), true);
+assert.equal(completedScriptContentType.native_get_script_content_type(), "javascript");
+assert.equal(completedScriptContentType.next_token(), false);
+assert.equal(completedScriptContentType.native_get_script_content_type(), null);
+completedScriptContentType.destroy();
+
+const foreignNamespaceScript = new WP_HTML_Tag_Processor("<script>one</script>");
+assert.equal(foreignNamespaceScript.change_parsing_namespace("svg"), true);
+assert.equal(foreignNamespaceScript.next_tag("script"), true);
+assert.equal(foreignNamespaceScript.native_get_script_content_type(), null);
+foreignNamespaceScript.destroy();
+
 const processorScript = WP_HTML_Processor.create_fragment('<script type="application/json">{"one":1}</script>');
 assert.equal(processorScript.next_tag("script"), true);
 assert.equal(processorScript.native_get_script_content_type(), "json");
 processorScript.destroy();
+
+const processorForeignScript = WP_HTML_Processor.create_fragment("<svg><script></script></svg>");
+assert.equal(processorForeignScript.next_tag("script"), true);
+assert.equal(processorForeignScript.get_namespace(), "svg");
+assert.equal(processorForeignScript.native_get_script_content_type(), null);
+processorForeignScript.destroy();
 
 const legacyNamedCharacterReference = new WP_HTML_Tag_Processor("<div>ZZ&AElig=</div>");
 assert.equal(legacyNamedCharacterReference.next_token(), true);

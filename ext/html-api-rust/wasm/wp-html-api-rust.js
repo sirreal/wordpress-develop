@@ -1818,6 +1818,14 @@ export function createHtmlApi(wasm) {
 
 		native_get_script_content_type() {
 			this.#ensureLive();
+			if (
+				this.parser_state !== STATE_MATCHED_TAG ||
+				this.get_tag() !== "SCRIPT" ||
+				this.get_namespace() !== "html"
+			) {
+				return null;
+			}
+
 			switch (wasm.wp_html_api_rust_tag_processor_script_content_type(this.pointer)) {
 				case 1:
 					return "javascript";
