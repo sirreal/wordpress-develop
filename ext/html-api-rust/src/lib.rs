@@ -1239,12 +1239,6 @@ impl TagProcessor {
         classify_script_type_string(&type_string)
     }
 
-    fn raw_attribute_value(&self, scan: TagScan, name: &[u8]) -> Option<&[u8]> {
-        let attribute = self.find_attribute(scan, name)?;
-        let (start, end) = attribute.value?;
-        Some(&self.html[start..end])
-    }
-
     fn get_attribute(&mut self, wanted_name: &[u8]) -> AttributeValue {
         let Some(scan) = self.current else {
             return AttributeValue::Missing;
