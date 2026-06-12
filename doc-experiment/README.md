@@ -74,7 +74,7 @@ python3 render-docs-markdown.py \
   and writes `results/round-NN/round-metadata.json`.
 - `tools/verify-scratch-isolation.py` — checks a scratch directory exposes only
   rendered docs and selected task prompts, never references, tests, plans, or
-  source files.
+  source files; it can also emit/verify SHA-256 hashes for staged files.
 - `tools/validate-round.py` — reports whether a round is prepared, partially
   trialed, trial-complete, judged, or scored, and lists missing artifacts.
 - `tools/workflow-args.py` — emits trials or judges workflow JSON from

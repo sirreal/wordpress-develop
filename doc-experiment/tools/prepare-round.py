@@ -208,15 +208,20 @@ def main() -> int:
         "python3",
         str(EXPERIMENT_ROOT / "tools" / "verify-scratch-isolation.py"),
         str(scratch_dir),
+        "--json",
     ]
     for task in selected:
         verify_command.extend(["--task-id", task["id"]])
-    isolation_check = run_text(verify_command)
+    isolation = json.loads(run_text(verify_command))
 
     results_dir.mkdir(parents=True, exist_ok=True)
     metadata["scratch"] = str(scratch_dir)
     metadata["staged_task_files"] = [f"tasks/{task['id']}.md" for task in selected]
-    metadata["scratch_isolation_check"] = isolation_check
+    metadata["scratch_isolation_check"] = (
+        f"OK: {scratch_dir} exposes 2 docs and {len(selected)} task prompt(s), "
+        "with no forbidden files."
+    )
+    metadata["scratch_file_sha256"] = isolation["scratch_file_sha256"]
     metadata_file.write_text(json.dumps(metadata, indent=2) + "\n")
 
     print(json.dumps(metadata, indent=2))

@@ -61,7 +61,8 @@ This regenerates the rendered docs, copies only the selected tasks'
 tasks, trial count, model policy, git head, and scratch path. It must not copy
 corpus directories, `reference.php`, or `tests.json` into scratch. Use
 `--dry-run` first when reconciling task selection. The preparation script runs
-`verify-scratch-isolation.py` before writing metadata.
+`verify-scratch-isolation.py` before writing metadata and records SHA-256
+hashes for every staged doc and task prompt.
 
 `stage-round.sh <N>` remains the low-level docs-only staging command for
 manual scratch variants and shadow-doc A/B setup.

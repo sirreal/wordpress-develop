@@ -26,6 +26,11 @@ cover the recorded task set, and aggregation now refuses missing judges,
 missing executions, or mismatched task directories instead of silently scoring
 them.
 
+Round preparation now records SHA-256 hashes for every staged rendered doc and
+task prompt. Round 18 metadata was backfilled with hashes for the staged
+current-corpus baseline scratch files so the exact docs/prompts can be audited
+without trusting the transient `/tmp` path alone.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
