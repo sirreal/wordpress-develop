@@ -367,6 +367,15 @@ assert.equal(
 );
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0x1f170), "🅰");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0xd83c), "�");
+assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes("65.9"), "A");
+assert.throws(
+	() => WP_HTML_Decoder.code_point_to_utf8_bytes("65abc"),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Decoder.code_point_to_utf8_bytes(""),
+	TypeError,
+);
 
 const hellipReferenceLength = {};
 assert.equal(

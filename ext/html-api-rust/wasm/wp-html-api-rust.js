@@ -6952,7 +6952,7 @@ class WasmRuntime {
 	}
 
 	decoderCodePointToUtf8Bytes(codePoint) {
-		const numericCodePoint = Number(codePoint);
+		const numericCodePoint = phpIntegerParameterCoerce(codePoint, "code_point");
 		const normalizedCodePoint = Number.isFinite(numericCodePoint) && numericCodePoint >= 0
 			? Math.trunc(numericCodePoint)
 			: 0x110000;
@@ -7501,6 +7501,25 @@ function phpIntegerCast(value) {
 		return match ? Number.parseInt(match[0], 10) : 0;
 	}
 	return 0;
+}
+
+function phpIntegerParameterCoerce(value, parameterName) {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (
+			trimmed === "" ||
+			!/^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?$/.test(trimmed)
+		) {
+			throw new TypeError(`Argument $${parameterName} must be numeric.`);
+		}
+		return Math.trunc(Number(trimmed));
+	}
+
+	if (typeof value === "object" && value !== null) {
+		throw new TypeError(`Argument $${parameterName} must be of type int.`);
+	}
+
+	return phpIntegerCast(value);
 }
 
 function contextNamespace(nodeName) {
