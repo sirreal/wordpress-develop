@@ -592,8 +592,8 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 	readonly ERROR_UNSUPPORTED: "unsupported";
 	readonly ERROR_EXCEEDED_MAX_BOOKMARKS: "exceeded-max-bookmarks";
 	readonly CONSTRUCTOR_UNLOCK_CODE: string;
-	create_fragment(html: unknown, context?: string, encoding?: string): WP_HTML_Processor | null;
-	create_full_parser(html: unknown, encoding?: string): WP_HTML_Processor | null;
+	create_fragment(html: unknown, context?: unknown, encoding?: unknown): WP_HTML_Processor | null;
+	create_full_parser(html: unknown, encoding?: unknown): WP_HTML_Processor | null;
 	normalize(html: PhpStringParameter): string | null;
 	is_void(tagName: PhpInternalStringParameter): boolean;
 	is_special(tagName: unknown): boolean;

@@ -2931,11 +2931,14 @@ assert.equal(WP_HTML_Processor.create_fragment(null), null);
 assert.equal(WP_HTML_Processor.create_fragment("", "<body>", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.create_fragment("", ""), null);
 assert.equal(WP_HTML_Processor.create_fragment("", "<br>"), null);
+assert.equal(WP_HTML_Processor.create_fragment("", null), null);
+assert.equal(WP_HTML_Processor.create_fragment("", "<body>", {}), null);
 const emptyTextareaFragment = WP_HTML_Processor.create_fragment("", "<textarea>");
 assert.notEqual(emptyTextareaFragment, null);
 emptyTextareaFragment.destroy();
 assert.equal(WP_HTML_Processor.create_full_parser(null), null);
 assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
+assert.equal(WP_HTML_Processor.create_full_parser("", {}), null);
 assert.equal(WP_HTML_Processor.normalize(123), "123");
 assert.equal(WP_HTML_Processor.normalize(false), "");
 assert.throws(
