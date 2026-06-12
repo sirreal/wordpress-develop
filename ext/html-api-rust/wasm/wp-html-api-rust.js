@@ -6533,6 +6533,7 @@ const REQUIRED_WASM_FUNCTION_EXPORTS = [
 	"wp_html_api_rust_decoder_read_character_reference",
 	"wp_html_api_rust_scan_next_tag",
 	"wp_html_api_rust_tag_processor_add_class",
+	"wp_html_api_rust_tag_processor_apply_lexical_update",
 	"wp_html_api_rust_tag_processor_class_list",
 	"wp_html_api_rust_tag_processor_current_comment_type",
 	"wp_html_api_rust_tag_processor_current_span",
