@@ -6054,6 +6054,15 @@ assert.equal(
 );
 fullParserFosteredListItemsBeforeTable.destroy();
 
+const fullParserFosteredParagraphsBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<table><tr><p><a><p>You should see this text.",
+);
+assert.equal(
+	fullParserFosteredParagraphsBeforeTable.serialize(),
+	"<html><head></head><body><p><a></a></p><p><a>You should see this text.</a></p><table><tbody><tr></tr></tbody></table></body></html>",
+);
+fullParserFosteredParagraphsBeforeTable.destroy();
+
 const fullParserFosteredTextBeforeTableColgroup = WP_HTML_Processor.create_full_parser(
 	"<table><colgroup>foo",
 );

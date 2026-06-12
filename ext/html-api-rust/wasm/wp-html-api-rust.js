@@ -8305,7 +8305,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "DIV" || tagName === "LI";
+			return tagName === "DIV" || tagName === "LI" || tagName === "P";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
