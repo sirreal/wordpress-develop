@@ -47,7 +47,6 @@ def main() -> int:
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
     results_dir = EXPERIMENT_ROOT / "results" / round_name
 
-    verdicts = json.load(open(output_file))["result"]
     validate_output = subprocess.run(
         [
             "python3",
@@ -64,6 +63,7 @@ def main() -> int:
         print(validate_output.stderr, file=sys.stderr)
         return validate_output.returncode
 
+    verdicts = json.load(open(output_file))["result"]
     errors = validate_verdicts(results_dir, verdicts)
     if errors:
         for error in errors:

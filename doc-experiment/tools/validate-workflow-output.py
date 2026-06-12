@@ -19,6 +19,8 @@ def metadata(round_name: str) -> dict:
 
 def load_result(output_file: Path) -> list[dict]:
     payload = json.loads(output_file.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("workflow output must be an object with a result array")
     result = payload.get("result")
     if not isinstance(result, list):
         raise ValueError("workflow output must contain a result array")
@@ -30,8 +32,13 @@ def validate_coverage(
     expected_ids: set[str],
     label: str,
 ) -> list[str]:
-    ids = [entry.get("id") for entry in entries]
     errors = []
+    ids = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(f"entry {index}: {label} entry must be an object")
+            continue
+        ids.append(entry.get("id"))
     duplicates = sorted({entry_id for entry_id in ids if ids.count(entry_id) > 1})
     if duplicates:
         errors.append(f"duplicate {label}: " + ", ".join(str(item) for item in duplicates))
@@ -56,6 +63,9 @@ def validate_trials(entries: list[dict], meta: dict) -> list[str]:
     seen_pairs = []
 
     for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(f"entry {index}: trial result must be an object")
+            continue
         task_id = entry.get("id")
         trial = entry.get("trial")
         if task_id not in expected_tasks:
@@ -179,7 +189,7 @@ def validate_judges(entries: list[dict], meta: dict) -> list[str]:
     expected_trials = int(meta.get("trials_per_task", 0))
     errors = validate_coverage(entries, expected_tasks, "judge verdicts")
     for entry in entries:
-        if entry.get("id") in expected_tasks:
+        if isinstance(entry, dict) and entry.get("id") in expected_tasks:
             errors.extend(validate_judge_verdict(entry, expected_trials))
     return errors
 

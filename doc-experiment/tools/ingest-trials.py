@@ -15,9 +15,7 @@ EXPERIMENT_ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> int:
     output_file, round_name = sys.argv[1], sys.argv[2]
-    trials = json.load(open(output_file))["result"]
     results_dir = EXPERIMENT_ROOT / "results" / round_name
-    results_dir.mkdir(parents=True, exist_ok=True)
 
     validate = subprocess.run(
         [
@@ -34,6 +32,9 @@ def main() -> int:
         print(validate.stdout, end="")
         print(validate.stderr, file=sys.stderr)
         return validate.returncode
+
+    trials = json.load(open(output_file))["result"]
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     proc = subprocess.run(
         ["python3", str(EXPERIMENT_ROOT / "tools" / "persist-trials.py"), str(results_dir)],

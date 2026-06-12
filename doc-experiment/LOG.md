@@ -96,6 +96,11 @@ Trial ingestion now rejects subject `code` payloads that do not start with
 record the subject's actual structured answer, and malformed trial output
 cannot be repaired by ingestion before scoring.
 
+Workflow output validation now rejects malformed envelopes, non-array
+`result` payloads, and non-object trial or judge entries with explicit errors.
+Trial and judge ingestion run this validation before reading or persisting the
+payload, keeping bad runner output from creating partial round artifacts.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

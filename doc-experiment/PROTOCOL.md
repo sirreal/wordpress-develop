@@ -204,7 +204,9 @@ task IDs, trial numbers, or structured-output fields do not match
 `explanation` strings plus integer `confidence` 0-100, and `code` must be a
 complete PHP file starting with `<?php`. Incomplete or malformed agent
 responses are rejected before result files are written; ingestion does not
-repair subject code. You can run the same
+repair subject code. Malformed workflow envelopes, non-array `result` payloads,
+and non-object trial entries are rejected before ingestion reads or persists
+the payload. You can run the same
 preflight without writing files:
 
 ```sh
@@ -257,7 +259,9 @@ For metadata-backed rounds, judge workflow preflight rejects missing task
 coverage, missing trial verdicts, non-integer adherence, non-string
 hallucinated method entries, empty trial notes, empty failure analysis, and
 empty doc-gap fields before any `judge.json` or `round-summary.json` is
-written.
+written. Malformed workflow envelopes, non-array `result` payloads, and
+non-object judge entries are rejected before ingestion reads or persists the
+payload.
 
 Adherence rubric (0-100): correct processor choice for the job (30),
 no hallucinated/undocumented API usage (30), idiomatic use of documented
