@@ -16,6 +16,13 @@ locally. Scoring is paused until the next action runs a no-edit
 baseline/calibration on the current corpus under the current model policy. No
 PHP behavior or source docblocks were changed in this reconciliation.
 
+Operational follow-up: round-18 docs and train task prompts were staged in
+`/tmp/html-api-docs-eval/round-18`, but no trusted round-18 score was run. A
+sandboxed Codex CLI smoke runner with isolated `CODEX_HOME` started under
+`gpt-5.4` but failed on restricted network access to `api.openai.com`; the
+unsandboxed escalation path was rejected by policy. The next run still needs a
+valid current-corpus no-edit baseline before source docblock edits.
+
 ## Round 17 — Haiku, hold round (no edits): campaign-best score
 
 **Train 98.93 — the highest of the campaign, with ZERO doc changes.**
