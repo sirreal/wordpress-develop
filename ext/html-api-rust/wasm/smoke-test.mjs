@@ -1949,6 +1949,45 @@ assert.equal(addClassAfterBooleanClassAttribute.get_attribute("class"), "add_cla
 assert.equal(addClassAfterBooleanClassAttribute.get_updated_html(), '<div class="add_class" id="first"><span></span></div>');
 addClassAfterBooleanClassAttribute.destroy();
 
+const addEmptyClassName = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(addEmptyClassName.next_tag("div"), true);
+assert.equal(addEmptyClassName.add_class(null), true);
+assert.equal(addEmptyClassName.add_class(""), true);
+assert.equal(addEmptyClassName.get_updated_html(), "<div></div>");
+addEmptyClassName.destroy();
+
+const addEmptyClassNameWithExistingClass = new WP_HTML_Tag_Processor('<div class="0 1"></div>');
+assert.equal(addEmptyClassNameWithExistingClass.next_tag("div"), true);
+assert.equal(addEmptyClassNameWithExistingClass.add_class(null), true);
+assert.equal(addEmptyClassNameWithExistingClass.get_updated_html(), '<div class="0 1 "></div>');
+addEmptyClassNameWithExistingClass.destroy();
+
+const addFalseClassName = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(addFalseClassName.next_tag("div"), true);
+assert.equal(addFalseClassName.add_class(false), true);
+assert.equal(addFalseClassName.get_updated_html(), '<div class="0"></div>');
+addFalseClassName.destroy();
+
+const addNumericClassName = new WP_HTML_Tag_Processor('<div class="0 1"></div>');
+assert.equal(addNumericClassName.next_tag("div"), true);
+assert.equal(addNumericClassName.add_class(1), true);
+assert.equal(addNumericClassName.add_class("1"), true);
+assert.equal(addNumericClassName.add_class(1.5), true);
+assert.equal(addNumericClassName.get_updated_html(), '<div class="0 1 1 1 1"></div>');
+addNumericClassName.destroy();
+
+const removeNumericClassName = new WP_HTML_Tag_Processor('<div class="0 1 1.5 01 +1"></div>');
+assert.equal(removeNumericClassName.next_tag("div"), true);
+assert.equal(removeNumericClassName.remove_class(false), true);
+assert.equal(removeNumericClassName.remove_class(1), true);
+assert.equal(removeNumericClassName.remove_class("1"), true);
+assert.equal(removeNumericClassName.remove_class(1.5), true);
+assert.equal(removeNumericClassName.get_updated_html(), '<div class="0 1 1.5 01 +1"></div>');
+assert.equal(removeNumericClassName.remove_class("1.5"), true);
+assert.equal(removeNumericClassName.remove_class("01"), true);
+assert.equal(removeNumericClassName.get_updated_html(), '<div class="0 1 +1"></div>');
+removeNumericClassName.destroy();
+
 const stagedAttributeUpdates = new WP_HTML_Tag_Processor(
 	'<hr id="remove" /><div enabled class="test">Test</div><span id="span-id"></span>',
 );

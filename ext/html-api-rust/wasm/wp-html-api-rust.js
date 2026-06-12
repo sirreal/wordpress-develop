@@ -1778,8 +1778,22 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const normalizedClassName = phpInternalStringCoerce(className, "class_name");
-			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
+			const normalizedClassName = phpClassUpdateKey(className, "class_name");
+			if (normalizedClassName.name === "") {
+				const currentClass = this.get_attribute("class");
+				return typeof currentClass === "string" && currentClass !== ""
+					? this.set_attribute("class", `${currentClass} `)
+					: true;
+			}
+			if (normalizedClassName.isIntegerKey && !this.#isQuirksMode()) {
+				const currentClass = this.get_attribute("class");
+				const currentValue = currentClass === null || currentClass === true ? "" : currentClass;
+				return this.set_attribute(
+					"class",
+					currentValue === "" ? normalizedClassName.name : `${currentValue} ${normalizedClassName.name}`,
+				);
+			}
+			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName.name, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_add_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
 		}
@@ -1794,8 +1808,11 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const normalizedClassName = phpInternalStringCoerce(className, "class_name");
-			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
+			const normalizedClassName = phpClassUpdateKey(className, "class_name");
+			if (normalizedClassName.name === "" || (normalizedClassName.isIntegerKey && !this.#isQuirksMode())) {
+				return true;
+			}
+			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName.name, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
 		}
@@ -7759,6 +7776,30 @@ function phpArrayKeyParameterCoerce(value, parameterName) {
 
 	if (value === null) {
 		return "s:";
+	}
+
+	throw new TypeError(`Argument $${parameterName} must be of type array-key.`);
+}
+
+function phpClassUpdateKey(value, parameterName) {
+	if (typeof value === "string") {
+		if (isPhpIntegerArrayKeyString(value)) {
+			return { isIntegerKey: true, name: BigInt(value).toString() };
+		}
+		return { isIntegerKey: false, name: value };
+	}
+
+	if (typeof value === "number") {
+		const integer = phpIntegerCast(value);
+		return { isIntegerKey: true, name: String(Object.is(integer, -0) ? 0 : integer) };
+	}
+
+	if (typeof value === "boolean") {
+		return { isIntegerKey: true, name: value ? "1" : "0" };
+	}
+
+	if (value === null) {
+		return { isIntegerKey: false, name: "" };
 	}
 
 	throw new TypeError(`Argument $${parameterName} must be of type array-key.`);
