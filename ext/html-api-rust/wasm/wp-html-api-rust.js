@@ -2380,6 +2380,7 @@ export function createHtmlApi(wasm) {
 			this.special_start_adoption_preclosed_formatting_elements = [];
 			this.deep_anchor_reconstructed_div_start_offsets = new Set();
 			this.deferred_table_opener = null;
+			this.deferred_table_child_openers = [];
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
@@ -3976,6 +3977,19 @@ export function createHtmlApi(wasm) {
 				this.skip_current_token = true;
 			}
 
+			if (this.#shouldDeferCurrentTableChildOpener(tagName, this.current_token_namespace)) {
+				this.deferred_table_child_openers.push({
+					tokenType: "#tag",
+					tokenName: tagName,
+					tagName,
+					namespaceName: this.current_token_namespace,
+					attributes: this.#currentTokenAttributes(),
+					breadcrumbs: [...this.breadcrumbs],
+					hasSelfClosingFlag: this.has_self_closing_flag(),
+				});
+				this.skip_current_token = true;
+			}
+
 			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
 				this.open_elements.pop();
 				this.open_element_namespaces.pop();
@@ -4030,12 +4044,16 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueDeferredTableOpener() {
-			if (this.deferred_table_opener === null) {
+			if (this.deferred_table_opener === null && this.deferred_table_child_openers.length === 0) {
 				return false;
 			}
 
-			this.delayed_synthetic_tokens.push(this.deferred_table_opener);
+			if (this.deferred_table_opener !== null) {
+				this.delayed_synthetic_tokens.push(this.deferred_table_opener);
+			}
+			this.delayed_synthetic_tokens.push(...this.deferred_table_child_openers);
 			this.deferred_table_opener = null;
+			this.deferred_table_child_openers = [];
 			return true;
 		}
 
@@ -4131,6 +4149,11 @@ export function createHtmlApi(wasm) {
 						breadcrumbs: [...this.deferred_table_opener.breadcrumbs],
 						attributes: this.deferred_table_opener.attributes.map((attribute) => ({ ...attribute })),
 					},
+				deferredTableChildOpeners: this.deferred_table_child_openers.map((token) => ({
+					...token,
+					breadcrumbs: [...token.breadcrumbs],
+					attributes: token.attributes.map((attribute) => ({ ...attribute })),
+				})),
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
@@ -4166,6 +4189,11 @@ export function createHtmlApi(wasm) {
 					breadcrumbs: [...state.deferredTableOpener.breadcrumbs],
 					attributes: (state.deferredTableOpener.attributes ?? []).map((attribute) => ({ ...attribute })),
 				};
+			this.deferred_table_child_openers = (state.deferredTableChildOpeners ?? []).map((token) => ({
+				...token,
+				breadcrumbs: [...token.breadcrumbs],
+				attributes: (token.attributes ?? []).map((attribute) => ({ ...attribute })),
+			}));
 			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
@@ -7982,28 +8010,23 @@ export function createHtmlApi(wasm) {
 				this.deferred_table_opener === null &&
 				tagName === "TABLE" &&
 				namespaceName === "html" &&
-				this.#currentTableStartIsFollowedByFosteredText()
+				this.#currentTableStartIsFollowedByFosteredContent()
 			);
 		}
 
-		#currentTableStartIsFollowedByFosteredText() {
-			const span = this.#currentRealTokenSpan();
-			if (span === null) {
-				return false;
-			}
+		#currentTableStartIsFollowedByFosteredContent() {
+			return this.#currentTokenIsFollowedByFosteredTableContent(
+				new Set(["TBODY", "TFOOT", "THEAD"]),
+			);
+		}
 
-			const afterToken = span.start + span.length;
-			const nextTag = runtime.scanNextTag(this.html, afterToken);
-			const text = nextTag === false
-				? this.html.slice(afterToken)
-				: this.html.slice(afterToken, nextTag.tag_start);
+		#shouldDeferCurrentTableChildOpener(tagName, namespaceName) {
 			return (
-				!this.#isIgnorableTableText(text) ||
-				(
-					nextTag !== false &&
-					!nextTag.is_closing &&
-					(FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) || nextTag.tag_name === "SELECT")
-				)
+				this.is_full_parser &&
+				this.deferred_table_opener !== null &&
+				namespaceName === "html" &&
+				this.#isDeferredTableChildOpenerTag(tagName) &&
+				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
 			);
 		}
 
@@ -8039,12 +8062,22 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.is_tag_closer()) {
-				return tagName === "TABLE" && this.#queueDeferredTableOpener();
+				return (
+					(tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) &&
+					this.#queueDeferredTableOpener()
+				);
 			}
 
 			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
 				this.#bailUnsupported("Foster parenting is not supported.");
 				return true;
+			}
+
+			if (
+				this.#isDeferredTableChildOpenerTag(tagName) &&
+				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
+			) {
+				return false;
 			}
 
 			return TABLE_MODE_START_TAGS.has(tagName) && this.#queueDeferredTableOpener();
@@ -8068,6 +8101,49 @@ export function createHtmlApi(wasm) {
 
 		#currentFosterParentedTableIndex() {
 			return this.open_element_foster_parented_table_indices.at(-1) ?? null;
+		}
+
+		#currentTokenIsFollowedByFosteredTableContent(allowedWrapperTags) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let at = span.start + span.length;
+			let wrappers = allowedWrapperTags;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = nextTag === false
+					? this.html.slice(at)
+					: this.html.slice(at, nextTag.tag_start);
+				if (!this.#isIgnorableTableText(text)) {
+					return true;
+				}
+				if (nextTag === false || nextTag.is_closing) {
+					return false;
+				}
+				if (FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) || nextTag.tag_name === "SELECT") {
+					return true;
+				}
+				if (!wrappers.has(nextTag.tag_name)) {
+					return false;
+				}
+
+				wrappers = this.#deferredTableChildLookaheadTags(nextTag.tag_name);
+				at = nextTag.token_end;
+			}
+		}
+
+		#isDeferredTableChildOpenerTag(tagName) {
+			return tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
+		}
+
+		#deferredTableChildLookaheadTags(tagName) {
+			return TABLE_SECTION_ELEMENTS.has(tagName) ? new Set(["TR"]) : new Set();
+		}
+
+		#hasDeferredTableChildOpener(tagName) {
+			return this.deferred_table_child_openers.some((token) => token.tagName === tagName);
 		}
 
 		#fosterParentedStartTableIndex(tagName) {

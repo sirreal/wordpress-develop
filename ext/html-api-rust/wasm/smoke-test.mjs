@@ -5964,6 +5964,15 @@ assert.equal(
 );
 fullParserFosteredSelectBeforeTable.destroy();
 
+const fullParserFosteredSvgBeforeTableSection = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table><tbody><tr><svg><g>foo</g></svg></tr></tbody></table>",
+);
+assert.equal(
+	fullParserFosteredSvgBeforeTableSection.serialize(),
+	"<!DOCTYPE html><html><head></head><body><svg><g>foo</g></svg><table><tbody><tr></tr></tbody></table></body></html>",
+);
+fullParserFosteredSvgBeforeTableSection.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",
