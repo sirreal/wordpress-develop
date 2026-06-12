@@ -7769,7 +7769,15 @@ function phpIntegerParameterCoerce(value, parameterName) {
 		) {
 			throw new TypeError(`Argument $${parameterName} must be numeric.`);
 		}
-		return Math.trunc(Number(trimmed));
+		const numericValue = Number(trimmed);
+		if (!Number.isFinite(numericValue)) {
+			throw new TypeError(`Argument $${parameterName} must be of type int.`);
+		}
+		return Math.trunc(numericValue);
+	}
+
+	if (typeof value === "number" && !Number.isFinite(value)) {
+		throw new TypeError(`Argument $${parameterName} must be of type int.`);
 	}
 
 	if (
