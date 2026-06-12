@@ -2939,6 +2939,9 @@ assert.equal(WP_HTML_Processor.is_special("math mi"), false);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "math", node_name: "mi" }), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "svg", node_name: "foreignObject" }), true);
 assert.equal(WP_HTML_Processor.is_special({ namespace: "math", node_name: 1 }), false);
+assert.equal(WP_HTML_Processor.is_special({ node_name: "DIV" }), false);
+assert.equal(WP_HTML_Processor.is_special({ namespace: null, node_name: "DIV" }), false);
+assert.equal(WP_HTML_Processor.is_special({ namespace: "html", node_name: null }), false);
 assert.equal(WP_HTML_Processor.is_special({ namespaceName: "svg", tagName: "foreignObject" }), true);
 assert.throws(
 	() => WP_HTML_Processor.is_special({ namespace: "math", node_name: {} }),

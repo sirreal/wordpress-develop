@@ -7883,12 +7883,17 @@ function hasSpecialBoundaryAfter(openElements, namespaces, index) {
 
 function normalizeSpecialTagInput(tagName) {
 	if (tagName && typeof tagName === "object") {
-		const nodeName = phpStringParameterCoerce(
-			tagName.node_name ?? tagName.nodeName ?? tagName.tagName ?? "",
+		const hasNodeName = Object.prototype.hasOwnProperty.call(tagName, "node_name");
+		const hasCamelNodeName = Object.prototype.hasOwnProperty.call(tagName, "nodeName");
+		const hasTagName = Object.prototype.hasOwnProperty.call(tagName, "tagName");
+		const hasNamespace = Object.prototype.hasOwnProperty.call(tagName, "namespace");
+		const hasCamelNamespace = Object.prototype.hasOwnProperty.call(tagName, "namespaceName");
+		const nodeName = phpInternalStringCoerce(
+			hasNodeName ? tagName.node_name : hasCamelNodeName ? tagName.nodeName : hasTagName ? tagName.tagName : "",
 			"node_name",
 		);
-		const namespaceName = phpStringParameterCoerce(
-			tagName.namespace ?? tagName.namespaceName ?? "html",
+		const namespaceName = phpInternalStringCoerce(
+			hasNamespace ? tagName.namespace : hasCamelNamespace ? tagName.namespaceName : "",
 			"namespace",
 		);
 
