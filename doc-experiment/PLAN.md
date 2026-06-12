@@ -57,7 +57,7 @@ probes, scratch-rendered A/B variants, and source-edit hypotheses.
    judging).
 
 6. Judge: one strongest-available judge per task sees the task spec, reference
-   implementation, hidden-test execution results for all 3 trials, the
+   implementation, hidden-test execution results for every trial, the
    markdown docs the subagents saw, and full source access. It scores each
    trial and writes a failure analysis: which doc gap or misleading passage
    caused each failure.
@@ -112,7 +112,8 @@ method-local contracts.
   passed) + 30% API adherence rubric (no hallucinated methods, correct
   processor choice, idiomatic handling of malformed HTML, no
   `_doing_it_wrong` triggers).
-- Task score = mean of 3 trials; round score = mean over 15 train tasks.
+- Task score = mean of all trials for that task, usually 3 unless a weaker
+  tier needs 5 to reduce variance; round score = mean over 15 train tasks.
   Scale 0–100.
 - Revert rule: revert a hypothesis commit if the next round's score drops
   more than 2 points, or a previously passing task regresses across all

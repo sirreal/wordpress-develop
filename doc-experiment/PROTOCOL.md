@@ -41,13 +41,19 @@ policy, then use that result as the current comparison point.
 ## 1. Stage
 
 ```sh
-sh doc-experiment/tools/stage-round.sh <N>   # prints /tmp/html-api-docs-eval/round-NN
+python3 doc-experiment/tools/prepare-round.py <N> \
+  --mode weak-tier-calibration
 ```
 
-If the trial orchestration needs task files, copy only each active task's
-`task.md` into the scratch directory, such as `<scratch>/tasks/<task-id>.md`.
-Do not expose corpus directories, `reference.php`, or `tests.json` to test
-subjects.
+This regenerates the rendered docs, copies only the selected tasks'
+`task.md` files into `/tmp/html-api-docs-eval/round-NN/tasks/`, and writes
+`doc-experiment/results/round-NN/round-metadata.json` with the mode, selected
+tasks, trial count, model policy, git head, and scratch path. It must not copy
+corpus directories, `reference.php`, or `tests.json` into scratch. Use
+`--dry-run` first when reconciling task selection.
+
+`stage-round.sh <N>` remains the low-level docs-only staging command for
+manual scratch variants and shadow-doc A/B setup.
 
 If docs were edited since the last round, first run the docs-only guard:
 
@@ -107,6 +113,20 @@ When orchestrating via the Workflow tool, prefer `schema` structured
 output with fields `code` (string), `explanation` (string), `confidence`
 (integer 0-100) instead of free-text parsing.
 
+For the bundled workflow script, pass the task list and model policy from the
+round metadata:
+
+```json
+{
+  "scratch": "/tmp/html-api-docs-eval/round-NN",
+  "taskIds": ["T01-add-image-class"],
+  "trialsPerTask": 3,
+  "model": "gpt-5.4",
+  "reasoning_effort": "medium",
+  "service_tier": "priority"
+}
+```
+
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and
 one-sentence rationale. Do not execute code or expose hidden tests.
@@ -132,10 +152,11 @@ clearly labeled.
 ## 4. Judge prompt template
 
 One `gpt-5.5` / `xhigh` / `priority` judge per task. The judge receives: the
-task directory contents (task.md, reference.php, tests.json), all three trials
-(candidate.php, explanation, confidence, execution.json), and the two rendered
-markdown docs the subagents saw. The judge may read the html-api source and
-run ad-hoc probes with the harness bootstrap.
+task directory contents (task.md, reference.php, tests.json), every `trial-N`
+directory for that task (candidate.php, explanation, confidence,
+execution.json), and the two rendered markdown docs the subagents saw. The
+judge may read the html-api source and run ad-hoc probes with the harness
+bootstrap.
 
 The judge returns JSON:
 

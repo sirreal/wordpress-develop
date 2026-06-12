@@ -7,7 +7,14 @@ export const meta = {
 }
 
 const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
-const { scratch, taskIds, trialsPerTask, model } = parsedArgs
+const {
+  scratch,
+  taskIds,
+  trialsPerTask = 3,
+  model = 'gpt-5.4',
+  reasoning_effort = 'medium',
+  service_tier = 'priority',
+} = parsedArgs
 
 const SCHEMA = {
   type: 'object',
@@ -50,7 +57,14 @@ Your ONLY sources of information about the HTML API are these two documentation 
 Strict rules: you may use ONLY the Read and Grep tools, and ONLY on the three files listed above. Do not read any other file or directory. Do not run any code or commands. Do not rely on memory of WordPress source code — if the documentation contradicts your memory, trust the documentation. Methods not documented in those two documentation files do not exist.
 
 Deliver via StructuredOutput: code (a complete PHP file defining exactly the requested function), explanation (one short paragraph: your approach and which documented APIs you used), confidence (integer 0-100: how confident you are the implementation passes a strict behavioral test suite).`,
-    { label: `${p.id}/trial-${p.trial}`, phase: 'Trials', schema: SCHEMA, model }
+    {
+      label: `${p.id}/trial-${p.trial}`,
+      phase: 'Trials',
+      schema: SCHEMA,
+      model,
+      reasoning_effort,
+      service_tier,
+    }
   ).then(r => ({ id: p.id, trial: p.trial, ok: !!r, ...(r ?? {}) }))
 ))
 

@@ -68,6 +68,11 @@ def main() -> int:
         print("No results found.", file=sys.stderr)
         return 1
 
+    metadata = None
+    metadata_file = results_dir / "round-metadata.json"
+    if metadata_file.exists():
+        metadata = json.loads(metadata_file.read_text())
+
     # Per-category breakdowns from corpus labels (concept, role, split).
     corpus_dir = Path(__file__).resolve().parent.parent / "corpus"
     by_concept = {}
@@ -91,24 +96,36 @@ def main() -> int:
             core_scores.append(data["score"])
 
     round_score = sum(t["score"] for t in task_scores.values()) / len(task_scores)
-    print(
-        json.dumps(
-            {
-                "round_score": round(round_score, 2),
-                "core_score": round(sum(core_scores) / len(core_scores), 2)
-                if core_scores
-                else None,
-                "by_split": {
-                    k: round(sum(v) / len(v), 2) for k, v in sorted(by_split.items())
-                },
-                "by_concept": {
-                    k: round(sum(v) / len(v), 2) for k, v in sorted(by_concept.items())
-                },
-                "tasks": task_scores,
-            },
-            indent=2,
-        )
-    )
+    summary = {
+        "round_score": round(round_score, 2),
+        "core_score": round(sum(core_scores) / len(core_scores), 2)
+        if core_scores
+        else None,
+        "by_split": {
+            k: round(sum(v) / len(v), 2) for k, v in sorted(by_split.items())
+        },
+        "by_concept": {
+            k: round(sum(v) / len(v), 2) for k, v in sorted(by_concept.items())
+        },
+        "tasks": task_scores,
+    }
+    if metadata is not None:
+        summary["round_metadata"] = {
+            key: metadata.get(key)
+            for key in (
+                "round",
+                "mode",
+                "task_ids",
+                "task_count",
+                "trials_per_task",
+                "subject",
+                "judge",
+                "git_head",
+                "git_status_short",
+            )
+        }
+
+    print(json.dumps(summary, indent=2))
     return 0
 
 

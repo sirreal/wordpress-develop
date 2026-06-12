@@ -64,3 +64,15 @@ python3 render-docs-markdown.py \
 ```
 
 <!-- The experiment harness documentation is appended below by a later step. -->
+
+## Round tools
+
+- `tools/prepare-round.py` — preferred current entry point for a round. It
+  stages rendered docs, copies only selected `task.md` prompts into scratch,
+  and writes `results/round-NN/round-metadata.json`.
+- `tools/stage-round.sh` — low-level docs-only staging command used by
+  `prepare-round.py` and manual scratch variants.
+- `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject
+  outputs and execute them against hidden tests.
+- `tools/ingest-judges.py` / `tools/aggregate-round.py` — persist judge
+  verdicts and compute scored summaries.

@@ -1,13 +1,21 @@
 export const meta = {
   name: 'html-api-docs-judges',
-  description: 'Judge one round of test-subject trials, one Opus judge per task',
+  description: 'Judge one round of test-subject trials, one strongest-available judge per task',
   phases: [
-    { title: 'Judge', detail: 'one judge per task, executes nothing destructive', model: 'opus' },
+    { title: 'Judge', detail: 'one judge per task, executes nothing destructive', model: 'gpt-5.5' },
   ],
 }
 
 const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
-const { repoRoot, round, scratch, taskIds } = parsedArgs
+const {
+  repoRoot,
+  round,
+  scratch,
+  taskIds,
+  model = 'gpt-5.5',
+  reasoning_effort = 'xhigh',
+  service_tier = 'priority',
+} = parsedArgs
 
 const SCHEMA = {
   type: 'object',
@@ -50,7 +58,7 @@ Locations:
 - Task spec (what subjects saw): ${repoRoot}/doc-experiment/corpus/${id}/task.md
 - Canonical reference: ${repoRoot}/doc-experiment/corpus/${id}/reference.php
 - Hidden tests + frozen expectations: ${repoRoot}/doc-experiment/corpus/${id}/tests.json
-- Trials: ${repoRoot}/doc-experiment/results/${round}/${id}/trial-{1,2,3}/ each containing candidate.php, response.json (subject's explanation + self-reported confidence), execution.json (hidden-test results: per-case pass/fail with expected vs actual, plus any _doing_it_wrong records)
+- Trials: ${repoRoot}/doc-experiment/results/${round}/${id}/trial-N/ directories, each containing candidate.php, response.json (subject's explanation + self-reported confidence), execution.json (hidden-test results: per-case pass/fail with expected vs actual, plus any _doing_it_wrong records)
 - The exact docs subjects saw: ${scratch}/html-tag-processor.md and ${scratch}/html-processor.md
 
 Score each trial's ADHERENCE 0-100 by this rubric:
@@ -68,7 +76,14 @@ Then list doc_gaps: concrete, GENERALIZABLE improvements to the docblocks (locat
 You may verify actual API behavior with probes:
   php -r 'require "${repoRoot}/doc-experiment/harness/bootstrap.php"; <probe code>'
 Do not modify any files. Deliver via StructuredOutput.`,
-    { label: `judge:${id}`, phase: 'Judge', schema: SCHEMA, model: 'opus' }
+    {
+      label: `judge:${id}`,
+      phase: 'Judge',
+      schema: SCHEMA,
+      model,
+      reasoning_effort,
+      service_tier,
+    }
   ).then(v => ({ id, verdict: v }))
 ))
 

@@ -2,6 +2,17 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Tooling hardening for current-corpus baseline
+
+Infrastructure-only follow-up, no source docblock edits and no PHP behavior
+changes. Added `prepare-round.py` as the preferred round-preparation entry
+point: it stages rendered docs, copies only selected task prompts into
+scratch, and records mode/model/task metadata under the result directory.
+Updated the workflow scripts and runbook to use the current model policy and
+to treat the number of trials as round metadata rather than a hardcoded
+three-trial assumption. This prepares the required current-corpus no-edit
+baseline without creating a trusted score.
+
 ## Post-round-17 corpus refresh — comparability reset before next score
 
 Start-of-run reconciliation found that the current worktree is clean but the
