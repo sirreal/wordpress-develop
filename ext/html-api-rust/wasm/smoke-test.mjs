@@ -539,12 +539,93 @@ const processorStaticMembers = [
 	"PROCESS_NEXT_NODE",
 	"REPROCESS_CURRENT_NODE",
 ];
+const decoderStaticMethods = [
+	"attribute_starts_with",
+	"code_point_to_utf8_bytes",
+	"decode",
+	"decode_attribute",
+	"decode_text_node",
+	"read_character_reference",
+];
+const doctypeStaticMethods = ["from_doctype_token"];
+const tokenPrototypeMethods = ["destroy", "free"];
+const activeFormattingPrototypeMethods = [
+	"clear_up_to_last_marker",
+	"contains_node",
+	"count",
+	"current_node",
+	"insert_marker",
+	"push",
+	"remove_node",
+	"walk_down",
+	"walk_up",
+];
+const openElementsPrototypeMethods = [
+	"after_element_pop",
+	"after_element_push",
+	"at",
+	"clear_to_table_body_context",
+	"clear_to_table_context",
+	"clear_to_table_row_context",
+	"contains",
+	"contains_node",
+	"count",
+	"current_node",
+	"current_node_is",
+	"has_element_in_button_scope",
+	"has_element_in_list_item_scope",
+	"has_element_in_scope",
+	"has_element_in_select_scope",
+	"has_element_in_specific_scope",
+	"has_element_in_table_scope",
+	"has_p_in_button_scope",
+	"pop",
+	"pop_until",
+	"push",
+	"remove_node",
+	"set_pop_handler",
+	"set_push_handler",
+	"walk_down",
+	"walk_up",
+];
+const stackEventStaticMembers = ["POP", "PUSH"];
+const processorStateStaticMembers = [
+	"INSERTION_MODE_AFTER_AFTER_BODY",
+	"INSERTION_MODE_AFTER_AFTER_FRAMESET",
+	"INSERTION_MODE_AFTER_BODY",
+	"INSERTION_MODE_AFTER_FRAMESET",
+	"INSERTION_MODE_AFTER_HEAD",
+	"INSERTION_MODE_BEFORE_HEAD",
+	"INSERTION_MODE_BEFORE_HTML",
+	"INSERTION_MODE_IN_BODY",
+	"INSERTION_MODE_IN_CAPTION",
+	"INSERTION_MODE_IN_CELL",
+	"INSERTION_MODE_IN_COLUMN_GROUP",
+	"INSERTION_MODE_IN_FRAMESET",
+	"INSERTION_MODE_IN_HEAD",
+	"INSERTION_MODE_IN_HEAD_NOSCRIPT",
+	"INSERTION_MODE_IN_ROW",
+	"INSERTION_MODE_IN_SELECT",
+	"INSERTION_MODE_IN_SELECT_IN_TABLE",
+	"INSERTION_MODE_IN_TABLE",
+	"INSERTION_MODE_IN_TABLE_BODY",
+	"INSERTION_MODE_IN_TABLE_TEXT",
+	"INSERTION_MODE_IN_TEMPLATE",
+	"INSERTION_MODE_INITIAL",
+];
 
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Tag_Processor"), [...tagProcessorPrototypeMethods].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Tag_Processor_Constructor"), [...tagProcessorStaticMembers].sort());
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Processor"), [...processorPrototypeMethods].sort());
 assert.deepEqual(declaredConstructorMethodNames("WP_HTML_Processor_Constructor"), [...processorStaticMethods].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Processor_Constructor"), [...processorStaticMembers].sort());
+assert.deepEqual(declaredConstructorMethodNames("WP_HTML_Decoder_Constructor"), [...decoderStaticMethods].sort());
+assert.deepEqual(declaredConstructorMethodNames("WP_HTML_Doctype_Info_Constructor"), [...doctypeStaticMethods].sort());
+assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Token"), [...tokenPrototypeMethods].sort());
+assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Active_Formatting_Elements"), [...activeFormattingPrototypeMethods].sort());
+assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Open_Elements"), [...openElementsPrototypeMethods].sort());
+assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Stack_Event_Constructor"), [...stackEventStaticMembers].sort());
+assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Processor_State_Constructor"), [...processorStateStaticMembers].sort());
 
 for (const method of tagProcessorPrototypeMethods) {
 	assert.equal(typeof WP_HTML_Tag_Processor.prototype[method], "function", `Missing tag processor method ${method}`);
@@ -565,6 +646,34 @@ for (const method of processorStaticMethods) {
 
 for (const property of processorStaticMembers) {
 	assert.ok(Object.prototype.hasOwnProperty.call(WP_HTML_Processor, property), `Missing processor static member ${property}`);
+}
+
+for (const method of decoderStaticMethods) {
+	assert.equal(typeof WP_HTML_Decoder[method], "function", `Missing decoder static method ${method}`);
+}
+
+for (const method of doctypeStaticMethods) {
+	assert.equal(typeof WP_HTML_Doctype_Info[method], "function", `Missing doctype static method ${method}`);
+}
+
+for (const method of tokenPrototypeMethods) {
+	assert.equal(typeof WP_HTML_Token.prototype[method], "function", `Missing token method ${method}`);
+}
+
+for (const method of activeFormattingPrototypeMethods) {
+	assert.equal(typeof WP_HTML_Active_Formatting_Elements.prototype[method], "function", `Missing active formatting method ${method}`);
+}
+
+for (const method of openElementsPrototypeMethods) {
+	assert.equal(typeof WP_HTML_Open_Elements.prototype[method], "function", `Missing open elements method ${method}`);
+}
+
+for (const property of stackEventStaticMembers) {
+	assert.ok(Object.prototype.hasOwnProperty.call(WP_HTML_Stack_Event, property), `Missing stack event static member ${property}`);
+}
+
+for (const property of processorStateStaticMembers) {
+	assert.ok(Object.prototype.hasOwnProperty.call(WP_HTML_Processor_State, property), `Missing processor state static member ${property}`);
 }
 
 function compareHtml5libTreeAttributes(left, right) {
