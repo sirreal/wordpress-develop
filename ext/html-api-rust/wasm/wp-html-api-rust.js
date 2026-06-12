@@ -7118,6 +7118,13 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (this.deferred_table_opener !== null) {
+				for (const queuedTagName of queued) {
+					this.#deferImplicitTableWrapperOpen(queuedTagName);
+				}
+				return false;
+			}
+
 			for (const queuedTagName of queued) {
 				this.virtual_tokens.push({
 					operation: "push",
@@ -7127,6 +7134,24 @@ export function createHtmlApi(wasm) {
 			}
 
 			return queued.length > 0;
+		}
+
+		#deferImplicitTableWrapperOpen(tagName) {
+			this.open_elements.push(tagName);
+			this.open_element_namespaces.push("html");
+			this.open_element_integration_node_types.push(null);
+			this.open_element_foster_parented_table_indices.push(this.#currentFosterParentedTableIndex());
+			this.breadcrumbs = this.#breadcrumbStack();
+			this.deferred_table_child_openers.push({
+				tokenType: "#tag",
+				tokenName: tagName,
+				tagName,
+				namespaceName: "html",
+				attributes: [],
+				breadcrumbs: [...this.breadcrumbs],
+				hasSelfClosingFlag: false,
+			});
+			this.#setCurrentNamespace("html");
 		}
 
 		#queueFullParserScaffold() {
@@ -8020,7 +8045,7 @@ export function createHtmlApi(wasm) {
 
 		#currentTableStartIsFollowedByFosteredContent() {
 			return this.#currentTokenIsFollowedByFosteredTableContent(
-				new Set(["TBODY", "TFOOT", "THEAD"]),
+				new Set(["TBODY", "TFOOT", "THEAD", "TR"]),
 			);
 		}
 
