@@ -4,6 +4,16 @@ Operational runbook for one evaluation round. Keep in sync with PLAN.md.
 
 ## 0. Choose round mode and model tier
 
+Start every run with the read-only state audit:
+
+```sh
+python3 doc-experiment/tools/audit-state.py
+```
+
+If it reports local drift, corpus/result mismatch, source-doc changes since the
+last trusted score, or missing current-corpus baseline, resolve that state
+before trusting any new score.
+
 Use `priority` service tier for every Codex agent when available.
 
 Judges always use `gpt-5.5` / `xhigh` / `priority` when available. If this

@@ -13,6 +13,11 @@ to treat the number of trials as round metadata rather than a hardcoded
 three-trial assumption. This prepares the required current-corpus no-edit
 baseline without creating a trusted score.
 
+Added `audit-state.py` as a read-only start-of-run guard. It reports worktree
+drift, the latest completed score, current corpus task IDs, source/tooling/corpus
+changes since that score, whether a current-corpus no-edit baseline exists for
+the active subject tier, and the protocol-safe next action.
+
 ## Post-round-17 corpus refresh — comparability reset before next score
 
 Start-of-run reconciliation found that the current worktree is clean but the
