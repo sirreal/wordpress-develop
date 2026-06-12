@@ -412,8 +412,10 @@ const apiFromPromisedInstance = await loadWasm(Promise.resolve(wasmInstance));
 assert.equal(apiFromPromisedInstance.version(), "0.1.0");
 const apiCreatedFromInstance = createHtmlApi(wasmInstance);
 assert.equal(apiCreatedFromInstance.version(), "0.1.0");
+assert.equal(apiCreatedFromInstance.wasm, wasmInstance.exports);
 const apiCreatedFromExports = createHtmlApi(wasmInstance.exports);
 assert.equal(apiCreatedFromExports.version(), "0.1.0");
+assert.equal(apiCreatedFromExports.wasm, wasmInstance.exports);
 const incompleteWasmExports = {
 	...wasmInstance.exports,
 	wp_html_api_rust_scan_next_tag: undefined,
@@ -434,6 +436,7 @@ const apiFromPromisedInstantiatedSource = await loadWasm(Promise.resolve(wasmIns
 assert.equal(apiFromPromisedInstantiatedSource.version(), "0.1.0");
 const apiCreatedFromInstantiatedSource = createHtmlApi(wasmInstantiatedSource);
 assert.equal(apiCreatedFromInstantiatedSource.version(), "0.1.0");
+assert.equal(apiCreatedFromInstantiatedSource.wasm, wasmInstantiatedSource.instance.exports);
 
 if (typeof Response === "function") {
 	const apiFromResponse = await loadWasm(new Response(wasmArrayBuffer.slice(0)));
