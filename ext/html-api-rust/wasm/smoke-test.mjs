@@ -303,6 +303,12 @@ if (typeof Response === "function") {
 	);
 }
 
+if (typeof Request === "function" && typeof fetch === "function") {
+	const wasmDataUrl = `data:application/wasm;base64,${wasmBytes.toString("base64")}`;
+	const apiFromRequest = await loadWasm(new Request(wasmDataUrl));
+	assert.equal(apiFromRequest.version(), "0.1.0");
+}
+
 if (typeof Blob === "function") {
 	const apiFromBlob = await loadWasm(new Blob([wasmArrayBuffer.slice(0)], { type: "application/wasm" }));
 	assert.equal(apiFromBlob.version(), "0.1.0");
