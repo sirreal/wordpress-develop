@@ -576,7 +576,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	expects_closer(node?: HtmlTokenInput | null): boolean | null;
 	get_breadcrumbs(): string[];
 	get_current_depth(): number;
-	matches_breadcrumbs(breadcrumbs: string[]): boolean;
+	matches_breadcrumbs(breadcrumbs: PhpStringParameter[]): boolean;
 	serialize(): string | null;
 	serialize_token(): string;
 }
