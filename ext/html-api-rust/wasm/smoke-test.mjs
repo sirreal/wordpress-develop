@@ -5215,6 +5215,13 @@ assert.equal(tableFragmentStandaloneAnchorProcessor.serialize(), "<a></a>");
 assert.equal(tableFragmentStandaloneAnchorProcessor.get_last_error(), null);
 tableFragmentStandaloneAnchorProcessor.destroy();
 
+for (const html of ["<caption><a>", "<col><a>", "<tbody><a>", "<tfoot><a>", "<thead><a>", "</table><a>"]) {
+	const tableSectionFragmentStandaloneAnchorProcessor = WP_HTML_Processor.create_fragment(html, "<tbody>");
+	assert.equal(tableSectionFragmentStandaloneAnchorProcessor.serialize(), "<a></a>");
+	assert.equal(tableSectionFragmentStandaloneAnchorProcessor.get_last_error(), null);
+	tableSectionFragmentStandaloneAnchorProcessor.destroy();
+}
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");

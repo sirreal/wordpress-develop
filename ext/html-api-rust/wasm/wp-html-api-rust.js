@@ -8487,15 +8487,25 @@ export function createHtmlApi(wasm) {
 				tagName !== "A" ||
 				this.is_full_parser ||
 				this.context_namespace !== "html" ||
-				this.context_node !== "TABLE" ||
 				topIndex !== this.base_open_element_count - 1 ||
-				this.open_elements[topIndex] !== "TABLE"
+				!this.#currentContextCanRepresentStandaloneFosteredStart()
 			) {
 				return false;
 			}
 
 			const span = this.#currentRealTokenSpan();
 			return span !== null && span.start + span.length === this.html.length;
+		}
+
+		#currentContextCanRepresentStandaloneFosteredStart() {
+			const topIndex = this.open_elements.length - 1;
+			return (
+				(this.context_node === "TABLE" && this.open_elements[topIndex] === "TABLE") ||
+				(
+					TABLE_SECTION_ELEMENTS.has(this.context_node) &&
+					this.open_elements[topIndex] === this.context_node
+				)
+			);
 		}
 
 		#wouldUseUnsupportedTableFosterParenting(tagName, isCloser) {
