@@ -414,9 +414,14 @@ export interface HtmlTokenInput {
 export interface WP_HTML_Processor_Options {
 	contextNode?: string;
 	contextNamespace?: HtmlNamespace;
+	contextIntegrationNodeType?: "math" | "html" | null;
+	contextBreadcrumbs?: string[];
 	compatMode?: "no-quirks-mode" | "quirks-mode";
 	fullParser?: boolean;
+	htmlFragmentContext?: boolean;
+	rawTextFragmentContext?: string | null;
 	encodingConfidence?: EncodingConfidence;
+	preserveInBodyIgnoredStartTags?: boolean;
 }
 
 export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
