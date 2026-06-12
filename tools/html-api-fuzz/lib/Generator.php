@@ -348,7 +348,7 @@ class Generator {
 				return $this->character_reference( 'text' ) . $this->terminal_payload();
 			case 'comment':
 				$this->mark_feature( 'comment' );
-				return '<!--' . $this->terminal_comment() . ( $this->rng->chance( 85 ) ? '-->' : $this->rng->choice( array( '--!>', '', '>' ) ) );
+				return $this->comment();
 			case 'void':
 				$this->mark_feature( 'void-element' );
 				return '<' . $this->rng->choice( $this->void_tags ) . $this->attrs() . ( $this->rng->chance( 25 ) ? '/>' : '>' );
@@ -936,15 +936,68 @@ class Generator {
 	}
 
 	private function bogus(): string {
-		return $this->rng->choice(
-			array(
-				'<![CDATA[' . $this->terminal_text() . ']]>',
-				'<?' . $this->terminal_ascii( 8 ) . '?>',
-				'</ ' . $this->terminal_ascii( 5 ),
-				'<' . $this->terminal_ascii( $this->rng->int( 0, 12 ) ),
-				'<//' . $this->terminal_ascii( 10 ) . '>',
-			)
-		);
+		switch ( $this->rng->weighted( array( 'cdata' => 28, 'pi' => 20, 'bogus-declaration' => 18, 'bad-end-tag' => 14, 'short-open' => 12, 'double-slash' => 8 ) ) ) {
+			case 'pi':
+				$this->mark_feature( 'bogus:pi-comment' );
+				return '<?target?>';
+			case 'bogus-declaration':
+				$this->mark_feature( 'bogus:declaration-comment' );
+				return '<!not-a-comment>';
+			case 'bad-end-tag':
+				return '</ ' . $this->terminal_ascii( 5 );
+			case 'short-open':
+				return '<' . $this->terminal_ascii( $this->rng->int( 0, 12 ) );
+			case 'double-slash':
+				return '<//' . $this->terminal_ascii( 10 ) . '>';
+			case 'cdata':
+			default:
+				return '<![CDATA[' . $this->terminal_text() . ']]>';
+		}
+	}
+
+	private function comment(): string {
+		switch ( $this->rng->weighted( array( 'ordinary' => 40, 'ordinary-simple' => 8, 'empty' => 10, 'space' => 6, 'short' => 8, 'short-hyphen' => 8, 'nested-hyphens' => 8, 'malformed-bang' => 4, 'malformed-greater-than' => 4, 'abrupt-eof' => 4, 'bogus-pi' => 4, 'bogus-declaration' => 4 ) ) ) {
+			case 'ordinary-simple':
+				$this->mark_feature( 'comment:ordinary-simple' );
+				return '<!--comment-->';
+			case 'empty':
+				$this->mark_feature( 'comment:empty' );
+				return '<!---->';
+			case 'space':
+				$this->mark_feature( 'comment:space' );
+				return '<!-- -->';
+			case 'short':
+				$this->mark_feature( 'comment:short-empty-end' );
+				return '<!-->';
+			case 'short-hyphen':
+				$this->mark_feature( 'comment:short-hyphen-end' );
+				return '<!--->';
+			case 'nested-hyphens':
+				$this->mark_feature( 'comment:nested-hyphens' );
+				return '<!--a<!--b--c-->';
+			case 'malformed-bang':
+				$this->mark_feature( 'comment:malformed-ending' );
+				$this->mark_feature( 'comment:malformed-bang-ending' );
+				return '<!--x--!>';
+			case 'malformed-greater-than':
+				$this->mark_feature( 'comment:malformed-ending' );
+				$this->mark_feature( 'comment:malformed-greater-than-ending' );
+				return '<!--x>';
+			case 'abrupt-eof':
+				$this->mark_feature( 'comment:malformed-ending' );
+				$this->mark_feature( 'comment:unterminated' );
+				return '<!--x';
+			case 'bogus-pi':
+				$this->mark_feature( 'comment:bogus-pi' );
+				return '<?target?>';
+			case 'bogus-declaration':
+				$this->mark_feature( 'comment:bogus-declaration' );
+				return '<!not-a-comment>';
+			case 'ordinary':
+			default:
+				$this->mark_feature( 'comment:ordinary' );
+				return '<!--' . $this->terminal_comment() . '-->';
+		}
 	}
 
 	private function terminal_text( bool $raw = false ): string {
