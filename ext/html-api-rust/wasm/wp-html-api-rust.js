@@ -6723,6 +6723,10 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			if (this.#queueForeignIntegrationPointTableBreakoutForStartTag(tagName)) {
+				return true;
+			}
+
 			if (tagName === "TABLE") {
 				const tableIndex = this.#tableStartTagPreclosureIndex();
 				if (tableIndex !== -1) {
@@ -6882,6 +6886,32 @@ export function createHtmlApi(wasm) {
 				const sectionIndex = this.#findElementInTableScope((nodeName) => TABLE_SECTION_ELEMENTS.has(nodeName));
 				if (sectionIndex !== -1) {
 					this.#queueVirtualPopsFrom(sectionIndex);
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#queueForeignIntegrationPointTableBreakoutForStartTag(tagName) {
+			if (
+				this.current_namespace !== "html" ||
+				tagName !== "TABLE"
+			) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			for (let i = tableIndex + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_element_namespaces[i] !== "html" &&
+					this.open_element_integration_node_types[i] !== null
+				) {
+					this.#queueVirtualPopsFrom(i);
 					return true;
 				}
 			}
@@ -9035,7 +9065,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "I" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT";
+			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "I" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT" || tagName === "S";
 		}
 
 		#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) {

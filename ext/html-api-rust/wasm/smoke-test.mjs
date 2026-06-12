@@ -6388,6 +6388,15 @@ assert.equal(
 );
 fullParserFosteredItalicDivBeforeTable.destroy();
 
+const fullParserFosteredForeignSelectTable = WP_HTML_Processor.create_full_parser(
+	"<div><table><svg><foreignObject><select><table><s>",
+);
+assert.equal(
+	fullParserFosteredForeignSelectTable.serialize(),
+	"<html><head></head><body><div><svg><foreignObject><select></select></foreignObject></svg><table></table><s></s><table></table></div></body></html>",
+);
+fullParserFosteredForeignSelectTable.destroy();
+
 const fullParserFosteredTextBeforeTableColgroup = WP_HTML_Processor.create_full_parser(
 	"<table><colgroup>foo",
 );
