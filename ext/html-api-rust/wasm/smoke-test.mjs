@@ -142,6 +142,42 @@ async function phpClassConstantNames(fileName) {
 		.sort();
 }
 
+function parsePhpClassConstantValue(value) {
+	value = value.trim();
+	if (value === "true") {
+		return true;
+	}
+	if (value === "false") {
+		return false;
+	}
+	if (value === "null") {
+		return null;
+	}
+	if (/^\d[\d_]*$/.test(value)) {
+		return Number(value.replaceAll("_", ""));
+	}
+	const stringMatch = value.match(/^'([^']*)'$/);
+	assert.ok(stringMatch, `Unsupported PHP class constant value: ${value}`);
+	return stringMatch[1];
+}
+
+async function phpClassConstantValues(fileName) {
+	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
+	return Object.fromEntries(
+		[...source.matchAll(/^\s*const\s+([A-Z0-9_]+)\s*=\s*([^;]+);/gm)]
+			.map((match) => [match[1], parsePhpClassConstantValue(match[2])])
+			.sort(([leftName], [rightName]) => leftName.localeCompare(rightName)),
+	);
+}
+
+function staticMemberValues(classValue, memberNames) {
+	return Object.fromEntries(
+		memberNames
+			.map((memberName) => [memberName, classValue[memberName]])
+			.sort(([leftName], [rightName]) => leftName.localeCompare(rightName)),
+	);
+}
+
 const declaredModuleValueExports = [
 	...typeDeclarations.matchAll(/^export const\s+([A-Za-z_$][\w$]*)\s*:/gm),
 	...typeDeclarations.matchAll(/^export function\s+([A-Za-z_$][\w$]*)\s*\(/gm),
@@ -773,6 +809,26 @@ assert.deepEqual(
 assert.deepEqual(
 	await phpClassConstantNames("class-wp-html-processor-state.php"),
 	[...processorStateStaticMembers].sort(),
+);
+const phpTagProcessorStaticMemberValues = await phpClassConstantValues("class-wp-html-tag-processor.php");
+const phpProcessorStaticMemberValues = await phpClassConstantValues("class-wp-html-processor.php");
+const phpStackEventStaticMemberValues = await phpClassConstantValues("class-wp-html-stack-event.php");
+const phpProcessorStateStaticMemberValues = await phpClassConstantValues("class-wp-html-processor-state.php");
+assert.deepEqual(
+	staticMemberValues(WP_HTML_Tag_Processor, tagProcessorStaticMembers),
+	phpTagProcessorStaticMemberValues,
+);
+assert.deepEqual(
+	staticMemberValues(WP_HTML_Processor, processorStaticMembers),
+	phpProcessorStaticMemberValues,
+);
+assert.deepEqual(
+	staticMemberValues(WP_HTML_Stack_Event, stackEventStaticMembers),
+	phpStackEventStaticMemberValues,
+);
+assert.deepEqual(
+	staticMemberValues(WP_HTML_Processor_State, processorStateStaticMembers),
+	phpProcessorStateStaticMemberValues,
 );
 
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Tag_Processor"), [...tagProcessorPrototypeMethods].sort());
