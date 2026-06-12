@@ -31,6 +31,11 @@ task prompt. Round 18 metadata was backfilled with hashes for the staged
 current-corpus baseline scratch files so the exact docs/prompts can be audited
 without trusting the transient `/tmp` path alone.
 
+Round validation and workflow argument generation now verify the recorded
+scratch hashes before a prepared round is trusted or handed to agents. This
+closes the remaining transient-`/tmp` drift hole: if staged rendered docs or
+task prompts change after preparation, validation fails before scoring.
+
 Round preparation now also records source-file fingerprints for the two HTML
 API class files: raw source SHA-256 plus a comment/whitespace-stripped PHP
 token-stream SHA-256 matching the docs-only guard invariant. Round 18 metadata

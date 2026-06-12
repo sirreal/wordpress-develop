@@ -12,6 +12,7 @@ It is read-only and does not execute candidates or aggregate scores.
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -79,6 +80,19 @@ def validate_scratch(metadata: dict | None) -> list[str]:
         errors.append("scratch missing expected files: " + ", ".join(missing))
     if unexpected:
         errors.append("scratch has unexpected files: " + ", ".join(unexpected))
+
+    expected_hashes = metadata.get("scratch_file_sha256", {})
+    if expected_hashes:
+        for relpath, expected_hash in sorted(expected_hashes.items()):
+            path = scratch_dir / relpath
+            if not path.exists() or not path.is_file():
+                continue
+            actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual_hash != expected_hash:
+                errors.append(
+                    f"scratch hash mismatch for {relpath}: "
+                    f"expected {expected_hash}, got {actual_hash}"
+                )
     return errors
 
 

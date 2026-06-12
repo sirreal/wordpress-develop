@@ -150,6 +150,10 @@ the round metadata:
 python3 doc-experiment/tools/workflow-args.py trials round-NN
 ```
 
+This command verifies the staged scratch directory and recorded file hashes
+before emitting agent-launch arguments. If `/tmp` was cleaned or a staged file
+changed, restage the round rather than launching subjects against drifted docs.
+
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and
 one-sentence rationale. Do not execute code or expose hidden tests.
@@ -196,6 +200,9 @@ For the bundled judge workflow script, generate args from the same metadata:
 python3 doc-experiment/tools/workflow-args.py judges round-NN
 ```
 
+This performs the same scratch/hash preflight because judges must see the exact
+rendered docs that subjects saw.
+
 The judge returns JSON:
 
 ```json
@@ -240,6 +247,8 @@ python3 doc-experiment/tools/validate-round.py round-NN
 
 It should report `judged` before aggregation. After aggregation, rerun it with
 `--require-scored`; it should report `scored` before the score is trusted.
+For metadata-backed rounds, validation also checks that staged scratch files
+still match the SHA-256 hashes recorded at preparation time.
 `ingest-judges.py` validates trial completeness before writing judges and
 judged-state completeness before writing a summary. It also preflights judge
 workflow output shape:

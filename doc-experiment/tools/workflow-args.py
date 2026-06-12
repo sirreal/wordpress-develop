@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,11 +17,33 @@ def results_dir(round_name: str) -> Path:
     return EXPERIMENT_ROOT / "results" / name
 
 
+def metadata_file(round_name: str) -> Path:
+    return results_dir(round_name) / "round-metadata.json"
+
+
 def load_metadata(round_name: str) -> dict:
-    metadata_file = results_dir(round_name) / "round-metadata.json"
-    if not metadata_file.exists():
-        raise FileNotFoundError(f"missing round metadata: {metadata_file}")
-    return json.loads(metadata_file.read_text())
+    path = metadata_file(round_name)
+    if not path.exists():
+        raise FileNotFoundError(f"missing round metadata: {path}")
+    return json.loads(path.read_text())
+
+
+def verify_scratch(round_name: str) -> None:
+    proc = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "verify-scratch-isolation.py"),
+            "--metadata",
+            str(metadata_file(round_name)),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"scratch preflight failed: {message}")
 
 
 def trial_args(metadata: dict) -> dict:
@@ -57,9 +80,16 @@ def main() -> int:
         action="store_true",
         help="Print one-line JSON for copy/paste into workflow runners",
     )
+    parser.add_argument(
+        "--skip-scratch-check",
+        action="store_true",
+        help="Emit metadata-derived args without verifying the staged scratch directory",
+    )
     args = parser.parse_args()
 
     metadata = load_metadata(args.round)
+    if not args.skip_scratch_check:
+        verify_scratch(args.round)
     payload = trial_args(metadata) if args.phase == "trials" else judge_args(metadata)
     print(
         json.dumps(

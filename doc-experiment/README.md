@@ -78,10 +78,11 @@ python3 render-docs-markdown.py \
 - `tools/source-digests.php` — emits raw-source and comment/whitespace-stripped
   PHP token-stream SHA-256 fingerprints for the two HTML API source files.
 - `tools/validate-round.py` — reports whether a round is prepared, partially
-  trialed, trial-complete, judged, or scored, and lists missing artifacts.
+  trialed, trial-complete, judged, or scored, verifies recorded scratch hashes,
+  and lists missing artifacts.
 - `tools/workflow-args.py` — emits trials or judges workflow JSON from
   `round-metadata.json` so model policy and task IDs are not transcribed by
-  hand.
+  hand; it checks scratch isolation and hashes before emitting launch args.
 - `tools/validate-workflow-output.py` — preflights trials or judges workflow
   JSON against round metadata before ingestion writes files.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
