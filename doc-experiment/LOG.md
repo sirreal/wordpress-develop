@@ -76,6 +76,10 @@ Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.
 
+Round validation now verifies recorded HTML API source digests against their
+recorded git ref, in addition to staged scratch hashes. This makes round 18's
+metadata provenance check executable instead of merely documentary.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

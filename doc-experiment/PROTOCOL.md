@@ -283,7 +283,8 @@ python3 doc-experiment/tools/validate-round.py round-NN
 It should report `judged` before aggregation. After aggregation, rerun it with
 `--require-scored`; it should report `scored` before the score is trusted.
 For metadata-backed rounds, validation also checks that staged scratch files
-still match the SHA-256 hashes recorded at preparation time.
+still match the SHA-256 hashes recorded at preparation time and that recorded
+HTML API source digests match their recorded git ref.
 `ingest-judges.py` validates trial completeness before writing judges and
 judged-state completeness before writing a summary. It also preflights judge
 workflow output shape:
