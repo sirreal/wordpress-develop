@@ -622,6 +622,38 @@ scopedOpenElements.push(mathMiToken);
 assert.equal(scopedOpenElements.has_element_in_scope("math MI"), true);
 assert.equal(scopedOpenElements.has_element_in_specific_scope("P", ["math MI"]), false);
 
+const coercedOpenElements = new WP_HTML_Open_Elements();
+coercedOpenElements.push(new WP_HTML_Token("html", "HTML", false));
+coercedOpenElements.push(new WP_HTML_Token("one", "1", false));
+coercedOpenElements.push(new WP_HTML_Token("numeric", "123", false));
+assert.equal(coercedOpenElements.contains(123), true);
+assert.equal(coercedOpenElements.current_node_is(123), true);
+assert.equal(coercedOpenElements.has_element_in_scope(123), true);
+assert.equal(coercedOpenElements.has_element_in_select_scope(123), true);
+assert.equal(coercedOpenElements.pop_until(123), true);
+assert.deepEqual(coercedOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "1"]);
+assert.equal(coercedOpenElements.has_element_in_specific_scope(true, ["HTML"]), true);
+assert.throws(
+	() => coercedOpenElements.contains(null),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.current_node_is([]),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.has_element_in_specific_scope("P", null),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.set_push_handler("not-callable"),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.set_pop_handler(null),
+	TypeError,
+);
+
 const selectOpenElements = new WP_HTML_Open_Elements();
 selectOpenElements.push(new WP_HTML_Token("select", "SELECT", false));
 selectOpenElements.push(new WP_HTML_Token("optgroup", "OPTGROUP", false));

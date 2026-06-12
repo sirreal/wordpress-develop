@@ -856,10 +856,16 @@ export class WP_HTML_Open_Elements {
 	#pushHandler = null;
 
 	set_pop_handler(handler) {
+		if (typeof handler !== "function") {
+			throw new TypeError("Argument $handler must be callable.");
+		}
 		this.#popHandler = handler;
 	}
 
 	set_push_handler(handler) {
+		if (typeof handler !== "function") {
+			throw new TypeError("Argument $handler must be callable.");
+		}
 		this.#pushHandler = handler;
 	}
 
@@ -875,8 +881,9 @@ export class WP_HTML_Open_Elements {
 	}
 
 	contains(nodeName) {
+		const normalizedNodeName = phpStringParameterCoerce(nodeName, "node_name");
 		for (const item of this.walk_up()) {
-			if (nodeName === item.node_name) {
+			if (normalizedNodeName === item.node_name) {
 				return true;
 			}
 		}
@@ -901,6 +908,7 @@ export class WP_HTML_Open_Elements {
 	}
 
 	current_node_is(identity) {
+		const normalizedIdentity = phpStringParameterCoerce(identity, "identity");
 		const currentNode = this.current_node();
 		if (currentNode === null) {
 			return false;
@@ -908,23 +916,24 @@ export class WP_HTML_Open_Elements {
 
 		const currentNodeName = currentNode.node_name;
 		return (
-			currentNodeName === identity ||
-			(identity === "#doctype" && currentNodeName === "html") ||
-			(identity === "#tag" && /^[A-Z]+$/.test(currentNodeName))
+			currentNodeName === normalizedIdentity ||
+			(normalizedIdentity === "#doctype" && currentNodeName === "html") ||
+			(normalizedIdentity === "#tag" && /^[A-Z]+$/.test(currentNodeName))
 		);
 	}
 
 	has_element_in_specific_scope(tagName, terminationList) {
-		const terminationSet = new Set(terminationList ?? []);
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
+		const terminationSet = new Set(phpArrayParameterCoerce(terminationList, "termination_list"));
 		for (const node of this.walk_up()) {
 			const namespacedName = openElementNamespacedName(node);
 
-			if (namespacedName === tagName) {
+			if (namespacedName === normalizedTagName) {
 				return true;
 			}
 
 			if (
-				tagName === "(internal: H1 through H6 - do not use)" &&
+				normalizedTagName === "(internal: H1 through H6 - do not use)" &&
 				HEADING_ELEMENTS.has(namespacedName)
 			) {
 				return true;
@@ -939,7 +948,8 @@ export class WP_HTML_Open_Elements {
 	}
 
 	has_element_in_scope(tagName) {
-		return this.has_element_in_specific_scope(tagName, [
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
+		return this.has_element_in_specific_scope(normalizedTagName, [
 			"APPLET",
 			"CAPTION",
 			"HTML",
@@ -954,7 +964,8 @@ export class WP_HTML_Open_Elements {
 	}
 
 	has_element_in_list_item_scope(tagName) {
-		return this.has_element_in_specific_scope(tagName, [
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
+		return this.has_element_in_specific_scope(normalizedTagName, [
 			"APPLET",
 			"BUTTON",
 			"CAPTION",
@@ -972,7 +983,8 @@ export class WP_HTML_Open_Elements {
 	}
 
 	has_element_in_button_scope(tagName) {
-		return this.has_element_in_specific_scope(tagName, [
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
+		return this.has_element_in_specific_scope(normalizedTagName, [
 			"APPLET",
 			"BUTTON",
 			"CAPTION",
@@ -988,12 +1000,14 @@ export class WP_HTML_Open_Elements {
 	}
 
 	has_element_in_table_scope(tagName) {
-		return this.has_element_in_specific_scope(tagName, ["HTML", "TABLE", "TEMPLATE"]);
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
+		return this.has_element_in_specific_scope(normalizedTagName, ["HTML", "TABLE", "TEMPLATE"]);
 	}
 
 	has_element_in_select_scope(tagName) {
+		const normalizedTagName = phpStringParameterCoerce(tagName, "tag_name");
 		for (const node of this.walk_up()) {
-			if (node.node_name === tagName) {
+			if (node.node_name === normalizedTagName) {
 				return true;
 			}
 
@@ -1020,6 +1034,7 @@ export class WP_HTML_Open_Elements {
 	}
 
 	pop_until(htmlTagName) {
+		const normalizedHtmlTagName = phpStringParameterCoerce(htmlTagName, "html_tag_name");
 		while (this.stack.length > 0) {
 			const item = this.current_node();
 			this.pop();
@@ -1029,13 +1044,13 @@ export class WP_HTML_Open_Elements {
 			}
 
 			if (
-				htmlTagName === "(internal: H1 through H6 - do not use)" &&
+				normalizedHtmlTagName === "(internal: H1 through H6 - do not use)" &&
 				HEADING_ELEMENTS.has(item.node_name)
 			) {
 				return true;
 			}
 
-			if (htmlTagName === item.node_name) {
+			if (normalizedHtmlTagName === item.node_name) {
 				return true;
 			}
 		}
