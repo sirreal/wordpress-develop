@@ -95,6 +95,19 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Bad string tokens have no associated value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_bad_string_token_value_is_null(): void {
+		$processor = WP_CSS_Token_Processor::create( "'str\ning'" );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_BAD_STRING, $processor->get_token_type() );
+		$this->assertNull( $processor->get_token_value() );
+	}
+
+	/**
 	 * @ticket 62653
 	 */
 	public function test_hash_token_type_flag(): void {

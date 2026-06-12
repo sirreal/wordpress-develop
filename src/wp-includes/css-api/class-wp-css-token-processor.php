@@ -718,8 +718,11 @@ class WP_CSS_Token_Processor {
 					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length );
 					break;
 
-				case self::TOKEN_STRING:
 				case self::TOKEN_BAD_STRING:
+					$this->token_value = null;
+					break;
+
+				case self::TOKEN_STRING:
 					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
 						$this->token_value = $this->decode_range(
 							$this->token_value_starts_at,
