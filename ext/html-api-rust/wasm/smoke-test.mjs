@@ -3969,16 +3969,10 @@ assert.equal(
 	"<b><nobr>1</nobr><nobr><ins></ins></nobr></b><nobr><i></i></nobr><i><nobr></nobr></i>",
 );
 
-for (const html of [
-	"<!DOCTYPE html><body><b><nobr>1<table><nobr></b><i><nobr>2<nobr></i>3",
-]) {
-	const unsupportedAdoptionProcessor = WP_HTML_Processor.create_fragment(html);
-	while (unsupportedAdoptionProcessor.next_token() && unsupportedAdoptionProcessor.get_attribute("supported") === null) {
-	}
-	assert.equal(unsupportedAdoptionProcessor.next_token(), false);
-	assert.equal(unsupportedAdoptionProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	unsupportedAdoptionProcessor.destroy();
-}
+assert.equal(
+	WP_HTML_Processor.normalize("<!DOCTYPE html><body><b><nobr>1<table><nobr></b><i><nobr>2<nobr></i>3"),
+	"<b><nobr>1<nobr><i></i></nobr><i><nobr>2</nobr><nobr></nobr></i><nobr>3</nobr><table></table></nobr></b>",
+);
 
 const fullParserText = WP_HTML_Processor.create_full_parser("text");
 assert.equal(fullParserText.next_tag("body"), true);
@@ -5158,12 +5152,18 @@ assert.equal(
 );
 
 const tableTextProcessor = WP_HTML_Processor.create_fragment("<table>text<tr><td>cell");
-while (tableTextProcessor.next_token()) {
-}
-assert.equal(tableTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(tableTextProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+assert.equal(tableTextProcessor.next_token(), true);
+assert.equal(tableTextProcessor.get_token_type(), "#text");
+assert.equal(tableTextProcessor.get_modifiable_text(), "text");
+assert.deepEqual(tableTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(tableTextProcessor.next_tag("td"), true);
+assert.deepEqual(tableTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(tableTextProcessor.get_last_error(), null);
 tableTextProcessor.destroy();
-assert.equal(WP_HTML_Processor.normalize("<table>text<tr><td>cell"), null);
+assert.equal(
+	WP_HTML_Processor.normalize("<table>text<tr><td>cell"),
+	"text<table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
 
 const tableEndParagraphProcessor = WP_HTML_Processor.create_full_parser("<p><table></p>");
 while (tableEndParagraphProcessor.next_token()) {
@@ -5500,8 +5500,12 @@ assert.equal(
 	"<table><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
+assert.equal(
+	WP_HTML_Processor.normalize("<table><div><tr><td>cell"),
+	"<div></div><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 for (const html of [
-	"<table><div><tr><td>cell",
 	"<table><tbody><div><tr><td>cell",
 	"<table><tr><div><td>cell",
 	"<table><input><tr><td>cell",
