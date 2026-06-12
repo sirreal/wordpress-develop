@@ -452,6 +452,7 @@ append_display_element_name(buffer_t *buf, lxb_dom_element_t *element)
 	}
 
 	if (ns == LXB_NS_SVG) {
+		name = lxb_dom_element_qualified_name(element, &len);
 		return buffer_append_cstr(buf, "svg ") && buffer_append_mem(buf, (const char *) name, len);
 	}
 
