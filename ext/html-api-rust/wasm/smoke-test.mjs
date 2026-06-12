@@ -476,6 +476,7 @@ assert.equal(WP_HTML_Decoder.read_character_reference(null, "&notin", 0, scalarD
 assert.equal(scalarDecoderContextLength.value, 4);
 assert.equal(WP_HTML_Decoder.read_character_reference({}, "&notin"), "¬");
 assert.equal(WP_HTML_Decoder.read_character_reference([], "&notin"), "¬");
+assert.equal(WP_HTML_Decoder.read_character_reference("data", null), null);
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "x&copy;", -1), null);
 assert.throws(
 	() => WP_HTML_Decoder.read_character_reference("data", "x&copy;", "1.0"),
@@ -561,6 +562,8 @@ assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", {}), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", []), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with(true, 1), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(null, "anything"), true);
+assert.equal(WP_HTML_Decoder.attribute_starts_with("anything", null), true);
 assert.throws(
 	() => WP_HTML_Decoder.attribute_starts_with({}, ""),
 	TypeError,

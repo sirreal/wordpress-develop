@@ -1454,8 +1454,8 @@ export function createHtmlApi(wasm) {
 	class WP_HTML_Decoder {
 		static attribute_starts_with(haystack, searchText, caseSensitivity = "case-sensitive") {
 			return runtime.decoderAttributeStartsWith(
-				phpStringParameterCoerce(haystack, "haystack"),
-				phpStringParameterCoerce(searchText, "search_text"),
+				phpInternalStringCoerce(haystack, "haystack"),
+				phpInternalStringCoerce(searchText, "search_text"),
 				caseSensitivity === "ascii-case-insensitive",
 			);
 		}
@@ -1478,7 +1478,7 @@ export function createHtmlApi(wasm) {
 		static read_character_reference(context, text, at = 0, matchByteLength = null) {
 			return runtime.decoderReadCharacterReference(
 				context,
-				phpStringParameterCoerce(text, "text"),
+				phpInternalStringCoerce(text, "text"),
 				at,
 				matchByteLength,
 			);

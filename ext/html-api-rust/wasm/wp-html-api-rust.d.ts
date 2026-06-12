@@ -225,8 +225,8 @@ export interface MatchByteLength {
 
 export interface WP_HTML_Decoder_Constructor {
 	attribute_starts_with(
-		haystack: PhpStringParameter,
-		searchText: PhpStringParameter,
+		haystack: PhpInternalStringParameter,
+		searchText: PhpInternalStringParameter,
 		caseSensitivity?: unknown,
 	): boolean;
 	decode_text_node(text: PhpStringParameter): string;
@@ -234,7 +234,7 @@ export interface WP_HTML_Decoder_Constructor {
 	decode(context: unknown, text: PhpStringParameter): string;
 	read_character_reference(
 		context: unknown,
-		text: PhpStringParameter,
+		text: PhpInternalStringParameter,
 		at?: number | string | boolean | null,
 		matchByteLength?: MatchByteLength | null,
 	): string | null;
