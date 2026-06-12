@@ -209,6 +209,12 @@ export type EncodingConfidence = "tentative" | "certain" | "irrelevant";
 
 export type DecoderContext = "attribute" | "data" | string;
 
+export type PhpIntegerParameter = number | string | boolean;
+
+export type PhpStringParameter = string | number | boolean;
+
+export type PhpBooleanParameter = boolean | number | string;
+
 export interface MatchByteLength {
 	value?: number;
 }
@@ -228,7 +234,7 @@ export interface WP_HTML_Decoder_Constructor {
 		at?: number | string | boolean | null,
 		matchByteLength?: MatchByteLength | null,
 	): string | null;
-	code_point_to_utf8_bytes(codePoint: number | string): string;
+	code_point_to_utf8_bytes(codePoint: PhpIntegerParameter | null): string;
 }
 
 export interface WP_HTML_Doctype_Info {
@@ -255,18 +261,18 @@ export interface WP_HTML_Unsupported_Exception extends Error {
 	token_name: string;
 	token_at: number;
 	token: string;
-	stack_of_open_elements: string[];
-	active_formatting_elements: string[];
+	stack_of_open_elements: unknown[];
+	active_formatting_elements: unknown[];
 }
 
 export interface WP_HTML_Unsupported_Exception_Constructor {
 	new (
-		message: string,
-		tokenName: string,
-		tokenAt: number,
-		token: string,
-		stackOfOpenElements: string[],
-		activeFormattingElements: string[],
+		message: PhpStringParameter,
+		tokenName: PhpStringParameter,
+		tokenAt: PhpIntegerParameter,
+		token: PhpStringParameter,
+		stackOfOpenElements: unknown[],
+		activeFormattingElements: unknown[],
 	): WP_HTML_Unsupported_Exception;
 }
 
@@ -278,7 +284,7 @@ export interface WP_HTML_Span {
 }
 
 export interface WP_HTML_Span_Constructor {
-	new (start: number | string, length: number | string): WP_HTML_Span;
+	new (start: PhpIntegerParameter, length: PhpIntegerParameter): WP_HTML_Span;
 }
 
 export const WP_HTML_Span: WP_HTML_Span_Constructor;
@@ -290,7 +296,7 @@ export interface WP_HTML_Text_Replacement {
 }
 
 export interface WP_HTML_Text_Replacement_Constructor {
-	new (start: number | string, length: number | string, text: string): WP_HTML_Text_Replacement;
+	new (start: PhpIntegerParameter, length: PhpIntegerParameter, text: PhpStringParameter): WP_HTML_Text_Replacement;
 }
 
 export const WP_HTML_Text_Replacement: WP_HTML_Text_Replacement_Constructor;
@@ -330,9 +336,9 @@ export interface WP_HTML_Token {
 
 export interface WP_HTML_Token_Constructor {
 	new (
-		bookmarkName: string | null,
-		nodeName: string,
-		hasSelfClosingFlag: boolean,
+		bookmarkName: PhpStringParameter | null,
+		nodeName: PhpStringParameter,
+		hasSelfClosingFlag: PhpBooleanParameter,
 		onDestroy?: ((bookmarkName: string | null) => void) | null,
 	): WP_HTML_Token;
 }
@@ -348,7 +354,7 @@ export interface WP_HTML_Stack_Event {
 export interface WP_HTML_Stack_Event_Constructor {
 	readonly POP: "pop";
 	readonly PUSH: "push";
-	new (token: WP_HTML_Token, operation: string, provenance: string): WP_HTML_Stack_Event;
+	new (token: WP_HTML_Token, operation: PhpStringParameter, provenance: PhpStringParameter): WP_HTML_Stack_Event;
 }
 
 export const WP_HTML_Stack_Event: WP_HTML_Stack_Event_Constructor;
