@@ -324,6 +324,45 @@ assert.equal(typeof WP_HTML_Active_Formatting_Elements, "function");
 assert.equal(typeof WP_HTML_Open_Elements, "function");
 assert.equal(typeof WP_HTML_Processor_State, "function");
 
+const coercedUnsupportedException = new WP_HTML_Unsupported_Exception(
+	123,
+	true,
+	"5.9",
+	false,
+	["HTML"],
+	["B"],
+);
+assert.equal(coercedUnsupportedException.message, "123");
+assert.equal(coercedUnsupportedException.token_name, "1");
+assert.equal(coercedUnsupportedException.token_at, 5);
+assert.equal(coercedUnsupportedException.token, "");
+assert.deepEqual(coercedUnsupportedException.stack_of_open_elements, ["HTML"]);
+assert.deepEqual(coercedUnsupportedException.active_formatting_elements, ["B"]);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception(null, "DIV", 5, "<div>", [], []),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", null, 5, "<div>", [], []),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", "5px", "<div>", [], []),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", 5, null, [], []),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", 5, "<div>", "HTML", []),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Unsupported_Exception("Unsupported", "DIV", 5, "<div>", [], "B"),
+	TypeError,
+);
+
 for (const [fileName, interfaceName, instance] of [
 	["class-wp-html-doctype-info.php", "WP_HTML_Doctype_Info", new WP_HTML_Doctype_Info("html", null, null, false)],
 	[

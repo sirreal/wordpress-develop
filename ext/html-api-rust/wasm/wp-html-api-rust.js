@@ -702,13 +702,26 @@ const textDecoder = new TextDecoder();
 
 export class WP_HTML_Unsupported_Exception extends Error {
 	constructor(message, tokenName, tokenAt, token, stackOfOpenElements, activeFormattingElements) {
-		super(message);
+		const normalizedMessage = phpStringParameterCoerce(message, "message");
+		const normalizedTokenName = phpStringParameterCoerce(tokenName, "token_name");
+		const normalizedTokenAt = phpIntegerParameterCoerce(tokenAt, "token_at");
+		const normalizedToken = phpStringParameterCoerce(token, "token");
+		const normalizedStackOfOpenElements = phpArrayParameterCoerce(
+			stackOfOpenElements,
+			"stack_of_open_elements",
+		);
+		const normalizedActiveFormattingElements = phpArrayParameterCoerce(
+			activeFormattingElements,
+			"active_formatting_elements",
+		);
+
+		super(normalizedMessage);
 		this.name = "WP_HTML_Unsupported_Exception";
-		this.token_name = tokenName;
-		this.token_at = tokenAt;
-		this.token = token;
-		this.stack_of_open_elements = [...stackOfOpenElements];
-		this.active_formatting_elements = [...activeFormattingElements];
+		this.token_name = normalizedTokenName;
+		this.token_at = normalizedTokenAt;
+		this.token = normalizedToken;
+		this.stack_of_open_elements = normalizedStackOfOpenElements;
+		this.active_formatting_elements = normalizedActiveFormattingElements;
 	}
 }
 
@@ -7564,6 +7577,14 @@ function phpBooleanParameterCoerce(value, parameterName) {
 	}
 
 	return Boolean(value);
+}
+
+function phpArrayParameterCoerce(value, parameterName) {
+	if (!Array.isArray(value)) {
+		throw new TypeError(`Argument $${parameterName} must be of type array.`);
+	}
+
+	return [...value];
 }
 
 function contextNamespace(nodeName) {
