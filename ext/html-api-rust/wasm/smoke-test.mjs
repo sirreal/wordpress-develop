@@ -632,9 +632,19 @@ assert.equal(coercedOpenElements.has_element_in_scope(123), true);
 assert.equal(coercedOpenElements.has_element_in_select_scope(123), true);
 assert.equal(coercedOpenElements.pop_until(123), true);
 assert.deepEqual(coercedOpenElements.stack.map(({ node_name }) => node_name), ["HTML", "1"]);
+assert.equal(coercedOpenElements.at(true).node_name, "HTML");
+assert.equal(coercedOpenElements.at("2").node_name, "1");
 assert.equal(coercedOpenElements.has_element_in_specific_scope(true, ["HTML"]), true);
 assert.throws(
 	() => coercedOpenElements.contains(null),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.at("2px"),
+	TypeError,
+);
+assert.throws(
+	() => coercedOpenElements.at(null),
 	TypeError,
 );
 assert.throws(

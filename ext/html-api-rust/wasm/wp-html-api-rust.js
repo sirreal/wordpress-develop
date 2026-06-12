@@ -870,7 +870,7 @@ export class WP_HTML_Open_Elements {
 	}
 
 	at(nth) {
-		let remaining = Math.trunc(Number(nth));
+		let remaining = phpIntegerParameterCoerce(nth, "nth");
 		for (const item of this.walk_down()) {
 			remaining -= 1;
 			if (remaining === 0) {

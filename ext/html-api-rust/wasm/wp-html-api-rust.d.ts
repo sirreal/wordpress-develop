@@ -381,7 +381,7 @@ export interface WP_HTML_Open_Elements {
 	stack: WP_HTML_Token[];
 	set_pop_handler(handler: (token: WP_HTML_Token) => void): void;
 	set_push_handler(handler: (token: WP_HTML_Token) => void): void;
-	at(nth: number | string): WP_HTML_Token | null;
+	at(nth: PhpIntegerParameter): WP_HTML_Token | null;
 	contains(nodeName: PhpStringParameter): boolean;
 	contains_node(token: WP_HTML_Token): boolean;
 	count(): number;
