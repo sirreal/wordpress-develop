@@ -8,6 +8,7 @@ function unwrap_spans( string $html ): string {
 
 	$output = '';
 	while ( $processor->next_token() ) {
+		// A single check for 'SPAN' === $processor->get_token_name() is also idiomatic here.
 		if ( '#tag' === $processor->get_token_type() && 'SPAN' === $processor->get_tag() ) {
 			continue;
 		}
