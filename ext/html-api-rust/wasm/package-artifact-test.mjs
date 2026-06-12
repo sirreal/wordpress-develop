@@ -57,6 +57,11 @@ try {
 	);
 	assert.match(installedReadme, /loadWasm\(\)/);
 	assert.match(installedReadme, /WP_HTML_Processor/);
+	const installedTypes = await readFile(
+		join(workspace, "node_modules", "wp-html-api-rust-wasm", "wp-html-api-rust.d.ts"),
+		"utf8",
+	);
+	assert.match(installedTypes, /get_updated_html\(flushClassNameUpdates\?: boolean\): string;/);
 
 	await writeFile(
 		join(workspace, "consumer.mjs"),

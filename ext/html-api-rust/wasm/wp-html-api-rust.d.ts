@@ -493,7 +493,7 @@ export interface WP_HTML_Tag_Processor {
 	get_qualified_tag_name(): string | null;
 	get_qualified_attribute_name(attributeName: PhpInternalStringParameter): string | null;
 	get_full_comment_text(): string | null;
-	get_updated_html(): string;
+	get_updated_html(flushClassNameUpdates?: boolean): string;
 	toString(): string;
 }
 
