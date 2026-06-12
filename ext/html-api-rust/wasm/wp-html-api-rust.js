@@ -212,6 +212,8 @@ const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "DIV
 const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
+const FONT_PARAGRAPH_ADOPTION_RECONSTRUCTING_START_TAGS = new Set(["META", "TITLE"]);
+const FONT_PARAGRAPH_ADOPTION_SKIPPABLE_END_TAGS = new Set(["TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
 	"COL",
@@ -3834,7 +3836,8 @@ export function createHtmlApi(wasm) {
 				(
 					FORMATTING_ELEMENTS.has(tagName) ||
 					ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(tagName) ||
-					this.#shouldReconstructActiveAnchorForStartTag(tagName)
+					this.#shouldReconstructActiveAnchorForStartTag(tagName) ||
+					this.#shouldReconstructActiveFontForStartTag(tagName)
 				) &&
 				this.#queueReconstructActiveFormattingElements()
 			) {
@@ -4583,6 +4586,14 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
+		#shouldReconstructActiveFontForStartTag(tagName) {
+			return (
+				FONT_PARAGRAPH_ADOPTION_RECONSTRUCTING_START_TAGS.has(tagName) &&
+				this.#lastActiveFormattingElementIndex("FONT") !== -1 &&
+				this.#lastOpenElementIndex("FONT", "html") === -1
+			);
+		}
+
 		#queueParagraphAdoptionFormattingPreclosure(tagName) {
 			if (tagName !== "P" || this.current_namespace !== "html") {
 				return false;
@@ -4638,6 +4649,15 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
+				if (
+					tagName === "FONT" &&
+					nextTag.is_closing &&
+					FONT_PARAGRAPH_ADOPTION_SKIPPABLE_END_TAGS.has(nextTag.tag_name)
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
+
 				if (tagName !== "A" && nextTag.is_closing) {
 					return false;
 				}
@@ -4650,7 +4670,8 @@ export function createHtmlApi(wasm) {
 						tagName === "FONT" &&
 						(
 							FORMATTING_ELEMENTS.has(nextTag.tag_name) ||
-							ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name)
+							ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name) ||
+							FONT_PARAGRAPH_ADOPTION_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name)
 						)
 					) {
 						at = nextTag.token_end;
