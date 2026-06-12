@@ -3823,6 +3823,10 @@ assert.equal(
 	"<b></b><p><b></b>TEST</p>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<font><p>hello<b>cruel</font>world"),
+	"<font></font><p><font>hello<b>cruel</b></font><b>world</b></p>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<a><p>X<a>Y</a>Z</p></a>"),
 	"<a></a><p><a>X</a><a>Y</a>Z</p>",
 );

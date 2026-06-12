@@ -4555,11 +4555,6 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			if (tagName !== "A") {
-				const nextTag = runtime.scanNextTag(this.html, span.start + span.length);
-				return nextTag !== false && nextTag.is_closing && nextTag.tag_name === tagName;
-			}
-
 			let at = span.start + span.length;
 			while (true) {
 				const nextTag = runtime.scanNextTag(this.html, at);
@@ -4578,8 +4573,25 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
+				if (tagName !== "A" && nextTag.is_closing) {
+					return false;
+				}
+
 				if (!nextTag.is_closing) {
-					return tagName === "A" && nextTag.tag_name === "A";
+					if (tagName === "A" && nextTag.tag_name === "A") {
+						return true;
+					}
+					if (
+						tagName === "FONT" &&
+						(
+							FORMATTING_ELEMENTS.has(nextTag.tag_name) ||
+							ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS.has(nextTag.tag_name)
+						)
+					) {
+						at = nextTag.token_end;
+						continue;
+					}
+					return false;
 				}
 
 				at = nextTag.token_end;
