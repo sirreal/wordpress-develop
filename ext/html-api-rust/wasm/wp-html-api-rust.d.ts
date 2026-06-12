@@ -590,7 +590,7 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 	readonly CONSTRUCTOR_UNLOCK_CODE: string;
 	create_fragment(html: unknown, context?: string, encoding?: string): WP_HTML_Processor | null;
 	create_full_parser(html: unknown, encoding?: string): WP_HTML_Processor | null;
-	normalize(html: unknown): string | null;
+	normalize(html: PhpStringParameter): string | null;
 	is_void(tagName: string): boolean;
 	is_special(tagName: string | SpecialTagInput): boolean;
 }

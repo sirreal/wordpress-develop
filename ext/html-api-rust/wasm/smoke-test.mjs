@@ -2741,7 +2741,16 @@ assert.notEqual(emptyTextareaFragment, null);
 emptyTextareaFragment.destroy();
 assert.equal(WP_HTML_Processor.create_full_parser(null), null);
 assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
-assert.equal(WP_HTML_Processor.normalize(null), null);
+assert.equal(WP_HTML_Processor.normalize(123), "123");
+assert.equal(WP_HTML_Processor.normalize(false), "");
+assert.throws(
+	() => WP_HTML_Processor.normalize(null),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Processor.normalize({ html: "<p>object" }),
+	TypeError,
+);
 
 class Custom_HTML_Processor extends WP_HTML_Processor {
 	custom_method() {

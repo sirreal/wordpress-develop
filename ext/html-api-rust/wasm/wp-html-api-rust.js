@@ -2385,7 +2385,8 @@ export function createHtmlApi(wasm) {
 		}
 
 		static normalize(html) {
-			const processor = this.create_fragment(html);
+			const normalizedHtml = phpStringParameterCoerce(html, "html");
+			const processor = this.create_fragment(normalizedHtml);
 			if (processor === null) {
 				return null;
 			}
