@@ -1988,6 +1988,15 @@ assert.equal(fullParserIncompleteEndTagProcessor.get_last_error(), null);
 assert.deepEqual(fullParserIncompleteEndTagProcessor.get_breadcrumbs(), []);
 fullParserIncompleteEndTagProcessor.destroy();
 
+const fullParserIncompleteQuotedAttributeProcessor = WP_HTML_Processor.create_full_parser(
+	'<html><body><img src="" border="0" alt="><div>A</div></body></html>',
+);
+while (fullParserIncompleteQuotedAttributeProcessor.next_token()) {}
+assert.equal(fullParserIncompleteQuotedAttributeProcessor.paused_at_incomplete_token(), false);
+assert.equal(fullParserIncompleteQuotedAttributeProcessor.get_last_error(), null);
+assert.deepEqual(fullParserIncompleteQuotedAttributeProcessor.get_breadcrumbs(), []);
+fullParserIncompleteQuotedAttributeProcessor.destroy();
+
 const fullParserIncompleteRawtextProcessor = WP_HTML_Processor.create_full_parser('<script type="data"><!-- foo-');
 assert.equal(fullParserIncompleteRawtextProcessor.next_tag("script"), true);
 assert.equal(fullParserIncompleteRawtextProcessor.get_modifiable_text(), "<!-- foo-");

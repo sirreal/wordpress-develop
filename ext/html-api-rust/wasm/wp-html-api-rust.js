@@ -2448,6 +2448,10 @@ export function createHtmlApi(wasm) {
 					return this.next_token();
 				}
 
+				if (this.#skipIncompleteFullParserQuotedStartTag()) {
+					return this.next_token();
+				}
+
 				if (this.#skipIncompleteSelectBreakoutStartTag()) {
 					return this.next_token();
 				}
@@ -5427,6 +5431,25 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#skipIncompleteFullParserQuotedStartTag() {
+			if (!this.is_full_parser) {
+				return false;
+			}
+
+			const tokenStart = this.#incompleteTokenStart();
+			if (tokenStart === null || !incompleteQuotedStartTagAt(this.html, tokenStart)) {
+				return false;
+			}
+
+			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, this.html.length);
+			this.parser_state = STATE_READY;
+			this.current_virtual = null;
+			this.current_synthetic_token = null;
+			this.skip_current_token = false;
+			this.breadcrumbs = this.#breadcrumbStack();
+			return true;
+		}
+
 		#seekPastCurrentStartTag() {
 			const span = this.#nativeCurrentSpan();
 			if (span === null) {
@@ -6870,6 +6893,56 @@ function incompleteEndTagAt(value, at) {
 	}
 
 	return true;
+}
+
+function incompleteQuotedStartTagAt(value, at) {
+	const end = value.length;
+	if (value.charCodeAt(at) !== 0x3c /* < */) {
+		return false;
+	}
+
+	let nameStart = at + 1;
+	if (nameStart >= end || !isAsciiAlphaCode(value.charCodeAt(nameStart))) {
+		return false;
+	}
+
+	let nameEnd = nameStart + 1;
+	while (nameEnd < end && !isTagNameDelimiterCode(value.charCodeAt(nameEnd))) {
+		nameEnd += 1;
+	}
+
+	let afterEquals = false;
+	let quote = null;
+	for (let i = nameEnd; i < end; i += 1) {
+		const code = value.charCodeAt(i);
+		if (quote !== null) {
+			if (code === quote) {
+				quote = null;
+			}
+			continue;
+		}
+
+		if (afterEquals && (code === 0x22 /* " */ || code === 0x27 /* ' */)) {
+			quote = code;
+			afterEquals = false;
+			continue;
+		}
+
+		if (code === 0x3d /* = */) {
+			afterEquals = true;
+			continue;
+		}
+
+		if (code === 0x3e /* > */ || code === 0x3c /* < */) {
+			return false;
+		}
+
+		if (!isHtmlWhitespaceCode(code)) {
+			afterEquals = false;
+		}
+	}
+
+	return quote !== null;
 }
 
 function isHtmlWhitespaceCode(code) {
