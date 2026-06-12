@@ -6452,6 +6452,15 @@ assert.equal(
 );
 fullParserFosteredDivBeforeTableCell.destroy();
 
+const fullParserWhitespaceBeforeFosteredCenterTableCell = WP_HTML_Processor.create_full_parser(
+	"<table>\n<tr><center><td>",
+);
+assert.equal(
+	fullParserWhitespaceBeforeFosteredCenterTableCell.serialize(),
+	"<html><head></head><body><center></center><table>\n<tbody><tr><td></td></tr></tbody></table></body></html>",
+);
+fullParserWhitespaceBeforeFosteredCenterTableCell.destroy();
+
 const fullParserFosteredListItemsBeforeTable = WP_HTML_Processor.create_full_parser(
 	"<table><li><li></table>",
 );

@@ -3409,6 +3409,15 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (
+					tokenType === "#text" &&
+					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+					this.#currentTextChunkPrecedesDeferredTableChildOpener()
+				) {
+					this.#deferCurrentTextAsTableChild();
+					return;
+				}
+
 				if (tokenType === "#text" && this.#isInTableTextContext()) {
 					if (this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE) {
 						this.skip_current_token = true;
@@ -8493,6 +8502,13 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (tokenType === "#text") {
+				if (
+					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+					this.#currentTextChunkPrecedesDeferredTableChildOpener()
+				) {
+					return false;
+				}
+
 				return (
 					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
 					!this.#currentTextChunkPrecedesFosteredTableText() &&
@@ -8608,6 +8624,13 @@ export function createHtmlApi(wasm) {
 		#representFosteredTextBeforeDeferredTable() {
 			if (!this.is_full_parser || this.deferred_table_opener === null) {
 				return false;
+			}
+
+			if (
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+				this.#currentTextChunkPrecedesDeferredTableChildOpener()
+			) {
+				return this.#deferCurrentTextAsTableChild();
 			}
 
 			if (
@@ -9017,7 +9040,13 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			let at = span.start + span.length;
+			return this.#tokenEndIsFollowedByFosteredTableContent(
+				span.start + span.length,
+				allowedWrapperTags,
+			);
+		}
+
+		#tokenEndIsFollowedByFosteredTableContent(at, allowedWrapperTags) {
 			let wrappers = allowedWrapperTags;
 			while (true) {
 				const nextTag = runtime.scanNextTag(this.html, at);
@@ -9708,6 +9737,34 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.#isFosteredTableLookaheadStartTag(nextTag);
+		}
+
+		#currentTextChunkPrecedesDeferredTableChildOpener() {
+			if (
+				this.deferred_table_opener === null ||
+				!this.#currentHtmlElementIs("TABLE")
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const nextTag = this.#nextNonWhitespaceTag(span.start + span.length);
+			if (
+				nextTag === false ||
+				nextTag.is_closing ||
+				!this.#isDeferredTableChildOpenerTag(nextTag.tag_name)
+			) {
+				return false;
+			}
+
+			return this.#tokenEndIsFollowedByFosteredTableContent(
+				nextTag.token_end,
+				this.#deferredTableChildLookaheadTags(nextTag.tag_name),
+			);
 		}
 
 		#currentTextChunkPrecedesIgnoredEndTagFosteredText() {
