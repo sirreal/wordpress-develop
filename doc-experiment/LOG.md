@@ -31,6 +31,12 @@ task prompt. Round 18 metadata was backfilled with hashes for the staged
 current-corpus baseline scratch files so the exact docs/prompts can be audited
 without trusting the transient `/tmp` path alone.
 
+Round preparation now also records source-file fingerprints for the two HTML
+API class files: raw source SHA-256 plus a comment/whitespace-stripped PHP
+token-stream SHA-256 matching the docs-only guard invariant. Round 18 metadata
+was backfilled with those fingerprints. This is infrastructure/results metadata
+only; no source docblock or PHP behavior changed.
+
 Added `validate-workflow-output.py` and wired it into trial/judge ingestion.
 Workflow output files are now checked against round metadata and structured
 output shape before any candidate, execution, judge, or summary file is

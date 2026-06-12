@@ -64,6 +64,20 @@ def run_text(command: list[str]) -> str:
     return proc.stdout.strip()
 
 
+def source_digests(ref: str | None = None) -> dict:
+    command = [
+        "php",
+        str(EXPERIMENT_ROOT / "tools" / "source-digests.php"),
+        "--json",
+    ]
+    if ref:
+        command.extend(["--ref", ref])
+
+    return json.loads(
+        run_text(command)
+    )
+
+
 def active_tasks() -> dict[str, dict]:
     tasks = {}
     for tests_file in sorted((EXPERIMENT_ROOT / "corpus").glob("*/tests.json")):
@@ -149,6 +163,9 @@ def main() -> int:
     round_number, round_name = round_parts(args.round)
     tasks = active_tasks()
     selected = select_tasks(tasks, args.mode, args.tasks)
+    git_head = run_text(["git", "rev-parse", "HEAD"])
+    git_status_short = run_text(["git", "status", "--short"])
+    source_ref = None if git_status_short else git_head
 
     metadata = {
         "round": round_name,
@@ -168,8 +185,9 @@ def main() -> int:
             "reasoning_effort": args.judge_reasoning_effort,
             "service_tier": args.judge_service_tier,
         },
-        "git_head": run_text(["git", "rev-parse", "HEAD"]),
-        "git_status_short": run_text(["git", "status", "--short"]),
+        "git_head": git_head,
+        "git_status_short": git_status_short,
+        "source_file_digests": source_digests(source_ref),
         "created_at_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "isolation": {
             "scratch_contains": [

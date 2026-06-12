@@ -58,11 +58,16 @@ python3 doc-experiment/tools/prepare-round.py <N> \
 This regenerates the rendered docs, copies only the selected tasks'
 `task.md` files into `/tmp/html-api-docs-eval/round-NN/tasks/`, and writes
 `doc-experiment/results/round-NN/round-metadata.json` with the mode, selected
-tasks, trial count, model policy, git head, and scratch path. It must not copy
-corpus directories, `reference.php`, or `tests.json` into scratch. Use
-`--dry-run` first when reconciling task selection. The preparation script runs
-`verify-scratch-isolation.py` before writing metadata and records SHA-256
-hashes for every staged doc and task prompt.
+tasks, trial count, model policy, git head, scratch path, and HTML API source
+file digests. It must not copy corpus directories, `reference.php`, or
+`tests.json` into scratch. Use `--dry-run` first when reconciling task
+selection. The preparation script runs `verify-scratch-isolation.py` before
+writing metadata and records SHA-256 hashes for every staged doc and task
+prompt. Source digests include both raw source bytes and a comment/whitespace
+stripped PHP token-stream fingerprint matching the docs-only guard invariant.
+When the worktree is clean, the digest ref is the recorded `git_head`; when
+local drift exists, it is `working-tree` and `git_status_short` records the
+drift.
 
 `stage-round.sh <N>` remains the low-level docs-only staging command for
 manual scratch variants and shadow-doc A/B setup.
@@ -78,6 +83,12 @@ If docs were edited since the last round, first run the docs-only guard:
 
 ```sh
 php doc-experiment/tools/docs-only-guard.php
+```
+
+To inspect the source fingerprints recorded by prepared rounds:
+
+```sh
+php doc-experiment/tools/source-digests.php
 ```
 
 For `shadow-doc-a/b`, stage normal docs first, then copy the staged directory
