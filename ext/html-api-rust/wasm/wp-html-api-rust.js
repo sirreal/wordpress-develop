@@ -7977,7 +7977,7 @@ export function createHtmlApi(wasm) {
 				return tagName === "TABLE" && this.#queueDeferredTableOpener();
 			}
 
-			if (tagName === "INPUT" || SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
 				this.#bailUnsupported("Foster parenting is not supported.");
 				return true;
 			}
