@@ -5,6 +5,11 @@ Improve the documentation of `WP_HTML_Tag_Processor` and `WP_HTML_Processor`
 models can complete real HTML API tasks using *only* the rendered
 documentation, then editing the docs to fix observed failure modes.
 
+Current phase: after round 17 the train score is saturated enough that the
+primary work is no longer "run another full round, add the latest gap." Use
+`doc-experiment/NEXT-HYPOTHESES.md` as the backlog for diagnostic probes,
+scratch-rendered A/B variants, and source-edit hypotheses.
+
 ## Pipeline (per round)
 
 1. Regenerate parsed-doc JSON (script lives in the phpdoc-parser checkout;
@@ -36,11 +41,10 @@ documentation, then editing the docs to fix observed failure modes.
    repo (e.g. `/tmp/html-api-docs-eval/round-NN/`). Test subagents are given
    those two absolute paths and never learn the repo location.
 
-4. Run the train set: 12 tasks × 3 independent test-subagent trials
-   (Sonnet initially; Haiku after the Sonnet plateau). One fresh subagent per
-   task-trial, run in parallel. Test subagents get Read + Grep only, the task
-   prompt, and the two markdown paths. They MUST NOT access any other
-   information source or execute code. Their deliverable: PHP code +
+4. Run the train set with one primary subject tier per scored round. One fresh
+   subagent per task-trial, run in parallel. Test subagents get Read + Grep
+   only, the task prompt, and the two markdown paths. They MUST NOT access any
+   other information source or execute code. Their deliverable: PHP code +
    explanation + self-reported confidence. Spot-check transcripts for
    isolation violations each round.
 
@@ -48,14 +52,55 @@ documentation, then editing the docs to fix observed failure modes.
    hidden test cases (deterministic pass/fail per case, recorded before
    judging).
 
-6. Judge: one Opus judge per task sees the task spec, reference
+6. Judge: one strongest-available judge per task sees the task spec, reference
    implementation, hidden-test execution results for all 3 trials, the
    markdown docs the subagents saw, and full source access. It scores each
    trial and writes a failure analysis: which doc gap or misleading passage
    caused each failure.
 
-7. Analyze failures, form doc-edit hypotheses, edit docblocks, commit
-   (one commit per hypothesis), regenerate, next round.
+7. Analyze failures, form hypotheses, and choose the next action:
+   no-edit weak-tier calibration, citation-only discoverability probes,
+   scratch-rendered A/B variants, or source docblock edits. Source edits are
+   promoted only after diagnostic evidence, and then committed one hypothesis
+   per commit.
+
+## Current model policy
+
+Use `priority` service tier for every Codex agent when available.
+
+- Judges: always `gpt-5.5` / `xhigh` / `priority` when available. If this
+  is unavailable, pause or explicitly record the downgrade; do not silently
+  compare judge scores across judge tiers.
+- Test subjects, strongest to weakest:
+  1. `gpt-5.4` / `medium` / `priority`
+  2. `gpt-5.4` / `low` / `priority`
+  3. `gpt-5.4-mini` / `high` / `priority`
+  4. `gpt-5.4-mini` / `low` / `priority`
+
+Use one primary subject tier per scored round. Do not mix tiers into the main
+round score. Step down only after no-edit calibration shows the next tier is a
+useful measuring instrument: not saturated, but still mostly failing on
+documentation/API reasoning rather than generic coding errors. Cross-tier
+panels are diagnostic only until each tier has its own no-edit baseline.
+
+## Post-round-17 diagnostic loop
+
+Before promoting more source docblock edits, prefer this sequence:
+
+1. Run no-edit weak-tier calibration across the subject ladder, one tier at a
+   time.
+2. Run citation-only discoverability probes for the strong candidate contracts
+   in `NEXT-HYPOTHESES.md`.
+3. Create scratch-rendered variants that insert contract cards, relocate
+   method-local facts, or remove noisy rendered sections without editing source.
+4. Run paired shadow-doc A/B tests against the selected primary tier.
+5. Promote only winning variants to source docblocks, one hypothesis per
+   commit, then run the docs-only guard and a normal scored round.
+
+Strong current candidates are: the depth-boundary equivalence card, factory
+lifecycle contract, where-text-lives matrix, method-heading contract cards,
+signal-density pruning, parsed identity/namespace contract, and smaller
+method-local contracts.
 
 ## Scoring
 
@@ -106,6 +151,13 @@ cases. All references must pass their hidden tests in the harness, and
 extraction tasks are cross-checked against PHP's Dom\HTMLDocument oracle,
 before they enter a round.
 
+Held-out must stay protected in the post-round-17 phase. Do not run every
+agent tier against held-out every round. Regular scored rounds use the primary
+tier on train. Checkpoint/final rounds may run the primary tier on train plus
+held-out. Cross-tier panels should be train-only or diagnostic; if they include
+held-out, treat held-out results as regression sentinels only, never edit
+drivers.
+
 ## Execution harness
 
 Standalone PHP CLI harness (no WordPress boot, no DB): requires the html-api
@@ -126,15 +178,19 @@ Tasks are authored to avoid protocol-filtering-sensitive expectations.
   otherwise allowed (file-, class-, property-, method-level, both files).
 - Docs are free-form: optimized purely for scores, not for WP documentation
   standards (upstreaming is a later, separate concern).
-- Switch Sonnet → Haiku when the Sonnet train score is ≥90 for 2 consecutive
-  rounds (re-baseline with Haiku before further edits).
-- Stop when 2 consecutive Haiku rounds show no significant gain, or on
-  Jon's interrupt.
+- Step down the subject ladder when the current primary tier is saturated for
+  two consecutive train rounds and checkpoint held-out is stable. Re-baseline
+  the new tier with no doc edits before using it to drive source changes.
+- Stop or pause when the selected weak tier has two consecutive flat rounds,
+  when diagnostic A/B tests stop producing concept-level signal, or on Jon's
+  interrupt.
 
 ## Repo layout
 
 - `doc-experiment/PLAN.md` — this contract; update it when the design
   changes.
+- `doc-experiment/NEXT-HYPOTHESES.md` — post-round-17 hypotheses, model
+  policy, diagnostic tests, and source-promotion criteria.
 - `doc-experiment/render-docs-markdown.py` — JSON→markdown renderer.
 - `doc-experiment/corpus/` — task specs, reference implementations, hidden
   test cases (never exposed to test subagents).

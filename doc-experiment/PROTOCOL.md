@@ -2,6 +2,37 @@
 
 Operational runbook for one evaluation round. Keep in sync with PLAN.md.
 
+## 0. Choose round mode and model tier
+
+Use `priority` service tier for every Codex agent when available.
+
+Judges always use `gpt-5.5` / `xhigh` / `priority` when available. If this
+is unavailable, pause or explicitly record the downgrade.
+
+Test subjects use one primary tier per scored round:
+
+1. `gpt-5.4` / `medium` / `priority`
+2. `gpt-5.4` / `low` / `priority`
+3. `gpt-5.4-mini` / `high` / `priority`
+4. `gpt-5.4-mini` / `low` / `priority`
+
+Do not mix subject tiers into the main round score. Before a new tier drives
+source edits, run a no-edit baseline for that tier.
+
+Pick exactly one round mode:
+
+- `scored-train`: primary tier on train tasks only; this is the normal edit
+  feedback loop.
+- `checkpoint`: primary tier on train plus held-out; held-out is a regression
+  sentinel and never drives edits.
+- `weak-tier-calibration`: current docs, no edits, one candidate tier at a
+  time; selects the next measuring instrument.
+- `discoverability-probe`: citation-only questions against rendered docs; no
+  hidden tests and no source edits.
+- `shadow-doc-a/b`: compare normal rendered docs against a scratch-only
+  rendered variant, such as contract cards or pruning. Source docblocks are not
+  edited until a variant wins and is promoted as its own hypothesis.
+
 ## 1. Stage
 
 ```sh
@@ -14,11 +45,17 @@ If docs were edited since the last round, first run the docs-only guard:
 php doc-experiment/tools/docs-only-guard.php
 ```
 
+For `shadow-doc-a/b`, stage normal docs first, then copy the staged directory
+to a variant scratch directory and apply rendered-markdown-only changes there.
+Do not edit source docblocks for the variant. Record the variant name in the
+result directory and judge prompts.
+
 ## 2. Test-subagent prompt template
 
 One agent per task-trial; agent type `docs-test-subject` (Read+Grep only,
-defined in `.claude/agents/`); model `sonnet` (later `haiku`); 3 trials per
-task. Note: agent definitions register at session start — in a session
+defined in `.claude/agents/`); use the selected primary subject tier from
+section 0; 3 trials per task unless a weaker tier needs 5 trials to reduce
+variance. Note: agent definitions register at session start — in a session
 older than the definition, fall back to a general agent with the
 prompt-level restrictions below and spot-check transcripts for isolation
 violations. Substitute `{SCRATCH}` and `{TASK_MD}`:
@@ -60,6 +97,10 @@ When orchestrating via the Workflow tool, prefer `schema` structured
 output with fields `code` (string), `explanation` (string), `confidence`
 (integer 0-100) instead of free-text parsing.
 
+For `discoverability-probe`, replace the implementation prompt with a
+question-answer prompt requiring: answer, cited markdown file/heading, and
+one-sentence rationale. Do not execute code or expose hidden tests.
+
 ## 3. Execute
 
 For each trial, write the returned code to
@@ -74,13 +115,17 @@ php doc-experiment/harness/run-tests.php \
 
 (`run-tests.php` exits non-zero on failures; the JSON is still complete.)
 
+Skip this section for `discoverability-probe` rounds. For `shadow-doc-a/b`,
+execute control and variant candidates separately and keep result directories
+clearly labeled.
+
 ## 4. Judge prompt template
 
-One Opus judge per task. The judge receives: the task directory contents
-(task.md, reference.php, tests.json), all three trials (candidate.php,
-explanation, confidence, execution.json), and the two rendered markdown
-docs the subagents saw. The judge may read the html-api source and run
-ad-hoc probes with the harness bootstrap.
+One `gpt-5.5` / `xhigh` / `priority` judge per task. The judge receives: the
+task directory contents (task.md, reference.php, tests.json), all three trials
+(candidate.php, explanation, confidence, execution.json), and the two rendered
+markdown docs the subagents saw. The judge may read the html-api source and
+run ad-hoc probes with the harness bootstrap.
 
 The judge returns JSON:
 
@@ -107,6 +152,15 @@ patterns — bookmarks, breadcrumbs, token walking (25), graceful handling
 of edge cases the docs describe (15). Execution results measure
 correctness separately; adherence is about HOW the API was used.
 
+For held-out tasks, judges may report regressions but their `doc_gaps` must be
+tagged `held-out-only` and must not drive source edits unless the same issue
+has train or probe evidence.
+
+For `shadow-doc-a/b`, ask judges to compare whether the variant changed
+failure modes, hallucinated methods, local citations, or unnecessary fallback
+branches. A variant "wins" only if it improves concept-level behavior or
+discoverability without a clean regression.
+
 ## 5. Aggregate and record
 
 ```sh
@@ -114,8 +168,12 @@ python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN
 ```
 
 Record in LOG.md: round score, per-task scores, judge doc_gaps summary.
-Commit results, then make doc edits (one commit per hypothesis), re-run
-the guard, and stage the next round.
+Commit results. For normal scored rounds, make source doc edits only when the
+evidence supports a general hypothesis; commit one hypothesis at a time,
+re-run the docs-only guard, and stage the next round. For calibration,
+discoverability, or shadow-doc rounds, record the outcome and whether any
+variant should be promoted; do not commit source docblock changes as part of
+the same hypothesis.
 
 ## Storage layout
 

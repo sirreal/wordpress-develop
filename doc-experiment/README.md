@@ -1,5 +1,15 @@
 # Doc-improvement experiment
 
+## Process documents
+
+- `PLAN.md` — experiment contract, corpus rules, model policy, and
+  source-edit promotion criteria.
+- `PROTOCOL.md` — operational runbook for scored rounds, weak-tier
+  calibration, discoverability probes, and shadow-doc A/B tests.
+- `NEXT-HYPOTHESES.md` — post-round-17 hypothesis backlog: strong candidates,
+  signal-density tests, contrast cards, model ladder, and next sequence.
+- `LOG.md` — round-by-round hypothesis and outcome narrative.
+
 ## `render-docs-markdown.py`
 
 Deterministic JSON-to-Markdown renderer for phpdoc-parser output. Converts a
