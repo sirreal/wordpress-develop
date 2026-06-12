@@ -8350,7 +8350,15 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isIgnoredFosterLookaheadEndTag(tagName) {
-			return tagName === "HTML";
+			return (
+				tagName === "BLINK" ||
+				tagName === "BODY" ||
+				tagName === "HTML" ||
+				tagName === "PRE" ||
+				tagName === "SELECT" ||
+				FORMATTING_ELEMENTS.has(tagName) ||
+				HEADING_ELEMENTS.has(tagName)
+			);
 		}
 
 		#isFosteredTableEndTag(tagName) {
