@@ -651,9 +651,10 @@ class WP_CSS_Token_Processor {
 			return null;
 		}
 
-		return $this->decode_string_or_url(
+		return $this->decode_range(
 			$this->token_starts_at,
-			$this->token_length
+			$this->token_length,
+			self::TOKEN_STRING === $this->token_type
 		);
 	}
 
@@ -699,30 +700,31 @@ class WP_CSS_Token_Processor {
 			switch ( $this->token_type ) {
 				case self::TOKEN_HASH:
 					// Hash value starts after the # character.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at + 1, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at + 1, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_AT_KEYWORD:
 					// At-keyword value starts after the @ character.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at + 1, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at + 1, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_FUNCTION:
 					// Function name is everything except the final (.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_IDENT:
 					// Identifier is the entire token.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length );
 					break;
 
 				case self::TOKEN_STRING:
 				case self::TOKEN_BAD_STRING:
 					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
-						$this->token_value = $this->decode_string_token_value(
+						$this->token_value = $this->decode_range(
 							$this->token_value_starts_at,
-							$this->token_value_length
+							$this->token_value_length,
+							true
 						);
 					} else {
 						$this->token_value = null;
@@ -732,7 +734,7 @@ class WP_CSS_Token_Processor {
 				case self::TOKEN_URL:
 					// Decode and cache the URL value.
 					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
-						$this->token_value = $this->decode_string_or_url(
+						$this->token_value = $this->decode_range(
 							$this->token_value_starts_at,
 							$this->token_value_length
 						);
@@ -743,7 +745,7 @@ class WP_CSS_Token_Processor {
 
 				case self::TOKEN_DELIM:
 					// Delim value is the single code point.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length );
 					break;
 
 				case self::TOKEN_NUMBER:
@@ -1150,7 +1152,7 @@ class WP_CSS_Token_Processor {
 			// Consume an ident sequence. Set the <dimension-token>'s unit to the returned value.
 			$unit_starts_at = $this->at;
 			$this->consume_ident_sequence();
-			$this->token_unit   = $this->decode_string_or_url( $unit_starts_at, $this->at - $unit_starts_at );
+			$this->token_unit   = $this->decode_range( $unit_starts_at, $this->at - $unit_starts_at );
 			$this->token_type   = self::TOKEN_DIMENSION;
 			$this->token_length = $this->at - $this->token_starts_at;
 			return true;
@@ -1185,7 +1187,7 @@ class WP_CSS_Token_Processor {
 		// Consume an ident sequence, and let string be the result.
 		$ident_start = $this->at;
 		$decoded     = $this->consume_ident_sequence();
-		$string      = $decoded ?? $this->decode_string_or_url( $ident_start, $this->at - $ident_start );
+		$string      = $decoded ?? $this->decode_range( $ident_start, $this->at - $ident_start );
 
 		// If string's value is an ASCII case-insensitive match for "url",
 		// and the next input code point is U+0028 LEFT PARENTHESIS (().
@@ -1504,19 +1506,15 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Decodes a string or URL value with escape sequences and normalization.
+	 * Decodes and normalizes ident-like or string CSS values from a byte range.
 	 *
-	 * Fast path: If the slice contains no special characters, returns the raw
-	 * substring with almost zero allocations.
-	 *
-	 * Slow path: Builds the decoded string by optionally processing escapes and
-	 * normalizing line endings and null bytes.
-	 *
-	 * @param int $start           Start byte offset.
-	 * @param int $length          Length of the substring to decode.
-	 * @return string Decoded/normalized string.
+	 * @param int  $start          Start byte offset.
+	 * @param int  $length         Length of the substring to decode.
+	 * @param bool $string_escapes Optional, default false. When true, apply additional escape
+	 *                             rules that apply only to string tokens.
+	 * @return string Decoded and normalized string.
 	 */
-	private function decode_string_or_url( int $start, int $length ): string {
+	private function decode_range( int $start, int $length, bool $string_escapes = false ): string {
 		// Fast path: check if any processing is needed.
 		$slice         = wp_scrub_utf8( substr( $this->css, $start, $length ) );
 		$special_chars = "\\\r\f\x00";
@@ -1548,6 +1546,30 @@ class WP_CSS_Token_Processor {
 
 			// Handle escapes (if enabled).
 			if ( '\\' === $char ) {
+				if ( $string_escapes ) {
+					if ( $at + 1 >= $end ) {
+						// Backslash-EOF: consume the backslash and stop.
+						++$at;
+						continue;
+					}
+
+					$next = $this->css[ $at + 1 ];
+					if ( "\n" === $next || "\f" === $next ) {
+						// Backslash followed by LF or FF is a string line continuation.
+						$at += 2;
+						continue;
+					}
+
+					if ( "\r" === $next ) {
+						// Backslash followed by CR or CRLF is a string line continuation.
+						$at += 2;
+						if ( $at < $end && "\n" === $this->css[ $at ] ) {
+							++$at;
+						}
+						continue;
+					}
+				}
+
 				if ( $this->is_valid_escape( $at ) ) {
 					++$at;
 					$decoded .= $this->decode_escape_at( $at, $bytes_consumed );
@@ -1578,93 +1600,6 @@ class WP_CSS_Token_Processor {
 			}
 
 			// Null bytes become U+FFFD.
-			if ( "\x00" === $char ) {
-				$decoded .= "\u{FFFD}";
-				++$at;
-				continue;
-			}
-		}
-
-		return $decoded;
-	}
-
-	/**
-	 * Decodes a string token value with string-token escape semantics.
-	 *
-	 * String tokens differ from identifiers and URLs: a backslash followed by
-	 * EOF appends nothing, and a backslash followed by a newline consumes the
-	 * newline and appends nothing.
-	 *
-	 * @param int $start  Start byte offset.
-	 * @param int $length Length of the substring to decode.
-	 * @return string Decoded/normalized string token value.
-	 */
-	private function decode_string_token_value( int $start, int $length ): string {
-		$slice         = wp_scrub_utf8( substr( $this->css, $start, $length ) );
-		$special_chars = "\\\r\f\x00";
-		if ( false === strpbrk( $slice, $special_chars ) ) {
-			return $slice;
-		}
-
-		$decoded = '';
-		$at      = $start;
-		$end     = $start + $length;
-
-		while ( $at < $end ) {
-			$normal_len = strcspn( $this->css, $special_chars, $at );
-			if ( $normal_len > 0 ) {
-				$normal_len = min( $normal_len, $end - $at );
-				$decoded   .= substr( $this->css, $at, $normal_len );
-				$at        += $normal_len;
-			}
-
-			if ( $at >= $end ) {
-				break;
-			}
-
-			$char = $this->css[ $at ];
-
-			if ( '\\' === $char ) {
-				++$at;
-
-				if ( $at >= $end ) {
-					continue;
-				}
-
-				switch ( $this->css[ $at ] ) {
-					case "\n":
-					case "\f":
-						++$at;
-						continue 2;
-
-					case "\r":
-						++$at;
-						if ( $at < $end && "\n" === $this->css[ $at ] ) {
-							++$at;
-						}
-						continue 2;
-				}
-
-				$decoded .= $this->decode_escape_at( $at, $bytes_consumed );
-				$at      += $bytes_consumed;
-				continue;
-			}
-
-			if ( "\r" === $char ) {
-				$decoded .= "\n";
-				++$at;
-				if ( $at < $end && "\n" === $this->css[ $at ] ) {
-					++$at;
-				}
-				continue;
-			}
-
-			if ( "\f" === $char ) {
-				$decoded .= "\n";
-				++$at;
-				continue;
-			}
-
 			if ( "\x00" === $char ) {
 				$decoded .= "\u{FFFD}";
 				++$at;
