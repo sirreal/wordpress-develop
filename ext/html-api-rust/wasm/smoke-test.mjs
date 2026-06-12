@@ -3804,6 +3804,22 @@ assert.equal(fullParserFramesetAfterHiddenInput.get_last_error(), null);
 assert.equal(fullParserFramesetAfterHiddenInput.get_unsupported_exception(), null);
 fullParserFramesetAfterHiddenInput.destroy();
 
+for (const html of ["<p><frameset><frame>", "<p> <frameset><frame>"]) {
+	const fullParserFramesetAfterParagraph = WP_HTML_Processor.create_full_parser(html);
+	const fullParserFramesetAfterParagraphTokens = [];
+	while (fullParserFramesetAfterParagraph.next_token()) {
+		if (fullParserFramesetAfterParagraph.get_token_type() === "#tag") {
+			fullParserFramesetAfterParagraphTokens.push(
+				`${fullParserFramesetAfterParagraph.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterParagraph.get_tag()}`,
+			);
+		}
+	}
+	assert.deepEqual(fullParserFramesetAfterParagraphTokens, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "+FRAME", "-FRAMESET", "-HTML"]);
+	assert.equal(fullParserFramesetAfterParagraph.get_last_error(), null);
+	assert.equal(fullParserFramesetAfterParagraph.get_unsupported_exception(), null);
+	fullParserFramesetAfterParagraph.destroy();
+}
+
 const fullParserFramesetNoframes = WP_HTML_Processor.create_full_parser("<frameset><noframes>x</noframes><frame></frameset>");
 const fullParserFramesetNoframesTokens = [];
 while (fullParserFramesetNoframes.next_token()) {

@@ -2240,6 +2240,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_scaffolded = !this.is_full_parser || this.is_html_fragment_context;
 			this.full_parser_seen_doctype = false;
 			this.frameset_ok = true;
+			this.pre_frameset_paragraph_ignored = false;
 			this.form_element_pointer = null;
 			this.preserve_in_body_ignored_start_tags = Boolean(options.preserveInBodyIgnoredStartTags);
 			this.context_node = options.contextNode ?? "BODY";
@@ -4391,6 +4392,15 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (
+							this.pre_frameset_paragraph_ignored &&
+							isWhitespaceText &&
+							this.#currentTokenPrecedesStartTag("FRAMESET")
+						) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
+						if (
 							isIgnorablePreBodyText ||
 							tokenType === "#comment" ||
 							tokenType === "#funky-comment" ||
@@ -4411,11 +4421,18 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "FRAMESET") {
+							this.pre_frameset_paragraph_ignored = false;
 							this.full_parser_insertion_mode = "in_frameset";
 							return false;
 						}
 
 						if (tokenType === "#tag" && !isCloser && this.#hiddenInputPrecedesFrameset(tagName)) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
+						if (tokenType === "#tag" && !isCloser && this.#paragraphPrecedesFrameset(tagName)) {
+							this.pre_frameset_paragraph_ignored = true;
 							this.#ignoreCurrentToken();
 							return true;
 						}
@@ -4450,6 +4467,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						this.full_parser_insertion_mode = "in_body";
+						this.pre_frameset_paragraph_ignored = false;
 						this.#queueVirtualPush("BODY");
 						return this.#reprocessCurrentTokenAfterVirtualTokens();
 
@@ -5323,6 +5341,14 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			return this.#currentTokenPrecedesStartTag("FRAMESET");
+		}
+
+		#paragraphPrecedesFrameset(tagName) {
+			return tagName === "P" && this.#currentTokenPrecedesStartTag("FRAMESET");
+		}
+
+		#currentTokenPrecedesStartTag(tagName) {
 			const span = this.#currentRealTokenSpan();
 			if (span === null) {
 				return false;
@@ -5333,7 +5359,7 @@ export function createHtmlApi(wasm) {
 			if (
 				nextTag === false ||
 				nextTag.is_closing ||
-				nextTag.tag_name !== "FRAMESET"
+				nextTag.tag_name !== tagName
 			) {
 				return false;
 			}
