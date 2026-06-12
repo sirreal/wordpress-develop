@@ -10,6 +10,8 @@ import {
 	WP_HTML_Span as Exported_WP_HTML_Span,
 	WP_HTML_Stack_Event as Exported_WP_HTML_Stack_Event,
 	WP_HTML_Text_Replacement as Exported_WP_HTML_Text_Replacement,
+	WP_HTML_Token as Exported_WP_HTML_Token,
+	WP_HTML_Unsupported_Exception as Exported_WP_HTML_Unsupported_Exception,
 } from "./wp-html-api-rust.js";
 
 const {
@@ -37,10 +39,12 @@ assert.equal(Exported_WP_HTML_Doctype_Info, WP_HTML_Doctype_Info);
 assert.equal(Exported_WP_HTML_Span, WP_HTML_Span);
 assert.equal(Exported_WP_HTML_Text_Replacement, WP_HTML_Text_Replacement);
 assert.equal(Exported_WP_HTML_Attribute_Token, WP_HTML_Attribute_Token);
+assert.equal(Exported_WP_HTML_Token, WP_HTML_Token);
 assert.equal(Exported_WP_HTML_Stack_Event, WP_HTML_Stack_Event);
 assert.equal(Exported_WP_HTML_Active_Formatting_Elements, WP_HTML_Active_Formatting_Elements);
 assert.equal(Exported_WP_HTML_Open_Elements, WP_HTML_Open_Elements);
 assert.equal(Exported_WP_HTML_Processor_State, WP_HTML_Processor_State);
+assert.equal(Exported_WP_HTML_Unsupported_Exception, WP_HTML_Unsupported_Exception);
 assert.equal(typeof WP_HTML_Decoder.decode_text_node, "function");
 assert.equal(typeof WP_HTML_Unsupported_Exception, "function");
 assert.equal(typeof WP_HTML_Span, "function");
