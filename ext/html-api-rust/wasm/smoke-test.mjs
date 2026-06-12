@@ -5210,6 +5210,11 @@ assert.equal(tableHiddenInputProcessor.next_tag("td"), true);
 assert.equal(tableHiddenInputProcessor.get_last_error(), null);
 tableHiddenInputProcessor.destroy();
 
+const tableFragmentStandaloneAnchorProcessor = WP_HTML_Processor.create_fragment("<a>", "<table>");
+assert.equal(tableFragmentStandaloneAnchorProcessor.serialize(), "<a></a>");
+assert.equal(tableFragmentStandaloneAnchorProcessor.get_last_error(), null);
+tableFragmentStandaloneAnchorProcessor.destroy();
+
 const tableFormProcessor = WP_HTML_Processor.create_fragment("<table><form><!--comment-->");
 assert.equal(tableFormProcessor.next_tag("form"), true);
 assert.equal(tableFormProcessor.get_tag(), "FORM");

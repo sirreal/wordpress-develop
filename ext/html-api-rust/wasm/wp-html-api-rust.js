@@ -8432,6 +8432,13 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				!isCloser &&
+				this.#isRepresentableStandaloneFosteredStartInTableFragment(tagName, topIndex)
+			) {
+				return false;
+			}
+
 			const currentNode = this.open_elements[topIndex];
 			if (currentNode === "TABLE") {
 				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
@@ -8473,6 +8480,22 @@ export function createHtmlApi(wasm) {
 				topIndex === this.base_open_element_count - 1 &&
 				this.open_elements[topIndex] === this.context_node
 			);
+		}
+
+		#isRepresentableStandaloneFosteredStartInTableFragment(tagName, topIndex) {
+			if (
+				tagName !== "A" ||
+				this.is_full_parser ||
+				this.context_namespace !== "html" ||
+				this.context_node !== "TABLE" ||
+				topIndex !== this.base_open_element_count - 1 ||
+				this.open_elements[topIndex] !== "TABLE"
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			return span !== null && span.start + span.length === this.html.length;
 		}
 
 		#wouldUseUnsupportedTableFosterParenting(tagName, isCloser) {
