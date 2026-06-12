@@ -251,7 +251,7 @@ export interface WP_HTML_Doctype_Info_Constructor {
 		systemIdentifier: string | null,
 		forceQuirksFlag: boolean,
 	): WP_HTML_Doctype_Info;
-	from_doctype_token(doctypeHtml: string): WP_HTML_Doctype_Info | null;
+	from_doctype_token(doctypeHtml: PhpStringParameter): WP_HTML_Doctype_Info | null;
 }
 
 export const WP_HTML_Doctype_Info: WP_HTML_Doctype_Info_Constructor;

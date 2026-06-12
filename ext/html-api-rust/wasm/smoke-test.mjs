@@ -2320,6 +2320,16 @@ for (const html of [
 ]) {
 	assert.equal(WP_HTML_Doctype_Info.from_doctype_token(html), null, html);
 }
+assert.equal(WP_HTML_Doctype_Info.from_doctype_token(123), null);
+assert.equal(WP_HTML_Doctype_Info.from_doctype_token(false), null);
+assert.throws(
+	() => WP_HTML_Doctype_Info.from_doctype_token(null),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Doctype_Info.from_doctype_token({ html: "<!DOCTYPE html>" }),
+	TypeError,
+);
 
 const comment = new WP_HTML_Tag_Processor("<?xml-stylesheet href='x'?>");
 assert.equal(comment.next_token(), true);

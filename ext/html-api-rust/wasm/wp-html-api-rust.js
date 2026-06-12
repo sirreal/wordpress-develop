@@ -1260,7 +1260,7 @@ export class WP_HTML_Doctype_Info {
 	}
 
 	static from_doctype_token(doctypeHtml) {
-		let doctype = String(doctypeHtml);
+		let doctype = phpStringParameterCoerce(doctypeHtml, "doctype_html");
 		let end = doctype.length - 1;
 
 		if (end < 9 || !asciiStartsWithAt(doctype, "<!DOCTYPE", 0)) {
