@@ -213,6 +213,8 @@ export type PhpIntegerParameter = number | string | boolean;
 
 export type PhpStringParameter = string | number | boolean;
 
+export type PhpInternalStringParameter = string | number | boolean | null;
+
 export type PhpBooleanParameter = boolean | number | string;
 
 export interface MatchByteLength {
@@ -491,7 +493,7 @@ export interface WP_HTML_Tag_Processor {
 	change_parsing_namespace(namespaceName: PhpStringParameter): boolean;
 	get_namespace(): HtmlNamespace;
 	get_qualified_tag_name(): string | null;
-	get_qualified_attribute_name(attributeName: string): string | null;
+	get_qualified_attribute_name(attributeName: PhpInternalStringParameter): string | null;
 	get_full_comment_text(): string | null;
 	get_updated_html(): string;
 	toString(): string;

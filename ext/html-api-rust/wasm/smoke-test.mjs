@@ -1868,6 +1868,13 @@ bareLessThanText.destroy();
 const nonText = new WP_HTML_Tag_Processor("<div></div>");
 assert.equal(nonText.next_tag("div"), true);
 assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
+assert.equal(nonText.get_qualified_attribute_name(123), "123");
+assert.equal(nonText.get_qualified_attribute_name(false), "");
+assert.equal(nonText.get_qualified_attribute_name(null), "");
+assert.throws(
+	() => nonText.get_qualified_attribute_name([]),
+	TypeError,
+);
 assert.equal(nonText.get_modifiable_text(), "");
 assert.equal(nonText.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
 assert.equal(nonText.is_tag_closer(), true);
@@ -1950,6 +1957,7 @@ assert.equal(svgQualifiedNames.get_qualified_attribute_name("attributeName"), "a
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("xlink:href"), "xlink href");
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("viewbox"), "viewBox");
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
+assert.equal(svgQualifiedNames.get_qualified_attribute_name(123), "123");
 svgQualifiedNames.destroy();
 
 const mathQualifiedNames = new WP_HTML_Tag_Processor("<mi definitionurl=1 xlink:title=2>");
@@ -2576,6 +2584,7 @@ const processor = WP_HTML_Processor.create_fragment("<img><p>Hi");
 assert.equal(processor.next_tag("p"), true);
 assert.equal(processor.expects_closer(), true);
 assert.equal(processor.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
+assert.equal(processor.get_qualified_attribute_name(null), "");
 assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "P"]);
 processor.destroy();
 

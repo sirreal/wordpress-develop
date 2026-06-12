@@ -2009,10 +2009,11 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			const normalizedAttributeName = phpInternalStringCoerce(attributeName, "attribute_name");
 			if (this.parsing_namespace === "html") {
-				return attributeName;
+				return normalizedAttributeName;
 			}
-			return qualifyForeignAttributeName(this.parsing_namespace, attributeName);
+			return qualifyForeignAttributeName(this.parsing_namespace, normalizedAttributeName);
 		}
 
 		get_full_comment_text() {
@@ -2901,9 +2902,10 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			const normalizedAttributeName = phpInternalStringCoerce(attributeName, "attribute_name");
 			return this.get_namespace() === "html"
-				? attributeName
-				: qualifyForeignAttributeName(this.get_namespace(), attributeName);
+				? normalizedAttributeName
+				: qualifyForeignAttributeName(this.get_namespace(), normalizedAttributeName);
 		}
 
 		expects_closer(node = null) {
@@ -7596,6 +7598,27 @@ function phpStringParameterCoerce(value, parameterName, nullable = false) {
 			return null;
 		}
 		throw new TypeError(`Argument $${parameterName} must be of type string.`);
+	}
+
+	if (
+		typeof value === "object" ||
+		typeof value === "function" ||
+		typeof value === "symbol" ||
+		typeof value === "undefined"
+	) {
+		throw new TypeError(`Argument $${parameterName} must be of type string.`);
+	}
+
+	if (typeof value === "boolean") {
+		return value ? "1" : "";
+	}
+
+	return String(value);
+}
+
+function phpInternalStringCoerce(value, parameterName) {
+	if (value === null) {
+		return "";
 	}
 
 	if (
