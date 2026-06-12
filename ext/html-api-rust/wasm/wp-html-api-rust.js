@@ -7149,7 +7149,9 @@ class WasmRuntime {
 
 	decoderCodePointToUtf8Bytes(codePoint) {
 		const numericCodePoint = phpInternalIntegerParameterCoerce(codePoint, "code_point");
-		const normalizedCodePoint = Number.isFinite(numericCodePoint) && numericCodePoint >= 0
+		const normalizedCodePoint = Number.isFinite(numericCodePoint) &&
+			numericCodePoint >= 0 &&
+			numericCodePoint <= 0x10ffff
 			? Math.trunc(numericCodePoint)
 			: 0x110000;
 		const output = this.allocBytes(new Uint8Array(4));
@@ -7717,6 +7719,8 @@ function phpIntegerCast(value) {
 
 const PHP_INT_MIN = -9223372036854775808n;
 const PHP_INT_MAX = 9223372036854775807n;
+const PHP_INT_MIN_NUMBER = Number(PHP_INT_MIN);
+const PHP_INT_MAX_NUMBER = Number(PHP_INT_MAX);
 
 function isPhpIntegerArrayKeyString(value) {
 	if (value === "0") {
@@ -7769,14 +7773,28 @@ function phpIntegerParameterCoerce(value, parameterName) {
 		) {
 			throw new TypeError(`Argument $${parameterName} must be numeric.`);
 		}
+		if (/^\+?\d+$/.test(trimmed) && BigInt(trimmed) > PHP_INT_MAX) {
+			throw new TypeError(`Argument $${parameterName} must be of type int.`);
+		}
 		const numericValue = Number(trimmed);
-		if (!Number.isFinite(numericValue)) {
+		if (
+			!Number.isFinite(numericValue) ||
+			numericValue > PHP_INT_MAX_NUMBER ||
+			numericValue < PHP_INT_MIN_NUMBER
+		) {
 			throw new TypeError(`Argument $${parameterName} must be of type int.`);
 		}
 		return Math.trunc(numericValue);
 	}
 
-	if (typeof value === "number" && !Number.isFinite(value)) {
+	if (
+		typeof value === "number" &&
+		(
+			!Number.isFinite(value) ||
+			value > PHP_INT_MAX_NUMBER ||
+			value < PHP_INT_MIN_NUMBER
+		)
+	) {
 		throw new TypeError(`Argument $${parameterName} must be of type int.`);
 	}
 

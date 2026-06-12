@@ -380,7 +380,15 @@ assert.throws(
 	TypeError,
 );
 assert.throws(
+	() => new WP_HTML_Span("9223372036854775808", 1),
+	TypeError,
+);
+assert.throws(
 	() => new WP_HTML_Text_Replacement(0, NaN, "text"),
+	TypeError,
+);
+assert.throws(
+	() => new WP_HTML_Text_Replacement(0, "1e20", "text"),
 	TypeError,
 );
 
@@ -443,6 +451,7 @@ assert.equal(
 );
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0x1f170), "🅰");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(0xd83c), "�");
+assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes("9223372036854775807"), "�");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes(null), "\0");
 assert.equal(WP_HTML_Decoder.code_point_to_utf8_bytes("65.9"), "A");
 assert.throws(
@@ -455,6 +464,10 @@ assert.throws(
 );
 assert.throws(
 	() => WP_HTML_Decoder.code_point_to_utf8_bytes("1e9999"),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Decoder.code_point_to_utf8_bytes("9223372036854775808"),
 	TypeError,
 );
 assert.throws(
