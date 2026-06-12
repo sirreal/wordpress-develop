@@ -1545,6 +1545,33 @@ assert.equal(addClassAfterBooleanClassAttribute.get_attribute("class"), "add_cla
 assert.equal(addClassAfterBooleanClassAttribute.get_updated_html(), '<div class="add_class" id="first"><span></span></div>');
 addClassAfterBooleanClassAttribute.destroy();
 
+const stagedAttributeUpdates = new WP_HTML_Tag_Processor(
+	'<hr id="remove" /><div enabled class="test">Test</div><span id="span-id"></span>',
+);
+assert.equal(stagedAttributeUpdates.next_tag(), true);
+assert.equal(stagedAttributeUpdates.remove_attribute("id"), true);
+assert.equal(stagedAttributeUpdates.next_tag(), true);
+assert.equal(stagedAttributeUpdates.set_attribute("id", "div-id-1"), true);
+assert.equal(stagedAttributeUpdates.add_class("new_class_1"), true);
+assert.equal(
+	stagedAttributeUpdates.get_updated_html(),
+	'<hr  /><div id="div-id-1" enabled class="test new_class_1">Test</div><span id="span-id"></span>',
+);
+assert.equal(stagedAttributeUpdates.toString(), stagedAttributeUpdates.get_updated_html());
+assert.equal(stagedAttributeUpdates.set_attribute("id", "div-id-2"), true);
+assert.equal(stagedAttributeUpdates.add_class("new_class_2"), true);
+assert.equal(
+	stagedAttributeUpdates.get_updated_html(),
+	'<hr  /><div id="div-id-2" enabled class="test new_class_1 new_class_2">Test</div><span id="span-id"></span>',
+);
+assert.equal(stagedAttributeUpdates.next_tag(), true);
+assert.equal(stagedAttributeUpdates.remove_attribute("id"), true);
+assert.equal(
+	stagedAttributeUpdates.get_updated_html(),
+	'<hr  /><div id="div-id-2" enabled class="test new_class_1 new_class_2">Test</div><span ></span>',
+);
+stagedAttributeUpdates.destroy();
+
 const rawClassNameUpdates = new WP_HTML_Tag_Processor('<div class="x\uFFFDy">');
 assert.equal(rawClassNameUpdates.next_tag("div"), true);
 assert.equal(rawClassNameUpdates.has_class("x\0y"), false);
@@ -2094,6 +2121,23 @@ assert.equal(longAttributeRemovalSeek.remove_attribute("7_chars"), true);
 assert.equal(longAttributeRemovalSeek.seek("second"), true);
 assert.equal(longAttributeRemovalSeek.get_tag(), "BUTTON");
 longAttributeRemovalSeek.destroy();
+
+const bookmarkBeforeCursorUpdate = new WP_HTML_Tag_Processor(
+	"<div>outside</div><section><div><img>inside</div></section>",
+);
+assert.equal(bookmarkBeforeCursorUpdate.next_tag(), true);
+assert.equal(bookmarkBeforeCursorUpdate.add_class("foo"), true);
+assert.equal(bookmarkBeforeCursorUpdate.next_tag("section"), true);
+assert.equal(bookmarkBeforeCursorUpdate.set_bookmark("here"), true);
+assert.equal(bookmarkBeforeCursorUpdate.next_tag("img"), true);
+assert.equal(bookmarkBeforeCursorUpdate.seek("here"), true);
+assert.equal(
+	bookmarkBeforeCursorUpdate.get_updated_html(),
+	'<div class="foo">outside</div><section><div><img>inside</div></section>',
+);
+assert.equal(bookmarkBeforeCursorUpdate.get_tag(), "SECTION");
+assert.equal(bookmarkBeforeCursorUpdate.is_tag_closer(), false);
+bookmarkBeforeCursorUpdate.destroy();
 
 const bookmarkAdditionsAfterBothSides = new WP_HTML_Tag_Processor("<div>First</div><div>Second</div>");
 assert.equal(bookmarkAdditionsAfterBothSides.next_tag(), true);
