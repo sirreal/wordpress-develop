@@ -94,6 +94,7 @@ const wasmFunctionExportNames = wasmExportNames.filter((name) => name.startsWith
 
 const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
 const phpHtmlApiDirectory = new URL("../../../src/wp-includes/html-api/", import.meta.url);
+const rustCoreSource = await readFile(new URL("../src/lib.rs", import.meta.url), "utf8");
 function declaredInterfaceBody(interfaceName) {
 	const pattern = new RegExp(`^export interface ${interfaceName}(?: extends [^{]+)? \\{\\n([\\s\\S]*?)^\\}`, "m");
 	const match = typeDeclarations.match(pattern);
@@ -151,6 +152,12 @@ async function phpClassConstantNames(fileName) {
 async function phpPublicPropertyNames(fileName) {
 	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
 	return [...source.matchAll(/\bpublic\s+\$([A-Za-z_]\w*)\b/g)]
+		.map((match) => match[1])
+		.sort();
+}
+
+function rustNoMangleExportNames(source) {
+	return [...source.matchAll(/#\[no_mangle\]\s+pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+([A-Za-z_]\w*)\s*\(/g)]
 		.map((match) => match[1])
 		.sort();
 }
@@ -221,6 +228,7 @@ assert.deepEqual(declaredModuleValueExports, directModuleExports);
 assert.deepEqual(declaredLoadedApiExports, loadedApiExports);
 assert.deepEqual(declaredReadonlyMemberNames("WpHtmlApiRustWasmExports"), wasmReadonlyExportNames);
 assert.deepEqual(declaredInterfaceMethodNames("WpHtmlApiRustWasmExports"), wasmFunctionExportNames);
+assert.deepEqual(rustNoMangleExportNames(rustCoreSource), wasmFunctionExportNames);
 assert.match(typeDeclarations, /^\s*wasm: WpHtmlApiRustWasmExports;$/m);
 assert.deepEqual(Object.keys(HtmlApiModule).sort(), directModuleExports);
 
