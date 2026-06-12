@@ -65,6 +65,21 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A string-ending backslash followed by EOF is consumed without adding
+	 * anything to the string token value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_string_token_backslash_eof_does_not_decode_to_replacement_character(): void {
+		$processor = WP_CSS_Token_Processor::create( '"b\\' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( 'b', $processor->get_token_value() );
+		$this->assertFalse( $processor->next_token() );
+	}
+
+	/**
 	 * Tests handling of non-UTF-8 byte sequences in identifiers.
 	 *
 	 * Invalid UTF-8 sequences should be replaced with U+FFFD replacement characters
