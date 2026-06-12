@@ -2014,6 +2014,7 @@ export function createHtmlApi(wasm) {
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
 			this.raw_text_fragment_consumed = false;
+			this.raw_text_fragment_updated_html = null;
 			this.is_full_parser = Boolean(options.fullParser || this.is_html_fragment_context);
 			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
 			this.full_parser_insertion_mode = this.is_html_fragment_context
@@ -2532,9 +2533,20 @@ export function createHtmlApi(wasm) {
 		}
 
 		set_modifiable_text(text) {
+			if (this.#isSyntheticToken()) {
+				if (this.current_synthetic_token.tokenType !== "#text") {
+					return false;
+				}
+
+				this.current_synthetic_token.modifiableText = replaceNulls(String(text));
+				if (this.raw_text_fragment_context !== null) {
+					this.raw_text_fragment_updated_html = this.#serializeTextToken();
+				}
+				return true;
+			}
+
 			if (
 				this.is_virtual() ||
-				this.#isSyntheticToken() ||
 				(
 					this.parser_state === STATE_MATCHED_TAG &&
 					this.get_namespace() !== "html"
@@ -2544,6 +2556,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			return super.set_modifiable_text(text);
+		}
+
+		get_updated_html() {
+			return this.raw_text_fragment_updated_html ?? super.get_updated_html();
 		}
 
 		set_bookmark(name) {
@@ -2753,13 +2769,7 @@ export function createHtmlApi(wasm) {
 				case "#doctype":
 					return serializeDoctype(this.get_doctype_info());
 				case "#text":
-					if (
-						this.raw_text_fragment_context !== null &&
-						!RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
-					) {
-						return this.get_modifiable_text() ?? "";
-					}
-					return htmlEscape(this.get_modifiable_text() ?? "");
+					return this.#serializeTextToken();
 				case "#presumptuous-tag":
 					return "";
 				case "#funky-comment":
@@ -3461,6 +3471,17 @@ export function createHtmlApi(wasm) {
 			this.current_token_namespace = "html";
 			this.breadcrumbs = [...this.open_elements, "#text"];
 			return true;
+		}
+
+		#serializeTextToken() {
+			const text = this.get_modifiable_text() ?? "";
+			if (
+				this.raw_text_fragment_context !== null &&
+				!RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
+			) {
+				return text;
+			}
+			return htmlEscape(text);
 		}
 
 		#getVirtualAttribute(name) {

@@ -1791,6 +1791,23 @@ for (const [html, context, expectedText, expectedSerialized] of [
 	rawTextFragmentSerializeProcessor.destroy();
 }
 
+for (const [context, expectedUpdatedHtml] of [
+	["<textarea>", "Updated &amp; &lt;\uFFFD"],
+	["<title>", "Updated &amp; &lt;\uFFFD"],
+	["<script>", "Updated & <\uFFFD"],
+	["<style>", "Updated & <\uFFFD"],
+	["<plaintext>", "Updated & <\uFFFD"],
+]) {
+	const rawTextFragmentMutationProcessor = WP_HTML_Processor.create_fragment("Original", context);
+	assert.notEqual(rawTextFragmentMutationProcessor, null);
+	assert.equal(rawTextFragmentMutationProcessor.next_token(), true);
+	assert.equal(rawTextFragmentMutationProcessor.set_modifiable_text("Updated & <\0"), true);
+	assert.equal(rawTextFragmentMutationProcessor.get_modifiable_text(), "Updated & <\uFFFD");
+	assert.equal(rawTextFragmentMutationProcessor.serialize_token(), expectedUpdatedHtml);
+	assert.equal(rawTextFragmentMutationProcessor.get_updated_html(), expectedUpdatedHtml);
+	rawTextFragmentMutationProcessor.destroy();
+}
+
 const explicitTokenExpectationsProcessor = WP_HTML_Processor.create_fragment("");
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ node_name: "img", namespace: "html" }), false);
 assert.equal(explicitTokenExpectationsProcessor.expects_closer({ nodeName: "DIV", namespaceName: "html" }), true);
