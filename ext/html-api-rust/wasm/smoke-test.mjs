@@ -3897,6 +3897,10 @@ assert.equal(
 	"<b><em><foo><foo></foo></foo></em></b><em><aside><b></b></aside></em>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<b><em><foo><foo><aside></b></em>"),
+	"<b><em><foo><foo></foo></foo></em></b><em></em><aside><em><b></b></em></aside>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<b><em><foo><foo><foo><aside></b></em>"),
 	"<b><em><foo><foo><foo></foo></foo></foo></em></b><aside><b></b></aside>",
 );

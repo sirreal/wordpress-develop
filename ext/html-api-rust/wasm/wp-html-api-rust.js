@@ -4432,20 +4432,22 @@ export function createHtmlApi(wasm) {
 				if (!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)) {
 					continue;
 				}
-				if (
-					tagName === "ASIDE" &&
-					!this.#canPrecloseAsideFormattingAncestor(activeFormattingElementIndex, i, tagName)
-				) {
+				const reconstructionMode = tagName === "ASIDE"
+					? this.#asideFormattingPreclosureReconstructionMode(activeFormattingElementIndex, i, tagName)
+					: "self";
+				if (reconstructionMode === null) {
 					return false;
 				}
 
-				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
+				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName, reconstructionMode);
 				this.#queueVirtualPopsFrom(i);
 				if (
 					tagName === "ASIDE" &&
-					this.#shouldQueueActiveFormattingElementsAfterAsidePreclosure(i)
+					reconstructionMode === "wrap-following"
 				) {
 					this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+				} else if (reconstructionMode === "empty-following-then-self") {
+					this.#queueActiveFormattingElementsAfterIndexAsEmpty(activeFormattingElementIndex);
 				}
 				return true;
 			}
@@ -4498,28 +4500,32 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
-		#canPrecloseAsideFormattingAncestor(activeIndex, openIndex, elementTagName) {
+		#asideFormattingPreclosureReconstructionMode(activeIndex, openIndex, elementTagName) {
 			const openElementsAfterIndex = this.open_elements.length - openIndex - 1;
 			let activeFormattingElementsAfterIndex = 0;
+			let followingFormattingEndPrecedesElementClose = false;
 			for (let i = activeIndex + 1; i < this.active_formatting_elements.length; i += 1) {
 				const entry = this.active_formatting_elements[i];
 				if (this.#isActiveFormattingMarker(entry)) {
 					break;
 				}
 				activeFormattingElementsAfterIndex += 1;
-				if (
-					openElementsAfterIndex === 3 &&
-					this.#formattingEndTagPrecedesElementClose(entry.tagName, elementTagName)
-				) {
-					return false;
+				if (this.#formattingEndTagPrecedesElementClose(entry.tagName, elementTagName)) {
+					followingFormattingEndPrecedesElementClose = true;
 				}
 			}
 
-			return activeFormattingElementsAfterIndex === 1 && openElementsAfterIndex >= 3;
-		}
+			if (activeFormattingElementsAfterIndex !== 1 || openElementsAfterIndex < 3) {
+				return null;
+			}
 
-		#shouldQueueActiveFormattingElementsAfterAsidePreclosure(openIndex) {
-			return this.open_elements.length - openIndex - 1 === 3;
+			if (openElementsAfterIndex > 3) {
+				return "self";
+			}
+
+			return followingFormattingEndPrecedesElementClose
+				? "empty-following-then-self"
+				: "wrap-following";
 		}
 
 		#queueActiveFormattingElementsAfterIndex(index) {
@@ -4529,6 +4535,22 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+			}
+		}
+
+		#queueActiveFormattingElementsAfterIndexAsEmpty(index) {
+			const queued = [];
+			for (let i = index + 1; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					break;
+				}
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+				queued.push(entry);
+			}
+
+			for (let i = queued.length - 1; i >= 0; i -= 1) {
+				this.#queueVirtualPop(queued[i].tagName, queued[i].namespaceName);
 			}
 		}
 
@@ -4542,6 +4564,30 @@ export function createHtmlApi(wasm) {
 					this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
 					return true;
 				}
+			}
+
+			return false;
+		}
+
+		#queueActiveFormattingElementWithFollowingElements(tagName, namespaceName) {
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return false;
+				}
+				if (entry.tagName !== tagName || entry.namespaceName !== namespaceName) {
+					continue;
+				}
+
+				for (let j = i + 1; j < this.active_formatting_elements.length; j += 1) {
+					const followingEntry = this.active_formatting_elements[j];
+					if (this.#isActiveFormattingMarker(followingEntry)) {
+						break;
+					}
+					this.#queueVirtualPush(followingEntry.tagName, followingEntry.namespaceName, followingEntry.attributes);
+				}
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+				return true;
 			}
 
 			return false;
@@ -4836,8 +4882,8 @@ export function createHtmlApi(wasm) {
 			));
 		}
 
-		#markSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName) {
-			this.special_start_adoption_preclosed_formatting_elements.push({ tagName, namespaceName, containerTagName });
+		#markSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName, reconstructionMode = "self") {
+			this.special_start_adoption_preclosed_formatting_elements.push({ tagName, namespaceName, containerTagName, reconstructionMode });
 		}
 
 		#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName) {
@@ -4852,10 +4898,10 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.special_start_adoption_preclosed_formatting_elements.splice(i, 1);
-				return true;
+				return entry;
 			}
 
-			return false;
+			return null;
 		}
 
 		#clearSpecialStartAdoptionPreclosedFormattingElements(tagName, namespaceName) {
@@ -7549,19 +7595,26 @@ export function createHtmlApi(wasm) {
 			const containerTagName = this.open_elements.at(-1);
 
 			if (
-				namespaceName === "html" &&
-				formattingElementIndex === -1 &&
-				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
-				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
-				this.open_element_namespaces.at(-1) === "html" &&
-				FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(containerTagName) &&
-				this.#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName)
+				namespaceName !== "html" ||
+				formattingElementIndex !== -1 ||
+				!ADOPTION_AGENCY_END_TAGS.has(tagName) ||
+				this.#lastActiveFormattingElementIndex(tagName) === -1 ||
+				this.open_element_namespaces.at(-1) !== "html" ||
+				!FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(containerTagName)
 			) {
-				this.#queueActiveFormattingElement(tagName, namespaceName);
-				return true;
+				return false;
 			}
 
-			return false;
+			const marker = this.#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName);
+			if (marker === null) {
+				return false;
+			}
+
+			if (marker.reconstructionMode === "empty-following-then-self") {
+				return this.#queueActiveFormattingElementWithFollowingElements(tagName, namespaceName);
+			}
+
+			return this.#queueActiveFormattingElement(tagName, namespaceName);
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {
