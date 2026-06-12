@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to canonical reference except next_tag uses the array form next_tag( array( 'tag_name' => 'img' ) ), which is the primary documented signature (html-tag-processor.md line 58). Correct processor: tag processor is explicitly recommended for flat, position-based attribute/class edits (Overview > Which processor should I use?, lines 18-24). All four methods (__construct, next_tag, add_class, get_updated_html) exist and are used per their documented contracts. Idiomatic while-next_tag loop matching the doc's 'Custom queries' and 'Modifying CSS classes' examples. Edge cases handled implicitly by documented behavior: comments skipped by next_tag (line 47, only stops on real tags), incomplete trailing tag yields false from next_tag, add_class appends without reorder (lines 198-204), unquoted attrs preserved. 8/8 cases pass. Self-explanation accurate, no overclaiming; confidence 95 is justified."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trial-1's implementation (array tag_name form). Same correct processor choice, same fully-documented method set, same idiomatic loop. 8/8 pass. Explanation correctly notes add_class appends without removing/reordering and that get_updated_html preserves untouched bytes (matches Design and limitations, line 328). Confidence 92."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the string shorthand next_tag( 'img' ), also explicitly documented (line 59 and the Usage example at line 40). Matches canonical reference most closely. All methods documented, correct processor, idiomatic, 8/8 pass. Explanation accurate about case-insensitivity (line 952 @type tag_name 'Matching is ASCII case-insensitive') and comment skipping. Confidence 95."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials passed all 8 hidden cases (simple, multiple, existing-classes, uppercase-tag, inside-comment-ignored, no-images, unquoted-attributes, incomplete-tag-at-end), with zero _doing_it_wrong and zero trigger_error records. All three converged on the canonical reference solution, differing only in the next_tag query form (two used array('tag_name'=>'img'), one used the 'img' string shorthand) — both forms are explicitly documented side-by-side in the 'Finding tags' table (html-tag-processor.md lines 58-59).\\n\\nWhat the docs did well for this smoke task:\\n- Processor selection was unambiguous. The 'Which processor should I use?' section (lines 18-24) directly maps this job ('changing attributes and classes, byte-precise edits that preserve the rest of the document exactly') to the Tag Processor, and the defensive notes about non-existent methods (get_breadcrumbs/get_current_depth/create_fragment belonging to WP_HTML_Processor) steer subjects away from over-reaching for the structural processor on a flat task.\\n- The exact pattern needed was demonstrated. The 'Custom queries' example (lines 78-83) shows precisely a while(next_tag()) loop calling add_class, and the table at lines 57-61 shows the IMG-by-name query. Subjects essentially transcribed documented idiom.\\n- Edge-case correctness fell out of documented semantics without subjects having to special-case anything: line 47 states next_tag only stops on real tags (comment contents skipped → inside-comment-ignored passes); line 63 / paused_at_incomplete_token discussion implies an incomplete trailing tag is not matched (incomplete-tag-at-end passes unchanged); add_class examples (lines 198-204) show append-without-reorder and no-op-if-present (existing-classes passes); Design/limitations line 328 confirms unquoted/single-quoted values are preserved when untouched (unquoted-attributes passes since the img's existing attrs are not rewritten).\\n\\nNear-misses in the explanations: All three asserted that next_tag handles case-insensitive matching and comment-skipping 'automatically.' These claims are correct and doc-supported (case-insensitivity at line 952; comment handling at line 47), so they are accurate rather than lucky. The one subtle gap none of the subjects needed but none would have learned from the docs: why the incomplete-tag-at-end case leaves the tag untouched — none cited the incomplete-token semantics, they just relied on the loop terminating. This did not cause any failure here but is a latent weak spot (see doc_gaps).\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor :: next_tag() / Finding tags section (and paused_at_incomplete_token)",
+      "problem": "The behavior on a truncated/incomplete tag at the end of input is documented only obliquely. 'Finding tags' (line 63) says next_tag returns false and moves the cursor to the end of file, and 'When matching fails' (lines 94-118) plus paused_at_incomplete_token (lines 1015-1049) discuss incomplete tokens, but a subject reading only the next_tag/add_class path would not clearly learn that an incomplete final tag is NOT matched and is therefore left byte-for-byte unchanged. All three subjects passed this case by luck of loop termination rather than by understanding.",
+      "suggestion": "In the 'Finding tags' section add one explicit sentence: 'A tag whose markup is truncated at the end of the document (e.g. <img src=\"a.jpg with no closing >) is treated as incomplete: next_tag() returns false for it and no modifications are applied, so it is emitted unchanged.' This generalizes to any caller doing best-effort edits on partial documents."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor :: next_tag() @type tag_name parameter doc",
+      "problem": "The two accepted query forms — array('tag_name'=>...) and the bare string shorthand — appear only in the prose table at lines 57-61, not in the next_tag() method reference at line 927-952. A subject reading the method signature in isolation sees 'array|string|null $query' but the inline @type block only documents the array keys, leaving the string shorthand semantics (string == tag_name) undocumented at the method heading.",
+      "suggestion": "In the next_tag() method block, add a line stating that passing a bare string is shorthand equivalent to array('tag_name' => $string). This removes ambiguity for readers who jump straight to the Methods/Method Index rather than the narrative Usage section."
+    }
+  ]
+}

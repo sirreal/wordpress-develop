@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan for the TITLE element in the HTML document. The next_tag() method finds the first title tag, and get_modifiable_text() returns the decoded text content (character references are automatically decoded for TITLE elements per the HTML API specification). If no TITLE element is found, next_tag() returns false and the function returns null; if TITLE exists but is empty, get_modifiable_text() returns an empty string which is correctly returned as is.",
+  "confidence": 92
+}

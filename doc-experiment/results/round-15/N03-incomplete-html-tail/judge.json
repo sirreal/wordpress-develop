@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to reference solution. Constructs WP_HTML_Tag_Processor, drains all tokens with next_token() loop, returns paused_at_incomplete_token(). Both methods documented in html-tag-processor.md (next_token lines 962-995; paused_at_incomplete_token lines 1015-1047). Correct processor choice: Tag Processor is the documented home of the incomplete-token API and the lighter, appropriate tool for a lexical truncation check. Idiomatic drain-then-check loop exactly as the paused_at_incomplete_token example prescribes. All 9 hidden cases pass, no _doing_it_wrong records. Edge cases (empty string, trailing '<' as text, unclosed-but-complete element, unterminated SCRIPT) handled by delegating to the documented method semantics. Self-reported confidence 88."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-1 and the reference (differing only in comment wording). Drain-loop with next_token() then paused_at_incomplete_token(). No undocumented API. Explanation correctly states the method reports whether input ended mid-syntax-element. 9/9 pass, no misuse records. Highest self-reported confidence (95) of the three, justified."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical solution. next_token() drain loop followed by paused_at_incomplete_token(). Explanation explicitly distinguishes lexically-complete-but-structurally-unclosed elements from truly incomplete tokens, matching the task's stated nuance and the docs' SCRIPT/special-element notes. 9/9 pass, no _doing_it_wrong. Self-reported confidence 92."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three produced the canonical solution and passed all 9 hidden cases (complete-document, cut-inside-attribute, cut-inside-comment, plain-text, trailing-lt-is-text, unterminated-script, cut-after-complete-content, unclosed-element-is-complete, empty-string). What the docs did exceptionally well, and why this task was solved cleanly: (1) The paused_at_incomplete_token() method heading (html-tag-processor.md lines 1015-1047) carries TWO examples, the second of which is the exact required idiom: \\\"In a longer document, drain all tokens first... while ( $processor->next_token() ) { continue; } $was_truncated = $processor->paused_at_incomplete_token();\\\". This is essentially the reference solution, so subjects could lift it directly. (2) The \\\"When matching fails\\\" section (lines 92-119) primes the concept: it explains that a document ending mid-syntax-element pauses the processor, and crucially that an unclosed special element (STYLE/SCRIPT) \\\"will count as an incomplete tag\\\" with the parser pausing \\\"as if the opening tag were incomplete\\\". This is exactly what makes the unterminated-script case (expected true) work, and all three subjects' explanations show they internalized it. (3) The \\\"Which processor should I use?\\\" guidance (lines 18-25) plus the Tag Processor being the documented owner of paused_at_incomplete_token() steered every subject to the correct, lighter processor rather than reaching for WP_HTML_Processor. (4) The task's tricky edge cases map cleanly onto documented semantics the subjects did not need to special-case: trailing '<' as text, an unclosed-but-lexically-complete <div>text, and empty string all fall out of correctly delegating to the documented method. The only near-miss is in the explanations, not the code: trial-1 and trial-3 describe paused_at_incomplete_token() as distinguishing \\\"structurally unclosed\\\" from \\\"incomplete\\\" tokens. That framing is slightly imprecise, the method is purely lexical and has no structural awareness, but it does not affect correctness because the Tag Processor's lexical pause already yields the right answer for the unclosed-element-is-complete case. No subject confused this method with structural completeness checks (e.g. attempting get_breadcrumbs or get_current_depth from WP_HTML_Processor), which would have been the likely failure mode had the docs been weaker.\"}",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (html-tag-processor.md, method heading ~lines 1015-1047)",
+      "problem": "The method description says it reports whether input \"ended in the middle of a syntax element, such as in the middle of a tag,\" but does not explicitly state that this is a LEXICAL judgment with no structural component. Two of three subjects' explanations drifted into describing it as distinguishing \"structurally unclosed\" from \"incomplete\" tokens, conflating lexical token completeness with DOM-structural completeness. The code was unaffected here, but on a task where the distinction mattered (e.g. asking whether elements are left open), that conflation could produce wrong processor choice or wrong expectations.",
+      "suggestion": "Add one sentence contrasting the two notions: \"This reports only LEXICAL completeness, whether the final token's bytes were all present, not structural completeness. An unclosed but whole element such as `<div>text` returns false (its tokens are complete) even though the DIV never closes; for open-element/nesting questions use the HTML Processor's depth and breadcrumb APIs instead.\" This generalizes beyond this task and pre-empts the structural-vs-lexical confusion."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (method heading) and the \"When matching fails\" / \"Special self-contained elements\" sections (~lines 92-141)",
+      "problem": "The fact that an unclosed special/rawtext element (SCRIPT, STYLE, TITLE, TEXTAREA) causes the processor to pause as an incomplete token is stated in the \"When matching fails\" prose (lines 109-119) but is NOT cross-referenced from the paused_at_incomplete_token() heading itself. A reader who jumps straight to the method (as is common) could miss that `<script>...` with no `</script>` counts as incomplete, the unterminated-script case. Subjects succeeded here only because they read the surrounding prose.",
+      "suggestion": "In the paused_at_incomplete_token() docblock, add a brief note with a See reference: \"An unclosed special element whose contents run to the end of input (e.g. `<script>...` with no closing tag) also pauses as incomplete; see the 'Special self-contained elements' section.\" Keeps the method self-contained for readers who don't read the whole class doc."
+    }
+  ]
+}

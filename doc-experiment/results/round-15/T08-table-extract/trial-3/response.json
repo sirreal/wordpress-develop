@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML and finds the first TABLE element with next_tag(). It then walks through all tokens within the table using next_token(), accumulating text content from #text tokens via get_modifiable_text(), and organizing that text into cells and rows by detecting TD/TH and TR closing tags. Since WP_HTML_Processor provides implicit closing tags even when omitted in the source HTML, the implementation reliably detects cell and row boundaries through these synthesized closers.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor's fragment parsing mode to safely process the HTML. It iterates through all P tags using next_tag(), checks each one's breadcrumbs (the ancestor chain from root to the current element) for a BLOCKQUOTE ancestor, and adds the \"quoted\" class if found. The breadcrumbs approach correctly handles P elements at any depth within a blockquote. The implementation preserves the HTML exactly except for the class attribute modifications using get_updated_html().",
+  "confidence": 92
+}

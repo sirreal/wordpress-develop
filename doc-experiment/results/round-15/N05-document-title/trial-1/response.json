@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan for the TITLE tag, then calls get_modifiable_text() which automatically returns character references (like &mdash;) already decoded as documented. For complete HTML documents, this finds the first title element. If no TITLE tag exists, it returns null; if TITLE is empty, it returns an empty string as required.",
+  "confidence": 85
+}

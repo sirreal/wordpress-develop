@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment, iterates through all tokens with next_token(), and skips any SPAN tags (both opening and closing) by checking get_tag() and using continue. All other tokens (text nodes, other tags, comments) are serialized using serialize_token() and concatenated. The processor handles HTML normalization automatically as it serializes. This approach correctly removes SPAN elements while preserving their contents and normalizing the output.",
+  "confidence": 82
+}

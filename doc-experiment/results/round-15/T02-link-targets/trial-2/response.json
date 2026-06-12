@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to linearly scan for A tags and check for href attributes. The get_attribute() method returns null when an attribute doesn't exist, or a value (including empty string or true for boolean) when it does. For each A tag with an href, set_attribute() sets target to _blank, overwriting any existing target. Finally, get_updated_html() returns the document with all changes applied while preserving byte-for-byte everything not modified.",
+  "confidence": 92
+}

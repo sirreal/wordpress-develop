@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor; all 7 methods documented; break-when-depth-less-than-opener equals the greater-or-equal guard, handles nested EM closer. 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Textbook reference; canonical greater-or-equal idiom; no hallucinated API. 8/8. Cleanest."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 72,
+      "hallucinated_methods": [],
+      "notes": "Used strictly-greater-than depth guard; nested EM closer at opener depth exits walk early, dropping trailing text. Fails simple, 7/8."
+    }
+  ],
+  "failure_analysis": "The third subject used a strict greater than check, so the walk stopped at the child closer and lost the text after it. The docs say to continue while depth stays at least the opener depth, since a child closer reports that same depth. The first two subjects read this correctly and passed. So this is a reading error, not a missing piece in the docs.",
+  "doc_gaps": [
+    {
+      "location": "get_current_depth/next_token subtree walk",
+      "problem": "greater-or-equal guard buried in prose; trial-3 used strictly-greater-than and dropped trailing text.",
+      "suggestion": "Add a boxed recipe: walk while depth greater-or-equal opener depth; child closer reports depth equal to it; add a counterexample."
+    },
+    {
+      "location": "get_current_depth guard vs break",
+      "problem": "docs never show greater-or-equal-continue equals less-than-break.",
+      "suggestion": "Show both forms; break must use less-than not less-or-equal."
+    },
+    {
+      "location": "get_attribute boolean vs missing",
+      "problem": "no present-at-all idiom; falsy/empty drops a valueless true attribute.",
+      "suggestion": "Use strict not-null for existence; test the string for non-empty."
+    }
+  ]
+}

@@ -2,6 +2,19 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 15 — Haiku, checkpoint: T05 cured; N05 one placement away
+
+**All-19 96.16 / train 97.59 / held-out 90.79 (flat vs 91.04 — N05's
+single 0/7 trial swings the 4-task holdout mean ±10).** T05 back to
+9/9×3 (construction-asymmetry note), T08 +15.5. N05's only failure
+called create_full_parser() on the wrong class while otherwise
+following the documented TITLE idiom — the asymmetry note exists but
+not where that subject was reading.
+
+Round-16 hypothesis (committed): one-line asymmetry reminder inside
+get_modifiable_text() on the Tag Processor (placement refinement of
+the same train-licensed hypothesis).
+
 ## Round 14 — Haiku, the construction-asymmetry gap crosses into train
 
 **Train 95.92 (−2.6).** The dip is dominated by one T05 trial (1/9)

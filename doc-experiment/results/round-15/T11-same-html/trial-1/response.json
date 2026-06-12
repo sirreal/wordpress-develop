@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse both HTML fragments with create_fragment() (which creates a fragment parser in BODY context, the default for body-level HTML), then calls serialize() on each processor to get normalized, standardized representations. The serialize() method normalizes quotes, omitted tags, tag case, character references, and whitespace according to HTML5 rules. If either processor creation or serialization fails (returns null), the function returns false per the requirement. Finally, the normalized versions are compared for exact equality, which captures structural differences while ignoring cosmetic differences like quoting style and tag case.",
+  "confidence": 72
+}

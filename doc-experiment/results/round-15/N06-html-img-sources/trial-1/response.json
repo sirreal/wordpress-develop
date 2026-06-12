@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to linearly scan the HTML document and find all tags. For each tag, it checks if the tag name is 'IMG' and the namespace is 'html' (excluding SVG image elements which would have namespace 'svg'). The get_attribute() method returns decoded attribute values directly. The function collects src values in document order, skipping empty or missing values, and returns them as a numeric array.",
+  "confidence": 85
+}

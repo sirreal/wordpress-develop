@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment and locate the first H1 tag with next_tag(). Records the depth at the H1 opening tag, then iterates through tokens with next_token() and get_token_type() to collect all #text nodes. The get_modifiable_text() method returns decoded text (character references already replaced), so no additional decoding is needed. Returns null if no H1 found, otherwise returns the concatenated text (empty string if the H1 contains no text).",
+  "confidence": 85
+}

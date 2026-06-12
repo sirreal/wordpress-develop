@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse both HTML fragments into their canonical/normalized form and compares the results. The normalize() method handles all equivalencies mentioned in the task (attribute quoting, optional tags, tag case, character references) by serializing the parsed structure. It returns false if either input cannot be fully parsed or serialized, ensuring that incomplete HTML is properly handled.",
+  "confidence": 72
+}

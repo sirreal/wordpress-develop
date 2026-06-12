@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment, iterates through all tokens using next_token(), and collects text from #text nodes (which already have character references decoded and exclude SCRIPT/STYLE contents). It counts Unicode code points using mb_strlen() with UTF-8 encoding and truncates to exactly max_codepoints using mb_substr() without cutting multi-byte characters, returning empty string for non-positive limits.",
+  "confidence": 85
+}

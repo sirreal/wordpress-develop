@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then loops through each IMG tag with next_tag(). For each IMG found, it checks if FIGURE appears in the breadcrumbs (the path from root to current element), which confirms the IMG is nested inside a FIGURE at any depth. It retrieves the decoded src attribute with get_attribute() and only includes non-empty values in the result array. The breadcrumbs automatically include the full tree path, so checking for FIGURE's presence correctly identifies images inside figures regardless of nesting depth.",
+  "confidence": 82
+}
