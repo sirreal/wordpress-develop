@@ -26,6 +26,7 @@
 		}
 	},
 	"files": [
+		"README.md",
 		"dist/wp_html_api_rust_core.wasm",
 		"wp_html_api_rust_core.wasm.d.ts",
 		"wp-html-api-rust.d.ts",

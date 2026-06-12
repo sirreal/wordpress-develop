@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -51,6 +51,12 @@ try {
 			maxBuffer: 1024 * 1024,
 		},
 	);
+	const installedReadme = await readFile(
+		join(workspace, "node_modules", "wp-html-api-rust-wasm", "README.md"),
+		"utf8",
+	);
+	assert.match(installedReadme, /loadWasm\(\)/);
+	assert.match(installedReadme, /WP_HTML_Processor/);
 
 	await writeFile(
 		join(workspace, "consumer.mjs"),
