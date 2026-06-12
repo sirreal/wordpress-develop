@@ -1973,8 +1973,49 @@ assert.equal(addNumericClassName.next_tag("div"), true);
 assert.equal(addNumericClassName.add_class(1), true);
 assert.equal(addNumericClassName.add_class("1"), true);
 assert.equal(addNumericClassName.add_class(1.5), true);
-assert.equal(addNumericClassName.get_updated_html(), '<div class="0 1 1 1 1"></div>');
+assert.equal(addNumericClassName.get_updated_html(), '<div class="0 1 1"></div>');
 addNumericClassName.destroy();
+
+for (const attributeName of ["CLASS", "Class"]) {
+	const pendingAddClassAttribute = new WP_HTML_Tag_Processor('<div class="one"></div>');
+	assert.equal(pendingAddClassAttribute.next_tag("div"), true);
+	assert.equal(pendingAddClassAttribute.add_class("two"), true);
+	assert.equal(pendingAddClassAttribute.get_attribute(attributeName), "one");
+	assert.equal(pendingAddClassAttribute.get_updated_html(), '<div class="one two"></div>');
+	pendingAddClassAttribute.destroy();
+}
+
+for (const attributeName of ["CLASS", "Class"]) {
+	const pendingRemoveClassAttribute = new WP_HTML_Tag_Processor('<div class="one two"></div>');
+	assert.equal(pendingRemoveClassAttribute.next_tag("div"), true);
+	assert.equal(pendingRemoveClassAttribute.remove_class("two"), true);
+	assert.equal(pendingRemoveClassAttribute.get_attribute(attributeName), "one two");
+	assert.equal(pendingRemoveClassAttribute.get_attribute("class"), "one");
+	pendingRemoveClassAttribute.destroy();
+}
+
+const pendingSetThenAddClassAttribute = new WP_HTML_Tag_Processor('<div class="one"></div>');
+assert.equal(pendingSetThenAddClassAttribute.next_tag("div"), true);
+assert.equal(pendingSetThenAddClassAttribute.set_attribute("class", "set"), true);
+assert.equal(pendingSetThenAddClassAttribute.add_class("two"), true);
+assert.equal(pendingSetThenAddClassAttribute.get_attribute("CLASS"), "set");
+assert.equal(pendingSetThenAddClassAttribute.get_attribute("class"), "set two");
+pendingSetThenAddClassAttribute.destroy();
+
+const pendingClassPrefixAttributes = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(pendingClassPrefixAttributes.next_tag("div"), true);
+assert.equal(pendingClassPrefixAttributes.add_class("two"), true);
+assert.deepEqual(pendingClassPrefixAttributes.get_attribute_names_with_prefix("cl"), []);
+assert.equal(pendingClassPrefixAttributes.get_attribute("class"), "two");
+pendingClassPrefixAttributes.destroy();
+
+const pendingEmptyThenClassName = new WP_HTML_Tag_Processor('<div class="one"></div>');
+assert.equal(pendingEmptyThenClassName.next_tag("div"), true);
+assert.equal(pendingEmptyThenClassName.add_class(null), true);
+assert.equal(pendingEmptyThenClassName.add_class("two"), true);
+assert.equal(pendingEmptyThenClassName.get_attribute("CLASS"), "one");
+assert.equal(pendingEmptyThenClassName.get_attribute("class"), "one  two");
+pendingEmptyThenClassName.destroy();
 
 const removeNumericClassName = new WP_HTML_Tag_Processor('<div class="0 1 1.5 01 +1"></div>');
 assert.equal(removeNumericClassName.next_tag("div"), true);

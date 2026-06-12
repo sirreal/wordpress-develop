@@ -7,6 +7,8 @@ const TOKEN_TYPE_PRESUMPTUOUS_TAG = 6;
 const TOKEN_TYPE_FUNKY_COMMENT = 7;
 const DECODE_CONTEXT_DATA = 0;
 const DECODE_CONTEXT_ATTRIBUTE = 1;
+const CLASS_UPDATE_ADD = true;
+const CLASS_UPDATE_REMOVE = false;
 
 const STATE_READY = "STATE_READY";
 const STATE_COMPLETE = "STATE_COMPLETE";
@@ -1530,6 +1532,7 @@ export function createHtmlApi(wasm) {
 		static COMMENT_AS_INVALID_HTML = "COMMENT_AS_INVALID_HTML";
 		#reportIncompleteTokens = true;
 		#pausedAtJsIncompleteToken = false;
+		#classNameUpdates = new Map();
 
 		constructor(html, options = {}) {
 			if (typeof html !== "string") {
@@ -1678,16 +1681,11 @@ export function createHtmlApi(wasm) {
 			}
 
 			const attributeName = phpInternalStringCoerce(name, "name");
-			return runtime.withEncoded(attributeName, ({ ptr, len }) => runtime.withOutSlice((out) => {
-				const result = wasm.wp_html_api_rust_tag_processor_get_attribute(this.pointer, ptr, len, out);
-				if (result === 0) {
-					return null;
-				}
-				if (result === 1) {
-					return true;
-				}
-				return runtime.readStringFromOut(out);
-			}));
+			if (attributeName === "class") {
+				this.#flushClassNameUpdates();
+			}
+
+			return this.#readNativeAttribute(attributeName);
 		}
 
 		get_attribute_names_with_prefix(prefix) {
@@ -1738,18 +1736,11 @@ export function createHtmlApi(wasm) {
 				encodedValue = runtime.encode(phpStringParameterCoerce(value, "value"));
 			}
 
-			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, (nameBytes) => (
-				runtime.withBytes(encodedValue, (valueBytes) => (
-					wasm.wp_html_api_rust_tag_processor_set_attribute(
-						this.pointer,
-						nameBytes.ptr,
-						nameBytes.len,
-						valueBytes.ptr,
-						valueBytes.len,
-						valueKind,
-					)
-				))
-			)));
+			const result = this.#setNativeAttribute(attributeName, encodedValue, valueKind);
+			if (result && asciiLower(attributeName) === "class") {
+				this.#classNameUpdates.clear();
+			}
+			return result;
 		}
 
 		remove_attribute(name) {
@@ -1763,9 +1754,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			const attributeName = phpInternalStringCoerce(name, "name");
-			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, ({ ptr, len }) => (
-				wasm.wp_html_api_rust_tag_processor_remove_attribute(this.pointer, ptr, len)
-			)));
+			if (asciiLower(attributeName) === "class") {
+				this.#classNameUpdates.clear();
+			}
+			return this.#removeNativeAttribute(attributeName);
 		}
 
 		add_class(className) {
@@ -1779,23 +1771,8 @@ export function createHtmlApi(wasm) {
 			}
 
 			const normalizedClassName = phpClassUpdateKey(className, "class_name");
-			if (normalizedClassName.name === "") {
-				const currentClass = this.get_attribute("class");
-				return typeof currentClass === "string" && currentClass !== ""
-					? this.set_attribute("class", `${currentClass} `)
-					: true;
-			}
-			if (normalizedClassName.isIntegerKey && !this.#isQuirksMode()) {
-				const currentClass = this.get_attribute("class");
-				const currentValue = currentClass === null || currentClass === true ? "" : currentClass;
-				return this.set_attribute(
-					"class",
-					currentValue === "" ? normalizedClassName.name : `${currentValue} ${normalizedClassName.name}`,
-				);
-			}
-			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName.name, ({ ptr, len }) => (
-				wasm.wp_html_api_rust_tag_processor_add_class(this.pointer, ptr, len, this.#isQuirksMode())
-			)));
+			this.#queueClassNameUpdate(normalizedClassName, CLASS_UPDATE_ADD);
+			return true;
 		}
 
 		remove_class(className) {
@@ -1809,12 +1786,8 @@ export function createHtmlApi(wasm) {
 			}
 
 			const normalizedClassName = phpClassUpdateKey(className, "class_name");
-			if (normalizedClassName.name === "" || (normalizedClassName.isIntegerKey && !this.#isQuirksMode())) {
-				return true;
-			}
-			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName.name, ({ ptr, len }) => (
-				wasm.wp_html_api_rust_tag_processor_remove_class(this.pointer, ptr, len, this.#isQuirksMode())
-			)));
+			this.#queueClassNameUpdate(normalizedClassName, CLASS_UPDATE_REMOVE);
+			return true;
 		}
 
 		has_class(className) {
@@ -1828,6 +1801,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			this.#flushClassNameUpdates();
 			return runtime.withEncoded(wantedClass, ({ ptr, len }) => {
 				const result = wasm.wp_html_api_rust_tag_processor_has_class(this.pointer, ptr, len, this.#isQuirksMode());
 				return result === 0 ? null : result === 2;
@@ -1844,6 +1818,7 @@ export function createHtmlApi(wasm) {
 				return [];
 			}
 
+			this.#flushClassNameUpdates();
 			return runtime.withOutSlice((out) => {
 				if (wasm.wp_html_api_rust_tag_processor_class_list(this.pointer, out, this.#isQuirksMode()) === 0) {
 					return null;
@@ -2034,7 +2009,9 @@ export function createHtmlApi(wasm) {
 			}
 
 			this.seek_count += 1;
-			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, bookmark.start);
+			this.#syncLexicalUpdates();
+			const updatedBookmark = this.bookmarks.get(bookmarkName);
+			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, updatedBookmark.start);
 			if (!wasm.wp_html_api_rust_tag_processor_next_token(this.pointer)) {
 				this.parser_state = wasm.wp_html_api_rust_tag_processor_paused_at_incomplete(this.pointer)
 					? STATE_INCOMPLETE_INPUT
@@ -2116,8 +2093,11 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		get_updated_html() {
+		get_updated_html(flushClassNameUpdates = true) {
 			this.#ensureLive();
+			if (flushClassNameUpdates) {
+				this.#flushClassNameUpdates();
+			}
 			return runtime.readOutputString((out) => (
 				wasm.wp_html_api_rust_tag_processor_get_html(this.pointer, out)
 			)) ?? "";
@@ -2226,6 +2206,84 @@ export function createHtmlApi(wasm) {
 			return token !== null && token.length >= 2 && token[0] === 0x3c && token[1] === 0x2f;
 		}
 
+		#readNativeAttribute(attributeName) {
+			return runtime.withEncoded(attributeName, ({ ptr, len }) => runtime.withOutSlice((out) => {
+				const result = wasm.wp_html_api_rust_tag_processor_get_attribute(this.pointer, ptr, len, out);
+				if (result === 0) {
+					return null;
+				}
+				if (result === 1) {
+					return true;
+				}
+				return runtime.readStringFromOut(out);
+			}));
+		}
+
+		#setNativeAttribute(attributeName, encodedValue, valueKind) {
+			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, (nameBytes) => (
+				runtime.withBytes(encodedValue, (valueBytes) => (
+					wasm.wp_html_api_rust_tag_processor_set_attribute(
+						this.pointer,
+						nameBytes.ptr,
+						nameBytes.len,
+						valueBytes.ptr,
+						valueBytes.len,
+						valueKind,
+					)
+				))
+			)));
+		}
+
+		#removeNativeAttribute(attributeName) {
+			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, ({ ptr, len }) => (
+				wasm.wp_html_api_rust_tag_processor_remove_attribute(this.pointer, ptr, len)
+			)));
+		}
+
+		#queueClassNameUpdate(className, operation) {
+			if (this.#isQuirksMode()) {
+				for (const queued of this.#classNameUpdates.values()) {
+					if (
+						queued.name.length === className.name.length &&
+						asciiLower(queued.name) === asciiLower(className.name)
+					) {
+						queued.operation = operation;
+						return;
+					}
+				}
+			}
+
+			this.#classNameUpdates.set(classUpdateMapKey(className), {
+				isIntegerKey: className.isIntegerKey,
+				name: className.name,
+				operation,
+			});
+		}
+
+		#flushClassNameUpdates() {
+			if (this.#classNameUpdates.size === 0 || this.parser_state !== STATE_MATCHED_TAG) {
+				return false;
+			}
+
+			const updates = Array.from(this.#classNameUpdates.values());
+			this.#classNameUpdates.clear();
+
+			let existingClass = this.#readNativeAttribute("class");
+			if (existingClass === null || existingClass === true) {
+				existingClass = "";
+			}
+
+			const result = applyClassNameUpdates(existingClass, updates, this.#isQuirksMode());
+			if (!result.modified) {
+				return false;
+			}
+
+			if (result.className.length > 0) {
+				return this.#setNativeAttribute("class", runtime.encode(result.className), 2);
+			}
+			return this.#removeNativeAttribute("class");
+		}
+
 		#mutateCurrentToken(callback) {
 			const oldSpan = this.#currentSpan();
 			const result = Boolean(callback());
@@ -2237,7 +2295,7 @@ export function createHtmlApi(wasm) {
 			if (oldSpan && newSpan) {
 				this.#adjustBookmarks(oldSpan, newSpan);
 			}
-			this.html = this.get_updated_html();
+			this.html = this.get_updated_html(false);
 			return true;
 		}
 
@@ -2919,11 +2977,12 @@ export function createHtmlApi(wasm) {
 			return super.set_modifiable_text(plaintextContent);
 		}
 
-		get_updated_html() {
+		get_updated_html(flushClassNameUpdates = true) {
 			if (this.plaintext_updated_html != null && this.plaintext_content_start != null) {
-				return super.get_updated_html().slice(0, this.plaintext_content_start) + this.plaintext_updated_html;
+				return super.get_updated_html(flushClassNameUpdates).slice(0, this.plaintext_content_start) + this.plaintext_updated_html;
 			}
-			return this.raw_text_fragment_updated_html ?? super.get_updated_html();
+			const html = super.get_updated_html(flushClassNameUpdates);
+			return this.raw_text_fragment_updated_html ?? html;
 		}
 
 		set_bookmark(name) {
@@ -7803,6 +7862,82 @@ function phpClassUpdateKey(value, parameterName) {
 	}
 
 	throw new TypeError(`Argument $${parameterName} must be of type array-key.`);
+}
+
+function classUpdateMapKey(className) {
+	return `${className.isIntegerKey ? "i" : "s"}:${className.name}`;
+}
+
+function classUpdateComparable(className, isQuirksMode) {
+	if (isQuirksMode) {
+		return `s:${asciiLower(className.name)}`;
+	}
+
+	return classUpdateMapKey(className);
+}
+
+function classTokenComparable(className, isQuirksMode) {
+	return `s:${isQuirksMode ? asciiLower(className) : className}`;
+}
+
+function applyClassNameUpdates(existingClass, updates, isQuirksMode) {
+	let className = "";
+	let at = 0;
+	let modified = false;
+	const seen = new Set();
+	const toRemove = new Set(
+		updates
+			.filter((update) => update.operation === CLASS_UPDATE_REMOVE)
+			.map((update) => classUpdateComparable(update, isQuirksMode)),
+	);
+
+	while (at < existingClass.length) {
+		const whitespaceStart = at;
+		while (at < existingClass.length && isHtmlClassWhitespace(existingClass[at])) {
+			at += 1;
+		}
+
+		const nameStart = at;
+		while (at < existingClass.length && !isHtmlClassWhitespace(existingClass[at])) {
+			at += 1;
+		}
+
+		if (nameStart === at) {
+			break;
+		}
+
+		const name = existingClass.slice(nameStart, at);
+		const comparableName = classTokenComparable(name, isQuirksMode);
+		if (toRemove.has(comparableName)) {
+			modified = true;
+			continue;
+		}
+
+		if (seen.has(comparableName)) {
+			continue;
+		}
+
+		seen.add(comparableName);
+		if (className !== "") {
+			className += existingClass.slice(whitespaceStart, nameStart);
+		}
+		className += name;
+	}
+
+	for (const update of updates) {
+		const comparableName = classUpdateComparable(update, isQuirksMode);
+		if (update.operation === CLASS_UPDATE_ADD && !seen.has(comparableName)) {
+			modified = true;
+			className += className.length > 0 ? " " : "";
+			className += update.name;
+		}
+	}
+
+	return { className, modified };
+}
+
+function isHtmlClassWhitespace(value) {
+	return value === " " || value === "\t" || value === "\n" || value === "\f" || value === "\r";
 }
 
 function phpIntegerParameterCoerce(value, parameterName) {
