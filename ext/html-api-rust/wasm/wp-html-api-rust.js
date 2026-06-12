@@ -205,6 +205,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"OBJECT",
 	"SPAN",
 ]);
+const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
 	"COL",
@@ -3285,6 +3286,9 @@ export function createHtmlApi(wasm) {
 				if (closingNamespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 					this.#clearActiveFormattingElementsUpToLastMarker();
 				}
+				if (closingNamespace === "html" && ACTIVE_FORMATTING_MARKER_ELEMENTS.has(tagName)) {
+					this.#clearActiveFormattingElementsUpToLastMarker();
+				}
 				this.breadcrumbs = this.#breadcrumbStack();
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
@@ -3458,6 +3462,9 @@ export function createHtmlApi(wasm) {
 			if (this.current_token_namespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingMarker();
 			}
+			if (this.current_token_namespace === "html" && ACTIVE_FORMATTING_MARKER_ELEMENTS.has(tagName)) {
+				this.#insertActiveFormattingMarker();
+			}
 			if (this.current_token_namespace === "html" && FORMATTING_ELEMENTS.has(tagName)) {
 				this.#insertActiveFormattingElement(this.#createActiveFormattingElement(tagName));
 			}
@@ -3557,7 +3564,10 @@ export function createHtmlApi(wasm) {
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
-					if (token.namespaceName === "html" && TABLE_CELL_ELEMENTS.has(token.tagName)) {
+					if (
+						token.namespaceName === "html" &&
+						(TABLE_CELL_ELEMENTS.has(token.tagName) || ACTIVE_FORMATTING_MARKER_ELEMENTS.has(token.tagName))
+					) {
 						this.#clearActiveFormattingElementsUpToLastMarker();
 					}
 					this.#setCurrentNamespace(

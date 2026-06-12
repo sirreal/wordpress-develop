@@ -2622,6 +2622,14 @@ assert.equal(
 	"<p><b><b><b><b></b></b></b></b></p><p><b><b><b>x</b></b></b></p>",
 );
 
+assert.equal(
+	WP_HTML_Processor.normalize("<p><b id=a><b id=a><b id=a><b><object><b id=a><b id=a>X</object><p>Y"),
+	[
+		'<p><b id="a"><b id="a"><b id="a"><b><object><b id="a"><b id="a">X</b></b></object></b></b></b></b></p>',
+		'<p><b id="a"><b id="a"><b id="a"><b>Y</b></b></b></b></p>',
+	].join(""),
+);
+
 const staleFormattingCloserProcessor = WP_HTML_Processor.create_full_parser("<p id=a><b><p id=b></b>TEST");
 while (
 	staleFormattingCloserProcessor.next_token() &&
