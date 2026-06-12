@@ -212,6 +212,36 @@ function staticMemberValues(classValue, memberNames) {
 	);
 }
 
+function runtimePrototypeMethodNames(classValue, includeInherited = false) {
+	const methods = new Set();
+	let prototype = classValue.prototype;
+	do {
+		for (const name of Object.getOwnPropertyNames(prototype)) {
+			if (name !== "constructor" && typeof classValue.prototype[name] === "function") {
+				methods.add(name);
+			}
+		}
+		prototype = includeInherited ? Object.getPrototypeOf(prototype) : null;
+	} while (prototype && prototype !== Object.prototype);
+
+	return [...methods].sort();
+}
+
+function runtimeStaticMemberNames(classValue, includeInherited = false) {
+	const members = new Set();
+	let value = classValue;
+	do {
+		for (const name of Object.getOwnPropertyNames(value)) {
+			if (!["length", "name", "prototype"].includes(name)) {
+				members.add(name);
+			}
+		}
+		value = includeInherited ? Object.getPrototypeOf(value) : null;
+	} while (value && value !== Function.prototype);
+
+	return [...members].sort();
+}
+
 const declaredModuleValueExports = [
 	...typeDeclarations.matchAll(/^export const\s+([A-Za-z_$][\w$]*)\s*:/gm),
 	...typeDeclarations.matchAll(/^export function\s+([A-Za-z_$][\w$]*)\s*\(/gm),
@@ -928,6 +958,24 @@ assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Active_Formatting_Element
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Open_Elements"), [...openElementsPrototypeMethods].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Stack_Event_Constructor"), [...stackEventStaticMembers].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Processor_State_Constructor"), [...processorStateStaticMembers].sort());
+
+assert.deepEqual(runtimePrototypeMethodNames(WP_HTML_Tag_Processor), [...tagProcessorPrototypeMethods].sort());
+assert.deepEqual(runtimeStaticMemberNames(WP_HTML_Tag_Processor), [...tagProcessorStaticMembers].sort());
+assert.deepEqual(
+	runtimePrototypeMethodNames(WP_HTML_Processor, true),
+	[...new Set([...tagProcessorPrototypeMethods, ...processorPrototypeMethods])].sort(),
+);
+assert.deepEqual(
+	runtimeStaticMemberNames(WP_HTML_Processor, true),
+	[...new Set([...tagProcessorStaticMembers, ...processorStaticMethods, ...processorStaticMembers])].sort(),
+);
+assert.deepEqual(runtimeStaticMemberNames(WP_HTML_Decoder), [...decoderStaticMethods].sort());
+assert.deepEqual(runtimeStaticMemberNames(WP_HTML_Doctype_Info), [...doctypeStaticMethods].sort());
+assert.deepEqual(runtimePrototypeMethodNames(WP_HTML_Token), [...tokenPrototypeMethods].sort());
+assert.deepEqual(runtimePrototypeMethodNames(WP_HTML_Active_Formatting_Elements), [...activeFormattingPrototypeMethods].sort());
+assert.deepEqual(runtimePrototypeMethodNames(WP_HTML_Open_Elements), [...openElementsPrototypeMethods].sort());
+assert.deepEqual(runtimeStaticMemberNames(WP_HTML_Stack_Event), [...stackEventStaticMembers].sort());
+assert.deepEqual(runtimeStaticMemberNames(WP_HTML_Processor_State), [...processorStateStaticMembers].sort());
 
 for (const method of tagProcessorPrototypeMethods) {
 	assert.equal(typeof WP_HTML_Tag_Processor.prototype[method], "function", `Missing tag processor method ${method}`);
