@@ -2028,14 +2028,18 @@ export function createHtmlApi(wasm) {
 			this.context_node = options.contextNode ?? "BODY";
 			this.context_namespace = options.contextNamespace ?? contextNamespace(this.context_node);
 			this.context_integration_node_type = options.contextIntegrationNodeType ?? null;
+			this.context_breadcrumbs = options.contextBreadcrumbs ?? (
+				this.is_full_parser || this.is_html_fragment_context ? [] : [this.context_node]
+			);
 			this.open_elements = this.is_html_fragment_context ? ["HTML"] : this.is_full_parser ? [] : ["HTML", this.context_node];
 			this.open_element_namespaces = this.is_html_fragment_context ? ["html"] : this.is_full_parser ? [] : ["html", this.context_namespace];
 			this.open_element_integration_node_types = this.is_html_fragment_context ? [null] : this.is_full_parser ? [] : [null, this.context_integration_node_type];
+			this.detached_context_breadcrumbs = [];
 			this.active_formatting_elements = [];
 			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
-			this.breadcrumbs = [...this.open_elements];
+			this.breadcrumbs = this.#breadcrumbStack();
 			this.current_namespace = this.is_html_fragment_context
 				? "html"
 				: this.#childNamespaceForStackEntry(
@@ -2074,6 +2078,7 @@ export function createHtmlApi(wasm) {
 			let contextNode = null;
 			let contextNamespaceName = null;
 			let contextIntegrationNodeType = null;
+			const contextBreadcrumbs = [];
 			while (contextProcessor.next_tag()) {
 				if (!contextProcessor.is_virtual() && !contextProcessor.is_tag_closer()) {
 					contextNode = contextProcessor.get_tag();
@@ -2082,6 +2087,7 @@ export function createHtmlApi(wasm) {
 						contextNode,
 						contextNamespaceName,
 					);
+					contextBreadcrumbs.push(contextNode);
 				}
 			}
 
@@ -2100,6 +2106,7 @@ export function createHtmlApi(wasm) {
 					contextNode,
 					contextNamespace: contextNamespaceName,
 					contextIntegrationNodeType,
+					contextBreadcrumbs,
 					fullParser: false,
 					rawTextFragmentContext: contextNode,
 				});
@@ -2122,6 +2129,7 @@ export function createHtmlApi(wasm) {
 					contextNode,
 					contextNamespace: contextNamespaceName,
 					contextIntegrationNodeType,
+					contextBreadcrumbs,
 					fullParser: false,
 					htmlFragmentContext: true,
 					encodingConfidence: "irrelevant",
@@ -2133,6 +2141,7 @@ export function createHtmlApi(wasm) {
 				contextNode,
 				contextNamespace: contextNamespaceName,
 				contextIntegrationNodeType,
+				contextBreadcrumbs,
 				fullParser: false,
 			});
 		}
@@ -2333,7 +2342,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.raw_text_fragment_context !== null) {
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				return false;
 			}
 
@@ -2358,7 +2367,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (super.paused_at_incomplete_token() && !this.#incompleteTokenIsEofComment()) {
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				return false;
 			}
 
@@ -2387,7 +2396,7 @@ export function createHtmlApi(wasm) {
 				return this.#consumeVirtualToken();
 			}
 
-			this.breadcrumbs = [...this.open_elements];
+			this.breadcrumbs = this.#breadcrumbStack();
 			return false;
 		}
 
@@ -2685,6 +2694,21 @@ export function createHtmlApi(wasm) {
 			return [...this.breadcrumbs];
 		}
 
+		#breadcrumbStack(tokenName = null) {
+			const stack = this.detached_context_breadcrumbs.length > 0 && this.open_elements[0] === "HTML"
+				? [
+					this.open_elements[0],
+					...this.detached_context_breadcrumbs,
+					...this.open_elements.slice(1),
+				]
+				: [...this.open_elements];
+
+			if (tokenName !== null) {
+				stack.push(tokenName);
+			}
+			return stack;
+		}
+
 		get_current_depth() {
 			return this.breadcrumbs.length;
 		}
@@ -2792,7 +2816,7 @@ export function createHtmlApi(wasm) {
 			const tokenName = this.get_token_name();
 
 			if (tokenName === null) {
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.current_token_namespace = this.current_namespace;
 				return;
 			}
@@ -2850,13 +2874,13 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.current_token_namespace = this.current_namespace;
-				this.breadcrumbs = [...this.open_elements, tokenName];
+				this.breadcrumbs = this.#breadcrumbStack(tokenName);
 				return;
 			}
 
 			const tagName = this.#getCurrentTreeTagName();
 			if (tagName === null) {
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.current_token_namespace = this.current_namespace;
 				return;
 			}
@@ -2869,7 +2893,7 @@ export function createHtmlApi(wasm) {
 					this.#shouldIgnoreEndTagInTableContext(tagName)
 				) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -2897,7 +2921,7 @@ export function createHtmlApi(wasm) {
 					existingIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
 					if (existingIndex === -1) {
 						this.current_token_namespace = this.current_namespace;
-						this.breadcrumbs = [...this.open_elements];
+						this.breadcrumbs = this.#breadcrumbStack();
 						this.virtual_tokens.push(
 							{
 								operation: "push",
@@ -2917,7 +2941,7 @@ export function createHtmlApi(wasm) {
 
 				if (!this.is_full_parser && existingIndex !== -1 && existingIndex < this.base_open_element_count) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -2933,7 +2957,7 @@ export function createHtmlApi(wasm) {
 
 				if (this.#shouldIgnoreEndTagClosingOutsideTemplate(tagName, closingNamespace, existingIndex)) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -2953,7 +2977,7 @@ export function createHtmlApi(wasm) {
 					}
 
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -2966,7 +2990,7 @@ export function createHtmlApi(wasm) {
 					this.#hasOnlyTableElementsAfter(existingIndex)
 				) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.form_element_pointer = null;
 					if (this.open_elements.length === existingIndex + 2) {
 						this.skip_current_token = true;
@@ -2996,7 +3020,7 @@ export function createHtmlApi(wasm) {
 				if (this.#shouldIgnoreAdoptionAgencyEndTagWithStaleEntry(tagName, closingNamespace)) {
 					this.#removeStaleActiveFormattingElementsForClose(tagName);
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -3004,7 +3028,7 @@ export function createHtmlApi(wasm) {
 				if (this.#shouldIgnoreAdoptionAgencyEndTagOutsideScope(tagName, closingNamespace, existingIndex)) {
 					this.#removeActiveFormattingElementsForClose(tagName);
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -3026,7 +3050,7 @@ export function createHtmlApi(wasm) {
 					);
 					if (headingIndex !== -1 && (existingIndex === -1 || headingIndex > existingIndex)) {
 						this.current_token_namespace = this.current_namespace;
-						this.breadcrumbs = [...this.open_elements];
+						this.breadcrumbs = this.#breadcrumbStack();
 						this.#queueVirtualPopsFrom(headingIndex);
 						this.skip_current_token = true;
 						return;
@@ -3056,7 +3080,7 @@ export function createHtmlApi(wasm) {
 					this.#hasHtmlScopeBoundaryAfter(existingIndex, DEFAULT_SCOPE_BOUNDARIES)
 				) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -3095,7 +3119,7 @@ export function createHtmlApi(wasm) {
 						this.#removeActiveFormattingElementsForClose(tagName);
 					}
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
 					return;
 				}
@@ -3129,7 +3153,7 @@ export function createHtmlApi(wasm) {
 				if (closingNamespace === "html" && TABLE_CELL_ELEMENTS.has(tagName)) {
 					this.#clearActiveFormattingElementsUpToLastMarker();
 				}
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.#setCurrentNamespace(this.#namespaceForStackTop());
 				return;
 			}
@@ -3200,7 +3224,7 @@ export function createHtmlApi(wasm) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1) {
 					this.current_token_namespace = this.current_namespace;
-					this.breadcrumbs = [...this.open_elements];
+					this.breadcrumbs = this.#breadcrumbStack();
 					this.#queueVirtualPopsFrom(selectIndex);
 					this.skip_current_token = true;
 					return;
@@ -3241,7 +3265,7 @@ export function createHtmlApi(wasm) {
 				)
 			) {
 				this.current_token_namespace = this.current_namespace;
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.skip_current_token = true;
 				return;
 			}
@@ -3252,7 +3276,7 @@ export function createHtmlApi(wasm) {
 				this.#hasOpenHtmlElement("SELECT")
 			) {
 				this.current_token_namespace = this.current_namespace;
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.skip_current_token = true;
 				return;
 			}
@@ -3316,7 +3340,7 @@ export function createHtmlApi(wasm) {
 			) {
 				this.form_element_pointer = shouldPopTableFormImmediately ? "detached" : "open";
 			}
-			this.breadcrumbs = [...this.open_elements];
+			this.breadcrumbs = this.#breadcrumbStack();
 
 			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
 				this.open_elements.pop();
@@ -3353,7 +3377,7 @@ export function createHtmlApi(wasm) {
 				this.open_elements.push(token.tagName);
 				this.open_element_namespaces.push(token.namespaceName);
 				this.open_element_integration_node_types.push(token.integrationNodeType ?? null);
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 				this.#setCurrentNamespace(this.#childNamespaceForStackEntry(
 					token.tagName,
 					token.namespaceName,
@@ -3369,18 +3393,28 @@ export function createHtmlApi(wasm) {
 					} else if (token.namespaceName === "html") {
 						this.#applyTemplateInsertionModeForEndTag(token.tagName);
 					}
+					if (token.skipSerialization && existingIndex < this.base_open_element_count) {
+						const detachedContextBreadcrumbs = (
+							existingIndex === 1 &&
+							this.base_open_element_count === 2 &&
+							this.context_breadcrumbs.length > 0
+						)
+							? this.context_breadcrumbs
+							: this.open_elements.slice(existingIndex, this.base_open_element_count);
+						this.detached_context_breadcrumbs.unshift(
+							...detachedContextBreadcrumbs,
+						);
+						this.base_open_element_count = existingIndex;
+					}
 					this.open_elements = this.open_elements.slice(0, existingIndex);
 					this.open_element_namespaces = this.open_element_namespaces.slice(0, existingIndex);
 					this.open_element_integration_node_types = this.open_element_integration_node_types.slice(0, existingIndex);
 					if (token.namespaceName === "html" && TABLE_CELL_ELEMENTS.has(token.tagName)) {
 						this.#clearActiveFormattingElementsUpToLastMarker();
 					}
-					if (token.skipSerialization && existingIndex < this.base_open_element_count) {
-						this.base_open_element_count = existingIndex;
-					}
 					this.#setCurrentNamespace(this.#namespaceForStackTop());
 				}
-				this.breadcrumbs = [...this.open_elements];
+				this.breadcrumbs = this.#breadcrumbStack();
 			}
 
 			return this.last_error === null;
@@ -3391,6 +3425,7 @@ export function createHtmlApi(wasm) {
 				openElements: [...this.open_elements],
 				openElementNamespaces: [...this.open_element_namespaces],
 				openElementIntegrationNodeTypes: [...this.open_element_integration_node_types],
+				detachedContextBreadcrumbs: [...this.detached_context_breadcrumbs],
 				breadcrumbs: [...this.breadcrumbs],
 				currentNamespace: this.current_namespace,
 				currentTokenNamespace: this.current_token_namespace,
@@ -3421,6 +3456,7 @@ export function createHtmlApi(wasm) {
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
+			this.detached_context_breadcrumbs = [...state.detachedContextBreadcrumbs];
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
@@ -3469,7 +3505,7 @@ export function createHtmlApi(wasm) {
 				? WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
 				: WP_HTML_Tag_Processor.TEXT_IS_GENERIC;
 			this.current_token_namespace = "html";
-			this.breadcrumbs = [...this.open_elements, "#text"];
+			this.breadcrumbs = this.#breadcrumbStack("#text");
 			return true;
 		}
 
@@ -4487,7 +4523,7 @@ export function createHtmlApi(wasm) {
 
 		#ignoreCurrentToken() {
 			this.current_token_namespace = this.current_namespace;
-			this.breadcrumbs = [...this.open_elements];
+			this.breadcrumbs = this.#breadcrumbStack();
 			this.skip_current_token = true;
 		}
 
@@ -5104,7 +5140,7 @@ export function createHtmlApi(wasm) {
 			};
 			this.parser_state = STATE_COMMENT;
 			this.current_token_namespace = this.current_namespace;
-			this.breadcrumbs = [...this.open_elements, "#comment"];
+			this.breadcrumbs = this.#breadcrumbStack("#comment");
 			return true;
 		}
 

@@ -3458,6 +3458,15 @@ assert.equal(mathTextIntegrationFragmentProcessor.get_namespace(), "html");
 assert.deepEqual(mathTextIntegrationFragmentProcessor.get_breadcrumbs(), ["HTML", "MS", "MS"]);
 mathTextIntegrationFragmentProcessor.destroy();
 
+const foreignFragmentBreakoutProcessor = WP_HTML_Processor.create_fragment("<nobr>X", "<svg><path>");
+assert.equal(foreignFragmentBreakoutProcessor.next_tag("nobr"), true);
+assert.equal(foreignFragmentBreakoutProcessor.get_namespace(), "html");
+assert.deepEqual(foreignFragmentBreakoutProcessor.get_breadcrumbs(), ["HTML", "SVG", "PATH", "NOBR"]);
+assert.equal(foreignFragmentBreakoutProcessor.next_token(), true);
+assert.equal(foreignFragmentBreakoutProcessor.get_token_type(), "#text");
+assert.deepEqual(foreignFragmentBreakoutProcessor.get_breadcrumbs(), ["HTML", "SVG", "PATH", "NOBR", "#text"]);
+foreignFragmentBreakoutProcessor.destroy();
+
 const mathAnnotationXmlFragmentProcessor = WP_HTML_Processor.create_fragment("<figure></figure>", "<math><annotation-xml>");
 assert.equal(mathAnnotationXmlFragmentProcessor.next_tag("figure"), true);
 assert.equal(mathAnnotationXmlFragmentProcessor.get_namespace(), "math");
@@ -3467,7 +3476,7 @@ mathAnnotationXmlFragmentProcessor.destroy();
 const mathAnnotationXmlBreakoutProcessor = WP_HTML_Processor.create_fragment("<div></div>", "<math><annotation-xml>");
 assert.equal(mathAnnotationXmlBreakoutProcessor.next_tag("div"), true);
 assert.equal(mathAnnotationXmlBreakoutProcessor.get_namespace(), "html");
-assert.deepEqual(mathAnnotationXmlBreakoutProcessor.get_breadcrumbs(), ["HTML", "DIV"]);
+assert.deepEqual(mathAnnotationXmlBreakoutProcessor.get_breadcrumbs(), ["HTML", "MATH", "ANNOTATION-XML", "DIV"]);
 mathAnnotationXmlBreakoutProcessor.destroy();
 
 const mathAnnotationXmlHtmlIntegrationProcessor = WP_HTML_Processor.create_fragment(
