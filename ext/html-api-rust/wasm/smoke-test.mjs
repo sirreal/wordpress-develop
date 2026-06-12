@@ -3893,6 +3893,10 @@ assert.equal(
 	"<b></b><div><b></b><p>x</p></div>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<b><em><foo><foo><aside></b>"),
+	"<b><em><foo><foo></foo></foo></em></b><em><aside><b></b></aside></em>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<b>a<div></div><div></b>y"),
 	"<b>a<div></div></b><div><b></b>y</div>",
 );

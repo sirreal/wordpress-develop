@@ -209,8 +209,8 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"SPAN",
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
-const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON", "DIV", "MENU", "NOBR"]);
-const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["DIV"]);
+const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["ASIDE", "BUTTON", "DIV", "MENU", "NOBR"]);
+const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["ASIDE", "DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const FONT_PARAGRAPH_ADOPTION_RECONSTRUCTING_START_TAGS = new Set(["META", "TITLE"]);
@@ -3526,9 +3526,8 @@ export function createHtmlApi(wasm) {
 
 				if (
 					allowVirtualPreclosures &&
-					this.#consumeSpecialStartAdoptionReconstructionForEndTag(tagName, closingNamespace, existingIndex)
+					this.#queueSpecialStartAdoptionReconstructionForEndTag(tagName, closingNamespace, existingIndex)
 				) {
-					this.#queueReconstructActiveFormattingElements();
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
 					return;
@@ -4420,16 +4419,31 @@ export function createHtmlApi(wasm) {
 				}
 
 				const formattingTagName = this.open_elements[i];
+				if (tagName === "ASIDE" && formattingTagName !== "B") {
+					continue;
+				}
+				const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
 				if (
-					this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
-					hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) ||
-					!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+					activeFormattingElementIndex === -1 ||
+					hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i)
+				) {
+					return false;
+				}
+				if (!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)) {
+					continue;
+				}
+				if (
+					tagName === "ASIDE" &&
+					!this.#canPrecloseAsideFormattingAncestor(activeFormattingElementIndex, i, tagName)
 				) {
 					return false;
 				}
 
 				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
 				this.#queueVirtualPopsFrom(i);
+				if (tagName === "ASIDE") {
+					this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+				}
 				return true;
 			}
 
@@ -4479,6 +4493,47 @@ export function createHtmlApi(wasm) {
 			this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
 			this.#queueVirtualPopsFrom(topIndex);
 			return true;
+		}
+
+		#canPrecloseAsideFormattingAncestor(activeIndex, openIndex, elementTagName) {
+			let activeFormattingElementsAfterIndex = 0;
+			for (let i = activeIndex + 1; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					break;
+				}
+				activeFormattingElementsAfterIndex += 1;
+				if (this.#formattingEndTagPrecedesElementClose(entry.tagName, elementTagName)) {
+					return false;
+				}
+			}
+
+			return activeFormattingElementsAfterIndex === 1 && this.open_elements.length - openIndex - 1 === 3;
+		}
+
+		#queueActiveFormattingElementsAfterIndex(index) {
+			for (let i = index + 1; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return;
+				}
+				this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+			}
+		}
+
+		#queueActiveFormattingElement(tagName, namespaceName) {
+			for (let i = this.active_formatting_elements.length - 1; i >= 0; i -= 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return false;
+				}
+				if (entry.tagName === tagName && entry.namespaceName === namespaceName) {
+					this.#queueVirtualPush(entry.tagName, entry.namespaceName, entry.attributes);
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		#hasOpenFormattingElementBeforeIndex(index) {
@@ -7479,10 +7534,10 @@ export function createHtmlApi(wasm) {
 			);
 		}
 
-		#consumeSpecialStartAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
+		#queueSpecialStartAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
 			const containerTagName = this.open_elements.at(-1);
 
-			return (
+			if (
 				namespaceName === "html" &&
 				formattingElementIndex === -1 &&
 				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
@@ -7490,7 +7545,12 @@ export function createHtmlApi(wasm) {
 				this.open_element_namespaces.at(-1) === "html" &&
 				FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(containerTagName) &&
 				this.#consumeSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName)
-			);
+			) {
+				this.#queueActiveFormattingElement(tagName, namespaceName);
+				return true;
+			}
+
+			return false;
 		}
 
 		#shouldBailUnsupportedAdoptionAgency(tagName, namespaceName, formattingElementIndex) {
