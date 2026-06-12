@@ -1968,16 +1968,46 @@ assert.equal(incompleteStepProcessor.step(WP_HTML_Processor.REPROCESS_CURRENT_NO
 incompleteStepProcessor.destroy();
 
 const fullParserIncompleteTagProcessor = WP_HTML_Processor.create_full_parser("<div");
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "HTML");
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "HEAD");
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "HEAD");
+assert.equal(fullParserIncompleteTagProcessor.is_tag_closer(), true);
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "BODY");
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "BODY");
+assert.equal(fullParserIncompleteTagProcessor.is_tag_closer(), true);
+assert.equal(fullParserIncompleteTagProcessor.next_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.get_tag(), "HTML");
+assert.equal(fullParserIncompleteTagProcessor.is_tag_closer(), true);
 assert.equal(fullParserIncompleteTagProcessor.next_token(), false);
-assert.equal(fullParserIncompleteTagProcessor.paused_at_incomplete_token(), true);
+assert.equal(fullParserIncompleteTagProcessor.paused_at_incomplete_token(), false);
 assert.deepEqual(fullParserIncompleteTagProcessor.get_breadcrumbs(), []);
 fullParserIncompleteTagProcessor.destroy();
 
 const fullParserIncompleteAfterDoctypeProcessor = WP_HTML_Processor.create_full_parser("<!DOCTYPE html><div");
 assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
 assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_token_type(), "#doctype");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "HTML");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "HEAD");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "HEAD");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.is_tag_closer(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "BODY");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "BODY");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.is_tag_closer(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.get_tag(), "HTML");
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.is_tag_closer(), true);
 assert.equal(fullParserIncompleteAfterDoctypeProcessor.next_token(), false);
-assert.equal(fullParserIncompleteAfterDoctypeProcessor.paused_at_incomplete_token(), true);
+assert.equal(fullParserIncompleteAfterDoctypeProcessor.paused_at_incomplete_token(), false);
 assert.deepEqual(fullParserIncompleteAfterDoctypeProcessor.get_breadcrumbs(), []);
 fullParserIncompleteAfterDoctypeProcessor.destroy();
 
