@@ -395,11 +395,19 @@ assert.equal(legacyNotReferenceLength.value, 4);
 const span = new WP_HTML_Span("14", 28);
 assert.equal(span.start, 14);
 assert.equal(span.length, 28);
+assert.throws(
+	() => new WP_HTML_Span("14px", 28),
+	TypeError,
+);
 
 const replacement = new WP_HTML_Text_Replacement(14, "28", "updated");
 assert.equal(replacement.start, 14);
 assert.equal(replacement.length, 28);
 assert.equal(replacement.text, "updated");
+assert.throws(
+	() => new WP_HTML_Text_Replacement(14, "28px", "updated"),
+	TypeError,
+);
 
 const attributeToken = new WP_HTML_Attribute_Token("class", 12, "6", 5, 13, false);
 assert.equal(attributeToken.name, "class");

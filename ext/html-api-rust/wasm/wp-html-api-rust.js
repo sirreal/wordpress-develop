@@ -714,15 +714,15 @@ export class WP_HTML_Unsupported_Exception extends Error {
 
 export class WP_HTML_Span {
 	constructor(start, length) {
-		this.start = Number(start);
-		this.length = Number(length);
+		this.start = phpIntegerParameterCoerce(start, "start");
+		this.length = phpIntegerParameterCoerce(length, "length");
 	}
 }
 
 export class WP_HTML_Text_Replacement {
 	constructor(start, length, text) {
-		this.start = Number(start);
-		this.length = Number(length);
+		this.start = phpIntegerParameterCoerce(start, "start");
+		this.length = phpIntegerParameterCoerce(length, "length");
 		this.text = String(text);
 	}
 }
