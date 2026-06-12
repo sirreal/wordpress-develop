@@ -208,7 +208,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 	"OBJECT",
 	"SPAN",
 ]);
-const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
+const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "CAPTION", "MARQUEE", "OBJECT"]);
 const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["ASIDE", "BUTTON", "DIV", "MENU", "NOBR"]);
 const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["ASIDE", "DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
@@ -6535,6 +6535,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#queueFosteredFragmentFormattingElementPreclosureForTableStartTag(tagName)) {
+				return true;
+			}
+
 			if (tagName === "NOBR" && this.#currentHtmlElementIs("NOBR")) {
 				this.#removeActiveFormattingElementsForClose("NOBR");
 				this.#queueVirtualPopsFrom(this.open_elements.length - 1);
@@ -7104,7 +7108,13 @@ export function createHtmlApi(wasm) {
 		}
 
 		#queueVirtualOpenersForStartTag(tagName) {
-			if (this.current_namespace !== "html" || !this.#hasElementInTableScope("TABLE")) {
+			if (
+				this.current_namespace !== "html" ||
+				(
+					!this.#hasElementInTableScope("TABLE") &&
+					!this.#isOpenTableSectionFragmentContext()
+				)
+			) {
 				return false;
 			}
 
@@ -7147,6 +7157,15 @@ export function createHtmlApi(wasm) {
 			return queued.length > 0;
 		}
 
+		#isOpenTableSectionFragmentContext() {
+			return (
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				TABLE_SECTION_ELEMENTS.has(this.context_node) &&
+				this.#currentHtmlElementIs(this.context_node)
+			);
+		}
+
 		#deferImplicitTableWrapperOpen(tagName) {
 			this.open_elements.push(tagName);
 			this.open_element_namespaces.push("html");
@@ -7163,6 +7182,56 @@ export function createHtmlApi(wasm) {
 				hasSelfClosingFlag: false,
 			});
 			this.#setCurrentNamespace("html");
+		}
+
+		#queueFosteredFragmentFormattingElementPreclosureForTableStartTag(tagName) {
+			if (
+				this.is_full_parser ||
+				!this.#tableFragmentContextHandlesStartTag(tagName)
+			) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < this.base_open_element_count ||
+				this.open_elements[topIndex] !== "A" ||
+				this.open_element_namespaces[topIndex] !== "html"
+			) {
+				return false;
+			}
+
+			const fosterParentedBaseIndex = this.open_element_foster_parented_table_indices[topIndex];
+			if (fosterParentedBaseIndex === null || fosterParentedBaseIndex >= topIndex) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(topIndex);
+			this.#removeActiveFormattingElement("A");
+			return true;
+		}
+
+		#tableFragmentContextHandlesStartTag(tagName) {
+			if (
+				this.is_full_parser ||
+				this.context_namespace !== "html"
+			) {
+				return false;
+			}
+
+			if (this.context_node === "TABLE") {
+				return TABLE_MODE_START_TAGS.has(tagName);
+			}
+
+			if (TABLE_SECTION_ELEMENTS.has(this.context_node)) {
+				return this.#isHandledInTableBodyMode(tagName, false);
+			}
+
+			if (this.context_node === "TR") {
+				return this.#isHandledInTableRowMode(tagName, false);
+			}
+
+			return false;
 		}
 
 		#queueFullParserScaffold() {
@@ -8309,6 +8378,11 @@ export function createHtmlApi(wasm) {
 		}
 
 		#fosterParentedStartTableIndex(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			if (this.#isRepresentableStandaloneFosteredStartInTableFragment(tagName, topIndex)) {
+				return topIndex;
+			}
+
 			if (
 				!this.is_full_parser ||
 				this.deferred_table_opener === null ||
@@ -8494,7 +8568,39 @@ export function createHtmlApi(wasm) {
 			}
 
 			const span = this.#currentRealTokenSpan();
-			return span !== null && span.start + span.length === this.html.length;
+			if (span === null) {
+				return false;
+			}
+
+			if (span.start + span.length === this.html.length) {
+				return true;
+			}
+
+			return this.#currentFosteredFragmentStartIsFollowedByTableStartTag(span.start + span.length);
+		}
+
+		#currentFosteredFragmentStartIsFollowedByTableStartTag(at) {
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				const text = this.html.slice(at, nextTag === false ? this.html.length : nextTag.tag_start);
+				if (!this.#isIgnorableTableText(text)) {
+					return false;
+				}
+
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (
+					nextTag.is_closing &&
+					this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
+
+				return !nextTag.is_closing && this.#tableFragmentContextHandlesStartTag(nextTag.tag_name);
+			}
 		}
 
 		#currentContextCanRepresentStandaloneFosteredStart() {
