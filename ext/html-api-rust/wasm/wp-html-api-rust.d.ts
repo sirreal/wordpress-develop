@@ -596,7 +596,7 @@ export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Con
 	create_full_parser(html: unknown, encoding?: string): WP_HTML_Processor | null;
 	normalize(html: PhpStringParameter): string | null;
 	is_void(tagName: PhpInternalStringParameter): boolean;
-	is_special(tagName: string | SpecialTagInput): boolean;
+	is_special(tagName: unknown): boolean;
 }
 
 export interface HtmlApi {
