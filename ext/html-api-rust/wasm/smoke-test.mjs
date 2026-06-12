@@ -1846,6 +1846,11 @@ assert.equal(decodedClassQueryTags.get_tag(), "DIV");
 assert.deepEqual(decodedClassQueryTags.class_list(), ["∉-class", "<egg>", "＃"]);
 decodedClassQueryTags.destroy();
 
+const nonStringClassQueryTags = new WP_HTML_Tag_Processor('<div class="x"></div><span></span>');
+assert.equal(nonStringClassQueryTags.next_tag({ class_name: null }), true);
+assert.equal(nonStringClassQueryTags.get_tag(), "DIV");
+nonStringClassQueryTags.destroy();
+
 const duplicateDecodedClassList = new WP_HTML_Tag_Processor('<div class="one one &#x6f;ne">');
 assert.equal(duplicateDecodedClassList.next_tag("div"), true);
 assert.deepEqual(duplicateDecodedClassList.class_list(), ["one"]);
@@ -2761,6 +2766,11 @@ assert.equal(processorMatchOffsetWithoutBreadcrumbs.next_tag({ tag_name: "div", 
 assert.equal(processorMatchOffsetWithoutBreadcrumbs.get_attribute("one"), true);
 assert.equal(processorMatchOffsetWithoutBreadcrumbs.get_attribute("two"), null);
 processorMatchOffsetWithoutBreadcrumbs.destroy();
+
+const processorNonStringClassQuery = WP_HTML_Processor.create_fragment('<div class="x"></div><span></span>');
+assert.equal(processorNonStringClassQuery.next_tag({ class_name: {} }), true);
+assert.equal(processorNonStringClassQuery.get_tag(), "DIV");
+processorNonStringClassQuery.destroy();
 
 const processorNumericTagName = WP_HTML_Processor.create_fragment("<div></div>");
 assert.equal(processorNumericTagName.next_tag({ tag_name: 1 }), false);

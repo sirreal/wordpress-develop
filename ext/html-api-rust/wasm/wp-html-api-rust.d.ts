@@ -152,7 +152,7 @@ export interface ScanNextTagResult {
 }
 
 export interface NextTagBaseQuery {
-	class_name?: string | null;
+	class_name?: unknown;
 	tag_closers?: "visit" | "skip";
 	visit_closers?: boolean;
 }
