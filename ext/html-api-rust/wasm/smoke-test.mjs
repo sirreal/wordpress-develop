@@ -6009,6 +6009,24 @@ assert.equal(
 );
 fullParserFosteredTextBeforeTableRow.destroy();
 
+const fullParserFosteredDivBeforeTableRow = WP_HTML_Processor.create_full_parser(
+	"<table><tr><div>",
+);
+assert.equal(
+	fullParserFosteredDivBeforeTableRow.serialize(),
+	"<html><head></head><body><div></div><table><tbody><tr></tr></tbody></table></body></html>",
+);
+fullParserFosteredDivBeforeTableRow.destroy();
+
+const fullParserFosteredDivBeforeTableCell = WP_HTML_Processor.create_full_parser(
+	"<table><tr><div><td>",
+);
+assert.equal(
+	fullParserFosteredDivBeforeTableCell.serialize(),
+	"<html><head></head><body><div></div><table><tbody><tr><td></td></tr></tbody></table></body></html>",
+);
+fullParserFosteredDivBeforeTableCell.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",

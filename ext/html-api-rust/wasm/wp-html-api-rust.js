@@ -2807,6 +2807,10 @@ export function createHtmlApi(wasm) {
 				return this.#consumeVirtualToken();
 			}
 
+			if (this.#queueFosteredElementPopsBeforeDeferredTable()) {
+				return this.#consumeVirtualToken();
+			}
+
 			if (this.#consumeDeferredTableOpener()) {
 				return true;
 			}
@@ -8064,6 +8068,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#currentFosterParentedTableIndex() !== null && tokenType !== "#tag") {
+				return false;
+			}
+
 			if (tokenType === "#text") {
 				return (
 					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
@@ -8090,10 +8098,24 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.is_tag_closer()) {
+				if (this.#currentFosterParentedTableIndex() !== null) {
+					if (tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) {
+						return this.#queueFosteredElementPopsBeforeDeferredTable();
+					}
+					return false;
+				}
+
 				return (
 					(tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) &&
 					this.#queueDeferredTableOpener()
 				);
+			}
+
+			if (this.#currentFosterParentedTableIndex() !== null) {
+				if (TABLE_CELL_ELEMENTS.has(tagName)) {
+					return this.#queueFosteredElementPopsBeforeDeferredTable();
+				}
+				return false;
 			}
 
 			if (SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
@@ -8134,6 +8156,30 @@ export function createHtmlApi(wasm) {
 			return this.open_element_foster_parented_table_indices.at(-1) ?? null;
 		}
 
+		#queueFosteredElementPopsBeforeDeferredTable() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const tableIndex = this.#currentFosterParentedTableIndex();
+			if (tableIndex === null) {
+				return false;
+			}
+
+			const firstFosteredIndex = this.open_element_foster_parented_table_indices.findIndex(
+				(fosterParentedTableIndex, index) => (
+					index > tableIndex &&
+					fosterParentedTableIndex === tableIndex
+				),
+			);
+			if (firstFosteredIndex === -1) {
+				return false;
+			}
+
+			this.#queueVirtualPopsFrom(firstFosteredIndex);
+			return true;
+		}
+
 		#currentTokenIsFollowedByFosteredTableContent(allowedWrapperTags) {
 			const span = this.#currentRealTokenSpan();
 			if (span === null) {
@@ -8155,7 +8201,8 @@ export function createHtmlApi(wasm) {
 					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
 					nextTag.tag_name === "SELECT" ||
 					this.#isFosteredVoidTableStartTag(nextTag.tag_name) ||
-					this.#isFosteredAtomicTableStartTag(nextTag.tag_name)
+					this.#isFosteredAtomicTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredElementTableStartTag(nextTag.tag_name)
 				) {
 					return true;
 				}
@@ -8188,12 +8235,20 @@ export function createHtmlApi(wasm) {
 			return tagName === "TITLE";
 		}
 
+		#isFosteredElementTableStartTag(tagName) {
+			return tagName === "DIV";
+		}
+
 		#fosterParentedStartTableIndex(tagName) {
 			if (
 				!this.is_full_parser ||
 				this.deferred_table_opener === null ||
 				this.current_namespace !== "html" ||
-				(!FOREIGN_CONTENT_START_TAGS.has(tagName) && tagName !== "SELECT")
+				(
+					!FOREIGN_CONTENT_START_TAGS.has(tagName) &&
+					tagName !== "SELECT" &&
+					!this.#isFosteredElementTableStartTag(tagName)
+				)
 			) {
 				return -1;
 			}
