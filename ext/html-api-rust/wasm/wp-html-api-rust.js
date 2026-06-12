@@ -4537,10 +4537,17 @@ export function createHtmlApi(wasm) {
 			}
 
 			let at = span.start + span.length;
+			let sameTagDepth = 0;
 			while (true) {
 				const nextTag = runtime.scanNextTag(this.html, at);
 				if (nextTag === false) {
 					return false;
+				}
+
+				if (!nextTag.is_closing && nextTag.tag_name === tagName && tagName === "DIV") {
+					sameTagDepth += 1;
+					at = nextTag.token_end;
+					continue;
 				}
 
 				if (
@@ -4555,6 +4562,16 @@ export function createHtmlApi(wasm) {
 
 				if (nextTag.is_closing && nextTag.tag_name === "A") {
 					return true;
+				}
+
+				if (
+					nextTag.is_closing &&
+					nextTag.tag_name === tagName &&
+					sameTagDepth > 0
+				) {
+					sameTagDepth -= 1;
+					at = nextTag.token_end;
+					continue;
 				}
 
 				if (

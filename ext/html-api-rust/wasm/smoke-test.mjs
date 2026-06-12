@@ -3896,6 +3896,10 @@ assert.equal(
 	WP_HTML_Processor.normalize("<a><div></a><p>x"),
 	"<a></a><div><p>x</p></div>",
 );
+assert.equal(
+	WP_HTML_Processor.normalize("<label><a><div>Hello<div>World</div></a></label>  "),
+	"<label><a></a><div><a>Hello<div>World</div></a>  </div></label>",
+);
 
 for (const html of [
 	"<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
