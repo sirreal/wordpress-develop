@@ -413,10 +413,23 @@ assert.equal(WP_HTML_Decoder.decode_text_node("&"), "&");
 assert.equal(WP_HTML_Decoder.decode_text_node("&\0b"), "&\0b");
 assert.equal(WP_HTML_Decoder.decode_text_node("&#x93;&#x1f604;&#x94;"), "“😄”");
 assert.equal(WP_HTML_Decoder.decode_text_node("&notin"), "¬in");
+assert.equal(WP_HTML_Decoder.decode_text_node(false), "");
+assert.equal(WP_HTML_Decoder.decode_text_node(true), "1");
+assert.throws(
+	() => WP_HTML_Decoder.decode_text_node({ text: "&copy;" }),
+	TypeError,
+);
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin"), "&notin");
 assert.equal(WP_HTML_Decoder.decode_attribute("&notin;"), "∉");
+assert.equal(WP_HTML_Decoder.decode_attribute(true), "1");
 assert.equal(WP_HTML_Decoder.decode("data", "&copy;"), "©");
+assert.equal(WP_HTML_Decoder.decode("data", false), "");
+assert.equal(WP_HTML_Decoder.decode(false, "&notin"), "¬in");
 assert.equal(WP_HTML_Decoder.decode("attribute", "&notit;"), "&notit;");
+assert.throws(
+	() => WP_HTML_Decoder.decode("data", ["&copy;"]),
+	TypeError,
+);
 assert.equal(
 	WP_HTML_Decoder.decode_text_node(
 		"&reg; &trade; &mdash; &rsquo; &euro; &CounterClockwiseContourIntegral; &NotNestedGreaterGreater;",
@@ -522,6 +535,11 @@ for (const attributeValue of [
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP"), false);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "HTTP", "ascii-case-insensitive"), true);
 assert.equal(WP_HTML_Decoder.attribute_starts_with("http://wordpress.org", "https", "ascii-case-insensitive"), false);
+assert.equal(WP_HTML_Decoder.attribute_starts_with(true, 1), true);
+assert.throws(
+	() => WP_HTML_Decoder.attribute_starts_with({}, ""),
+	TypeError,
+);
 
 let destroyedTokenBookmark = null;
 const token = new WP_HTML_Token("mark", "img", false, (bookmarkName) => {

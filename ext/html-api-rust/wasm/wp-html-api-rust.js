@@ -1454,26 +1454,34 @@ export function createHtmlApi(wasm) {
 	class WP_HTML_Decoder {
 		static attribute_starts_with(haystack, searchText, caseSensitivity = "case-sensitive") {
 			return runtime.decoderAttributeStartsWith(
-				haystack,
-				searchText,
-				caseSensitivity === "ascii-case-insensitive",
+				phpStringParameterCoerce(haystack, "haystack"),
+				phpStringParameterCoerce(searchText, "search_text"),
+				phpStringParameterCoerce(caseSensitivity, "case_sensitivity") === "ascii-case-insensitive",
 			);
 		}
 
 		static decode_text_node(text) {
-			return runtime.decoderDecode("data", text);
+			return runtime.decoderDecode("data", phpStringParameterCoerce(text, "text"));
 		}
 
 		static decode_attribute(text) {
-			return runtime.decoderDecode("attribute", text);
+			return runtime.decoderDecode("attribute", phpStringParameterCoerce(text, "text"));
 		}
 
 		static decode(context, text) {
-			return runtime.decoderDecode(context, text);
+			return runtime.decoderDecode(
+				phpStringParameterCoerce(context, "context"),
+				phpStringParameterCoerce(text, "text"),
+			);
 		}
 
 		static read_character_reference(context, text, at = 0, matchByteLength = null) {
-			return runtime.decoderReadCharacterReference(context, text, at, matchByteLength);
+			return runtime.decoderReadCharacterReference(
+				phpStringParameterCoerce(context, "context"),
+				phpStringParameterCoerce(text, "text"),
+				at,
+				matchByteLength,
+			);
 		}
 
 		static code_point_to_utf8_bytes(codePoint) {

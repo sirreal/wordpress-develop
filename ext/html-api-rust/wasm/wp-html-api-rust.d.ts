@@ -223,16 +223,16 @@ export interface MatchByteLength {
 
 export interface WP_HTML_Decoder_Constructor {
 	attribute_starts_with(
-		haystack: string,
-		searchText: string,
-		caseSensitivity?: "case-sensitive" | "ascii-case-insensitive",
+		haystack: PhpStringParameter,
+		searchText: PhpStringParameter,
+		caseSensitivity?: PhpStringParameter,
 	): boolean;
-	decode_text_node(text: string): string;
-	decode_attribute(text: string): string;
-	decode(context: DecoderContext, text: string): string;
+	decode_text_node(text: PhpStringParameter): string;
+	decode_attribute(text: PhpStringParameter): string;
+	decode(context: DecoderContext | PhpStringParameter, text: PhpStringParameter): string;
 	read_character_reference(
-		context: DecoderContext,
-		text: string,
+		context: DecoderContext | PhpStringParameter,
+		text: PhpStringParameter,
 		at?: number | string | boolean | null,
 		matchByteLength?: MatchByteLength | null,
 	): string | null;
