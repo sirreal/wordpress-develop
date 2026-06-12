@@ -8546,8 +8546,20 @@ export function createHtmlApi(wasm) {
 			return (
 				nextTag !== false &&
 				!nextTag.is_closing &&
-				this.#isFosteredElementTableStartTag(nextTag.tag_name)
+				(
+					this.#isFosteredElementTableStartTag(nextTag.tag_name) ||
+					(
+						nextTag.tag_name === "COLGROUP" &&
+						this.#colgroupStartPrecedesDirectFosteredText(nextTag.token_end)
+					)
+				)
 			);
+		}
+
+		#colgroupStartPrecedesDirectFosteredText(at) {
+			const nextTag = runtime.scanNextTag(this.html, at);
+			const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
+			return !this.#isIgnorableTableText(text);
 		}
 
 		#canDeferNestedTableInFragment() {
@@ -8581,7 +8593,7 @@ export function createHtmlApi(wasm) {
 
 		#shouldDeferCurrentTableChildOpener(tagName, namespaceName) {
 			return (
-				(this.is_full_parser || this.#canDeferNestedTableInFragment()) &&
+				(this.is_full_parser || this.#canDeferNestedTableInFragment() || this.#canDeferBodyTableChildInFragment()) &&
 				this.deferred_table_opener !== null &&
 				namespaceName === "html" &&
 				(
@@ -8613,6 +8625,15 @@ export function createHtmlApi(wasm) {
 					) ||
 					this.#isDeferredTableHiddenInputChildOpener(tagName)
 				)
+			);
+		}
+
+		#canDeferBodyTableChildInFragment() {
+			return (
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				this.context_node === "BODY" &&
+				this.#lastOpenElementIndex("TABLE", "html") >= this.base_open_element_count
 			);
 		}
 

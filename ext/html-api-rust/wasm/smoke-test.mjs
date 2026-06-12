@@ -5468,12 +5468,22 @@ assert.equal(tableCenterFontFosterProcessor.get_last_error(), null);
 tableCenterFontFosterProcessor.destroy();
 
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
-while (colgroupTextProcessor.next_token()) {
-}
-assert.equal(colgroupTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(colgroupTextProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+assert.equal(colgroupTextProcessor.next_token(), true);
+assert.equal(colgroupTextProcessor.get_token_type(), "#text");
+assert.equal(colgroupTextProcessor.get_modifiable_text(), "foo");
+assert.deepEqual(colgroupTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(colgroupTextProcessor.next_tag("colgroup"), true);
+assert.deepEqual(colgroupTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "COLGROUP"]);
+assert.equal(colgroupTextProcessor.next_token(), true);
+assert.equal(colgroupTextProcessor.get_token_type(), "#text");
+assert.equal(colgroupTextProcessor.get_modifiable_text(), " ");
+assert.deepEqual(colgroupTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "COLGROUP", "#text"]);
+assert.equal(colgroupTextProcessor.get_last_error(), null);
 colgroupTextProcessor.destroy();
-assert.equal(WP_HTML_Processor.normalize("<table><colgroup> foo</colgroup></table>"), null);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><colgroup> foo</colgroup></table>"),
+	"foo<table><colgroup> </colgroup></table>",
+);
 
 const tableWhitespaceProcessor = WP_HTML_Processor.create_fragment("<table> \n <tr><td>cell");
 assert.equal(tableWhitespaceProcessor.next_token(), true);
