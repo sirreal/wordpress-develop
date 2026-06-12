@@ -4243,6 +4243,11 @@ assert.equal(
 );
 
 assert.equal(
+	buildFullParserHtml5libTree("<template><template><tbody><select>"),
+	"<html>\n  <head>\n    <template>\n      content\n        <template>\n          content\n            <tbody>\n            <select>\n  <body>\n\n",
+);
+
+assert.equal(
 	buildFullParserHtml5libTree("<template><td></template><body><span>Foo"),
 	"<html>\n  <head>\n    <template>\n      content\n        <td>\n  <body>\n    <span>\n      \"Foo\"\n\n",
 );

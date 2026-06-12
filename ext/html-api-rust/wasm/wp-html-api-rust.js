@@ -6380,6 +6380,19 @@ export function createHtmlApi(wasm) {
 					return true;
 				}
 
+				if (tagName === "SELECT") {
+					const topIndex = this.open_elements.length - 1;
+					if (
+						topIndex >= 0 &&
+						this.open_element_namespaces[topIndex] === "html" &&
+						TABLE_SECTION_ELEMENTS.has(this.open_elements[topIndex])
+					) {
+						this.#setCurrentTemplateInsertionMode("in_table");
+						this.#queueVirtualPopsFrom(topIndex);
+						return this.#reprocessCurrentTokenAfterVirtualTokens();
+					}
+				}
+
 				if (TABLE_CELL_ELEMENTS.has(tagName)) {
 					this.#setCurrentTemplateInsertionMode("in_row");
 					this.#queueVirtualPush("TR");
@@ -8732,6 +8745,13 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				!isCloser &&
+				this.#canCloseTemplateTableBodyForStartTag(tagName)
+			) {
+				return false;
+			}
+
 			const currentNode = this.open_elements[topIndex];
 			if (currentNode === "TABLE") {
 				return this.#wouldUseUnsupportedTableFosterParenting(tagName, isCloser);
@@ -8839,6 +8859,18 @@ export function createHtmlApi(wasm) {
 				this.template_insertion_modes.length > 0 &&
 				this.#currentTemplateInsertionMode() === "in_row" &&
 				this.#currentHtmlElementIs("TR")
+			);
+		}
+
+		#canCloseTemplateTableBodyForStartTag(tagName) {
+			const topIndex = this.open_elements.length - 1;
+			return (
+				tagName === "SELECT" &&
+				this.template_insertion_modes.length > 0 &&
+				this.#currentTemplateInsertionMode() === "in_table_body" &&
+				topIndex >= 0 &&
+				this.open_element_namespaces[topIndex] === "html" &&
+				TABLE_SECTION_ELEMENTS.has(this.open_elements[topIndex])
 			);
 		}
 
