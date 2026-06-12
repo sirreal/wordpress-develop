@@ -47,6 +47,12 @@ Workflow output files are now checked against round metadata and structured
 output shape before any candidate, execution, judge, or summary file is
 written.
 
+Added `validate-corpus.py` so the corpus precondition is reproducible: active
+reference implementations are run against their hidden tests before a fresh
+baseline is trusted. Current result: 19 active references pass 151/151 cases;
+N04 records expected unsupported-markup `wp_trigger_error()` events as
+warnings, not output failures.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

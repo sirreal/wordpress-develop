@@ -77,6 +77,8 @@ python3 render-docs-markdown.py \
   source files; it can also emit/verify SHA-256 hashes for staged files.
 - `tools/source-digests.php` — emits raw-source and comment/whitespace-stripped
   PHP token-stream SHA-256 fingerprints for the two HTML API source files.
+- `tools/validate-corpus.py` — runs active corpus `reference.php` files against
+  their hidden `tests.json` fixtures and reports harness signal warnings.
 - `tools/validate-round.py` — reports whether a round is prepared, partially
   trialed, trial-complete, judged, or scored, verifies recorded scratch hashes,
   and lists missing artifacts.

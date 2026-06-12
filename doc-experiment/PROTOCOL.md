@@ -14,6 +14,18 @@ If it reports local drift, corpus/result mismatch, source-doc changes since the
 last trusted score, or missing current-corpus baseline, resolve that state
 before trusting any new score.
 
+When corpus fixtures changed since the latest trusted score, verify active
+reference implementations before staging or comparing a new round:
+
+```sh
+python3 doc-experiment/tools/validate-corpus.py
+```
+
+This runs every active `reference.php` against its hidden `tests.json`.
+Harness signal records such as unsupported-markup `wp_trigger_error()` events
+are reported as warnings by default; use `--strict-signals` when those should
+fail a focused audit.
+
 Use `priority` service tier for every Codex agent when available.
 
 Judges always use `gpt-5.5` / `xhigh` / `priority` when available. If this
