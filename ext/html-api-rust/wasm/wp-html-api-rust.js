@@ -8339,6 +8339,14 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
+				this.#currentHtmlElementIs("TABLE") &&
+				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+				this.#currentTextChunkPrecedesFosteredTableToken()
+			) {
+				return this.#deferCurrentTextAsTableChild();
+			}
+
+			if (
 				this.#currentHtmlElementIs("COLGROUP") &&
 				(
 					this.#currentTextHasLeadingIgnorableTableText() ||
@@ -8701,7 +8709,57 @@ export function createHtmlApi(wasm) {
 				afterToken,
 				this.#fosterLookaheadTextEnd(afterToken, nextTag),
 			);
-			return !this.#isIgnorableTableText(text);
+			if (!this.#isIgnorableTableText(text)) {
+				return true;
+			}
+
+			if (nextTag === false) {
+				return false;
+			}
+
+			if (nextTag.is_closing) {
+				return this.#isFosteredTableEndTag(nextTag.tag_name);
+			}
+
+			return this.#isFosteredTableLookaheadStartTag(nextTag);
+		}
+
+		#currentTextChunkPrecedesFosteredTableToken() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const afterToken = span.start + span.length;
+			const nextTag = runtime.scanNextTag(this.html, afterToken);
+			const text = this.html.slice(
+				afterToken,
+				this.#fosterLookaheadTextEnd(afterToken, nextTag),
+			);
+			if (!this.#isIgnorableTableText(text) || nextTag === false) {
+				return false;
+			}
+
+			if (nextTag.is_closing) {
+				return this.#isFosteredTableEndTag(nextTag.tag_name);
+			}
+
+			return this.#isFosteredTableLookaheadStartTag(nextTag);
+		}
+
+		#isFosteredTableLookaheadStartTag(nextTag) {
+			return (
+				FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
+				nextTag.tag_name === "SELECT" ||
+				this.#isFosteredVoidTableStartTag(nextTag.tag_name) ||
+				this.#isFosteredInputStartTag(nextTag) ||
+				this.#isFosteredAtomicTableStartTag(nextTag.tag_name) ||
+				this.#isFosteredElementTableStartTag(nextTag.tag_name)
+			);
 		}
 
 		#fosterLookaheadTextEnd(at, nextTag) {

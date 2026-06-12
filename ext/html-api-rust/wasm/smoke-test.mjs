@@ -5252,6 +5252,20 @@ assert.deepEqual(tableFragmentAnchorFosterProcessor.get_breadcrumbs(), ["HTML", 
 assert.equal(tableFragmentAnchorFosterProcessor.get_last_error(), null);
 tableFragmentAnchorFosterProcessor.destroy();
 
+const nestedTableMetaProcessor = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table>X<tr><td><table> <meta></table></table>",
+);
+assert.equal(nestedTableMetaProcessor.next_tag("meta"), true);
+assert.deepEqual(nestedTableMetaProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "META"]);
+assert.equal(nestedTableMetaProcessor.next_tag("table"), true);
+assert.deepEqual(nestedTableMetaProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "TABLE"]);
+assert.equal(nestedTableMetaProcessor.next_token(), true);
+assert.equal(nestedTableMetaProcessor.get_token_type(), "#text");
+assert.equal(nestedTableMetaProcessor.get_modifiable_text(), " ");
+assert.deepEqual(nestedTableMetaProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "TABLE", "#text"]);
+assert.equal(nestedTableMetaProcessor.get_last_error(), null);
+nestedTableMetaProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
