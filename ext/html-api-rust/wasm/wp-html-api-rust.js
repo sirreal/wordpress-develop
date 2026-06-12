@@ -2378,6 +2378,7 @@ export function createHtmlApi(wasm) {
 			this.pending_real_parser_state = null;
 			this.paragraph_adoption_preclosed_formatting_elements = [];
 			this.special_start_adoption_preclosed_formatting_elements = [];
+			this.deep_anchor_reconstructed_div_start_offsets = new Set();
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
@@ -3552,6 +3553,14 @@ export function createHtmlApi(wasm) {
 					return;
 				}
 
+				if (this.#shouldIgnoreCappedDeepAnchorEndTag(tagName, closingNamespace, existingIndex)) {
+					this.#removeActiveFormattingElementsForClose(tagName);
+					this.current_token_namespace = this.current_namespace;
+					this.breadcrumbs = this.#breadcrumbStack();
+					this.skip_current_token = true;
+					return;
+				}
+
 				if (this.#shouldBailUnsupportedAdoptionAgency(tagName, closingNamespace, existingIndex)) {
 					this.#bailUnsupported("Cannot extract common ancestor in adoption agency algorithm.");
 					return;
@@ -4000,6 +4009,7 @@ export function createHtmlApi(wasm) {
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
+				deepAnchorReconstructedDivStartOffsets: [...this.deep_anchor_reconstructed_div_start_offsets],
 				ignoredSelectFormattingElements: [...this.ignored_select_formatting_elements.entries()],
 				templateInsertionModes: [...this.template_insertion_modes],
 				encodingConfidence: this.encoding_confidence,
@@ -4038,6 +4048,7 @@ export function createHtmlApi(wasm) {
 			this.active_formatting_elements = state.activeFormattingElements.map((entry) => this.#cloneActiveFormattingElement(entry));
 			this.paragraph_adoption_preclosed_formatting_elements = (state.paragraphAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
 			this.special_start_adoption_preclosed_formatting_elements = (state.specialStartAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
+			this.deep_anchor_reconstructed_div_start_offsets = new Set(state.deepAnchorReconstructedDivStartOffsets ?? []);
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
 			this.encoding_confidence = state.encodingConfidence;
@@ -4481,7 +4492,26 @@ export function createHtmlApi(wasm) {
 				}
 
 				const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
+				const activeFormattingElement = this.active_formatting_elements[activeFormattingElementIndex];
 				const followingEntries = this.#activeFormattingElementsAfterIndex(activeFormattingElementIndex);
+				if (
+					activeFormattingElementIndex !== -1 &&
+					followingEntries.length === 1 &&
+					followingEntries[0].tagName === "B" &&
+					followingEntries[0].namespaceName === "html" &&
+					!hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) &&
+					this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+				) {
+					this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName, "reconstruct-before-nested-div");
+					this.#queueVirtualPopsFrom(i);
+					this.#queueActiveFormattingElementEntries(followingEntries);
+					this.#replaceActiveFormattingElementsFromIndex(activeFormattingElementIndex, [
+						...followingEntries,
+						activeFormattingElement,
+					]);
+					return true;
+				}
+
 				if (
 					activeFormattingElementIndex === -1 ||
 					followingEntries.length < 4 ||
@@ -4566,6 +4596,10 @@ export function createHtmlApi(wasm) {
 
 		#queueFormattingElementSpecialStartPreclosure(tagName) {
 			if (!FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			if (this.#shouldKeepDeepAnchorAroundCurrentNestedDiv(tagName)) {
 				return false;
 			}
 
@@ -4870,6 +4904,7 @@ export function createHtmlApi(wasm) {
 				this.open_elements[topIndex] !== "A" ||
 				this.open_element_namespaces[topIndex] !== "html" ||
 				this.#lastActiveFormattingElementIndex("A") === -1 ||
+				this.#shouldKeepDeepAnchorAroundCurrentNestedDiv(tagName) ||
 				!this.#nestedAnchorStartPrecedesBlockEnd(tagName)
 			) {
 				return false;
@@ -4944,12 +4979,75 @@ export function createHtmlApi(wasm) {
 
 			return (
 				NESTED_ANCHOR_RECONSTRUCTING_START_TAGS.has(tagName) ||
+				this.#shouldReconstructDeepAnchorBeforeNestedDiv(tagName) ||
 				(
 					tagName === "P" &&
 					!this.#hasParagraphAdoptionPreclosedFormattingElement("A", "html") &&
 					this.#formattingEndTagPrecedesParagraphClose("A")
 				)
 			);
+		}
+
+		#shouldReconstructDeepAnchorBeforeNestedDiv(tagName) {
+			if (
+				tagName !== "DIV" ||
+				this.open_elements.at(-1) !== "DIV" ||
+				this.open_element_namespaces.at(-1) !== "html" ||
+				!this.#hasSpecialStartAdoptionPreclosedFormattingElement(
+					"A",
+					"html",
+					"DIV",
+					"reconstruct-before-nested-div",
+				) ||
+				this.#countOpenHtmlElementsAfterLast("B", "DIV") > 8
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null || this.deep_anchor_reconstructed_div_start_offsets.has(span.start)) {
+				return false;
+			}
+
+			this.deep_anchor_reconstructed_div_start_offsets.add(span.start);
+			return true;
+		}
+
+		#shouldKeepDeepAnchorAroundCurrentNestedDiv(tagName) {
+			if (
+				tagName !== "DIV" ||
+				this.open_elements.at(-1) !== "A" ||
+				this.open_element_namespaces.at(-1) !== "html" ||
+				!this.#hasSpecialStartAdoptionPreclosedFormattingElement(
+					"A",
+					"html",
+					"DIV",
+					"reconstruct-before-nested-div",
+				) ||
+				this.#countOpenHtmlElementsAfterLast("B", "DIV") < 8
+			) {
+				return false;
+			}
+
+			return true;
+		}
+
+		#countOpenHtmlElementsAfterLast(afterTagName, countedTagName) {
+			const afterIndex = this.#lastOpenElementIndex(afterTagName, "html");
+			if (afterIndex === -1) {
+				return 0;
+			}
+
+			let count = 0;
+			for (let i = afterIndex + 1; i < this.open_elements.length; i += 1) {
+				if (
+					this.open_elements[i] === countedTagName &&
+					this.open_element_namespaces[i] === "html"
+				) {
+					count += 1;
+				}
+			}
+			return count;
 		}
 
 		#shouldReconstructActiveFontForStartTag(tagName) {
@@ -5231,6 +5329,15 @@ export function createHtmlApi(wasm) {
 			}
 
 			return null;
+		}
+
+		#hasSpecialStartAdoptionPreclosedFormattingElement(tagName, namespaceName, containerTagName, reconstructionMode = null) {
+			return this.special_start_adoption_preclosed_formatting_elements.some((entry) => (
+				entry.tagName === tagName &&
+				entry.namespaceName === namespaceName &&
+				entry.containerTagName === containerTagName &&
+				(reconstructionMode === null || entry.reconstructionMode === reconstructionMode)
+			));
 		}
 
 		#clearSpecialStartAdoptionPreclosedFormattingElements(tagName, namespaceName) {
@@ -7882,6 +7989,27 @@ export function createHtmlApi(wasm) {
 				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
 				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
 				this.#hasHtmlScopeBoundaryAfter(formattingElementIndex, DEFAULT_SCOPE_BOUNDARIES)
+			);
+		}
+
+		#shouldIgnoreCappedDeepAnchorEndTag(tagName, namespaceName, formattingElementIndex) {
+			return (
+				tagName === "A" &&
+				namespaceName === "html" &&
+				formattingElementIndex !== -1 &&
+				this.#lastActiveFormattingElementIndex("A") !== -1 &&
+				this.#hasSpecialStartAdoptionPreclosedFormattingElement(
+					"A",
+					"html",
+					"DIV",
+					"reconstruct-before-nested-div",
+				) &&
+				this.#countOpenHtmlElementsAfterLast("B", "DIV") >= 8 &&
+				hasSpecialBoundaryAfter(
+					this.open_elements,
+					this.open_element_namespaces,
+					formattingElementIndex,
+				)
 			);
 		}
 

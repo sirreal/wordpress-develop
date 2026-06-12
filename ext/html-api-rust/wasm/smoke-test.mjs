@@ -3851,6 +3851,10 @@ assert.equal(
 	"<a><b><big><em><strong></strong></em></big></b></a><big><em><strong><div><a>X</a></div></strong></em></big>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<a><b><div id=1><div id=2><div id=3><div id=4><div id=5><div id=6><div id=7><div id=8><div id=9>A</a>"),
+	'<a><b></b></a><b><div id="1"><a></a><div id="2"><a></a><div id="3"><a></a><div id="4"><a></a><div id="5"><a></a><div id="6"><a></a><div id="7"><a></a><div id="8"><a><div id="9">A</div></a></div></div></div></div></div></div></div></div></b>',
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<font><p>hello<b>cruel</font>world"),
 	"<font></font><p><font>hello<b>cruel</b></font><b>world</b></p>",
 );
