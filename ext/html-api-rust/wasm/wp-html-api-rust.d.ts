@@ -10,6 +10,7 @@ export type WasmInputSource =
 	| string
 	| ArrayBuffer
 	| ArrayBufferView
+	| Blob
 	| WebAssembly.Module
 	| WebAssembly.Instance
 	| WasmInstantiatedSource;

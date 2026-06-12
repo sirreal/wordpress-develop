@@ -303,6 +303,11 @@ if (typeof Response === "function") {
 	);
 }
 
+if (typeof Blob === "function") {
+	const apiFromBlob = await loadWasm(new Blob([wasmArrayBuffer.slice(0)], { type: "application/wasm" }));
+	assert.equal(apiFromBlob.version(), "0.1.0");
+}
+
 const apiFromDefaultLocation = await loadWasm();
 assert.equal(apiFromDefaultLocation.version(), "0.1.0");
 

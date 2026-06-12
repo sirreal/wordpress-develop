@@ -1305,6 +1305,10 @@ async function bytesFromInput(input) {
 		return responseBytes(input);
 	}
 
+	if (typeof Blob === "function" && input instanceof Blob) {
+		return input.arrayBuffer();
+	}
+
 	if (typeof input === "string") {
 		if (/^file:\/\//.test(input) && isNodeLikeRuntime()) {
 			return nodeFileUrlBytes(input);
