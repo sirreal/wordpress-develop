@@ -827,6 +827,23 @@ class WP_HTML_Tag_Processor {
 	private $skip_newline_at = null;
 
 	/**
+	 * Indicates which bookmarks point to a token which immediately follows
+	 * the opening tag of a LISTING or PRE element, where a leading newline
+	 * should be ignored when reading modifiable text.
+	 *
+	 * When seeking to a bookmark, this state must be restored because it
+	 * cannot be re-derived from the bookmarked location alone.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Tag_Processor::$skip_newline_at
+	 * @see WP_HTML_Tag_Processor::seek()
+	 *
+	 * @var array<string, true>
+	 */
+	private $bookmark_skips_newline = array();
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 6.2.0
@@ -1358,6 +1375,12 @@ class WP_HTML_Tag_Processor {
 
 		$this->bookmarks[ $name ] = new WP_HTML_Span( $this->token_starts_at, $this->token_length );
 
+		if ( $this->token_starts_at === $this->skip_newline_at ) {
+			$this->bookmark_skips_newline[ $name ] = true;
+		} else {
+			unset( $this->bookmark_skips_newline[ $name ] );
+		}
+
 		return true;
 	}
 
@@ -1376,7 +1399,7 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		unset( $this->bookmarks[ $name ] );
+		unset( $this->bookmarks[ $name ], $this->bookmark_skips_newline[ $name ] );
 
 		return true;
 	}
@@ -2620,6 +2643,7 @@ class WP_HTML_Tag_Processor {
 	 * maximum limit on the number of times seek() can be called.
 	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 Restores the ignored-newline state for tokens following LISTING and PRE opening tags.
 	 *
 	 * @param string $bookmark_name Jump to the place in the document identified by this bookmark name.
 	 * @return bool Whether the internal cursor was successfully moved to the bookmark's location.
@@ -2658,6 +2682,18 @@ class WP_HTML_Tag_Processor {
 		// Point this tag processor before the sought tag opener and consume it.
 		$this->bytes_already_parsed = $this->bookmarks[ $bookmark_name ]->start;
 		$this->parser_state         = self::STATE_READY;
+
+		/*
+		 * The leading newline after a LISTING or PRE opening tag is ignored
+		 * as an authoring convenience. This state is set when scanning past
+		 * one of these opening tags, but a later LISTING or PRE tag may have
+		 * overwritten it; it must be restored from the bookmark when seeking
+		 * to a token which immediately follows such an opening tag.
+		 */
+		$this->skip_newline_at = isset( $this->bookmark_skips_newline[ $bookmark_name ] )
+			? $this->bytes_already_parsed
+			: null;
+
 		return $this->next_token();
 	}
 
@@ -3642,15 +3678,9 @@ class WP_HTML_Tag_Processor {
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
 	 *
-	 * Limitations:
-	 *
-	 *  - This function will not strip the leading newline appropriately
-	 *    after seeking into a LISTING or PRE element. To ensure that the
-	 *    newline is treated properly, seek to the LISTING or PRE opening
-	 *    tag instead of to the first text node inside the element.
-	 *
 	 * @since 6.5.0
 	 * @since 6.7.0 Replaces NULL bytes (U+0000) and newlines appropriately.
+	 * @since 7.1.0 Ignores the leading newline after LISTING and PRE opening tags even after seeking.
 	 *
 	 * @return string
 	 */
