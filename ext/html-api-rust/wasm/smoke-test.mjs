@@ -1916,13 +1916,22 @@ assert.equal(fragmentMetaProcessor.get_last_error(), null);
 fragmentMetaProcessor.destroy();
 
 const plaintextProcessor = WP_HTML_Processor.create_fragment("<plaintext>raw <b>markup</b>");
-assert.equal(plaintextProcessor.next_tag("plaintext"), false);
-assert.equal(plaintextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(plaintextProcessor.get_unsupported_exception().message, "Cannot process PLAINTEXT elements.");
-assert.equal(plaintextProcessor.step(WP_HTML_Processor.PROCESS_CURRENT_NODE), false);
-assert.equal(plaintextProcessor.step(WP_HTML_Processor.REPROCESS_CURRENT_NODE), false);
-assert.equal(plaintextProcessor.step(), false);
+assert.equal(plaintextProcessor.next_tag("plaintext"), true);
+assert.equal(plaintextProcessor.get_last_error(), null);
+assert.deepEqual(plaintextProcessor.get_breadcrumbs(), ["HTML", "BODY", "PLAINTEXT"]);
+assert.equal(plaintextProcessor.next_token(), true);
+assert.equal(plaintextProcessor.get_token_type(), "#text");
+assert.equal(plaintextProcessor.get_modifiable_text(), "raw <b>markup</b>");
+assert.equal(plaintextProcessor.serialize_token(), "raw <b>markup</b>");
+assert.equal(plaintextProcessor.set_modifiable_text("updated <\0"), true);
+assert.equal(plaintextProcessor.get_modifiable_text(), "updated <\uFFFD");
+assert.equal(plaintextProcessor.get_updated_html(), "<plaintext>updated <\uFFFD");
 plaintextProcessor.destroy();
+
+assert.equal(
+	WP_HTML_Processor.normalize("<plaintext>raw <b>markup</b>"),
+	"<plaintext>raw <b>markup</b></plaintext>",
+);
 
 const incompleteStepProcessor = WP_HTML_Processor.create_fragment("<div");
 assert.equal(incompleteStepProcessor.next_token(), false);

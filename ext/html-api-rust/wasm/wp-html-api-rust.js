@@ -444,6 +444,7 @@ const P_CLOSING_START_TAGS = new Set([
 	"NAV",
 	"OL",
 	"P",
+	"PLAINTEXT",
 	"PRE",
 	"SEARCH",
 	"SECTION",
@@ -2035,6 +2036,10 @@ export function createHtmlApi(wasm) {
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
 			this.raw_text_fragment_consumed = false;
 			this.raw_text_fragment_updated_html = null;
+			this.plaintext_pending = false;
+			this.plaintext_content_start = null;
+			this.plaintext_text_consumed = false;
+			this.plaintext_updated_html = null;
 			this.is_full_parser = Boolean(options.fullParser || this.is_html_fragment_context);
 			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
 			this.full_parser_insertion_mode = this.is_html_fragment_context
@@ -2367,6 +2372,23 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#consumePlaintextTextToken()) {
+				return true;
+			}
+
+			if (this.plaintext_content_start !== null) {
+				if (this.#queueFullParserMissingBodyAtEof()) {
+					return this.#consumeVirtualToken();
+				}
+
+				if (this.#queueEofVirtualClosers()) {
+					return this.#consumeVirtualToken();
+				}
+
+				this.breadcrumbs = this.#breadcrumbStack();
+				return false;
+			}
+
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
@@ -2572,6 +2594,9 @@ export function createHtmlApi(wasm) {
 				if (this.raw_text_fragment_context !== null) {
 					this.raw_text_fragment_updated_html = this.#serializeTextToken();
 				}
+				if (this.plaintext_content_start !== null) {
+					this.plaintext_updated_html = this.#serializeTextToken();
+				}
 				return true;
 			}
 
@@ -2589,6 +2614,9 @@ export function createHtmlApi(wasm) {
 		}
 
 		get_updated_html() {
+			if (this.plaintext_updated_html != null && this.plaintext_content_start != null) {
+				return super.get_updated_html().slice(0, this.plaintext_content_start) + this.plaintext_updated_html;
+			}
 			return this.raw_text_fragment_updated_html ?? super.get_updated_html();
 		}
 
@@ -3315,10 +3343,7 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
-			if (this.current_namespace === "html" && tagName === "PLAINTEXT") {
-				this.#bailUnsupported("Cannot process PLAINTEXT elements.");
-				return;
-			}
+			const entersPlaintext = this.current_namespace === "html" && tagName === "PLAINTEXT";
 
 			this.#applySimpleHtmlSemanticClosures(tagName);
 			if (
@@ -3382,6 +3407,10 @@ export function createHtmlApi(wasm) {
 						skipSerialization: false,
 					});
 				}
+			}
+			if (entersPlaintext) {
+				this.plaintext_pending = true;
+				this.#queueReconstructActiveFormattingElements();
 			}
 
 			this.#closeTemporaryReopenedHeadAfterCurrentToken();
@@ -3536,8 +3565,44 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#consumePlaintextTextToken() {
+			if (!this.plaintext_pending || this.plaintext_text_consumed) {
+				return false;
+			}
+
+			const span = this.#nativeCurrentSpan();
+			const html = super.get_updated_html();
+			this.plaintext_content_start = span === null
+				? html.length
+				: Math.min(html.length, span.start + span.length);
+			const text = replaceNulls(html.slice(this.plaintext_content_start));
+			this.plaintext_pending = false;
+			this.plaintext_text_consumed = true;
+			if (text === "") {
+				return false;
+			}
+
+			this.current_synthetic_token = {
+				tokenType: "#text",
+				tokenName: "#text",
+				modifiableText: text,
+				rawText: true,
+			};
+			this.current_virtual = null;
+			this.parser_state = STATE_TEXT_NODE;
+			this.text_node_classification = splitHtmlWhitespace(text).length === 0
+				? WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
+				: WP_HTML_Tag_Processor.TEXT_IS_GENERIC;
+			this.current_token_namespace = "html";
+			this.breadcrumbs = this.#breadcrumbStack("#text");
+			return true;
+		}
+
 		#serializeTextToken() {
 			const text = this.get_modifiable_text() ?? "";
+			if (this.current_synthetic_token?.rawText === true) {
+				return text;
+			}
 			if (
 				this.raw_text_fragment_context !== null &&
 				!RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
