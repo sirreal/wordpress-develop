@@ -54,38 +54,38 @@ class Tests_HtmlApi_WpCssSelectorParserMatcher extends WP_UnitTestCase {
 	 */
 	public static function data_idents(): array {
 		return array(
-			'trailing #'                         => array( '_-foo123#xyz', '_-foo123', '#xyz' ),
-			'trailing .'                         => array( '😍foo123.xyz', '😍foo123', '.xyz' ),
-			'trailing " "'                       => array( '😍foo123 more', '😍foo123', ' more' ),
-			'escaped ASCII character'            => array( '\\xyz', 'xyz', '' ),
-			'escape after multibyte character'   => array( 'Ü\\sup', 'Üsup', '' ),
-			'escape after multibyte characters'  => array( 'ÜÜ\\sup', 'ÜÜsup', '' ),
+			'trailing #'                           => array( '_-foo123#xyz', '_-foo123', '#xyz' ),
+			'trailing .'                           => array( '😍foo123.xyz', '😍foo123', '.xyz' ),
+			'trailing " "'                         => array( '😍foo123 more', '😍foo123', ' more' ),
+			'escaped ASCII character'              => array( '\\xyz', 'xyz', '' ),
+			'escape after multibyte character'     => array( 'Ü\\sup', 'Üsup', '' ),
+			'escape after multibyte characters'    => array( 'ÜÜ\\sup', 'ÜÜsup', '' ),
 			'hex escape after multibyte character' => array( 'Ü\\31 23', 'Ü123', '' ),
-			'escaped space'                      => array( '\\ x', ' x', '' ),
-			'escaped emoji'                      => array( '\\😍', '😍', '' ),
-			'hex unicode codepoint'              => array( '\\1f0a1', '🂡', '' ),
-			'HEX UNICODE CODEPOINT'              => array( '\\1D4B2', '𝒲', '' ),
+			'escaped space'                        => array( '\\ x', ' x', '' ),
+			'escaped emoji'                        => array( '\\😍', '😍', '' ),
+			'hex unicode codepoint'                => array( '\\1f0a1', '🂡', '' ),
+			'HEX UNICODE CODEPOINT'                => array( '\\1D4B2', '𝒲', '' ),
 
-			'hex tab-suffixed 1'                 => array( "\\31\t23", '123', '' ),
-			'hex newline-suffixed 1'             => array( "\\31\n23", '123', '' ),
-			'hex space-suffixed 1'               => array( "\\31 23", '123', '' ),
-			'hex tab'                            => array( '\\9', "\t", '' ),
-			'hex a'                              => array( '\\61 bc', 'abc', '' ),
-			'hex a max escape length'            => array( '\\000061bc', 'abc', '' ),
+			'hex tab-suffixed 1'                   => array( "\\31\t23", '123', '' ),
+			'hex newline-suffixed 1'               => array( "\\31\n23", '123', '' ),
+			'hex space-suffixed 1'                 => array( "\\31 23", '123', '' ),
+			'hex tab'                              => array( '\\9', "\t", '' ),
+			'hex a'                                => array( '\\61 bc', 'abc', '' ),
+			'hex a max escape length'              => array( '\\000061bc', 'abc', '' ),
 
-			'out of range replacement min'       => array( '\\110000 ', "\u{fffd}", '' ),
-			'out of range replacement max'       => array( '\\ffffff ', "\u{fffd}", '' ),
-			'leading surrogate min replacement'  => array( '\\d800 ', "\u{fffd}", '' ),
-			'leading surrogate max replacement'  => array( '\\dbff ', "\u{fffd}", '' ),
-			'trailing surrogate min replacement' => array( '\\dc00 ', "\u{fffd}", '' ),
-			'trailing surrogate max replacement' => array( '\\dfff ', "\u{fffd}", '' ),
-			'can start with -ident'              => array( '-ident', '-ident', '' ),
-			'can start with --anything'          => array( '--anything', '--anything', '' ),
-			'can start with ---anything'         => array( '--_anything', '--_anything', '' ),
-			'can start with --1anything'         => array( '--1anything', '--1anything', '' ),
-			'can start with -\31 23'             => array( '-\31 23', '-123', '' ),
-			'can start with --\31 23'            => array( '--\31 23', '--123', '' ),
-			'ident ends before ]'                => array( 'ident]', 'ident', ']' ),
+			'out of range replacement min'         => array( '\\110000 ', "\u{fffd}", '' ),
+			'out of range replacement max'         => array( '\\ffffff ', "\u{fffd}", '' ),
+			'leading surrogate min replacement'    => array( '\\d800 ', "\u{fffd}", '' ),
+			'leading surrogate max replacement'    => array( '\\dbff ', "\u{fffd}", '' ),
+			'trailing surrogate min replacement'   => array( '\\dc00 ', "\u{fffd}", '' ),
+			'trailing surrogate max replacement'   => array( '\\dfff ', "\u{fffd}", '' ),
+			'can start with -ident'                => array( '-ident', '-ident', '' ),
+			'can start with --anything'            => array( '--anything', '--anything', '' ),
+			'can start with ---anything'           => array( '--_anything', '--_anything', '' ),
+			'can start with --1anything'           => array( '--1anything', '--1anything', '' ),
+			'can start with -\31 23'               => array( '-\31 23', '-123', '' ),
+			'can start with --\31 23'              => array( '--\31 23', '--123', '' ),
+			'ident ends before ]'                  => array( 'ident]', 'ident', ']' ),
 
 			/*
 			 * > EOF
@@ -93,19 +93,52 @@ class Tests_HtmlApi_WpCssSelectorParserMatcher extends WP_UnitTestCase {
 			 *
 			 * https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
 			 */
-			'escape at EOF'                      => array( 'foo\\', "foo\u{fffd}", '' ),
-			'lone escape at EOF'                 => array( '\\', "\u{fffd}", '' ),
-			'hyphen then escape at EOF'          => array( '-\\', "-\u{fffd}", '' ),
+			'escape at EOF'                        => array( 'foo\\', "foo\u{fffd}", '' ),
+			'lone escape at EOF'                   => array( '\\', "\u{fffd}", '' ),
+			'hyphen then escape at EOF'            => array( '-\\', "-\u{fffd}", '' ),
+
+			// Identity escapes of multibyte characters, by UTF-8 sequence length.
+			'escaped 2-byte character'             => array( "\\\u{FC}z", "\u{FC}z", '' ),
+			'escaped 3-byte character'             => array( "\\\u{270F}z", "\u{270F}z", '' ),
+			'escaped 4-byte character'             => array( "\\\u{1F0A1}z", "\u{1F0A1}z", '' ),
+			'escaped 2-byte character at EOF'      => array( "a\\\u{FC}", "a\u{FC}", '' ),
+			'escaped 3-byte character at EOF'      => array( "a\\\u{270F}", "a\u{270F}", '' ),
+			'escaped 4-byte character at EOF'      => array( "a\\\u{1F0A1}", "a\u{1F0A1}", '' ),
+
+			/*
+			 * An escaped NUL byte passes through this low-level helper unchanged.
+			 * This is unreachable through the public selector API, where
+			 * normalize_selector_input() replaces NUL with U+FFFD before parsing.
+			 */
+			'escaped NUL byte'                     => array( "a\\\x00z", "a\x00z", '' ),
+
+			/*
+			 * Identity escapes of invalid UTF-8 byte sequences.
+			 *
+			 * These inputs are not valid UTF-8. The escaped invalid byte decodes via
+			 * mbstring substitution (`?` under the default `mb_substitute_character()`
+			 * setting) and one byte is consumed; any continuation bytes that follow
+			 * are appended verbatim by the ident-code-point path. These cases pin the
+			 * current behavior under the default mbstring settings; they do not
+			 * assert it is desirable.
+			 */
+			'escaped lone continuation byte'       => array( "a\\\x80z", 'a?z', '' ),
+			'escaped overlong lead 0xC0'           => array( "a\\\xC0\xAFz", "a?\xAFz", '' ),
+			'escaped invalid lead 0xF5'            => array( "a\\\xF5z", 'a?z', '' ),
+			'escaped truncated 3-byte sequence'    => array( "a\\\xE2\x80z", "a?\x80z", '' ),
+			'escaped truncated 4-byte at EOF'      => array( "a\\\xF0\x9F\x82", "a?\x9F\x82", '' ),
+			'escaped UTF-8-encoded surrogate'      => array( "a\\\xED\xA0\x80z", "a?\xA0\x80z", '' ),
+			'escaped sequence above U+10FFFF'      => array( "a\\\xF4\x90\x80\x80z", "a?\x90\x80\x80z", '' ),
 
 			// Invalid
-			'Invalid: (empty string)'            => array( '' ),
-			'Invalid: bad start >'               => array( '>ident' ),
-			'Invalid: bad start ['               => array( '[ident' ),
-			'Invalid: bad start #'               => array( '#ident' ),
-			'Invalid: bad start " "'             => array( ' ident' ),
-			'Invalid: bad start 1'               => array( '1ident' ),
-			'Invalid: bad start -1'              => array( '-1ident' ),
-			'Invalid: bad start -'               => array( '-' ),
+			'Invalid: (empty string)'              => array( '' ),
+			'Invalid: bad start >'                 => array( '>ident' ),
+			'Invalid: bad start ['                 => array( '[ident' ),
+			'Invalid: bad start #'                 => array( '#ident' ),
+			'Invalid: bad start " "'               => array( ' ident' ),
+			'Invalid: bad start 1'                 => array( '1ident' ),
+			'Invalid: bad start -1'                => array( '-1ident' ),
+			'Invalid: bad start -'                 => array( '-' ),
 		);
 	}
 
