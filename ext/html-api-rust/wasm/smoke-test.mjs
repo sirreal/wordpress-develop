@@ -2516,6 +2516,7 @@ const completedTagBookmark = new WP_HTML_Tag_Processor("<div>");
 assert.equal(completedTagBookmark.next_tag("div"), true);
 assert.equal(completedTagBookmark.next_tag(), false);
 assert.equal(completedTagBookmark.set_bookmark("after-complete"), false);
+assert.equal(completedTagBookmark.set_bookmark({}), false);
 assert.equal(completedTagBookmark.has_bookmark("after-complete"), false);
 completedTagBookmark.destroy();
 
@@ -2523,6 +2524,7 @@ const incompleteTagBookmark = new WP_HTML_Tag_Processor("<div");
 assert.equal(incompleteTagBookmark.next_tag(), false);
 assert.equal(incompleteTagBookmark.paused_at_incomplete_token(), true);
 assert.equal(incompleteTagBookmark.set_bookmark("after-incomplete"), false);
+assert.equal(incompleteTagBookmark.set_bookmark({}), false);
 assert.equal(incompleteTagBookmark.has_bookmark("after-incomplete"), false);
 incompleteTagBookmark.destroy();
 
@@ -2533,6 +2535,25 @@ for (let i = 0; i < WP_HTML_Tag_Processor.MAX_BOOKMARKS; i += 1) {
 }
 assert.equal(tagBookmarkLimit.set_bookmark("tag-over-limit"), false);
 tagBookmarkLimit.destroy();
+
+const tagBookmarkScalarNames = new WP_HTML_Tag_Processor("<div></div><span></span>");
+assert.equal(tagBookmarkScalarNames.next_tag("div"), true);
+assert.equal(tagBookmarkScalarNames.set_bookmark(1), true);
+assert.equal(tagBookmarkScalarNames.has_bookmark("1"), true);
+assert.equal(tagBookmarkScalarNames.seek("1"), true);
+assert.equal(tagBookmarkScalarNames.release_bookmark(true), true);
+assert.equal(tagBookmarkScalarNames.has_bookmark(1), false);
+assert.equal(tagBookmarkScalarNames.set_bookmark(false), true);
+assert.equal(tagBookmarkScalarNames.has_bookmark(0), true);
+assert.equal(tagBookmarkScalarNames.has_bookmark(""), false);
+assert.equal(tagBookmarkScalarNames.release_bookmark(0), true);
+assert.equal(tagBookmarkScalarNames.set_bookmark(null), true);
+assert.equal(tagBookmarkScalarNames.has_bookmark(""), true);
+assert.throws(
+	() => tagBookmarkScalarNames.set_bookmark({}),
+	TypeError,
+);
+tagBookmarkScalarNames.destroy();
 
 const repeatedSameTokenSeek = new WP_HTML_Tag_Processor("<div></div>");
 assert.equal(repeatedSameTokenSeek.next_tag("div"), true);
@@ -3267,6 +3288,25 @@ assert.equal(processorBookmarkRelease.release_bookmark("mark"), true);
 assert.equal(processorBookmarkRelease.has_bookmark("mark"), false);
 assert.equal(processorBookmarkRelease.seek("mark"), false);
 processorBookmarkRelease.destroy();
+
+const processorBookmarkScalarNames = WP_HTML_Processor.create_fragment("<div></div><span></span>");
+assert.equal(processorBookmarkScalarNames.next_tag("div"), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(1), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark("1"), true);
+assert.equal(processorBookmarkScalarNames.seek("1"), true);
+assert.equal(processorBookmarkScalarNames.release_bookmark(true), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark(1), false);
+assert.equal(processorBookmarkScalarNames.set_bookmark(false), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark(""), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark(0), false);
+assert.equal(processorBookmarkScalarNames.release_bookmark(""), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(null), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark(false), true);
+assert.throws(
+	() => processorBookmarkScalarNames.set_bookmark({}),
+	TypeError,
+);
+processorBookmarkScalarNames.destroy();
 
 for (const [parserName, createProcessor] of [
 	["fragment", (html) => WP_HTML_Processor.create_fragment(html)],

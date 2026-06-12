@@ -1935,8 +1935,9 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			const bookmarkName = phpArrayKeyParameterCoerce(name, "name");
 			const maxBookmarks = this.constructor.MAX_BOOKMARKS ?? WP_HTML_Tag_Processor.MAX_BOOKMARKS;
-			if (this.bookmarks.size >= maxBookmarks && !this.bookmarks.has(name)) {
+			if (this.bookmarks.size >= maxBookmarks && !this.bookmarks.has(bookmarkName)) {
 				return false;
 			}
 
@@ -1945,26 +1946,27 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			this.bookmarks.set(name, span);
+			this.bookmarks.set(bookmarkName, span);
 			return true;
 		}
 
 		release_bookmark(name) {
-			return this.bookmarks.delete(name);
+			return this.bookmarks.delete(phpArrayKeyParameterCoerce(name, "name"));
 		}
 
 		has_bookmark(name) {
-			return this.bookmarks.has(name);
+			return this.bookmarks.has(phpArrayKeyParameterCoerce(name, "name"));
 		}
 
 		seek(name) {
 			this.#ensureLive();
 			this.#pausedAtJsIncompleteToken = false;
-			if (!this.bookmarks.has(name)) {
+			const bookmarkName = phpArrayKeyParameterCoerce(name, "name");
+			if (!this.bookmarks.has(bookmarkName)) {
 				return false;
 			}
 
-			const bookmark = this.bookmarks.get(name);
+			const bookmark = this.bookmarks.get(bookmarkName);
 			const currentSpan = this.#currentSpan();
 			if (
 				currentSpan &&
@@ -2860,20 +2862,32 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			if (!super.set_bookmark(name)) {
+			const bookmarkName = phpInternalStringCoerce(name, "bookmark_name");
+			const bookmarkKey = phpArrayKeyParameterCoerce(bookmarkName, "bookmark_name");
+			if (!super.set_bookmark(bookmarkName)) {
 				return false;
 			}
 
-			this.bookmarks.set(name, {
-				...this.bookmarks.get(name),
+			this.bookmarks.set(bookmarkKey, {
+				...this.bookmarks.get(bookmarkKey),
 				processorState: this.#snapshotProcessorState(),
 			});
 			return true;
 		}
 
+		release_bookmark(name) {
+			return super.release_bookmark(phpInternalStringCoerce(name, "bookmark_name"));
+		}
+
+		has_bookmark(name) {
+			return super.has_bookmark(phpInternalStringCoerce(name, "bookmark_name"));
+		}
+
 		seek(name) {
-			const bookmark = this.bookmarks.get(name);
-			if (!bookmark || !super.seek(name)) {
+			const bookmarkName = phpInternalStringCoerce(name, "bookmark_name");
+			const bookmarkKey = phpArrayKeyParameterCoerce(bookmarkName, "bookmark_name");
+			const bookmark = this.bookmarks.get(bookmarkKey);
+			if (!bookmark || !super.seek(bookmarkName)) {
 				return false;
 			}
 
@@ -7631,6 +7645,47 @@ function phpIntegerCast(value) {
 		return match ? Number.parseInt(match[0], 10) : 0;
 	}
 	return 0;
+}
+
+const PHP_INT_MIN = -9223372036854775808n;
+const PHP_INT_MAX = 9223372036854775807n;
+
+function isPhpIntegerArrayKeyString(value) {
+	if (value === "0") {
+		return true;
+	}
+	if (value === "" || value[0] === "+") {
+		return false;
+	}
+
+	const digits = value[0] === "-" ? value.slice(1) : value;
+	if (digits === "" || digits[0] === "0" || !/^\d+$/.test(digits)) {
+		return false;
+	}
+
+	const integer = BigInt(value);
+	return integer >= PHP_INT_MIN && integer <= PHP_INT_MAX;
+}
+
+function phpArrayKeyParameterCoerce(value, parameterName) {
+	if (typeof value === "string") {
+		return isPhpIntegerArrayKeyString(value) ? `i:${BigInt(value).toString()}` : `s:${value}`;
+	}
+
+	if (typeof value === "number") {
+		const integer = Number.isFinite(value) ? Math.trunc(value) : 0;
+		return `i:${Object.is(integer, -0) ? 0 : integer}`;
+	}
+
+	if (typeof value === "boolean") {
+		return `i:${value ? 1 : 0}`;
+	}
+
+	if (value === null) {
+		return "s:";
+	}
+
+	throw new TypeError(`Argument $${parameterName} must be of type array-key.`);
 }
 
 function phpIntegerParameterCoerce(value, parameterName) {

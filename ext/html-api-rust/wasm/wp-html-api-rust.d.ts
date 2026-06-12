@@ -217,6 +217,8 @@ export type PhpInternalStringParameter = string | number | boolean | null;
 
 export type PhpBooleanParameter = boolean | number | string;
 
+export type PhpArrayKeyParameter = string | number | boolean | null;
+
 export interface MatchByteLength {
 	value?: number;
 }
@@ -486,10 +488,10 @@ export interface WP_HTML_Tag_Processor {
 	set_modifiable_text(text: PhpStringParameter): boolean;
 	get_comment_type(): CommentType | null;
 	get_doctype_info(): WP_HTML_Doctype_Info | null;
-	set_bookmark(name: string): boolean;
-	release_bookmark(name: string): boolean;
-	has_bookmark(name: string): boolean;
-	seek(name: string): boolean;
+	set_bookmark(name: PhpArrayKeyParameter): boolean;
+	release_bookmark(name: PhpArrayKeyParameter): boolean;
+	has_bookmark(name: PhpArrayKeyParameter): boolean;
+	seek(name: PhpArrayKeyParameter): boolean;
 	change_parsing_namespace(namespaceName: PhpStringParameter): boolean;
 	get_namespace(): HtmlNamespace;
 	get_qualified_tag_name(): string | null;
