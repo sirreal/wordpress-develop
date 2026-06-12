@@ -215,6 +215,8 @@ export type PhpStringParameter = string | number | boolean;
 
 export type PhpInternalStringParameter = string | number | boolean | null;
 
+export type PhpInterpolatedStringParameter = string | number | boolean | null | unknown[];
+
 export type PhpBooleanParameter = boolean | number | string;
 
 export type PhpArrayKeyParameter = string | number | boolean | null;
@@ -573,6 +575,10 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	get_breadcrumbs(): string[];
 	get_current_depth(): number;
 	matches_breadcrumbs(breadcrumbs: PhpInternalStringParameter[]): boolean;
+	set_bookmark(name: PhpInterpolatedStringParameter): boolean;
+	release_bookmark(name: PhpInterpolatedStringParameter): boolean;
+	has_bookmark(name: PhpInterpolatedStringParameter): boolean;
+	seek(name: PhpInterpolatedStringParameter): boolean;
 	serialize(): string | null;
 	serialize_token(): string;
 }

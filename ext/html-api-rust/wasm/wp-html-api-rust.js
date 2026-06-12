@@ -2873,7 +2873,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const bookmarkName = phpInternalStringCoerce(name, "bookmark_name");
+			const bookmarkName = phpInterpolatedStringCoerce(name, "bookmark_name");
 			const bookmarkKey = phpArrayKeyParameterCoerce(bookmarkName, "bookmark_name");
 			if (!super.set_bookmark(bookmarkName)) {
 				return false;
@@ -2887,15 +2887,15 @@ export function createHtmlApi(wasm) {
 		}
 
 		release_bookmark(name) {
-			return super.release_bookmark(phpInternalStringCoerce(name, "bookmark_name"));
+			return super.release_bookmark(phpInterpolatedStringCoerce(name, "bookmark_name"));
 		}
 
 		has_bookmark(name) {
-			return super.has_bookmark(phpInternalStringCoerce(name, "bookmark_name"));
+			return super.has_bookmark(phpInterpolatedStringCoerce(name, "bookmark_name"));
 		}
 
 		seek(name) {
-			const bookmarkName = phpInternalStringCoerce(name, "bookmark_name");
+			const bookmarkName = phpInterpolatedStringCoerce(name, "bookmark_name");
 			const bookmarkKey = phpArrayKeyParameterCoerce(bookmarkName, "bookmark_name");
 			const bookmark = this.bookmarks.get(bookmarkKey);
 			if (!bookmark || !super.seek(bookmarkName)) {
@@ -7811,6 +7811,31 @@ function phpInternalStringCoerce(value, parameterName) {
 		typeof value === "undefined"
 	) {
 		throw new TypeError(`Argument $${parameterName} must be of type string.`);
+	}
+
+	if (typeof value === "boolean") {
+		return value ? "1" : "";
+	}
+
+	return String(value);
+}
+
+function phpInterpolatedStringCoerce(value, parameterName) {
+	if (Array.isArray(value)) {
+		return "Array";
+	}
+
+	if (value === null) {
+		return "";
+	}
+
+	if (
+		typeof value === "object" ||
+		typeof value === "function" ||
+		typeof value === "symbol" ||
+		typeof value === "undefined"
+	) {
+		throw new TypeError(`Argument $${parameterName} could not be converted to string.`);
 	}
 
 	if (typeof value === "boolean") {

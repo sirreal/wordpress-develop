@@ -1044,13 +1044,17 @@ const processorPrototypeMethods = [
 	"get_last_error",
 	"get_namespace",
 	"get_unsupported_exception",
+	"has_bookmark",
 	"is_tag_closer",
 	"is_virtual",
 	"matches_breadcrumbs",
 	"next_tag",
 	"next_token",
+	"release_bookmark",
+	"seek",
 	"serialize",
 	"serialize_token",
+	"set_bookmark",
 	"step",
 ];
 const processorStaticMethods = ["create_fragment", "create_full_parser", "is_special", "is_void", "normalize"];
@@ -3373,6 +3377,12 @@ assert.equal(processorBookmarkScalarNames.has_bookmark(0), false);
 assert.equal(processorBookmarkScalarNames.release_bookmark(""), true);
 assert.equal(processorBookmarkScalarNames.set_bookmark(null), true);
 assert.equal(processorBookmarkScalarNames.has_bookmark(false), true);
+assert.equal(processorBookmarkScalarNames.set_bookmark(["x"]), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark([]), true);
+assert.equal(processorBookmarkScalarNames.seek(["different"]), true);
+assert.equal(processorBookmarkScalarNames.get_tag(), "DIV");
+assert.equal(processorBookmarkScalarNames.release_bookmark([]), true);
+assert.equal(processorBookmarkScalarNames.has_bookmark(["x"]), false);
 assert.throws(
 	() => processorBookmarkScalarNames.set_bookmark({}),
 	TypeError,
