@@ -3605,6 +3605,10 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
+		#hasNoframesStartTag() {
+			return /<\s*noframes(?:[\t\n\f\r />]|$)/i.test(super.get_updated_html());
+		}
+
 		#serializeTextToken() {
 			const text = this.get_modifiable_text() ?? "";
 			if (this.current_synthetic_token?.rawText === true) {
@@ -4351,8 +4355,17 @@ export function createHtmlApi(wasm) {
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag"
 						) {
-							this.#bailUnsupported("Content outside of HTML is unsupported.");
-							return true;
+							if (this.#hasNoframesStartTag()) {
+								this.#bailUnsupported("Content outside of HTML is unsupported.");
+								return true;
+							}
+							if (this.open_elements.length > 0) {
+								this.#queueVirtualPopsFrom(0);
+								this.pending_real_token = true;
+								this.pending_real_parser_state = this.parser_state;
+								return true;
+							}
+							return false;
 						}
 
 						if (tokenType === "#doctype" || (tokenType === "#tag" && !isCloser && tagName === "HTML")) {

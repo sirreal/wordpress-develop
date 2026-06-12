@@ -254,7 +254,12 @@ function buildHtml5libTree(fragmentContext, html) {
 				if (namespace === "html" && tokenName === "HEAD" && path.length === 2 && path[0].name === "HTML") {
 					headStarted = true;
 				}
-				if (namespace === "html" && tokenName === "BODY" && path.length === 2 && path[0].name === "HTML") {
+				if (
+					namespace === "html" &&
+					(tokenName === "BODY" || tokenName === "FRAMESET") &&
+					path.length === 2 &&
+					path[0].name === "HTML"
+				) {
 					flushPendingHtmlChildrenBeforeBody();
 					bodyStarted = true;
 				}
