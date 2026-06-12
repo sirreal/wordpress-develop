@@ -8119,7 +8119,11 @@ export function createHtmlApi(wasm) {
 				if (nextTag === false || nextTag.is_closing) {
 					return false;
 				}
-				if (FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) || nextTag.tag_name === "SELECT") {
+				if (
+					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
+					nextTag.tag_name === "SELECT" ||
+					this.#isFosteredVoidTableStartTag(nextTag.tag_name)
+				) {
 					return true;
 				}
 				if (!wrappers.has(nextTag.tag_name)) {
@@ -8141,6 +8145,10 @@ export function createHtmlApi(wasm) {
 
 		#hasDeferredTableChildOpener(tagName) {
 			return this.deferred_table_child_openers.some((token) => token.tagName === tagName);
+		}
+
+		#isFosteredVoidTableStartTag(tagName) {
+			return VOID_ELEMENTS.has(tagName) && !TABLE_MODE_START_TAGS.has(tagName) && tagName !== "INPUT";
 		}
 
 		#fosterParentedStartTableIndex(tagName) {

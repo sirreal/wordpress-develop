@@ -9,7 +9,7 @@ const testHtmlFilter = process.env.HTML5LIB_TEST_HTML_FILTER ?? "";
 const testContextFilter = process.env.HTML5LIB_TEST_CONTEXT_FILTER ?? "";
 const includeKnownSkippedTests = process.env.HTML5LIB_INCLUDE_KNOWN_SKIPS === "1";
 const unsupportedSampleLimit = Number.parseInt(process.env.HTML5LIB_UNSUPPORTED_SAMPLES ?? "0", 10);
-const maxBroadUnsupportedTests = 86;
+const maxBroadUnsupportedTests = 85;
 const supportedFragmentContexts = new Set([
 	"body",
 	"caption",

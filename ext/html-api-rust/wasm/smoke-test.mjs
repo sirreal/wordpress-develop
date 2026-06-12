@@ -5982,6 +5982,15 @@ assert.equal(
 );
 fullParserFosteredTextBeforeTableComment.destroy();
 
+const fullParserFosteredMetaBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<!doctype html><table><meta></table>",
+);
+assert.equal(
+	fullParserFosteredMetaBeforeTable.serialize(),
+	"<!DOCTYPE html><html><head></head><body><meta><table></table></body></html>",
+);
+fullParserFosteredMetaBeforeTable.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",
