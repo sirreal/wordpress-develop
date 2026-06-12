@@ -2,6 +2,20 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Post-round-17 corpus refresh — comparability reset before next score
+
+Start-of-run reconciliation found that the current worktree is clean but the
+active corpus no longer matches round 17's result directories. Recent commits
+replaced or tightened several active tasks after the round-17 hold score:
+N03, N04, N06, T07, T11, H04, plus smaller task/reference updates. Therefore
+round 17 remains a trusted historical no-edit hold score for the previous
+corpus, but it is not a comparable baseline for the current corpus.
+
+Current corpus reference validation: all 19 references pass their hidden tests
+locally. Scoring is paused until the next action runs a no-edit
+baseline/calibration on the current corpus under the current model policy. No
+PHP behavior or source docblocks were changed in this reconciliation.
+
 ## Round 17 — Haiku, hold round (no edits): campaign-best score
 
 **Train 98.93 — the highest of the campaign, with ZERO doc changes.**

@@ -8,9 +8,21 @@ from discoverability gaps.
 
 ## Current read
 
-Round 17 was a no-edit hold round and scored 98.93 on train. The remaining
-train misses are scattered, with T08 traversal the only material weak spot.
-Most judge gaps are now one of these shapes:
+Round 17 was a no-edit hold round on the previous active corpus and scored
+98.93 on train. After that hold round, several active tasks were intentionally
+replaced or tightened: N03, N04, N06, T07, T11, H04, plus smaller prompt or
+reference updates. Those committed corpus changes reset comparability: round
+17 remains a trusted historical score for the previous corpus, but it is not a
+current-corpus baseline.
+
+All current corpus reference implementations were rechecked locally after the
+refresh and pass their hidden tests. The next valid action is a no-edit
+baseline/calibration on the current corpus under the current model policy
+before any source docblock promotion. The old round-17 gap shapes remain
+useful as hypothesis seeds, but current-corpus failures must be measured
+fresh.
+
+Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
   through.
@@ -152,8 +164,10 @@ Core idea: show that parsed element identity is not source spelling. Clarify
 that `next_tag( 'IMG' )` uses the parser's element identity, while
 `get_namespace()` distinguishes HTML/SVG/MathML when names overlap.
 
-Why this is strong: N06 passes now, but subjects often add redundant or
-misunderstood namespace guards. Future foreign-content tasks will stress this.
+Why this is strong: the pre-refresh N06 namespace task passed, but subjects
+often added redundant or misunderstood namespace guards. The current corpus no
+longer has an active namespace task, so treat this as historical/future-task
+evidence until a current train task, probe, or A/B test revives it.
 
 Risk: medium. Use generic parsed-identity language and varied examples rather
 than a task-shaped `img`-only recipe.
@@ -392,19 +406,23 @@ confirmed hypothesis, not a style cleanup.
 
 ## Proposed next sequence
 
-1. Run no-edit weak-tier calibration across the subject ladder, one tier at a
-   time, until a tier lands in a useful signal band: not saturated, but still
-   mostly failing on doc/API reasoning rather than generic coding errors.
-2. Run citation-only discoverability probes for the strong-candidate contracts.
+1. Run a no-edit current-corpus baseline/calibration with the first current
+   subject tier, `gpt-5.4` / `medium` / `priority`. Record any runner
+   mismatch, because this score replaces round 17 as the current-corpus
+   comparison point.
+2. Continue weak-tier calibration down the subject ladder, one tier at a time,
+   until a tier lands in a useful signal band: not saturated, but still mostly
+   failing on doc/API reasoning rather than generic coding errors.
+3. Run citation-only discoverability probes for the strong-candidate contracts.
    If a fact exists but weak subjects cannot cite it locally, prefer relocation
    or a contract card over more narrative prose.
-3. Add a scratch-only rendered-doc variant tool or manual script that can
+4. Add a scratch-only rendered-doc variant tool or manual script that can
    insert contract cards and remove named sections without editing source.
-4. Run paired shadow-doc A/B tests for the depth-boundary card, factory
+5. Run paired shadow-doc A/B tests for the depth-boundary card, factory
    lifecycle card, where-text-lives matrix, and signal-density pruning.
-5. Run a small cross-tier diagnostic panel on checkpoint or hold rounds to
+6. Run a small cross-tier diagnostic panel on checkpoint or hold rounds to
    confirm the improvement generalizes across subject capability.
-6. Only then promote winning changes to docblocks, one hypothesis per commit,
+7. Only then promote winning changes to docblocks, one hypothesis per commit,
    with held-out still protected from driving edits.
 
 The main risk now is overfitting the train set or adding enough prose that the

@@ -5,10 +5,14 @@ Improve the documentation of `WP_HTML_Tag_Processor` and `WP_HTML_Processor`
 models can complete real HTML API tasks using *only* the rendered
 documentation, then editing the docs to fix observed failure modes.
 
-Current phase: after round 17 the train score is saturated enough that the
-primary work is no longer "run another full round, add the latest gap." Use
-`doc-experiment/NEXT-HYPOTHESES.md` as the backlog for diagnostic probes,
-scratch-rendered A/B variants, and source-edit hypotheses.
+Current phase: after round 17 the original train score was saturated enough
+that the primary work was no longer "run another full round, add the latest
+gap." The corpus was then refreshed by replacing several active tasks, so
+rounds through 17 are historical for the previous corpus and must not be used
+as comparable baselines for new source edits. The next valid action is a
+no-edit baseline/calibration on the current corpus and current model policy,
+then use `doc-experiment/NEXT-HYPOTHESES.md` as the backlog for diagnostic
+probes, scratch-rendered A/B variants, and source-edit hypotheses.
 
 ## Pipeline (per round)
 
@@ -108,7 +112,7 @@ method-local contracts.
   passed) + 30% API adherence rubric (no hallucinated methods, correct
   processor choice, idiomatic handling of malformed HTML, no
   `_doing_it_wrong` triggers).
-- Task score = mean of 3 trials; round score = mean over 12 train tasks.
+- Task score = mean of 3 trials; round score = mean over 15 train tasks.
   Scale 0–100.
 - Revert rule: revert a hypothesis commit if the next round's score drops
   more than 2 points, or a previously passing task regresses across all
@@ -116,26 +120,28 @@ method-local contracts.
 
 ## Corpus
 
-Revised after Jon's round-1 review (task-first, not API-surface-first):
+Revised after Jon's round-1 review and refreshed again after round 17:
 19 active tasks — 15 train + 4 held-out. Held-out tasks are scored only at
 checkpoints (every 3rd round and at the end) and never drive doc edits —
-they detect doc edits that game the train set.
+they detect doc edits that game the train set. Because the post-round-17
+refresh replaced active tasks, pre-refresh scores are not comparable with
+future current-corpus scores except as historical context.
 
-- Train core: T03–T12 (text extraction, traversal, serialization,
-  bookmarks) plus N03 (incomplete-input detection via
-  paused_at_incomplete_token), N04 (normalize() failure handling),
-  N06 (HTML img vs SVG image namespace distinction).
+- Train core: T03–T12 plus N03 (first list direct-child count), N04
+  (normalize with fallback), and N06 (heading table-of-contents extraction).
+  Current train concepts cover attributes, classes, normalization,
+  serialization, text, and traversal.
 - Train smoke: T01, T02 — basic sanity checks, kept in the round score
   but reviewed separately; they must not dominate coverage.
 - Held-out: N01 (class removal), N02 (contextual selection with
   breadcrumbs), N05 (full-document title via create_full_parser),
-  H04 (advanced subtree text extraction).
+  H04 (empty-paragraph normalized removal).
 - Retired to corpus-retired/ (too close to train patterns to give
   held-out anti-overfitting value): H01, H02, H03.
 
 Every active task carries labels in tests.json — role (core/smoke), commonness
 (high/medium/low), concept (attributes, classes, text, traversal,
-serialization, full-document, failure-handling, namespace), and intended
+serialization, full-document, normalization), and intended
 processor (tag/html/either). Rounds are reviewed per concept, not only by
 aggregate score, so a high aggregate cannot hide an untaught concept.
 

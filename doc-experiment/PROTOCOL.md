@@ -33,6 +33,11 @@ Pick exactly one round mode:
   rendered variant, such as contract cards or pruning. Source docblocks are not
   edited until a variant wins and is promoted as its own hypothesis.
 
+If the active corpus has changed since the last trusted score, do not compare
+against that older score and do not promote source docblock edits. First run a
+no-edit baseline/calibration on the current corpus with the current model
+policy, then use that result as the current comparison point.
+
 ## 1. Stage
 
 ```sh
