@@ -4460,11 +4460,17 @@ export function createHtmlApi(wasm) {
 				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
 				(
 					tagName === "DIV" &&
+					formattingTagName !== "NOBR" &&
 					this.#hasOpenFormattingElementBeforeIndex(topIndex)
 				) ||
 				(
 					!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName) &&
-					(tagName !== "NOBR" || !this.#currentTokenHasNoFollowingTags())
+					(tagName !== "NOBR" || !this.#currentTokenHasNoFollowingTags()) &&
+					(
+						tagName !== "DIV" ||
+						formattingTagName !== "NOBR" ||
+						!this.#openFormattingElementBeforeIndexPrecedesElementClose(topIndex, tagName)
+					)
 				)
 			) {
 				return false;
@@ -4482,6 +4488,25 @@ export function createHtmlApi(wasm) {
 				}
 				if (FORMATTING_ELEMENTS.has(this.open_elements[i])) {
 					return true;
+				}
+				if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
+					return false;
+				}
+			}
+
+			return false;
+		}
+
+		#openFormattingElementBeforeIndexPrecedesElementClose(index, elementTagName) {
+			for (let i = index - 1; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					return false;
+				}
+				if (FORMATTING_ELEMENTS.has(this.open_elements[i])) {
+					return (
+						this.#lastActiveFormattingElementIndex(this.open_elements[i]) !== -1 &&
+						this.#formattingEndTagPrecedesElementClose(this.open_elements[i], elementTagName)
+					);
 				}
 				if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
 					return false;
