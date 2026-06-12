@@ -5937,6 +5937,24 @@ assert.equal(
 );
 fullParserFosteredTextBeforeTableHiddenInput.destroy();
 
+const fullParserFosteredInputBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<table><input>",
+);
+assert.equal(
+	fullParserFosteredInputBeforeTable.serialize(),
+	"<html><head></head><body><input><table></table></body></html>",
+);
+fullParserFosteredInputBeforeTable.destroy();
+
+const fullParserFosteredInputBeforeHiddenTableInput = WP_HTML_Processor.create_full_parser(
+	'<!doctype html><table><input type=" hidden"><input type=hidDEN></table>',
+);
+assert.equal(
+	fullParserFosteredInputBeforeHiddenTableInput.serialize(),
+	'<!DOCTYPE html><html><head></head><body><input type=" hidden"><table><input type="hidDEN"></table></body></html>',
+);
+fullParserFosteredInputBeforeHiddenTableInput.destroy();
+
 const fullParserFosteredTextBeforeTableMeta = WP_HTML_Processor.create_full_parser(
 	"<!doctype html><table> X<meta></table>",
 );

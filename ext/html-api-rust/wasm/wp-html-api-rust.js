@@ -8140,6 +8140,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.#isFosteredInputTableStartTag(tagName)) {
+				return false;
+			}
+
 			return TABLE_MODE_START_TAGS.has(tagName) && this.#queueDeferredTableOpener();
 		}
 
@@ -8223,6 +8227,7 @@ export function createHtmlApi(wasm) {
 					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) ||
 					nextTag.tag_name === "SELECT" ||
 					this.#isFosteredVoidTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredInputStartTag(nextTag) ||
 					this.#isFosteredAtomicTableStartTag(nextTag.tag_name) ||
 					this.#isFosteredElementTableStartTag(nextTag.tag_name)
 				) {
@@ -8267,6 +8272,22 @@ export function createHtmlApi(wasm) {
 			return VOID_ELEMENTS.has(tagName) && !TABLE_MODE_START_TAGS.has(tagName) && tagName !== "INPUT";
 		}
 
+		#isFosteredInputStartTag(nextTag) {
+			return (
+				nextTag.tag_name === "INPUT" &&
+				!inputStartTagHasHiddenType(this.html.slice(nextTag.tag_start, nextTag.token_end))
+			);
+		}
+
+		#isFosteredInputTableStartTag(tagName) {
+			if (tagName !== "INPUT") {
+				return false;
+			}
+
+			const typeAttribute = this.get_attribute("type");
+			return !(typeof typeAttribute === "string" && typeAttribute.toLowerCase() === "hidden");
+		}
+
 		#isFosteredAtomicTableStartTag(tagName) {
 			return tagName === "TITLE";
 		}
@@ -8298,7 +8319,10 @@ export function createHtmlApi(wasm) {
 				this.deferred_table_opener === null ||
 				this.current_namespace !== "html" ||
 				!VOID_ELEMENTS.has(tagName) ||
-				TABLE_MODE_START_TAGS.has(tagName)
+				(
+					TABLE_MODE_START_TAGS.has(tagName) &&
+					!this.#isFosteredInputTableStartTag(tagName)
+				)
 			) {
 				return false;
 			}
@@ -9356,6 +9380,16 @@ function completeStartTagAt(value, at) {
 	}
 
 	return null;
+}
+
+function inputStartTagHasHiddenType(markup) {
+	const match = /(?:^|[\t\n\f\r /])type(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'|([^\t\n\f\r />]*)))?/i.exec(markup);
+	if (match === null) {
+		return false;
+	}
+
+	const value = match[1] ?? match[2] ?? match[3] ?? "";
+	return value.toLowerCase() === "hidden";
 }
 
 function incompleteBogusCommentAtEof(value) {
