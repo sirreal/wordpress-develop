@@ -2379,6 +2379,7 @@ export function createHtmlApi(wasm) {
 			this.paragraph_adoption_preclosed_formatting_elements = [];
 			this.special_start_adoption_preclosed_formatting_elements = [];
 			this.deep_anchor_reconstructed_div_start_offsets = new Set();
+			this.table_nobr_reconstructed_start_offsets = new Set();
 			this.deferred_table_opener = null;
 			this.deferred_table_child_openers = [];
 			this.pending_foreign_table_fostered_text_table_index = null;
@@ -3850,8 +3851,10 @@ export function createHtmlApi(wasm) {
 			if (
 				allowVirtualPreclosures &&
 				this.#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) &&
+				!this.#alreadyReconstructedTableNobrForCurrentToken(tagName) &&
 				this.#queueReconstructActiveFormattingElementsBeforeDeferredTable()
 			) {
+				this.#rememberTableNobrReconstructionForCurrentToken(tagName);
 				this.pending_real_token = true;
 				this.pending_real_parser_state = this.parser_state;
 				return;
@@ -4028,8 +4031,10 @@ export function createHtmlApi(wasm) {
 					this.#shouldReconstructActiveAnchorForStartTag(tagName) ||
 					this.#shouldReconstructActiveFontForStartTag(tagName)
 				) &&
+				!this.#alreadyReconstructedTableNobrForCurrentToken(tagName) &&
 				this.#queueReconstructActiveFormattingElements()
 			) {
+				this.#rememberTableNobrReconstructionForCurrentToken(tagName);
 				this.pending_real_token = true;
 				this.pending_real_parser_state = this.parser_state;
 				return;
@@ -4291,6 +4296,7 @@ export function createHtmlApi(wasm) {
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				deepAnchorReconstructedDivStartOffsets: [...this.deep_anchor_reconstructed_div_start_offsets],
+				tableNobrReconstructedStartOffsets: [...this.table_nobr_reconstructed_start_offsets],
 				ignoredSelectFormattingElements: [...this.ignored_select_formatting_elements.entries()],
 				templateInsertionModes: [...this.template_insertion_modes],
 				encodingConfidence: this.encoding_confidence,
@@ -4348,6 +4354,7 @@ export function createHtmlApi(wasm) {
 			this.paragraph_adoption_preclosed_formatting_elements = (state.paragraphAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
 			this.special_start_adoption_preclosed_formatting_elements = (state.specialStartAdoptionPreclosedFormattingElements ?? []).map((entry) => ({ ...entry }));
 			this.deep_anchor_reconstructed_div_start_offsets = new Set(state.deepAnchorReconstructedDivStartOffsets ?? []);
+			this.table_nobr_reconstructed_start_offsets = new Set(state.tableNobrReconstructedStartOffsets ?? []);
 			this.ignored_select_formatting_elements = new Map(state.ignoredSelectFormattingElements);
 			this.template_insertion_modes = [...state.templateInsertionModes];
 			this.encoding_confidence = state.encodingConfidence;
@@ -4991,6 +4998,14 @@ export function createHtmlApi(wasm) {
 			const formattingTagName = this.open_elements[topIndex];
 			const openNobrIndex = tagName === "NOBR" ? this.#lastOpenElementIndex("NOBR", "html") : -1;
 			if (
+				tagName === "NOBR" &&
+				formattingTagName !== "NOBR" &&
+				openNobrIndex !== -1 &&
+				this.#lastOpenElementIndex("TABLE", "html") > openNobrIndex
+			) {
+				return false;
+			}
+			if (
 				tagName === "DIV" &&
 				formattingTagName !== "NOBR" &&
 				this.deferred_table_opener !== null &&
@@ -5466,6 +5481,34 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#alreadyReconstructedTableNobrForCurrentToken(tagName) {
+			if (
+				tagName !== "NOBR" ||
+				this.#lastOpenElementIndex("TABLE", "html") === -1 ||
+				this.#currentFosterParentedTableIndex() !== null
+			) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			return span !== null && this.table_nobr_reconstructed_start_offsets.has(span.start);
+		}
+
+		#rememberTableNobrReconstructionForCurrentToken(tagName) {
+			if (
+				tagName !== "NOBR" ||
+				this.#lastOpenElementIndex("TABLE", "html") === -1 ||
+				this.#currentFosterParentedTableIndex() !== null
+			) {
+				return;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span !== null) {
+				this.table_nobr_reconstructed_start_offsets.add(span.start);
+			}
 		}
 
 		#countOpenHtmlElementsAfterLast(afterTagName, countedTagName) {
@@ -6974,6 +7017,12 @@ export function createHtmlApi(wasm) {
 						this.pending_nested_anchor_outer_closer_after_deferred_table_index = formattingElementIndex;
 						this.pending_nested_anchor_active_removal_after_deferred_table = this.#shouldRemoveNestedAnchorActiveAfterDeferredTable();
 						this.#removeActiveFormattingElement(tagName);
+						return false;
+					}
+					if (
+						tagName === "NOBR" &&
+						this.#lastOpenElementIndex("TABLE", "html") > formattingElementIndex
+					) {
 						return false;
 					}
 					if (
@@ -9875,7 +9924,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredElementTableStartTag(tagName) {
-			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "I" || tagName === "LI" || tagName === "P" || tagName === "PLAINTEXT" || tagName === "S";
+			return tagName === "A" || tagName === "B" || tagName === "CENTER" || tagName === "DIV" || tagName === "FONT" || tagName === "I" || tagName === "LI" || tagName === "NOBR" || tagName === "P" || tagName === "PLAINTEXT" || tagName === "S";
 		}
 
 		#shouldReconstructActiveFormattingBeforeFosteredStart(tagName) {
@@ -9892,7 +9941,8 @@ export function createHtmlApi(wasm) {
 				tagName === "SELECT" ||
 				this.#isFosteredVoidTableStartTag(tagName) ||
 				this.#isFosteredInputTableStartTag(tagName) ||
-				this.#isFosteredAtomicTableStartTag(tagName)
+				this.#isFosteredAtomicTableStartTag(tagName) ||
+				(tagName === "NOBR" && !this.#currentHtmlElementIs("NOBR"))
 			);
 		}
 
