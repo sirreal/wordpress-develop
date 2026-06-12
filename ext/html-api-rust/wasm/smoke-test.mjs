@@ -4229,6 +4229,7 @@ for (const html of ["<param><frameset></frameset>", "<source> <frameset></frames
 for (const html of [
 	"<svg></svg><frameset><frame>",
 	"<math></math><frameset><frame>",
+	"<svg>\0 </svg><frameset><frame>",
 	"<svg><path></path></svg><frameset><frame>",
 ]) {
 	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
@@ -4246,7 +4247,7 @@ for (const html of [
 	fullParserFramesetAfterEmptyForeign.destroy();
 }
 
-for (const html of ["<svg> </svg><frameset>"]) {
+for (const html of ["<svg>\0</svg><frameset>", "<svg> </svg><frameset>"]) {
 	const fullParserFramesetAfterEmptyForeign = WP_HTML_Processor.create_full_parser(html);
 	const fullParserFramesetAfterEmptyForeignTags = [];
 	while (fullParserFramesetAfterEmptyForeign.next_token()) {
@@ -4376,16 +4377,54 @@ for (const html of [
 	ignoredFramesetProcessor.destroy();
 }
 
-for (const html of ["<svg>\0</svg><frameset>", "<svg>\0 </svg><frameset>"]) {
-	const nonIgnoredFramesetAfterForeignTextProcessor = WP_HTML_Processor.create_full_parser(html);
-	while (nonIgnoredFramesetAfterForeignTextProcessor.next_token()) {
+for (const [html, expectedTokens] of [
+	[
+		"<svg>\0<frameset>",
+		[
+			"+HTML:html",
+			"+HEAD:html",
+			"-HEAD:html",
+			"+BODY:html",
+			"+SVG:svg",
+			"#text:svg",
+			"+FRAMESET:svg",
+			"-FRAMESET:svg",
+			"-SVG:svg",
+			"-BODY:html",
+			"-HTML:html",
+		],
+	],
+	[
+		"<svg>\0 <frameset>",
+		[
+			"+HTML:html",
+			"+HEAD:html",
+			"-HEAD:html",
+			"+BODY:html",
+			"+SVG:svg",
+			"#text:svg",
+			"#text:svg",
+			"+FRAMESET:svg",
+			"-FRAMESET:svg",
+			"-SVG:svg",
+			"-BODY:html",
+			"-HTML:html",
+		],
+	],
+]) {
+	const fullParserOpenSvgFramesetProcessor = WP_HTML_Processor.create_full_parser(html);
+	const visitedOpenSvgFramesetTokens = [];
+	while (fullParserOpenSvgFramesetProcessor.next_token()) {
+		visitedOpenSvgFramesetTokens.push(
+			fullParserOpenSvgFramesetProcessor.get_token_type() === "#tag"
+				? `${fullParserOpenSvgFramesetProcessor.is_tag_closer() ? "-" : "+"}${fullParserOpenSvgFramesetProcessor.get_tag()}:${fullParserOpenSvgFramesetProcessor.get_namespace()}`
+				: `${fullParserOpenSvgFramesetProcessor.get_token_type()}:${fullParserOpenSvgFramesetProcessor.get_namespace()}`,
+		);
 	}
-	assert.equal(nonIgnoredFramesetAfterForeignTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(
-		nonIgnoredFramesetAfterForeignTextProcessor.get_unsupported_exception().message,
-		"Cannot process non-ignored FRAMESET tags.",
-	);
-	nonIgnoredFramesetAfterForeignTextProcessor.destroy();
+	assert.deepEqual(visitedOpenSvgFramesetTokens, expectedTokens);
+	assert.equal(fullParserOpenSvgFramesetProcessor.get_last_error(), null);
+	assert.equal(fullParserOpenSvgFramesetProcessor.get_unsupported_exception(), null);
+	fullParserOpenSvgFramesetProcessor.destroy();
 }
 
 const fullParserCommentAfterBody = WP_HTML_Processor.create_full_parser("<html><body></body><!--outside-->");

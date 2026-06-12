@@ -5575,7 +5575,7 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
-				if (!this.#isWhitespacePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
+				if (!this.#isIgnorablePreFramesetText(this.html.slice(at, nextTag.tag_start))) {
 					return false;
 				}
 
