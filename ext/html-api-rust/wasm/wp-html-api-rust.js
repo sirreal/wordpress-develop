@@ -8188,7 +8188,7 @@ export function createHtmlApi(wasm) {
 
 		#currentTableStartIsFollowedByFosteredContent() {
 			return this.#currentTokenIsFollowedByFosteredTableContent(
-				new Set(["COLGROUP", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
+				new Set(["COLGROUP", "FORM", "INPUT", "TBODY", "TEMPLATE", "TFOOT", "THEAD", "TR"]),
 			);
 		}
 
@@ -8197,7 +8197,10 @@ export function createHtmlApi(wasm) {
 				this.is_full_parser &&
 				this.deferred_table_opener !== null &&
 				namespaceName === "html" &&
-				this.#isDeferredTableChildOpenerTag(tagName) &&
+				(
+					this.#isDeferredTableChildOpenerTag(tagName) ||
+					this.#isDeferredTableHiddenInputChildOpener(tagName)
+				) &&
 				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
 			);
 		}
@@ -8248,6 +8251,10 @@ export function createHtmlApi(wasm) {
 					return false;
 				}
 
+				if (tagName === "FORM" && this.#hasDeferredTableChildOpener("FORM")) {
+					return false;
+				}
+
 				return (
 					(tagName === "TABLE" || this.#hasDeferredTableChildOpener(tagName)) &&
 					this.#queueDeferredTableOpener()
@@ -8262,7 +8269,10 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (
-				this.#isDeferredTableChildOpenerTag(tagName) &&
+				(
+					this.#isDeferredTableChildOpenerTag(tagName) ||
+					this.#isDeferredTableHiddenInputChildOpener(tagName)
+				) &&
 				this.#currentTokenIsFollowedByFosteredTableContent(this.#deferredTableChildLookaheadTags(tagName))
 			) {
 				return false;
@@ -8404,6 +8414,15 @@ export function createHtmlApi(wasm) {
 					at = atomicEnd;
 					continue;
 				}
+				if (
+					nextTag.tag_name === "INPUT" &&
+					wrappers.has("INPUT") &&
+					!this.#isFosteredInputStartTag(nextTag)
+				) {
+					wrappers = this.#deferredTableChildLookaheadTags(nextTag.tag_name);
+					at = nextTag.token_end;
+					continue;
+				}
 				if (!wrappers.has(nextTag.tag_name)) {
 					return false;
 				}
@@ -8450,6 +8469,7 @@ export function createHtmlApi(wasm) {
 		#isDeferredTableChildOpenerTag(tagName) {
 			return (
 				tagName === "COLGROUP" ||
+				tagName === "FORM" ||
 				tagName === "TEMPLATE" ||
 				tagName === "TR" ||
 				TABLE_SECTION_ELEMENTS.has(tagName) ||
@@ -8458,7 +8478,19 @@ export function createHtmlApi(wasm) {
 		}
 
 		#deferredTableChildLookaheadTags(tagName) {
-			return TABLE_SECTION_ELEMENTS.has(tagName) ? new Set(["TR"]) : new Set();
+			if (TABLE_SECTION_ELEMENTS.has(tagName)) {
+				return new Set(["TR"]);
+			}
+
+			if (tagName === "FORM" || tagName === "INPUT") {
+				return new Set(["INPUT"]);
+			}
+
+			return new Set();
+		}
+
+		#isDeferredTableHiddenInputChildOpener(tagName) {
+			return tagName === "INPUT" && !this.#isFosteredInputTableStartTag(tagName);
 		}
 
 		#isDeferredTableAtomicChildOpenerTag(tagName) {

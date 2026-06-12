@@ -5188,6 +5188,21 @@ assert.equal(sawTableStyle, true);
 assert.equal(tableStyleProcessor.get_last_error(), null);
 tableStyleProcessor.destroy();
 
+const tableFormFosterProcessor = WP_HTML_Processor.create_full_parser(
+	"<table><form><input type=hidden><input></form><div></div></table>",
+);
+assert.equal(tableFormFosterProcessor.next_tag("input"), true);
+assert.deepEqual(tableFormFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "INPUT"]);
+assert.equal(tableFormFosterProcessor.next_tag("div"), true);
+assert.deepEqual(tableFormFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"]);
+assert.equal(tableFormFosterProcessor.next_tag("table"), true);
+assert.deepEqual(tableFormFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableFormFosterProcessor.next_tag("input"), true);
+assert.equal(tableFormFosterProcessor.get_attribute("type"), "hidden");
+assert.deepEqual(tableFormFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "INPUT"]);
+assert.equal(tableFormFosterProcessor.get_last_error(), null);
+tableFormFosterProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
