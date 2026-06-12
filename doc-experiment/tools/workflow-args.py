@@ -71,9 +71,43 @@ def judge_args(metadata: dict) -> dict:
     }
 
 
+def launch_manifest(metadata: dict) -> dict:
+    round_name = metadata["round"]
+    return {
+        "round": round_name,
+        "mode": metadata.get("mode"),
+        "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
+        "scripts": {
+            "trials": str(EXPERIMENT_ROOT / "tools" / "trials-workflow.js"),
+            "judges": str(EXPERIMENT_ROOT / "tools" / "judge-workflow.js"),
+        },
+        "args": {
+            "trials": trial_args(metadata),
+            "judges": judge_args(metadata),
+        },
+        "commands": {
+            "preflight": [
+                f"python3 doc-experiment/tools/validate-corpus.py --split train",
+                f"python3 doc-experiment/tools/validate-round.py {round_name}",
+                f"python3 doc-experiment/tools/workflow-args.py manifest {round_name}",
+            ],
+            "after_trials_workflow": [
+                f"python3 doc-experiment/tools/validate-workflow-output.py trials <trials-output.json> {round_name}",
+                f"python3 doc-experiment/tools/ingest-trials.py <trials-output.json> {round_name}",
+                f"python3 doc-experiment/tools/validate-round.py {round_name} --require-trials-complete",
+            ],
+            "after_judges_workflow": [
+                f"python3 doc-experiment/tools/validate-workflow-output.py judges <judges-output.json> {round_name}",
+                f"python3 doc-experiment/tools/ingest-judges.py <judges-output.json> {round_name}",
+                f"python3 doc-experiment/tools/validate-round.py {round_name} --require-scored",
+            ],
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["trials", "judges"])
+    parser.add_argument("phase", choices=["trials", "judges", "manifest"])
     parser.add_argument("round", help="Round number or name, e.g. 18 or round-18")
     parser.add_argument(
         "--compact",
@@ -90,7 +124,12 @@ def main() -> int:
     metadata = load_metadata(args.round)
     if not args.skip_scratch_check:
         verify_scratch(args.round)
-    payload = trial_args(metadata) if args.phase == "trials" else judge_args(metadata)
+    if args.phase == "trials":
+        payload = trial_args(metadata)
+    elif args.phase == "judges":
+        payload = judge_args(metadata)
+    else:
+        payload = launch_manifest(metadata)
     print(
         json.dumps(
             payload,

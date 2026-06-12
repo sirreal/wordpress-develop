@@ -168,6 +168,12 @@ python3 doc-experiment/tools/workflow-args.py trials round-NN
 This command verifies the staged scratch directory and recorded file hashes
 before emitting agent-launch arguments. If `/tmp` was cleaned or a staged file
 changed, restage the round rather than launching subjects against drifted docs.
+To emit both trial and judge workflow inputs plus the ingest/validation command
+sequence as a single handoff object, run:
+
+```sh
+python3 doc-experiment/tools/workflow-args.py manifest round-NN
+```
 
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and

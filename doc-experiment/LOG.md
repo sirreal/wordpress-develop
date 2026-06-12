@@ -58,6 +58,10 @@ calibration round and report its lifecycle. For round 18 it now distinguishes
 "baseline missing" from "round prepared; launch trials next," while still
 blocking scoring on local drift or invalid scratch artifacts.
 
+Added a `manifest` mode to `workflow-args.py`. The manifest preflights scratch
+hashes and emits trial/judge workflow script paths, exact model-policy args,
+and the ingest/validation command sequence for the external workflow runner.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
