@@ -279,6 +279,13 @@ assert.equal(apiFromDataView.version(), "0.1.0");
 const apiFromModule = await loadWasm(await WebAssembly.compile(wasmBytes));
 assert.equal(apiFromModule.version(), "0.1.0");
 
+const compiledWasmModule = await WebAssembly.compile(wasmBytes);
+const wasmInstance = await WebAssembly.instantiate(compiledWasmModule, {});
+const apiFromInstance = await loadWasm(wasmInstance);
+assert.equal(apiFromInstance.version(), "0.1.0");
+const apiFromPromisedInstance = await loadWasm(Promise.resolve(wasmInstance));
+assert.equal(apiFromPromisedInstance.version(), "0.1.0");
+
 if (typeof Response === "function") {
 	const apiFromResponse = await loadWasm(new Response(wasmArrayBuffer.slice(0)));
 	assert.equal(apiFromResponse.version(), "0.1.0");

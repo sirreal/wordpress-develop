@@ -1275,6 +1275,10 @@ export class WP_HTML_Doctype_Info {
 async function bytesFromInput(input) {
 	input = await input;
 
+	if (input instanceof WebAssembly.Instance) {
+		return input;
+	}
+
 	if (input instanceof WebAssembly.Module) {
 		return input;
 	}
@@ -1334,6 +1338,9 @@ async function responseBytes(response) {
 
 export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url)) {
 	const source = await bytesFromInput(input);
+	if (source instanceof WebAssembly.Instance) {
+		return createHtmlApi(source.exports);
+	}
 	const module = source instanceof WebAssembly.Module ? source : await WebAssembly.compile(source);
 	const instance = await WebAssembly.instantiate(module, {});
 

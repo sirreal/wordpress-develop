@@ -5,7 +5,8 @@ export type WasmInputSource =
 	| string
 	| ArrayBuffer
 	| ArrayBufferView
-	| WebAssembly.Module;
+	| WebAssembly.Module
+	| WebAssembly.Instance;
 
 export type WasmInput = WasmInputSource | PromiseLike<WasmInputSource>;
 
