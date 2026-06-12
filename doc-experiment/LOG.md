@@ -62,6 +62,11 @@ Added a `manifest` mode to `workflow-args.py`. The manifest preflights scratch
 hashes and emits trial/judge workflow script paths, exact model-policy args,
 and the ingest/validation command sequence for the external workflow runner.
 
+Tightened trial workflow preflight so metadata-backed ingestion rejects
+incomplete subject responses before writing partial trial directories: every
+trial output must include non-empty `code` and `explanation` strings plus
+integer `confidence` 0-100.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

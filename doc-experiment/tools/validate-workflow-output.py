@@ -70,14 +70,16 @@ def validate_trials(entries: list[dict], meta: dict) -> list[str]:
         ok = entry.get("ok")
         if ok is not None and not isinstance(ok, bool):
             errors.append(f"{task_id}/trial-{trial}: ok must be boolean when present")
-        if entry.get("code") is not None and not isinstance(entry.get("code"), str):
-            errors.append(f"{task_id}/trial-{trial}: code must be a string when present")
-        if entry.get("explanation") is not None and not isinstance(entry.get("explanation"), str):
-            errors.append(f"{task_id}/trial-{trial}: explanation must be a string when present")
+        code = entry.get("code")
+        if not isinstance(code, str) or not code.strip():
+            errors.append(f"{task_id}/trial-{trial}: code must be a non-empty string")
+        explanation = entry.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            errors.append(
+                f"{task_id}/trial-{trial}: explanation must be a non-empty string"
+            )
         confidence = entry.get("confidence")
-        if confidence is not None and (
-            not isinstance(confidence, int) or confidence < 0 or confidence > 100
-        ):
+        if not isinstance(confidence, int) or confidence < 0 or confidence > 100:
             errors.append(f"{task_id}/trial-{trial}: confidence must be integer 0-100")
 
     duplicates = sorted({pair for pair in seen_pairs if seen_pairs.count(pair) > 1})
