@@ -8002,7 +8002,7 @@ export function createHtmlApi(wasm) {
 				(
 					nextTag !== false &&
 					!nextTag.is_closing &&
-					FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name)
+					(FOREIGN_CONTENT_START_TAGS.has(nextTag.tag_name) || nextTag.tag_name === "SELECT")
 				)
 			);
 		}
@@ -8075,7 +8075,7 @@ export function createHtmlApi(wasm) {
 				!this.is_full_parser ||
 				this.deferred_table_opener === null ||
 				this.current_namespace !== "html" ||
-				!FOREIGN_CONTENT_START_TAGS.has(tagName)
+				(!FOREIGN_CONTENT_START_TAGS.has(tagName) && tagName !== "SELECT")
 			) {
 				return -1;
 			}

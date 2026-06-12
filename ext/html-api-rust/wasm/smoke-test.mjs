@@ -5955,6 +5955,15 @@ assert.equal(
 );
 fullParserFosteredSvgBeforeTable.destroy();
 
+const fullParserFosteredSelectBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<table><select><option>3</select></table>",
+);
+assert.equal(
+	fullParserFosteredSelectBeforeTable.serialize(),
+	"<html><head></head><body><select><option>3</option></select><table></table></body></html>",
+);
+fullParserFosteredSelectBeforeTable.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",
