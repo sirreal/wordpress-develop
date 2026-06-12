@@ -1,0 +1,81 @@
+{
+  "round": "round-18",
+  "mode": "weak-tier-calibration",
+  "task_ids": [
+    "N03-first-list-count",
+    "N04-normalize-or-placeholder",
+    "N06-extract-toc",
+    "T01-add-image-class",
+    "T02-link-targets",
+    "T03-first-h1-text",
+    "T04-build-figure",
+    "T05-text-excerpt",
+    "T06-collect-links",
+    "T07-nested-lists",
+    "T08-table-extract",
+    "T09-mark-keyword",
+    "T10-last-h2",
+    "T11-strip-tracking-attributes",
+    "T12-unwrap-spans"
+  ],
+  "task_count": 15,
+  "splits": {
+    "train": 15
+  },
+  "concepts": {
+    "attributes": 3,
+    "classes": 1,
+    "normalization": 1,
+    "serialization": 2,
+    "text": 3,
+    "traversal": 5
+  },
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "af84d03d00b7fc23d397db8a8867ceee53d1c3cc",
+  "git_status_short": "",
+  "created_at_utc": "2026-06-12T23:11:02+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-18",
+  "staged_task_files": [
+    "tasks/N03-first-list-count.md",
+    "tasks/N04-normalize-or-placeholder.md",
+    "tasks/N06-extract-toc.md",
+    "tasks/T01-add-image-class.md",
+    "tasks/T02-link-targets.md",
+    "tasks/T03-first-h1-text.md",
+    "tasks/T04-build-figure.md",
+    "tasks/T05-text-excerpt.md",
+    "tasks/T06-collect-links.md",
+    "tasks/T07-nested-lists.md",
+    "tasks/T08-table-extract.md",
+    "tasks/T09-mark-keyword.md",
+    "tasks/T10-last-h2.md",
+    "tasks/T11-strip-tracking-attributes.md",
+    "tasks/T12-unwrap-spans.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-18 exposes 2 docs and 15 task prompt(s), with no forbidden files."
+}

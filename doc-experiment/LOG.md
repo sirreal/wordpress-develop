@@ -2,6 +2,16 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 18 — prepared current-corpus no-edit baseline, not scored
+
+Prepared the required current-corpus weak-tier calibration round with no source
+docblock edits: `round-metadata.json` records 15 train tasks, subject
+`gpt-5.4` / `medium` / `priority`, judge `gpt-5.5` / `xhigh` / `priority`,
+and the staged scratch directory `/tmp/html-api-docs-eval/round-18`.
+Scratch isolation passed: only the two rendered docs and selected task prompts
+are exposed. No subject trials, hidden-test executions, judge verdicts, or
+round summary exist yet, so round 18 is not a trusted score.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
