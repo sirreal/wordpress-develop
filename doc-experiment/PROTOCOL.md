@@ -288,7 +288,11 @@ HTML API source digests match their recorded git ref. Trial artifacts are
 content-validated before a round can be considered trial-complete:
 `candidate.php` must be non-empty PHP, `response.json` must contain the
 subject explanation/confidence shape, and `execution.json` must contain the
-harness pass/total/cases shape.
+harness pass/total/cases shape. Persisted `judge.json` artifacts are
+content-validated before a round can be considered judged or scored: every
+expected trial must have an adherence score, hallucinated-method list, and
+non-empty notes, and the task verdict must include non-empty failure analysis
+plus structured doc-gap entries.
 `ingest-judges.py` validates trial completeness before writing judges and
 judged-state completeness before writing a summary. It also preflights judge
 workflow output shape:

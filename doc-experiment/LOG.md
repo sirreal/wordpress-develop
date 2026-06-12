@@ -85,6 +85,12 @@ round as trial-complete: candidate files must be non-empty PHP, responses must
 carry explanation/confidence, and execution files must contain harness
 pass/total/cases data.
 
+Round validation now also content-checks persisted judge artifacts before
+reporting a round as judged or scored: `judge.json` files must contain exactly
+the expected trial verdicts, integer adherence scores, string
+hallucinated-method entries, non-empty notes, non-empty failure analysis, and
+structured doc-gap fields.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

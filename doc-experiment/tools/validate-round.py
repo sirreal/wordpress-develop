@@ -226,6 +226,78 @@ def validate_trial_artifacts(trial_dir: Path) -> list[str]:
     return errors
 
 
+def validate_judge_artifact(judge_file: Path, expected_trials: int) -> list[str]:
+    task_id = judge_file.parent.name
+    try:
+        verdict = json.loads(judge_file.read_text())
+    except json.JSONDecodeError as exc:
+        return [f"{task_id}: judge.json is invalid JSON: {exc}"]
+
+    if not isinstance(verdict, dict):
+        return [f"{task_id}: judge.json must be an object"]
+
+    errors = []
+    trials = verdict.get("trials")
+    if not isinstance(trials, list):
+        errors.append(f"{task_id}: judge.json trials must be an array")
+        trials = []
+
+    expected_trial_ids = {f"trial-{i}" for i in range(1, expected_trials + 1)}
+    actual_trial_ids = []
+    for trial in trials:
+        trial_id = trial.get("trial_id") if isinstance(trial, dict) else None
+        actual_trial_ids.append(trial_id)
+        if not isinstance(trial, dict):
+            errors.append(f"{task_id}: judge trial verdict must be an object")
+            continue
+        if trial_id not in expected_trial_ids:
+            errors.append(f"{task_id}: unexpected judge trial_id {trial_id!r}")
+        adherence = trial.get("adherence")
+        if not isinstance(adherence, int) or adherence < 0 or adherence > 100:
+            errors.append(f"{task_id}/{trial_id}: judge adherence must be integer 0-100")
+        hallucinated_methods = trial.get("hallucinated_methods")
+        if not isinstance(hallucinated_methods, list):
+            errors.append(f"{task_id}/{trial_id}: judge hallucinated_methods must be an array")
+        else:
+            for index, method in enumerate(hallucinated_methods):
+                if not isinstance(method, str):
+                    errors.append(
+                        f"{task_id}/{trial_id}: judge hallucinated_methods[{index}] "
+                        "must be a string"
+                    )
+        notes = trial.get("notes")
+        if not isinstance(notes, str) or not notes.strip():
+            errors.append(f"{task_id}/{trial_id}: judge notes must be a non-empty string")
+
+    missing_trials = sorted(expected_trial_ids - set(actual_trial_ids))
+    duplicate_trials = sorted({
+        trial_id for trial_id in actual_trial_ids if actual_trial_ids.count(trial_id) > 1
+    })
+    if missing_trials:
+        errors.append(f"{task_id}: missing judge trial verdicts: " + ", ".join(missing_trials))
+    if duplicate_trials:
+        errors.append(f"{task_id}: duplicate judge trial verdicts: " + ", ".join(duplicate_trials))
+
+    failure_analysis = verdict.get("failure_analysis")
+    if not isinstance(failure_analysis, str) or not failure_analysis.strip():
+        errors.append(f"{task_id}: judge failure_analysis must be a non-empty string")
+    doc_gaps = verdict.get("doc_gaps")
+    if not isinstance(doc_gaps, list):
+        errors.append(f"{task_id}: judge doc_gaps must be an array")
+    else:
+        for index, gap in enumerate(doc_gaps):
+            if not isinstance(gap, dict):
+                errors.append(f"{task_id}: judge doc_gaps[{index}] must be an object")
+                continue
+            for key in ("location", "problem", "suggestion"):
+                if not isinstance(gap.get(key), str) or not gap.get(key).strip():
+                    errors.append(
+                        f"{task_id}: judge doc_gaps[{index}].{key} must be a non-empty string"
+                    )
+
+    return errors
+
+
 def validate_round(results_dir: Path) -> dict:
     metadata, metadata_tasks, metadata_trials = expected_from_metadata(results_dir)
     summary, summary_tasks, summary_trials = expected_from_summary(results_dir)
@@ -286,6 +358,7 @@ def validate_round(results_dir: Path) -> dict:
         has_judge = judge_file.exists()
         if has_judge:
             tasks_with_judges += 1
+            errors.extend(validate_judge_artifact(judge_file, expected_trials))
 
         if not missing_trials and not incomplete_trials:
             tasks_with_all_trials += 1
