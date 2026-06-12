@@ -3835,6 +3835,10 @@ assert.equal(
 	"<b>1<i>2</i></b><i><p><b>3</b>4</p></i>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<i>A<b>B<p></i>C</b>D"),
+	"<i>A<b>B</b></i><b></b><p><b><i></i>C</b>D</p>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<DIV> abc <B> def <I> ghi <P> jkl </B> mno"),
 	"<div> abc <b> def <i> ghi </i></b><i><p><b> jkl </b> mno</p></i></div>",
 );

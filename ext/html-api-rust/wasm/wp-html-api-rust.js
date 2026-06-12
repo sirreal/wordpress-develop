@@ -4806,10 +4806,21 @@ export function createHtmlApi(wasm) {
 					continue;
 				}
 
-				this.#markParagraphAdoptionPreclosedFormattingElement(formattingTagName, "html");
+				const reconstructionMode = (
+					i < topIndex &&
+					this.#activeFormattingElementAfterIndexPrecedesParagraphClose(activeFormattingElementIndex, formattingTagName)
+				)
+					? "following-inside"
+					: "self";
+
+				this.#markParagraphAdoptionPreclosedFormattingElement(formattingTagName, "html", reconstructionMode);
 				this.#queueVirtualPopsFrom(i);
 				if (i < topIndex) {
-					this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+					if (reconstructionMode === "following-inside") {
+						this.#queueActiveFormattingElementsAfterIndexAsEmpty(activeFormattingElementIndex);
+					} else {
+						this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+					}
 				}
 				return true;
 			}
@@ -4830,11 +4841,66 @@ export function createHtmlApi(wasm) {
 					this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1 &&
 					this.#lastActiveFormattingElementIndex(entry.tagName) !== -1
 				) {
-					return this.#queueActiveFormattingElement(entry.tagName, entry.namespaceName);
+					return entry.reconstructionMode === "following-inside"
+						? this.#queueActiveFormattingElementWithFollowingElements(entry.tagName, entry.namespaceName)
+						: this.#queueActiveFormattingElement(entry.tagName, entry.namespaceName);
 				}
 			}
 
 			return false;
+		}
+
+		#activeFormattingElementAfterIndexPrecedesParagraphClose(index, skippedEndTagName) {
+			for (let i = index + 1; i < this.active_formatting_elements.length; i += 1) {
+				const entry = this.active_formatting_elements[i];
+				if (this.#isActiveFormattingMarker(entry)) {
+					return false;
+				}
+				if (this.#formattingEndTagPrecedesParagraphCloseAfterSkippedEndTag(entry.tagName, skippedEndTagName)) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		#formattingEndTagPrecedesParagraphCloseAfterSkippedEndTag(tagName, skippedEndTagName) {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			let skipped = false;
+			let at = span.start + span.length;
+			while (true) {
+				const nextTag = runtime.scanNextTag(this.html, at);
+				if (nextTag === false) {
+					return false;
+				}
+
+				if (nextTag.is_closing && nextTag.tag_name === tagName) {
+					return true;
+				}
+
+				if (!skipped && nextTag.is_closing && nextTag.tag_name === skippedEndTagName) {
+					skipped = true;
+					at = nextTag.token_end;
+					continue;
+				}
+
+				if (
+					(nextTag.is_closing && nextTag.tag_name === "P") ||
+					(!nextTag.is_closing && this.#shouldClosePForStartTag(nextTag.tag_name))
+				) {
+					return false;
+				}
+
+				if (tagName !== "A" && nextTag.is_closing) {
+					return false;
+				}
+
+				at = nextTag.token_end;
+			}
 		}
 
 		#formattingEndTagPrecedesParagraphClose(tagName) {
@@ -4896,8 +4962,8 @@ export function createHtmlApi(wasm) {
 			}
 		}
 
-		#markParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName) {
-			this.paragraph_adoption_preclosed_formatting_elements.push({ tagName, namespaceName });
+		#markParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName, reconstructionMode = "self") {
+			this.paragraph_adoption_preclosed_formatting_elements.push({ tagName, namespaceName, reconstructionMode });
 		}
 
 		#consumeParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName) {
@@ -7640,7 +7706,9 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			return this.#queueActiveFormattingElement(tagName, namespaceName);
+			return marker.reconstructionMode === "following-inside"
+				? this.#queueActiveFormattingElementWithFollowingElements(tagName, namespaceName)
+				: this.#queueActiveFormattingElement(tagName, namespaceName);
 		}
 
 		#queueSpecialStartAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
