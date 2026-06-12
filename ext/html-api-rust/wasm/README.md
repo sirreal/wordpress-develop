@@ -67,8 +67,7 @@ tree-state tracking for common HTML breadcrumbs, namespace handling, implied
 closures, serialization, and unsupported-parser diagnostics.
 
 Full HTML5 tree-construction parity is still incomplete. Known unsupported
-areas include foster parenting, some adoption-agency reparenting cases, and
-some frameset body-replacement cases.
+areas include foster parenting and some adoption-agency reparenting cases.
 
 ## Testing
 

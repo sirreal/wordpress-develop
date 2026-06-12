@@ -64,5 +64,5 @@ instantiated source object returned by `WebAssembly.instantiate()`.
 
 The processor layer adds JavaScript-side open-element stack tracking for common
 HTML breadcrumbs, breadcrumb queries, void-element handling, namespaces, scoped
-end tags, and simple implied closures. Full HTML5 tree-construction behavioral
-parity remains incomplete.
+end tags, frameset handling, and simple implied closures. Full HTML5
+tree-construction behavioral parity remains incomplete.
