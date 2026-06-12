@@ -93,6 +93,7 @@ const wasmReadonlyExportNames = ["__data_end", "__heap_base", "memory"];
 const wasmFunctionExportNames = wasmExportNames.filter((name) => name.startsWith("wp_html_api_rust_"));
 
 const typeDeclarations = await readFile(new URL("./wp-html-api-rust.d.ts", import.meta.url), "utf8");
+const phpHtmlApiDirectory = new URL("../../../src/wp-includes/html-api/", import.meta.url);
 function declaredInterfaceBody(interfaceName) {
 	const pattern = new RegExp(`^export interface ${interfaceName}(?: extends [^{]+)? \\{\\n([\\s\\S]*?)^\\}`, "m");
 	const match = typeDeclarations.match(pattern);
@@ -116,6 +117,29 @@ function declaredReadonlyMemberNames(interfaceName) {
 	return [
 		...declaredInterfaceBody(interfaceName).matchAll(/^\s*readonly\s+([A-Za-z_$][\w$]*)\s*:/gm),
 	].map((match) => match[1]).sort();
+}
+
+function normalizePhpMethodName(methodName) {
+	return methodName === "__toString" ? "toString" : methodName;
+}
+
+async function phpPublicMethodNames(fileName, { staticOnly = false, instanceOnly = false } = {}) {
+	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
+	return [
+		...source.matchAll(/\bpublic\s+(static\s+)?function\s+([A-Za-z_]\w*)\s*\(/g),
+	]
+		.filter((match) => !staticOnly || match[1] !== undefined)
+		.filter((match) => !instanceOnly || match[1] === undefined)
+		.map((match) => normalizePhpMethodName(match[2]))
+		.filter((methodName) => !["__construct", "__destruct", "__wakeup"].includes(methodName))
+		.sort();
+}
+
+async function phpClassConstantNames(fileName) {
+	const source = await readFile(new URL(fileName, phpHtmlApiDirectory), "utf8");
+	return [...source.matchAll(/^\s*const\s+([A-Z0-9_]+)\s*=/gm)]
+		.map((match) => match[1])
+		.sort();
 }
 
 const declaredModuleValueExports = [
@@ -684,6 +708,72 @@ const processorStateStaticMembers = [
 	"INSERTION_MODE_IN_TEMPLATE",
 	"INSERTION_MODE_INITIAL",
 ];
+
+const jsOnlyTagProcessorPrototypeMethods = new Set([
+	"destroy",
+	"free",
+	"native_get_script_content_type",
+]);
+const jsOnlyProcessorPrototypeMethods = new Set([
+	...jsOnlyTagProcessorPrototypeMethods,
+	"is_virtual",
+]);
+const phpTagProcessorPrototypeMethods = await phpPublicMethodNames(
+	"class-wp-html-tag-processor.php",
+	{ instanceOnly: true },
+);
+const phpProcessorPrototypeMethods = await phpPublicMethodNames(
+	"class-wp-html-processor.php",
+	{ instanceOnly: true },
+);
+assert.deepEqual(
+	tagProcessorPrototypeMethods
+		.filter((methodName) => !jsOnlyTagProcessorPrototypeMethods.has(methodName))
+		.sort(),
+	phpTagProcessorPrototypeMethods,
+);
+assert.deepEqual(
+	[...new Set([...tagProcessorPrototypeMethods, ...processorPrototypeMethods])]
+		.filter((methodName) => !jsOnlyProcessorPrototypeMethods.has(methodName))
+		.sort(),
+	[...new Set([...phpTagProcessorPrototypeMethods, ...phpProcessorPrototypeMethods])].sort(),
+);
+assert.deepEqual(
+	await phpPublicMethodNames("class-wp-html-processor.php", { staticOnly: true }),
+	[...processorStaticMethods].sort(),
+);
+assert.deepEqual(
+	await phpPublicMethodNames("class-wp-html-decoder.php", { staticOnly: true }),
+	[...decoderStaticMethods].sort(),
+);
+assert.deepEqual(
+	await phpPublicMethodNames("class-wp-html-doctype-info.php", { staticOnly: true }),
+	[...doctypeStaticMethods].sort(),
+);
+assert.deepEqual(
+	await phpPublicMethodNames("class-wp-html-active-formatting-elements.php", { instanceOnly: true }),
+	[...activeFormattingPrototypeMethods].sort(),
+);
+assert.deepEqual(
+	await phpPublicMethodNames("class-wp-html-open-elements.php", { instanceOnly: true }),
+	[...openElementsPrototypeMethods].sort(),
+);
+assert.deepEqual(
+	await phpClassConstantNames("class-wp-html-tag-processor.php"),
+	[...tagProcessorStaticMembers].sort(),
+);
+assert.deepEqual(
+	await phpClassConstantNames("class-wp-html-processor.php"),
+	[...processorStaticMembers].sort(),
+);
+assert.deepEqual(
+	await phpClassConstantNames("class-wp-html-stack-event.php"),
+	[...stackEventStaticMembers].sort(),
+);
+assert.deepEqual(
+	await phpClassConstantNames("class-wp-html-processor-state.php"),
+	[...processorStateStaticMembers].sort(),
+);
 
 assert.deepEqual(declaredInterfaceMethodNames("WP_HTML_Tag_Processor"), [...tagProcessorPrototypeMethods].sort());
 assert.deepEqual(declaredReadonlyMemberNames("WP_HTML_Tag_Processor_Constructor"), [...tagProcessorStaticMembers].sort());
