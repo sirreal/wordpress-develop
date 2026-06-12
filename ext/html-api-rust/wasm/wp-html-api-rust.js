@@ -2456,7 +2456,9 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const needsTag = query.tag_name == null ? null : asciiUpper(String(query.tag_name));
+			const needsTag = query.tag_name == null
+				? null
+				: asciiUpper(phpStringParameterCoerce(query.tag_name, "tag_name"));
 			const needsClass = typeof query.class_name === "string" ? query.class_name : null;
 			const hasBreadcrumbs = Array.isArray(query.breadcrumbs);
 
