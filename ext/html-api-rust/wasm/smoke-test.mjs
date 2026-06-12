@@ -3044,6 +3044,16 @@ assert.equal(
 	"<html>\n  <head>\n    <template>\n      content\n  <body>\n\n",
 );
 
+assert.equal(
+	buildFullParserHtml5libTree("<!DOCTYPE html><body t1=1><body t2=2><body t3=3 t4=4>"),
+	'<!DOCTYPE html>\n<html>\n  <head>\n  <body>\n    t1="1"\n\n',
+);
+
+assert.equal(
+	buildFullParserHtml5libTree("<!DOCTYPE html><html a=1><body><html b=2>"),
+	'<!DOCTYPE html>\n<html>\n  a="1"\n  <head>\n  <body>\n\n',
+);
+
 const fullParserExplicitShell = WP_HTML_Processor.create_full_parser(
 	"<html><head><title>Title</title></head><body><p>One<footer>Two</footer><ul><li>A<li>B</ul></body></html>",
 );

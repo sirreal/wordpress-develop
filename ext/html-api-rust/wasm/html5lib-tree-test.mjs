@@ -42,18 +42,20 @@ const supportedFragmentContexts = new Set([
 	"tr",
 ]);
 
-const skippedTests = new Set([
-	"noscript01/line0014",
-	"tests14/line0022",
-	"tests14/line0055",
-	"tests19/line0488",
-	"tests19/line0500",
-	"tests19/line1079",
-	"tests2/line0207",
-	"tests2/line0686",
-	"tests2/line0697",
-	"tests2/line0709",
-	"webkit01/line0231",
+// WordPress does not currently adopt later duplicate HTML/BODY attributes onto the shell elements.
+const SKIP_DUPLICATE_SHELL_ATTRIBUTES = "phpDuplicateShellAttributes";
+const skippedTests = new Map([
+	["noscript01/line0014", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests14/line0022", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests14/line0055", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests19/line0488", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests19/line0500", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests19/line1079", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests2/line0207", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests2/line0686", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests2/line0697", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["tests2/line0709", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
+	["webkit01/line0231", SKIP_DUPLICATE_SHELL_ATTRIBUTES],
 ]);
 
 const {
@@ -402,6 +404,7 @@ const summary = {
 	tested: 0,
 	skippedContext: 0,
 	skippedKnown: 0,
+	skippedKnownByReason: {},
 	skippedUnsupported: 0,
 	skippedIncomplete: 0,
 	failed: 0,
@@ -428,7 +431,8 @@ for (const file of files) {
 			continue;
 		}
 
-		if (testFilter === "" && skippedTests.has(test.name)) {
+		const skippedReason = skippedTests.get(test.name);
+		if (testFilter === "" && skippedReason !== undefined) {
 			const result = buildHtml5libTree(test.fragmentContext, test.html);
 			if (
 				result.unsupported === null &&
@@ -441,6 +445,7 @@ for (const file of files) {
 			}
 
 			summary.skippedKnown += 1;
+			summary.skippedKnownByReason[skippedReason] = (summary.skippedKnownByReason[skippedReason] ?? 0) + 1;
 			continue;
 		}
 
