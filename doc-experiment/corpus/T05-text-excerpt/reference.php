@@ -20,6 +20,9 @@ function html_text_excerpt( string $html, int $max_codepoints ): string {
 			)
 		) {
 			$text .= $processor->get_modifiable_text();
+			if ( mb_strlen( $text, 'UTF-8' ) >= $max_codepoints ) {
+				break;
+			}
 		}
 	}
 
