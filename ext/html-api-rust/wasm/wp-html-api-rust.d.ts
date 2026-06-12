@@ -471,7 +471,7 @@ export interface WP_HTML_Tag_Processor {
 	get_tag(): string | null;
 	get_attribute(name: PhpStringParameter): string | true | null;
 	get_attribute_names_with_prefix(prefix: PhpStringParameter): string[] | null;
-	set_attribute(name: PhpStringParameter, value: PhpStringParameter | boolean): boolean;
+	set_attribute(name: PhpStringParameter, value: PhpStringParameter | boolean | null): boolean;
 	remove_attribute(name: PhpStringParameter): boolean;
 	add_class(className: PhpStringParameter): boolean;
 	remove_class(className: PhpStringParameter): boolean;

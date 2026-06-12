@@ -1707,6 +1707,8 @@ assert.equal(coercedAttributeTags.remove_class(false), true);
 assert.equal(coercedAttributeTags.set_attribute(false, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute("data-num", 123), true);
 assert.equal(coercedAttributeTags.get_attribute("data-num"), "123");
+assert.equal(coercedAttributeTags.set_attribute("data-null", null), false);
+assert.equal(coercedAttributeTags.get_attribute("data-null"), null);
 assert.throws(
 	() => coercedAttributeTags.get_attribute({ name: "class" }),
 	TypeError,

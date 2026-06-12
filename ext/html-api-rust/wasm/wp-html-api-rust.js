@@ -1711,6 +1711,8 @@ export function createHtmlApi(wasm) {
 				valueKind = 0;
 			} else if (value === true) {
 				valueKind = 1;
+			} else if (value === null) {
+				return false;
 			} else {
 				encodedValue = runtime.encode(phpStringParameterCoerce(value, "value"));
 			}
