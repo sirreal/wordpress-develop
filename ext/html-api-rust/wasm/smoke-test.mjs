@@ -2221,6 +2221,29 @@ assert.equal(fullParserOpenHeadNoscript.next_tag("body"), true);
 assert.deepEqual(fullParserOpenHeadNoscript.get_breadcrumbs(), ["HTML", "BODY"]);
 fullParserOpenHeadNoscript.destroy();
 
+const fullParserHeadContentAfterHead = WP_HTML_Processor.create_full_parser(
+	"<head></head><!-- --><style></style><!-- --><script></script>",
+);
+const fullParserHeadContentAfterHeadTokens = [];
+while (fullParserHeadContentAfterHead.next_token()) {
+	fullParserHeadContentAfterHeadTokens.push(
+		`${fullParserHeadContentAfterHead.is_virtual() ? "V" : "R"}${fullParserHeadContentAfterHead.is_tag_closer() ? "-" : "+"}${fullParserHeadContentAfterHead.get_token_name()}:${fullParserHeadContentAfterHead.get_breadcrumbs().join("/")}`,
+	);
+}
+assert.deepEqual(fullParserHeadContentAfterHeadTokens, [
+	"V+HTML:HTML",
+	"R+HEAD:HTML/HEAD",
+	"R-HEAD:HTML",
+	"R+#comment:HTML/#comment",
+	"R+STYLE:HTML/HEAD/STYLE",
+	"R+#comment:HTML/#comment",
+	"R+SCRIPT:HTML/HEAD/SCRIPT",
+	"V+BODY:HTML/BODY",
+	"V-BODY:HTML",
+	"V-HTML:",
+]);
+fullParserHeadContentAfterHead.destroy();
+
 const fullParserHeadTemplateText = WP_HTML_Processor.create_full_parser("<template>Hello</template>");
 assert.equal(fullParserHeadTemplateText.next_tag("template"), true);
 assert.deepEqual(fullParserHeadTemplateText.get_breadcrumbs(), ["HTML", "HEAD", "TEMPLATE"]);

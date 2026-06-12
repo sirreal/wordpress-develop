@@ -100,6 +100,17 @@ const HEAD_CONTENT_ELEMENTS = new Set([
 	"TEMPLATE",
 	"TITLE",
 ]);
+const AFTER_HEAD_TEMPORARY_HEAD_START_TAGS = new Set([
+	"BASE",
+	"BASEFONT",
+	"BGSOUND",
+	"LINK",
+	"META",
+	"NOFRAMES",
+	"SCRIPT",
+	"STYLE",
+	"TITLE",
+]);
 const TEMPLATE_HEAD_START_TAGS = new Set([
 	"BASE",
 	"BASEFONT",
@@ -2039,6 +2050,7 @@ export function createHtmlApi(wasm) {
 			this.ignored_select_formatting_elements = new Map();
 			this.template_insertion_modes = [];
 			this.base_open_element_count = this.open_elements.length;
+			this.temporary_reopened_head = false;
 			this.breadcrumbs = this.#breadcrumbStack();
 			this.current_namespace = this.is_html_fragment_context
 				? "html"
@@ -3363,6 +3375,7 @@ export function createHtmlApi(wasm) {
 				}
 			}
 
+			this.#closeTemporaryReopenedHeadAfterCurrentToken();
 			this.#bailIfExceededMaxBookmarks();
 		}
 
@@ -3457,6 +3470,7 @@ export function createHtmlApi(wasm) {
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
 			this.frameset_ok = state.framesetOk;
 			this.form_element_pointer = state.formElementPointer;
+			this.temporary_reopened_head = false;
 			this.open_elements = [...state.openElements];
 			this.open_element_namespaces = [...state.openElementNamespaces];
 			this.open_element_integration_node_types = [...state.openElementIntegrationNodeTypes];
@@ -3999,6 +4013,13 @@ export function createHtmlApi(wasm) {
 						if (tokenType === "#tag" && !isCloser && tagName === "TEMPLATE") {
 							this.full_parser_insertion_mode = "in_head";
 							this.#silentlyReopenFullParserElement("HEAD");
+							return false;
+						}
+
+						if (tokenType === "#tag" && !isCloser && AFTER_HEAD_TEMPORARY_HEAD_START_TAGS.has(tagName)) {
+							this.full_parser_insertion_mode = "in_head";
+							this.#silentlyReopenFullParserElement("HEAD");
+							this.temporary_reopened_head = true;
 							return false;
 						}
 
@@ -5684,6 +5705,25 @@ export function createHtmlApi(wasm) {
 			this.open_element_namespaces.push("html");
 			this.open_element_integration_node_types.push(null);
 			this.#setCurrentNamespace(this.#childNamespaceForStackEntry(tagName, "html", null));
+			return true;
+		}
+
+		#closeTemporaryReopenedHeadAfterCurrentToken() {
+			if (!this.temporary_reopened_head) {
+				return false;
+			}
+
+			this.temporary_reopened_head = false;
+			this.full_parser_insertion_mode = "after_head";
+			const headIndex = this.#lastOpenElementIndex("HEAD", "html");
+			if (headIndex === -1) {
+				return false;
+			}
+
+			this.open_elements.splice(headIndex, 1);
+			this.open_element_namespaces.splice(headIndex, 1);
+			this.open_element_integration_node_types.splice(headIndex, 1);
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
 			return true;
 		}
 

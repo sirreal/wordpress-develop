@@ -62,8 +62,6 @@ const skippedTests = new Set([
 	"tests26/line0198",
 	"tests26/line0221",
 	"tests26/line0242",
-	"tests3/line0023",
-	"webkit01/line0515",
 	"webkit01/line0231",
 ]);
 
@@ -162,10 +160,35 @@ function buildHtml5libTree(fragmentContext, html) {
 	const baseDepth = html5libFragmentBaseDepth(fragmentContext);
 	const basePath = html5libFragmentBasePath(fragmentContext);
 	let output = "";
+	let pendingHtmlChildrenBeforeBody = "";
+	let headStarted = fragmentContext !== null;
+	let bodyStarted = fragmentContext !== null;
 	let wasText = false;
 	let textNode = "";
+	let textNodePath = null;
 	let openElementPath = [];
 	const indent = (level) => treeIndent.repeat(level);
+	const appendOutput = (text, path = null) => {
+		if (
+			headStarted &&
+			!bodyStarted &&
+			path !== null &&
+			path.length === 2 &&
+			path[0].name === "HTML" &&
+			(path[1].name === "#text" || path[1].name === "#comment")
+		) {
+			pendingHtmlChildrenBeforeBody += text;
+			return;
+		}
+
+		output += text;
+	};
+	const flushPendingHtmlChildrenBeforeBody = () => {
+		if (pendingHtmlChildrenBeforeBody !== "") {
+			output += pendingHtmlChildrenBeforeBody;
+			pendingHtmlChildrenBeforeBody = "";
+		}
+	};
 	const expandFragmentBasePath = (breadcrumbs) => {
 		if (
 			basePath.length > 2 &&
@@ -199,10 +222,11 @@ function buildHtml5libTree(fragmentContext, html) {
 
 		if (wasText && tokenName !== "#text") {
 			if (textNode !== "") {
-				output += `${textNode}"\n`;
+				appendOutput(`${textNode}"\n`, textNodePath);
 			}
 			wasText = false;
 			textNode = "";
+			textNodePath = null;
 		}
 
 		switch (tokenType) {
@@ -227,7 +251,14 @@ function buildHtml5libTree(fragmentContext, html) {
 					? processor.get_tag().toLowerCase()
 					: `${namespace} ${processor.get_qualified_tag_name()}`;
 				const tagIndent = html5libTreeIndentLevel(path, baseDepth);
-				output += `${indent(tagIndent)}<${tagName}>\n`;
+				if (namespace === "html" && tokenName === "HEAD" && path.length === 2 && path[0].name === "HTML") {
+					headStarted = true;
+				}
+				if (namespace === "html" && tokenName === "BODY" && path.length === 2 && path[0].name === "HTML") {
+					flushPendingHtmlChildrenBeforeBody();
+					bodyStarted = true;
+				}
+				appendOutput(`${indent(tagIndent)}<${tagName}>\n`);
 
 				const attributeNames = processor.get_attribute_names_with_prefix("");
 				if (attributeNames) {
@@ -236,17 +267,17 @@ function buildHtml5libTree(fragmentContext, html) {
 						.sort(compareHtml5libTreeAttributes);
 					for (const { name, display } of attributes) {
 						const value = processor.get_attribute(name) === true ? "" : processor.get_attribute(name);
-						output += `${indent(tagIndent + 1)}${display}="${value}"\n`;
+						appendOutput(`${indent(tagIndent + 1)}${display}="${value}"\n`);
 					}
 				}
 
 				const modifiableText = processor.get_modifiable_text();
 				if (modifiableText !== "") {
-					output += `${indent(tagIndent + 1)}"${modifiableText}"\n`;
+					appendOutput(`${indent(tagIndent + 1)}"${modifiableText}"\n`);
 				}
 
 				if (namespace === "html" && tokenName === "TEMPLATE") {
-					output += `${indent(tagIndent + 1)}content\n`;
+					appendOutput(`${indent(tagIndent + 1)}content\n`);
 				}
 				openElementPath = processor.expects_closer() ? path : path.slice(0, -1);
 				break;
@@ -260,6 +291,7 @@ function buildHtml5libTree(fragmentContext, html) {
 					wasText = true;
 					if (textNode === "") {
 						textNode += `${indent(html5libTreeIndentLevel(path, baseDepth))}"`;
+						textNodePath = path;
 					}
 					textNode += textContent;
 				}
@@ -269,14 +301,14 @@ function buildHtml5libTree(fragmentContext, html) {
 
 			case "#funky-comment": {
 				const path = pathFromBreadcrumbs(namespace, false);
-				output += `${indent(html5libTreeIndentLevel(path, baseDepth))}<!-- ${processor.get_modifiable_text()} -->\n`;
+				appendOutput(`${indent(html5libTreeIndentLevel(path, baseDepth))}<!-- ${processor.get_modifiable_text()} -->\n`, path);
 				openElementPath = path.slice(0, -1);
 				break;
 			}
 
 			case "#comment": {
 				const path = pathFromBreadcrumbs(namespace, false);
-				output += `${indent(html5libTreeIndentLevel(path, baseDepth))}<!-- ${processor.get_full_comment_text()} -->\n`;
+				appendOutput(`${indent(html5libTreeIndentLevel(path, baseDepth))}<!-- ${processor.get_full_comment_text()} -->\n`, path);
 				openElementPath = path.slice(0, -1);
 				break;
 			}
@@ -287,8 +319,9 @@ function buildHtml5libTree(fragmentContext, html) {
 	}
 
 	if (textNode !== "") {
-		output += `${textNode}"\n`;
+		appendOutput(`${textNode}"\n`, textNodePath);
 	}
+	flushPendingHtmlChildrenBeforeBody();
 
 	const result = {
 		tree: `${output}\n`,
