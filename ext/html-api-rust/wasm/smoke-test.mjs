@@ -284,6 +284,8 @@ const compiledWasmModule = await WebAssembly.compile(wasmBytes);
 const wasmInstance = await WebAssembly.instantiate(compiledWasmModule, {});
 const apiFromInstance = await loadWasm(wasmInstance);
 assert.equal(apiFromInstance.version(), "0.1.0");
+const apiFromExports = await loadWasm(wasmInstance.exports);
+assert.equal(apiFromExports.version(), "0.1.0");
 const apiFromPromisedInstance = await loadWasm(Promise.resolve(wasmInstance));
 assert.equal(apiFromPromisedInstance.version(), "0.1.0");
 const apiCreatedFromInstance = createHtmlApi(wasmInstance);

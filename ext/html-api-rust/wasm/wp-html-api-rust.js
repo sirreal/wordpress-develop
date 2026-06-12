@@ -1280,6 +1280,10 @@ async function bytesFromInput(input) {
 		return input.instance;
 	}
 
+	if (isWebAssemblyExports(input)) {
+		return input;
+	}
+
 	if (input instanceof WebAssembly.Instance) {
 		return input;
 	}
@@ -1361,6 +1365,9 @@ async function responseBytes(response) {
 
 export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url)) {
 	const source = await bytesFromInput(input);
+	if (isWebAssemblyExports(source)) {
+		return createHtmlApi(source);
+	}
 	if (source instanceof WebAssembly.Instance) {
 		return createHtmlApi(source.exports);
 	}
@@ -6474,10 +6481,18 @@ function wasmExportsFromInput(input) {
 	return input;
 }
 
+function isWebAssemblyExports(input) {
+	return input !== null &&
+		typeof input === "object" &&
+		input.memory instanceof WebAssembly.Memory &&
+		typeof input.wp_html_api_rust_alloc === "function" &&
+		typeof input.wp_html_api_rust_dealloc === "function";
+}
+
 class WasmRuntime {
 	constructor(wasm) {
 		this.wasm = wasm;
-		if (!wasm.memory || !wasm.wp_html_api_rust_alloc || !wasm.wp_html_api_rust_dealloc) {
+		if (!isWebAssemblyExports(wasm)) {
 			throw new Error("WASM module does not expose the expected HTML API runtime functions.");
 		}
 	}
