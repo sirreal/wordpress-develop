@@ -8049,7 +8049,7 @@ export function createHtmlApi(wasm) {
 
 		#currentTableStartIsFollowedByFosteredContent() {
 			return this.#currentTokenIsFollowedByFosteredTableContent(
-				new Set(["TBODY", "TFOOT", "THEAD", "TR"]),
+				new Set(["COLGROUP", "TBODY", "TFOOT", "THEAD", "TR"]),
 			);
 		}
 
@@ -8141,6 +8141,19 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (
+				this.#currentHtmlElementIs("COLGROUP") &&
+				(
+					this.#currentTextHasLeadingIgnorableTableText() ||
+					(
+						this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+						this.#currentTextChunkPrecedesFosteredTableText()
+					)
+				)
+			) {
+				return false;
+			}
+
 			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
 			if (tableIndex === -1) {
 				return false;
@@ -8216,7 +8229,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isDeferredTableChildOpenerTag(tagName) {
-			return tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
+			return tagName === "COLGROUP" || tagName === "TR" || TABLE_SECTION_ELEMENTS.has(tagName);
 		}
 
 		#deferredTableChildLookaheadTags(tagName) {
@@ -8330,6 +8343,17 @@ export function createHtmlApi(wasm) {
 				const code = char.charCodeAt(0);
 				return code === 0 || isHtmlWhitespaceCode(code);
 			});
+		}
+
+		#currentTextHasLeadingIgnorableTableText() {
+			const text = this.get_modifiable_text() ?? "";
+			for (let i = 0; i < text.length; i += 1) {
+				const code = text.charCodeAt(i);
+				if (code !== 0 && !isHtmlWhitespaceCode(code)) {
+					return i > 0;
+				}
+			}
+			return false;
 		}
 
 		#shouldBailUnsupportedTableFosterParenting(tagName, isCloser) {
