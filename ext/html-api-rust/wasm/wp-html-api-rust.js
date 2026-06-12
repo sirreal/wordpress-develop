@@ -3934,6 +3934,7 @@ export function createHtmlApi(wasm) {
 				tokenType === "#text" &&
 				this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE
 			);
+			const isIgnorablePreBodyText = isWhitespaceText || isNullText;
 
 			while (true) {
 				switch (this.full_parser_insertion_mode) {
@@ -3959,7 +3960,7 @@ export function createHtmlApi(wasm) {
 						continue;
 
 					case "before_html":
-						if (tokenType === "#doctype" || isWhitespaceText) {
+						if (tokenType === "#doctype" || isIgnorablePreBodyText) {
 							this.skip_current_token = true;
 							return true;
 						}
@@ -3985,7 +3986,7 @@ export function createHtmlApi(wasm) {
 						return this.#reprocessCurrentTokenAfterVirtualTokens();
 
 					case "before_head":
-						if (tokenType === "#doctype" || isWhitespaceText) {
+						if (tokenType === "#doctype" || isIgnorablePreBodyText) {
 							this.skip_current_token = true;
 							return true;
 						}
@@ -4025,7 +4026,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (
-							isWhitespaceText ||
+							isIgnorablePreBodyText ||
 							tokenType === "#comment" ||
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag" ||
@@ -4098,7 +4099,7 @@ export function createHtmlApi(wasm) {
 						}
 
 						if (
-							isWhitespaceText ||
+							isIgnorablePreBodyText ||
 							tokenType === "#comment" ||
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag"

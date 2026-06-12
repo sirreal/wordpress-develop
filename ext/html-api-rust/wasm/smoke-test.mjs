@@ -2544,6 +2544,20 @@ assert.deepEqual(fullParserFramesetTokens, [
 ]);
 fullParserFrameset.destroy();
 
+const fullParserFramesetAfterNull = WP_HTML_Processor.create_full_parser("<html>\0<frameset></frameset>");
+const fullParserFramesetAfterNullTags = [];
+while (fullParserFramesetAfterNull.next_token()) {
+	if (fullParserFramesetAfterNull.get_token_type() === "#tag") {
+		fullParserFramesetAfterNullTags.push(
+			`${fullParserFramesetAfterNull.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterNull.get_tag()}`,
+		);
+	}
+}
+assert.deepEqual(fullParserFramesetAfterNullTags, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]);
+assert.equal(fullParserFramesetAfterNull.get_last_error(), null);
+assert.equal(fullParserFramesetAfterNull.get_unsupported_exception(), null);
+fullParserFramesetAfterNull.destroy();
+
 const fullParserFramesetNoframes = WP_HTML_Processor.create_full_parser("<frameset><noframes>x</noframes><frame></frameset>");
 const fullParserFramesetNoframesTokens = [];
 while (fullParserFramesetNoframes.next_token()) {
