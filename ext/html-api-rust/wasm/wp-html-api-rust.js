@@ -3350,7 +3350,10 @@ export function createHtmlApi(wasm) {
 					allowVirtualPreclosures &&
 					tokenType === "#text" &&
 					this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_NULL_SEQUENCE &&
-					this.#queueReconstructActiveFormattingElements()
+					(
+						this.#queueParagraphAdoptionPreclosedFormattingElementsForText() ||
+						this.#queueReconstructActiveFormattingElements()
+					)
 				) {
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
@@ -3516,9 +3519,8 @@ export function createHtmlApi(wasm) {
 
 				if (
 					allowVirtualPreclosures &&
-					this.#consumeParagraphAdoptionReconstructionForEndTag(tagName, closingNamespace, existingIndex)
+					this.#queueParagraphAdoptionReconstructionForEndTag(tagName, closingNamespace, existingIndex)
 				) {
-					this.#queueReconstructActiveFormattingElements();
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;
 					return;
@@ -4780,17 +4782,59 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const formattingTagName = this.open_elements[topIndex];
+			for (let i = topIndex; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					return false;
+				}
+
+				if (!FORMATTING_ELEMENTS.has(this.open_elements[i])) {
+					if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
+						return false;
+					}
+					continue;
+				}
+
+				const formattingTagName = this.open_elements[i];
+				const activeFormattingElementIndex = this.#lastActiveFormattingElementIndex(formattingTagName);
+				if (
+					activeFormattingElementIndex === -1 ||
+					hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i)
+				) {
+					return false;
+				}
+				if (!this.#formattingEndTagPrecedesParagraphClose(formattingTagName)) {
+					continue;
+				}
+
+				this.#markParagraphAdoptionPreclosedFormattingElement(formattingTagName, "html");
+				this.#queueVirtualPopsFrom(i);
+				if (i < topIndex) {
+					this.#queueActiveFormattingElementsAfterIndex(activeFormattingElementIndex);
+				}
+				return true;
+			}
+
+			return false;
+		}
+
+		#queueParagraphAdoptionPreclosedFormattingElementsForText() {
 			if (
-				this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
-				!this.#formattingEndTagPrecedesParagraphClose(formattingTagName)
+				this.open_element_namespaces.at(-1) !== "html" ||
+				this.open_elements.at(-1) !== "P"
 			) {
 				return false;
 			}
 
-			this.#markParagraphAdoptionPreclosedFormattingElement(formattingTagName, "html");
-			this.#queueVirtualPopsFrom(topIndex);
-			return true;
+			for (const entry of this.paragraph_adoption_preclosed_formatting_elements) {
+				if (
+					this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1 &&
+					this.#lastActiveFormattingElementIndex(entry.tagName) !== -1
+				) {
+					return this.#queueActiveFormattingElement(entry.tagName, entry.namespaceName);
+				}
+			}
+
+			return false;
 		}
 
 		#formattingEndTagPrecedesParagraphClose(tagName) {
@@ -4864,10 +4908,10 @@ export function createHtmlApi(wasm) {
 				}
 
 				this.paragraph_adoption_preclosed_formatting_elements.splice(i, 1);
-				return true;
+				return entry;
 			}
 
-			return false;
+			return null;
 		}
 
 		#hasParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName) {
@@ -7579,16 +7623,24 @@ export function createHtmlApi(wasm) {
 			return activeCount > this.#countOpenHtmlElements(tagName);
 		}
 
-		#consumeParagraphAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
-			return (
-				namespaceName === "html" &&
-				formattingElementIndex === -1 &&
-				ADOPTION_AGENCY_END_TAGS.has(tagName) &&
-				this.#lastActiveFormattingElementIndex(tagName) !== -1 &&
-				this.open_element_namespaces.at(-1) === "html" &&
-				this.open_elements.at(-1) === "P" &&
-				this.#consumeParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName)
-			);
+		#queueParagraphAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
+			if (
+				namespaceName !== "html" ||
+				formattingElementIndex !== -1 ||
+				!ADOPTION_AGENCY_END_TAGS.has(tagName) ||
+				this.#lastActiveFormattingElementIndex(tagName) === -1 ||
+				this.open_element_namespaces.at(-1) !== "html" ||
+				this.open_elements.at(-1) !== "P"
+			) {
+				return false;
+			}
+
+			const marker = this.#consumeParagraphAdoptionPreclosedFormattingElement(tagName, namespaceName);
+			if (marker === null) {
+				return false;
+			}
+
+			return this.#queueActiveFormattingElement(tagName, namespaceName);
 		}
 
 		#queueSpecialStartAdoptionReconstructionForEndTag(tagName, namespaceName, formattingElementIndex) {
