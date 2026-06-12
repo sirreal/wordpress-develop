@@ -3491,6 +3491,7 @@ export function createHtmlApi(wasm) {
 								operation: "push",
 								tagName: "P",
 								namespaceName: "html",
+								fosterParentedTableIndex: this.#missingParagraphCloserFosterParentedTableIndex(),
 							},
 							{
 								operation: "pop",
@@ -8319,6 +8320,13 @@ export function createHtmlApi(wasm) {
 					at = nextTag.token_end;
 					continue;
 				}
+				if (
+					nextTag !== false &&
+					nextTag.is_closing &&
+					this.#isFosteredTableEndTag(nextTag.tag_name)
+				) {
+					return true;
+				}
 				if (nextTag === false || nextTag.is_closing) {
 					return false;
 				}
@@ -8343,6 +8351,28 @@ export function createHtmlApi(wasm) {
 
 		#isIgnoredFosterLookaheadEndTag(tagName) {
 			return tagName === "HTML";
+		}
+
+		#isFosteredTableEndTag(tagName) {
+			return tagName === "P";
+		}
+
+		#missingParagraphCloserFosterParentedTableIndex() {
+			if (this.deferred_table_opener === null) {
+				return null;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			return tableIndex === -1 ? null : tableIndex;
+		}
+
+		#canRepresentMissingParagraphCloserBeforeDeferredTable() {
+			return (
+				this.deferred_table_opener !== null &&
+				this.current_namespace === "html" &&
+				this.#currentHtmlElementIs("TABLE") &&
+				this.#lastOpenElementIndex("TABLE", "html") !== -1
+			);
 		}
 
 		#isDeferredTableChildOpenerTag(tagName) {
@@ -8518,6 +8548,14 @@ export function createHtmlApi(wasm) {
 
 			const topIndex = this.open_elements.length - 1;
 			if (topIndex < 0 || this.open_element_namespaces[topIndex] !== "html") {
+				return false;
+			}
+
+			if (
+				isCloser &&
+				tagName === "P" &&
+				this.#canRepresentMissingParagraphCloserBeforeDeferredTable()
+			) {
 				return false;
 			}
 

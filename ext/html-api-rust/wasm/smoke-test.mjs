@@ -5136,9 +5136,15 @@ assert.equal(WP_HTML_Processor.normalize("<table>text<tr><td>cell"), null);
 const tableEndParagraphProcessor = WP_HTML_Processor.create_full_parser("<p><table></p>");
 while (tableEndParagraphProcessor.next_token()) {
 }
-assert.equal(tableEndParagraphProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(tableEndParagraphProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+assert.equal(tableEndParagraphProcessor.get_last_error(), null);
+assert.equal(tableEndParagraphProcessor.get_unsupported_exception(), null);
 tableEndParagraphProcessor.destroy();
+const tableEndParagraphSerializer = WP_HTML_Processor.create_full_parser("<p><table></p>");
+assert.equal(
+	tableEndParagraphSerializer.serialize(),
+	"<html><head></head><body><p><p></p><table></table></p></body></html>",
+);
+tableEndParagraphSerializer.destroy();
 assert.equal(WP_HTML_Processor.normalize("<p><table></p>"), null);
 
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
