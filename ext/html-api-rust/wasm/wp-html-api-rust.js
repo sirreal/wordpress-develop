@@ -1892,7 +1892,7 @@ export function createHtmlApi(wasm) {
 			if (this.parsing_namespace === "html") {
 				return attributeName;
 			}
-			return qualifyForeignAttributeName(this.parsing_namespace, asciiLower(attributeName));
+			return qualifyForeignAttributeName(this.parsing_namespace, attributeName);
 		}
 
 		get_full_comment_text() {
@@ -2753,10 +2753,9 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			const lower = asciiLower(attributeName);
 			return this.get_namespace() === "html"
 				? attributeName
-				: qualifyForeignAttributeName(this.get_namespace(), lower);
+				: qualifyForeignAttributeName(this.get_namespace(), attributeName);
 		}
 
 		expects_closer(node = null) {
@@ -7313,7 +7312,9 @@ function qualifySvgTagName(lowerTagName) {
 	return adjusted.get(lowerTagName) ?? lowerTagName;
 }
 
-function qualifyForeignAttributeName(namespaceName, lowerAttributeName) {
+function qualifyForeignAttributeName(namespaceName, attributeName) {
+	const lowerAttributeName = asciiLower(attributeName);
+
 	if (namespaceName === "math" && lowerAttributeName === "definitionurl") {
 		return "definitionURL";
 	}
@@ -7398,5 +7399,5 @@ function qualifyForeignAttributeName(namespaceName, lowerAttributeName) {
 		["xmlns", "xmlns"],
 		["xmlns:xlink", "xmlns xlink"],
 	]);
-	return foreignAdjusted.get(lowerAttributeName) ?? lowerAttributeName;
+	return foreignAdjusted.get(lowerAttributeName) ?? attributeName;
 }

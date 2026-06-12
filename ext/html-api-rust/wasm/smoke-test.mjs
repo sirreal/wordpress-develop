@@ -1058,6 +1058,7 @@ assert.equal(svgQualifiedNames.get_qualified_tag_name(), "foreignObject");
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("attributeName"), "attributeName");
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("xlink:href"), "xlink href");
 assert.equal(svgQualifiedNames.get_qualified_attribute_name("viewbox"), "viewBox");
+assert.equal(svgQualifiedNames.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
 svgQualifiedNames.destroy();
 
 const mathQualifiedNames = new WP_HTML_Tag_Processor("<mi definitionurl=1 xlink:title=2>");
@@ -1067,6 +1068,7 @@ assert.equal(mathQualifiedNames.get_namespace(), "math");
 assert.equal(mathQualifiedNames.get_qualified_tag_name(), "mi");
 assert.equal(mathQualifiedNames.get_qualified_attribute_name("definitionurl"), "definitionURL");
 assert.equal(mathQualifiedNames.get_qualified_attribute_name("xlink:title"), "xlink title");
+assert.equal(mathQualifiedNames.get_qualified_attribute_name("viewBox"), "viewBox");
 mathQualifiedNames.destroy();
 
 const textarea = new WP_HTML_Tag_Processor("<textarea>One</textarea>");
@@ -3663,6 +3665,7 @@ assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xl
 assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xml:lang"), "xml lang");
 assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("xmlns:xlink"), "xmlns xlink");
 assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("custom:attr"), "custom:attr");
+assert.equal(qualifiedForeignAttributeProcessor.get_qualified_attribute_name("custom:Attr"), "custom:Attr");
 qualifiedForeignAttributeProcessor.destroy();
 
 const foreignObjectProcessor = WP_HTML_Processor.create_fragment("<svg><foreignObject><div></div></foreignObject></svg>");
@@ -3709,6 +3712,7 @@ assert.equal(mathQualifiedForeignAttributeProcessor.get_namespace(), "math");
 assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("definitionurl"), "definitionURL");
 assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("xlink:show"), "xlink show");
 assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("viewbox"), "viewbox");
+assert.equal(mathQualifiedForeignAttributeProcessor.get_qualified_attribute_name("viewBox"), "viewBox");
 mathQualifiedForeignAttributeProcessor.destroy();
 
 const mathIntegrationEndTagProcessor = WP_HTML_Processor.create_fragment("<math><mi>x</mi><mn>1</mn></math>");
