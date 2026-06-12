@@ -1302,8 +1302,14 @@ async function bytesFromInput(input) {
 			: new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
 	}
 
-	if (input instanceof URL && input.protocol === "file:") {
-		return nodeFileUrlBytes(input);
+	if (input instanceof URL) {
+		if (input.protocol === "file:" && isNodeLikeRuntime()) {
+			return nodeFileUrlBytes(input);
+		}
+		if (typeof fetch === "function") {
+			return fetchBytes(input);
+		}
+		throw new TypeError("Unsupported WASM input.");
 	}
 
 	if (typeof Response === "function" && input instanceof Response) {
@@ -1312,6 +1318,13 @@ async function bytesFromInput(input) {
 
 	if (typeof Blob === "function" && input instanceof Blob) {
 		return input.arrayBuffer();
+	}
+
+	if (typeof Request === "function" && input instanceof Request) {
+		if (typeof fetch === "function") {
+			return fetchBytes(input);
+		}
+		throw new TypeError("Unsupported WASM input.");
 	}
 
 	if (typeof input === "string") {
@@ -1325,10 +1338,6 @@ async function bytesFromInput(input) {
 
 		const { readFile } = await import("node:fs/promises");
 		return readFile(input);
-	}
-
-	if (typeof fetch === "function") {
-		return fetchBytes(input);
 	}
 
 	throw new TypeError("Unsupported WASM input.");

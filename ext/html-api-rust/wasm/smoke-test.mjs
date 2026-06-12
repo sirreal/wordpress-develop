@@ -369,6 +369,13 @@ assert.equal(apiFromDefaultLocation.version(), "0.1.0");
 const apiFromFileUrlString = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url).href);
 assert.equal(apiFromFileUrlString.version(), "0.1.0");
 
+for (const unsupportedWasmInput of [null, 123, {}, Promise.resolve({})]) {
+	await assert.rejects(
+		() => loadWasm(unsupportedWasmInput),
+		/Unsupported WASM input\./,
+	);
+}
+
 const originalProcessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
 const originalFetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
 try {
