@@ -743,11 +743,11 @@ export class WP_HTML_Text_Replacement {
 export class WP_HTML_Attribute_Token {
 	constructor(name, valueStart, valueLength, start, length, isTrue) {
 		this.name = name;
-		this.value_starts_at = Number(valueStart);
-		this.value_length = Number(valueLength);
-		this.start = Number(start);
-		this.length = Number(length);
-		this.is_true = Boolean(isTrue);
+		this.value_starts_at = valueStart;
+		this.value_length = valueLength;
+		this.start = start;
+		this.length = length;
+		this.is_true = isTrue;
 	}
 }
 

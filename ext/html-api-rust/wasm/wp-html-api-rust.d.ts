@@ -296,22 +296,22 @@ export interface WP_HTML_Text_Replacement_Constructor {
 export const WP_HTML_Text_Replacement: WP_HTML_Text_Replacement_Constructor;
 
 export interface WP_HTML_Attribute_Token {
-	name: string;
-	value_starts_at: number;
-	value_length: number;
-	start: number;
-	length: number;
-	is_true: boolean;
+	name: unknown;
+	value_starts_at: unknown;
+	value_length: unknown;
+	start: unknown;
+	length: unknown;
+	is_true: unknown;
 }
 
 export interface WP_HTML_Attribute_Token_Constructor {
 	new (
-		name: string,
-		valueStart: number | string,
-		valueLength: number | string,
-		start: number | string,
-		length: number | string,
-		isTrue: boolean,
+		name: unknown,
+		valueStart: unknown,
+		valueLength: unknown,
+		start: unknown,
+		length: unknown,
+		isTrue: unknown,
 	): WP_HTML_Attribute_Token;
 }
 

@@ -456,10 +456,17 @@ assert.throws(
 const attributeToken = new WP_HTML_Attribute_Token("class", 12, "6", 5, 13, false);
 assert.equal(attributeToken.name, "class");
 assert.equal(attributeToken.value_starts_at, 12);
-assert.equal(attributeToken.value_length, 6);
+assert.equal(attributeToken.value_length, "6");
 assert.equal(attributeToken.start, 5);
 assert.equal(attributeToken.length, 13);
 assert.equal(attributeToken.is_true, false);
+const oddAttributeToken = new WP_HTML_Attribute_Token(123, "12x", null, [], "13", "0");
+assert.equal(oddAttributeToken.name, 123);
+assert.equal(oddAttributeToken.value_starts_at, "12x");
+assert.equal(oddAttributeToken.value_length, null);
+assert.deepEqual(oddAttributeToken.start, []);
+assert.equal(oddAttributeToken.length, "13");
+assert.equal(oddAttributeToken.is_true, "0");
 
 for (const attributeValue of [
 	"javascript:",
