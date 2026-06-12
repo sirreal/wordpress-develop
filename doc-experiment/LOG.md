@@ -16,6 +16,10 @@ Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
 round is prepared, partially trialed, trial-complete, judged, or scored, and it
 lists missing trial, judge, or summary files before a score can be trusted.
 
+Added `workflow-args.py` to emit trial and judge workflow JSON directly from
+`round-metadata.json`, avoiding hand transcription of task IDs, scratch paths,
+and model policy when the runner becomes available.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

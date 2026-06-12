@@ -131,18 +131,11 @@ When orchestrating via the Workflow tool, prefer `schema` structured
 output with fields `code` (string), `explanation` (string), `confidence`
 (integer 0-100) instead of free-text parsing.
 
-For the bundled workflow script, pass the task list and model policy from the
-round metadata:
+For the bundled workflow script, generate the task list and model policy from
+the round metadata:
 
-```json
-{
-  "scratch": "/tmp/html-api-docs-eval/round-NN",
-  "taskIds": ["T01-add-image-class"],
-  "trialsPerTask": 3,
-  "model": "gpt-5.4",
-  "reasoning_effort": "medium",
-  "service_tier": "priority"
-}
+```sh
+python3 doc-experiment/tools/workflow-args.py trials round-NN
 ```
 
 For `discoverability-probe`, replace the implementation prompt with a
@@ -175,6 +168,12 @@ directory for that task (candidate.php, explanation, confidence,
 execution.json), and the two rendered markdown docs the subagents saw. The
 judge may read the html-api source and run ad-hoc probes with the harness
 bootstrap.
+
+For the bundled judge workflow script, generate args from the same metadata:
+
+```sh
+python3 doc-experiment/tools/workflow-args.py judges round-NN
+```
 
 The judge returns JSON:
 
