@@ -46,6 +46,8 @@ not require an instantiated WASM module.
 `Request`, `Response`, `Blob`, `ArrayBuffer`, typed array/DataView,
 `WebAssembly.Module`, `WebAssembly.Instance`, raw `WebAssembly.Exports`, or an
 instantiated source object returned by `WebAssembly.instantiate()`.
+Browser `fetch` and `Response` inputs use streaming WASM instantiation when
+available, with byte-buffer loading as a fallback.
 
 The WASM asset is exported for consumers that need an explicit URL:
 

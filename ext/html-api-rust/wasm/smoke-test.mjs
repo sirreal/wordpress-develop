@@ -615,6 +615,47 @@ if (typeof Response === "function") {
 		() => loadWasm(new Response("", { status: 503, statusText: "Unavailable" })),
 		/Failed to load WASM: 503 Unavailable/,
 	);
+
+	const originalInstantiateStreamingDescriptor = Object.getOwnPropertyDescriptor(WebAssembly, "instantiateStreaming");
+	if (
+		typeof WebAssembly.instantiateStreaming === "function" &&
+		originalInstantiateStreamingDescriptor !== undefined &&
+		(originalInstantiateStreamingDescriptor.writable || originalInstantiateStreamingDescriptor.configurable)
+	) {
+		let streamingCalls = 0;
+		try {
+			Object.defineProperty(WebAssembly, "instantiateStreaming", {
+				configurable: originalInstantiateStreamingDescriptor.configurable,
+				value: async (response, imports) => {
+					streamingCalls += 1;
+					assert.ok(response instanceof Response);
+					assert.deepEqual(imports, {});
+					return WebAssembly.instantiate(await response.arrayBuffer(), imports);
+				},
+				writable: originalInstantiateStreamingDescriptor.writable,
+			});
+			const apiFromStreamingResponse = await loadWasm(new Response(
+				wasmArrayBuffer.slice(0),
+				{ headers: { "Content-Type": "application/wasm" } },
+			));
+			assert.equal(apiFromStreamingResponse.version(), "0.1.0");
+			assert.equal(streamingCalls, 1);
+
+			Object.defineProperty(WebAssembly, "instantiateStreaming", {
+				configurable: originalInstantiateStreamingDescriptor.configurable,
+				value: async () => {
+					streamingCalls += 1;
+					throw new TypeError("Cannot stream this response.");
+				},
+				writable: originalInstantiateStreamingDescriptor.writable,
+			});
+			const apiFromStreamingFallback = await loadWasm(new Response(wasmArrayBuffer.slice(0)));
+			assert.equal(apiFromStreamingFallback.version(), "0.1.0");
+			assert.equal(streamingCalls, 2);
+		} finally {
+			Object.defineProperty(WebAssembly, "instantiateStreaming", originalInstantiateStreamingDescriptor);
+		}
+	}
 }
 
 if (typeof Request === "function" && typeof fetch === "function") {

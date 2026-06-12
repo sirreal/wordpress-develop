@@ -1274,7 +1274,7 @@ export class WP_HTML_Doctype_Info {
 	}
 }
 
-async function bytesFromInput(input) {
+async function wasmSourceFromInput(input) {
 	input = await input;
 
 	if (isWebAssemblyInstantiatedSource(input)) {
@@ -1308,13 +1308,13 @@ async function bytesFromInput(input) {
 			return nodeFileUrlBytes(input);
 		}
 		if (typeof fetch === "function") {
-			return fetchBytes(input);
+			return fetchWasmSource(input);
 		}
 		throw new TypeError("Unsupported WASM input.");
 	}
 
 	if (typeof Response === "function" && input instanceof Response) {
-		return responseBytes(input);
+		return responseWasmSource(input);
 	}
 
 	if (typeof Blob === "function" && input instanceof Blob) {
@@ -1323,7 +1323,7 @@ async function bytesFromInput(input) {
 
 	if (typeof Request === "function" && input instanceof Request) {
 		if (typeof fetch === "function") {
-			return fetchBytes(input);
+			return fetchWasmSource(input);
 		}
 		throw new TypeError("Unsupported WASM input.");
 	}
@@ -1334,7 +1334,7 @@ async function bytesFromInput(input) {
 		}
 
 		if (typeof fetch === "function" && (/^https?:\/\//.test(input) || !isNodeLikeRuntime())) {
-			return fetchBytes(input);
+			return fetchWasmSource(input);
 		}
 
 		const { readFile } = await import("node:fs/promises");
@@ -1362,19 +1362,33 @@ function isNodeLikeRuntime() {
 	return typeof process === "object" && process !== null && Boolean(process.versions?.node);
 }
 
-async function fetchBytes(input) {
-	return responseBytes(await fetch(input));
+async function fetchWasmSource(input) {
+	return responseWasmSource(await fetch(input));
 }
 
-async function responseBytes(response) {
+async function responseWasmSource(response) {
 	if (!response.ok) {
 		throw new Error(`Failed to load WASM: ${response.status} ${response.statusText}`);
 	}
+
+	if (
+		typeof WebAssembly.instantiateStreaming === "function" &&
+		typeof Response === "function" &&
+		response instanceof Response &&
+		typeof response.clone === "function"
+	) {
+		try {
+			return (await WebAssembly.instantiateStreaming(response.clone(), {})).instance;
+		} catch {
+			// Fall through to byte-buffer loading when streaming compilation is unavailable for the response.
+		}
+	}
+
 	return response.arrayBuffer();
 }
 
 export async function loadWasm(input = new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url)) {
-	const source = await bytesFromInput(input);
+	const source = await wasmSourceFromInput(input);
 	if (isWebAssemblyExports(source)) {
 		return createHtmlApi(source);
 	}
