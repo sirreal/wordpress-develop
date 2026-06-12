@@ -6375,6 +6375,15 @@ assert.equal(
 );
 fullParserReconstructedAnchorTextAfterTableCell.destroy();
 
+const fullParserNestedFosteredAnchorBeforeTableRow = WP_HTML_Processor.create_full_parser(
+	'<a href="blah">aba<table><a href="foo">br<tr><td></td></tr>x</table>aoe',
+);
+assert.equal(
+	fullParserNestedFosteredAnchorBeforeTableRow.serialize(),
+	'<html><head></head><body><a href="blah">aba<a href="foo">br</a><a href="foo">x</a><table><tbody><tr><td></tbody></table></a><a href="foo">aoe</a></body></html>',
+);
+fullParserNestedFosteredAnchorBeforeTableRow.destroy();
+
 const fullParserFosteredDivBeforeTableRow = WP_HTML_Processor.create_full_parser(
 	"<table><tr><div>",
 );
