@@ -5,6 +5,8 @@ import { loadWasm } from "./wp-html-api-rust.js";
 const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tree-construction/", import.meta.url);
 const treeIndent = "  ";
 const testFilter = process.env.HTML5LIB_TEST_FILTER ?? "";
+const testHtmlFilter = process.env.HTML5LIB_TEST_HTML_FILTER ?? "";
+const includeKnownSkippedTests = process.env.HTML5LIB_INCLUDE_KNOWN_SKIPS === "1";
 const unsupportedSampleLimit = Number.parseInt(process.env.HTML5LIB_UNSUPPORTED_SAMPLES ?? "0", 10);
 const supportedFragmentContexts = new Set([
 	"body",
@@ -429,22 +431,28 @@ for (const file of files) {
 			continue;
 		}
 
+		if (testHtmlFilter !== "" && !test.html.includes(testHtmlFilter)) {
+			continue;
+		}
+
 		if (test.fragmentContext !== null && !supportedFragmentContexts.has(test.fragmentContext)) {
 			summary.skippedContext += 1;
 			continue;
 		}
 
 		const skippedReason = skippedTests.get(test.name);
-		if (testFilter === "" && skippedReason !== undefined) {
-			const result = buildHtml5libTree(test.fragmentContext, test.html);
-			if (
-				result.unsupported === null &&
-				result.error === null &&
-				!result.incomplete &&
-				result.tree === test.expectedTree
-			) {
-				staleSkippedTests.push(test.name);
-				continue;
+		if (!includeKnownSkippedTests && skippedReason !== undefined) {
+			if (testFilter === "" && testHtmlFilter === "") {
+				const result = buildHtml5libTree(test.fragmentContext, test.html);
+				if (
+					result.unsupported === null &&
+					result.error === null &&
+					!result.incomplete &&
+					result.tree === test.expectedTree
+				) {
+					staleSkippedTests.push(test.name);
+					continue;
+				}
 			}
 
 			summary.skippedKnown += 1;
@@ -488,7 +496,7 @@ for (const file of files) {
 }
 
 assert.deepEqual(staleSkippedTests, [], "Remove passing tests from skippedTests.");
-if (testFilter === "") {
+if (testFilter === "" && testHtmlFilter === "") {
 	assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
 }
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
