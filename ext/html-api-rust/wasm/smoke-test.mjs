@@ -5919,6 +5919,15 @@ for (const [doctypeInput, doctypeOutput] of [
 	fullParserSerializeDoctype.destroy();
 }
 
+const fullParserFosteredTextBeforeTable = WP_HTML_Processor.create_full_parser(
+	"<table class=x data-id=1>a<!doctype html>",
+);
+assert.equal(
+	fullParserFosteredTextBeforeTable.serialize(),
+	'<html><head></head><body>a<table class="x" data-id="1"></table></body></html>',
+);
+fullParserFosteredTextBeforeTable.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",

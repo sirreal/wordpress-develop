@@ -2379,6 +2379,7 @@ export function createHtmlApi(wasm) {
 			this.paragraph_adoption_preclosed_formatting_elements = [];
 			this.special_start_adoption_preclosed_formatting_elements = [];
 			this.deep_anchor_reconstructed_div_start_offsets = new Set();
+			this.deferred_table_opener = null;
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
 			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
@@ -2761,6 +2762,9 @@ export function createHtmlApi(wasm) {
 				if (!this.skip_current_token) {
 					return true;
 				}
+				if (this.#nextDelayedSyntheticTokenIsTableOpener()) {
+					return this.#consumeDelayedSyntheticToken();
+				}
 				if (this.virtual_tokens.length > 0) {
 					return this.#consumeVirtualToken();
 				}
@@ -2799,6 +2803,10 @@ export function createHtmlApi(wasm) {
 				}
 				this.#queueFullParserScaffold();
 				return this.#consumeVirtualToken();
+			}
+
+			if (this.#consumeDeferredTableOpener()) {
+				return true;
 			}
 
 			if (this.#queueFullParserMissingBodyAtEof()) {
@@ -2846,7 +2854,7 @@ export function createHtmlApi(wasm) {
 			}
 
 			if (this.#isSyntheticToken()) {
-				return null;
+				return this.current_synthetic_token.tagName ?? null;
 			}
 
 			return normalizeTagNameForNamespace(super.get_tag(), this.current_token_namespace);
@@ -2856,14 +2864,14 @@ export function createHtmlApi(wasm) {
 			if (this.is_virtual()) {
 				return this.#getVirtualAttribute(name);
 			}
-			return this.#isSyntheticToken() ? null : super.get_attribute(name);
+			return this.#isSyntheticToken() ? this.#getSyntheticAttribute(name) : super.get_attribute(name);
 		}
 
 		get_attribute_names_with_prefix(prefix) {
 			if (this.is_virtual()) {
 				return this.#getVirtualAttributeNamesWithPrefix(prefix);
 			}
-			return this.#isSyntheticToken() ? null : super.get_attribute_names_with_prefix(prefix);
+			return this.#isSyntheticToken() ? this.#getSyntheticAttributeNamesWithPrefix(prefix) : super.get_attribute_names_with_prefix(prefix);
 		}
 
 		set_attribute(name, value) {
@@ -2897,7 +2905,12 @@ export function createHtmlApi(wasm) {
 		}
 
 		has_self_closing_flag() {
-			return this.is_virtual() || this.#isSyntheticToken() ? false : super.has_self_closing_flag();
+			if (this.is_virtual()) {
+				return false;
+			}
+			return this.#isSyntheticToken()
+				? Boolean(this.current_synthetic_token.hasSelfClosingFlag)
+				: super.has_self_closing_flag();
 		}
 
 		get_token_name() {
@@ -2951,6 +2964,9 @@ export function createHtmlApi(wasm) {
 
 		get_modifiable_text() {
 			if (this.is_virtual()) {
+				return "";
+			}
+			if (this.#isSyntheticToken() && this.current_synthetic_token.tokenType === "#tag") {
 				return "";
 			}
 			return this.#isSyntheticToken()
@@ -3139,10 +3155,11 @@ export function createHtmlApi(wasm) {
 			return [...this.breadcrumbs];
 		}
 
-		#breadcrumbStack(tokenName = null) {
+		#breadcrumbStack(tokenName = null, endIndex = this.open_elements.length) {
 			this.#pruneDetachedBreadcrumbs();
 			const stack = [];
-			for (let i = 0; i < this.open_elements.length; i += 1) {
+			const boundedEndIndex = Math.max(0, Math.min(endIndex, this.open_elements.length));
+			for (let i = 0; i < boundedEndIndex; i += 1) {
 				for (const detached of this.detached_breadcrumbs) {
 					if (detached.index === i) {
 						stack.push(detached.tagName);
@@ -3315,6 +3332,16 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (
+				allowVirtualPreclosures &&
+				this.#queueDeferredTableOpenerBeforeCurrentToken(tokenType)
+			) {
+				this.pending_real_token = true;
+				this.pending_real_parser_state = this.parser_state;
+				this.skip_current_token = true;
+				return;
+			}
+
 			if (this.#applyFullParserInsertionMode(tokenType, tokenName)) {
 				return;
 			}
@@ -3342,6 +3369,9 @@ export function createHtmlApi(wasm) {
 					}
 
 					if (this.text_node_classification !== WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE) {
+						if (this.#representFosteredTextBeforeDeferredTable()) {
+							return;
+						}
 						this.#bailUnsupported("Foster parenting is not supported.");
 						return;
 					}
@@ -3891,6 +3921,19 @@ export function createHtmlApi(wasm) {
 			}
 			this.breadcrumbs = this.#breadcrumbStack();
 
+			if (this.#shouldDeferCurrentTableOpener(tagName, this.current_token_namespace)) {
+				this.deferred_table_opener = {
+					tokenType: "#tag",
+					tokenName: tagName,
+					tagName,
+					namespaceName: this.current_token_namespace,
+					attributes: this.#currentTokenAttributes(),
+					breadcrumbs: [...this.breadcrumbs],
+					hasSelfClosingFlag: this.has_self_closing_flag(),
+				};
+				this.skip_current_token = true;
+			}
+
 			if (!tokenExpectsCloser(tagName, this.current_token_namespace, this.has_self_closing_flag())) {
 				this.open_elements.pop();
 				this.open_element_namespaces.pop();
@@ -3925,10 +3968,36 @@ export function createHtmlApi(wasm) {
 			this.current_virtual = null;
 			this.current_synthetic_token = token;
 			this.skip_current_token = false;
-			this.parser_state = token.tokenType === "#comment" ? STATE_COMMENT : STATE_TEXT_NODE;
+			this.parser_state = token.tokenType === "#comment"
+				? STATE_COMMENT
+				: token.tokenType === "#tag" ? STATE_MATCHED_TAG : STATE_TEXT_NODE;
 			this.current_token_namespace = token.namespaceName ?? this.current_namespace;
 			this.breadcrumbs = [...token.breadcrumbs];
 			return true;
+		}
+
+		#nextDelayedSyntheticTokenIsTableOpener() {
+			const token = this.delayed_synthetic_tokens[0] ?? null;
+			return (
+				token !== null &&
+				token.tokenType === "#tag" &&
+				token.tagName === "TABLE" &&
+				token.namespaceName === "html"
+			);
+		}
+
+		#queueDeferredTableOpener() {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			this.delayed_synthetic_tokens.push(this.deferred_table_opener);
+			this.deferred_table_opener = null;
+			return true;
+		}
+
+		#consumeDeferredTableOpener() {
+			return this.#queueDeferredTableOpener() && this.#consumeDelayedSyntheticToken();
 		}
 
 		#consumeVirtualToken() {
@@ -4005,7 +4074,15 @@ export function createHtmlApi(wasm) {
 				delayedSyntheticTokens: this.delayed_synthetic_tokens.map((token) => ({
 					...token,
 					breadcrumbs: [...token.breadcrumbs],
+					attributes: (token.attributes ?? []).map((attribute) => ({ ...attribute })),
 				})),
+				deferredTableOpener: this.deferred_table_opener === null
+					? null
+					: {
+						...this.deferred_table_opener,
+						breadcrumbs: [...this.deferred_table_opener.breadcrumbs],
+						attributes: this.deferred_table_opener.attributes.map((attribute) => ({ ...attribute })),
+					},
 				activeFormattingElements: this.active_formatting_elements.map((entry) => this.#cloneActiveFormattingElement(entry)),
 				paragraphAdoptionPreclosedFormattingElements: this.paragraph_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
 				specialStartAdoptionPreclosedFormattingElements: this.special_start_adoption_preclosed_formatting_elements.map((entry) => ({ ...entry })),
@@ -4032,7 +4109,15 @@ export function createHtmlApi(wasm) {
 			this.delayed_synthetic_tokens = (state.delayedSyntheticTokens ?? []).map((token) => ({
 				...token,
 				breadcrumbs: [...token.breadcrumbs],
+				attributes: (token.attributes ?? []).map((attribute) => ({ ...attribute })),
 			}));
+			this.deferred_table_opener = state.deferredTableOpener === null || state.deferredTableOpener === undefined
+				? null
+				: {
+					...state.deferredTableOpener,
+					breadcrumbs: [...state.deferredTableOpener.breadcrumbs],
+					attributes: (state.deferredTableOpener.attributes ?? []).map((attribute) => ({ ...attribute })),
+				};
 			this.full_parser_insertion_mode = state.fullParserInsertionMode;
 			this.full_parser_scaffolded = state.fullParserScaffolded;
 			this.full_parser_seen_doctype = state.fullParserSeenDoctype;
@@ -4182,6 +4267,37 @@ export function createHtmlApi(wasm) {
 
 		#getVirtualAttributeNamesWithPrefix(prefix) {
 			const attributes = this.current_virtual?.attributes ?? [];
+			const wantedPrefix = phpInternalStringCoerce(prefix, "prefix");
+			const normalizedWantedPrefix = this.current_token_namespace === "html" ? asciiLower(wantedPrefix) : wantedPrefix;
+			const names = [];
+
+			for (const attribute of attributes) {
+				const attributeName = this.current_token_namespace === "html" ? asciiLower(attribute.name) : attribute.name;
+				if (attributeName.startsWith(normalizedWantedPrefix)) {
+					names.push(attribute.name);
+				}
+			}
+
+			return names.length === 0 ? null : names;
+		}
+
+		#getSyntheticAttribute(name) {
+			const attributes = this.current_synthetic_token?.attributes ?? [];
+			const wantedName = phpInternalStringCoerce(name, "name");
+			const normalizedWantedName = this.current_token_namespace === "html" ? asciiLower(wantedName) : wantedName;
+
+			for (const attribute of attributes) {
+				const attributeName = this.current_token_namespace === "html" ? asciiLower(attribute.name) : attribute.name;
+				if (attributeName === normalizedWantedName) {
+					return attribute.value;
+				}
+			}
+
+			return null;
+		}
+
+		#getSyntheticAttributeNamesWithPrefix(prefix) {
+			const attributes = this.current_synthetic_token?.attributes ?? [];
 			const wantedPrefix = phpInternalStringCoerce(prefix, "prefix");
 			const normalizedWantedPrefix = this.current_token_namespace === "html" ? asciiLower(wantedPrefix) : wantedPrefix;
 			const names = [];
@@ -7801,6 +7917,95 @@ export function createHtmlApi(wasm) {
 			}
 
 			return this.open_elements[topIndex] === "TABLE" || this.#openHtmlElementBefore("TABLE", topIndex);
+		}
+
+		#shouldDeferCurrentTableOpener(tagName, namespaceName) {
+			return (
+				this.is_full_parser &&
+				this.deferred_table_opener === null &&
+				tagName === "TABLE" &&
+				namespaceName === "html" &&
+				this.#currentTableStartIsFollowedByFosteredText()
+			);
+		}
+
+		#currentTableStartIsFollowedByFosteredText() {
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const afterToken = span.start + span.length;
+			const nextTag = runtime.scanNextTag(this.html, afterToken);
+			const text = nextTag === false
+				? this.html.slice(afterToken)
+				: this.html.slice(afterToken, nextTag.tag_start);
+			return !this.#isIgnorableTableText(text);
+		}
+
+		#queueDeferredTableOpenerBeforeCurrentToken(tokenType) {
+			if (this.deferred_table_opener === null) {
+				return false;
+			}
+
+			if (tokenType === "#text") {
+				return (
+					this.text_node_classification === WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE &&
+					this.#queueDeferredTableOpener()
+				);
+			}
+
+			if (
+				tokenType === "#comment" ||
+				tokenType === "#funky-comment" ||
+				tokenType === "#presumptuous-tag"
+			) {
+				this.#bailUnsupported("Foster parenting is not supported.");
+				return true;
+			}
+
+			if (tokenType !== "#tag") {
+				return this.#queueDeferredTableOpener();
+			}
+
+			const tagName = this.#getCurrentTreeTagName();
+			if (tagName === null) {
+				return false;
+			}
+
+			if (this.is_tag_closer()) {
+				return tagName === "TABLE" && this.#queueDeferredTableOpener();
+			}
+
+			if (tagName === "INPUT" || SPECIAL_ATOMIC_ELEMENTS.has(tagName)) {
+				this.#bailUnsupported("Foster parenting is not supported.");
+				return true;
+			}
+
+			return TABLE_MODE_START_TAGS.has(tagName) && this.#queueDeferredTableOpener();
+		}
+
+		#representFosteredTextBeforeDeferredTable() {
+			if (!this.is_full_parser || this.deferred_table_opener === null) {
+				return false;
+			}
+
+			const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+			if (tableIndex === -1) {
+				return false;
+			}
+
+			this.current_token_namespace = "html";
+			this.breadcrumbs = this.#breadcrumbStack("#text", tableIndex);
+			this.frameset_ok = false;
+			return true;
+		}
+
+		#isIgnorableTableText(text) {
+			return text.split("").every((char) => {
+				const code = char.charCodeAt(0);
+				return code === 0 || isHtmlWhitespaceCode(code);
+			});
 		}
 
 		#shouldBailUnsupportedTableFosterParenting(tagName, isCloser) {
