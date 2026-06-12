@@ -7,12 +7,13 @@
 	"types": "./wp-html-api-rust.d.ts",
 	"scripts": {
 		"build": "../build-wasm.sh",
-		"check": "node --check wp-html-api-rust.js && node --check smoke-test.mjs && node --check package-test.mjs && node --check html5lib-tree-test.mjs",
+		"check": "node --check wp-html-api-rust.js && node --check smoke-test.mjs && node --check package-test.mjs && node --check package-artifact-test.mjs && node --check html5lib-tree-test.mjs",
 		"prepack": "npm run build",
 		"test": "node smoke-test.mjs",
-		"test:all": "npm run check && npm test && npm run test:package && npm run test:html5lib",
+		"test:all": "npm run check && npm test && npm run test:package && npm run test:package-artifact && npm run test:html5lib",
 		"test:html5lib": "node html5lib-tree-test.mjs",
-		"test:package": "node package-test.mjs"
+		"test:package": "node package-test.mjs",
+		"test:package-artifact": "node package-artifact-test.mjs"
 	},
 	"exports": {
 		".": {
