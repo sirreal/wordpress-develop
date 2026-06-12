@@ -17,6 +17,8 @@
  * @access private
  */
 final class WP_CSS_Attribute_Selector extends WP_CSS_Selector_Parser_Matcher {
+	const WHITESPACE_CHARACTERS = " \t\r\n\f";
+
 	/**
 	 * The attribute value is matched exactly.
 	 *
@@ -323,7 +325,7 @@ final class WP_CSS_Attribute_Selector extends WP_CSS_Selector_Parser_Matcher {
 	}
 
 	/**
-	 * Parses a selector string to create a selector instance.
+	 * Parses CSS selector tokens to create a selector instance.
 	 *
 	 * To create an instance of this class, use the {@see WP_CSS_Compound_Selector_List::from_selectors()} method.
 	 *
@@ -334,117 +336,109 @@ final class WP_CSS_Attribute_Selector extends WP_CSS_Selector_Parser_Matcher {
 	 *
 	 * https://www.w3.org/TR/css-syntax-3/#consume-simple-block
 	 *
-	 * @param string $input The selector string.
-	 * @param int    $offset The offset into the string. The offset is passed by reference and
-	 *                       will be updated if the parse is successful.
+	 * @param WP_CSS_Selector_Token_Stream $tokens The selector token stream.
 	 * @return static|null The selector instance, or null if the parse was unsuccessful.
 	 */
-	public static function parse( string $input, int &$offset ) {
-		// Need at least 2 bytes `[x`; the closing `]` may be supplied by the end of input.
-		if ( $offset + 1 >= strlen( $input ) ) {
+	public static function parse( WP_CSS_Selector_Token_Stream $tokens ) {
+		$bookmark = $tokens->bookmark();
+
+		if ( ! $tokens->consume( WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET ) ) {
 			return null;
 		}
 
-		$updated_offset = $offset;
-
-		if ( '[' !== $input[ $updated_offset ] ) {
-			return null;
-		}
-		++$updated_offset;
-
-		self::parse_whitespace( $input, $updated_offset );
-		$attr_name = self::parse_ident( $input, $updated_offset );
+		$tokens->consume_whitespace();
+		$attr_name = $tokens->consume_ident();
 		if ( null === $attr_name ) {
+			$tokens->seek( $bookmark );
 			return null;
 		}
-		self::parse_whitespace( $input, $updated_offset );
+		$tokens->consume_whitespace();
 
-		// The end of input auto-closes the attribute selector.
-		if ( $updated_offset >= strlen( $input ) ) {
-			$offset = $updated_offset;
+		if (
+			$tokens->consume( WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET ) ||
+			$tokens->is_eof()
+		) {
 			return new WP_CSS_Attribute_Selector( $attr_name );
 		}
 
-		if ( ']' === $input[ $updated_offset ] ) {
-			$offset = $updated_offset + 1;
-			return new WP_CSS_Attribute_Selector( $attr_name );
-		}
-
-		if ( '=' === $input[ $updated_offset ] ) {
-			++$updated_offset;
+		if ( $tokens->consume_delim( '=' ) ) {
 			$attr_matcher = WP_CSS_Attribute_Selector::MATCH_EXACT;
-		} elseif ( $updated_offset + 1 < strlen( $input ) && '=' === $input[ $updated_offset + 1 ] ) {
-			switch ( $input[ $updated_offset ] ) {
-				case '~':
-					$attr_matcher    = WP_CSS_Attribute_Selector::MATCH_ONE_OF_EXACT;
-					$updated_offset += 2;
-					break;
-				case '|':
-					$attr_matcher    = WP_CSS_Attribute_Selector::MATCH_EXACT_OR_HYPHEN_SUFFIXED;
-					$updated_offset += 2;
-					break;
-				case '^':
-					$attr_matcher    = WP_CSS_Attribute_Selector::MATCH_PREFIXED_BY;
-					$updated_offset += 2;
-					break;
-				case '$':
-					$attr_matcher    = WP_CSS_Attribute_Selector::MATCH_SUFFIXED_BY;
-					$updated_offset += 2;
-					break;
-				case '*':
-					$attr_matcher    = WP_CSS_Attribute_Selector::MATCH_CONTAINS;
-					$updated_offset += 2;
-					break;
-				default:
-					return null;
-			}
 		} else {
-			return null;
+			$matcher_token = $tokens->get_token_value();
+			$attr_matcher  = null;
+
+			if ( $tokens->consume( WP_CSS_Token_Processor::TOKEN_DELIM ) && $tokens->consume_delim( '=' ) ) {
+				switch ( $matcher_token ) {
+					case '~':
+						$attr_matcher = WP_CSS_Attribute_Selector::MATCH_ONE_OF_EXACT;
+						break;
+					case '|':
+						$attr_matcher = WP_CSS_Attribute_Selector::MATCH_EXACT_OR_HYPHEN_SUFFIXED;
+						break;
+					case '^':
+						$attr_matcher = WP_CSS_Attribute_Selector::MATCH_PREFIXED_BY;
+						break;
+					case '$':
+						$attr_matcher = WP_CSS_Attribute_Selector::MATCH_SUFFIXED_BY;
+						break;
+					case '*':
+						$attr_matcher = WP_CSS_Attribute_Selector::MATCH_CONTAINS;
+						break;
+					default:
+						$attr_matcher = null;
+						break;
+				}
+			}
+
+			if ( null === $attr_matcher ) {
+				$tokens->seek( $bookmark );
+				return null;
+			}
 		}
 
-		self::parse_whitespace( $input, $updated_offset );
-		$attr_val =
-			self::parse_string( $input, $updated_offset ) ??
-			self::parse_ident( $input, $updated_offset );
+		$tokens->consume_whitespace();
+		if ( $tokens->matches( WP_CSS_Token_Processor::TOKEN_STRING ) ) {
+			$attr_val = $tokens->get_token_value();
+			$tokens->consume( WP_CSS_Token_Processor::TOKEN_STRING );
+		} else {
+			$attr_val = $tokens->consume_ident();
+		}
 
 		if ( null === $attr_val ) {
+			$tokens->seek( $bookmark );
 			return null;
 		}
 
-		self::parse_whitespace( $input, $updated_offset );
+		$tokens->consume_whitespace();
 
 		$attr_modifier = null;
-		if ( $updated_offset < strlen( $input ) ) {
-			switch ( $input[ $updated_offset ] ) {
+		if ( $tokens->matches( WP_CSS_Token_Processor::TOKEN_IDENT ) ) {
+			$modifier = $tokens->get_token_value();
+
+			switch ( strtolower( $modifier ) ) {
 				case 'i':
-				case 'I':
 					$attr_modifier = WP_CSS_Attribute_Selector::MODIFIER_CASE_INSENSITIVE;
-					++$updated_offset;
 					break;
 
 				case 's':
-				case 'S':
 					$attr_modifier = WP_CSS_Attribute_Selector::MODIFIER_CASE_SENSITIVE;
-					++$updated_offset;
 					break;
 			}
 
 			if ( null !== $attr_modifier ) {
-				self::parse_whitespace( $input, $updated_offset );
+				$tokens->consume( WP_CSS_Token_Processor::TOKEN_IDENT );
+				$tokens->consume_whitespace();
 			}
 		}
 
-		// The end of input auto-closes the attribute selector.
-		if ( $updated_offset >= strlen( $input ) ) {
-			$offset = $updated_offset;
+		if (
+			$tokens->consume( WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET ) ||
+			$tokens->is_eof()
+		) {
 			return new self( $attr_name, $attr_matcher, $attr_val, $attr_modifier );
 		}
 
-		if ( ']' === $input[ $updated_offset ] ) {
-			$offset = $updated_offset + 1;
-			return new self( $attr_name, $attr_matcher, $attr_val, $attr_modifier );
-		}
-
+		$tokens->seek( $bookmark );
 		return null;
 	}
 }

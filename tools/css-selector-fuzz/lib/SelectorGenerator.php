@@ -586,9 +586,9 @@ class SelectorGenerator {
 	 *
 	 * Targets parser branches the structural generators can't reach:
 	 *  - hex escapes whose codepoint is NUL / a surrogate / over-max, which
-	 *    `consume_escaped_codepoint` must decode to U+FFFD;
+	 *    the tokenizer must decode to U+FFFD;
 	 *  - raw NUL / CR / CRLF / FF bytes in the selector input, which
-	 *    `normalize_selector_input` rewrites ( NUL→U+FFFD, the rest→LF ).
+	 *    the selector token stream preprocesses ( NUL→U+FFFD, the rest→LF ).
 	 *
 	 * These carry a known intended AST: the decoded ident is the U+FFFD
 	 * replacement character ( or, for input normalization, the same selector
@@ -744,7 +744,7 @@ class SelectorGenerator {
 
 		/*
 		 * Raw control bytes in the selector input. A small fixed compound
-		 * keeps the case focused on normalize_selector_input and avoids
+		 * keeps the case focused on selector input preprocessing and avoids
 		 * entangling with unrelated attribute-selector edge cases.
 		 */
 		$compound = array(
@@ -805,7 +805,7 @@ class SelectorGenerator {
 	 *
 	 * Raw ill-formed UTF-8 byte sequences in the selector input, mirroring
 	 * the nul-input pattern: a small fixed simple selector keeps the case
-	 * focused on the normalize_selector_input() scrub. Each maximal subpart
+	 * focused on the selector token stream scrub. Each maximal subpart
 	 * of the injected sequence decodes to one U+FFFD ( per-class counts
 	 * pinned in INVALID_UTF8_CLASSES ), and U+FFFD is a valid ident
 	 * codepoint — including in start position — so the scrubbed selector
@@ -1576,7 +1576,6 @@ class SelectorGenerator {
 						"\\\n",
 						"a\\\nb",
 						'a/**/b',
-						'/* comment */ a',
 						'!important',
 						'@media screen',
 						'{}',

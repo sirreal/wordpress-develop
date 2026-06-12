@@ -66,7 +66,7 @@ produces the same document, the same selector, and the same verdict.
    - `edge-escape` — selectors that exercise otherwise-unreachable parser
      branches: hex escapes for NUL / surrogate / over-max codepoints (must
      decode to U+FFFD) and raw NUL / CR / CRLF / FF bytes in the input (must
-     normalize per `normalize_selector_input`); carries the intended AST.
+     normalize during selector token-stream preprocessing); carries the intended AST.
 4. Check invariants:
    - No PHP error/warning/exception from parsing or matching, ever.
    - Parse result (instance vs `null`) matches the bucket's expectation.

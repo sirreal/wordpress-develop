@@ -19,13 +19,13 @@ class Tests_HtmlApi_WpCssClassSelector extends WP_UnitTestCase {
 	 * @dataProvider data_class_selectors
 	 */
 	public function test_parse_class( string $input, ?string $expected = null, ?string $rest = null ) {
-		$offset = 0;
-		$result = WP_CSS_Class_Selector::parse( $input, $offset );
+		$tokens = WP_CSS_Selector_Token_Stream::from_selectors( $input, WP_CSS_Class_Selector::class );
+		$result = WP_CSS_Class_Selector::parse( $tokens );
 		if ( null === $expected ) {
 			$this->assertNull( $result );
 		} else {
 			$this->assertSame( $expected, $result->class_name );
-			$this->assertSame( $rest, substr( $input, $offset ) );
+			$this->assertSame( $rest, $tokens->get_remaining_text() );
 		}
 	}
 

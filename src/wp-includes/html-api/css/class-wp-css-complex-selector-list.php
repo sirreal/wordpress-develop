@@ -44,36 +44,31 @@
  */
 class WP_CSS_Complex_Selector_List extends WP_CSS_Compound_Selector_List {
 	/**
-	 * Parses a selector string to create a selector instance.
+	 * Parses CSS selector tokens to create a selector instance.
 	 *
 	 * To create an instance of this class, use the {@see WP_CSS_Compound_Selector_List::from_selectors()} method.
 	 *
-	 * @param string $input The selector string.
-	 * @param int    $offset The offset into the string. The offset is passed by reference and
-	 *                       will be updated if the parse is successful.
+	 * @param WP_CSS_Selector_Token_Stream $tokens The selector token stream.
 	 * @return static|null The selector instance, or null if the parse was unsuccessful.
 	 */
-	public static function parse( string $input, int &$offset ) {
-		$selector = WP_CSS_Complex_Selector::parse( $input, $offset );
+	public static function parse( WP_CSS_Selector_Token_Stream $tokens ) {
+		$bookmark = $tokens->bookmark();
+		$selector = WP_CSS_Complex_Selector::parse( $tokens );
 		if ( null === $selector ) {
 			return null;
 		}
-		self::parse_whitespace( $input, $offset );
+		$tokens->consume_whitespace();
 
 		$selectors = array( $selector );
-		while ( $offset < strlen( $input ) ) {
-			// Each loop should stop on a `,` selector list delimiter.
-			if ( ',' !== $input[ $offset ] ) {
-				return null;
-			}
-			++$offset;
-			self::parse_whitespace( $input, $offset );
-			$selector = WP_CSS_Complex_Selector::parse( $input, $offset );
+		while ( $tokens->consume( WP_CSS_Token_Processor::TOKEN_COMMA ) ) {
+			$tokens->consume_whitespace();
+			$selector = WP_CSS_Complex_Selector::parse( $tokens );
 			if ( null === $selector ) {
+				$tokens->seek( $bookmark );
 				return null;
 			}
 			$selectors[] = $selector;
-			self::parse_whitespace( $input, $offset );
+			$tokens->consume_whitespace();
 		}
 
 		return new self( $selectors );

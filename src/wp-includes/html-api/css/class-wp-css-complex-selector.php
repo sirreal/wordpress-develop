@@ -181,57 +181,50 @@ final class WP_CSS_Complex_Selector extends WP_CSS_Selector_Parser_Matcher {
 	}
 
 	/**
-	 * Parses a selector string to create a selector instance.
+	 * Parses CSS selector tokens to create a selector instance.
 	 *
 	 * To create an instance of this class, use the {@see WP_CSS_Compound_Selector_List::from_selectors()} method.
 	 *
-	 * @param string $input The selector string.
-	 * @param int    $offset The offset into the string. The offset is passed by reference and
-	 *                       will be updated if the parse is successful.
+	 * @param WP_CSS_Selector_Token_Stream $tokens The selector token stream.
 	 * @return static|null The selector instance, or null if the parse was unsuccessful.
 	 */
-	public static function parse( string $input, int &$offset ) {
-		if ( $offset >= strlen( $input ) ) {
-			return null;
-		}
-
-		$updated_offset = $offset;
-		$self_selector  = WP_CSS_Compound_Selector::parse( $input, $updated_offset );
+	public static function parse( WP_CSS_Selector_Token_Stream $tokens ) {
+		$bookmark      = $tokens->bookmark();
+		$self_selector = WP_CSS_Compound_Selector::parse( $tokens );
 		if ( null === $self_selector ) {
 			return null;
 		}
 		/** @var array{WP_CSS_Compound_Selector, string}[] */
 		$selectors = array();
 
-		$found_whitespace = self::parse_whitespace( $input, $updated_offset );
-		while ( $updated_offset < strlen( $input ) ) {
+		$found_whitespace = $tokens->consume_whitespace();
+		while ( ! $tokens->is_eof() ) {
 			$combinator    = null;
 			$next_selector = null;
 
 			// Sibling (`+` and `~`) combinators are not supported at this time.
 			if (
-				WP_CSS_Complex_Selector::COMBINATOR_NEXT_SIBLING === $input[ $updated_offset ] ||
-				WP_CSS_Complex_Selector::COMBINATOR_SUBSEQUENT_SIBLING === $input[ $updated_offset ]
+				$tokens->matches( WP_CSS_Token_Processor::TOKEN_DELIM, WP_CSS_Complex_Selector::COMBINATOR_NEXT_SIBLING ) ||
+				$tokens->matches( WP_CSS_Token_Processor::TOKEN_DELIM, WP_CSS_Complex_Selector::COMBINATOR_SUBSEQUENT_SIBLING )
 			) {
+				$tokens->seek( $bookmark );
 				return null;
-			} elseif (
-				WP_CSS_Complex_Selector::COMBINATOR_CHILD === $input[ $updated_offset ]
-			) {
-				$combinator = $input[ $updated_offset ];
-				++$updated_offset;
-				self::parse_whitespace( $input, $updated_offset );
+			} elseif ( $tokens->consume_delim( WP_CSS_Complex_Selector::COMBINATOR_CHILD ) ) {
+				$combinator = WP_CSS_Complex_Selector::COMBINATOR_CHILD;
+				$tokens->consume_whitespace();
 
 				// A combinator has been found, failure to find a selector here is a parse error.
-				$next_selector = WP_CSS_Compound_Selector::parse( $input, $updated_offset );
+				$next_selector = WP_CSS_Compound_Selector::parse( $tokens );
 				if ( null === $next_selector ) {
+					$tokens->seek( $bookmark );
 					return null;
 				}
 			} elseif ( $found_whitespace ) {
 				/*
-				* Whitespace is ambiguous, it could be a descendant combinator or
-				* insignificant whitespace.
-				*/
-				$next_selector = WP_CSS_Compound_Selector::parse( $input, $updated_offset );
+				 * Whitespace is ambiguous, it could be a descendant combinator or
+				 * insignificant whitespace.
+				 */
+				$next_selector = WP_CSS_Compound_Selector::parse( $tokens );
 				if ( null !== $next_selector ) {
 					$combinator = WP_CSS_Complex_Selector::COMBINATOR_DESCENDANT;
 				}
@@ -243,6 +236,7 @@ final class WP_CSS_Complex_Selector extends WP_CSS_Selector_Parser_Matcher {
 
 			// $self_selector will pass to a relative selector where only the type selector is allowed.
 			if ( null !== $self_selector->subclass_selectors || null === $self_selector->type_selector ) {
+				$tokens->seek( $bookmark );
 				return null;
 			}
 
@@ -251,9 +245,8 @@ final class WP_CSS_Complex_Selector extends WP_CSS_Selector_Parser_Matcher {
 			$selectors[]   = $selector_pair;
 			$self_selector = $next_selector;
 
-			$found_whitespace = self::parse_whitespace( $input, $updated_offset );
+			$found_whitespace = $tokens->consume_whitespace();
 		}
-		$offset = $updated_offset;
 
 		return new self( $self_selector, array_reverse( $selectors ) );
 	}
