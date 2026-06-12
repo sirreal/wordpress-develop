@@ -3630,8 +3630,10 @@ export function createHtmlApi(wasm) {
 			return true;
 		}
 
-		#hasNoframesStartTag() {
-			return /<\s*noframes(?:[\t\n\f\r />]|$)/i.test(super.get_updated_html());
+		#hasFutureNoframesStartTag() {
+			const span = this.#nativeCurrentSpan();
+			const start = span === null ? 0 : span.start + span.length;
+			return /<\s*noframes(?:[\t\n\f\r />]|$)/i.test(super.get_updated_html().slice(start));
 		}
 
 		#serializeTextToken() {
@@ -4378,7 +4380,7 @@ export function createHtmlApi(wasm) {
 							tokenType === "#funky-comment" ||
 							tokenType === "#presumptuous-tag"
 						) {
-							if (this.#hasNoframesStartTag()) {
+							if (this.#hasFutureNoframesStartTag()) {
 								this.#bailUnsupported("Content outside of HTML is unsupported.");
 								return true;
 							}

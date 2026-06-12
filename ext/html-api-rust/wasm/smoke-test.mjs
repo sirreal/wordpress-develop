@@ -2659,6 +2659,20 @@ assert.equal(fullParserCommentAfterFramesetHtml.get_last_error(), null);
 assert.equal(fullParserCommentAfterFramesetHtml.get_unsupported_exception(), null);
 fullParserCommentAfterFramesetHtml.destroy();
 
+const fullParserCommentAfterFramesetNoframes = WP_HTML_Processor.create_full_parser(
+	"<html><frameset></frameset></html><noframes>fallback</noframes><!--outside-->",
+);
+while (
+	fullParserCommentAfterFramesetNoframes.next_token() &&
+	fullParserCommentAfterFramesetNoframes.get_token_type() !== "#comment"
+) {
+}
+assert.equal(fullParserCommentAfterFramesetNoframes.get_token_type(), "#comment");
+assert.deepEqual(fullParserCommentAfterFramesetNoframes.get_breadcrumbs(), ["#comment"]);
+assert.equal(fullParserCommentAfterFramesetNoframes.get_last_error(), null);
+assert.equal(fullParserCommentAfterFramesetNoframes.get_unsupported_exception(), null);
+fullParserCommentAfterFramesetNoframes.destroy();
+
 const noQuirksClasses = WP_HTML_Processor.create_full_parser('<!DOCTYPE html><span class="UPPER">');
 assert.equal(noQuirksClasses.next_tag("span"), true);
 assert.equal(noQuirksClasses.compat_mode, WP_HTML_Tag_Processor.NO_QUIRKS_MODE);
