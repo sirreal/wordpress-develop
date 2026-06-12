@@ -406,6 +406,7 @@ const summary = {
 	skippedKnown: 0,
 	skippedKnownByReason: {},
 	skippedUnsupported: 0,
+	skippedUnsupportedByReason: {},
 	skippedIncomplete: 0,
 	failed: 0,
 };
@@ -452,6 +453,9 @@ for (const file of files) {
 		const result = buildHtml5libTree(test.fragmentContext, test.html);
 		if (result.unsupported !== null) {
 			summary.skippedUnsupported += 1;
+			const unsupportedReason = result.unsupported.message;
+			summary.skippedUnsupportedByReason[unsupportedReason] =
+				(summary.skippedUnsupportedByReason[unsupportedReason] ?? 0) + 1;
 			continue;
 		}
 
