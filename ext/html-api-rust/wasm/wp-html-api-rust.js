@@ -8354,7 +8354,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#isFosteredTableEndTag(tagName) {
-			return tagName === "P";
+			return tagName === "BR" || tagName === "P";
 		}
 
 		#missingParagraphCloserFosterParentedTableIndex() {

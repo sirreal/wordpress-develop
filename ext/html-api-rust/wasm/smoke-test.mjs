@@ -5147,6 +5147,13 @@ assert.equal(
 tableEndParagraphSerializer.destroy();
 assert.equal(WP_HTML_Processor.normalize("<p><table></p>"), null);
 
+const tablePresumptuousBrProcessor = WP_HTML_Processor.create_full_parser("<table><tr></br></table>");
+assert.equal(
+	tablePresumptuousBrProcessor.serialize(),
+	"<html><head></head><body><br><table><tbody><tr></tr></tbody></table></body></html>",
+);
+tablePresumptuousBrProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
