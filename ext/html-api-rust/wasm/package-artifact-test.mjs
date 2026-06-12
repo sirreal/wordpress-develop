@@ -32,6 +32,7 @@ try {
 	);
 	const [pack] = parseNpmJsonArray(stdout);
 	assert.deepEqual(pack.files.map(({ path }) => path).sort(), [
+		"README.md",
 		"dist/wp_html_api_rust_core.wasm",
 		"package.json",
 		"wp-html-api-rust.d.ts",

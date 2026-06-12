@@ -1,0 +1,69 @@
+# WordPress HTML API Rust WASM
+
+WebAssembly build of the WordPress HTML API Rust implementation with an ES
+module JavaScript wrapper.
+
+## Usage
+
+```js
+import { loadWasm } from "wp-html-api-rust-wasm";
+
+const { WP_HTML_Processor } = await loadWasm();
+const processor = WP_HTML_Processor.create_fragment("<main><p>Hello");
+
+processor.next_tag("p");
+console.log(processor.get_breadcrumbs());
+
+processor.destroy();
+```
+
+`loadWasm()` instantiates the bundled `dist/wp_html_api_rust_core.wasm` module
+by default and returns the WASM-bound API:
+
+- `WP_HTML_Decoder`
+- `WP_HTML_Tag_Processor`
+- `WP_HTML_Processor`
+- `WP_HTML_Doctype_Info`
+- `WP_HTML_Span`
+- `WP_HTML_Text_Replacement`
+- `WP_HTML_Attribute_Token`
+- `WP_HTML_Token`
+- `WP_HTML_Stack_Event`
+- `WP_HTML_Active_Formatting_Elements`
+- `WP_HTML_Open_Elements`
+- `WP_HTML_Processor_State`
+- `WP_HTML_Unsupported_Exception`
+- `scanNextTag()`
+- `version()`
+- `wasm`
+
+The package also exports `createHtmlApi()` and the value/helper classes that do
+not require an instantiated WASM module.
+
+## Loading WASM
+
+`loadWasm()` accepts the default bundled WASM URL, a path or URL string, `URL`,
+`Request`, `Response`, `Blob`, `ArrayBuffer`, typed array/DataView,
+`WebAssembly.Module`, `WebAssembly.Instance`, raw `WebAssembly.Exports`, or an
+instantiated source object returned by `WebAssembly.instantiate()`.
+
+The WASM asset is exported for consumers that need an explicit URL:
+
+```js
+const wasmUrl = import.meta.resolve(
+	"wp-html-api-rust-wasm/dist/wp_html_api_rust_core.wasm",
+);
+const api = await loadWasm(wasmUrl);
+```
+
+## Parser Support
+
+The JavaScript API mirrors the public WordPress HTML API classes with
+JavaScript naming and TypeScript declarations. The low-level tag processor is
+implemented by the Rust/WASM core. The processor layer adds JavaScript-side
+tree-state tracking for common HTML breadcrumbs, namespace handling, implied
+closures, serialization, and unsupported-parser diagnostics.
+
+Full HTML5 tree-construction parity is still incomplete. Known unsupported
+areas include foster parenting, some adoption-agency reparenting cases, and
+some frameset body-replacement cases.
