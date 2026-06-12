@@ -2806,6 +2806,18 @@ assert.equal(processorBreadcrumbMatchOffset.get_attribute("one"), null);
 assert.equal(processorBreadcrumbMatchOffset.get_attribute("two"), true);
 processorBreadcrumbMatchOffset.destroy();
 
+const processorObjectMatchOffset = WP_HTML_Processor.create_fragment("<div><span one></span><span two></span></div>");
+assert.equal(processorObjectMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPAN"], match_offset: {} }), true);
+assert.equal(processorObjectMatchOffset.get_attribute("one"), true);
+assert.equal(processorObjectMatchOffset.get_attribute("two"), null);
+processorObjectMatchOffset.destroy();
+
+const processorArrayMatchOffset = WP_HTML_Processor.create_fragment("<div><span one></span><span two></span></div>");
+assert.equal(processorArrayMatchOffset.next_tag({ breadcrumbs: ["DIV", "SPAN"], match_offset: [2] }), true);
+assert.equal(processorArrayMatchOffset.get_attribute("one"), true);
+assert.equal(processorArrayMatchOffset.get_attribute("two"), null);
+processorArrayMatchOffset.destroy();
+
 const processorNullBreadcrumb = WP_HTML_Processor.create_fragment("<div><span></span></div>");
 assert.equal(processorNullBreadcrumb.next_tag({ breadcrumbs: [null] }), false);
 processorNullBreadcrumb.destroy();

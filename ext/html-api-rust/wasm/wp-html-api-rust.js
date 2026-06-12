@@ -7646,6 +7646,12 @@ function phpIntegerCast(value) {
 		const match = value.trimStart().match(/^[+-]?\d+/);
 		return match ? Number.parseInt(match[0], 10) : 0;
 	}
+	if (Array.isArray(value)) {
+		return value.length === 0 ? 0 : 1;
+	}
+	if (value !== null && (typeof value === "object" || typeof value === "function")) {
+		return 1;
+	}
 	return 0;
 }
 

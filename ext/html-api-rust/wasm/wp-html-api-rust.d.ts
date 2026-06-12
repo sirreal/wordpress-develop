@@ -164,7 +164,7 @@ export interface TagNextTagQuery extends NextTagBaseQuery {
 
 export interface ProcessorNextTagQuery extends NextTagBaseQuery {
 	tag_name?: string | number | boolean | null;
-	match_offset?: number | string | boolean | null;
+	match_offset?: unknown;
 	breadcrumbs?: PhpInternalStringParameter[];
 }
 
