@@ -3755,6 +3755,12 @@ class WP_HTML_Tag_Processor {
 	 * accepts a plain, unescaped string and encodes it as needed, so the
 	 * decoded form is the only form application code should handle.
 	 *
+	 * Reminder when reading text from a complete document (for example a
+	 * TITLE in HEAD): full-document parsing is done with
+	 * WP_HTML_Processor::create_full_parser(). That factory belongs to
+	 * the HTML Processor only — this class is constructed with
+	 * `new WP_HTML_Tag_Processor( $html )` and has no factory methods.
+	 *
 	 * Limitations:
 	 *
 	 *  - This function will not strip the leading newline appropriately
