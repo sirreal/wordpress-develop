@@ -3327,6 +3327,9 @@ export function createHtmlApi(wasm) {
 			) {
 				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
 				if (selectIndex !== -1 && selectIndex < this.base_open_element_count) {
+					if (tagName === "TEXTAREA") {
+						this.#seekPastCurrentStartTag();
+					}
 					this.#ignoreCurrentToken();
 					return;
 				}
@@ -5398,6 +5401,25 @@ export function createHtmlApi(wasm) {
 			this.current_synthetic_token = null;
 			this.skip_current_token = false;
 			this.breadcrumbs = this.#breadcrumbStack();
+			return true;
+		}
+
+		#seekPastCurrentStartTag() {
+			const span = this.#nativeCurrentSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const startTag = completeStartTagAt(super.get_updated_html(), span.start);
+			if (
+				startTag === null ||
+				startTag.end <= span.start ||
+				startTag.end > span.start + span.length
+			) {
+				return false;
+			}
+
+			wasm.wp_html_api_rust_tag_processor_seek(this.pointer, startTag.end);
 			return true;
 		}
 

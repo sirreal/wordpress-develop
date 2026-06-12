@@ -2431,7 +2431,7 @@ fn is_special_atomic_tag(tag_name: &[u8]) -> bool {
 }
 
 fn should_consume_unclosed_atomic_tag_at_eof(tag_name: &[u8]) -> bool {
-    is_special_atomic_tag(tag_name) && !eq_ignore_ascii_case(tag_name, b"TEXTAREA")
+    is_special_atomic_tag(tag_name)
 }
 
 fn find_special_closer(html: &[u8], offset: usize, tag_name: &[u8]) -> Option<usize> {
@@ -3151,11 +3151,23 @@ mod tests {
     }
 
     #[test]
-    fn scanner_keeps_unclosed_textarea_incomplete() {
-        assert!(matches!(
-            scan_next_token(b"<textarea><option>", 0),
-            ScanResult::Incomplete
-        ));
+    fn scanner_reports_unclosed_textarea_at_eof() {
+        let mut processor = TagProcessor {
+            html: b"<textarea><option>".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        let scan = processor.current.unwrap();
+        assert_eq!(&processor.html[scan.name_start..scan.name_start + scan.name_len], b"textarea");
+        assert_eq!(scan.tag_end, b"<textarea>".len());
+        assert_eq!(scan.token_end, processor.html.len());
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"<option>");
     }
 
     #[test]

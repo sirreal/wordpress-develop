@@ -1990,6 +1990,15 @@ assert.equal(fullParserIncompleteRawtextProcessor.paused_at_incomplete_token(), 
 assert.equal(fullParserIncompleteRawtextProcessor.get_last_error(), null);
 fullParserIncompleteRawtextProcessor.destroy();
 
+const fullParserUnclosedTextareaProcessor = WP_HTML_Processor.create_full_parser("<textarea>test</div>test");
+assert.equal(fullParserUnclosedTextareaProcessor.next_tag("textarea"), true);
+assert.equal(fullParserUnclosedTextareaProcessor.get_modifiable_text(), "test</div>test");
+assert.deepEqual(fullParserUnclosedTextareaProcessor.get_breadcrumbs(), ["HTML", "BODY", "TEXTAREA"]);
+while (fullParserUnclosedTextareaProcessor.next_token()) {}
+assert.equal(fullParserUnclosedTextareaProcessor.paused_at_incomplete_token(), false);
+assert.equal(fullParserUnclosedTextareaProcessor.get_last_error(), null);
+fullParserUnclosedTextareaProcessor.destroy();
+
 const fragmentDoctypeProcessor = WP_HTML_Processor.create_fragment("<!doctype html><p>x");
 assert.equal(fragmentDoctypeProcessor.next_token(), true);
 assert.equal(fragmentDoctypeProcessor.get_tag(), "P");
