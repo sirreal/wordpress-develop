@@ -746,7 +746,7 @@ def render_method(out, method):
         out.line()
     mld = (doc.get("long_description") or "").strip()
     if mld:
-        out.block(html_to_markdown(mld, heading_shift=1,
+        out.block(html_to_markdown(mld, heading_shift=2,
                                    context="method %s long_description" % mname))
         out.line()
 
