@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, iterates through all tokens using next_token(), and accumulates text from #text tokens using get_modifiable_text() which returns already-decoded text (character references are decoded by the processor). It truncates the result to max_codepoints Unicode code points using mb_strlen() and mb_substr() with UTF-8 encoding, which correctly handles multi-byte characters. Content from SCRIPT and STYLE tags is excluded automatically since their contents are not #text tokens. Whitespace is preserved as-is without normalization.",
+  "confidence": 82
+}

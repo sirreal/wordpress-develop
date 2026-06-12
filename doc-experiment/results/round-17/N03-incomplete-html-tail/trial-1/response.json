@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's built-in token scanning and incomplete token detection. It creates a processor with the input HTML, then calls next_token() in a loop to scan through all tokens in the document. When next_token() returns false, it either means the document is fully parsed or the processor paused at an incomplete token. The paused_at_incomplete_token() method directly answers the question of whether the HTML was truncated mid-token.",
+  "confidence": 92
+}

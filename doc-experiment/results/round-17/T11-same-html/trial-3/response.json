@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse both HTML fragments as BODY context fragments, then calls serialize() on each to obtain normalized HTML. The normalize() static method could also be used, but serialize() on individual processors is more explicit about the method used. Both inputs are checked for parse failures (null returns), and the normalized serialized HTML strings are compared for equality. This approach handles all the documented normalization behaviors: implied tag insertion, case normalization, character reference decoding, and attribute quoting standardization.",
+  "confidence": 78
+}

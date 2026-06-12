@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Tag_Processor for mechanical attribute mutation with byte preservation. Every method documented: next_tag(array('tag_name'=>'img')) matches the doc example verbatim (html-tag-processor.md line 58); add_class('wp-image') (line 2225); get_updated_html() (line 2291). Idiomatic add-then-get_updated_html flow, no return-value inspection needed (line 2247). Relies correctly on documented ASCII case-insensitive tag matching (line 952) for the uppercase-IMG case, and on next_tag skipping comments. 8/8 hidden cases pass including all edge cases (comment-ignored, unquoted attrs, incomplete tag at end). Explanation accurate."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical implementation to trial-1. Same correct processor choice and fully-documented method set (next_tag, add_class, get_updated_html). Explanation is accurate and adds the byte-precise-preservation claim, which the docs back at line 2299/328. 8/8 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same core implementation as trials 1/2 plus a docblock. All methods documented; correct processor; idiomatic walk-and-mutate pattern. Explanation correctly states add_class creates the class attribute when absent or appends otherwise (line 328 'preserve whitespace and class ordering'). 8/8 pass."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials passed all 8 hidden cases (24/24). The three candidates are essentially identical (trial-3 only adds a docblock), all using the canonical reference solution: instantiate WP_HTML_Tag_Processor, loop next_tag(array('tag_name'=>'img')), add_class('wp-image'), return get_updated_html().\n\nWhat the docs did well for this smoke test:\n- The next_tag query table (html-tag-processor.md lines 57-61) shows the exact 'tag_name'=>'img' form, so all subjects used the array-query idiom rather than guessing a method name. This single example directly drove the correct call.\n- ASCII case-insensitive matching is stated explicitly in the @type doc for $tag_name (line 952), so subjects correctly trusted lowercase 'img' to match the uppercase <IMG> case rather than hand-rolling case normalization. The explanations all cite this.\n- add_class()'s contract (lines 2243-2247, plus the whitespace/ordering-preservation note at line 328) gave subjects confidence that existing classes are preserved and appended-to, covering the existing-classes case without any manual class-string manipulation.\n- get_updated_html()'s byte-preservation guarantee (line 2299) reassured subjects that everything else is preserved verbatim, covering unquoted-attributes and the comment-ignored case.\n- The comment/incomplete-input edge cases passed implicitly because the Tag Processor never surfaces comment contents or an unfinished trailing tag as a matched tag; no subject had to reason about these explicitly and none broke them.\n\nNear-misses in explanations: none material. The explanations are accurate. The only mild imprecision: trials assert comments are 'never matched by next_tag as documented,' but the markdown does not contain an explicit statement that comment contents are skipped — subjects inferred this correctly from the parser model rather than from a cited passage. It happened to be right, but it was an inference, not a documented fact (see doc_gaps).",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor class overview / next_tag()",
+      "problem": "The docs never explicitly state that next_tag() only stops on real parsed tags and will NOT surface markup that appears inside HTML comments, CDATA, or other non-tag tokens. All three subjects asserted 'comments are skipped as documented,' but this is an inference, not a stated fact. A weaker subject could wrongly assume <img> text inside a comment is matched, or conversely add manual comment-skipping logic.",
+      "suggestion": "Add one sentence to the next_tag() description (or class overview) stating that next_tag() advances only to actual HTML tags and never matches tag-like text inside comments, CDATA sections, or script/style raw-text; such content is preserved untouched."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor class overview (incomplete / truncated input)",
+      "problem": "The 'incomplete-tag-at-end' behavior (a truncated trailing tag like '<img src=\"a.jpg' is left unmodified and returned byte-for-byte) is not documented. Subjects passed this case by luck of the implementation, not by understanding. There is no statement about how the processor treats input that ends mid-tag.",
+      "suggestion": "Add a short note that a tag which is not completely closed before the end of input is treated as incomplete: next_tag() will not match it and no updates are applied to it, so truncated trailing markup is returned unchanged. This generalizes to any truncated/streaming-fragment scenario."
+    },
+    {
+      "location": "next_tag() $tag_name @type note (line 952)",
+      "problem": "Tag-name matching is documented as 'ASCII case-insensitive,' but the docs do not make explicit that the value the user passes in the query may be any case (e.g. lowercase 'img') and will still match uppercase source tags — and that the original source casing is preserved in output. This worked here, but the relationship between query casing, match casing, and output casing is left implicit.",
+      "suggestion": "In the $tag_name doc, add a clause: the query value's case is irrelevant to matching, and the tag's original casing in the source document is preserved in the output (the processor does not normalize tag-name case)."
+    }
+  ]
+}

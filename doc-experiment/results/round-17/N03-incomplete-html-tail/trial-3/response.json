@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor, which is designed to tokenize HTML documents. Following the documented pattern for checking if input ends mid-token, I iterate through all tokens with next_token() to ensure the processor scans the entire document, then call paused_at_incomplete_token() to determine if the input was truncated in the middle of a token (like an unfinished tag, unterminated comment, or unclosed SCRIPT element).",
+  "confidence": 92
+}

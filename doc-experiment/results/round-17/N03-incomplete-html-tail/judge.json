@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Tag_Processor is the right tool for lexical token detection (the task is about token completeness, not tree structure). 30/30. No hallucinated API: both next_token() and paused_at_incomplete_token() exist in html-tag-processor.md (lines 962, 1015); execution.json shows zero _doing_it_wrong records. 30/30. Idiomatic: reproduces the canonical drain-the-token-stream loop (while next_token() {} then check) shown verbatim in the docs at lines 1031-1038. 25/25. Edge cases: delegates entirely to the API, which the docs correctly describe as pausing at incomplete tokens; trailing '<', unclosed-but-complete elements, and empty string are all handled by paused_at_incomplete_token() returning the right answer. 15/15. 9/9 cases pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to the reference. Correct processor (30/30), no hallucinated methods (30/30), idiomatic drain loop matching docs lines 1033-1038 (25/25), full edge-case coverage via API delegation (15/15). 9/9 pass, no _doing_it_wrong records. Explanation correctly characterizes paused_at_incomplete_token() as reporting state 'at the end' after exhausting the document, matching the doc note at line 1031."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical pattern. Correct processor (30/30), all methods documented (30/30), idiomatic walk-to-end then check (25/25), edge cases handled by the API (15/15). 9/9 pass. Explanation explicitly references 'the documented pattern for checking if input ends mid-token', confirming the subject lifted the worked example at html-tag-processor.md lines 1031-1038."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three are 9/9 with zero _doing_it_wrong records and no trigger_error entries. All three converged on the reference implementation byte-for-byte in substance (new WP_HTML_Tag_Processor, drain with `while ($p->next_token()) {}`, return `$p->paused_at_incomplete_token()`).\n\nWhy the docs succeeded here: html-tag-processor.md contains a near-verbatim worked example of the exact required pattern. The `paused_at_incomplete_token()` section (lines 1015-1047) does three things well that prevented every plausible mistake: (1) line 1031 explicitly warns \"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped\" — this directly heads off the common error of calling the method after a single next_tag()/next_token() rather than after exhausting the stream; (2) lines 1033-1038 give the complete drain-loop idiom verbatim; (3) the short example at lines 1026-1028 shows the truncated-attribute case (`<input type=\"text\" value=\"Th`) which generalizes to the cut-inside-attribute test case. The method's one-line summary (line 1021, \"ended in the middle of a syntax element, such as in the middle of a tag\") correctly frames the lexical-vs-structural distinction that the task's note about `<div>text` being \"structurally unclosed but lexically complete\" depends on — and the API itself returns false for that case, so subjects didn't even need to reason about it.\n\nNear-misses in the explanations: none materially wrong. Trial-1's explanation says \"When next_token() returns false, it either means the document is fully parsed or the processor paused at an incomplete token\" — this is a slight oversimplification (next_token() also returns false at clean end-of-input, and on a true empty-string / no-more-tokens condition that is NOT an incomplete token), but the subject correctly relied on paused_at_incomplete_token() to disambiguate rather than treating a false return from next_token() as itself signifying truncation, so the code is correct. All three subjects correctly understood that the loop must run to completion before the check is meaningful, which is the single load-bearing insight and the one the docs spell out at line 1031.\n\nNote: the trailing-lt-is-text case (\"ends with <\") and the unclosed-element-is-complete case (\"<div>unclosed element\") are the two that would trip a naive hand-rolled detector, but no subject hand-rolled detection — they all delegated to the API, which returns the correct answer. The docs deserve credit for making delegation the obvious path (the worked example IS the whole solution) rather than tempting subjects into manual string inspection.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (html-tag-processor.md, lines 1015-1047)",
+      "problem": "The doc demonstrates that the method returns true for truncated input but never states the converse boundary cases that distinguish 'lexically incomplete' from 'structurally unclosed'. A reader cannot tell from the docblock alone that a trailing lone '<' (treated as text), an unclosed-but-whole element like '<div>text', or an empty string all return false. The task's subjects got these right only because they delegated to the API blindly; a reader trying to reason about behavior or validate it has no documented anchor.",
+      "suggestion": "Add one or two lines clarifying that the method reports LEXICAL completeness of the final token only, not structural/tree completeness: e.g. 'Returns false when every token is whole even if elements remain unclosed (`<div>text` is complete; `<div class=\"` is not), and false for a trailing bare `<`, which is parsed as text, and for empty input.' This generalizes beyond this task and prevents readers from conflating the two notions of 'incomplete'."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_token() return-value semantics (html-tag-processor.md, ~line 962-997)",
+      "problem": "The docs do not explicitly state that next_token() returning false is ambiguous between 'reached clean end of input' and 'paused at an incomplete token'. Trial-1's explanation revealed this gap by asserting a false return 'either means the document is fully parsed or the processor paused at an incomplete token' — the subject inferred the disambiguation correctly, but the docblock for next_token() itself never says you must consult paused_at_incomplete_token() to tell the two apart.",
+      "suggestion": "In the next_token() Returns section, add a sentence: 'A false return does not by itself indicate truncation — it is returned both at a clean end of input and when the input ends mid-token. Call paused_at_incomplete_token() to distinguish the two.' This cross-link makes the relationship explicit for any failure-handling code path."
+    }
+  ]
+}

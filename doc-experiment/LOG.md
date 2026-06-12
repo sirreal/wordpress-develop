@@ -2,6 +2,21 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 17 — Haiku, hold round (no edits): campaign-best score
+
+**Train 98.93 — the highest of the campaign, with ZERO doc changes.**
+44/45 trials passed every hidden case (one T08 7/8). The hold round
+measures the noise floor: the documentation in its current state
+sustains ~98–99 on pure re-sampling. Judge gap lists are reduced to
+re-statements of already-documented facts in alternate locations.
+
+Campaign stopped here at Jon's instruction (goal cleared after the
+session-limit pause). Final state: 17 evaluated rounds, 24 doc
+hypothesis commits, all train-driven, all execution-verified.
+Held-out trajectory across checkpoints: 87.38 → 88.69 → 88.79 →
+91.04 → 90.79 — improvement achieved purely through generalization,
+never by editing for held-out failures.
+
 ## Round 16 — Haiku, three concepts at 100; entering hold-round protocol
 
 **Train 97.78.** Attributes/classes/failure-handling concepts all at

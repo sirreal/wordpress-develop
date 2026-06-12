@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and locate the first H1 element. It records the depth when the H1 is found, then walks through all tokens at or deeper than that depth, accumulating text from all #text tokens. The get_modifiable_text() method returns already-decoded text, as confirmed by the documentation. This pattern matches the exact example provided in the HTML Processor documentation for extracting element text content.",
+  "confidence": 92
+}

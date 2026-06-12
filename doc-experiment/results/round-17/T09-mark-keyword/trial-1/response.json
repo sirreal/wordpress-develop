@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each text node (#text token type), it checks if the decoded text contains the keyword using a case-sensitive substring match. If found, the entire text node is wrapped in `<mark>` tags by serializing it within the mark wrapper. All other tokens are serialized normally. The result is normalized HTML output with mark elements wrapping matching text nodes.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance with the input HTML, then uses next_tag() with a query to find all IMG tags (tag name matching is ASCII case-insensitive per the documentation). For each matched IMG tag, it calls add_class() to add the \"wp-image\" class. Tags inside comments are never matched by next_tag() as documented. Finally, get_updated_html() returns the document with all changes applied. The documentation states that add_class() is safe to call without pre-checking if the tag exists, and it preserves existing classes.",
+  "confidence": 92
+}
