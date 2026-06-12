@@ -5321,6 +5321,19 @@ assert.deepEqual(tableRowIgnoredEndFosterTextProcessor.get_breadcrumbs(), ["HTML
 assert.equal(tableRowIgnoredEndFosterTextProcessor.get_last_error(), null);
 tableRowIgnoredEndFosterTextProcessor.destroy();
 
+const tableCellEndFosterTextProcessor = WP_HTML_Processor.create_full_parser("<table><td></tbody>A");
+assert.equal(tableCellEndFosterTextProcessor.next_tag("body"), true);
+assert.equal(tableCellEndFosterTextProcessor.next_token(), true);
+assert.equal(tableCellEndFosterTextProcessor.get_token_type(), "#text");
+assert.equal(tableCellEndFosterTextProcessor.get_modifiable_text(), "A");
+assert.deepEqual(tableCellEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(tableCellEndFosterTextProcessor.next_tag("table"), true);
+assert.deepEqual(tableCellEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableCellEndFosterTextProcessor.next_tag("td"), true);
+assert.deepEqual(tableCellEndFosterTextProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(tableCellEndFosterTextProcessor.get_last_error(), null);
+tableCellEndFosterTextProcessor.destroy();
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
