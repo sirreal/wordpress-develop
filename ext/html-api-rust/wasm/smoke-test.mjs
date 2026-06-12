@@ -2565,16 +2565,25 @@ assert.deepEqual(fullParserFramesetNoframesTokens, [
 ]);
 fullParserFramesetNoframes.destroy();
 
-for (const [html, message] of [
-	["<frameset>text", "Non-whitespace characters cannot be handled in frameset."],
-	["<frameset></frameset>text", "Non-whitespace characters cannot be handled in after frameset"],
-	["<frameset></frameset></html>text", "Non-whitespace characters cannot be handled in after after frameset."],
+for (const [html, expectedTextTokens] of [
+	["<frameset>text", []],
+	["<frameset>\nfoo", [["\n", ["HTML", "FRAMESET", "#text"]]]],
+	["<frameset></frameset> te st", [[" ", ["HTML", "#text"]], [" ", ["HTML", "#text"]]]],
+	["<frameset></frameset></html>text", []],
 ]) {
 	const framesetTextProcessor = WP_HTML_Processor.create_full_parser(html);
+	const framesetTextTokens = [];
 	while (framesetTextProcessor.next_token()) {
+		if (framesetTextProcessor.get_token_type() === "#text") {
+			framesetTextTokens.push([
+				framesetTextProcessor.get_modifiable_text(),
+				framesetTextProcessor.get_breadcrumbs(),
+			]);
+		}
 	}
-	assert.equal(framesetTextProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(framesetTextProcessor.get_unsupported_exception().message, message);
+	assert.equal(framesetTextProcessor.get_last_error(), null);
+	assert.equal(framesetTextProcessor.get_unsupported_exception(), null);
+	assert.deepEqual(framesetTextTokens, expectedTextTokens);
 	framesetTextProcessor.destroy();
 }
 

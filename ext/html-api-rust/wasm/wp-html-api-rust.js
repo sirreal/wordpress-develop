@@ -2615,7 +2615,10 @@ export function createHtmlApi(wasm) {
 
 		set_modifiable_text(text) {
 			if (this.#isSyntheticToken()) {
-				if (this.current_synthetic_token.tokenType !== "#text") {
+				if (
+					this.current_synthetic_token.tokenType !== "#text" ||
+					this.current_synthetic_token.readOnly
+				) {
 					return false;
 				}
 
@@ -4282,8 +4285,7 @@ export function createHtmlApi(wasm) {
 							if (isWhitespaceText) {
 								return false;
 							}
-							this.#bailUnsupported("Non-whitespace characters cannot be handled in frameset.");
-							return true;
+							return this.#filterFramesetTextToken();
 						}
 
 						if (
@@ -4336,8 +4338,7 @@ export function createHtmlApi(wasm) {
 							if (isWhitespaceText) {
 								return false;
 							}
-							this.#bailUnsupported("Non-whitespace characters cannot be handled in after frameset");
-							return true;
+							return this.#filterFramesetTextToken();
 						}
 
 						if (
@@ -4399,8 +4400,7 @@ export function createHtmlApi(wasm) {
 							if (isWhitespaceText) {
 								return false;
 							}
-							this.#bailUnsupported("Non-whitespace characters cannot be handled in after after frameset.");
-							return true;
+							return this.#filterFramesetTextToken();
 						}
 
 						if (tokenType === "#tag" && !isCloser && tagName === "NOFRAMES") {
@@ -4414,6 +4414,35 @@ export function createHtmlApi(wasm) {
 						return false;
 				}
 			}
+		}
+
+		#filterFramesetTextToken() {
+			const text = this.get_modifiable_text() ?? "";
+			let whitespace = "";
+			for (let i = 0; i < text.length; i += 1) {
+				if (isHtmlWhitespaceCode(text.charCodeAt(i))) {
+					whitespace += text[i];
+				}
+			}
+
+			if (whitespace === "") {
+				this.skip_current_token = true;
+				this.breadcrumbs = this.#breadcrumbStack();
+				return true;
+			}
+
+			this.current_synthetic_token = {
+				tokenType: "#text",
+				tokenName: "#text",
+				modifiableText: whitespace,
+				readOnly: true,
+			};
+			this.parser_state = STATE_TEXT_NODE;
+			this.text_node_classification = WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE;
+			this.current_token_namespace = "html";
+			this.breadcrumbs = this.#breadcrumbStack("#text");
+			this.skip_current_token = false;
+			return true;
 		}
 
 		#queueVirtualPush(tagName, namespaceName = "html", attributes = [], integrationNodeType = null) {
