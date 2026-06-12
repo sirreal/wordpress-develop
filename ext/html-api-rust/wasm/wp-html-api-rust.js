@@ -209,6 +209,7 @@ const ACTIVE_FORMATTING_RECONSTRUCTING_START_TAGS = new Set([
 ]);
 const ACTIVE_FORMATTING_MARKER_ELEMENTS = new Set(["APPLET", "MARQUEE", "OBJECT"]);
 const FORMATTING_ELEMENT_SPECIAL_PRECLOSURE_START_TAGS = new Set(["BUTTON"]);
+const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["DIV"]);
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
@@ -3707,6 +3708,7 @@ export function createHtmlApi(wasm) {
 				(
 					this.#queueNestedAnchorBlockAdoptionPreclosure(tagName) ||
 					this.#queueFormattingElementSpecialStartPreclosure(tagName) ||
+					this.#queueFormattingElementAncestorSpecialStartPreclosure(tagName) ||
 					this.#queueParagraphAdoptionFormattingPreclosure(tagName) ||
 					this.#queueVirtualPreclosuresForStartTag(tagName) ||
 					this.#queueVirtualOpenersForStartTag(tagName)
@@ -4385,6 +4387,49 @@ export function createHtmlApi(wasm) {
 			}
 
 			return true;
+		}
+
+		#queueFormattingElementAncestorSpecialStartPreclosure(tagName) {
+			if (!FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS.has(tagName)) {
+				return false;
+			}
+
+			const topIndex = this.open_elements.length - 1;
+			if (
+				topIndex < 1 ||
+				this.open_element_namespaces[topIndex] !== "html" ||
+				FORMATTING_ELEMENTS.has(this.open_elements[topIndex])
+			) {
+				return false;
+			}
+
+			for (let i = topIndex - 1; i >= 0; i -= 1) {
+				if (this.open_element_namespaces[i] !== "html") {
+					return false;
+				}
+
+				if (!FORMATTING_ELEMENTS.has(this.open_elements[i])) {
+					if (isSpecialBoundary(this.open_elements[i], this.open_element_namespaces[i])) {
+						return false;
+					}
+					continue;
+				}
+
+				const formattingTagName = this.open_elements[i];
+				if (
+					this.#lastActiveFormattingElementIndex(formattingTagName) === -1 ||
+					hasSpecialBoundaryAfter(this.open_elements, this.open_element_namespaces, i) ||
+					!this.#formattingEndTagPrecedesElementClose(formattingTagName, tagName)
+				) {
+					return false;
+				}
+
+				this.#markSpecialStartAdoptionPreclosedFormattingElement(formattingTagName, "html", tagName);
+				this.#queueVirtualPopsFrom(i);
+				return true;
+			}
+
+			return false;
 		}
 
 		#queueFormattingElementSpecialStartPreclosure(tagName) {
