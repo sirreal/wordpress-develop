@@ -3053,6 +3053,10 @@ export function createHtmlApi(wasm) {
 				if (tagName === "P" && closingNamespace === "html") {
 					existingIndex = this.#findOpenElementBeforeBoundary("P", BUTTON_SCOPE_BOUNDARIES);
 					if (existingIndex === -1) {
+						if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+							this.#bailUnsupported("Foster parenting is not supported.");
+							return;
+						}
 						this.current_token_namespace = this.current_namespace;
 						this.breadcrumbs = this.#breadcrumbStack();
 						this.virtual_tokens.push(
@@ -3212,6 +3216,10 @@ export function createHtmlApi(wasm) {
 					MODELED_SCOPED_END_TAGS.has(tagName) &&
 					this.#hasHtmlScopeBoundaryAfter(existingIndex, DEFAULT_SCOPE_BOUNDARIES)
 				) {
+					if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+						this.#bailUnsupported("Foster parenting is not supported.");
+						return;
+					}
 					this.current_token_namespace = this.current_namespace;
 					this.breadcrumbs = this.#breadcrumbStack();
 					this.skip_current_token = true;
@@ -3231,6 +3239,10 @@ export function createHtmlApi(wasm) {
 						existingIndex,
 					)
 				) {
+					if (this.#shouldBailUnsupportedTableFosterParenting(tagName, true)) {
+						this.#bailUnsupported("Foster parenting is not supported.");
+						return;
+					}
 					this.#queueVirtualPopsFrom(existingIndex + 1);
 					this.pending_real_token = true;
 					this.pending_real_parser_state = this.parser_state;

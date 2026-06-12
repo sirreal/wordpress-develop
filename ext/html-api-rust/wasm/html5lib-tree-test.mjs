@@ -53,7 +53,6 @@ const skippedTests = new Set([
 	"tests2/line0686",
 	"tests2/line0697",
 	"tests2/line0709",
-	"tests20/line0536",
 	"tests26/line0001",
 	"tests26/line0043",
 	"tests26/line0106",

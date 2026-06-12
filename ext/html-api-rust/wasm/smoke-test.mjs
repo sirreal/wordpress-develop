@@ -3689,6 +3689,14 @@ assert.equal(tableTextProcessor.get_unsupported_exception().message, "Foster par
 tableTextProcessor.destroy();
 assert.equal(WP_HTML_Processor.normalize("<table>text<tr><td>cell"), null);
 
+const tableEndParagraphProcessor = WP_HTML_Processor.create_full_parser("<p><table></p>");
+while (tableEndParagraphProcessor.next_token()) {
+}
+assert.equal(tableEndParagraphProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
+assert.equal(tableEndParagraphProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
+tableEndParagraphProcessor.destroy();
+assert.equal(WP_HTML_Processor.normalize("<p><table></p>"), null);
+
 const colgroupTextProcessor = WP_HTML_Processor.create_fragment("<table><colgroup> foo</colgroup></table>");
 while (colgroupTextProcessor.next_token()) {
 }
