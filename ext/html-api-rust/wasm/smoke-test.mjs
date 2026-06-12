@@ -3790,6 +3790,20 @@ assert.equal(fullParserFramesetAfterNull.get_last_error(), null);
 assert.equal(fullParserFramesetAfterNull.get_unsupported_exception(), null);
 fullParserFramesetAfterNull.destroy();
 
+const fullParserFramesetAfterHiddenInput = WP_HTML_Processor.create_full_parser('<input type="hidden"><frameset>');
+const fullParserFramesetAfterHiddenInputTokens = [];
+while (fullParserFramesetAfterHiddenInput.next_token()) {
+	if (fullParserFramesetAfterHiddenInput.get_token_type() === "#tag") {
+		fullParserFramesetAfterHiddenInputTokens.push(
+			`${fullParserFramesetAfterHiddenInput.is_tag_closer() ? "-" : "+"}${fullParserFramesetAfterHiddenInput.get_tag()}`,
+		);
+	}
+}
+assert.deepEqual(fullParserFramesetAfterHiddenInputTokens, ["+HTML", "+HEAD", "-HEAD", "+FRAMESET", "-FRAMESET", "-HTML"]);
+assert.equal(fullParserFramesetAfterHiddenInput.get_last_error(), null);
+assert.equal(fullParserFramesetAfterHiddenInput.get_unsupported_exception(), null);
+fullParserFramesetAfterHiddenInput.destroy();
+
 const fullParserFramesetNoframes = WP_HTML_Processor.create_full_parser("<frameset><noframes>x</noframes><frame></frameset>");
 const fullParserFramesetNoframesTokens = [];
 while (fullParserFramesetNoframes.next_token()) {
@@ -3853,7 +3867,6 @@ for (const html of [
 }
 
 for (const html of [
-	'<input type="hidden"><frameset>',
 	"<div><frameset>",
 	"<svg>\0</svg><frameset>",
 	"<svg> </svg><frameset>",

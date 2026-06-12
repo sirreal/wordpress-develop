@@ -4415,6 +4415,11 @@ export function createHtmlApi(wasm) {
 							return false;
 						}
 
+						if (tokenType === "#tag" && !isCloser && this.#hiddenInputPrecedesFrameset(tagName)) {
+							this.#ignoreCurrentToken();
+							return true;
+						}
+
 						if (tokenType === "#tag" && !isCloser && tagName === "TEMPLATE") {
 							this.full_parser_insertion_mode = "in_head";
 							this.#silentlyReopenFullParserElement("HEAD");
@@ -5311,6 +5316,31 @@ export function createHtmlApi(wasm) {
 
 			const typeAttribute = this.get_attribute("type");
 			return typeof typeAttribute === "string" && typeAttribute.toLowerCase() === "hidden";
+		}
+
+		#hiddenInputPrecedesFrameset(tagName) {
+			if (!this.#isHiddenInputStartTag(tagName)) {
+				return false;
+			}
+
+			const span = this.#currentRealTokenSpan();
+			if (span === null) {
+				return false;
+			}
+
+			const afterToken = span.start + span.length;
+			const nextTag = runtime.scanNextTag(this.html, afterToken);
+			if (
+				nextTag === false ||
+				nextTag.is_closing ||
+				nextTag.tag_name !== "FRAMESET"
+			) {
+				return false;
+			}
+
+			return this.html.slice(afterToken, nextTag.tag_start).split("").every((char) => (
+				isHtmlWhitespaceCode(char.charCodeAt(0))
+			));
 		}
 
 		#startTagClearsFramesetOk(tagName) {
