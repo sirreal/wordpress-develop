@@ -1712,17 +1712,24 @@ const coercedAttributeTags = new WP_HTML_Tag_Processor('<div 1="one" class="1 0"
 assert.equal(coercedAttributeTags.next_tag("div"), true);
 assert.equal(coercedAttributeTags.get_attribute(true), "one");
 assert.equal(coercedAttributeTags.get_attribute(false), null);
+assert.equal(coercedAttributeTags.get_attribute(null), null);
 assert.deepEqual(coercedAttributeTags.get_attribute_names_with_prefix(true), ["1"]);
 assert.deepEqual(coercedAttributeTags.get_attribute_names_with_prefix(false), ["1", "class", "data-", "data-1"]);
+assert.deepEqual(coercedAttributeTags.get_attribute_names_with_prefix(null), ["1", "class", "data-", "data-1"]);
 assert.equal(coercedAttributeTags.has_class(true), true);
 assert.equal(coercedAttributeTags.has_class(false), false);
+assert.equal(coercedAttributeTags.has_class(null), false);
 assert.equal(coercedAttributeTags.add_class(true), true);
+assert.equal(coercedAttributeTags.add_class(null), true);
 assert.equal(coercedAttributeTags.remove_class(false), true);
+assert.equal(coercedAttributeTags.remove_class(null), true);
 assert.equal(coercedAttributeTags.set_attribute(false, "v"), false);
+assert.equal(coercedAttributeTags.set_attribute(null, "v"), false);
 assert.equal(coercedAttributeTags.set_attribute("data-num", 123), true);
 assert.equal(coercedAttributeTags.get_attribute("data-num"), "123");
 assert.equal(coercedAttributeTags.set_attribute("data-null", null), false);
 assert.equal(coercedAttributeTags.get_attribute("data-null"), null);
+assert.equal(coercedAttributeTags.remove_attribute(null), false);
 assert.throws(
 	() => coercedAttributeTags.get_attribute({ name: "class" }),
 	TypeError,

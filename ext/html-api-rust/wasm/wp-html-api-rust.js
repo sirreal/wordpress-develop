@@ -1664,7 +1664,7 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			const attributeName = phpStringParameterCoerce(name, "name");
+			const attributeName = phpInternalStringCoerce(name, "name");
 			return runtime.withEncoded(attributeName, ({ ptr, len }) => runtime.withOutSlice((out) => {
 				const result = wasm.wp_html_api_rust_tag_processor_get_attribute(this.pointer, ptr, len, out);
 				if (result === 0) {
@@ -1683,7 +1683,7 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
-			const attributePrefix = phpStringParameterCoerce(prefix, "prefix");
+			const attributePrefix = phpInternalStringCoerce(prefix, "prefix");
 			return runtime.withEncoded(attributePrefix, ({ ptr, len }) => runtime.withOutSlice((out) => {
 				const result = wasm.wp_html_api_rust_tag_processor_get_attribute_names_with_prefix(this.pointer, ptr, len, out);
 				if (result === 0) {
@@ -1700,7 +1700,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const attributeName = phpStringParameterCoerce(name, "name");
+			const attributeName = phpInternalStringCoerce(name, "name");
 			if (!isValidAttributeName(attributeName)) {
 				return false;
 			}
@@ -1737,7 +1737,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const attributeName = phpStringParameterCoerce(name, "name");
+			const attributeName = phpInternalStringCoerce(name, "name");
 			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_attribute(this.pointer, ptr, len)
 			)));
@@ -1749,7 +1749,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const normalizedClassName = phpStringParameterCoerce(className, "class_name");
+			const normalizedClassName = phpInternalStringCoerce(className, "class_name");
 			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_add_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
@@ -1761,7 +1761,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const normalizedClassName = phpStringParameterCoerce(className, "class_name");
+			const normalizedClassName = phpInternalStringCoerce(className, "class_name");
 			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_class(this.pointer, ptr, len, this.#isQuirksMode())
 			)));
@@ -1777,7 +1777,7 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			const wantedClass = phpStringParameterCoerce(className, "wanted_class");
+			const wantedClass = phpInternalStringCoerce(className, "wanted_class");
 			return runtime.withEncoded(wantedClass, ({ ptr, len }) => {
 				const result = wasm.wp_html_api_rust_tag_processor_has_class(this.pointer, ptr, len, this.#isQuirksMode());
 				return result === 0 ? null : result === 2;
@@ -3978,7 +3978,7 @@ export function createHtmlApi(wasm) {
 
 		#getVirtualAttribute(name) {
 			const attributes = this.current_virtual?.attributes ?? [];
-			const wantedName = phpStringParameterCoerce(name, "name");
+			const wantedName = phpInternalStringCoerce(name, "name");
 			const normalizedWantedName = this.current_token_namespace === "html" ? asciiLower(wantedName) : wantedName;
 
 			for (const attribute of attributes) {
@@ -3993,7 +3993,7 @@ export function createHtmlApi(wasm) {
 
 		#getVirtualAttributeNamesWithPrefix(prefix) {
 			const attributes = this.current_virtual?.attributes ?? [];
-			const wantedPrefix = phpStringParameterCoerce(prefix, "prefix");
+			const wantedPrefix = phpInternalStringCoerce(prefix, "prefix");
 			const normalizedWantedPrefix = this.current_token_namespace === "html" ? asciiLower(wantedPrefix) : wantedPrefix;
 			const names = [];
 
@@ -4008,7 +4008,7 @@ export function createHtmlApi(wasm) {
 		}
 
 		#virtualHasClass(className) {
-			const wantedClass = phpStringParameterCoerce(className, "wanted_class");
+			const wantedClass = phpInternalStringCoerce(className, "wanted_class");
 			const comparableClassName = this.#comparableClassName(wantedClass.replaceAll("\0", "\uFFFD"));
 			return this.#virtualClassEntries().some((entry) => entry.comparable === comparableClassName);
 		}
