@@ -4365,6 +4365,41 @@ assert.equal(quirksClasses.remove_class("upPer"), true);
 assert.equal(quirksClasses.get_updated_html(), "<span >");
 quirksClasses.destroy();
 
+for (const [className, expectedHtml] of [
+	[null, '<span class="0 1 ONE ">'],
+	[false, '<span class="0 1 ONE">'],
+	[1, '<span class="0 1 ONE">'],
+	["1", '<span class="0 1 ONE">'],
+	[1.5, '<span class="0 1 ONE">'],
+	["1.5", '<span class="0 1 ONE 1.5">'],
+	["01", '<span class="0 1 ONE 01">'],
+	["one", '<span class="0 1 ONE">'],
+]) {
+	const quirksAddClassKey = WP_HTML_Processor.create_full_parser('<span class="0 1 ONE">');
+	assert.equal(quirksAddClassKey.next_tag("span"), true);
+	assert.equal(quirksAddClassKey.add_class(className), true);
+	assert.equal(quirksAddClassKey.get_updated_html(), expectedHtml);
+	quirksAddClassKey.destroy();
+}
+
+for (const [className, expectedHtml] of [
+	[null, '<span class="0 1 ONE">'],
+	[false, '<span class="1 ONE">'],
+	[1, '<span class="0 ONE">'],
+	["1", '<span class="0 ONE">'],
+	[1.5, '<span class="0 ONE">'],
+	["1.5", '<span class="0 1 ONE">'],
+	["01", '<span class="0 1 ONE">'],
+	["one", '<span class="0 1">'],
+	["ONE", '<span class="0 1">'],
+]) {
+	const quirksRemoveClassKey = WP_HTML_Processor.create_full_parser('<span class="0 1 ONE">');
+	assert.equal(quirksRemoveClassKey.next_tag("span"), true);
+	assert.equal(quirksRemoveClassKey.remove_class(className), true);
+	assert.equal(quirksRemoveClassKey.get_updated_html(), expectedHtml);
+	quirksRemoveClassKey.destroy();
+}
+
 const quirksClassList = WP_HTML_Processor.create_full_parser("<span class='A A a B b \u00C9 \u0045\u0301 \u00C9 é \u0065\u0301'>");
 assert.equal(quirksClassList.next_tag("span"), true);
 assert.deepEqual(quirksClassList.class_list(), ["a", "b", "É", "e\u0301", "é"]);
