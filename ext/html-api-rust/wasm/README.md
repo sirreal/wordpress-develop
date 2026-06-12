@@ -66,8 +66,10 @@ implemented by the Rust/WASM core. The processor layer adds JavaScript-side
 tree-state tracking for common HTML breadcrumbs, namespace handling, implied
 closures, serialization, and unsupported-parser diagnostics.
 
-Full HTML5 tree-construction parity is still incomplete. Known unsupported
-areas include foster parenting and some adoption-agency reparenting cases.
+The html5lib tree-construction harness runs with zero unsupported cases, aside
+from the known WordPress duplicate shell-attribute skips. Some direct fragment
+and normalization paths still deliberately surface `WP_HTML_Unsupported_Exception`
+diagnostics for guarded parser states.
 
 ## Testing
 

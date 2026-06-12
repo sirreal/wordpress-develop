@@ -62,7 +62,10 @@ processor.destroy();
 `WebAssembly.Module`, `WebAssembly.Instance`, raw `WebAssembly.Exports`, or an
 instantiated source object returned by `WebAssembly.instantiate()`.
 
-The processor layer adds JavaScript-side open-element stack tracking for common
-HTML breadcrumbs, breadcrumb queries, void-element handling, namespaces, scoped
-end tags, frameset handling, and simple implied closures. Full HTML5
-tree-construction behavioral parity remains incomplete.
+The processor layer adds JavaScript-side open-element stack tracking for HTML
+breadcrumbs, breadcrumb queries, void-element handling, namespaces, scoped end
+tags, frameset handling, implied closures, foster parenting, and adoption-agency
+reconstruction. The html5lib tree-construction harness runs with zero
+unsupported cases, aside from the known WordPress duplicate shell-attribute
+skips. Some direct fragment and normalization paths still deliberately surface
+`WP_HTML_Unsupported_Exception` diagnostics for guarded parser states.
