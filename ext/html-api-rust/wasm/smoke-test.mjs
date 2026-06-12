@@ -5497,13 +5497,27 @@ for (const html of [
 const tableForeignCellFosterParentingProcessor = WP_HTML_Processor.create_full_parser(
 	"<body><table><tr><td><svg><td><foreignObject><span></td>Foo",
 );
-while (tableForeignCellFosterParentingProcessor.next_token()) {
-}
-assert.equal(tableForeignCellFosterParentingProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-assert.equal(
-	tableForeignCellFosterParentingProcessor.get_unsupported_exception().message,
-	"Foster parenting is not supported.",
-);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("body"), true);
+assert.equal(tableForeignCellFosterParentingProcessor.next_token(), true);
+assert.equal(tableForeignCellFosterParentingProcessor.get_token_type(), "#text");
+assert.equal(tableForeignCellFosterParentingProcessor.get_modifiable_text(), "Foo");
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "#text"]);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("table"), true);
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("svg"), true);
+assert.equal(tableForeignCellFosterParentingProcessor.get_namespace(), "svg");
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG"]);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("td"), true);
+assert.equal(tableForeignCellFosterParentingProcessor.get_namespace(), "svg");
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG", "TD"]);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("foreignobject"), true);
+assert.equal(tableForeignCellFosterParentingProcessor.get_namespace(), "svg");
+assert.equal(tableForeignCellFosterParentingProcessor.get_qualified_tag_name(), "foreignObject");
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG", "TD", "FOREIGNOBJECT"]);
+assert.equal(tableForeignCellFosterParentingProcessor.next_tag("span"), true);
+assert.equal(tableForeignCellFosterParentingProcessor.get_namespace(), "html");
+assert.deepEqual(tableForeignCellFosterParentingProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD", "SVG", "TD", "FOREIGNOBJECT", "SPAN"]);
+assert.equal(tableForeignCellFosterParentingProcessor.get_last_error(), null);
 tableForeignCellFosterParentingProcessor.destroy();
 
 const tableHiddenInputProcessor = WP_HTML_Processor.create_fragment("<table><input type=hidden><tr><td>cell");
