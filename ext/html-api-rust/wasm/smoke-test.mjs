@@ -1654,7 +1654,9 @@ assert.equal(WP_HTML_Processor.create_fragment(null), null);
 assert.equal(WP_HTML_Processor.create_fragment("", "<body>", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.create_fragment("", ""), null);
 assert.equal(WP_HTML_Processor.create_fragment("", "<br>"), null);
-assert.equal(WP_HTML_Processor.create_fragment("", "<textarea>"), null);
+const emptyTextareaFragment = WP_HTML_Processor.create_fragment("", "<textarea>");
+assert.notEqual(emptyTextareaFragment, null);
+emptyTextareaFragment.destroy();
 assert.equal(WP_HTML_Processor.create_full_parser(null), null);
 assert.equal(WP_HTML_Processor.create_full_parser("", "ISO-8859-1"), null);
 assert.equal(WP_HTML_Processor.normalize(null), null);
@@ -1718,12 +1720,21 @@ for (const [html, context, expected] of [
 	["<span><body>", "<div>", "<span></span>"],
 	["<frameset><span>", "<div>", "<span></span>"],
 	["<span><frameset>", "<div>", "<span></span>"],
+	[
+		"textarea content with <em>pseudo</em> <foo>markup",
+		"<textarea>",
+		"textarea content with &lt;em&gt;pseudo&lt;/em&gt; &lt;foo&gt;markup",
+	],
 	["setting html's innerHTML", "<html>", "<head></head><body>setting html&apos;s innerHTML</body>"],
 	["<body><span>", "<html>", "<head></head><body><span></span></body>"],
 	["<frameset><span>", "<html>", "<head></head><frameset></frameset>"],
 	["</html><!--abc-->", "<html>", "<head></head><body></body><!--abc-->"],
 	["", "<html>", "<head></head><body></body>"],
 	["<title>setting head's innerHTML</title>", "<head>", "<title>setting head&apos;s innerHTML</title>"],
+	["direct <title> content", "<title>", "direct &lt;title&gt; content"],
+	["this is &#x0043;DATA inside a <style> element", "<style>", "this is &#x0043;DATA inside a <style> element"],
+	["<!-- inside </script> -->", "<script>", "<!-- inside </script> -->"],
+	["</plaintext>", "<plaintext>", "</plaintext>"],
 	["</frameset><frame>", "<frameset>", "<frame>"],
 	["<td>cell", "<tr>", "<td>cell</td>"],
 	["<tr><td>cell", "<table>", "<tbody><tr><td>cell</td></tr></tbody>"],

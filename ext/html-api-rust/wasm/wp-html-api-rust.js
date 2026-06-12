@@ -77,6 +77,15 @@ const SPECIAL_ATOMIC_ELEMENTS = new Set([
 	"TITLE",
 	"XMP",
 ]);
+const RAW_TEXT_FRAGMENT_CONTEXT_ELEMENTS = new Set([
+	"PLAINTEXT",
+	"SCRIPT",
+	"STYLE",
+	"TEXTAREA",
+	"TITLE",
+]);
+const RCDATA_FRAGMENT_CONTEXT_ELEMENTS = new Set(["TEXTAREA", "TITLE"]);
+const RAW_TEXT_FRAGMENT_CONTEXT_END_TAGS = "</textarea></title></script></style>";
 
 const HEAD_CONTENT_ELEMENTS = new Set([
 	"BASE",
@@ -2003,6 +2012,8 @@ export function createHtmlApi(wasm) {
 			this.pending_real_parser_state = null;
 			this.skip_current_token = false;
 			this.is_html_fragment_context = Boolean(options.htmlFragmentContext);
+			this.raw_text_fragment_context = options.rawTextFragmentContext ?? null;
+			this.raw_text_fragment_consumed = false;
 			this.is_full_parser = Boolean(options.fullParser || this.is_html_fragment_context);
 			this.encoding_confidence = options.encodingConfidence ?? (this.is_full_parser ? "tentative" : "irrelevant");
 			this.full_parser_insertion_mode = this.is_html_fragment_context
@@ -2041,8 +2052,19 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			const plaintextContextNode = WP_HTML_Processor.#plaintextFragmentContextNode(context);
+			if (plaintextContextNode !== null) {
+				return new this(html, {
+					compatMode: WP_HTML_Tag_Processor.NO_QUIRKS_MODE,
+					contextNode: plaintextContextNode,
+					contextNamespace: "html",
+					fullParser: false,
+					rawTextFragmentContext: plaintextContextNode,
+				});
+			}
+
 			// Context discovery must preserve otherwise ignored table-context tags like TR and TD.
-			const contextProcessor = new this(`<!DOCTYPE html>${context}`, {
+			const contextProcessor = new this(`<!DOCTYPE html>${context}${RAW_TEXT_FRAGMENT_CONTEXT_END_TAGS}`, {
 				fullParser: true,
 				encodingConfidence: "certain",
 				preserveInBodyIgnoredStartTags: true,
@@ -2066,6 +2088,20 @@ export function createHtmlApi(wasm) {
 			contextProcessor.destroy();
 			if (contextNode === null || contextNamespaceName === null) {
 				return null;
+			}
+
+			if (
+				contextNamespaceName === "html" &&
+				RAW_TEXT_FRAGMENT_CONTEXT_ELEMENTS.has(contextNode)
+			) {
+				return new this(html, {
+					compatMode,
+					contextNode,
+					contextNamespace: contextNamespaceName,
+					contextIntegrationNodeType,
+					fullParser: false,
+					rawTextFragmentContext: contextNode,
+				});
 			}
 
 			if (
@@ -2109,6 +2145,20 @@ export function createHtmlApi(wasm) {
 				fullParser: true,
 				encodingConfidence: "certain",
 			});
+		}
+
+		static #plaintextFragmentContextNode(context) {
+			const contextProcessor = new WP_HTML_Tag_Processor(context);
+			let contextNode = null;
+			let startTagCount = 0;
+			while (contextProcessor.next_tag()) {
+				if (!contextProcessor.is_tag_closer()) {
+					startTagCount += 1;
+					contextNode = normalizeTagNameForNamespace(contextProcessor.get_tag(), "html");
+				}
+			}
+			contextProcessor.destroy();
+			return startTagCount === 1 && contextNode === "PLAINTEXT" ? contextNode : null;
 		}
 
 		static normalize(html) {
@@ -2277,6 +2327,15 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
+			if (this.#consumeRawTextFragmentToken()) {
+				return true;
+			}
+
+			if (this.raw_text_fragment_context !== null) {
+				this.breadcrumbs = [...this.open_elements];
+				return false;
+			}
+
 			this.current_virtual = null;
 			while (super.next_token()) {
 				this.skip_current_token = false;
@@ -2429,18 +2488,30 @@ export function createHtmlApi(wasm) {
 		}
 
 		paused_at_incomplete_token() {
-			return this.synthetic_eof_comment_consumed ? false : super.paused_at_incomplete_token();
+			return this.synthetic_eof_comment_consumed || this.raw_text_fragment_context !== null
+				? false
+				: super.paused_at_incomplete_token();
 		}
 
 		get_comment_type() {
 			if (this.is_virtual()) {
 				return null;
 			}
-			return this.#isSyntheticToken() ? WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT : super.get_comment_type();
+			if (this.#isSyntheticToken()) {
+				return this.current_synthetic_token.tokenType === "#comment"
+					? WP_HTML_Tag_Processor.COMMENT_AS_HTML_COMMENT
+					: null;
+			}
+			return super.get_comment_type();
 		}
 
 		get_full_comment_text() {
-			return this.#isSyntheticToken() ? this.current_synthetic_token.commentText : super.get_full_comment_text();
+			if (this.#isSyntheticToken()) {
+				return this.current_synthetic_token.tokenType === "#comment"
+					? this.current_synthetic_token.commentText
+					: null;
+			}
+			return super.get_full_comment_text();
 		}
 
 		get_doctype_info() {
@@ -2455,7 +2526,9 @@ export function createHtmlApi(wasm) {
 			if (this.is_virtual()) {
 				return "";
 			}
-			return this.#isSyntheticToken() ? this.current_synthetic_token.commentText : super.get_modifiable_text();
+			return this.#isSyntheticToken()
+				? this.current_synthetic_token.modifiableText ?? this.current_synthetic_token.commentText ?? ""
+				: super.get_modifiable_text();
 		}
 
 		set_modifiable_text(text) {
@@ -2680,6 +2753,12 @@ export function createHtmlApi(wasm) {
 				case "#doctype":
 					return serializeDoctype(this.get_doctype_info());
 				case "#text":
+					if (
+						this.raw_text_fragment_context !== null &&
+						!RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
+					) {
+						return this.get_modifiable_text() ?? "";
+					}
 					return htmlEscape(this.get_modifiable_text() ?? "");
 				case "#presumptuous-tag":
 					return "";
@@ -3354,6 +3433,33 @@ export function createHtmlApi(wasm) {
 			if (!this.is_virtual() && this.parser_state === STATE_TEXT_NODE) {
 				super.subdivide_text_appropriately();
 			}
+		}
+
+		#consumeRawTextFragmentToken() {
+			if (
+				this.raw_text_fragment_context === null ||
+				this.raw_text_fragment_consumed ||
+				this.html === ""
+			) {
+				return false;
+			}
+
+			const text = RCDATA_FRAGMENT_CONTEXT_ELEMENTS.has(this.raw_text_fragment_context)
+				? WP_HTML_Decoder.decode_text_node(this.html)
+				: this.html;
+			this.raw_text_fragment_consumed = true;
+			this.current_synthetic_token = {
+				tokenType: "#text",
+				tokenName: "#text",
+				modifiableText: text,
+			};
+			this.parser_state = STATE_TEXT_NODE;
+			this.text_node_classification = splitHtmlWhitespace(text).length === 0
+				? WP_HTML_Tag_Processor.TEXT_IS_WHITESPACE
+				: WP_HTML_Tag_Processor.TEXT_IS_GENERIC;
+			this.current_token_namespace = "html";
+			this.breadcrumbs = [...this.open_elements, "#text"];
+			return true;
 		}
 
 		#getVirtualAttribute(name) {

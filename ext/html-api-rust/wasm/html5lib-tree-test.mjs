@@ -21,7 +21,10 @@ const supportedFragmentContexts = new Set([
 	"math mo",
 	"math ms",
 	"math mtext",
+	"plaintext",
+	"script",
 	"select",
+	"style",
 	"svg desc",
 	"svg foreignObject",
 	"svg path",
@@ -30,9 +33,11 @@ const supportedFragmentContexts = new Set([
 	"table",
 	"tbody",
 	"template",
+	"textarea",
 	"td",
 	"tfoot",
 	"thead",
+	"title",
 	"tr",
 ]);
 
