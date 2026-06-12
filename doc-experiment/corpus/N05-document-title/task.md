@@ -6,10 +6,9 @@ Write a single PHP function:
 function get_document_title( string $html ): ?string
 ```
 
-Given a **complete HTML document** (with doctype, `<html>`, `<head>`,
-etc.), return the text of its `<title>` element with character references
-decoded, or `null` if the document has no `<title>` element. An existing
-but empty `<title></title>` returns the empty string, not `null`.
+Given a complete HTML document, return the text of its `<title>` element,
+or `null` if the document has no `<title>` element. An existing but empty
+`<title></title>` returns the empty string, not `null`.
 
 Example:
 

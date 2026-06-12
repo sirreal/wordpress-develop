@@ -6,8 +6,8 @@ function get_document_title( string $html ): ?string {
 		return null;
 	}
 
-	while ( $processor->next_token() ) {
-		if ( 'TITLE' === $processor->get_token_name() && ! $processor->is_tag_closer() ) {
+	while ( $processor->next_tag( 'TITLE' ) ) {
+		if ( 'html' === $processor->get_namespace() ) {
 			return $processor->get_modifiable_text();
 		}
 	}
