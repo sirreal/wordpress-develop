@@ -89,10 +89,12 @@ Target html5lib tree-construction cases by fixture name or input markup:
 ```sh
 HTML5LIB_TEST_FILTER=tests19 npm run test:html5lib
 HTML5LIB_TEST_HTML_FILTER=frameset HTML5LIB_UNSUPPORTED_SAMPLES=10 npm run test:html5lib
+HTML5LIB_TEST_CONTEXT_FILTER='svg svg' npm run test:html5lib
 ```
 
 Known skipped tests remain skipped in focused runs unless
-`HTML5LIB_INCLUDE_KNOWN_SKIPS=1` is set.
+`HTML5LIB_INCLUDE_KNOWN_SKIPS=1` is set. Use `document` as the context filter
+for full-document html5lib cases.
 
 The browser smoke test uses the WordPress checkout's Playwright development
 dependency when available, otherwise it falls back to an installed

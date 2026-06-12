@@ -6,6 +6,7 @@ const fixturesDirectory = new URL("../../../tests/phpunit/data/html5lib-tests/tr
 const treeIndent = "  ";
 const testFilter = process.env.HTML5LIB_TEST_FILTER ?? "";
 const testHtmlFilter = process.env.HTML5LIB_TEST_HTML_FILTER ?? "";
+const testContextFilter = process.env.HTML5LIB_TEST_CONTEXT_FILTER ?? "";
 const includeKnownSkippedTests = process.env.HTML5LIB_INCLUDE_KNOWN_SKIPS === "1";
 const unsupportedSampleLimit = Number.parseInt(process.env.HTML5LIB_UNSUPPORTED_SAMPLES ?? "0", 10);
 const supportedFragmentContexts = new Set([
@@ -435,6 +436,10 @@ for (const file of files) {
 			continue;
 		}
 
+		if (testContextFilter !== "" && (test.fragmentContext ?? "document") !== testContextFilter) {
+			continue;
+		}
+
 		if (test.fragmentContext !== null && !supportedFragmentContexts.has(test.fragmentContext)) {
 			summary.skippedContext += 1;
 			continue;
@@ -442,7 +447,7 @@ for (const file of files) {
 
 		const skippedReason = skippedTests.get(test.name);
 		if (!includeKnownSkippedTests && skippedReason !== undefined) {
-			if (testFilter === "" && testHtmlFilter === "") {
+			if (testFilter === "" && testHtmlFilter === "" && testContextFilter === "") {
 				const result = buildHtml5libTree(test.fragmentContext, test.html);
 				if (
 					result.unsupported === null &&
@@ -496,7 +501,7 @@ for (const file of files) {
 }
 
 assert.deepEqual(staleSkippedTests, [], "Remove passing tests from skippedTests.");
-if (testFilter === "" && testHtmlFilter === "") {
+if (testFilter === "" && testHtmlFilter === "" && testContextFilter === "") {
 	assert.ok(summary.tested > 1000, `Expected broad html5lib coverage, only tested ${summary.tested}.`);
 }
 assert.deepEqual(failures, [], `html5lib tree mismatches: ${summary.failed}`);
