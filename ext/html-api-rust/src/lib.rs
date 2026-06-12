@@ -899,9 +899,13 @@ impl TagProcessor {
             }
             TOKEN_TYPE_TAG if scan.token_end > scan.tag_end => {
                 let inner = &self.html[scan.tag_end..scan.token_end];
-                let relative = find_last_subslice(inner, b"</")?;
-                let mut raw = &self.html[scan.tag_end..scan.tag_end + relative];
                 let tag_name = &self.html[scan.name_start..scan.name_start + scan.name_len];
+                let relative = if find_special_closer(&self.html[..scan.token_end], scan.tag_end, tag_name).is_some() {
+                    find_last_subslice(inner, b"</")?
+                } else {
+                    unclosed_atomic_text_end(&self.html, scan.tag_end, scan.token_end, tag_name) - scan.tag_end
+                };
+                let mut raw = &self.html[scan.tag_end..scan.tag_end + relative];
 
                 if matches_ignore_ascii_case(tag_name, &[&b"TEXTAREA"[..]]) {
                     raw = strip_initial_newline(raw);
@@ -1170,8 +1174,21 @@ impl TagProcessor {
     }
 
     fn atomic_text_span(&self, scan: TagScan) -> Option<(usize, usize)> {
-        let inner = &self.html[scan.tag_end..scan.token_end];
-        find_last_subslice(inner, b"</").map(|relative| (scan.tag_end, scan.tag_end + relative))
+        if scan.token_type != TOKEN_TYPE_TAG || scan.token_end <= scan.tag_end {
+            return None;
+        }
+
+        let tag_name = &self.html[scan.name_start..scan.name_start + scan.name_len];
+        if find_special_closer(&self.html[..scan.token_end], scan.tag_end, tag_name).is_some() {
+            let inner = &self.html[scan.tag_end..scan.token_end];
+            return find_last_subslice(inner, b"</")
+                .map(|relative| (scan.tag_end, scan.tag_end + relative));
+        }
+
+        Some((
+            scan.tag_end,
+            unclosed_atomic_text_end(&self.html, scan.tag_end, scan.token_end, tag_name),
+        ))
     }
 
     fn comment_body_span(&self, scan: TagScan) -> Option<(usize, usize)> {
@@ -2203,10 +2220,14 @@ fn scan_next_token_in_namespace(html: &[u8], offset: usize, namespace: u8) -> Sc
         && !is_closing
         && is_special_atomic_tag(&html[name_start..name_end])
     {
-        let Some(closer_end) = find_special_closer(html, tag_end, &html[name_start..name_end]) else {
+        let tag_name = &html[name_start..name_end];
+        if let Some(closer_end) = find_special_closer(html, tag_end, tag_name) {
+            scan.token_end = closer_end;
+        } else if should_consume_unclosed_atomic_tag_at_eof(tag_name) {
+            scan.token_end = len;
+        } else {
             return ScanResult::Incomplete;
-        };
-        scan.token_end = closer_end;
+        }
     }
 
     ScanResult::Token(scan)
@@ -2409,6 +2430,10 @@ fn is_special_atomic_tag(tag_name: &[u8]) -> bool {
     )
 }
 
+fn should_consume_unclosed_atomic_tag_at_eof(tag_name: &[u8]) -> bool {
+    is_special_atomic_tag(tag_name) && !eq_ignore_ascii_case(tag_name, b"TEXTAREA")
+}
+
 fn find_special_closer(html: &[u8], offset: usize, tag_name: &[u8]) -> Option<usize> {
     if eq_ignore_ascii_case(tag_name, b"SCRIPT") {
         return find_script_closer(html, offset);
@@ -2433,6 +2458,96 @@ fn find_special_closer(html: &[u8], offset: usize, tag_name: &[u8]) -> Option<us
     }
 
     None
+}
+
+fn unclosed_atomic_text_end(
+    html: &[u8],
+    text_start: usize,
+    token_end: usize,
+    tag_name: &[u8],
+) -> usize {
+    if eq_ignore_ascii_case(tag_name, b"SCRIPT") {
+        return unclosed_script_text_end(html, text_start, token_end);
+    }
+
+    let mut at = text_start;
+
+    while at + 2 + tag_name.len() <= token_end {
+        let Some(relative) = find_subslice(&html[at..token_end], b"</") else {
+            return token_end;
+        };
+        let closer_start = at + relative;
+        let name_start = closer_start + 2;
+        let name_end = name_start + tag_name.len();
+
+        if name_end < token_end
+            && eq_ignore_ascii_case(&html[name_start..name_end], tag_name)
+            && is_tag_name_delimiter(html[name_end])
+            && find_tag_end(html, name_end).is_none()
+        {
+            return closer_start;
+        }
+
+        at = closer_start + 2;
+    }
+
+    token_end
+}
+
+fn unclosed_script_text_end(html: &[u8], text_start: usize, token_end: usize) -> usize {
+    let mut at = text_start;
+    let mut escaped = false;
+    let mut double_escaped = false;
+
+    while at < token_end {
+        if html[at..token_end].starts_with(b"<!-->") {
+            at += 5;
+            continue;
+        }
+
+        if html[at..token_end].starts_with(b"<!--") {
+            escaped = true;
+            double_escaped = false;
+            at += 4;
+            continue;
+        }
+
+        if (escaped || double_escaped) && html[at..token_end].starts_with(b"-->") {
+            escaped = false;
+            double_escaped = false;
+            at += 3;
+            continue;
+        }
+
+        if starts_with_ignore_ascii_case(&html[at..token_end], b"</script") {
+            let name_end = at + b"</script".len();
+            if name_end == token_end || is_tag_name_delimiter(html[name_end]) {
+                if double_escaped {
+                    double_escaped = false;
+                    escaped = true;
+                    at = name_end;
+                    continue;
+                }
+
+                if name_end < token_end && find_tag_end(html, name_end).is_none() {
+                    return at;
+                }
+            }
+        }
+
+        if escaped && starts_with_ignore_ascii_case(&html[at..token_end], b"<script") {
+            let name_end = at + b"<script".len();
+            if name_end == token_end || is_tag_name_delimiter(html[name_end]) {
+                double_escaped = true;
+                at = name_end;
+                continue;
+            }
+        }
+
+        at += 1;
+    }
+
+    token_end
 }
 
 fn find_script_closer(html: &[u8], offset: usize) -> Option<usize> {
@@ -3010,6 +3125,60 @@ mod tests {
 
         let div = scan_next_tag(html, script.token_end).unwrap();
         assert_eq!(&html[div.name_start..div.name_start + div.name_len], b"div");
+    }
+
+    #[test]
+    fn scanner_reports_unclosed_atomic_tags_at_eof() {
+        let mut processor = TagProcessor {
+            html: b"<script>text".to_vec(),
+            offset: 0,
+            current: None,
+            scratch: Vec::new(),
+            paused_at_incomplete: false,
+            inserted_attributes: Vec::new(),
+            parsing_namespace: NAMESPACE_HTML,
+        };
+
+        assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        let scan = processor.current.unwrap();
+        assert_eq!(&processor.html[scan.name_start..scan.name_start + scan.name_len], b"script");
+        assert_eq!(scan.tag_end, b"<script>".len());
+        assert_eq!(scan.token_end, processor.html.len());
+        assert_eq!(processor.current_modifiable_text(scan).unwrap(), b"text");
+
+        assert!(!unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+        assert!(!processor.paused_at_incomplete);
+    }
+
+    #[test]
+    fn scanner_keeps_unclosed_textarea_incomplete() {
+        assert!(matches!(
+            scan_next_token(b"<textarea><option>", 0),
+            ScanResult::Incomplete
+        ));
+    }
+
+    #[test]
+    fn scanner_keeps_partial_atomic_closer_text_until_delimiter() {
+        for (html, expected) in [
+            (&b"<script></S"[..], &b"</S"[..]),
+            (&b"<script></SCRIPT"[..], &b"</SCRIPT"[..]),
+            (&b"<script></SCRIPT "[..], &b""[..]),
+        ] {
+            let mut processor = TagProcessor {
+                html: html.to_vec(),
+                offset: 0,
+                current: None,
+                scratch: Vec::new(),
+                paused_at_incomplete: false,
+                inserted_attributes: Vec::new(),
+                parsing_namespace: NAMESPACE_HTML,
+            };
+
+            assert!(unsafe { super::wp_html_api_rust_tag_processor_next_token(&mut processor) });
+            let scan = processor.current.unwrap();
+            assert_eq!(processor.current_modifiable_text(scan).unwrap(), expected);
+        }
     }
 
     #[test]
