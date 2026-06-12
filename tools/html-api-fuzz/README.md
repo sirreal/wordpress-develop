@@ -117,6 +117,14 @@ Minimize a failure while preserving the same signature:
 php tools/html-api-fuzz/minimize.php --replay artifacts/html-api-fuzz/run-.../seed-.../primary/replay.json
 ```
 
+By default (`--probe-mode auto`) the minimizer evaluates candidates in worker
+subprocesses so `--timeout-ms` can kill pathological candidates and each probe
+starts with fresh PHP state. Use `--probe-mode in-process` for faster
+exact-signature minimization when that isolation is not needed; in-process
+probes write only the final minimized artifacts unless
+`--keep-candidate-artifacts` is also passed. Use `--probe-mode process` to
+force subprocess probes explicitly.
+
 Watch an existing run directory and minimize new distinct signatures:
 
 ```sh

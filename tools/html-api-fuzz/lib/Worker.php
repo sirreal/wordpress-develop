@@ -91,8 +91,50 @@ class Worker {
 		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options() );
 		write_json_file( $replay_path, $replay );
 
-		$tag_result = TagInvariants::check( $input, $limits, $mode, $fragment_context );
-		$wp_result  = TreeRenderer::render_wordpress( $input, $mode, $limits, $fragment_context );
+		$result = self::evaluate_input(
+			$input,
+			$seed,
+			$profile,
+			$mode,
+			$payload_policy,
+			$fragment_context,
+			$generator_parameters,
+			$input_source,
+			$limits,
+			$fail_unsupported,
+			$oracle_renderer
+		);
+		$result['paths'] = array(
+			'outputDir'  => $output_dir,
+			'inputPath'  => $input_path,
+			'replayPath' => $replay_path,
+			'resultPath' => $result_path,
+		);
+		$result['wordpress'] = self::compact_parse_result( $result['wordpress'], $output_dir, 'wordpress-tree.txt' );
+		$result['dom']       = self::compact_parse_result( $result['dom'], $output_dir, 'dom-tree.txt' );
+		$signature           = $result['signature'] ?? null;
+
+		$replay['result']    = array(
+			'ok'           => $result['ok'],
+			'status'       => $result['status'],
+			'failureClass' => $result['failureClass'] ?? null,
+			'signature'    => $signature,
+			'oracleFinding' => $result['oracleFinding'] ?? null,
+			'oracle'       => $result['oracle'] ?? $oracle_metadata,
+			'resultPath'   => $result_path,
+		);
+		$replay['signature'] = $signature;
+		$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
+		write_json_file( $replay_path, $replay );
+		write_json_file( $result_path, $result );
+
+		return $result;
+	}
+
+	public static function evaluate_input( string $input, int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, array $limits, bool $fail_unsupported, OracleRenderer $oracle_renderer ): array {
+		$oracle_metadata = $oracle_renderer->metadata();
+		$tag_result      = TagInvariants::check( $input, $limits, $mode, $fragment_context );
+		$wp_result       = TreeRenderer::render_wordpress( $input, $mode, $limits, $fragment_context );
 		if ( ! $oracle_renderer->is_php_dom() ) {
 			$wp_result['domOracleLineTolerances'] = array();
 		}
@@ -115,14 +157,8 @@ class Worker {
 			'inputLength'   => strlen( $input ),
 			'inputPreview'  => preview_bytes( $input ),
 			'oracle'        => $oracle_metadata,
-			'paths'         => array(
-				'outputDir'  => $output_dir,
-				'inputPath'  => $input_path,
-				'replayPath' => $replay_path,
-				'resultPath' => $result_path,
-			),
 			'tagProcessor'  => $tag_result,
-			'wordpress'     => self::compact_parse_result( $wp_result, $output_dir, 'wordpress-tree.txt' ),
+			'wordpress'     => $wp_result,
 			'dom'           => $dom_result,
 			'comparison'    => null,
 		);
@@ -154,7 +190,7 @@ class Worker {
 					'oracle'       => $oracle_metadata,
 				);
 			}
-			$result['dom'] = self::compact_parse_result( $dom_result, $output_dir, 'dom-tree.txt' );
+			$result['dom'] = $dom_result;
 
 			if ( TreeRenderer::STATUS_ERROR === $dom_result['status'] ) {
 				$dom_failure_class      = $dom_result['failureClass'] ?? 'oracle-renderer-error';
@@ -223,7 +259,7 @@ class Worker {
 		}
 
 		if ( $has_clean_baseline && is_string( $normalized_html ) ) {
-			$preservation                  = self::check_normalize_tree_preservation( $normalized_html, $mode, $limits, $wp_result['tree'] ?? null, $fragment_context );
+			$preservation                     = self::check_normalize_tree_preservation( $normalized_html, $mode, $limits, $wp_result['tree'] ?? null, $fragment_context );
 			$result['normalizePreservation'] = $preservation;
 			if ( false === $preservation['ok'] ) {
 				$result['ok']           = false;
@@ -252,20 +288,6 @@ class Worker {
 		if ( null !== $signature ) {
 			$result['signature'] = $signature;
 		}
-
-		$replay['result']    = array(
-			'ok'           => $result['ok'],
-			'status'       => $result['status'],
-			'failureClass' => $result['failureClass'] ?? null,
-			'signature'    => $signature,
-			'oracleFinding' => $result['oracleFinding'] ?? null,
-			'oracle'       => $result['oracle'] ?? $oracle_metadata,
-			'resultPath'   => $result_path,
-		);
-		$replay['signature'] = $signature;
-		$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
-		write_json_file( $replay_path, $replay );
-		write_json_file( $result_path, $result );
 
 		return $result;
 	}

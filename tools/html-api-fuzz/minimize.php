@@ -2,7 +2,79 @@
 <?php
 require_once __DIR__ . '/lib/autoload.php';
 
-function html_api_fuzz_min_test( string $candidate, array $base, string $work_dir, int $attempt, int $timeout_ms, bool $any_failure ): array {
+function html_api_fuzz_min_accepts_result( ?array $result, array $base, bool $any_failure ): bool {
+	if ( null === $result ) {
+		return false;
+	}
+
+	return 'oracle-finding' === $base['targetKind']
+		? ( ( $result['oracleFinding']['signature']['hash'] ?? null ) === $base['targetHash'] )
+		: ( $any_failure ? ! ( $result['ok'] ?? true ) : ( ( $result['signature']['hash'] ?? null ) === $base['targetHash'] ) );
+}
+
+function html_api_fuzz_min_worker_options( string $candidate, array $base, string $output_dir ): array {
+	$options = array(
+		'input-base64' => base64_encode( $candidate ),
+		'mode'         => $base['mode'],
+		'profile'      => $base['profile'],
+		'seed'         => (string) $base['seed'],
+		'output-dir'   => $output_dir,
+		'max-tokens'   => (string) $base['maxTokens'],
+		'max-nodes'    => (string) $base['maxNodes'],
+	);
+	if ( null !== $base['gitMetadataBase64'] ) {
+		$options['git-metadata-base64'] = $base['gitMetadataBase64'];
+	}
+	if ( $base['failUnsupported'] ) {
+		$options['fail-unsupported'] = true;
+	}
+	if ( null !== $base['payloadPolicy'] ) {
+		$options['payload-policy'] = $base['payloadPolicy'];
+	}
+	if ( 'body' !== $base['fragmentContext'] ) {
+		$options['fragment-context'] = $base['fragmentContext'];
+	}
+	foreach ( $base['oracleOptions'] as $name => $value ) {
+		if ( null !== $value ) {
+			$options[ $name ] = $value;
+		}
+	}
+
+	return $options;
+}
+
+function html_api_fuzz_min_fatal_result( array $base, \Throwable $e, int $duration_ms ): array {
+	$result = array(
+		'schemaVersion'  => 1,
+		'kind'           => 'html-api-fuzz-worker-result',
+		'createdAt'      => gmdate( 'c' ),
+		'ok'             => false,
+		'status'         => 'worker-fatal',
+		'failureClass'   => 'fatal-error',
+		'failureSnippet' => $e->getMessage(),
+		'throwable'      => get_class( $e ),
+		'seed'           => $base['seed'],
+		'profile'        => $base['profile'],
+		'mode'           => $base['mode'],
+		'payloadPolicy'  => $base['payloadPolicy'],
+		'fragmentContext' => $base['fragmentContext'],
+		'inputSource'    => 'minimize-candidate',
+		'oracle'         => $base['oracle'],
+		'process'        => array(
+			'code'       => null,
+			'timedOut'   => false,
+			'durationMs' => $duration_ms,
+		),
+	);
+	$signature = \HtmlApiFuzz\Signature::from_result( $result );
+	if ( null !== $signature ) {
+		$result['signature'] = $signature;
+	}
+
+	return $result;
+}
+
+function html_api_fuzz_min_process_test( string $candidate, array $base, string $work_dir, int $attempt, int $timeout_ms, bool $any_failure ): array {
 	$dir = $work_dir . '/candidates/candidate-' . str_pad( (string) $attempt, 4, '0', STR_PAD_LEFT );
 	\HtmlApiFuzz\ensure_dir( $dir );
 	$input_path = $dir . '/input.bin';
@@ -48,10 +120,73 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 		return array( 'accepted' => false, 'result' => null, 'process' => $proc );
 	}
 
-	$accepted = 'oracle-finding' === $base['targetKind']
-		? ( ( $result['oracleFinding']['signature']['hash'] ?? null ) === $base['targetHash'] )
-		: ( $any_failure ? ! ( $result['ok'] ?? true ) : ( ( $result['signature']['hash'] ?? null ) === $base['targetHash'] ) );
+	$accepted = html_api_fuzz_min_accepts_result( $result, $base, $any_failure );
 	return array( 'accepted' => $accepted, 'result' => $result, 'process' => $proc );
+}
+
+function html_api_fuzz_min_in_process_test( string $candidate, array $base, string $work_dir, int $attempt, bool $any_failure ): array {
+	$started_at = microtime( true );
+
+	try {
+		if ( $base['keepCandidateArtifacts'] ) {
+			$dir    = $work_dir . '/candidates/candidate-' . str_pad( (string) $attempt, 4, '0', STR_PAD_LEFT );
+			$result = \HtmlApiFuzz\Worker::run( html_api_fuzz_min_worker_options( $candidate, $base, $dir ) );
+		} else {
+			$result = \HtmlApiFuzz\Worker::evaluate_input(
+				$candidate,
+				$base['seed'],
+				$base['profile'],
+				$base['mode'],
+				$base['payloadPolicy'],
+				$base['fragmentContext'],
+				is_array( $base['originalGenerator'] ) ? $base['originalGenerator'] : null,
+				'minimize-candidate',
+				array(
+					'maxTokens' => $base['maxTokens'],
+					'maxNodes'  => $base['maxNodes'],
+				),
+				$base['failUnsupported'],
+				$base['oracleRenderer']
+			);
+		}
+		$duration_ms = (int) round( ( microtime( true ) - $started_at ) * 1000 );
+	} catch ( \Throwable $e ) {
+		$duration_ms = (int) round( ( microtime( true ) - $started_at ) * 1000 );
+		$result      = html_api_fuzz_min_fatal_result( $base, $e, $duration_ms );
+	}
+
+	return array(
+		'accepted' => html_api_fuzz_min_accepts_result( $result, $base, $any_failure ),
+		'result'   => $result,
+		'process'  => array(
+			'code'       => null,
+			'timedOut'   => false,
+			'durationMs' => $duration_ms,
+			'mode'       => 'in-process',
+		),
+	);
+}
+
+function html_api_fuzz_min_test( string $candidate, array $base, string $work_dir, int $attempt, int $timeout_ms, bool $any_failure ): array {
+	if ( 'process' === $base['probeMode'] ) {
+		return html_api_fuzz_min_process_test( $candidate, $base, $work_dir, $attempt, $timeout_ms, $any_failure );
+	}
+
+	return html_api_fuzz_min_in_process_test( $candidate, $base, $work_dir, $attempt, $any_failure );
+}
+
+function html_api_fuzz_min_record_probe( array &$stats, array $test ): void {
+	$duration_ms = $test['process']['durationMs'] ?? null;
+	if ( ! is_numeric( $duration_ms ) ) {
+		return;
+	}
+
+	$duration_ms = (int) $duration_ms;
+	$stats['durationMs'] += $duration_ms;
+	$stats['maxDurationMs'] = max( $stats['maxDurationMs'], $duration_ms );
+	if ( $test['accepted'] ?? false ) {
+		++$stats['accepted'];
+	}
 }
 
 function html_api_fuzz_min_target( array $replay, array $options ): array {
@@ -89,10 +224,23 @@ function html_api_fuzz_min_target( array $replay, array $options ): array {
 	);
 }
 
+function html_api_fuzz_min_probe_mode( array $options ): string {
+	$mode = \HtmlApiFuzz\option_string( $options, 'probe-mode', 'auto' );
+	if ( ! in_array( $mode, array( 'auto', 'in-process', 'process' ), true ) ) {
+		throw new InvalidArgumentException( 'Expected --probe-mode to be auto, in-process, or process.' );
+	}
+
+	if ( 'auto' !== $mode ) {
+		return $mode;
+	}
+
+	return 'process';
+}
+
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
+	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--probe-mode auto|in-process|process] [--keep-candidate-artifacts]\n";
 	exit( null === $replay_path ? 1 : 0 );
 }
 
@@ -104,7 +252,8 @@ if ( ! $replay || ! array_key_exists( 'inputBase64', $replay ) ) {
 
 $target      = html_api_fuzz_min_target( $replay, $options );
 $target_hash = $target['hash'];
-if ( null === $target_hash && ! \HtmlApiFuzz\option_bool( $options, 'any-failure', false ) ) {
+$any_failure = \HtmlApiFuzz\option_bool( $options, 'any-failure', false );
+if ( null === $target_hash && ! $any_failure ) {
 	fwrite( STDERR, "Replay does not contain a target failure or oracle-finding signature. Use --any-failure to minimize any failure.\n" );
 	exit( 1 );
 }
@@ -131,6 +280,7 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', 
 	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
 }
 $oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
+$probe_mode      = html_api_fuzz_min_probe_mode( $options );
 $base = array(
 	'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
 	'profile'           => $replay['profile'] ?? 'replay',
@@ -143,16 +293,28 @@ $base = array(
 	'targetKind'        => $target['kind'] ?? 'failure',
 	'sourceReplay'      => $source_replay,
 	'oracle'            => $oracle_renderer->metadata(),
+	'oracleRenderer'    => $oracle_renderer,
+	'oracleOptions'     => array(
+		'dom-oracle'         => \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ),
+		'lexbor-oracle-bin'  => \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ),
+		'oracle-timeout-ms'  => \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ),
+	),
 	'oracleWorkerArgs'  => $oracle_renderer->worker_args(),
 	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
 	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
 	'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
 	'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
+	'probeMode'         => $probe_mode,
+	'keepCandidateArtifacts' => \HtmlApiFuzz\option_bool( $options, 'keep-candidate-artifacts', false ),
 );
 $timeout_ms    = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
 $max_attempts  = \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 );
-$any_failure   = \HtmlApiFuzz\option_bool( $options, 'any-failure', false );
 $attempt_count = 0;
+$probe_stats   = array(
+	'durationMs'    => 0,
+	'maxDurationMs' => 0,
+	'accepted'      => 0,
+);
 
 $current = $input;
 
@@ -179,6 +341,7 @@ while ( $progress && $attempt_count < $max_attempts ) {
 		}
 		++$attempt_count;
 		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+		html_api_fuzz_min_record_probe( $probe_stats, $test );
 		if ( $test['accepted'] ) {
 			$current  = $candidate;
 			$progress = true;
@@ -201,6 +364,7 @@ while ( strlen( $current ) > 0 && $attempt_count < $max_attempts ) {
 		}
 		++$attempt_count;
 		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+		html_api_fuzz_min_record_probe( $probe_stats, $test );
 		if ( $test['accepted'] ) {
 			$current = $candidate;
 			$chunks  = max( 2, $chunks - 1 );
@@ -231,6 +395,7 @@ for ( $i = 0; $i < strlen( $current ) && $attempt_count < $max_attempts; ++$i ) 
 		}
 		++$attempt_count;
 		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+		html_api_fuzz_min_record_probe( $probe_stats, $test );
 		if ( $test['accepted'] ) {
 			$current = $candidate;
 			if ( '' === $replacement ) {
@@ -311,6 +476,14 @@ $summary = array(
 	'originalLength'    => strlen( $input ),
 	'minimizedLength'   => strlen( $current ),
 	'attempts'          => $attempt_count,
+	'probeMode'         => $base['probeMode'],
+	'candidateArtifactsRetained' => 'process' === $base['probeMode'] || $base['keepCandidateArtifacts'],
+	'probeTiming'       => array(
+		'totalDurationMs' => $probe_stats['durationMs'],
+		'maxDurationMs'   => $probe_stats['maxDurationMs'],
+		'acceptedProbes'  => $probe_stats['accepted'],
+		'averageDurationMs' => $attempt_count > 0 ? round( $probe_stats['durationMs'] / $attempt_count, 2 ) : null,
+	),
 	'minimizedReplay'   => $final_dir . '/replay.json',
 	'minimizedResult'   => $final_dir . '/result.json',
 	'inputBase64'       => base64_encode( $current ),
