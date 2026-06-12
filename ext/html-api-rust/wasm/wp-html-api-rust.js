@@ -2035,6 +2035,9 @@ export function createHtmlApi(wasm) {
 			if (this.parser_state !== STATE_MATCHED_TAG) {
 				return null;
 			}
+			if (attributeName === null) {
+				return null;
+			}
 
 			const normalizedAttributeName = phpInternalStringCoerce(attributeName, "attribute_name");
 			if (this.parsing_namespace === "html") {
@@ -2955,6 +2958,9 @@ export function createHtmlApi(wasm) {
 
 		get_qualified_attribute_name(attributeName) {
 			if (this.get_token_type() !== "#tag") {
+				return null;
+			}
+			if (attributeName === null) {
 				return null;
 			}
 
