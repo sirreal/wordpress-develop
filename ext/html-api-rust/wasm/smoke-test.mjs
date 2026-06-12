@@ -5089,19 +5089,25 @@ assert.deepEqual(selectFragmentIncompleteTextareaProcessor.get_breadcrumbs(), ["
 assert.equal(selectFragmentIncompleteTextareaProcessor.paused_at_incomplete_token(), false);
 selectFragmentIncompleteTextareaProcessor.destroy();
 
-for (const html of [
-	"<table><select><option>one<tr><td>cell",
-	"<table><select><option>one</table><p>after",
-	"<table><select><option>3</select></table>",
-]) {
-	const selectInTableProcessor = WP_HTML_Processor.create_fragment(html);
-	while (selectInTableProcessor.next_token()) {
-	}
-	assert.equal(selectInTableProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(selectInTableProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
-	selectInTableProcessor.destroy();
-	assert.equal(WP_HTML_Processor.normalize(html), null);
-}
+const selectInTableProcessor = WP_HTML_Processor.create_fragment("<table><select><option>one<tr><td>cell");
+assert.equal(selectInTableProcessor.next_tag("select"), true);
+assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "SELECT"]);
+assert.equal(selectInTableProcessor.next_tag("td"), true);
+assert.deepEqual(selectInTableProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(selectInTableProcessor.get_last_error(), null);
+selectInTableProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><select><option>one<tr><td>cell"),
+	"<select><option>one</option></select><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><select><option>one</table><p>after"),
+	"<select><option>one</option></select><table></table><p>after</p>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><select><option>3</select></table>"),
+	"<select><option>3</option></select><table></table>",
+);
 
 const bareColProcessor = WP_HTML_Processor.create_fragment("<table><col><tr><td>cell");
 assert.equal(bareColProcessor.next_tag("col"), true);
@@ -5527,9 +5533,16 @@ assert.equal(
 	"<input><table><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tbody><div><tr><td>cell"),
+	"<div></div><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+assert.equal(
+	WP_HTML_Processor.normalize("<table><tr><div><td>cell"),
+	"<div></div><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 for (const html of [
-	"<table><tbody><div><tr><td>cell",
-	"<table><tr><div><td>cell",
 	"<table><colgroup><svg><g>cell</g>",
 ]) {
 	const tableFosterParentingProcessor = WP_HTML_Processor.create_fragment(html);

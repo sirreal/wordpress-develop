@@ -8543,6 +8543,10 @@ export function createHtmlApi(wasm) {
 				return true;
 			}
 
+			if (this.#currentTableStartContentPrecedesFosteredStart()) {
+				return true;
+			}
+
 			return (
 				nextTag !== false &&
 				!nextTag.is_closing &&
