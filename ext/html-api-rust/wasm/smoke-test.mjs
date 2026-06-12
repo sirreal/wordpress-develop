@@ -1691,6 +1691,20 @@ assert.equal(completedSelfClosingTag.get_token_type(), null);
 assert.equal(completedSelfClosingTag.has_self_closing_flag(), false);
 completedSelfClosingTag.destroy();
 
+for (const [completedTextHtml, completedTextAdvance, expectedText] of [
+	["text", (processor) => processor.next_token(), "text"],
+	["<!--comment-->", (processor) => processor.next_token(), "comment"],
+	["<script>abc</script>", (processor) => processor.next_tag("script"), "abc"],
+]) {
+	const completedTextProcessor = new WP_HTML_Tag_Processor(completedTextHtml);
+	assert.equal(completedTextAdvance(completedTextProcessor), true);
+	assert.equal(completedTextProcessor.get_modifiable_text(), expectedText);
+	assert.equal(completedTextProcessor.next_token(), false);
+	assert.equal(completedTextProcessor.get_token_type(), null);
+	assert.equal(completedTextProcessor.get_modifiable_text(), "");
+	completedTextProcessor.destroy();
+}
+
 const svgQualifiedNames = new WP_HTML_Tag_Processor('<foreignobject attributeName=1 xlink:href=2 viewbox=3>');
 assert.equal(svgQualifiedNames.change_parsing_namespace("svg"), true);
 assert.equal(svgQualifiedNames.next_tag("foreignobject"), true);

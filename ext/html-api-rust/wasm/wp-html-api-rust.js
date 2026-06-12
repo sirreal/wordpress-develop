@@ -1797,6 +1797,20 @@ export function createHtmlApi(wasm) {
 
 		get_modifiable_text() {
 			this.#ensureLive();
+			if (
+				![
+					STATE_MATCHED_TAG,
+					STATE_TEXT_NODE,
+					STATE_CDATA_NODE,
+					STATE_COMMENT,
+					STATE_DOCTYPE,
+					STATE_PRESUMPTUOUS_TAG,
+					STATE_FUNKY_COMMENT,
+				].includes(this.parser_state)
+			) {
+				return "";
+			}
+
 			return runtime.readOutputString((out) => (
 				wasm.wp_html_api_rust_tag_processor_get_modifiable_text(this.pointer, out)
 			)) ?? "";
