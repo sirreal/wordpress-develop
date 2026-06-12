@@ -2619,6 +2619,43 @@ assert.equal(processorBookmarkRelease.has_bookmark("mark"), false);
 assert.equal(processorBookmarkRelease.seek("mark"), false);
 processorBookmarkRelease.destroy();
 
+for (const [parserName, createProcessor] of [
+	["fragment", (html) => WP_HTML_Processor.create_fragment(html)],
+	["full parser", (html) => WP_HTML_Processor.create_full_parser(html)],
+]) {
+	const seekSameLocationProcessor = createProcessor("<div><span>");
+	assert.notEqual(seekSameLocationProcessor, null, parserName);
+	assert.equal(seekSameLocationProcessor.next_tag("div"), true, parserName);
+	assert.equal(seekSameLocationProcessor.set_bookmark("mark"), true, parserName);
+	assert.equal(seekSameLocationProcessor.has_bookmark("mark"), true, parserName);
+	assert.equal(seekSameLocationProcessor.seek("mark"), true, parserName);
+	assert.equal(seekSameLocationProcessor.get_tag(), "DIV", parserName);
+	assert.deepEqual(seekSameLocationProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV"], parserName);
+	assert.equal(seekSameLocationProcessor.next_tag(), true, parserName);
+	assert.equal(seekSameLocationProcessor.get_tag(), "SPAN", parserName);
+	assert.deepEqual(seekSameLocationProcessor.get_breadcrumbs(), ["HTML", "BODY", "DIV", "SPAN"], parserName);
+	seekSameLocationProcessor.destroy();
+
+	const seekForwardProcessor = createProcessor("<div one></div><span two></span><a three>");
+	assert.notEqual(seekForwardProcessor, null, parserName);
+	assert.equal(seekForwardProcessor.next_tag("div"), true, parserName);
+	assert.equal(seekForwardProcessor.set_bookmark("one"), true, parserName);
+	assert.equal(seekForwardProcessor.has_bookmark("one"), true, parserName);
+	assert.equal(seekForwardProcessor.next_tag("span"), true, parserName);
+	assert.equal(seekForwardProcessor.get_attribute("two"), true, parserName);
+	assert.equal(seekForwardProcessor.set_bookmark("two"), true, parserName);
+	assert.equal(seekForwardProcessor.has_bookmark("two"), true, parserName);
+	assert.equal(seekForwardProcessor.seek("one"), true, parserName);
+	assert.equal(seekForwardProcessor.get_tag(), "DIV", parserName);
+	assert.equal(seekForwardProcessor.seek("two"), true, parserName);
+	assert.equal(seekForwardProcessor.get_tag(), "SPAN", parserName);
+	assert.equal(seekForwardProcessor.get_attribute("two"), true, parserName);
+	assert.equal(seekForwardProcessor.next_tag(), true, parserName);
+	assert.equal(seekForwardProcessor.get_tag(), "A", parserName);
+	assert.equal(seekForwardProcessor.get_attribute("three"), true, parserName);
+	seekForwardProcessor.destroy();
+}
+
 for (const html of [
 	"<i>".repeat(WP_HTML_Processor.MAX_BOOKMARKS + 1),
 	"<table><td>".repeat(Math.ceil(WP_HTML_Processor.MAX_BOOKMARKS / 4) + 1),
