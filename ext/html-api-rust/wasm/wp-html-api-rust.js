@@ -1275,6 +1275,10 @@ export class WP_HTML_Doctype_Info {
 async function bytesFromInput(input) {
 	input = await input;
 
+	if (isWebAssemblyInstantiatedSource(input)) {
+		return input.instance;
+	}
+
 	if (input instanceof WebAssembly.Instance) {
 		return input;
 	}
@@ -1319,6 +1323,12 @@ async function bytesFromInput(input) {
 	}
 
 	throw new TypeError("Unsupported WASM input.");
+}
+
+function isWebAssemblyInstantiatedSource(input) {
+	return input !== null &&
+		typeof input === "object" &&
+		input.instance instanceof WebAssembly.Instance;
 }
 
 function isNodeLikeRuntime() {

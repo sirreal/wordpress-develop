@@ -1,3 +1,8 @@
+export interface WasmInstantiatedSource {
+	module?: WebAssembly.Module;
+	instance: WebAssembly.Instance;
+}
+
 export type WasmInputSource =
 	| URL
 	| Request
@@ -6,7 +11,8 @@ export type WasmInputSource =
 	| ArrayBuffer
 	| ArrayBufferView
 	| WebAssembly.Module
-	| WebAssembly.Instance;
+	| WebAssembly.Instance
+	| WasmInstantiatedSource;
 
 export type WasmInput = WasmInputSource | PromiseLike<WasmInputSource>;
 
