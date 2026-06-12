@@ -67,3 +67,21 @@ closures, serialization, and unsupported-parser diagnostics.
 Full HTML5 tree-construction parity is still incomplete. Known unsupported
 areas include foster parenting, some adoption-agency reparenting cases, and
 some frameset body-replacement cases.
+
+## Testing
+
+Run the dependency-free Node/package/html5lib checks with:
+
+```sh
+npm run test:all
+```
+
+Run the browser smoke test with:
+
+```sh
+npm run test:browser
+```
+
+The browser smoke test uses the WordPress checkout's Playwright development
+dependency to load `browser-test.html` over a local server and verify that the
+ES module can fetch and instantiate the bundled WASM asset in a browser.
