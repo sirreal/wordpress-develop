@@ -20,10 +20,14 @@
 			"types": "./wp-html-api-rust.d.ts",
 			"default": "./wp-html-api-rust.js"
 		},
-		"./dist/wp_html_api_rust_core.wasm": "./dist/wp_html_api_rust_core.wasm"
+		"./dist/wp_html_api_rust_core.wasm": {
+			"types": "./wp_html_api_rust_core.wasm.d.ts",
+			"default": "./dist/wp_html_api_rust_core.wasm"
+		}
 	},
 	"files": [
 		"dist/wp_html_api_rust_core.wasm",
+		"wp_html_api_rust_core.wasm.d.ts",
 		"wp-html-api-rust.d.ts",
 		"wp-html-api-rust.js"
 	],

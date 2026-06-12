@@ -36,6 +36,7 @@ try {
 		"package.json",
 		"wp-html-api-rust.d.ts",
 		"wp-html-api-rust.js",
+		"wp_html_api_rust_core.wasm.d.ts",
 	]);
 
 	const tarballPath = join(workspace, pack.filename);
@@ -63,6 +64,7 @@ try {
 			'assert.equal(processor.next_tag("p"), true);',
 			'assert.deepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "MAIN", "P"]);',
 			"processor.destroy();",
+			'assert.match(import.meta.resolve("wp-html-api-rust-wasm/dist/wp_html_api_rust_core.wasm"), /wp_html_api_rust_core\\.wasm$/);',
 			"",
 		].join("\n"),
 	);
