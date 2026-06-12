@@ -574,7 +574,7 @@ export interface WP_HTML_Processor extends WP_HTML_Tag_Processor {
 }
 
 export interface WP_HTML_Processor_Constructor extends WP_HTML_Tag_Processor_Constructor {
-	new (html: unknown, options?: WP_HTML_Processor_Options): WP_HTML_Processor;
+	new (html: unknown, options?: unknown): WP_HTML_Processor;
 	readonly MAX_BOOKMARKS: 10000;
 	readonly PROCESS_NEXT_NODE: "process-next-node";
 	readonly REPROCESS_CURRENT_NODE: "reprocess-current-node";

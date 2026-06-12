@@ -2240,7 +2240,12 @@ export function createHtmlApi(wasm) {
 		static CONSTRUCTOR_UNLOCK_CODE = "Use WP_HTML_Processor::create_fragment() instead of calling the class constructor directly.";
 
 		constructor(html, options = undefined) {
-			if (options === undefined || options === null) {
+			if (
+				options === undefined ||
+				options === null ||
+				typeof options !== "object" ||
+				Array.isArray(options)
+			) {
 				options = typeof html === "string"
 					? {
 						fullParser: true,

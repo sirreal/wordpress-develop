@@ -2920,6 +2920,14 @@ assert.equal(directFullParser.next_tag(), true);
 assert.equal(directFullParser.get_tag(), "HTML");
 assert.deepEqual(directFullParser.get_breadcrumbs(), ["HTML"]);
 directFullParser.destroy();
+const directUnlockedFullParser = new WP_HTML_Processor(
+	"<p>Direct",
+	WP_HTML_Processor.CONSTRUCTOR_UNLOCK_CODE,
+);
+assert.equal(directUnlockedFullParser.next_tag(), true);
+assert.equal(directUnlockedFullParser.get_tag(), "HTML");
+assert.deepEqual(directUnlockedFullParser.get_breadcrumbs(), ["HTML"]);
+directUnlockedFullParser.destroy();
 const directNullProcessor = new WP_HTML_Processor(null);
 assert.equal(directNullProcessor.next_tag(), false);
 directNullProcessor.destroy();
