@@ -3863,6 +3863,10 @@ assert.equal(
 	"<font></font><p><font>hello<b>cruel</b></font><b>world</b></p>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<font><p><i>x</i>y</font>z</p>"),
+	"<font></font><p><font><i>x</i>y</font>z</p>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<font></p><p><meta><title></title></font>"),
 	"<font><p></p></font><p><font><meta><title></title></font></p>",
 );

@@ -214,7 +214,7 @@ const FORMATTING_ELEMENT_ANCESTOR_PRECLOSURE_START_TAGS = new Set(["ASIDE", "DIV
 const NESTED_ANCHOR_BLOCK_PRECLOSURE_START_TAGS = new Set(["ADDRESS", "BUTTON", "CENTER", "DIV", "LI"]);
 const NESTED_ANCHOR_RECONSTRUCTING_START_TAGS = new Set(["STYLE", "TITLE"]);
 const FONT_PARAGRAPH_ADOPTION_RECONSTRUCTING_START_TAGS = new Set(["META", "TITLE"]);
-const FONT_PARAGRAPH_ADOPTION_SKIPPABLE_END_TAGS = new Set(["TITLE"]);
+const FONT_PARAGRAPH_ADOPTION_SKIPPABLE_END_TAGS = new Set(["I", "TITLE"]);
 const IN_BODY_IGNORED_START_TAGS = new Set([
 	"CAPTION",
 	"COL",
@@ -5137,7 +5137,8 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
-			for (const entry of this.paragraph_adoption_preclosed_formatting_elements) {
+			for (let i = this.paragraph_adoption_preclosed_formatting_elements.length - 1; i >= 0; i -= 1) {
+				const entry = this.paragraph_adoption_preclosed_formatting_elements[i];
 				if (
 					this.#lastOpenElementIndex(entry.tagName, entry.namespaceName) === -1 &&
 					this.#lastActiveFormattingElementIndex(entry.tagName) !== -1
