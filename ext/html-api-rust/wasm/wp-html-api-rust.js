@@ -3790,6 +3790,11 @@ export function createHtmlApi(wasm) {
 				return;
 			}
 
+			if (this.#shouldIgnoreColgroupFragmentFosteredStartTag(tagName)) {
+				this.#ignoreCurrentToken();
+				return;
+			}
+
 			if (
 				allowVirtualPreclosures &&
 				(
@@ -7223,6 +7228,10 @@ export function createHtmlApi(wasm) {
 				return TABLE_MODE_START_TAGS.has(tagName);
 			}
 
+			if (this.context_node === "COLGROUP") {
+				return tagName === "COL" || tagName === "COLGROUP";
+			}
+
 			if (TABLE_SECTION_ELEMENTS.has(this.context_node)) {
 				return this.#isHandledInTableBodyMode(tagName, false);
 			}
@@ -7824,6 +7833,19 @@ export function createHtmlApi(wasm) {
 				this.context_node === "CAPTION" &&
 				(tagName === "HTML" || CAPTION_CLOSING_START_TAGS.has(tagName)) &&
 				this.#lastOpenElementIndex("CAPTION", "html") !== -1
+			);
+		}
+
+		#shouldIgnoreColgroupFragmentFosteredStartTag(tagName) {
+			const span = this.#currentRealTokenSpan();
+			return (
+				tagName === "A" &&
+				!this.is_full_parser &&
+				this.context_namespace === "html" &&
+				this.context_node === "COLGROUP" &&
+				this.#currentHtmlElementIs("COLGROUP") &&
+				span !== null &&
+				this.#currentFosteredFragmentStartIsFollowedByTableStartTag(span.start + span.length)
 			);
 		}
 
