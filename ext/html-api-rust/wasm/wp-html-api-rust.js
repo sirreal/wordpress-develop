@@ -8186,6 +8186,14 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.open_elements[topIndex] === "TEMPLATE") {
+				const tableIndex = this.#lastOpenElementIndex("TABLE", "html");
+				const selectIndex = this.#lastOpenElementIndex("SELECT", "html");
+				if (tableIndex !== -1 && selectIndex > tableIndex && selectIndex < topIndex) {
+					return false;
+				}
+			}
+
 			return this.open_elements[topIndex] === "TABLE" || this.#openHtmlElementBefore("TABLE", topIndex);
 		}
 
