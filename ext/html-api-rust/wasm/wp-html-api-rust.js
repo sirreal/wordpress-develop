@@ -8548,6 +8548,7 @@ export function createHtmlApi(wasm) {
 				!nextTag.is_closing &&
 				(
 					this.#isFosteredElementTableStartTag(nextTag.tag_name) ||
+					this.#isFosteredInputStartTag(nextTag) ||
 					(
 						nextTag.tag_name === "COLGROUP" &&
 						this.#colgroupStartPrecedesDirectFosteredText(nextTag.token_end)
@@ -10050,7 +10051,7 @@ export function createHtmlApi(wasm) {
 
 		#representFosteredVoidStartBeforeDeferredTable(tagName) {
 			if (
-				!this.is_full_parser ||
+				(!this.is_full_parser && !this.#canRepresentFosteredStartInFragment()) ||
 				this.deferred_table_opener === null ||
 				this.current_namespace !== "html" ||
 				!VOID_ELEMENTS.has(tagName) ||
@@ -10073,6 +10074,14 @@ export function createHtmlApi(wasm) {
 				: tableIndex;
 			this.breadcrumbs = this.#breadcrumbStack(tagName, endIndex);
 			return true;
+		}
+
+		#canRepresentFosteredStartInFragment() {
+			return (
+				this.context_namespace === "html" &&
+				this.context_node === "BODY" &&
+				this.#lastOpenElementIndex("TABLE", "html") >= this.base_open_element_count
+			);
 		}
 
 		#representFosteredAtomicStartBeforeDeferredTable(tagName) {

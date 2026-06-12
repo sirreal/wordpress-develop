@@ -5515,10 +5515,21 @@ assert.equal(
 	"<div></div><table><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
+const tableInputFosterProcessor = WP_HTML_Processor.create_fragment("<table><input><tr><td>cell");
+assert.equal(tableInputFosterProcessor.next_tag("input"), true);
+assert.deepEqual(tableInputFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "INPUT"]);
+assert.equal(tableInputFosterProcessor.next_tag("td"), true);
+assert.deepEqual(tableInputFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE", "TBODY", "TR", "TD"]);
+assert.equal(tableInputFosterProcessor.get_last_error(), null);
+tableInputFosterProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><input><tr><td>cell"),
+	"<input><table><tbody><tr><td>cell</td></tr></tbody></table>",
+);
+
 for (const html of [
 	"<table><tbody><div><tr><td>cell",
 	"<table><tr><div><td>cell",
-	"<table><input><tr><td>cell",
 	"<table><colgroup><svg><g>cell</g>",
 ]) {
 	const tableFosterParentingProcessor = WP_HTML_Processor.create_fragment(html);
