@@ -1851,6 +1851,17 @@ assert.equal(nonStringClassQueryTags.next_tag({ class_name: null }), true);
 assert.equal(nonStringClassQueryTags.get_tag(), "DIV");
 nonStringClassQueryTags.destroy();
 
+const nonStringTagQueryTags = new WP_HTML_Tag_Processor("<div one></div><div two></div>");
+assert.equal(nonStringTagQueryTags.next_tag({ tag_name: 1, match_offset: "2" }), true);
+assert.equal(nonStringTagQueryTags.get_attribute("one"), true);
+assert.equal(nonStringTagQueryTags.get_attribute("two"), null);
+nonStringTagQueryTags.destroy();
+
+const nonVisitCloserQueryTags = new WP_HTML_Tag_Processor("<div></div>");
+assert.equal(nonVisitCloserQueryTags.next_tag("div"), true);
+assert.equal(nonVisitCloserQueryTags.next_tag({ tag_name: "div", tag_closers: {} }), false);
+nonVisitCloserQueryTags.destroy();
+
 const duplicateDecodedClassList = new WP_HTML_Tag_Processor('<div class="one one &#x6f;ne">');
 assert.equal(duplicateDecodedClassList.next_tag("div"), true);
 assert.deepEqual(duplicateDecodedClassList.class_list(), ["one"]);

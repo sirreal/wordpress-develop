@@ -153,13 +153,13 @@ export interface ScanNextTagResult {
 
 export interface NextTagBaseQuery {
 	class_name?: unknown;
-	tag_closers?: "visit" | "skip";
+	tag_closers?: unknown;
 	visit_closers?: boolean;
 }
 
 export interface TagNextTagQuery extends NextTagBaseQuery {
-	tag_name?: string | null;
-	match_offset?: number | null;
+	tag_name?: unknown;
+	match_offset?: unknown;
 }
 
 export interface ProcessorNextTagQuery extends NextTagBaseQuery {
