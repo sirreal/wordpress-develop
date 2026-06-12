@@ -1692,6 +1692,10 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
+				return null;
+			}
+
 			const attributePrefix = phpInternalStringCoerce(prefix, "prefix");
 			return runtime.withEncoded(attributePrefix, ({ ptr, len }) => runtime.withOutSlice((out) => {
 				const result = wasm.wp_html_api_rust_tag_processor_get_attribute_names_with_prefix(this.pointer, ptr, len, out);
@@ -1706,6 +1710,10 @@ export function createHtmlApi(wasm) {
 		set_attribute(name, value) {
 			this.#ensureLive();
 			if (this.parser_state !== STATE_MATCHED_TAG) {
+				return false;
+			}
+
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
 				return false;
 			}
 
@@ -1746,6 +1754,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
+				return false;
+			}
+
 			const attributeName = phpInternalStringCoerce(name, "name");
 			return this.#mutateCurrentToken(() => runtime.withEncoded(attributeName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_attribute(this.pointer, ptr, len)
@@ -1755,6 +1767,10 @@ export function createHtmlApi(wasm) {
 		add_class(className) {
 			this.#ensureLive();
 			if (this.parser_state !== STATE_MATCHED_TAG) {
+				return false;
+			}
+
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
 				return false;
 			}
 
@@ -1770,6 +1786,10 @@ export function createHtmlApi(wasm) {
 				return false;
 			}
 
+			if (this.is_tag_closer() || this.#isRawTagCloser()) {
+				return false;
+			}
+
 			const normalizedClassName = phpInternalStringCoerce(className, "class_name");
 			return this.#mutateCurrentToken(() => runtime.withEncoded(normalizedClassName, ({ ptr, len }) => (
 				wasm.wp_html_api_rust_tag_processor_remove_class(this.pointer, ptr, len, this.#isQuirksMode())
@@ -1782,11 +1802,11 @@ export function createHtmlApi(wasm) {
 				return null;
 			}
 
+			const wantedClass = phpInternalStringCoerce(className, "wanted_class");
 			if (this.is_tag_closer() || this.#isRawTagCloser()) {
 				return false;
 			}
 
-			const wantedClass = phpInternalStringCoerce(className, "wanted_class");
 			return runtime.withEncoded(wantedClass, ({ ptr, len }) => {
 				const result = wasm.wp_html_api_rust_tag_processor_has_class(this.pointer, ptr, len, this.#isQuirksMode());
 				return result === 0 ? null : result === 2;

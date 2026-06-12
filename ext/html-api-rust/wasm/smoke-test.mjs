@@ -1964,10 +1964,19 @@ assert.equal(nonText.get_modifiable_text(), "");
 assert.equal(nonText.next_tag({ tag_name: "div", tag_closers: "visit" }), true);
 assert.equal(nonText.is_tag_closer(), true);
 assert.equal(nonText.get_qualified_attribute_name("DATA-ID"), "DATA-ID");
+assert.equal(nonText.get_attribute_names_with_prefix([]), null);
 assert.equal(nonText.has_class("active"), false);
+assert.throws(
+	() => nonText.has_class([]),
+	TypeError,
+);
 assert.deepEqual(nonText.class_list(), []);
 assert.equal(nonText.set_attribute("id", "x"), false);
+assert.equal(nonText.set_attribute([], []), false);
+assert.equal(nonText.remove_attribute([]), false);
 assert.equal(nonText.add_class("active"), false);
+assert.equal(nonText.add_class([]), false);
+assert.equal(nonText.remove_class([]), false);
 assert.throws(
 	() => nonText.set_modifiable_text(null),
 	TypeError,
@@ -1978,8 +1987,17 @@ nonText.destroy();
 const tagProcessorBrEndTag = new WP_HTML_Tag_Processor("</br class=x>");
 assert.equal(tagProcessorBrEndTag.next_tag({ tag_name: "br", tag_closers: "visit" }), true);
 assert.equal(tagProcessorBrEndTag.is_tag_closer(), false);
+assert.equal(tagProcessorBrEndTag.get_attribute_names_with_prefix([]), null);
 assert.equal(tagProcessorBrEndTag.has_class("x"), false);
+assert.throws(
+	() => tagProcessorBrEndTag.has_class([]),
+	TypeError,
+);
 assert.deepEqual(tagProcessorBrEndTag.class_list(), []);
+assert.equal(tagProcessorBrEndTag.set_attribute([], []), false);
+assert.equal(tagProcessorBrEndTag.remove_attribute([]), false);
+assert.equal(tagProcessorBrEndTag.add_class([]), false);
+assert.equal(tagProcessorBrEndTag.remove_class([]), false);
 tagProcessorBrEndTag.destroy();
 
 const completedClosingTag = new WP_HTML_Tag_Processor("</div>");
