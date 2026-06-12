@@ -43,10 +43,6 @@ const supportedFragmentContexts = new Set([
 ]);
 
 const skippedTests = new Set([
-	"foreign-fragment/line0590",
-	"foreign-fragment/line0602",
-	"foreign-fragment/line0614",
-	"foreign-fragment/line0636",
 	"noscript01/line0014",
 	"tests14/line0022",
 	"tests14/line0055",

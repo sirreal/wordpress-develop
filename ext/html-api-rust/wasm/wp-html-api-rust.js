@@ -3412,7 +3412,11 @@ export function createHtmlApi(wasm) {
 					if (token.namespaceName === "html" && TABLE_CELL_ELEMENTS.has(token.tagName)) {
 						this.#clearActiveFormattingElementsUpToLastMarker();
 					}
-					this.#setCurrentNamespace(this.#namespaceForStackTop());
+					this.#setCurrentNamespace(
+						token.skipSerialization && this.pending_real_token
+							? "html"
+							: this.#namespaceForStackTop(),
+					);
 				}
 				this.breadcrumbs = this.#breadcrumbStack();
 			}
@@ -4525,6 +4529,7 @@ export function createHtmlApi(wasm) {
 			this.current_token_namespace = this.current_namespace;
 			this.breadcrumbs = this.#breadcrumbStack();
 			this.skip_current_token = true;
+			this.#setCurrentNamespace(this.#namespaceForStackTop());
 		}
 
 		#bailUnsupported(message) {
@@ -5441,7 +5446,7 @@ export function createHtmlApi(wasm) {
 			const isInBodyFragmentContext = (
 				this.context_namespace === "html" &&
 				(this.context_node === "BODY" || this.context_node === "DIV")
-			) || this.context_integration_node_type === "html";
+			) || this.context_integration_node_type === "html" || this.detached_context_breadcrumbs.length > 0;
 
 			return (
 				!this.is_full_parser &&
@@ -6040,6 +6045,18 @@ export function createHtmlApi(wasm) {
 		}
 
 		#namespaceForStackTop() {
+			if (
+				this.open_element_namespaces.length === 1 &&
+				this.open_elements[0] === "HTML" &&
+				this.detached_context_breadcrumbs.length > 0
+			) {
+				return this.#childNamespaceForStackEntry(
+					this.context_node,
+					this.context_namespace,
+					this.context_integration_node_type,
+				);
+			}
+
 			return this.open_element_namespaces.length === 0
 				? "html"
 				: this.#childNamespaceForStackEntry(

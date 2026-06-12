@@ -3467,6 +3467,23 @@ assert.equal(foreignFragmentBreakoutProcessor.get_token_type(), "#text");
 assert.deepEqual(foreignFragmentBreakoutProcessor.get_breadcrumbs(), ["HTML", "SVG", "PATH", "NOBR", "#text"]);
 foreignFragmentBreakoutProcessor.destroy();
 
+for (const [html, firstHtmlTag] of [
+	["</p><foo>", "P"],
+	["</br><foo>", "BR"],
+	["<body><foo>", null],
+	["<p></p><foo>", "P"],
+]) {
+	const svgFragmentNamespaceProcessor = WP_HTML_Processor.create_fragment(html, "<svg>");
+	if (firstHtmlTag !== null) {
+		assert.equal(svgFragmentNamespaceProcessor.next_tag(firstHtmlTag), true, html);
+		assert.equal(svgFragmentNamespaceProcessor.get_namespace(), "html", html);
+	}
+	assert.equal(svgFragmentNamespaceProcessor.next_tag("foo"), true, html);
+	assert.equal(svgFragmentNamespaceProcessor.get_namespace(), "svg", html);
+	assert.deepEqual(svgFragmentNamespaceProcessor.get_breadcrumbs(), ["HTML", "SVG", "FOO"], html);
+	svgFragmentNamespaceProcessor.destroy();
+}
+
 const mathAnnotationXmlFragmentProcessor = WP_HTML_Processor.create_fragment("<figure></figure>", "<math><annotation-xml>");
 assert.equal(mathAnnotationXmlFragmentProcessor.next_tag("figure"), true);
 assert.equal(mathAnnotationXmlFragmentProcessor.get_namespace(), "math");
