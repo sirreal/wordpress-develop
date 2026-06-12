@@ -13,6 +13,9 @@ python3 doc-experiment/tools/audit-state.py
 If it reports local drift, corpus/result mismatch, source-doc changes since the
 last trusted score, or missing current-corpus baseline, resolve that state
 before trusting any new score.
+When a matching current-corpus calibration round is already prepared,
+`audit-state.py` reports its lifecycle and the next artifact action: launch
+trials, complete trials, run judges, aggregate, or repair/restage.
 
 When corpus fixtures changed since the latest trusted score, verify active
 reference implementations before staging or comparing a new round:

@@ -94,6 +94,64 @@ def completed_rounds() -> list[dict]:
     return sorted(rounds, key=lambda item: item["number"])
 
 
+def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
+    proc = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "validate-round.py"),
+            round_name,
+            "--json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout).strip()
+        return None, [message or f"validate-round.py failed for {round_name}"]
+    return json.loads(proc.stdout), []
+
+
+def prepared_current_rounds(train_ids: list[str]) -> list[dict]:
+    train_set = set(train_ids)
+    prepared = []
+    for round_dir in sorted((EXPERIMENT_ROOT / "results").glob("round-*")):
+        metadata_file = round_dir / "round-metadata.json"
+        summary_file = round_dir / "round-summary.json"
+        if not metadata_file.exists() or summary_file.exists():
+            continue
+
+        metadata = json.loads(metadata_file.read_text())
+        if metadata.get("mode") != "weak-tier-calibration":
+            continue
+        if metadata.get("subject") != CURRENT_SUBJECT:
+            continue
+        if metadata.get("judge") != CURRENT_JUDGE:
+            continue
+        if set(metadata.get("task_ids", [])) != train_set:
+            continue
+
+        report, errors = validate_round(round_dir.name)
+        prepared.append(
+            {
+                "round": round_dir.name,
+                "number": round_number(round_dir),
+                "mode": metadata.get("mode"),
+                "task_count": len(metadata.get("task_ids", [])),
+                "trials_per_task": metadata.get("trials_per_task"),
+                "scratch": metadata.get("scratch"),
+                "lifecycle": report.get("lifecycle") if report else "invalid",
+                "complete_trials": report.get("complete_trials") if report else 0,
+                "expected_trials": report.get("expected_trials") if report else 0,
+                "tasks_with_judges": report.get("tasks_with_judges") if report else 0,
+                "errors": (report.get("errors", []) if report else []) + errors,
+                "warnings": report.get("warnings", []) if report else [],
+            }
+        )
+    return sorted(prepared, key=lambda item: item["number"])
+
+
 def paths_changed_since(commit: str) -> list[str]:
     if not commit:
         return []
@@ -177,6 +235,8 @@ def build_audit() -> dict:
     corpus_matches_latest_train = latest_task_set == current_train_set
     corpus_matches_latest_active = latest_task_set == current_all_set
     current_baseline_exists = has_current_no_edit_baseline(rounds, train_ids)
+    prepared_rounds = prepared_current_rounds(train_ids)
+    latest_prepared = prepared_rounds[-1] if prepared_rounds else None
 
     mismatches = []
     if status_short:
@@ -194,9 +254,22 @@ def build_audit() -> dict:
 
     if status_short:
         next_action = "reconcile local worktree drift before scoring"
+    elif latest_prepared and latest_prepared["errors"]:
+        next_action = f"repair or restage {latest_prepared['round']} before launching agents"
+    elif latest_prepared and latest_prepared["lifecycle"] == "prepared":
+        next_action = (
+            f"launch trials for prepared current-corpus baseline {latest_prepared['round']} "
+            "with gpt-5.4/medium/priority"
+        )
+    elif latest_prepared and latest_prepared["lifecycle"] == "trials-partial":
+        next_action = f"complete missing trial artifacts for {latest_prepared['round']}"
+    elif latest_prepared and latest_prepared["lifecycle"] == "trials-complete":
+        next_action = f"run judges for {latest_prepared['round']} with gpt-5.5/xhigh/priority"
+    elif latest_prepared and latest_prepared["lifecycle"] == "judged":
+        next_action = f"aggregate {latest_prepared['round']} and record the current-corpus baseline"
     elif not current_baseline_exists:
         next_action = (
-            "run weak-tier-calibration no-edit baseline on current train corpus "
+            "prepare and run weak-tier-calibration no-edit baseline on current train corpus "
             "with gpt-5.4/medium/priority"
         )
     else:
@@ -233,6 +306,7 @@ def build_audit() -> dict:
             "tasks_added_vs_latest": sorted(current_train_set - latest_task_set),
             "tasks_removed_vs_latest": sorted(latest_task_set - current_train_set),
             "current_no_edit_baseline_exists": current_baseline_exists,
+            "prepared_current_round": latest_prepared,
             "changed_since_latest_summary_commit": changed_groups,
         },
         "mismatches": mismatches,
@@ -261,6 +335,17 @@ def print_text(audit: dict) -> None:
         "- current no-edit baseline exists: "
         f"{audit['comparability']['current_no_edit_baseline_exists']}"
     )
+    prepared = audit["comparability"]["prepared_current_round"]
+    if prepared:
+        print(
+            f"- prepared current round: {prepared['round']} {prepared['lifecycle']} "
+            f"trials {prepared['complete_trials']}/{prepared['expected_trials']} "
+            f"judges {prepared['tasks_with_judges']}/{prepared['task_count']}"
+        )
+        if prepared["errors"]:
+            print("- prepared round errors:")
+            for error in prepared["errors"]:
+                print(f"  - {error}")
     if audit["mismatches"]:
         print("- mismatches:")
         for mismatch in audit["mismatches"]:

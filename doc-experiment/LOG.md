@@ -53,6 +53,11 @@ baseline is trusted. Current result: 19 active references pass 151/151 cases;
 N04 records expected unsupported-markup `wp_trigger_error()` events as
 warnings, not output failures.
 
+Updated `audit-state.py` to detect a matching prepared current-corpus
+calibration round and report its lifecycle. For round 18 it now distinguishes
+"baseline missing" from "round prepared; launch trials next," while still
+blocking scoring on local drift or invalid scratch artifacts.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
