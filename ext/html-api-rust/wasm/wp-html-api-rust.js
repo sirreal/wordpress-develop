@@ -8555,16 +8555,23 @@ export function createHtmlApi(wasm) {
 					this.#isFosteredInputStartTag(nextTag) ||
 					(
 						nextTag.tag_name === "COLGROUP" &&
-						this.#colgroupStartPrecedesDirectFosteredText(nextTag.token_end)
+						this.#colgroupStartPrecedesDirectFosteredContent(nextTag.token_end)
 					)
 				)
 			);
 		}
 
-		#colgroupStartPrecedesDirectFosteredText(at) {
+		#colgroupStartPrecedesDirectFosteredContent(at) {
 			const nextTag = runtime.scanNextTag(this.html, at);
 			const text = this.html.slice(at, this.#fosterLookaheadTextEnd(at, nextTag));
-			return !this.#isIgnorableTableText(text);
+			return (
+				!this.#isIgnorableTableText(text) ||
+				(
+					nextTag !== false &&
+					!nextTag.is_closing &&
+					this.#isFosteredTableLookaheadStartTag(nextTag)
+				)
+			);
 		}
 
 		#canDeferNestedTableInFragment() {

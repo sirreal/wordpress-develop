@@ -5542,17 +5542,18 @@ assert.equal(
 	"<div></div><table><tbody><tr><td>cell</td></tr></tbody></table>",
 );
 
-for (const html of [
-	"<table><colgroup><svg><g>cell</g>",
-]) {
-	const tableFosterParentingProcessor = WP_HTML_Processor.create_fragment(html);
-	while (tableFosterParentingProcessor.next_token()) {
-	}
-	assert.equal(tableFosterParentingProcessor.get_last_error(), WP_HTML_Processor.ERROR_UNSUPPORTED);
-	assert.equal(tableFosterParentingProcessor.get_unsupported_exception().message, "Foster parenting is not supported.");
-	tableFosterParentingProcessor.destroy();
-	assert.equal(WP_HTML_Processor.normalize(html), null);
-}
+const colgroupForeignFosterProcessor = WP_HTML_Processor.create_fragment("<table><colgroup><svg><g>cell</g>");
+assert.equal(colgroupForeignFosterProcessor.next_tag("svg"), true);
+assert.equal(colgroupForeignFosterProcessor.get_namespace(), "svg");
+assert.deepEqual(colgroupForeignFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "SVG"]);
+assert.equal(colgroupForeignFosterProcessor.next_tag("table"), true);
+assert.deepEqual(colgroupForeignFosterProcessor.get_breadcrumbs(), ["HTML", "BODY", "TABLE"]);
+assert.equal(colgroupForeignFosterProcessor.get_last_error(), null);
+colgroupForeignFosterProcessor.destroy();
+assert.equal(
+	WP_HTML_Processor.normalize("<table><colgroup><svg><g>cell</g>"),
+	"<svg><g>cell</g></svg><table><colgroup></colgroup></table>",
+);
 
 const tableForeignCellFosterParentingProcessor = WP_HTML_Processor.create_full_parser(
 	"<body><table><tr><td><svg><td><foreignObject><span></td>Foo",
