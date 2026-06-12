@@ -7949,6 +7949,13 @@ function normalizeSpecialTagInput(tagName) {
 			"namespace",
 		);
 
+		if (hasNodeName || hasNamespace) {
+			return {
+				nodeName: namespaceName === "html" ? asciiUpper(nodeName) : nodeName,
+				namespaceName,
+			};
+		}
+
 		return {
 			nodeName: asciiUpper(nodeName),
 			namespaceName: asciiLower(namespaceName),
