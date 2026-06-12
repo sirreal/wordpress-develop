@@ -3795,6 +3795,10 @@ assert.equal(
 	"<b></b><button><b></b></button>",
 );
 assert.equal(
+	WP_HTML_Processor.normalize("<i><menu>Foo</i>"),
+	"<i></i><menu><i>Foo</i></menu>",
+);
+assert.equal(
 	WP_HTML_Processor.normalize("<a><p></a></p>"),
 	"<a></a><p><a></a></p>",
 );
