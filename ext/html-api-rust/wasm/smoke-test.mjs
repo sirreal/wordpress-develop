@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import * as HtmlApiModule from "./wp-html-api-rust.js";
 import {
 	createHtmlApi,
 	loadWasm,
@@ -14,6 +15,42 @@ import {
 	WP_HTML_Token as Exported_WP_HTML_Token,
 	WP_HTML_Unsupported_Exception as Exported_WP_HTML_Unsupported_Exception,
 } from "./wp-html-api-rust.js";
+
+const directModuleExports = [
+	"WP_HTML_Active_Formatting_Elements",
+	"WP_HTML_Attribute_Token",
+	"WP_HTML_Doctype_Info",
+	"WP_HTML_Open_Elements",
+	"WP_HTML_Processor_State",
+	"WP_HTML_Span",
+	"WP_HTML_Stack_Event",
+	"WP_HTML_Text_Replacement",
+	"WP_HTML_Token",
+	"WP_HTML_Unsupported_Exception",
+	"createHtmlApi",
+	"loadWasm",
+];
+
+const loadedApiExports = [
+	"WP_HTML_Active_Formatting_Elements",
+	"WP_HTML_Attribute_Token",
+	"WP_HTML_Decoder",
+	"WP_HTML_Doctype_Info",
+	"WP_HTML_Open_Elements",
+	"WP_HTML_Processor",
+	"WP_HTML_Processor_State",
+	"WP_HTML_Span",
+	"WP_HTML_Stack_Event",
+	"WP_HTML_Tag_Processor",
+	"WP_HTML_Text_Replacement",
+	"WP_HTML_Token",
+	"WP_HTML_Unsupported_Exception",
+	"scanNextTag",
+	"version",
+	"wasm",
+];
+
+assert.deepEqual(Object.keys(HtmlApiModule).sort(), directModuleExports);
 
 const {
 	WP_HTML_Decoder,
@@ -32,7 +69,10 @@ const {
 	scanNextTag,
 	version,
 	wasm,
-} = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
+} = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url)).then((api) => {
+	assert.deepEqual(Object.keys(api).sort(), loadedApiExports);
+	return api;
+});
 
 assert.equal(version(), "0.1.0");
 assert.equal(typeof wasm.wp_html_api_rust_core_version, "function");
