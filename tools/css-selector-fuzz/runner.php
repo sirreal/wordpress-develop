@@ -114,6 +114,48 @@ function css_selector_fuzz_worker_summary( string $stdout ): ?array {
 	return null;
 }
 
+/** Merges per-bucket/per-target match assertion counts. */
+function css_selector_fuzz_merge_match_stats( array &$target, array $source ): void {
+	foreach ( $source as $bucket => $targets ) {
+		foreach ( $targets as $match_target => $stats ) {
+			if ( ! isset( $target[ $bucket ][ $match_target ] ) ) {
+				$target[ $bucket ][ $match_target ] = array(
+					'assertions' => 0,
+					'nonVacuous' => 0,
+				);
+			}
+			$target[ $bucket ][ $match_target ]['assertions'] += (int) ( $stats['assertions'] ?? 0 );
+			$target[ $bucket ][ $match_target ]['nonVacuous'] += (int) ( $stats['nonVacuous'] ?? 0 );
+		}
+	}
+}
+
+/** Adds derived rates after all count aggregation is finished. */
+function css_selector_fuzz_finalize_match_stats( array $stats ): array {
+	foreach ( $stats as $bucket => $targets ) {
+		foreach ( $targets as $match_target => $counts ) {
+			$assertions  = (int) ( $counts['assertions'] ?? 0 );
+			$non_vacuous = (int) ( $counts['nonVacuous'] ?? 0 );
+			$vacuous     = max( 0, $assertions - $non_vacuous );
+
+			$stats[ $bucket ][ $match_target ]['vacuous']         = $vacuous;
+			$stats[ $bucket ][ $match_target ]['nonVacuousRate'] = $assertions > 0 ? round( $non_vacuous / $assertions, 4 ) : 0.0;
+			$stats[ $bucket ][ $match_target ]['vacuousRate']    = $assertions > 0 ? round( $vacuous / $assertions, 4 ) : 0.0;
+		}
+	}
+	return $stats;
+}
+
+function css_selector_fuzz_write_state( string $state_path, array $state ): void {
+	$state['matchStats'] = css_selector_fuzz_finalize_match_stats( $state['matchStats'] ?? array() );
+	write_json_file( $state_path, $state );
+}
+
+function css_selector_fuzz_state_for_output( array $state ): array {
+	$state['matchStats'] = css_selector_fuzz_finalize_match_stats( $state['matchStats'] ?? array() );
+	return $state;
+}
+
 $options = parse_cli_options( $argv );
 if ( option_bool( $options, 'help', false ) || option_bool( $options, 'h', false ) ) {
 	echo "Usage: php tools/css-selector-fuzz/runner.php [--start-seed N] [--max-seeds N] [--duration-seconds N] [--chunk-size N] [--timeout-ms N] [--output-dir DIR] [--stop-on-failure]\n";
@@ -159,10 +201,11 @@ $state = array(
 	'buckets'          => array(),
 	'signatures'       => array(),
 	'lexbor'           => array(),
+	'matchStats'       => array(),
 	'nextSeed'         => $start_seed,
 	'stopReason'       => null,
 );
-write_json_file( $state_path, $state );
+css_selector_fuzz_write_state( $state_path, $state );
 
 $deadline = $duration_seconds > 0 ? microtime( true ) + $duration_seconds : null;
 $seed     = $start_seed;
@@ -231,9 +274,16 @@ while ( $seed < $end_seed ) {
 			} else {
 				++$state['casesCompleted'];
 				$state['failures'] += $single_summary['failures'];
+				foreach ( $single_summary['buckets'] as $bucket => $bucket_count ) {
+					$state['buckets'][ $bucket ] = ( $state['buckets'][ $bucket ] ?? 0 ) + $bucket_count;
+				}
 				foreach ( $single_summary['signatures'] as $signature => $signature_count ) {
 					$state['signatures'][ $signature ] = ( $state['signatures'][ $signature ] ?? 0 ) + $signature_count;
 				}
+				foreach ( $single_summary['lexbor'] ?? array() as $lexbor_state => $lexbor_count ) {
+					$state['lexbor'][ $lexbor_state ] = ( $state['lexbor'][ $lexbor_state ] ?? 0 ) + $lexbor_count;
+				}
+				css_selector_fuzz_merge_match_stats( $state['matchStats'], $single_summary['matchStats'] ?? array() );
 			}
 		}
 	} else {
@@ -248,12 +298,13 @@ while ( $seed < $end_seed ) {
 		foreach ( $summary['lexbor'] ?? array() as $lexbor_state => $lexbor_count ) {
 			$state['lexbor'][ $lexbor_state ] = ( $state['lexbor'][ $lexbor_state ] ?? 0 ) + $lexbor_count;
 		}
+		css_selector_fuzz_merge_match_stats( $state['matchStats'], $summary['matchStats'] ?? array() );
 	}
 
 	$seed             += $count;
 	$state['nextSeed'] = $seed;
 	$state['updatedAt'] = gmdate( 'c' );
-	write_json_file( $state_path, $state );
+	css_selector_fuzz_write_state( $state_path, $state );
 
 	if ( $stop_on_failure && $state['failures'] > 0 ) {
 		$state['stopReason'] = 'stop-on-failure';
@@ -265,7 +316,7 @@ if ( null === $state['stopReason'] ) {
 	$state['stopReason'] = 'max-seeds';
 }
 $state['updatedAt'] = gmdate( 'c' );
-write_json_file( $state_path, $state );
+css_selector_fuzz_write_state( $state_path, $state );
 
 /*
  * The lexbor differential is the third oracle. If it ever ran ( 'compared' )
@@ -282,5 +333,5 @@ if ( $lexbor_ran && $lexbor_lost > 0 ) {
 	fwrite( STDERR, "NOTE: lexbor third oracle never ran (harness not built?); run `sh tools/css-selector-fuzz/lexbor/build.sh` for the differential.\n" );
 }
 
-echo json_encode_safe( $state ) . "\n";
+echo json_encode_safe( css_selector_fuzz_state_for_output( $state ) ) . "\n";
 exit( 0 === $state['failures'] ? 0 : 2 );

@@ -62,6 +62,8 @@ class Worker {
 	 *     failures: array,
 	 *     selector: string,
 	 *     html: string,
+	 *     lexbor: string,
+	 *     matchStats: array,
 	 * }
 	 */
 	public static function run_case( int $seed ): array {
@@ -78,6 +80,7 @@ class Worker {
 				'detail'    => $detail,
 			);
 		};
+		$match_stats = array();
 
 		/*
 		 * The processor's own parse is the matching oracle's ground truth.
@@ -301,6 +304,9 @@ class Worker {
 			}
 
 			$html_matches = self::check_select_matches( 'html', $selector_string, $document, $expected, $record );
+			if ( null !== $html_matches ) {
+				self::note_match_assertion( $match_stats, 'html', $expected, $html_matches );
+			}
 
 			// lexbor parses full documents only; fragments skip it.
 			if ( ! ( $document['fragment'] ?? false ) ) {
@@ -312,7 +318,10 @@ class Worker {
 
 		if ( null !== $compound_ast && null !== $tag_rows ) {
 			$expected = ReferenceMatcher::expected_tag_matches_rows( $compound_ast, $tag_rows );
-			self::check_select_matches( 'tag', $selector_string, $document, $expected, $record );
+			$tag_matches = self::check_select_matches( 'tag', $selector_string, $document, $expected, $record );
+			if ( null !== $tag_matches ) {
+				self::note_match_assertion( $match_stats, 'tag', $expected, $tag_matches );
+			}
 		} elseif ( null === $compound_list && null === $compound_error ) {
 			self::check_select_rejection( 'tag', $selector_string, $document, $record );
 		}
@@ -359,6 +368,7 @@ class Worker {
 			'selector'   => $selector_string,
 			'html'       => $document['html'],
 			'lexbor'     => $lexbor_state,
+			'matchStats' => $match_stats,
 		);
 	}
 
@@ -768,14 +778,43 @@ class Worker {
 		return $actual;
 	}
 
+	private static function note_match_assertion( array &$match_stats, string $target, array $expected, array $actual ): void {
+		if ( ! isset( $match_stats[ $target ] ) ) {
+			$match_stats[ $target ] = array(
+				'assertions' => 0,
+				'nonVacuous' => 0,
+			);
+		}
+
+		++$match_stats[ $target ]['assertions'];
+		if ( array() !== $expected || array() !== $actual ) {
+			++$match_stats[ $target ]['nonVacuous'];
+		}
+	}
+
+	private static function finalize_match_stats( array $match_stats ): array {
+		foreach ( $match_stats as $bucket => $targets ) {
+			foreach ( $targets as $target => $counts ) {
+				$assertions  = (int) ( $counts['assertions'] ?? 0 );
+				$non_vacuous = (int) ( $counts['nonVacuous'] ?? 0 );
+				$vacuous     = max( 0, $assertions - $non_vacuous );
+
+				$match_stats[ $bucket ][ $target ]['vacuous']         = $vacuous;
+				$match_stats[ $bucket ][ $target ]['nonVacuousRate'] = $assertions > 0 ? round( $non_vacuous / $assertions, 4 ) : 0.0;
+				$match_stats[ $bucket ][ $target ]['vacuousRate']    = $assertions > 0 ? round( $vacuous / $assertions, 4 ) : 0.0;
+			}
+		}
+		return $match_stats;
+	}
+
 	/**
 	 * Runs the lexbor differential — the THIRD, independent matching opinion.
 	 *
-	 * Quirks-mode documents are excluded ( lexbor #368 makes its quirks
-	 * behavior untrustworthy and WP's quirks class/ID folding is owned by
-	 * ReferenceMatcher ). The comparison only runs when lexbor built the
-	 * same element tree as WP ( fid/tag/ancestry multiset ), so it tests
-	 * the selector layer, not tree construction.
+	 * Quirks-mode documents are excluded unless the startup probe confirms
+	 * lexbor has reliable class/#id case folding in both no-quirks and quirks
+	 * mode. The comparison only runs when lexbor built the same element tree
+	 * as WP ( fid/tag/ancestry multiset ), so it tests the selector layer,
+	 * not tree construction.
 	 *
 	 * Verdict triage:
 	 *  - 'lexbor-divergence'   lexbor != reference: a fuzzer-oracle problem
@@ -793,7 +832,7 @@ class Worker {
 		if ( ! LexborOracle::available() ) {
 			return 'unavailable';
 		}
-		if ( $quirks ) {
+		if ( $quirks && ! LexborOracle::quirks_class_id_reliable() ) {
 			return 'skipped-quirks';
 		}
 
@@ -1115,6 +1154,7 @@ class Worker {
 		$buckets     = array();
 		$signatures  = array();
 		$lexbor      = array();
+		$match_stats = array();
 		$last_seed   = null;
 		$stop_reason = 'completed';
 
@@ -1145,6 +1185,16 @@ class Worker {
 			$buckets[ $result['bucket'] ] = ( $buckets[ $result['bucket'] ] ?? 0 ) + 1;
 			$lexbor[ $result['lexbor'] ]  = ( $lexbor[ $result['lexbor'] ] ?? 0 ) + 1;
 			$last_seed                    = $seed;
+			foreach ( $result['matchStats'] as $target => $stats ) {
+				if ( ! isset( $match_stats[ $result['bucket'] ][ $target ] ) ) {
+					$match_stats[ $result['bucket'] ][ $target ] = array(
+						'assertions' => 0,
+						'nonVacuous' => 0,
+					);
+				}
+				$match_stats[ $result['bucket'] ][ $target ]['assertions'] += $stats['assertions'];
+				$match_stats[ $result['bucket'] ][ $target ]['nonVacuous'] += $stats['nonVacuous'];
+			}
 
 			foreach ( $result['failures'] as $failure ) {
 				++$failures;
@@ -1179,6 +1229,7 @@ class Worker {
 			'buckets'     => $buckets,
 			'signatures'  => $signatures,
 			'lexbor'      => $lexbor,
+			'matchStats'  => self::finalize_match_stats( $match_stats ),
 			'stopReason'  => $stop_reason,
 			'durationMs'  => (int) round( 1000 * ( microtime( true ) - $started_at ) ),
 		);

@@ -14,16 +14,17 @@
 > (`CSS selector:` commits `7419a9fef6` / `0cefeb2fc8` / `16d03e2c5f`), each
 > with PHPUnit regression tests. A post-fix 5000-seed run is clean.
 >
-> **Open follow-up hardening (post-review):** `tests/self-check.php` runs its
-> parse-expectation assertions over a fixed seed window (1–400) that, against
-> an *unfixed* core, dodges the known core bugs only by seed luck. On this
-> branch the bugs are fixed so the collision risk is gone, but the hazard
-> returns whenever the tooling runs against a core without the fixes (e.g.
-> cherry-picked onto trunk before the fixes land) or when a future unfixed bug
-> is found. Decouple self-check from unfixed core bugs — e.g. allowlist known
-> signatures in the parse-expectation loop — as a standalone hardening. This is
-> worth doing on its own (it makes self-check robust to *any* future generator
-> change) and is the prerequisite for randomized class-NUL document injection.
+> **Fuzzer-side follow-up hardening implemented (2026-06-12):**
+> `tests/self-check.php` now allowlists known core parse-bug signatures in its
+> fixed seed-window parse-expectation loop, while unknown mismatches still fail.
+> The safe and wild document generators now inject NUL into random class tokens
+> and expose the decoded U+FFFD token to class-selector generation, without
+> leaking raw class values into the generic attribute-value pool. The lexbor
+> differential includes quirks documents whenever the startup probe confirms
+> class/#id behavior in both no-quirks and quirks mode (local master-built
+> harness `3a2d595fe8c50e5076ac79c02b2ded79a777bb52` passes), and `runner.php`
+> reports per-bucket/per-target vacuous and non-vacuous match assertion rates
+> under `matchStats`.
 >
 > **Candidate finding 4 — FIXED:** per CSS Syntax 3 §4.3.8, `\` followed by
 > EOF is a valid escape (EOF is not a newline), and §4.3.7 says consuming it
@@ -175,19 +176,15 @@
 > was skipped deliberately: it is near-tautological (it could only catch
 > a `from_selectors()` bypass, and no public path bypasses it).
 >
-> **Still open from the original follow-up list:** the tooling items in
-> this file's hardening notes (self-check decoupling, class-NUL injection,
-> vacuous-assertion rate, quirks-mode single-oracle gap). New small item
-> from the 2026-06-11 review: `gen_chaos()`'s whole-codepoint `unicode`
-> branch is dead code — it compares the alphabet *string* against the key
-> `'unicode'` after the value lookup already happened — so the unicode
-> alphabet is byte-sliced by the generic fallback instead. That slicing is
-> what makes chaos emit invalid UTF-8 organically (~15% of chaos cases),
-> so making the branch live is a behavior decision, not just a cleanup:
-> it would remove chaos's organic ill-formed-byte production, leaving the
-> deliberate paths (`invalid-utf8` bucket, `mutated` splice) plus
-> `mutated`'s residual organic corruption of pool multibyte characters
-> (~2% of mutated cases even without the splice).
+> **Still open:** `gen_chaos()`'s whole-codepoint `unicode` branch is dead
+> code — it compares the alphabet *string* against the key `'unicode'` after
+> the value lookup already happened — so the unicode alphabet is byte-sliced
+> by the generic fallback instead. That slicing is what makes chaos emit
+> invalid UTF-8 organically (~15% of chaos cases), so making the branch live
+> is a behavior decision, not just a cleanup: it would remove chaos's organic
+> ill-formed-byte production, leaving the deliberate paths (`invalid-utf8`
+> bucket, `mutated` splice) plus `mutated`'s residual organic corruption of
+> pool multibyte characters (~2% of mutated cases even without the splice).
 
 Repo: `/Users/jonsurrell/a8c/wordpress-develop/html-css-fuzz`, branch
 `html-css-fuzz` (trunk + merged `html-api/add-css-selector-parser`).

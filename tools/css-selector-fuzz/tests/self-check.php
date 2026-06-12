@@ -14,6 +14,7 @@ use CssSelectorFuzz\Bootstrap;
 use CssSelectorFuzz\DocumentGenerator;
 use CssSelectorFuzz\Prng;
 use CssSelectorFuzz\SelectorGenerator;
+use CssSelectorFuzz\WildDocumentGenerator;
 use CssSelectorFuzz\Worker;
 use function CssSelectorFuzz\utf8_codepoints;
 
@@ -26,6 +27,52 @@ function check( bool $condition, string $message ): void {
 	}
 	++$failures;
 	fwrite( STDERR, "FAIL: {$message}\n" );
+}
+
+function known_core_parse_mismatch( string $selector, bool $expected, bool $actual ): ?string {
+	if ( $expected === $actual || ! $expected || $actual ) {
+		return null;
+	}
+
+	if ( ! wp_is_valid_utf8( $selector ) ) {
+		return 'invalid-utf8-input-scrub';
+	}
+	if ( str_ends_with( $selector, '\\' ) ) {
+		return 'backslash-at-eof-escape';
+	}
+	if ( substr_count( $selector, '[' ) > substr_count( $selector, ']' ) ) {
+		return 'eof-auto-closes-attribute-selector';
+	}
+	if ( preg_match( '/\\[[^\\]]*=\\s*[-_a-zA-Z0-9]\\]$/', $selector ) ) {
+		return 'single-char-unquoted-attribute-value-at-eof';
+	}
+	if ( has_identity_escape_after_multibyte( $selector ) ) {
+		return 'identity-escape-after-multibyte';
+	}
+
+	return null;
+}
+
+function has_identity_escape_after_multibyte( string $selector ): bool {
+	$seen_multibyte = false;
+	$length         = strlen( $selector );
+	for ( $i = 0; $i < $length; $i++ ) {
+		$byte = ord( $selector[ $i ] );
+		if ( $byte > 0x7F ) {
+			$seen_multibyte = true;
+			continue;
+		}
+		if ( ! $seen_multibyte || '\\' !== $selector[ $i ] || $i + 1 >= $length ) {
+			continue;
+		}
+
+		$next = $selector[ $i + 1 ];
+		if ( "\n" === $next || "\r" === $next || "\f" === $next || ctype_xdigit( $next ) ) {
+			continue;
+		}
+		return true;
+	}
+	return false;
 }
 
 Bootstrap::load();
@@ -65,6 +112,7 @@ for ( $seed = 1; $seed <= 3; $seed++ ) {
 // --- Selector generator expectations over many seeds -----------------------
 
 $by_bucket = array();
+$allowed_parse_mismatches = array();
 for ( $seed = 1; $seed <= 400; $seed++ ) {
 	$prng     = new Prng( (string) $seed, 'self-check-selector' );
 	$document = DocumentGenerator::generate( $prng->fork( 'doc' ) );
@@ -76,20 +124,67 @@ for ( $seed = 1; $seed <= 400; $seed++ ) {
 	$complex  = WP_CSS_Complex_Selector_List::from_selectors( $selector['selector'] );
 
 	if ( null !== $selector['expectCompound'] ) {
-		check(
-			$selector['expectCompound'] === ( null !== $compound ),
-			"Seed {$seed} ({$selector['bucket']}): compound parse expectation for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
-		);
+		$expected = $selector['expectCompound'];
+		$actual   = null !== $compound;
+		$known    = known_core_parse_mismatch( $selector['selector'], $expected, $actual );
+		if ( null !== $known ) {
+			$allowed_parse_mismatches[ "compound:{$known}" ] = ( $allowed_parse_mismatches[ "compound:{$known}" ] ?? 0 ) + 1;
+		} else {
+			check(
+				$expected === $actual,
+				"Seed {$seed} ({$selector['bucket']}): compound parse expectation for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
+			);
+		}
 	}
 	if ( null !== $selector['expectComplex'] ) {
-		check(
-			$selector['expectComplex'] === ( null !== $complex ),
-			"Seed {$seed} ({$selector['bucket']}): complex parse expectation for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
-		);
+		$expected = $selector['expectComplex'];
+		$actual   = null !== $complex;
+		$known    = known_core_parse_mismatch( $selector['selector'], $expected, $actual );
+		if ( null !== $known ) {
+			$allowed_parse_mismatches[ "complex:{$known}" ] = ( $allowed_parse_mismatches[ "complex:{$known}" ] ?? 0 ) + 1;
+		} else {
+			check(
+				$expected === $actual,
+				"Seed {$seed} ({$selector['bucket']}): complex parse expectation for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
+			);
+		}
 	}
 }
 
 check( count( $by_bucket ) >= 5, 'Bucket variety: saw ' . count( $by_bucket ) . ' buckets.' );
+if ( array() !== $allowed_parse_mismatches ) {
+	fwrite( STDERR, 'Allowed known core parse bug signatures: ' . \CssSelectorFuzz\json_encode_safe( $allowed_parse_mismatches ) . "\n" );
+}
+
+// --- Document generator: randomized class NUL injection --------------------
+
+$safe_class_nul = 0;
+for ( $seed = 1; $seed <= 200; $seed++ ) {
+	$document = DocumentGenerator::generate( new Prng( (string) $seed, 'self-check-class-nul-safe' ) );
+	if ( false !== strpos( $document['html'], "\0" ) ) {
+		++$safe_class_nul;
+		check( false === str_contains( implode( "\n", $document['pools']['attrValues'] ), "\0" ), "Safe document {$seed}: class NUL does not leak into attrValues pool." );
+		check( \CssSelectorFuzz\ast_strings_are_utf8( $document['pools']['classes'] ), "Safe document {$seed}: class pool strings stay valid UTF-8." );
+		check( in_array( true, array_map( static function ( string $class ): bool {
+			return false !== strpos( $class, "\u{FFFD}" );
+		}, $document['pools']['classes'] ), true ), "Safe document {$seed}: class pool contains decoded U+FFFD token." );
+	}
+}
+check( $safe_class_nul > 0, "Safe document generator emits randomized class NUL values ({$safe_class_nul} of 200)." );
+
+$wild_class_nul = 0;
+for ( $seed = 1; $seed <= 200; $seed++ ) {
+	$document = WildDocumentGenerator::generate( new Prng( (string) $seed, 'self-check-class-nul-wild' ) );
+	if ( false !== strpos( $document['html'], "\0" ) ) {
+		++$wild_class_nul;
+		check( false === str_contains( implode( "\n", $document['pools']['attrValues'] ), "\0" ), "Wild document {$seed}: class NUL does not leak into attrValues pool." );
+		check( \CssSelectorFuzz\ast_strings_are_utf8( $document['pools']['classes'] ), "Wild document {$seed}: class pool strings stay valid UTF-8." );
+		check( in_array( true, array_map( static function ( string $class ): bool {
+			return false !== strpos( $class, "\u{FFFD}" );
+		}, $document['pools']['classes'] ), true ), "Wild document {$seed}: class pool contains decoded U+FFFD token." );
+	}
+}
+check( $wild_class_nul > 0, "Wild document generator emits randomized class NUL values ({$wild_class_nul} of 200)." );
 
 // --- Invalid-UTF-8 bucket: post-scrub AST expectations by construction ------
 // from_selectors() replaces each maximal subpart of an ill-formed UTF-8
@@ -224,10 +319,10 @@ check( array( 'e7' ) === select_fids( $known_html, '[lang^="en"]' ), 'Known: [la
 // --- Class-value decode boundary (ReferenceMatcher vs WP class_list) --------
 // WP's class_list() folds NUL -> U+FFFD and treats FF as a separator; the
 // reference matcher reimplements tokenization independently. Pin both engines
-// against each other on these boundary inputs ( exercised deterministically
-// here since the random document generator does not emit control bytes in
-// class values — see README #10 ). Each case also checks the reference matcher
-// agrees with select() over a TreeCapture of the same markup.
+// against each other on these boundary inputs; randomized generator sampling
+// above verifies that the same NUL boundary is present in the hot path. Each
+// case also checks the reference matcher agrees with select() over a
+// TreeCapture of the same markup.
 
 function ref_fids( string $html, string $selector ): array {
 	$capture = \CssSelectorFuzz\TreeCapture::capture( $html );

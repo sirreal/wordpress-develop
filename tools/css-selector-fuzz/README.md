@@ -45,6 +45,9 @@ produces the same document, the same selector, and the same verdict.
      path-directed generation is that the *combinator/breadcrumb* walker —
      the part most likely to harbor a matching bug — is now exercised with
      real depth, not that every assertion is non-vacuous.
+     `runner.php` persists per-bucket/per-target match assertion counts and
+     vacuous/non-vacuous rates under `matchStats` in `state.json`, so this
+     distribution is reported on every run instead of relying on stale notes.
    - `unsupported` — valid CSS the API intentionally rejects (pseudo-classes
      and -elements, `+`/`~`/`||` combinators, namespaces, non-type context
      selectors); must not parse.
@@ -88,15 +91,16 @@ produces the same document, the same selector, and the same verdict.
      Skipped for ASTs containing invalid UTF-8 (reachable only from
      chaos/mutated inputs), which the renderer cannot round-trip.
    - lexbor differential (third, independent oracle; requires the harness —
-     see below): on no-quirks documents whose selector parsed, a canonical
+     see below): on full-document cases whose selector parsed, a canonical
      re-render of the verified AST is matched by liblexbor and compared,
-     as a multiset of fids, against the reference matcher. Gated on WP and
+     as a multiset of fids, against the reference matcher. Quirks documents
+     participate only when the startup probe confirms lexbor's class/#id
+     folding behavior in both no-quirks and quirks mode. Gated on WP and
      lexbor building the same element tree (fid/tag/ancestry), so it tests
-     the selector layer, not tree construction. Verdicts: `lexbor-divergence`
-     (lexbor ≠ reference) is a fuzzer-oracle problem; `match-mismatch-html`
-     with no accompanying divergence means reference == lexbor ≠ WP — a
-     high-confidence WP finding. (Roughly half of `compared` cases are
-     themselves non-vacuous; the rest assert `[] == []` on both engines.)
+     the selector layer, not tree construction. Verdicts:
+     `lexbor-divergence` (lexbor ≠ reference) is a fuzzer-oracle problem;
+     `match-mismatch-html` with no accompanying divergence means reference
+     == lexbor ≠ WP — a high-confidence WP finding.
    - Repeating a case yields a byte-identical result digest (determinism).
      Note the digest covers the WP-under-test surface (selector, html,
      parse-nullness, ASTs, failure invariants) but **not** the lexbor
@@ -112,7 +116,8 @@ and reports per-batch tallies, persisted to `state.json` under `lexbor`:
 
 - `compared` — the differential ran and matched fid-multisets.
 - `tree-gated` — WP and lexbor built different trees; differential skipped.
-- `skipped-quirks` / `skipped-utf8` — quirks document / non-UTF-8 AST.
+- `skipped-quirks` / `skipped-utf8` — quirks document while lexbor class/#id
+  case behavior is not trusted / non-UTF-8 AST.
 - `n/a` — the differential does not apply (unparseable selector, fragment, no
   captured tree).
 - `unavailable` / `error` — the harness was missing or died. The runner prints
@@ -127,14 +132,9 @@ Known lexbor issues compensated for when present:
   case-sensitive). Detected by a startup probe; when present, lexbor is
   compared against the reference matcher run with quirks-style class/ID
   folding, and quirks-mode documents are excluded from the differential
-  entirely. **Consequence — a real coverage hole:** quirks-mode class/ID
-  matching has no independent third oracle. `ReferenceMatcher` is the sole
-  authority there, and it encodes the same "ASCII-only case fold in quirks"
-  reading WP does (both fold via ASCII-only lowercasing), so if that reading
-  is wrong they would be wrong identically and lexbor — the one engine that
-  could disagree — is excluded. This is inherent to lexbor #368 being open;
-  it is the weakest-covered behavior in the suite and is called out here
-  rather than papered over.
+  entirely. The same startup probe also checks class and `#id` selectors in
+  quirks mode; only when all four probes pass is quirks-mode class/ID matching
+  included in the differential.
 - lexbor rejects uppercase `I`/`S` attribute-selector modifiers, and its
   non-ASCII ident-codepoint table omits U+00B7 and U+00C0–U+00F6 (it
   starts at U+00F8), rejecting e.g. `.Über` while accepting `.über`.
@@ -159,13 +159,11 @@ The match oracle's independence differs between class and attribute selectors:
   splits on ASCII whitespace and folds NUL → U+FFFD per token;
   `ReferenceMatcher::class_matches()` reimplements that independently (and is
   pinned against `class_list()` on NUL/FF boundary inputs by `self-check.php`).
-  The random document generators do **not** emit control bytes inside class
-  values, so the *randomized* fuzzing never exercises this boundary — it is
-  covered only by the deterministic self-check cases. Randomized document-side
-  injection is deliberately deferred: adding it to the hot path perturbs the
-  deterministic self-check seed space enough to surface the known Bug 3, which
-  would first require decoupling `self-check.php` from the unfixed core bugs.
-  A worthwhile, scoped future improvement.
+  The safe and wild random document generators now inject NUL into class
+  tokens occasionally and expose the decoded U+FFFD token to class-selector
+  generation. Raw class attribute values are intentionally kept out of the
+  generic `attrValues` pool so attribute-selector generation does not inherit
+  class-list-only decoding semantics.
 - **Attribute values are matched through a single shared read.** Both WP's
   attribute matcher and `ReferenceMatcher::attr_matches()` read the same
   `get_attribute()` output, so a value-decoding bug there would be shared and

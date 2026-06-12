@@ -19,7 +19,8 @@ namespace CssSelectorFuzz;
  * ASCII case-insensitively even in no-quirks mode ( attribute selectors
  * like [id=x] are correctly case-sensitive ). Detected by probe at startup;
  * when present, lexbor is compared against the reference matcher run with
- * quirks-style class/ID folding.
+ * quirks-style class/ID folding. Quirks documents are compared only when
+ * the probe also confirms class and #id selectors fold in quirks mode.
  */
 class LexborOracle {
 
@@ -33,6 +34,8 @@ class LexborOracle {
 	private static $available = null;
 	/** @var bool */
 	private static $issue368 = false;
+	/** @var bool */
+	private static $quirks_class_id_reliable = false;
 
 	public static function harness_path(): string {
 		return dirname( __DIR__ ) . '/lexbor/harness';
@@ -49,15 +52,31 @@ class LexborOracle {
 			return false;
 		}
 
-		// Probe: sanity plus issue-#368 detection.
+		// Probe: sanity plus class/#id case-sensitivity behavior.
 		$sane = self::query( '<!DOCTYPE html><div class="a" data-fid="x"></div>', 'div.a' );
 		if ( null === $sane || array( 'x' ) !== $sane['matches'] ) {
 			self::stop();
 			return false;
 		}
 
-		$folded          = self::query( '<!DOCTYPE html><div class="a" data-fid="x"></div>', '.A' );
-		self::$issue368  = null !== $folded && array( 'x' ) === $folded['matches'];
+		$no_quirks_class = self::query( '<!DOCTYPE html><div class="a" data-fid="x"></div>', '.A' );
+		$no_quirks_id    = self::query( '<!DOCTYPE html><div id="a" data-fid="x"></div>', '#A' );
+		$quirks_class    = self::query( '<div class="a" data-fid="x"></div>', '.A' );
+		$quirks_id       = self::query( '<div id="a" data-fid="x"></div>', '#A' );
+		foreach ( array( $no_quirks_class, $no_quirks_id, $quirks_class, $quirks_id ) as $probe ) {
+			if ( null === $probe || null !== $probe['error'] ) {
+				self::stop();
+				return false;
+			}
+		}
+
+		self::$issue368 = array( 'x' ) === $no_quirks_class['matches']
+			|| array( 'x' ) === $no_quirks_id['matches'];
+		self::$quirks_class_id_reliable = ! self::$issue368
+			&& array() === $no_quirks_class['matches']
+			&& array() === $no_quirks_id['matches']
+			&& array( 'x' ) === $quirks_class['matches']
+			&& array( 'x' ) === $quirks_id['matches'];
 		self::$available = true;
 		return true;
 	}
@@ -65,6 +84,11 @@ class LexborOracle {
 	/** Whether the built lexbor exhibits issue #368 ( class/ID case folding ). */
 	public static function has_issue_368(): bool {
 		return self::$issue368;
+	}
+
+	/** Whether lexbor can be trusted on quirks class/#id case folding. */
+	public static function quirks_class_id_reliable(): bool {
+		return self::$quirks_class_id_reliable;
 	}
 
 	/**

@@ -957,7 +957,7 @@ class SelectorGenerator {
 
 		$class_value = DocumentGenerator::get_attribute_value( $element, 'class' );
 		if ( is_string( $class_value ) ) {
-			foreach ( preg_split( '/[ \t\n\f\r]+/', $class_value, -1, PREG_SPLIT_NO_EMPTY ) as $word ) {
+			foreach ( DocumentGenerator::class_tokens( $class_value ) as $word ) {
 				$features[] = array( 'kind' => 'class', 'name' => $word );
 			}
 		}
@@ -974,6 +974,9 @@ class SelectorGenerator {
 				continue;
 			}
 			$seen_attrs[ $lower ] = true;
+			if ( 'class' === $lower && is_string( $attr[1] ) && false !== strpos( $attr[1], "\0" ) ) {
+				continue;
+			}
 			$features[]           = $this->path_attr_feature( $lower, $attr[1], 'html' === ( $element['namespace'] ?? 'html' ) );
 		}
 

@@ -299,9 +299,11 @@ class WildDocumentGenerator {
 				$words = array();
 				$n     = $this->prng->int( 1, 3 );
 				for ( $j = 0; $j < $n; $j++ ) {
-					$word                     = $this->random_word();
-					$words[]                  = $word;
-					$this->pools['classes'][] = $word;
+					$word    = $this->maybe_inject_class_nul( $this->random_word() );
+					$words[] = $word;
+					foreach ( DocumentGenerator::class_tokens( $word ) as $token ) {
+						$this->pools['classes'][] = $token;
+					}
 				}
 				$value = implode( ' ', $words );
 			} elseif ( 'id' === $lower ) {
@@ -317,13 +319,30 @@ class WildDocumentGenerator {
 			}
 
 			$this->pools['attrNames'][] = $lower;
-			if ( is_string( $value ) ) {
+			if ( is_string( $value ) && 'class' !== $lower ) {
 				$this->pools['attrValues'][] = $value;
 			}
 			$attrs[] = array( $name, $value );
 		}
 
 		return $attrs;
+	}
+
+	private function maybe_inject_class_nul( string $class ): string {
+		if ( '' === $class || ! $this->prng->chance( 12 ) ) {
+			return $class;
+		}
+
+		$points = utf8_codepoints( $class );
+		$at     = $this->prng->int( 0, count( $points ) );
+		$out    = '';
+		foreach ( $points as $i => $point ) {
+			if ( $i === $at ) {
+				$out .= "\0";
+			}
+			$out .= $point[0];
+		}
+		return $at === count( $points ) ? $out . "\0" : $out;
 	}
 
 	private function render_attrs( array $attrs ): string {

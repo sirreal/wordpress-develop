@@ -314,7 +314,7 @@ class DocumentGenerator {
 			}
 
 			$this->pools['attrNames'][] = ascii_strtolower( $name );
-			if ( is_string( $value ) ) {
+			if ( is_string( $value ) && 'class' !== $lower ) {
 				$this->pools['attrValues'][] = $value;
 			}
 
@@ -328,9 +328,12 @@ class DocumentGenerator {
 		$count   = $this->prng->int( 1, 4 );
 		$classes = array();
 		for ( $i = 0; $i < $count; $i++ ) {
-			$class                    = $this->random_word( true );
-			$classes[]                = $class;
-			$this->pools['classes'][] = $class;
+			$class     = $this->random_word( true );
+			$raw_class = $this->maybe_inject_class_nul( $class );
+			$classes[] = $raw_class;
+			foreach ( self::class_tokens( $raw_class ) as $token ) {
+				$this->pools['classes'][] = $token;
+			}
 		}
 
 		$ws    = array( ' ', ' ', ' ', "\t", "\n", "\f", '  ' );
@@ -345,6 +348,23 @@ class DocumentGenerator {
 			$value .= $this->prng->choice( $ws );
 		}
 		return $value;
+	}
+
+	private function maybe_inject_class_nul( string $class ): string {
+		if ( '' === $class || ! $this->prng->chance( 12 ) ) {
+			return $class;
+		}
+
+		$points = utf8_codepoints( $class );
+		$at     = $this->prng->int( 0, count( $points ) );
+		$out    = '';
+		foreach ( $points as $i => $point ) {
+			if ( $i === $at ) {
+				$out .= "\0";
+			}
+			$out .= $point[0];
+		}
+		return $at === count( $points ) ? $out . "\0" : $out;
 	}
 
 	private function random_id_value(): string {
@@ -580,5 +600,29 @@ class DocumentGenerator {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Class tokens as seen by selector matching: ASCII whitespace separates
+	 * tokens, and NUL inside a token is exposed as U+FFFD by class_list().
+	 *
+	 * @return string[]
+	 */
+	public static function class_tokens( string $class_value ): array {
+		$tokens = array();
+		$length = strlen( $class_value );
+		$at     = 0;
+		$ws     = " \t\r\n\f";
+		while ( $at < $length ) {
+			$at += strspn( $class_value, $ws, $at );
+			if ( $at >= $length ) {
+				break;
+			}
+
+			$token_length = strcspn( $class_value, $ws, $at );
+			$tokens[]     = str_replace( "\0", "\u{FFFD}", substr( $class_value, $at, $token_length ) );
+			$at          += $token_length;
+		}
+		return $tokens;
 	}
 }
