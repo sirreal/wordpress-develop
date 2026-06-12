@@ -7031,7 +7031,10 @@ class WasmRuntime {
 	decoderReadCharacterReference(context, text, at = 0, matchByteLength = null) {
 		const input = this.encode(text);
 		const contextKind = decodeContextKind(context);
-		const normalizedAt = Math.max(0, phpIntegerCast(at));
+		const normalizedAt = phpStringOffsetParameterCoerce(at, "at");
+		if (!Number.isFinite(normalizedAt) || normalizedAt < 0) {
+			return null;
+		}
 		return this.withBytes(input, ({ ptr, len }) => {
 			const outputCapacity = Math.max(4, len - normalizedAt);
 			const output = this.allocBytes(new Uint8Array(outputCapacity));
@@ -7663,6 +7666,30 @@ function phpInternalIntegerParameterCoerce(value, parameterName) {
 	}
 
 	return phpIntegerParameterCoerce(value, parameterName);
+}
+
+function phpStringOffsetParameterCoerce(value, parameterName) {
+	if (value === null) {
+		return 0;
+	}
+
+	if (typeof value === "number") {
+		return Number.isFinite(value) ? Math.trunc(value) : value;
+	}
+
+	if (typeof value === "boolean") {
+		return value ? 1 : 0;
+	}
+
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (!/^[+-]?\d+$/.test(trimmed)) {
+			throw new TypeError(`Argument $${parameterName} must be of type int.`);
+		}
+		return Number.parseInt(trimmed, 10);
+	}
+
+	throw new TypeError(`Argument $${parameterName} must be of type int.`);
 }
 
 function phpStringParameterCoerce(value, parameterName, nullable = false) {

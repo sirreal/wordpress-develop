@@ -467,6 +467,20 @@ assert.equal(notinReferenceLength.value, 7);
 const legacyNotReferenceLength = {};
 assert.equal(WP_HTML_Decoder.read_character_reference("data", "&notin", 0, legacyNotReferenceLength), "¬");
 assert.equal(legacyNotReferenceLength.value, 4);
+assert.equal(WP_HTML_Decoder.read_character_reference("data", "x&copy;", " 1"), "©");
+assert.equal(WP_HTML_Decoder.read_character_reference("data", "x&copy;", -1), null);
+assert.throws(
+	() => WP_HTML_Decoder.read_character_reference("data", "x&copy;", "1.0"),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Decoder.read_character_reference("data", "x&copy;", ""),
+	TypeError,
+);
+assert.throws(
+	() => WP_HTML_Decoder.read_character_reference("data", "x&copy;", {}),
+	TypeError,
+);
 
 const span = new WP_HTML_Span("14", 28);
 assert.equal(span.start, 14);
