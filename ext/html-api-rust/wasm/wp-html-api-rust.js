@@ -8220,6 +8220,14 @@ export function createHtmlApi(wasm) {
 				if (!this.#isIgnorableTableText(text)) {
 					return true;
 				}
+				if (
+					nextTag !== false &&
+					nextTag.is_closing &&
+					this.#isIgnoredFosterLookaheadEndTag(nextTag.tag_name)
+				) {
+					at = nextTag.token_end;
+					continue;
+				}
 				if (nextTag === false || nextTag.is_closing) {
 					return false;
 				}
@@ -8240,6 +8248,10 @@ export function createHtmlApi(wasm) {
 				wrappers = this.#deferredTableChildLookaheadTags(nextTag.tag_name);
 				at = nextTag.token_end;
 			}
+		}
+
+		#isIgnoredFosterLookaheadEndTag(tagName) {
+			return tagName === "HTML";
 		}
 
 		#isDeferredTableChildOpenerTag(tagName) {

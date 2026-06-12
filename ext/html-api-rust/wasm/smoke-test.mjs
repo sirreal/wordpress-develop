@@ -6063,6 +6063,15 @@ assert.equal(
 );
 fullParserSplitFosteredTextBeforeTableColgroup.destroy();
 
+const fullParserFosteredTextAfterIgnoredHtmlEndInTableColgroup = WP_HTML_Processor.create_full_parser(
+	"<table><colgroup></html>foo",
+);
+assert.equal(
+	fullParserFosteredTextAfterIgnoredHtmlEndInTableColgroup.serialize(),
+	"<html><head></head><body>foo<table><colgroup></colgroup></table></body></html>",
+);
+fullParserFosteredTextAfterIgnoredHtmlEndInTableColgroup.destroy();
+
 for (const incompleteToken of [
 	"<!--",
 	"<!--x",
