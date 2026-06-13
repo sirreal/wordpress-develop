@@ -1,0 +1,42 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 72,
+      "hallucinated_methods": [
+        "seek('does-not-exist') as a safe no-op/existence probe"
+      ],
+      "notes": "Chose WP_HTML_Processor correctly and used documented token/depth APIs, clean-scan checks, set_attribute(), and get_updated_html(). The major API misuse is calling seek() for a bookmark that was never set, then reparsing instead of bookmarking the list opener. All method names exist in the docs, but this relies on undocumented missing-bookmark behavior and crashes in most modifying cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, fully documented API usage, idiomatic bookmark/seek/release flow, depth-based direct-child counting, tag_closers => 'visit' boundary detection, clean-scan guards, and get_updated_html(). Passed all hidden cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 84,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods. It uses bookmarks and token walking, but the subtree boundary check is ordered after skipping tag closers, so the UL/OL closing token is ignored and scanning continues into later malformed markup. That causes trailing incomplete/unsupported input after an already closed list to cancel a valid edit."
+    }
+  ],
+  "failure_analysis": "Failed cases simple-ul, ol, existing-count-overwritten, omitted-li-closers, and nested-list-counts-direct-children failed only in trial-1. The misconception was that seek() could be called with an arbitrary missing bookmark as a harmless no-op. The docs' Bookmarks recipe says to set a bookmark before seeking, but the seek() reference says it returns bool for whether movement succeeded without explicitly stating the precondition or missing-name behavior; that can be read as a safe false-return probe.\n\nFailed cases incomplete-token-after-closed-list and unsupported-after-closed-list failed in trial-1 for the same bogus seek() call. They failed in trial-3 because the candidate checked is_tag_closer() before checking whether get_current_depth() had dropped below the recorded list depth. The list closer is the boundary token, so skipping closers made the scan continue past the closed list and let later incomplete/unsupported markup poison the clean-scan check. The relevant docs are the next_token(), get_current_depth(), and Recipe: test subtree membership and direct children sections; they explain the boundary rule, but the direct-child predicate is separate from a full loop and does not strongly warn that the depth-boundary check must run before any continue for closers or non-child tokens.\n\nThe docs did well on the biggest choice: all trials picked WP_HTML_Processor rather than WP_HTML_Tag_Processor, and two trials used bookmark/edit/get_updated_html patterns. The near miss is regional completion: subjects need to distinguish 'the bounded subtree was scanned cleanly' from 'the rest of the document was scanned cleanly.'",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::seek() and bookmark docs",
+      "problem": "Missing-bookmark behavior is not explicit. The bool return description can imply that seek() is safe to call with a never-created bookmark and will simply return false.",
+      "suggestion": "Document seek()'s precondition: the bookmark name must have been created with set_bookmark() and not released on the same processor. State the exact behavior for unknown names, and align implementation/docs if unknown names are intended to return false without warnings."
+    },
+    {
+      "location": "Recipe: test subtree membership and direct children / get_current_depth()",
+      "problem": "The docs describe boundary depth and direct-child filtering, but do not show a complete loop where the boundary check comes before skipping closers or non-child tokens.",
+      "suggestion": "Add a generic bounded-subtree loop showing: after next_token() or next_tag(tag_closers => 'visit'), first break when get_current_depth() < $container_depth, then apply token type, closer, tag name, and direct-child predicates."
+    },
+    {
+      "location": "paused_at_incomplete_token() and get_last_error() completion policy",
+      "problem": "The docs say to check these after scans, but do not make the scan scope explicit enough. Candidates treated malformed markup after a closed target subtree as if it invalidated the subtree scan.",
+      "suggestion": "Add guidance that clean-scan checks should be evaluated immediately after the caller's promised scan region ends. Only drain to EOF when the function contract requires whole-document completeness."
+    }
+  ]
+}

@@ -2,6 +2,45 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 58/59 — depth-boundary closer-card scratch A/B loses
+
+`round-58` was the control rendered-doc round and `round-59` was a
+scratch-only HTML Processor rendered-doc variant for
+`N03-first-list-count`, `T07-nested-lists`, and `T08-table-extract`. Both used
+`shadow-doc-a/b`, subjects `gpt-5.4-mini` / `low` / `priority`, and judge
+`gpt-5.5` / `xhigh` / `priority`. Source docblocks were unchanged.
+
+Variant: add compact class-level and method-local contrast wording stating
+that depth-boundary scans must visit the boundary token: use `next_token()`, or
+use `next_tag( array( 'tag_closers' => 'visit' ) )` for tag-only scans because
+plain `next_tag()` skips closers.
+
+Numeric result: variant lost, **90.74 vs 97.35**. N03 fell 93.66 -> 76.51,
+T07 fell 99.40 -> 96.30, and T08 rose 99.00 -> 99.40. The N03 target pattern
+improved in one trial, which used `tag_closers => 'visit'` and scored 100, but
+another trial still skipped the boundary because it checked `is_tag_closer()`
+before checking whether depth had dropped below the recorded list depth. A
+third N03 trial introduced a separate bookmark misuse, calling `seek()` for a
+bookmark that was never set and then reparsing.
+
+Interpretation: do not promote the closer-card wording. The failure mode is
+more precise than the tested wording: weaker subjects need a full generic
+bounded-subtree loop where the first operation after advancing is
+`get_current_depth() < $container_depth` break, followed only then by token
+type, closer, tag-name, and direct-child predicates. Judges also identified two
+separate candidates: `seek()` should make the set-bookmark precondition and
+unknown-name behavior explicit, and clean-scan checks should be scoped to the
+caller's promised region rather than automatically treating malformed trailing
+markup after a closed target subtree as invalid.
+
+Next action: commit round-59 results separately, then do not edit source from
+this losing variant. If continuing the traversal hypothesis, run a new
+scratch-rendered A/B with subjects `gpt-5.4-mini` / `low` / `priority`, judge
+`gpt-5.5` / `xhigh` / `priority`, the same traversal subset, a complete
+bounded-loop recipe, and separate regional completion wording; keep the
+bookmark `seek()` precondition as its own method-local diagnostic or small
+source candidate only after evidence confirms it is not one-off sampling noise.
+
 ## Round 57 — checkpoint after serialization fallback source edit
 
 **All 97.90 / train 97.95 / held-out 97.73 / core 97.66** under

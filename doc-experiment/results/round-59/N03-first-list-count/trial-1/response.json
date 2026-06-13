@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in body context, then next_tag() and next_token() with get_current_depth() to find the first UL/OL and count only LI opener tokens at one level deeper. If the scan is incomplete or the processor reports an error, the function returns the original HTML unchanged; otherwise it rewinds by creating a fresh processor and updates the first matching list opener with set_attribute(), then returns get_updated_html().",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_tag()` and `next_token()` so table structure is handled the way the browser would. Cell text comes from `get_modifiable_text()` on `#text` tokens only, while `get_current_depth()`, `get_tag()`, and `is_tag_closer()` keep row and cell boundaries aligned with the parsed table subtree.",
+  "confidence": 90
+}

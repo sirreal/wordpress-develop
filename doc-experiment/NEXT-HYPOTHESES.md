@@ -8,6 +8,21 @@ from discoverability gaps.
 
 ## Current read
 
+Latest update: rounds 58/59 tested the weak-tier traversal-boundary scratch
+A/B requested after the round-57 checkpoint. The variant lost badly
+(90.74 vs 97.35), so do not promote the compact
+"plain `next_tag()` skips closers" card. It helped one N03 trial use
+`tag_closers => 'visit'`, but another trial still checked
+`is_tag_closer()` before the depth-boundary break, and a third trial exposed a
+separate `seek()`/bookmark precondition gap. The next traversal diagnostic, if
+pursued, should be a new scratch rendered-doc A/B with subjects
+`gpt-5.4-mini` / `low` / `priority`, judge `gpt-5.5` / `xhigh` / `priority`,
+the same traversal subset, and a complete bounded-subtree loop whose first
+check after advancing is `get_current_depth() < $container_depth`, followed by
+token/closer/name filters, plus explicit regional completion wording. Treat
+`seek()` unknown bookmark behavior as a separate method-local candidate; do
+not combine it into the failed closer-card promotion.
+
 Round 17 was a no-edit hold round on the previous active corpus and scored
 98.93 on train. After that hold round, several active tasks were intentionally
 replaced or tightened: N03, N04, N06, T07, T11, H04, plus smaller prompt or

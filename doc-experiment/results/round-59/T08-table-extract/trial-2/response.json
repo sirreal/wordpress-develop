@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_tag() and next_token() so table structure is handled by the HTML processor rather than by manual string parsing. Cell text is collected only from #text tokens via get_modifiable_text(), which the documented API returns decoded and safe for ordinary DOM-style text extraction.",
+  "confidence": 82
+}

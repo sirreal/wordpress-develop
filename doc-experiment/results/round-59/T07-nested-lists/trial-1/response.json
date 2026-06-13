@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to preserve fragment semantics and `next_token()` with `get_token_type()`, `get_tag()`, `is_tag_closer()`, `add_class()`, and `get_updated_html()` to walk the document structurally while keeping untouched bytes exact. A simple stack of open `UL`/`OL` tags tracks whether the current list has any list ancestor, so only nested lists receive `nested-list`.",
+  "confidence": 96
+}

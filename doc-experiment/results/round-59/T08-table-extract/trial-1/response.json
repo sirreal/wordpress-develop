@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware fragment parsing, then walked tokens with `next_tag()`/`next_token()` and `get_current_depth()` so table structure, implied rows, and cell boundaries are handled like a browser. Cell text comes only from `#text` tokens via `get_modifiable_text()`, and the first `TABLE` subtree is converted into an array of rows and cells.",
+  "confidence": 92
+}
