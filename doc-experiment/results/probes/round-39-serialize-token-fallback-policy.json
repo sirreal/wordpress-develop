@@ -1,0 +1,224 @@
+{
+  "round": "round-39",
+  "mode": "discoverability-probe",
+  "question_id": "serialize-token-fallback-policy",
+  "question": "Using only the rendered documentation, answer this citation-only API policy question: A caller builds normalized output by creating a WP_HTML_Processor fragment, walking with next_token(), accumulating serialize_token(), and sometimes emitting wrapper markup around selected text tokens. What should the caller understand about (1) create_fragment() returning null versus get_last_error() becoming non-null later, (2) paused_at_incomplete_token() after the walk, (3) calling normalize( $html ) or serialize() after a token-by-token rewrite, and (4) returning raw original input when the function promises normalized output? Cite the exact rendered doc file and heading for each part, and state whether the docs give a clear recommended fallback or only require a caller-defined policy.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-39/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "serialize-token-fallback-policy",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "1. `WP_HTML_Processor::create_fragment()` returning `null` is a creation-time failure signal; `get_last_error()` becoming non-`null` is a later scan-time abort on unsupported markup after a processor was created successfully. The docs distinguish these, but only the later case gets an explicit rewrite-loop rule: reject or fall back when `get_last_error()` is non-`null`.\n2. `paused_at_incomplete_token()` should be checked after the walk is drained to know whether scanning stopped on trailing incomplete syntax. The docs say this is a separate policy decision: best-effort rewrites may omit the incomplete tail, but callers that require complete input should reject when it is `true`.\n3. After a token-by-token rewrite that accumulates `serialize_token()` output and injects wrapper markup, the accumulated string is the result. Do not call `normalize( $html )` on the original input unless you intend to discard the rewrite, and do not call `serialize()` after scanning has started because it returns `null` once `next_token()` or `next_tag()` has been called.\n4. If a function promises normalized output, returning the raw original input is not documented as an acceptable fallback. The docs define normalized output as serialized/normalized HTML, and for unsupported markup they say outputs become `null` and rewrite loops must reject or use some caller-defined fallback; they do not endorse returning unnormalized original bytes under a normalized-output contract.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`create_fragment()`",
+            "support": "Returns: `static|null` - The created processor if successful, otherwise null. Current HTML Support: The only supported context is `<body>` ... The only supported document encoding is `UTF-8`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "HTML Support > Supported elements",
+            "support": "If any unsupported markup appears in the HTML input the HTML Processor will abort early and stop all processing. When this happens, `get_last_error` returns a non-null value ... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "Always reject or fall back when `WP_HTML_Processor::get_last_error` is non-null, because the parser stopped at unsupported markup."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers \"did the input end mid-token?\" only after the processor has scanned to the end of the input."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "Decide separately whether incomplete trailing syntax is acceptable. A token-by-token rewrite omits an incomplete token that was never visited ... If the caller needs proof that the source ended cleanly, also reject when `WP_HTML_Tag_Processor::paused_at_incomplete_token` is true."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "Use `WP_HTML_Processor::serialize_token` when output is built while walking tokens ... The accumulated string is the rewrite; do not later call `normalize()` on the original HTML unless the intention is to discard every change emitted by the loop."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize()`",
+            "support": "This method is for producing a normalized copy of a document, not for retrieving modifications ... Once `next_token()` or `next_tag()` has been called, this method returns `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize_token()`",
+            "support": "After a rewriting loop, return the accumulated output or reject it according to the caller's policy."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`normalize()`",
+            "support": "Returns: `string|null` - Normalized output, or `null` if unable to normalize. Many aspects of an input HTML fragment may be changed during normalization."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "HTML Support > Supported elements",
+            "support": "When this happens, `get_last_error` returns a non-null value ... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          }
+        ],
+        "rationale": "The cited sections separate creation failure from later parser aborts, state when incomplete-input detection is valid, explicitly forbid replacing a rewrite with later normalization/serialization of the original input, and show that unsupported-input fallback is only partially specified, leaving any non-rejection fallback to caller policy rather than authorizing raw original input as normalized output.",
+        "confidence": 95
+      }
+    },
+    {
+      "id": "serialize-token-fallback-policy",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "1. `create_fragment()` returning `null` is a construction-time failure, while `get_last_error()` becoming non-`null` later means a processor was created but parsing later aborted on unsupported markup. The docs do not give one mandated fallback for either case; they distinguish the states, and fallback policy is caller-defined.\n2. After a token walk, `paused_at_incomplete_token()` only answers whether scanning stopped because the input ended mid-token if you have drained the walk to the end. The docs clearly say to check it after the walk; whether to reject truncated input or accept best-effort output is caller-defined.\n3. After a token-by-token rewrite that accumulates `serialize_token()`, return the accumulated rewritten string. Do not call `normalize( $html )` on the original HTML afterward unless you intend to discard your emitted changes, and do not call `serialize()` after scanning because it returns `null` once `next_token()`/`next_tag()` has started. This is a clear recommendation.\n4. If a function promises normalized output, returning the raw original input is not supported by the docs as a normalized fallback. The docs say normalized output comes from serialization/normalization, and when `get_last_error()` is non-`null` you should reject or fall back according to caller policy. So returning raw input as if it were normalized is not a documented fallback; any fallback to raw input would need an explicit caller-defined non-normalized policy.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`create_fragment()`",
+            "support": "Returns: `static|null` - The created processor if successful, otherwise null."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "HTML Support",
+            "support": "If any unsupported markup appears in the HTML input the HTML Processor will abort early and stop all processing. When this happens, `get_last_error` returns a non-null value ... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_last_error()`",
+            "support": "To determine why something failed it's possible to request the last error ... to distinguish whether a given tag couldn't be found or if content in the document caused the processor to give up and abort processing."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers \"did the input end mid-token?\" only after the processor has scanned to the end of the input."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "Decide separately whether incomplete trailing syntax is acceptable... If the caller needs proof that the source ended cleanly, also reject when `paused_at_incomplete_token` is true. Always reject or fall back when `get_last_error` is non-null, because the parser stopped at unsupported markup."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "The accumulated string is the rewrite; do not later call `normalize()` on the original HTML unless the intention is to discard every change emitted by the loop."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize()`",
+            "support": "This differs from `normalize` in that it starts with a specific HTML Processor, which must not have already started scanning... Once `next_token()` or `next_tag()` has been called, this method returns `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize_token()`",
+            "support": "After a rewriting loop, return the accumulated output or reject it according to the caller's policy... Do not call `normalize()` on the original HTML after emitting changes unless the intention is to discard those changes."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`normalize()`",
+            "support": "Normalizes an HTML fragment by serializing it... Returns: `string|null` - Normalized output, or `null` if unable to normalize."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize_token()`",
+            "support": "Always reject or fall back if `get_last_error` is non-null, because the parser stopped at unsupported markup."
+          }
+        ],
+        "rationale": "The cited sections separate construction failure from later parser aborts, define when incomplete-input detection is meaningful, explicitly warn against `normalize()`/`serialize()` misuse after token-walk rewriting, and leave fallback behavior mostly to caller policy except for the clear recommendation to return the accumulated rewrite rather than re-normalizing the original input.",
+        "confidence": 94
+      }
+    },
+    {
+      "id": "serialize-token-fallback-policy",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "1. `WP_HTML_Processor::create_fragment()` returning `null` is an upfront creation failure, while `get_last_error()` becoming non-null later means the processor was created but then aborted on unsupported markup during parsing or serialization. The docs distinguish these states, but do not prescribe one fallback; fallback policy is caller-defined.\n2. After a token walk, `paused_at_incomplete_token()` tells you whether scanning stopped because the input ended mid-token. The docs say to check it only after draining the scan or after a bounded walk when completeness matters. For rewrites, whether to accept omitted trailing incomplete syntax is caller-defined; reject if your contract requires complete input.\n3. After building rewritten output token-by-token, return the accumulated output. Do not call `normalize( $html )` on the original input afterward unless you intend to discard the rewrite, and do not call `serialize()` on the same processor after scanning because it returns `null` once scanning has begun. This is a clear recommendation, not a fallback rule.\n4. If the function promises normalized output, returning the raw original input is not supported by the normalization contracts. `normalize()`/`serialize()` define normalized output, while `get_updated_html()` preserves untouched bytes exactly and is not normalization. For unsupported markup the docs clearly say to reject or fall back; they do not recommend raw-input fallback, so any such fallback is caller-defined and risks violating the promised normalized-output contract.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`create_fragment()`",
+            "support": "Returns: `static|null` - The created processor if successful, otherwise null."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`create_fragment()`",
+            "support": "Current HTML Support: The only supported context is `<body>`... The only supported document encoding is `UTF-8`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "HTML Support",
+            "support": "If any unsupported markup appears in the HTML input the HTML Processor will abort early and stop all processing... When this happens, `get_last_error` returns a non-null value... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_last_error()`",
+            "support": "This can be helpful to know to distinguish whether a given tag couldn't be found or if content in the document caused the processor to give up and abort processing."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers \"did the input end mid-token?\" only after the processor has scanned to the end of the input."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "Decide separately whether incomplete trailing syntax is acceptable... If the caller needs proof that the source ended cleanly, also reject when `paused_at_incomplete_token()` is true. Always reject or fall back when `get_last_error()` is non-null, because the parser stopped at unsupported markup."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "The accumulated string is the rewrite; do not later call `normalize()` on the original HTML unless the intention is to discard every change emitted by the loop."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize()`",
+            "support": "This method... must not have already started scanning... Once `next_token()` or `next_tag()` has been called, this method returns `null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize_token()`",
+            "support": "After a rewriting loop, return the accumulated output or reject it according to the caller's policy."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`serialize_token()`",
+            "support": "Do not call `normalize()` on the original HTML after emitting changes unless the intention is to discard those changes."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`get_updated_html()`",
+            "support": "Every byte the updates did not touch is returned exactly as it appeared in the input — no re-encoding, normalization, or reformatting occurs."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`normalize()`",
+            "support": "Normalizes an HTML fragment by serializing it... Many aspects of an input HTML fragment may be changed during normalization."
+          }
+        ],
+        "rationale": "The cited headings separate creation-time failure from later parser aborts, define how incomplete trailing syntax must be checked after walking, explicitly forbid post-rewrite `normalize()`/post-scan `serialize()` patterns, and show that normalized-output fallback behavior is only partly specified, leaving raw-input fallback as caller policy rather than a documented recommendation.",
+        "confidence": 95
+      }
+    }
+  ]
+}

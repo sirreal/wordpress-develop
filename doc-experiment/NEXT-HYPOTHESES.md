@@ -167,6 +167,14 @@ paired subset and did not eliminate special-element opener over-inclusion.
 Do not promote that wording. The next best action is the separate
 normalized-output / `serialize_token()` fallback citation-only probe.
 
+Round 39 ran that citation-only probe. It passed 3/3: subjects found the
+factory-null versus later parser-abort distinction, incomplete-token policy,
+the accumulated `serialize_token()` output rule, and the warning that
+`normalize( $html )` discards emitted rewrites. Treat this as evidence that
+the facts are present and discoverable when directly asked. The next
+diagnostic, if pursuing this hypothesis, should be scratch A/B transfer
+testing on implementation tasks, not a source edit from the probe alone.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -275,6 +283,14 @@ Contract to test:
 Why this is strong: repeated judge notes across N04, T09, T11, T12, and N05
 show invented null branches, wrong fallback choices, and cross-class factory
 hallucinations. This is a broad API boundary, not a task-specific patch.
+
+Round-39 citation probe result: passed 3/3 at the current subject tier.
+Subjects correctly distinguished factory `null` from later `get_last_error()`,
+found `paused_at_incomplete_token()` as a separate complete-input policy
+check, and identified `normalize( $html )` after a token rewrite as discarding
+the accumulated changes. This is not source-edit evidence by itself. Use a
+scratch A/B next to test whether a compact method-local fallback card improves
+T09/T12/N04 transfer.
 
 Risk: low.
 

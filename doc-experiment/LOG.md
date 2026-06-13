@@ -2,6 +2,35 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 39 — serialization fallback citation probe passes
+
+`round-39` was a `discoverability-probe` against the current rendered docs,
+with subjects `gpt-5.4` / `medium` / `priority`. The question asked how a
+token-by-token `serialize_token()` rewriter should distinguish
+`create_fragment()` returning `null`, later `get_last_error()`, trailing
+incomplete input via `paused_at_incomplete_token()`, post-rewrite
+`normalize( $html )` / `serialize()` calls, and raw-input fallback when the
+caller promises normalized output.
+
+Outcome: 3/3 subjects answered correctly with local citations. They found
+that factory `null` is construction-time failure while non-null
+`get_last_error()` is a later parser abort; `paused_at_incomplete_token()` is
+a separate complete-input policy check after scanning; the accumulated
+`serialize_token()` string is the rewrite; calling `normalize( $html )` on
+the original input discards emitted changes; `serialize()` returns `null`
+after scanning has started; and raw original input is not documented as a
+normalized-output fallback.
+
+Interpretation: the facts are discoverable when directly requested. The
+remaining problem is transfer into implementation tasks, where round-36 and
+round-37/38 candidates still improvised raw-input or `normalize( $html )`
+fallbacks after a rewrite loop.
+
+Next action: test a scratch-only method-local fallback-policy card around
+`serialize_token()` / `create_fragment()` / `normalize()` on
+`T09-mark-keyword`, `T12-unwrap-spans`, and `N04-normalize-or-placeholder`.
+Do not source-edit from this probe alone.
+
 ## Rounds 37/38 — method-local text policy scratch A/B loses
 
 `round-37` was the control rendered-doc round and `round-38` was a
