@@ -152,8 +152,14 @@ variant 99.08 vs control 97.34 on N03/N06/T06/T08, with N03 recovering from
 special-element over-inclusion signal did not disappear and should stay
 separate. Round 35 supplied the checkpoint: all 99.47 / train 99.50 /
 held-out 99.38, with all hidden cases passing and held-out above round 24.
-Next action: promote the adapted depth/direct-child card as one source
-docblock hypothesis.
+Round 36 confirmed the source promotion: train 99.65 / core 99.59, all 45
+subject trials passed all hidden cases, N03 stayed 100.00, T07 rose to
+100.00, and T08 rose to 98.50. Treat the depth/direct-child card as resolved
+for now. Next action: analyze the remaining trusted judge notes and choose a
+separate diagnostic; the strongest recurring candidates are the
+special-element ordinary-text policy near `next_token()` /
+`get_modifiable_text()` and normalized-output fallback policy for
+`serialize_token()` rewriters.
 
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
@@ -207,7 +213,7 @@ a list-counting recipe. Best placement is near
 `WP_HTML_Processor::next_token()`, `get_current_depth()`, and the inherited
 `paused_at_incomplete_token()` docs/cross-reference.
 
-### 1. Depth-boundary equivalence card — scratch win in rounds 33/34
+### 1. Depth-boundary equivalence card — confirmed in round 36
 
 Core idea: make the subtree-walk boundary mechanically hard to copy wrong.
 Show both safe forms side by side near `WP_HTML_Processor::next_token()` and
@@ -228,8 +234,13 @@ mechanical without source edits: N03 went from one incomplete-token functional
 miss in the control to 100.00 in the variant, T08 improved 96.50 to 98.00,
 N06 was effectively flat/slightly up, and T06 had only a -0.2 adherence dip.
 Round 35 checkpoint satisfied the held-out gate: all 99.47 / held-out 99.38,
-with no hidden failures. Promote next, keeping the source wording concise and
-generic.
+with no hidden failures.
+
+Round-36 result: source promotion confirmed. Train scored 99.65 / core 99.59
+against round 32's same-mode 99.67 / core 99.62, with no functional misses.
+The target traversal tasks held or improved: N03 100.00, T07 100.00, and T08
+98.50. Do not spend more source-edit budget on this depth/direct-child card
+unless a future weaker tier or task exposes a distinct traversal failure.
 
 Risk: medium. Avoid a table-specific solution. The invariant should be
 explained with generic "container and descendants" language, optionally backed

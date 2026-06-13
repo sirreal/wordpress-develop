@@ -2,6 +2,41 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 36 — depth-bounded traversal source edit confirmed
+
+**Train 99.65 / core 99.59** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored the source promotion of the round-34 class-level
+HTML Processor recipe for subtree membership and direct-child opener checks.
+The prepared round was at `4a39f7802c`, with the documentation hypothesis in
+`6548356f1f`.
+
+Outcome: confirmed. All 45 subject trials passed all hidden cases. Compared
+with the primary same-mode scored-train baseline, round 32, the round is
+essentially tied: 99.67 -> 99.65, well clear of the revert threshold. The
+targeted traversal tasks held or improved: N03-first-list-count stayed
+perfect at 100.00, T07-nested-lists rose 99.30 -> 100.00, and
+T08-table-extract rose 97.60 -> 98.50. N06-extract-toc was 99.00, down only
+0.4 from round 32 and still all hidden cases passed.
+
+Secondary context: compared with the immediate pre-promotion checkpoint's
+train split, round 35 train 99.50 -> round 36 train 99.65. This is useful
+local context but not the primary comparator because round 35 was
+`checkpoint` mode and included held-out tasks.
+
+Decision: keep the traversal recipe source edit. It is general API
+documentation and the scored source round does not show a regression. The
+remaining judge signal is separate: special-element opener text can still be
+over-included in ordinary subtree text, `serialize_token()` rewriters still
+vary in fallback policy, and examples that call the inherited
+`paused_at_incomplete_token()` from HTML Processor workflows could be made
+more explicit.
+
+Next action: commit round-36 results separately from the source hypothesis,
+then analyze trusted round-36 judge notes against the backlog. Do not add more
+traversal/depth source prose unless a new measurement exposes a distinct
+failure.
+
 ## Round 35 — checkpoint clears depth-card promotion gate
 
 **All 99.47 / train 99.50 / held-out 99.38 / core 99.41** under
