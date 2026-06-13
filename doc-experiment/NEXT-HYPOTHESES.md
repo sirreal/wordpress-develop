@@ -228,6 +228,14 @@ action is a scratch rendered-doc A/B, not a direct source edit. Test a compact
 read-only completion-policy note/example against T05/T06/T08/N06, with the
 decision framed as best-effort extraction versus complete-source validation.
 
+Rounds 48/49 tested that scratch variant. It won 99.65 vs 99.03 on the
+paired T05/T06/T08/N06 subset with all hidden cases passing. T05 moved to
+100.00, T08 to 99.80, and N06 to 100.00; T06 dipped to 98.80 because one
+trial still failed closed on `get_last_error()`. Treat the note as promotable
+after the checkpoint gate, but adapt rather than copy: keep it short, keep the
+caller-contract framing, and do not imply that all read-only extraction should
+keep partial results.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

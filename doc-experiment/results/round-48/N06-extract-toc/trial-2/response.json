@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` pass so structure is handled correctly. When an opening `H1` through `H6` tag is encountered, it records that heading's depth with `get_current_depth()`, appends only `#text` token contents via `get_modifiable_text()` while still inside that subtree, and closes the entry when the depth drops below the heading's depth; it also rejects incomplete or unsupported parses using `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 90
+}

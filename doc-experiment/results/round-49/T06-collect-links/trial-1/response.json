@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because link text extraction is a structure-aware subtree walk, then scans with `next_token()` in document order, starts a record on each `A` opener whose `get_attribute( 'href' )` returns a string, appends only `#text` token content via `get_modifiable_text()`, and flushes the record when the matching `A` closer is visited.",
+  "confidence": 85
+}

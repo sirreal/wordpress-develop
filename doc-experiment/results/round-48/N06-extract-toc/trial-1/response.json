@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens with `next_token()`. When it encounters an opening `H1` through `H6` tag, it starts a TOC entry and accumulates only ordinary `#text` token content via `get_modifiable_text()` until the matching heading closer is reached, which follows the documented tree-aware text-extraction guidance and ignores markup tags themselves.",
+  "confidence": 88
+}

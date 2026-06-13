@@ -2,6 +2,48 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 48/49 — read-only completion-policy scratch A/B wins
+
+`round-48` was the control rendered-doc round and `round-49` was a
+scratch-only HTML Processor rendered-doc variant for four train tasks:
+`T05-text-excerpt`, `T06-collect-links`, `T08-table-extract`, and
+`N06-extract-toc`. Both used `shadow-doc-a/b`, subjects `gpt-5.4` /
+`medium` / `priority`, and judge `gpt-5.5` / `xhigh` / `priority`. Source
+docblocks were unchanged.
+
+Variant: add one compact read-only completion-policy rule of thumb under the
+class-level DOM-style text recipe. It separates best-effort extraction from
+complete-source validation and from mutation, normalization, or token-rewrite
+output. The key contract is that `paused_at_incomplete_token()` and
+`get_last_error()` report scan status; they do not retroactively invalidate
+tokens already visited.
+
+Numeric result: variant won, **99.65 vs 99.03** on the paired subset. All 24
+subject trials passed all hidden cases. T05 improved 98.30 -> 100.00, T08
+improved 99.00 -> 99.80, and N06 improved 99.40 -> 100.00. T06 dipped 99.40
+-> 98.80 because one variant trial still cleared read-only results on
+`get_last_error()`.
+
+Transfer result: the variant removed several over-strict completion-policy
+near-misses. Control N06 trial 2 rejected accumulated headings after
+`paused_at_incomplete_token()`, while variant N06 was 100/100/100 adherence.
+Control T05 trials 1 and 2 used a risky Tag Processor fallback after an HTML
+Processor abort; variant T05 used the HTML Processor pattern directly in all
+trials. T06 shows the remaining weakness: a compact policy note helps but
+does not fully prevent all fail-closed read-only collectors.
+
+Interpretation: promotable after a checkpoint gate, but adapt carefully. The
+source edit should keep the small rule-of-thumb shape and avoid implying that
+all read-only extractors must keep partial results. It should state the
+choice as caller contract: best-effort extraction may return accumulated
+visited-token data, while complete-source validation and mutations/rewrites
+should fail closed when required.
+
+Next action: commit rounds 48/49 results separately, then run the required
+checkpoint/regression sentinel before promoting another source docblock edit.
+If held-out remains stable, promote an adapted read-only completion-policy
+note as one source hypothesis.
+
 ## Round 47 — text-policy decision table source edit confirmed
 
 **Train 99.55 / core 99.48** under `scored-train`, with subjects
