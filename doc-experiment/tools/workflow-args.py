@@ -2,6 +2,7 @@
 """Emit workflow arguments from a prepared round's metadata."""
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -26,6 +27,24 @@ def load_metadata(round_name: str) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"missing round metadata: {path}")
     return json.loads(path.read_text())
+
+
+def run_text(command: list[str]) -> str:
+    proc = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"{' '.join(command)} failed: {message}")
+    return proc.stdout.strip()
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def verify_round(round_name: str) -> None:
@@ -72,10 +91,22 @@ def judge_args(metadata: dict) -> dict:
 
 def launch_manifest(metadata: dict) -> dict:
     round_name = metadata["round"]
+    trials_script = EXPERIMENT_ROOT / "tools" / "trials-workflow.js"
+    judges_script = EXPERIMENT_ROOT / "tools" / "judge-workflow.js"
     return {
         "round": round_name,
         "mode": metadata.get("mode"),
         "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
+        "launch_provenance": {
+            "current_git_head": run_text(["git", "rev-parse", "HEAD"]),
+            "current_git_status_short": run_text(["git", "status", "--short"]),
+            "round_metadata_git_head": metadata.get("git_head"),
+            "round_metadata_git_status_short": metadata.get("git_status_short"),
+            "workflow_script_sha256": {
+                "trials": file_sha256(trials_script),
+                "judges": file_sha256(judges_script),
+            },
+        },
         "subject_isolation": {
             "required_agent_type": "docs-test-subject",
             "agent_option_key": "agent_type",
@@ -89,8 +120,8 @@ def launch_manifest(metadata: dict) -> dict:
             ],
         },
         "scripts": {
-            "trials": str(EXPERIMENT_ROOT / "tools" / "trials-workflow.js"),
-            "judges": str(EXPERIMENT_ROOT / "tools" / "judge-workflow.js"),
+            "trials": str(trials_script),
+            "judges": str(judges_script),
         },
         "args": {
             "trials": trial_args(metadata),

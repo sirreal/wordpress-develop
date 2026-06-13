@@ -214,6 +214,12 @@ sequence as a single handoff object, run:
 python3 doc-experiment/tools/workflow-args.py manifest round-NN
 ```
 
+The manifest includes launch provenance: current git head/status, the prepared
+round metadata git head/status, and SHA-256 hashes for the bundled trial and
+judge workflow scripts. Persist the manifest or equivalent values with the
+external runner handoff so tooling-only commits can be distinguished from the
+staged rendered-doc/corpus state.
+
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and
 one-sentence rationale. Do not execute code or expose hidden tests.

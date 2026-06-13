@@ -80,6 +80,11 @@ Round 18 was restaged before launch after the tooling-only isolation commits.
 The refreshed metadata now records git head `5d02b91636`; rendered-doc, task
 prompt, source, and corpus file hashes stayed unchanged.
 
+The launch manifest now reports current checkout provenance separately from
+round metadata provenance, plus SHA-256 hashes for the trial and judge workflow
+scripts. This avoids treating metadata's staged content ref as the workflow
+execution ref after tooling-only commits.
+
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.
