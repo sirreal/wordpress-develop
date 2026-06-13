@@ -155,6 +155,12 @@ Why this is strong: many passing trials still show shallow explanations about
 why comments, attributes, raw-text elements, and split text are excluded or
 included. Weaker models are likely to expose this more sharply.
 
+Round-19 probe result: a direct citation-only text-content recipe probe passed
+3/3 at the current `gpt-5.4` / `medium` tier. Subjects found the existing
+depth-bounded `#text` accumulation recipe and the SCRIPT/STYLE/TITLE/TEXTAREA
+element-token exception. Keep this as a weaker-tier or shadow-doc A/B
+candidate, not the next immediate source edit at the current tier.
+
 Risk: medium-low if phrased as a token model instead of a task recipe.
 
 ### 4. Contract-card rendered-doc A/B

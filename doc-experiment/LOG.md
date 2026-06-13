@@ -30,6 +30,14 @@ Round-19 judge residuals are now lower-signal polish: the stale
 for partial scans, and factory/serialization fallback clarity. The measured
 N03 failure is resolved.
 
+Follow-up citation-only probe: a text-content recipe probe asked how to collect
+an element's text, where SCRIPT/STYLE/TITLE/TEXTAREA contents appear, and what
+not to append. All three `gpt-5.4` / `medium` subjects answered correctly and
+cited `next_token()`, `get_current_depth()`, and `get_modifiable_text()`.
+Interpretation: the text-location facts are discoverable when named directly;
+do not promote another text recipe at this tier without weaker-tier or A/B
+evidence that task code still fails by transfer rather than model judgment.
+
 ## Round 18 — current-corpus weak-tier baseline scored
 
 **Train 98.73 / core 98.54** under the current corpus and current weak-tier
