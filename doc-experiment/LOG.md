@@ -41,12 +41,13 @@ train evidence is only near-miss level, so this is backlog rather than a source
 promotion gate.
 
 Full-round reanalysis after these probes found no remaining non-held-out,
-non-noise train pattern strong enough to justify a source docblock edit. The
-selected subject policy remains `gpt-5.4-mini` / `low` / `priority`, but the
-current action is to pause under the protocol's signal-exhaustion rule rather
-than adding speculative prose. Resume only if the corpus changes, a future
-trusted train round repeats one of the backlogged patterns, or the experiment
-owner explicitly asks to test a new hypothesis despite the weak signal.
+non-noise train pattern strong enough to justify a source docblock edit.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` and pause under the protocol's signal-exhaustion rule rather than
+adding speculative prose. Resume only if the corpus changes, a future trusted
+train round repeats one of the backlogged patterns, or the experiment owner
+explicitly asks to test a new hypothesis despite the weak signal.
 
 ## Round 60 — bounded-loop scratch A/B also loses
 

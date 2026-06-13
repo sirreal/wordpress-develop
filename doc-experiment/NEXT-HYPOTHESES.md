@@ -26,9 +26,11 @@ strings.
 
 Do not promote either traversal variant, and do not promote a constructor or
 breadcrumbs source edit from these probes alone. The facts are discoverable
-when asked directly, and the transfer-oriented A/B variants lost. Keep the
-selected subject policy at `gpt-5.4-mini` / `low` / `priority`. Next action:
-pause under the signal-exhaustion rule instead of adding speculative prose.
+when asked directly, and the transfer-oriented A/B variants lost.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` and pause under the signal-exhaustion rule instead of adding
+speculative prose.
 Full-round reanalysis found no remaining non-held-out, non-noise train pattern
 strong enough to justify a source docblock edit. Keep the usable-attribute
 predicate as backlog unless a train task repeats the confusion; held-out N02
