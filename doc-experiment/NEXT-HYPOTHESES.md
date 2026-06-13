@@ -22,18 +22,20 @@ one sequential filtered-search failure, and `T07` fell 99.40 -> 98.30 from
 lower-adherence traversal choices. Do not promote the processor-choice-only
 wording.
 
-Next action: pause the simplification/reduction loop under the protocol's
-signal-exhaustion rule. Rounds 62-67 tested broad internals pruning,
-method-local text deduplication, roadmap deletion, bookmark compression,
-combined processor-choice/bookmark simplification, and processor-choice-only
-overview pruning; every candidate damaged at least one current train concept at
-`gpt-5.4-mini` / `low` / `priority`. Treat the current source docs as the
-measured minimal set for this corpus/tier until new evidence identifies a safer
-removal or replacement. Do not promote source docblock reductions from rounds
-62-67. Resume only if the owner asks to change the corpus or model policy, run
-a paired no-edit variance/control round for a specific disputed scratch loss,
-or test a new evidence-backed documentation hypothesis that is not just another
-speculative pruning pass.
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, but
+pause the simplification/reduction loop under the protocol's signal-exhaustion
+rule. Rounds 62-67 tested broad internals pruning, method-local text
+deduplication, roadmap deletion, bookmark compression, combined
+processor-choice/bookmark simplification, and processor-choice-only overview
+pruning; every candidate damaged at least one current train concept at this
+tier. Treat the current source docs as the measured minimal set for this
+corpus/tier until new evidence identifies a safer removal or replacement. Do
+not promote source docblock reductions from rounds 62-67. Resume only if the
+owner asks to change the corpus or model policy, run a paired no-edit
+variance/control round for a specific disputed scratch loss, or test a new
+evidence-backed documentation hypothesis that is not just another speculative
+pruning pass.
 
 Previous update: round 66 tested a combined scratch simplification on
 `T01-add-image-class`, `T02-link-targets`, `T10-last-h2`,

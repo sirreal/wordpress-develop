@@ -33,7 +33,9 @@ deduplication, roadmap deletion, bookmark compression, and processor-choice
 overview pruning. The current source docs are the measured minimal set for this
 corpus/tier until new evidence identifies a safer removal or replacement.
 
-Next action: pause the simplification/reduction loop under the protocol's
+Next action: keep the selected subject policy recorded as
+`gpt-5.4-mini` / `low` / `priority` with judge policy `gpt-5.5` / `xhigh` /
+`priority`, but pause the simplification/reduction loop under the protocol's
 signal-exhaustion rule. Do not promote source docblock reductions from rounds
 62-67. Resume only if the owner asks to change the corpus or model policy, run
 a paired no-edit variance/control round for a specific disputed scratch loss,
