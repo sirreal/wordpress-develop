@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a single linear scan, re-setting one bookmark each time `next_tag( 'H2' )` finds another heading so the bookmark ends up on the last `H2`. If a bookmark was set, it seeks back to that tag, adds the `final-section` class with `add_class()`, and returns the modified HTML with `get_updated_html()`; otherwise it returns the original input unchanged.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, finds the first `H1` with `next_tag( 'H1' )`, then walks tokens inside that element with `next_token()` bounded by `get_current_depth()`. It concatenates decoded text from `#text` tokens via `get_modifiable_text()`, and also reads modifiable text from opening tag tokens so text carried directly on special elements is included when present.",
+  "confidence": 91
+}

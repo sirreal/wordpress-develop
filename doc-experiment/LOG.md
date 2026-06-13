@@ -9,8 +9,12 @@ docblock edits: `round-metadata.json` records 15 train tasks, subject
 `gpt-5.4` / `medium` / `priority`, judge `gpt-5.5` / `xhigh` / `priority`,
 and the staged scratch directory `/tmp/html-api-docs-eval/round-18`.
 Scratch isolation passed: only the two rendered docs and selected task prompts
-are exposed. No subject trials, hidden-test executions, judge verdicts, or
-round summary exist yet, so round 18 is not a trusted score.
+are exposed. Local Codex CLI subject trials are now complete and ingested:
+45/45 subject responses, hidden-test executions, and subject-isolation
+attestation are persisted. Pre-judge execution signal is 14/15 tasks perfect;
+N03-first-list-count scored 9/11 in all three trials, failing only
+`incomplete-token-inside-list` and `incomplete-comment-inside-list`. No judge
+verdicts or round summary exist yet, so round 18 is still not a trusted score.
 
 Added a local Codex CLI trial runner to avoid deadlocking on the external
 Workflow UI when it is unavailable. The runner writes the same trial-output

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so table structure is parsed with browser-like HTML rules, including implied table elements. It finds the first `TABLE` with `next_tag()`, then does a single `next_token()` walk bounded by the table depth from `get_current_depth()`, opening and closing rows and cells on `TR`/`TD`/`TH` tags, appending decoded `#text` token content via `get_modifiable_text()`, and also including text carried on raw-text elements like `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` when they appear inside a cell.",
+  "confidence": 85
+}

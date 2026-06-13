@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because structural awareness is required to count only direct `LI` children. It scans to the first `UL` or `OL` with `next_tag()`, records that opener with `set_bookmark()`, walks forward with `next_token()` and `get_current_depth()` to count direct-child `LI` openers, requires the list\u2019s closing token to be reached to consider the scan complete, then seeks back and adds `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 86
+}

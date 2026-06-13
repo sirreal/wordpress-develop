@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag('H1')` to find the first heading, `get_current_depth()` to bound a subtree walk, and `next_token()` plus `get_token_type()` / `get_modifiable_text()` to accumulate decoded text inside that `H1`. It also reads modifiable text from opening tag tokens so text carried on raw-text/rcdata elements is included when such elements appear inside the heading.",
+  "confidence": 90
+}

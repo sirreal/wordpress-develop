@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, finds the first `H1` with `next_tag()`, then walks tokens inside that element with `next_token()` while the depth stays within the `H1` subtree using `get_current_depth()`. It concatenates decoded text from `#text` tokens via `get_modifiable_text()`, and also includes text carried on special element opener tokens (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) because the documentation says those elements do not emit separate `#text` child tokens.",
+  "confidence": 86
+}
