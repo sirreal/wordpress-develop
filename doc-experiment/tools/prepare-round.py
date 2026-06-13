@@ -2,12 +2,14 @@
 """Prepare a documentation experiment round.
 
 This wraps the deterministic docs staging step, copies only task prompts into
-the scratch directory, and records round metadata in the results directory.
-It does not run subjects, execute candidates, or judge trials.
+the scratch directory, and records round metadata plus source/corpus digests in
+the results directory. It does not run subjects, execute candidates, or judge
+trials.
 """
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import subprocess
 import sys
@@ -78,6 +80,10 @@ def source_digests(ref: str | None = None) -> dict:
     )
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def active_tasks() -> dict[str, dict]:
     tasks = {}
     for tests_file in sorted((EXPERIMENT_ROOT / "corpus").glob("*/tests.json")):
@@ -91,6 +97,9 @@ def active_tasks() -> dict[str, dict]:
         task_md = task_dir / "task.md"
         if not task_md.exists():
             raise RuntimeError(f"Missing task prompt: {task_md}")
+        reference_php = task_dir / "reference.php"
+        if not reference_php.exists():
+            raise RuntimeError(f"Missing reference implementation: {reference_php}")
         tasks[task_id] = {
             "id": task_id,
             "split": meta.get("split"),
@@ -99,6 +108,8 @@ def active_tasks() -> dict[str, dict]:
             "concept": meta.get("concept"),
             "processor": meta.get("processor"),
             "task_md": task_md,
+            "tests_json": tests_file,
+            "reference_php": reference_php,
         }
     return tasks
 
@@ -120,6 +131,33 @@ def counts_by(items: list[dict], key: str) -> dict[str, int]:
         value = item.get(key) or "unknown"
         counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def corpus_file_digests(tasks: list[dict], ref: str | None) -> dict:
+    result = {
+        "ref": ref or "working-tree",
+        "algorithm": "sha256",
+        "tasks": {},
+    }
+
+    for task in tasks:
+        files = {}
+        for key in ("task_md", "reference_php", "tests_json"):
+            relpath = task[key].relative_to(REPO_ROOT).as_posix()
+            files[relpath] = file_sha256(task[key])
+
+        result["tasks"][task["id"]] = {
+            "labels": {
+                "split": task.get("split"),
+                "role": task.get("role"),
+                "commonness": task.get("commonness"),
+                "concept": task.get("concept"),
+                "processor": task.get("processor"),
+            },
+            "files": files,
+        }
+
+    return result
 
 
 def main() -> int:
@@ -188,6 +226,7 @@ def main() -> int:
         "git_head": git_head,
         "git_status_short": git_status_short,
         "source_file_digests": source_digests(source_ref),
+        "corpus_file_digests": corpus_file_digests(selected, source_ref),
         "created_at_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "isolation": {
             "scratch_contains": [

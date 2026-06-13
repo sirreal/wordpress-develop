@@ -8,7 +8,8 @@ The validator distinguishes round lifecycle states:
 - judged: trials are complete and every expected judge.json exists.
 - scored: judged plus round-summary.json exists and matches expected tasks.
 
-It is read-only and does not execute candidates or aggregate scores.
+It is read-only and does not execute candidates. For metadata-backed scored
+rounds, it recomputes aggregate scores to verify the persisted summary.
 """
 
 import argparse
@@ -154,6 +155,64 @@ def validate_source_digests(metadata: dict | None) -> list[str]:
                     f"source digest mismatch for {file} {key}: "
                     f"expected {recorded_digests.get(key)}, got {actual_digests.get(key)}"
                 )
+    return errors
+
+
+def validate_corpus_digests(metadata: dict | None) -> list[str]:
+    if not metadata or not metadata.get("corpus_file_digests"):
+        return []
+
+    recorded = metadata["corpus_file_digests"]
+    errors = []
+    if recorded.get("algorithm") != "sha256":
+        errors.append(
+            "corpus digest algorithm mismatch: "
+            f"expected sha256, got {recorded.get('algorithm')}"
+        )
+
+    recorded_tasks = recorded.get("tasks")
+    if not isinstance(recorded_tasks, dict):
+        return [*errors, "corpus digests tasks must be an object"]
+
+    expected_tasks = set(metadata.get("task_ids", []))
+    missing_tasks = sorted(expected_tasks - set(recorded_tasks))
+    unexpected_tasks = sorted(set(recorded_tasks) - expected_tasks)
+    if missing_tasks:
+        errors.append("corpus digests missing tasks: " + ", ".join(missing_tasks))
+    if unexpected_tasks:
+        errors.append("corpus digests unexpected tasks: " + ", ".join(unexpected_tasks))
+
+    for task_id, task_record in sorted(recorded_tasks.items()):
+        if not isinstance(task_record, dict):
+            errors.append(f"{task_id}: corpus digest record must be an object")
+            continue
+        files = task_record.get("files")
+        if not isinstance(files, dict):
+            errors.append(f"{task_id}: corpus digest files must be an object")
+            continue
+        expected_files = {
+            f"doc-experiment/corpus/{task_id}/task.md",
+            f"doc-experiment/corpus/{task_id}/reference.php",
+            f"doc-experiment/corpus/{task_id}/tests.json",
+        }
+        missing_files = sorted(expected_files - set(files))
+        unexpected_files = sorted(set(files) - expected_files)
+        if missing_files:
+            errors.append(f"{task_id}: corpus digest missing files: " + ", ".join(missing_files))
+        if unexpected_files:
+            errors.append(f"{task_id}: corpus digest unexpected files: " + ", ".join(unexpected_files))
+        for relpath, expected_hash in sorted(files.items()):
+            path = REPO_ROOT / relpath
+            if not path.exists() or not path.is_file():
+                errors.append(f"{task_id}: corpus file missing: {relpath}")
+                continue
+            actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual_hash != expected_hash:
+                errors.append(
+                    f"{task_id}: corpus hash mismatch for {relpath}: "
+                    f"expected {expected_hash}, got {actual_hash}"
+                )
+
     return errors
 
 
@@ -348,6 +407,7 @@ def validate_round(results_dir: Path) -> dict:
 
     errors.extend(validate_scratch(metadata))
     errors.extend(validate_source_digests(metadata))
+    errors.extend(validate_corpus_digests(metadata))
 
     task_status = {}
     total_trials = 0

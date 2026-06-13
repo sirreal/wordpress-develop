@@ -80,6 +80,9 @@ selection. The preparation script runs `verify-scratch-isolation.py` before
 writing metadata and records SHA-256 hashes for every staged doc and task
 prompt. Source digests include both raw source bytes and a comment/whitespace
 stripped PHP token-stream fingerprint matching the docs-only guard invariant.
+Metadata also records SHA-256 digests for each selected task's `task.md`,
+`reference.php`, and `tests.json`; these hidden corpus inputs must not drift
+between preparation, execution, judging, and aggregation.
 When the worktree is clean, the digest ref is the recorded `git_head`; when
 local drift exists, it is `working-tree` and `git_status_short` records the
 drift.
@@ -171,8 +174,9 @@ python3 doc-experiment/tools/workflow-args.py trials round-NN
 ```
 
 This command verifies the staged scratch directory and recorded file hashes
-before emitting agent-launch arguments. If `/tmp` was cleaned or a staged file
-changed, restage the round rather than launching subjects against drifted docs.
+and runs the round preflight before emitting agent-launch arguments. If `/tmp`
+was cleaned, a staged file changed, or selected corpus inputs drifted, restage
+the round rather than launching subjects against mismatched docs or fixtures.
 To emit both trial and judge workflow inputs plus the ingest/validation command
 sequence as a single handoff object, run:
 
@@ -290,8 +294,10 @@ It should report `judged` before aggregation. After aggregation, rerun it with
 `--require-scored`; it should report `scored` before the score is trusted.
 For metadata-backed rounds, validation also checks that staged scratch files
 still match the SHA-256 hashes recorded at preparation time and that recorded
-HTML API source digests match their recorded git ref. Trial artifacts are
-content-validated before a round can be considered trial-complete:
+HTML API source digests match their recorded git ref. It also checks the
+current selected task prompts, references, and hidden tests against the corpus
+file digests recorded at preparation time. Trial artifacts are content-validated
+before a round can be considered trial-complete:
 `candidate.php` must be non-empty PHP, `response.json` must contain the
 subject explanation/confidence shape, and `execution.json` must contain the
 harness pass/total/cases shape. Persisted `judge.json` artifacts are

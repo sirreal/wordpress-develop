@@ -106,6 +106,13 @@ aggregate from persisted trial executions, judge verdicts, metadata, and corpus
 labels before trusting `round-summary.json`. A hand-edited or stale summary
 therefore cannot make a round appear scored.
 
+Prepared-round metadata now records SHA-256 digests for each selected task's
+`task.md`, `reference.php`, and `tests.json`; round validation checks the live
+corpus files against those digests before launch or scoring. Round 18 metadata
+was backfilled with these digests. `workflow-args.py` now runs the full round
+preflight before emitting launch args, so drifted corpus inputs cannot be
+handed to the external runner by accident.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

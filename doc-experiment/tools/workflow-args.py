@@ -28,13 +28,12 @@ def load_metadata(round_name: str) -> dict:
     return json.loads(path.read_text())
 
 
-def verify_scratch(round_name: str) -> None:
+def verify_round(round_name: str) -> None:
     proc = subprocess.run(
         [
             "python3",
-            str(EXPERIMENT_ROOT / "tools" / "verify-scratch-isolation.py"),
-            "--metadata",
-            str(metadata_file(round_name)),
+            str(EXPERIMENT_ROOT / "tools" / "validate-round.py"),
+            round_name,
         ],
         cwd=REPO_ROOT,
         text=True,
@@ -43,7 +42,7 @@ def verify_scratch(round_name: str) -> None:
     )
     if proc.returncode != 0:
         message = (proc.stderr or proc.stdout).strip()
-        raise RuntimeError(f"scratch preflight failed: {message}")
+        raise RuntimeError(f"round preflight failed: {message}")
 
 
 def trial_args(metadata: dict) -> dict:
@@ -122,13 +121,13 @@ def main() -> int:
     parser.add_argument(
         "--skip-scratch-check",
         action="store_true",
-        help="Emit metadata-derived args without verifying the staged scratch directory",
+        help="Emit metadata-derived args without verifying staged round artifacts",
     )
     args = parser.parse_args()
 
     metadata = load_metadata(args.round)
     if not args.skip_scratch_check:
-        verify_scratch(args.round)
+        verify_round(args.round)
     if args.phase == "trials":
         payload = trial_args(metadata)
     elif args.phase == "judges":
