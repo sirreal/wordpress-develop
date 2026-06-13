@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented tree-aware HTML API: `WP_HTML_Processor::create_fragment()` to parse a body fragment, `next_tag( 'H1' )` to find the first heading, `get_current_depth()` to bound a subtree walk, and `next_token()` plus `get_token_type()`/`get_modifiable_text()` to concatenate only descendant `#text` tokens, which are already character-reference decoded by the API.",
+  "confidence": 92
+}

@@ -104,6 +104,16 @@ policy matrix near the HTML Processor text recipe and/or `next_token()`, then
 tests whether task implementation stops over-including special-element opener
 text.
 
+Round 25/26 tested that scratch policy matrix. It raised the three-task
+paired subset from 98.70 to 99.17 and made T05 perfect, but it was not a
+clean source-promotion win: T03 moved from one special-element over-inclusion
+in the control to three in the variant, and N06 still over-included
+special-element opener text inside heading text. Treat the matrix as mixed/no
+promotion. If continuing this hypothesis, test a narrower scratch variant
+with a negative example that makes the default exclusion rule dominant:
+ordinary heading/subtree text reads only `#text`; SCRIPT/STYLE/TITLE/TEXTAREA
+opener text is explicit opt-in, not automatically part of ordinary text.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -301,6 +311,15 @@ Processor lexical-boundary sections, and correctly answered that ordinary text
 uses `#text` only, special-element opener text is opt-in, and read-only
 fallback is caller policy. Do not promote source prose yet; test whether a
 scratch-only policy matrix improves transfer in task code.
+
+Scratch A/B result: mixed/no promotion. Round 26's policy matrix improved the
+paired subset numerically versus round 25 (99.17 vs 98.70) and fixed T05
+adherence, but it also encouraged all three T03 subjects to include
+SCRIPT/STYLE/TITLE/TEXTAREA opener text in ordinary heading text. N06 remained
+the target near-miss, with all three variant candidates still over-including
+special-element text. A promotable source edit needs sharper negative
+placement: ordinary `#text` is the default; special-element opener text is
+available for explicit caller contracts only.
 
 Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
 recipe. Phrase the edit, if promoted, as a token/policy matrix.

@@ -2,6 +2,37 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 25/26 — read-only text policy matrix scratch A/B
+
+`round-25` was the control rendered docs and `round-26` was a scratch-only
+HTML Processor rendered-doc variant adding a compact read-only text extraction
+policy matrix near the class-level DOM-style text recipe. Both rounds used
+`shadow-doc-a/b`, the same three train tasks (`T03-first-h1-text`,
+`N06-extract-toc`, `T05-text-excerpt`), subjects `gpt-5.4` / `medium` /
+`priority`, and judge `gpt-5.5` / `xhigh` / `priority`. Source docblocks were
+unchanged.
+
+Numeric result: the variant improved the paired subset from **98.70** to
+**99.17**. T05 moved from 99.40 to 100.00, T03 from 99.70 to 100.00, and N06
+from 97.00 to 97.50. All trials in both rounds passed all hidden tests.
+
+Interpretation: mixed, not promotable as written. The matrix helped the task
+that explicitly wanted TITLE/TEXTAREA text while excluding SCRIPT/STYLE, but
+it did not solve the target N06 over-inclusion pattern. More importantly, it
+worsened the ordinary-heading-text signal in T03: control had two pure
+`#text` implementations and one implementation that added special-element
+opener text, while the variant had all three T03 subjects append SCRIPT,
+STYLE, TEXTAREA, and TITLE opener text. Judges scored this as documented API
+use because hidden cases did not cover special elements, but they still noted
+that it was broader than the ordinary text-node extraction policy.
+
+Decision: do not promote this policy matrix to source docs. The next text
+diagnostic, if pursued, should be a revised scratch-only variant that stresses
+the default exclusion rule and a negative example: ordinary heading/subtree
+text appends only `#text`; special-element opener text is available but is not
+included unless the caller explicitly asks for those node types. Keep the
+serialization/decoded-text reparse signal separate.
+
 ## Round 24 — checkpoint after lexical-text boundary edit
 
 **All 99.35 / train 99.41 / held-out 99.12 / core 99.28** under
