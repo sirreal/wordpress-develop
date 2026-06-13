@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan tags linearly and update only matched `A` openers. The function checks `get_attribute( 'href' )` for presence, which covers normal values, empty strings, and boolean `href` attributes, then overwrites `target` with `set_attribute( 'target', '_blank' )`; `get_updated_html()` returns the document with untouched bytes preserved outside the edited attributes.",
+  "confidence": 97
+}

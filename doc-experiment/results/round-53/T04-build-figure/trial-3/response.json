@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template with placeholder values so the HTML API preserves the `src`/`alt` order and provides the text node needed for `figcaption`. The implementation relies on `WP_HTML_Tag_Processor::__construct`, `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()` to handle all encoding safely instead of manual escaping.",
+  "confidence": 92
+}

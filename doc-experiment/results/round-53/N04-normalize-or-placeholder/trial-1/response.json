@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Processor::normalize()` fragment serializer to normalize the input HTML fragment, then returns the required fallback exact markup when normalization is not possible. The implementation stays within the documented HTML Processor API and does not rely on any undocumented methods.",
+  "confidence": 96
+}

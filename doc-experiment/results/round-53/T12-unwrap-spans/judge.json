@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor` fragment parser and the documented `next_token()` plus `serialize_token()` rewrite pattern. `get_token_name()` is documented and works here for both SPAN openers and closers. Minor edge-policy issue: the `create_fragment()` null branch returns raw input, and there is no post-scan `get_last_error()` policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "All API calls are documented: `create_fragment()`, `normalize()`, `next_token()`, `get_tag()`, `serialize_token()`, and `get_last_error()`. Processor choice and token walking are correct. The main weakness is the post-rewrite fallback to `normalize( $html ) ?? $html`, which can discard accumulated edits and may return non-normalized raw input; the `serialize_token()` docs warn about this pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "All API calls are documented: `create_fragment()`, `normalize()`, `next_token()`, `get_tag()`, and `serialize_token()`. This is a clean token-rewrite solution using the right processor and serialization API. Minor edge-policy issue: no `get_last_error()` check, and the null-processor fallback can return raw input if normalization fails."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, with no `_doing_it_wrong` records. The docs did well on the core decision: the Tag Processor docs explicitly direct normalized output and missing/implicit closing-tag behavior to the HTML Processor, while the HTML Processor docs explain `create_fragment()` for BODY fragments. The `next_token()` section explains that closers, implied closers, and end-of-input closers are visited, which is exactly what makes unclosed and nested spans safe. The `serialize_token()` section and its token-rewrite recipe were especially effective: all candidates used the intended pattern of walking tokens, skipping matched element tokens, and appending normalized serialization. Near misses were around failure policy, not the main algorithm: trials used or omitted `get_last_error()` inconsistently, and trial 2 used `normalize()` on the original input as an error fallback after emitting a rewrite, which the docs warn will discard accumulated edits.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md `serialize_token()` / \"Recipe: rewrite while serializing tokens\"",
+      "problem": "The docs warn not to call `normalize()` on the original input after a rewrite, but candidates can still interpret `normalize( $html ) ?? $html` as a generic recovery path.",
+      "suggestion": "Add a short failure-policy example for token-rewrite functions showing acceptable choices after `get_last_error()`: return a sentinel, return an empty string, throw, or intentionally return raw/original output while explicitly noting that it is not the rewritten normalized result."
+    },
+    {
+      "location": "html-processor.md `create_fragment()` return-value docs",
+      "problem": "The docs say to check for `null`, but do not give guidance for APIs whose contract must return a string. This led to raw-input fallback branches.",
+      "suggestion": "Clarify that a raw input fallback is not normalized serialization. Suggest choosing an explicit fail-closed string policy, such as `''`, only when the caller contract requires a string and processor creation fails."
+    },
+    {
+      "location": "html-processor.md `normalize()` docs",
+      "problem": "The docs correctly state that `normalize()` serializes the original input, but do not call out the common `?? $html` fallback idiom as incompatible with guaranteed normalized output.",
+      "suggestion": "Add a note that `WP_HTML_Processor::normalize( $html ) ?? $html` is not a normalized-output guarantee, because the fallback branch preserves original source bytes and any unperformed rewrite."
+    }
+  ]
+}

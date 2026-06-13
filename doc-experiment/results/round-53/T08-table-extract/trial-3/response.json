@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in body context, then walked tokens with next_tag(), next_token(), get_current_depth(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text() to collect only ordinary text inside the first TABLE subtree while respecting browser-like implied structure.",
+  "confidence": 92
+}

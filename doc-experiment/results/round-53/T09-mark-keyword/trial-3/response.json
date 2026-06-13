@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked every token with `next_token()`, wrapping only ordinary `#text` tokens whose decoded text contains the keyword. All other tokens are emitted with `serialize_token()`, which gives normalized HTML and preserves special-element contents like `script`, `style`, `title`, and `textarea` without wrapping them.",
+  "confidence": 93
+}

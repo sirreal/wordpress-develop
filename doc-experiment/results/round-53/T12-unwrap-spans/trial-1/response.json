@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked every token with `next_token()` and rebuilt normalized output with `serialize_token()`, skipping only `SPAN` openers and closers so their contents stay in place and nested spans are removed too.",
+  "confidence": 92
+}

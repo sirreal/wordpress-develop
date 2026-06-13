@@ -2,6 +2,38 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 53 — mini/low calibration exhausts weak-tier ladder
+
+**Train 99.51 / core 99.43** under `weak-tier-calibration`, with subjects
+`gpt-5.4-mini` / `low` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This was the final no-edit calibration rung defined in
+`PROTOCOL.md`.
+
+Outcome: the weakest configured subject tier is still functionally saturated.
+All 45 subject trials passed all hidden cases. The round score was essentially
+flat with round 52, 99.53 -> 99.51. Concept means: classes 100.00, traversal
+99.62, normalization 99.60, attributes 99.57, text 99.50, and serialization
+98.85.
+
+The most repeated weaker-tier signal is not a hidden-test failure but an
+adherence pattern around normalized rewrite fallback. T12-unwrap-spans scored
+98.60 and T09-mark-keyword scored 99.10; candidates again used raw input or
+`normalize( $html )` as generic recovery after a `serialize_token()` rewrite
+loop, which discards accumulated insertions/removals/replacements. T05/T06/N06
+read-only extraction remained strong but still showed smaller caller-policy
+near-misses.
+
+Decision: treat `gpt-5.4-mini` / `low` as the selected weak diagnostic tier
+because the ladder is exhausted, even though it remains saturated. Do not
+promote source docs directly from the calibration. The next evidence-building
+step should be a scratch rendered-doc A/B, not a source edit.
+
+Next action: commit round-53 results separately, then run a focused
+`shadow-doc-a/b` diagnostic at `gpt-5.4-mini` / `low` on the serialization
+rewrite tasks, testing a compact generic recipe/card in the HTML Processor
+class docs for string-returning `serialize_token()` rewrites and explicit
+fallback policy.
+
 ## Round 52 — mini/high weak-tier calibration still saturated
 
 **Train 99.53 / core 99.46** under `weak-tier-calibration`, with subjects

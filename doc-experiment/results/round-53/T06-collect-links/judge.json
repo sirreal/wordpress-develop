@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and only documented APIs: create_fragment, next_token, get_token_type, is_tag_closer, get_tag, get_attribute, get_current_depth, and get_modifiable_text. It follows the documented depth-bounded #text extraction pattern and handles decoded text, decoded href, valueless href=true, missing href=null, empty href='', and unclosed anchors. Minor idiom deduction: it combines an outer next_token loop with an inner next_token subtree walk, despite the docs recommending a single stateful token loop for repeated regions."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor correctly and all API calls are documented. This is the most idiomatic trial: a single next_token pass with explicit state, get_current_depth boundary tracking, #text-only get_modifiable_text extraction, and is_string(get_attribute('href')) for the string|true|null contract. Handles virtual/end-of-input closers naturally by flushing the stack at EOF."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and documented APIs, and its next_tag('a') plus depth-bounded next_token text walk closely matches the intended pattern. It passed all hidden tests. Edge-case deduction: it rejects href='' with `'' === $href`, but an empty string is still a string-valued attribute and should be included under the task contract; API behavior is href='' => '', href => true, missing href => null."
+    }
+  ],
+  "failure_analysis": "All recorded hidden cases passed in all three trials, and there were no _doing_it_wrong records. The docs were effective for the main conceptual hazards: the processor-choice guidance says to use WP_HTML_Processor when structure, subtree walking, missing closing tags, or text content matter; the DOM-style text recipe says to walk the subtree and append only #text tokens; get_modifiable_text documents decoded text for #text nodes; get_attribute documents string|true|null and boolean attributes; next_token documents depth-bounded walks, virtual closers, and unclosed elements. Those passages explain the passes on nested inline markup, entity-decoded href/text, image-only links, valueless href exclusion, and unclosed links. The main near-miss is trial-3's untested href='' behavior: it appears to conflate an empty string value with a valueless boolean attribute. The Tag Processor overview does distinguish empty string from true, but WP_HTML_Processor::get_attribute's own method section lacks an empty-string example and decoded-string note, making this easy to miss when using the HTML Processor docs directly. A secondary near-miss is trial-1's outer next_token plus inner next_token pattern for repeated regions: it works here, but it sits close to the documented shared-cursor pitfall; trial-2 followed the safer single-loop guidance exactly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock / rendered section",
+      "problem": "The return type says string|true|null and the example covers a normal string, true, and null, but it does not show that a present empty-valued attribute returns ''. This leaves room to treat href='' as equivalent to a valueless boolean attribute.",
+      "suggestion": "Add an explicit example and return-note sentence: quoted or unquoted empty attribute values return the empty string, valueless boolean-style attributes return true, and absent/unavailable attributes return null."
+    },
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock / rendered section",
+      "problem": "The decoded-value contract for string attributes is clear in the Tag Processor docs, but not repeated in the HTML Processor method section where subjects using WP_HTML_Processor are likely to look.",
+      "suggestion": "Mirror the inherited contract in the HTML Processor section: string attribute values are returned decoded, e.g. an ampersand character reference in an href is returned as &."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock / query parameter description",
+      "problem": "The HTML Processor next_tag section says the tag_name query accepts one tag name string, but unlike the Tag Processor section it does not explicitly state that tag-name matching is ASCII case-insensitive.",
+      "suggestion": "Add the same case-insensitive matching sentence to the HTML Processor next_tag parameter docs so lowercase queries such as 'a' are clearly documented."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction recipe / next_token shared-cursor warning",
+      "problem": "The docs separately show a single-subtree text recipe and a warning against nested next_token loops for repeated regions. They do not explicitly contrast the safe outer-selection patterns with the risky shared-cursor pattern, which can leave authors unsure when a bounded inner subtree walk is acceptable.",
+      "suggestion": "Add a short general note: for collecting text from multiple matching elements, either use next_tag($name) for the outer selection plus a depth-bounded inner walk, or use one stateful next_token loop; avoid an outer any-token next_token loop with an inner next_token walk unless the boundary-token behavior is deliberate."
+    }
+  ]
+}

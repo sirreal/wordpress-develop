@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_tag( 'H1' )` to find the first heading in document order. Then I walked tokens with `next_token()`, using `get_current_depth()` to stay within that H1 subtree and `get_token_type()` plus `get_modifiable_text()` to concatenate only decoded text nodes, which naturally yields an empty string for a heading with no text content.",
+  "confidence": 96
+}

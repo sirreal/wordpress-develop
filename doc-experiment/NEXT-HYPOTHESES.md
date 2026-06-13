@@ -264,6 +264,18 @@ Do not promote source docs from this saturated calibration alone. The next
 protocol-consistent action is to step down to `gpt-5.4-mini` / `low` /
 `priority` and run one more no-edit `weak-tier-calibration`.
 
+Round 53 supplied the final `gpt-5.4-mini` / `low` calibration: train 99.51 /
+core 99.43, with all 45 subject trials still passing hidden cases. The ladder
+is exhausted and still saturated, so use `gpt-5.4-mini` / `low` as the
+selected weak diagnostic tier rather than looking for another model. The
+strongest repeated signal is serialization fallback policy for string-returning
+`serialize_token()` rewrites: T12 scored 98.60 and T09 scored 99.10, again
+because candidates used raw input or `normalize( $html )` as generic recovery
+after accumulating rewrite output. Next action: run a focused scratch
+`shadow-doc-a/b` diagnostic on T09/T12, and optionally N04 as a normalization
+control, testing a compact generic class-level recipe/card for rewrite output
+and explicit fallback policy. Do not edit source docs until that variant wins.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

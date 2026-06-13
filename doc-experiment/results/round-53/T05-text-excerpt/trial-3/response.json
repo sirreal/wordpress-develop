@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()` and collected only ordinary `#text` tokens plus opener-carried text from `TITLE` and `TEXTAREA`, using `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` as documented. The final string is truncated by Unicode code points with `mb_strlen()` and `mb_substr()` so multibyte characters are never split.",
+  "confidence": 93
+}
