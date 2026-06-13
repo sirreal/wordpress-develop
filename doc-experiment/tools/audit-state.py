@@ -323,7 +323,7 @@ def build_audit() -> dict:
         mismatches.append("tooling changed since latest completed score")
     if changed_groups["corpus"]:
         mismatches.append("corpus changed since latest completed score")
-    if not current_baseline_exists:
+    if not current_baseline_exists and not changed_groups["source_docs"]:
         mismatches.append("no current-corpus no-edit baseline for current subject/judge policy")
 
     next_action_commands = []
@@ -367,6 +367,8 @@ def build_audit() -> dict:
         ]
     elif latest_prepared and latest_prepared["lifecycle"] == "judged":
         next_action = f"aggregate {latest_prepared['round']} and record the current-corpus baseline"
+    elif changed_groups["source_docs"]:
+        next_action = "prepare and run scored-train for the current source documentation hypothesis"
     elif not current_baseline_exists:
         next_action = (
             "prepare and run weak-tier-calibration no-edit baseline on current train corpus "
