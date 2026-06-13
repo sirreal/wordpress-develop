@@ -15,12 +15,20 @@ reference updates. Those committed corpus changes reset comparability: round
 17 remains a trusted historical score for the previous corpus, but it is not a
 current-corpus baseline.
 
-All current corpus reference implementations were rechecked locally after the
-refresh and pass their hidden tests. The next valid action is a no-edit
-baseline/calibration on the current corpus under the current model policy
-before any source docblock promotion. The old round-17 gap shapes remain
-useful as hypothesis seeds, but current-corpus failures must be measured
-fresh.
+Round 18 is the first trusted current-corpus no-edit baseline:
+`gpt-5.4` / `medium` / `priority` subjects, `gpt-5.5` / `xhigh` /
+`priority` judges, train score 98.73 / core 98.54. The current tier is close
+to saturated, but it produced one concrete train failure with three-trial
+agreement: N03-first-list-count scored 85.07 because all trials trusted
+HTML Processor virtual closers after truncated syntax inside the scanned
+region. This is usable source-edit evidence because it is a current-corpus
+train failure, not held-out-only signal.
+
+The next valid action is either a focused source hypothesis for the N03
+incomplete-token subtree-guard gap, or another no-edit weak-tier calibration
+one step down the subject ladder if the experiment owner wants a less
+saturated measuring instrument before promotion. Do not compare round 18
+against round 17 except as historical context.
 
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
@@ -42,6 +50,31 @@ These are the best next candidates after a local review plus three read-only
 subagent passes. Treat them as hypotheses to test through no-edit baselines,
 discoverability probes, or scratch-rendered A/B variants before promoting any
 source docblock changes.
+
+### 0. Incomplete-token guard for HTML Processor region scans
+
+Core idea: connect the documented subtree-walk/depth-boundary pattern to the
+existing incomplete-token API. A depth drop or virtual closer proves that the
+HTML parser unwound the element stack; it does not prove the source region was
+complete. After a forward scan that will drive a mutation or other trusted
+result, callers should check both parser abort state and incomplete-token
+state:
+
+- `get_last_error()` / `get_unsupported_exception()` for unsupported parser
+  states.
+- `paused_at_incomplete_token()` for lexical truncation at the input tail.
+- A bounded scan can visit virtual closers after truncation while
+  `paused_at_incomplete_token()` is true and `get_last_error()` is still null.
+
+Why this is strong: round 18's only functional train failure was exactly this
+gap. All three N03 trials used the documented depth-bounded HTML Processor
+walk, passed ordinary omitted-end-tag and malformed-list cases, and failed
+only incomplete token/comment tails inside the scanned list.
+
+Risk: low-medium. Keep it framed as a general scan-completion contract, not as
+a list-counting recipe. Best placement is near
+`WP_HTML_Processor::next_token()`, `get_current_depth()`, and the inherited
+`paused_at_incomplete_token()` docs/cross-reference.
 
 ### 1. Depth-boundary equivalence card
 

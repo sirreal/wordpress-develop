@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Passed all 10 hidden cases and used only documented HTML API methods: WP_HTML_Tag_Processor construction, next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(). Main adherence loss is processor choice: the docs recommend WP_HTML_Processor when structure, browser-style implied/missing closers, or text-content collection matters. This lexical Tag Processor scan works for the tested whole-fragment cases, but is less aligned with that guidance. The implementation handles decoded UTF-8 text and skips SCRIPT/STYLE by allowlisting #text, TITLE, and TEXTAREA. Its explanation imprecisely calls SCRIPT/STYLE other token types; they are tag tokens with raw modifiable text."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Passed all 10 hidden cases and used only documented HTML API methods. Like trial-1, it chose WP_HTML_Tag_Processor even though the rendered docs steer structure-sensitive text collection toward WP_HTML_Processor::create_fragment(). The token walk is otherwise supported and uses get_modifiable_text() correctly for decoded #text, TITLE, and TEXTAREA content. Minor idiom loss: it checks truncation mid-loop only in the mb_* branch and does not explicitly guard TITLE/TEXTAREA with is_tag_closer(), though Tag Processor atomic-element behavior makes that harmless here."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed all 10 hidden cases. This matches the documented processor choice for an HTML body fragment by using WP_HTML_Processor::create_fragment(), then a single next_token() walk. It uses documented methods only, reads decoded #text plus opening TITLE/TEXTAREA element-token text with get_modifiable_text(), excludes raw SCRIPT/STYLE content, handles non-positive limits, and truncates decoded UTF-8 with explicit mb_* encoding."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The rendered docs did well on the critical points for this task: WP_HTML_Processor::next_token() says to use token walking when text matters, warns that text can be split across tokens, explains that TITLE/TEXTAREA/SCRIPT/STYLE carry text on the element token rather than child #text tokens, and get_modifiable_text() states that #text, TITLE, and TEXTAREA are decoded UTF-8 suitable for mb_substr(..., 'UTF-8'). The near-miss pattern is that two trials selected WP_HTML_Tag_Processor because its token-processing section also shows a text-accumulation example; this passed the cases but conflicts with the processor-selection guidance for browser-structure-aware text content. Another near miss is conceptual: explanations tended to treat SCRIPT/STYLE as skipped token types, when the API exposes them as #tag tokens whose modifiable text must be intentionally excluded by tag-name policy.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor overview, 'Which processor should I use?' and 'Tokens and finer-grained processing'",
+      "problem": "The Tag Processor page both warns that it is lexical and shows a text-accumulation example, leaving ambiguity about when lexical source-order text collection is acceptable versus when browser document order and implied closing behavior require WP_HTML_Processor.",
+      "suggestion": "Add a short note after the token text example: Tag Processor text walks are lexical/source-order scans; for DOM text content of a fragment/document, especially malformed markup, implied elements, or subtree boundaries, prefer WP_HTML_Processor::create_fragment() or create_full_parser()."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_modifiable_text() docs",
+      "problem": "The docs state special-element behavior, but they do not give a compact classification for readable text extraction versus raw language/comment text. Models can easily append every token with modifiable text, accidentally including SCRIPT, STYLE, comments, or processing instructions.",
+      "suggestion": "Add a general 'extracting readable text' note: ordinary text comes from #text tokens; RCDATA text comes from TITLE/TEXTAREA opening element tokens; raw text elements such as SCRIPT/STYLE and comment-like tokens also have modifiable text but are not document text unless the caller explicitly wants those languages/syntax nodes."
+    },
+    {
+      "location": "get_token_type() / get_token_name() method docs and examples",
+      "problem": "Examples mix switching on get_token_name() with checking get_token_type(), which can blur the distinction between token kind (#tag/#text) and element name (P, TITLE, SCRIPT).",
+      "suggestion": "Clarify the recommended discriminant pattern: use get_token_type() to decide whether the current token is a text node or tag, then use get_token_name() only to identify the tag name for special element handling."
+    }
+  ]
+}

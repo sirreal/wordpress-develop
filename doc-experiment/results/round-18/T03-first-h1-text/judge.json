@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), found H1 with next_tag(), and used a depth-bounded next_token() walk with get_current_depth() >= the H1 depth. All called methods are documented, and execution recorded no _doing_it_wrong notices. The extra non-closing #tag get_modifiable_text() branch is documented and useful for special text carriers; ordinary tags return an empty string."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Same strong pattern as trial-1: structural HTML Processor, fragment factory, first H1 query, one cursor walk bounded by depth, decoded #text collection through get_modifiable_text(), and no undocumented APIs. The generic #tag modifiable-text branch is safe by the documented empty-string contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Uses only documented APIs and follows the documented text-walk/depth-bound pattern. It more explicitly handles SCRIPT, STYLE, TEXTAREA, and TITLE opener-carried text, but the hard-coded list is narrower than the broader documented category of elements/sections whose text is carried on the element token, so it is a small edge-case near-miss."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial. The docs did well in four places: the processor-choice guidance says to use WP_HTML_Processor when collecting element text or walking subtrees; create_fragment() is described as the right factory for BODY-context fragments; next_token() explicitly says to use token walking when text matters, accumulate split #text tokens, and bound walks because next_token() otherwise continues to the end of the document; get_current_depth() explains why the guard must be >=, including nested closer and malformed/unclosed-input behavior. get_modifiable_text() also states that #text and RCDATA text are already decoded, which explains the entity test passes. Near-misses: trial-3 hard-coded only four special opener-carried text elements, while the docs also allude to other sections and the Tag Processor page lists more special elements such as IFRAME and XMP. Also, next_token() is encouraged throughout the docs but its Since note still says 'Added for internal support; do not use', which could undermine the otherwise correct guidance.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md#get_modifiable_text",
+      "problem": "The special-element text contract is split between examples and a vague 'any other section' phrase, so readers may hard-code only SCRIPT, STYLE, TEXTAREA, and TITLE.",
+      "suggestion": "Add a compact table of token categories that carry modifiable text, whether that text appears on a #text token or the element opener, and whether character references are decoded or raw. Cross-reference the special-element list instead of relying on examples."
+    },
+    {
+      "location": "html-processor.md#next_token",
+      "problem": "The subtree text example shows only #text accumulation even though the section separately warns that some element text is carried on opener tokens.",
+      "suggestion": "Add a general text-collection variant that shows how to include opener-carried raw/RCDATA text when the caller wants full element text content, while still skipping comments and markup."
+    },
+    {
+      "location": "html-processor.md#next_token Since note",
+      "problem": "The rendered docs recommend next_token() for public token walking but the changelog line says 'Added for internal support; do not use'.",
+      "suggestion": "Update the docblock/changelog wording to clarify that next_token() is a supported public API for token walking, or move any obsolete internal-use warning out of the public rendered docs."
+    },
+    {
+      "location": "html-processor.md#is_tag_closer",
+      "problem": "The docs describe behavior on tag closers but do not explicitly state what happens when the current token is not a tag.",
+      "suggestion": "Document whether is_tag_closer() returns false on non-tag tokens, and show the preferred guard pattern with get_token_type() when code branches on tag tokens."
+    }
+  ]
+}

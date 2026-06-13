@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural parser (`WP_HTML_Processor::create_fragment()`), a single `next_token()` walk, `get_current_depth()` to stay inside the first table, closer events for rows/cells, and `get_modifiable_text()` for decoded text. All called methods are present in the rendered docs and there were no `_doing_it_wrong` records. Minor precision issue: it calls `get_modifiable_text()` on every opening tag inside a cell, relying on the documented empty-string behavior for tags without modifiable text."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Strongest adherence: correct processor, documented methods only, single depth-bounded token walk, explicit token-type checks, decoded text via `get_modifiable_text()`, and graceful final flushing. No `_doing_it_wrong` records. Minor near-miss: it manually hardcodes only `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` as special text-carrying elements, while the docs describe a broader special/raw-text family across the two files."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor`, used only documented methods, bounded a single token walk by table depth, handled implied table structure through opener/closer events, and used `get_modifiable_text()` for decoded `#text`. No `_doing_it_wrong` records. Minor near-miss: like trial-2, it hardcodes a partial list of special text-carrying element names."
+    }
+  ],
+  "failure_analysis": "No hidden case failed: all three trials passed all 8 frozen cases. The docs did well in the passages that mattered: Tag Processor > \"Which processor should I use?\" says to use the HTML Processor for structure, collecting text, walking subtrees, and missing closers; HTML Processor > \"Supported elements\" explicitly mentions tables and implied structure; `next_token()` explains full token walking, implied TBODY structure, depth guards, and avoiding nested loops; `get_current_depth()` documents the `>=` subtree guard; `get_modifiable_text()` states that `#text` returns decoded text and special element text is carried on the opener. Near-misses were about special text tokens: trial-1 over-broadly called `get_modifiable_text()` on all openers, while trials 2 and 3 used a partial special-element list. The documented empty-string behavior and the hidden cases kept these from becoming failures.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` traversal guidance",
+      "problem": "The docs explain single-loop state tracking, but the main example is list-oriented; repeated nested regions with sibling boundaries still require inference.",
+      "suggestion": "Add a generic state-machine extraction example for repeated nested structures that tracks parent/child openers and closers in one `next_token()` loop, without being table-specific."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_modifiable_text()`",
+      "problem": "The processor docs name common special elements but do not present one authoritative list of opener tokens whose contents are carried as modifiable text instead of child `#text` tokens.",
+      "suggestion": "Document the exact special/raw-text/RCDATA element set, or cross-link to a canonical list, and state that ordinary element openers return `''`."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` and `get_current_depth()`",
+      "problem": "Implied openers are documented clearly, but EOF/omitted-end-tag closer events are less explicit.",
+      "suggestion": "Add a short token-sequence example showing omitted end tags producing virtual closer visits and their depth changes."
+    },
+    {
+      "location": "Text extraction guidance around `get_modifiable_text()`",
+      "problem": "`get_modifiable_text()` covers comments and other token interiors, so it is not automatically equivalent to element text content.",
+      "suggestion": "Add a warning that text-content extraction should usually append only `#text` tokens plus deliberately selected special-element openers, and should skip comments unless comments are intentionally desired."
+    }
+  ]
+}

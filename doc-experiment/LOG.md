@@ -2,19 +2,49 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
-## Round 18 — prepared current-corpus no-edit baseline, not scored
+## Round 18 — current-corpus weak-tier baseline scored
+
+**Train 98.73 / core 98.54** under the current corpus and current weak-tier
+policy: subject `gpt-5.4` / `medium` / `priority`, judge `gpt-5.5` /
+`xhigh` / `priority`, 15 train tasks × 3 trials. This is the first trusted
+current-corpus no-edit baseline after the post-round-17 corpus refresh; round
+17 remains historical and is not a comparable baseline for source edits.
+
+The baseline is nearly saturated but still has one strong train signal:
+N03-first-list-count scored 85.07, with all three trials passing 9/11 and
+failing only `incomplete-token-inside-list` and
+`incomplete-comment-inside-list`. Judges agreed on the root cause: subjects
+used the documented HTML Processor depth-bounded subtree pattern and trusted
+virtual closers as proof that the bounded region was fully scanned. The docs
+do not connect that pattern to `paused_at_incomplete_token()`: after truncated
+syntax at the end of input, `WP_HTML_Processor` can still emit virtual closers
+while `paused_at_incomplete_token()` remains true and `get_last_error()` stays
+null. The next source hypothesis should be general, not task-shaped: document
+that region scans which will drive mutations must treat a depth drop as a
+structural boundary only, then separately check incomplete-token and parser
+error state before trusting the scan.
+
+Concept means: attributes 100.00, classes 100.00, normalization 100.00,
+serialization 99.90, text 99.03, traversal 96.81. Secondary non-failing gaps
+remain useful as low-risk polish candidates, especially factory null/failure
+fallbacks, where text lives, special-element text lists, and clearer
+get_updated_html vs serialize()/serialize_token() contracts, but they should
+not displace the measured N03 failure unless diagnostic probes show higher
+signal at a weaker tier.
 
 Prepared the required current-corpus weak-tier calibration round with no source
-docblock edits: `round-metadata.json` records 15 train tasks, subject
-`gpt-5.4` / `medium` / `priority`, judge `gpt-5.5` / `xhigh` / `priority`,
-and the staged scratch directory `/tmp/html-api-docs-eval/round-18`.
-Scratch isolation passed: only the two rendered docs and selected task prompts
-are exposed. Local Codex CLI subject trials are now complete and ingested:
-45/45 subject responses, hidden-test executions, and subject-isolation
-attestation are persisted. Pre-judge execution signal is 14/15 tasks perfect;
-N03-first-list-count scored 9/11 in all three trials, failing only
-`incomplete-token-inside-list` and `incomplete-comment-inside-list`. No judge
-verdicts or round summary exist yet, so round 18 is still not a trusted score.
+docblock edits: `round-metadata.json` records 15 train tasks and the staged
+scratch directory `/tmp/html-api-docs-eval/round-18`. Scratch isolation
+passed: only the two rendered docs and selected task prompts are exposed.
+Local Codex CLI subject trials and judge verdicts are complete and ingested:
+45/45 subject responses, hidden-test executions, 15/15 judge verdicts, and
+subject-isolation attestation are persisted.
+
+Operational note: the first local judge-runner attempt failed before producing
+verdicts because the local Codex structured-output validator now requires
+`additionalProperties: false` on nested object schemas. The runner schema was
+fixed in a separate tooling commit, then the full judge run was rerun and
+validated before ingestion.
 
 Added a local Codex CLI trial runner to avoid deadlocking on the external
 Workflow UI when it is unavailable. The runner writes the same trial-output
