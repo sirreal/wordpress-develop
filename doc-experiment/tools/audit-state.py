@@ -304,6 +304,30 @@ def prepared_current_rounds(
     return sorted(prepared, key=lambda item: item["number"])
 
 
+def status_paths(status_short: str) -> list[str]:
+    paths = []
+    for line in status_short.splitlines():
+        if not line:
+            continue
+        paths.append(line[3:].strip())
+    return paths
+
+
+def status_only_expected_round_artifacts(
+    status_short: str,
+    prepared_round: dict | None,
+) -> bool:
+    if not status_short or not prepared_round:
+        return False
+
+    round_prefix = f"doc-experiment/results/{prepared_round['round']}/"
+    for path in status_paths(status_short):
+        if path == round_prefix.rstrip("/") or path.startswith(round_prefix):
+            continue
+        return False
+    return True
+
+
 def paths_changed_since(commit: str) -> list[str]:
     if not commit:
         return []
@@ -445,10 +469,14 @@ def build_audit() -> dict:
         prepared_mode,
     )
     latest_prepared = prepared_rounds[-1] if prepared_rounds else None
+    status_is_expected_round_artifacts = status_only_expected_round_artifacts(
+        status_short,
+        latest_prepared,
+    )
     next_round_name = f"round-{(latest['number'] + 1) if latest else 1}"
 
     mismatches = []
-    if status_short:
+    if status_short and not status_is_expected_round_artifacts:
         mismatches.append("worktree has local drift")
     if (
         latest
@@ -467,7 +495,7 @@ def build_audit() -> dict:
         mismatches.append("no current-corpus no-edit baseline for current subject/judge policy")
 
     next_action_commands = []
-    if status_short:
+    if status_short and not status_is_expected_round_artifacts:
         next_action = "reconcile local worktree drift before scoring"
     elif latest_prepared and latest_prepared["errors"]:
         next_action = f"repair or restage {latest_prepared['round']} before launching agents"
@@ -589,6 +617,7 @@ def build_audit() -> dict:
             "prepared_current_round": latest_prepared,
             "prepared_mode": prepared_mode,
             "prepared_task_count": len(expected_prepared_task_ids),
+            "status_is_expected_round_artifacts": status_is_expected_round_artifacts,
             "changed_since_latest_summary_commit": changed_groups,
         },
         "mismatches": mismatches,
