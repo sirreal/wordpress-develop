@@ -41,10 +41,10 @@
     "reasoning_effort": "xhigh",
     "service_tier": "priority"
   },
-  "git_head": "af84d03d00b7fc23d397db8a8867ceee53d1c3cc",
+  "git_head": "5d02b9163665c2146f985fce131bbbb0b3c3a899",
   "git_status_short": "",
   "source_file_digests": {
-    "ref": "af84d03d00b7fc23d397db8a8867ceee53d1c3cc",
+    "ref": "5d02b9163665c2146f985fce131bbbb0b3c3a899",
     "algorithm": "sha256",
     "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
     "files": {
@@ -60,62 +60,8 @@
       }
     }
   },
-  "created_at_utc": "2026-06-12T23:11:02+00:00",
-  "isolation": {
-    "scratch_contains": [
-      "html-tag-processor.md",
-      "html-processor.md",
-      "tasks/<task-id>.md"
-    ],
-    "subjects_must_not_read": [
-      "reference.php",
-      "tests.json",
-      "source files",
-      "logs",
-      "plans",
-      "hypothesis docs"
-    ]
-  },
-  "scratch": "/tmp/html-api-docs-eval/round-18",
-  "staged_task_files": [
-    "tasks/N03-first-list-count.md",
-    "tasks/N04-normalize-or-placeholder.md",
-    "tasks/N06-extract-toc.md",
-    "tasks/T01-add-image-class.md",
-    "tasks/T02-link-targets.md",
-    "tasks/T03-first-h1-text.md",
-    "tasks/T04-build-figure.md",
-    "tasks/T05-text-excerpt.md",
-    "tasks/T06-collect-links.md",
-    "tasks/T07-nested-lists.md",
-    "tasks/T08-table-extract.md",
-    "tasks/T09-mark-keyword.md",
-    "tasks/T10-last-h2.md",
-    "tasks/T11-strip-tracking-attributes.md",
-    "tasks/T12-unwrap-spans.md"
-  ],
-  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-18 exposes 2 docs and 15 task prompt(s), with no forbidden files.",
-  "scratch_file_sha256": {
-    "html-processor.md": "34f749e7ee35b2a28217dfe31a4137907b7eb58cb1a4405514fdd1c758cce6d0",
-    "html-tag-processor.md": "3896668fcfee5640a59363aebf18ce0c99caf979825796b3a8c215c8bb33c4d8",
-    "tasks/N03-first-list-count.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
-    "tasks/N04-normalize-or-placeholder.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
-    "tasks/N06-extract-toc.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
-    "tasks/T01-add-image-class.md": "d3b65e68db2bf26d3423b5474c3adb49b592375afc8005c127d4d20eb2740e28",
-    "tasks/T02-link-targets.md": "86f539bd48a600db4d47492e2abdf44d3048ba0463bcca0f3ed628228f82d0f8",
-    "tasks/T03-first-h1-text.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
-    "tasks/T04-build-figure.md": "69c807b773b41e98c0e5122bee32eca3780ccdfd123279590b4d098f8b7848e1",
-    "tasks/T05-text-excerpt.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
-    "tasks/T06-collect-links.md": "29bc31f664b27ca880bf5cdd6a50d0da8f3828cf59d085d2897df2cb987d7d3e",
-    "tasks/T07-nested-lists.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
-    "tasks/T08-table-extract.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
-    "tasks/T09-mark-keyword.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
-    "tasks/T10-last-h2.md": "285eca1aece8e63d9ab86d1d72319e1eef13f1e184a95216b373bbab22de2d0d",
-    "tasks/T11-strip-tracking-attributes.md": "6f2bc727f767a27a8f5d6f7a5e56ebd075db494c444dc0bbc8318c1bf4f8715b",
-    "tasks/T12-unwrap-spans.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b"
-  },
   "corpus_file_digests": {
-    "ref": "af84d03d00b7fc23d397db8a8867ceee53d1c3cc",
+    "ref": "5d02b9163665c2146f985fce131bbbb0b3c3a899",
     "algorithm": "sha256",
     "tasks": {
       "N03-first-list-count": {
@@ -329,5 +275,59 @@
         }
       }
     }
+  },
+  "created_at_utc": "2026-06-13T00:24:29+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-18",
+  "staged_task_files": [
+    "tasks/N03-first-list-count.md",
+    "tasks/N04-normalize-or-placeholder.md",
+    "tasks/N06-extract-toc.md",
+    "tasks/T01-add-image-class.md",
+    "tasks/T02-link-targets.md",
+    "tasks/T03-first-h1-text.md",
+    "tasks/T04-build-figure.md",
+    "tasks/T05-text-excerpt.md",
+    "tasks/T06-collect-links.md",
+    "tasks/T07-nested-lists.md",
+    "tasks/T08-table-extract.md",
+    "tasks/T09-mark-keyword.md",
+    "tasks/T10-last-h2.md",
+    "tasks/T11-strip-tracking-attributes.md",
+    "tasks/T12-unwrap-spans.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-18 exposes 2 docs and 15 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "34f749e7ee35b2a28217dfe31a4137907b7eb58cb1a4405514fdd1c758cce6d0",
+    "html-tag-processor.md": "3896668fcfee5640a59363aebf18ce0c99caf979825796b3a8c215c8bb33c4d8",
+    "tasks/N03-first-list-count.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
+    "tasks/N04-normalize-or-placeholder.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
+    "tasks/N06-extract-toc.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+    "tasks/T01-add-image-class.md": "d3b65e68db2bf26d3423b5474c3adb49b592375afc8005c127d4d20eb2740e28",
+    "tasks/T02-link-targets.md": "86f539bd48a600db4d47492e2abdf44d3048ba0463bcca0f3ed628228f82d0f8",
+    "tasks/T03-first-h1-text.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+    "tasks/T04-build-figure.md": "69c807b773b41e98c0e5122bee32eca3780ccdfd123279590b4d098f8b7848e1",
+    "tasks/T05-text-excerpt.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+    "tasks/T06-collect-links.md": "29bc31f664b27ca880bf5cdd6a50d0da8f3828cf59d085d2897df2cb987d7d3e",
+    "tasks/T07-nested-lists.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
+    "tasks/T08-table-extract.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+    "tasks/T09-mark-keyword.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+    "tasks/T10-last-h2.md": "285eca1aece8e63d9ab86d1d72319e1eef13f1e184a95216b373bbab22de2d0d",
+    "tasks/T11-strip-tracking-attributes.md": "6f2bc727f767a27a8f5d6f7a5e56ebd075db494c444dc0bbc8318c1bf4f8715b",
+    "tasks/T12-unwrap-spans.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b"
   }
 }
