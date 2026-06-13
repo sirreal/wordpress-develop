@@ -2,6 +2,42 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 29 — ordinary subtree text policy source edit is mixed
+
+**Train 98.31 / core 98.05** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `95173a4486`, which promoted the winning
+round-28 scratch direction into the HTML Processor class docs: ordinary
+subtree text is `#text` tokens by default, special-element opener text is
+explicit opt-in, and unguarded `get_modifiable_text()` is too broad.
+
+Outcome: mixed, keep under the revert rule but do not treat the hypothesis as
+fully confirmed. The round dropped from the comparable round-23 scored-train
+baseline 99.50 to 98.31, below the 2-point revert threshold. There was no
+all-trials regression on a previously passing task, but T07-nested-lists had
+one functional miss and fell to 81.13 because one subject ran separate
+cursor-relative `next_tag()` scans for `UL` and then `OL`; the second scan
+started at EOF and never revisited earlier `OL` elements. Judges attributed
+that to missing HTML Processor `next_tag()` cursor/OR-query guidance, not to
+the text-policy edit.
+
+Target text results were split. T03-first-h1-text improved to 99.40 and
+T05-text-excerpt improved to 99.80. N06-extract-toc fell to 97.60: all three
+subjects still included SCRIPT/STYLE/TEXTAREA/TITLE opener text in ordinary
+heading text. The N06 judge identified the competing method-local
+`next_token()` special-element paragraph as the stronger remaining source of
+over-inclusion; the overview recipe now says opt-in, but the method section
+can still read like a general instruction to include special-element opener
+text whenever collecting element text.
+
+Decision: do not revert `95173a4486`; it stays below the protocol's revert
+threshold and improved adjacent text tasks. Also do not add another broad
+overview recipe for this same text policy. If continuing text-policy work, the
+next diagnostic should be method-local and focused on the `next_token()`
+special-element paragraph. The stronger immediate train failure is the
+repeated `WP_HTML_Processor::next_tag()` cursor-relative / one-of-several-tags
+gap exposed by T07 and previously seen in N03-style scans.
+
 ## Rounds 27/28 — ordinary-text negative example scratch A/B
 
 `round-27` was a fresh control rendered-doc round and `round-28` was a

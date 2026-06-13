@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single depth-bounded next_token() walk, get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(); all are documented and no _doing_it_wrong records appeared. The main adherence issue is over-applying the special-element get_modifiable_text() guidance: it would include SCRIPT/STYLE/TEXTAREA/TITLE opener text in cell output, while the ordinary subtree-text recipe says to append only #text tokens unless the caller explicitly opts into special-element contents."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the documented pattern and reference: correct HTML Processor choice, browser-style fragment parsing, single cursor walk, depth bound, closer-driven row/cell flushing, and decoded text via get_modifiable_text() only on #text tokens. The extra cell_depth state is unnecessary but harmless. It checks get_last_error() for unsupported-parser aborts; it does not require complete source bytes, which is reasonable for this extraction task."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "All called API methods are documented, including inherited paused_at_incomplete_token(). The structural walk is mostly idiomatic and passed all frozen cases. Deductions are for an over-broad special text-only element whitelist, which would include raw SCRIPT/STYLE and decoded TEXTAREA/TITLE contents as table cell text, and for rejecting the whole result on paused_at_incomplete_token(), even though the docs present that as a caller policy rather than a default for best-effort extraction."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, so there were no hidden-case failures to attribute. The docs worked well on the core decision points: the Tag Processor overview says to use WP_HTML_Processor when structure, text collection, implied or missing closing tags, and browser-like parsing matter; WP_HTML_Processor::create_fragment() is clearly presented for BODY fragments; next_token() explains single-cursor token walking, implicit/virtual closers, synthesized table structure, and depth-bounded subtree walks; get_modifiable_text() explains decoded #text content, which prevented double-decoding entity text.\n\nThe near-miss was special-element text. The rendered docs include a strong ordinary subtree-text recipe saying to append only #text tokens unless another token type is explicitly desired, but the next_token() and get_modifiable_text() sections also emphasize that SCRIPT, STYLE, TITLE, and TEXTAREA carry text on opener tokens. Trial 1 and trial 3 latched onto that exception and would include those opener-token contents in table cells, diverging from the ordinary text-node policy.\n\nA second near-miss was incomplete input policy. The docs correctly explain that virtual closers make structural flushing reliable, and that paused_at_incomplete_token() should be checked when the caller must reject truncated input. Trial 3 treated that check as mandatory and would discard an otherwise extractable table for a trailing incomplete tag inside it. That is a policy misunderstanding, not an undocumented API problem.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() special-element paragraph",
+      "problem": "The paragraph says special elements carry text on the opener token and should be read there, but it is easy to over-apply this during ordinary text extraction despite the separate recipe warning.",
+      "suggestion": "Repeat the policy distinction inline: ordinary subtree text should remain #text-only; read SCRIPT/STYLE/TITLE/TEXTAREA opener text only when the caller explicitly wants those element contents, noting raw versus decoded behavior."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction recipe / get_modifiable_text() docblock",
+      "problem": "The docs distinguish modifiable text from ordinary DOM-style text, but the distinction is spread across sections and models still treated get_modifiable_text() availability as inclusion criteria.",
+      "suggestion": "Add a compact decision table: token type/name, whether it is ordinary subtree text, whether get_modifiable_text() is decoded or raw, and typical inclusion policy."
+    },
+    {
+      "location": "paused_at_incomplete_token() references from WP_HTML_Processor::next_token() and get_current_depth()",
+      "problem": "The docs say to check truncation when a result must reject incomplete input, but do not give enough contrast between best-effort extraction, strict validation, and mutation/rewrite policies.",
+      "suggestion": "Add examples of the three policies: best-effort extraction may return data from visited tokens; strict extraction may reject on paused_at_incomplete_token(); mutations should usually require both no truncation and null get_last_error()."
+    },
+    {
+      "location": "WP_HTML_Processor table-support documentation",
+      "problem": "The docs mention synthesized TBODY and implied structure, which was enough here, but table insertion modes are a recurring source of mistakes for subtree walkers.",
+      "suggestion": "Add a general table-walking note explaining that TABLE walks may visit virtual TBODY/TR/TD-related structure and implicit closers, so code should track row/cell state from visited opener/closer tokens rather than source text or absolute depths."
+    }
+  ]
+}

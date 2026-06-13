@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat attribute-rewrite pass over every tag opener with `next_tag()`. For each matched tag, it calls `get_attribute_names_with_prefix( 'data-track-' )` to find exactly the lowercase attribute names that start with that prefix, removes each one with `remove_attribute()`, and returns the edited markup with `get_updated_html()`.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-style table handling, `next_tag()` to find the first `TABLE`, and then a bounded `next_token()` walk using `get_current_depth()` so only that table subtree is visited. Row and cell boundaries come from `TR`/`TD`/`TH` tag openers and closers, ordinary text is collected from `#text` tokens via `get_modifiable_text()`, and text-only element contents are appended from their opener tokens because the HTML Processor carries those contents on the element token rather than separate text nodes.",
+  "confidence": 84
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), one forward next_tag() walk, get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(). All API calls are documented, no _doing_it_wrong records, and all hidden cases passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used only documented APIs, but used two separate next_tag() scans on the same processor: first for UL, then for OL. The first loop leaves the cursor at the end, so the second loop cannot revisit earlier OL elements. This is a cursor-walking misuse rather than hallucinated API usage."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and an idiomatic single forward walk with get_breadcrumbs(), add_class(), and get_updated_html(). All API calls are documented and all hidden cases passed. Minor edge-case gap: unlike trial 1, it does not inspect get_last_error() after the scan before returning modified output."
+    }
+  ],
+  "failure_analysis": "Trials 1 and 3 passed every hidden case. Trial 2 failed simple-ol-inside-ul, deep-descendant, existing-class-preserved, multiple-nested-levels, and mixed-document for the same reason: it assumed a WP_HTML_Processor could be scanned once for UL tags and then scanned again for OL tags from the beginning. In reality next_tag() advances one shared cursor; after the UL loop returns false, the processor is already at EOF, so nested OL elements are never visited. The clearest relevant passage is in html-tag-processor.md under 'Finding tags': next_tag() returning false moves the cursor to the end, and once the cursor reaches the end the processor is done unless you recreate it or use bookmarks. The HTML Processor docs do not repeat this warning in the WP_HTML_Processor::next_tag() section, even though this structural task naturally points subjects to WP_HTML_Processor. For existing-class-preserved, the failure was not a class-merging misconception: add_class() docs correctly say existing classes are preserved/appended. The add_class() call simply never happened because the OL pass never ran. Breadcrumb docs were adequate for ancestor detection: they state that get_breadcrumbs() contains the full path including the current element, and the candidates that used a single walk applied that correctly.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > WP_HTML_Processor::next_tag()",
+      "problem": "The method docs say it finds the next matching tag but do not explicitly state that searches are cursor-relative and do not restart after a failed search. The equivalent warning exists in the Tag Processor overview, but subjects using the HTML Processor may not transfer that rule.",
+      "suggestion": "Add a short method-level note: each next_tag() call starts after the current cursor position; when it returns false, the cursor is at EOF, paused on incomplete input, or aborted; a later call with a different query will not rescan earlier tags. To revisit earlier tags, set a bookmark/seek or create a new processor."
+    },
+    {
+      "location": "html-processor.md > Usage or next_tag() query examples",
+      "problem": "The docs document a single tag_name query but do not show the idiom for matching one of several tag names. This encourages separate sequential scans for each tag type.",
+      "suggestion": "Add a general example for OR-style tag matching: call next_tag() with no tag_name, inspect get_tag(), and branch when the current tag is in a small allowed set. Also state that tag_name accepts one name, not an array of alternatives."
+    },
+    {
+      "location": "html-processor.md > Breadcrumbs",
+      "problem": "The Breadcrumbs section explains exact paths and shortest suffix matching, but it lacks an explicit 'has an ancestor anywhere above the current node' pattern. That pattern is common for containment checks and differs from a direct breadcrumb query.",
+      "suggestion": "Add a general containment example showing get_breadcrumbs(), removing or ignoring the current element, and checking whether an ancestor tag appears in the remaining path. Clarify that breadcrumb queries express a path pattern, while arbitrary ancestor checks should inspect get_breadcrumbs()."
+    },
+    {
+      "location": "html-processor.md > class mutation / inherited output methods",
+      "problem": "The HTML Processor page has shorter inherited add_class() documentation than the Tag Processor page, while structural tasks often use add_class() through WP_HTML_Processor. Readers may need to jump pages to learn class preservation and output behavior.",
+      "suggestion": "In the HTML Processor inherited add_class() and get_updated_html() docs, cross-link or inline the key guarantees: add_class() appends without removing existing classes or duplicating the same class, and get_updated_html() returns untouched bytes unchanged after queued attribute/class edits."
+    }
+  ]
+}

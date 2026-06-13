@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), which is the documented choice for structure-aware direct-child counting. All called methods are present in the rendered docs. The implementation follows the documented bookmark -> next_token()/depth-bounded scan -> paused_at_incomplete_token()/get_last_error() -> seek -> set_attribute() -> get_updated_html() pattern. It passed 11/11 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the HTML Processor, bookmarks, token walking, get_current_depth(), get_token_type(), and get_updated_html(). The bounded subtree loop matches the docs' >= depth guidance, and it checks incomplete/unsupported parser state before editing. All API calls are documented. It passed 11/11 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API use. It applies the documented structural scan pattern, counts only LI opener tokens at list_depth + 1, rejects incomplete or unsupported scans, seeks back to the opener, and reads output with get_updated_html(). It passed 11/11 with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there were no failed cases to attribute to documentation gaps. The docs did especially well in four places: html-tag-processor.md, \"Which processor should I use?\", clearly says the Tag Processor has no tree awareness and points structural work to WP_HTML_Processor; html-processor.md, \"Recipe: scan a region before editing its opener\", almost directly teaches the required bookmark/scan/seek/edit pattern; WP_HTML_Processor::next_token() explains virtual closers, implied structure, and the single-cursor hazard; and WP_HTML_Processor::get_current_depth() explicitly documents the >= subtree boundary and the need to check paused_at_incomplete_token() plus get_last_error(). Those passages explain why all three subjects handled omitted LI closers, nested lists, incomplete tokens inside the list, and unsupported markup inside the list. The main near-misses were documentation ambiguities that did not bite this round: next_token() still has a stale \"do not use\" history note despite being required by the public recipes, and the HTML Support wording that unsupported markup aborts when it appears in the input can be read as whole-document-global rather than encounter-scoped. The frozen cases for malformed markup after a closed list depend on the encounter-scoped behavior: a bounded scan that stops at the list closer has not seen the later bad token, so get_last_error() and paused_at_incomplete_token() remain clean.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() method docs",
+      "problem": "The examples and recipes present next_token() as the right public tool for structural token walks, but the Since note still says \"Added for internal support; do not use.\"",
+      "suggestion": "Remove or revise the stale warning so it says next_token() is supported for advanced structural walks, with the existing cautions about bounding scans and the shared cursor."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and subtree-walk examples",
+      "problem": "The docs explain >= boundaries well, but the direct-child test is implicit: readers must infer that a direct child opener is a #tag, not a closer, at parent_depth + 1.",
+      "suggestion": "Add a short general contract or snippet for detecting direct child element openers: record parent depth N, then match complete tag opener tokens where get_current_depth() === N + 1; deeper tokens are descendants."
+    },
+    {
+      "location": "HTML Support / get_last_error() / paused_at_incomplete_token() docs",
+      "problem": "The docs say unsupported or incomplete markup should be checked after a scan, but they do not clearly distinguish errors encountered within a bounded region from malformed tokens that appear later and were never scanned.",
+      "suggestion": "State that get_last_error() and paused_at_incomplete_token() reflect parser progress so far. For bounded-region edits, callers should decide whether they require the region to be complete or the entire remaining document to be scanned cleanly."
+    }
+  ]
+}

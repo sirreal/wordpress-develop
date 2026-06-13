@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Tag_Processor` for fixed-shape fragment construction, with only documented methods: `next_tag`, `set_attribute`, `next_token`, `get_token_type`, `set_modifiable_text`, and `get_updated_html`. It followed the documented template/placeholder pattern and preserved attribute order by seeding `src` then `alt`. Minor near-miss: it did not check `next_tag()` or `set_modifiable_text()` return values, though the controlled literal template makes that low risk."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented API usage as the reference, and slightly more defensive than trials 1 and 3 by guarding the `next_tag( 'img' )` call before setting attributes. It used token walking to find a `#text` token and `get_updated_html()` to read queued edits. Minor near-miss: it still did not check the boolean result of `set_modifiable_text()`, despite the docs advising that generally."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct Tag Processor and only documented methods. The solution closely follows the rendered docs' `Building markup from a template` pattern: seed exact markup, update existing attributes, replace placeholder text, and return `get_updated_html()`. Minor near-miss: unchecked `next_tag()` and `set_modifiable_text()` return values."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases, with no `_doing_it_wrong` or PHP errors. The docs worked well for this task. The `Which processor should I use?` guidance clearly says the Tag Processor is appropriate for flat, byte-preserving attribute edits, while the HTML Processor is for structural questions. The `Building markup from a template` section directly taught the needed pattern: start from a literal template, include attributes in the desired order, include placeholder text for later replacement, then use `set_attribute()`, token walking, `set_modifiable_text()`, and `get_updated_html()`. The `set_attribute()` docs also explicitly explain that plain unescaped values are encoded and that newly added attributes sort by name, which likely prevented attribute-order failures. The `set_modifiable_text()` docs explain that ordinary container elements do not carry text themselves and that callers need a `#text` token or placeholder, which likely prevented attempts to set text while matched on `FIGCAPTION`. Near-misses were limited to defensive style: candidates mostly copied the fixed-template examples without checking every boolean return value, but the chosen template made those calls deterministic in this task.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::set_modifiable_text()` docblock and examples",
+      "problem": "The prose says to always check the return value, but the successful template-building examples make it easy to omit that check when copying the pattern.",
+      "suggestion": "Add a short example that captures the boolean result and handles `false`, or explicitly state that a known ordinary `#text` token in a trusted template is the narrow case where failure is unexpected."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::next_tag()` usage examples",
+      "problem": "Examples often call `next_tag()` directly in fixed-template code, while broader input-processing code needs to guard the `false` case because the cursor moves to the end on failure or incomplete input.",
+      "suggestion": "Distinguish trusted literal-template examples from arbitrary-input examples, and show guarded `next_tag()` for the latter."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::set_attribute()` docblock",
+      "problem": "The docs cover `true` and `false` boolean handling and attribute ordering, but the empty-string case is only implicit. Builders often need to know that `''` means an empty quoted value, not a boolean or removed attribute.",
+      "suggestion": "Add an explicit sentence and tiny example: passing `''` renders `name=\"\"`; passing `true` renders a boolean attribute; passing `false` removes it."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction is structure-aware. It finds the first `TABLE` with `next_tag()`, then performs a single depth-bounded `next_token()` walk through that table subtree, opening and closing rows/cells based on `get_tag()` and `is_tag_closer()`, and concatenating decoded text from `#text` tokens via `get_modifiable_text()`; for special text-only elements whose content lives on the opener token, it also appends their documented modifiable text.",
+  "confidence": 87
+}

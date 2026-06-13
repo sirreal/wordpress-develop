@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a single linear scan, re-setting one bookmark on each matched `H2` so the bookmark ends up at the last `H2` opener. It then `seek()`s back to that bookmarked tag, adds the `final-section` class with `add_class()`, and returns the edited markup via `get_updated_html()`.",
+  "confidence": 96
+}

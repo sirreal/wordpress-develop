@@ -124,6 +124,21 @@ scratch negative example's `null !== get_modifiable_text()` guard; teach
 token-type/name guards instead because `get_modifiable_text()` returns a
 string and is not a presence test.
 
+Round 29 promoted that adapted source edit. It is mixed: T03 and T05 improved,
+but N06 still over-included special-element opener text in all three trials.
+Judges identified the method-local `next_token()` special-element paragraph as
+the remaining competing cue. Keep the source edit under the revert rule, but
+do not spend more source budget on broad class-level text recipes. A further
+text hypothesis should be method-local and scratch-tested against the
+`next_token()` wording before promotion.
+
+Round 29 also exposed a stronger current train functional failure unrelated
+to the text edit: T07 trial 2 ran one `next_tag()` scan for `UL`, then another
+for `OL`, assuming the second scan restarted from the beginning. It did not;
+`next_tag()` is cursor-relative. This same family appeared earlier in
+N03-style sequential tag searches. Treat HTML Processor `next_tag()` cursor
+semantics and first-of-several-tags idiom as a strong next source candidate.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -220,6 +235,31 @@ show invented null branches, wrong fallback choices, and cross-class factory
 hallucinations. This is a broad API boundary, not a task-specific patch.
 
 Risk: low.
+
+### 2b. HTML Processor next_tag() cursor and OR-search contract
+
+Core idea: make `WP_HTML_Processor::next_tag()` cursor movement and
+multi-name searches explicit near the method heading.
+
+Contract to test:
+
+- Each `next_tag()` search starts after the current cursor position.
+- When `next_tag()` returns false, a later call with a different query will
+  not rescan earlier tags.
+- To find the first of several tag names, do one forward walk and branch on
+  `get_tag()`, or use bookmarks/new processor instances when a true rescan is
+  required.
+- `tag_name` is a single tag name, not an array of alternatives.
+
+Evidence: round 21 N03 had a sequential filtered-search failure, and round 29
+T07 repeated the same cursor misconception as a functional failure: a subject
+scanned for `UL`, then scanned for `OL` on the same processor and missed
+earlier nested `OL` elements because the cursor was already at EOF. Judges
+noted that the Tag Processor overview has the cursor warning, but the HTML
+Processor `next_tag()` method docs do not make it local enough.
+
+Risk: low-medium. Keep it generic and avoid a nested-list recipe; teach cursor
+state and first-of-several-tags search.
 
 ### 3. Where-text-lives matrix
 
@@ -338,6 +378,13 @@ special-element opener text, while variant T03/N06 used ordinary `#text` only;
 T05 still correctly opted into TITLE/TEXTAREA while excluding SCRIPT/STYLE.
 Promote an adapted source edit now. Keep it generic and avoid the scratch
 variant's misleading null-check negative example.
+
+Source result: round 29 was mixed. T03/T05 improved after promotion, but N06
+still over-included special-element opener text, with judges pointing at the
+`next_token()` method-local special-element paragraph rather than the overview
+recipe. If this hypothesis is revisited, use a scratch A/B that rewrites that
+method-local paragraph to say "only if the caller's definition of text includes
+special-element contents" and points back to the ordinary subtree-text recipe.
 
 Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
 recipe. Phrase the edit, if promoted, as a token/policy matrix.
