@@ -48,6 +48,13 @@ action is a no-edit calibration one step lower, `gpt-5.4-mini` / `high` /
 `priority`, or a scratch A/B for the generic recipe idea if the owner chooses
 diagnostics over another ladder step.
 
+Round 21 scored a broad HTML Processor recipe edit. It did not cross the
+revert threshold, but it was not a clean win: T09 improved slightly, while T05
+fell because all three subjects still chose the Tag Processor's lexical token
+walk for a BODY-fragment text-content task. Treat the next text hypothesis as
+processor-choice/discoverability work in the Tag Processor docs, not as more
+HTML Processor recipe prose.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -190,7 +197,31 @@ rewrite of visited tokens would be acceptable. This supports promoting a
 generic HTML Processor recipe that separates unsupported parser aborts from
 caller policy for incomplete trailing tokens.
 
+Round-21 result: a broad HTML Processor class-level recipe plus
+`serialize_token()` policy note was mixed. The rewrite portion improved
+T09-mark-keyword slightly, but the text portion did not improve processor
+choice in T05; all three subjects still selected `WP_HTML_Tag_Processor`.
+Before adding more text recipes, clarify the Tag Processor text-walk example
+as lexical token processing and point BODY-fragment text-content callers to
+`WP_HTML_Processor::create_fragment()`.
+
 Risk: medium-low if phrased as a token model instead of a task recipe.
+
+### 3a. Tag Processor lexical-text boundary
+
+Core idea: the Tag Processor docs contain a useful `next_token()` text example
+that is lexical, not parsed-tree textContent. Label it that way and
+cross-reference the HTML Processor when the caller needs BODY-fragment
+semantics, implied closing behavior, tree order, or unsupported-markup policy.
+
+Evidence: T05 in both round 20 and round 21 passed functionally but selected
+`WP_HTML_Tag_Processor` in all three trials. Round-21's added HTML Processor
+text recipe did not change this; judges identified the Tag Processor
+"Tokens and finer-grained processing" example as the stronger entry point.
+
+Risk: low-medium. Avoid saying the Tag Processor cannot read text; it can read
+lexical token text. The distinction is parsed fragment/DOM semantics versus
+flat lexical scanning.
 
 ### 4. Contract-card rendered-doc A/B
 

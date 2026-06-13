@@ -1,0 +1,30 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly used WP_HTML_Processor::create_fragment() for structural text extraction, then used only documented methods: next_tag(), get_current_depth(), next_token(), get_token_type(), and get_modifiable_text(). It follows the documented subtree text recipe, including the >= depth guard, #text filtering, decoded text handling, null for no H1, and empty string for an H1 with no text nodes."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Same documented and idiomatic implementation as the reference: HTML Processor, first H1 search, depth-bounded token walk, #text-only concatenation, and get_modifiable_text() for decoded text. No _doing_it_wrong records and no undocumented API calls."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Uses the exact documented pattern for collecting DOM-style text from a subtree. It handles nested markup, decoded entities, image-only headings, no H1, multiple H1s, nested containers, and an unclosed H1 without relying on hallucinated methods."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs worked well for this task because they directly explain the key decisions: the 'Which processor should I use?' guidance says to use WP_HTML_Processor when structure matters and specifically mentions collecting element text; html-processor.md's 'Recipe: collect DOM-style text from a subtree' shows the create_fragment -> next_tag -> record depth -> next_token loop -> #text -> get_modifiable_text pattern; next_token() and get_current_depth() explain why the walk must be bounded and why the comparison must be >=; get_modifiable_text() documents that #text output is already decoded. Near miss: none of the candidates checked paused_at_incomplete_token() or get_last_error(). That was acceptable for this task's best-effort text extraction and the unclosed-h1 expectation, but callers with a reject-truncated-or-unsupported-input policy would need those checks.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / WP_HTML_Processor::next_tag()",
+      "problem": "The method-level return documentation says only whether a tag matched, while the broader document explains parser aborts and incomplete-token pauses elsewhere. A reader may not know when false means 'not found' versus 'parser stopped'.",
+      "suggestion": "Add a short 'When matching fails' paragraph to next_tag(): false can mean no matching tag, paused incomplete syntax, or unsupported markup; callers that need the distinction should check paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}

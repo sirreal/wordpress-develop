@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 21 — generic HTML Processor recipes are mixed
+
+**Train 98.97 / core 98.81** under `scored-train`, with subjects
+`gpt-5.4` / `low` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored the generic main-class recipe hypothesis from commit
+`27077e06b1`: add HTML Processor class-level recipes for collecting
+DOM-style text from a subtree and rewriting while serializing tokens, plus a
+method-local `serialize_token()` completion-policy note.
+
+Outcome: keep for now under the protocol's revert rule, but this is not a
+clean win. Round score moved from the round-20 low-effort no-edit calibration
+99.43 to 98.97 (-0.46), below the 2-point revert threshold. All but one
+subject trial passed all hidden tests; N03 trial 2 failed 10/11 because it
+treated sequential filtered `next_tag( 'UL' )` then `next_tag( 'OL' )` calls
+as alternate searches from the same cursor. Judges attributed that to missing
+`WP_HTML_Processor::next_tag()` cursor/lookahead guidance, not to the recipe
+edit.
+
+The target tasks were mixed:
+- T09-mark-keyword improved slightly from 98.80 to 99.20. The new
+  `serialize_token()` policy avoided the exact probe failure where subjects
+  rejected all incomplete trailing syntax, but judges still saw inconsistent
+  fallback choices for factory failure and unsupported parser aborts.
+- T05-text-excerpt fell from 96.70 to 94.40, with all three trials still
+  passing hidden tests but choosing `WP_HTML_Tag_Processor` for text
+  extraction. The new HTML Processor text recipe did not overcome the existing
+  Tag Processor lexical-token text example, which still looks like a ready
+  whole-fragment text-content recipe.
+- N06 improved from 98.50 to 98.90, but two trials over-opted into special
+  element text while extracting heading text, reinforcing that
+  "modifiable text" is broader than ordinary parsed text.
+
+Interpretation: a broad HTML Processor recipe block is not enough. The next
+evidence-backed source hypothesis should clarify the Tag Processor text-walk
+example as lexical token processing and cross-reference the HTML Processor for
+parsed BODY-fragment text, implied closing behavior, tree order, and
+unsupported-markup policy. Separately, `WP_HTML_Processor::next_tag()` needs a
+small cursor/lookahead warning and a first-of-several-tags idiom, but that is
+a different hypothesis.
+
 ## Round 20 — low-effort weak-tier calibration still saturated
 
 **Train 99.43 / core 99.34** under `weak-tier-calibration`, with subjects

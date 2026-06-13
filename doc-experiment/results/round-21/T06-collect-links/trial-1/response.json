@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walks the document once with `next_token()`. For each `A` opening tag it reads `href` via `get_attribute()` and keeps only string values, and for each `#text` token it appends decoded text from `get_modifiable_text()` to the currently open link entries until their `A` closing tags are reached with `is_tag_closer()`.",
+  "confidence": 86
+}

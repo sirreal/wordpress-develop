@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for structure-aware parsing, then walks tokens with `next_token()`. On each heading opener (`H1` through `H6`), it records the current depth with `get_current_depth()` and collects descendant text until the walk reaches the heading\u2019s closer, appending ordinary text from `#text` tokens via `get_modifiable_text()` and also handling documented special text-carrying elements like `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA`.",
+  "confidence": 87
+}

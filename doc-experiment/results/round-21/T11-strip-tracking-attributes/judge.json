@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for flat attribute editing. All calls are documented: next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html(). The implementation follows the documented scan-edit-return pattern, preserves untouched bytes, handles the helper's nullable return defensively, and avoids value/text decoding pitfalls entirely."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same API usage as trial-1. Correct processor choice, no undocumented calls, no _doing_it_wrong records, and idiomatic use of the prefix helper plus remove_attribute() inside a next_tag() loop followed by get_updated_html()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same API usage as trial-1. It relies on documented case-insensitive prefix matching and lower-cased attribute names, then passes those names to remove_attribute(). get_updated_html() is the documented output path after queued edits."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three executions passed single-link, multiple-tags, multiple-matching-attributes, similar-prefixes-kept, uppercase-source-attribute, comments-untouched, and no-matches. The docs did well in the relevant places: the Tag Processor overview says to use this class for flat attribute/class edits with byte-precise preservation; the Usage section shows direct construction with new WP_HTML_Tag_Processor($html) and scanning via next_tag(); get_attribute_names_with_prefix() documents lower-cased names and case-insensitive matching, including an uppercase DATA-* example; the attribute modification section explains remove_attribute(); and get_updated_html() explicitly says it is the way to read back queued modifications while preserving untouched bytes. The HTML Processor docs also warned that normalization/serialization lower-cases and rewrites markup, which likely helped subjects avoid the wrong processor. Near-misses were minor: get_attribute_names_with_prefix() only implies, rather than explicitly states, that a matched tag with zero matches returns an empty array; remove_attribute() does not itself repeat the case-insensitive attribute-name contract; and next_tag() could be more explicit that comments are skipped as non-tag tokens.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix()",
+      "problem": "The return contract distinguishes array|null, but it does not explicitly say that a currently matched tag with no matching attributes returns an empty array, while null means there is no current tag opener.",
+      "suggestion": "Add a sentence and example: on a matched tag this returns a possibly empty array; it returns null only when the processor is not currently matched on a tag opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute()",
+      "problem": "The standalone method docs do not state that HTML attribute-name matching is ASCII case-insensitive, even though get_attribute_names_with_prefix() returns lower-case names and source markup may use uppercase attributes.",
+      "suggestion": "Document that lower-case names returned by attribute enumeration helpers can be passed directly to remove_attribute(), including for differently cased source attributes in HTML."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() / Finding tags",
+      "problem": "The docs say next_tag() finds tags, but do not explicitly call out that comments, text, doctypes, and other non-tag tokens are skipped and left untouched.",
+      "suggestion": "Add a short note that next_tag() visits tag openers only by default and skips non-tag tokens; point to WP_HTML_Processor::next_token() when non-tag tokens must be inspected."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() and get_updated_html()",
+      "problem": "Whitespace preservation around removed attributes is mentioned indirectly by the byte-preservation text and future-direction note, but not near remove_attribute().",
+      "suggestion": "Add a cross-reference or sentence explaining that removing an attribute preserves surrounding untouched bytes, so spacing around the removed attribute may remain until a separate whitespace-pruning behavior exists."
+    }
+  ]
+}

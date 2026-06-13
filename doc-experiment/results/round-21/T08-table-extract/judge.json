@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used a depth-bounded next_token() walk from the first TABLE. All called methods are documented in the rendered files, and execution reported no _doing_it_wrong records. Strong handling of implied/omitted table closers and decoded #text. Main issue: it opts into SCRIPT/STYLE/TITLE/TEXTAREA modifiable text inside cells, even though the DOM-style text recipe says to append ordinary #text tokens unless special token text is intentionally wanted; that can include raw, undecoded content. It checks get_last_error() but not paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented single-cursor token-walk pattern, with a proper depth break when leaving the first table. All API methods used are present in the docs and no misuse was recorded. It handles virtual closers and decoded #text well. Same near-miss as trial-1: special element modifiable text is included as cell text, which is not the documented default for DOM-style subtree text. It also checks get_last_error() but not paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Uses the right structural processor and documented token APIs, with no hallucinated method calls or _doing_it_wrong records. The core row/cell state machine is idiomatic and passed all frozen cases. It is weaker on documented edge policy: it returns partial results without checking get_last_error(), does not check paused_at_incomplete_token(), and broadens special-element text inclusion to additional element names, increasing the risk of raw or non-DOM-style text being reported as ordinary cell text."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed: all three trials passed all 8 cases, including omitted table closers, markup in cells, decoded entities, no-table, first-table-only, and empty cells. The docs appear to have done well on the central task: the processor-selection guidance says to use the HTML Processor when structure, subtree text, implied closers, or browser-like parsing matter; the next_token() docs explain virtual closers, implied TBODY insertion, single-cursor state machines, and depth-bounded walks; get_current_depth() explicitly warns to use >= or break only when depth drops below the opener depth; get_modifiable_text() documents decoded #text. Those passages map directly to the successful patterns in all three candidates.\n\nThe main near-miss was special text-carrying elements. Every trial added SCRIPT/STYLE/TITLE/TEXTAREA text, and trial-3 added more. The docs do say special elements carry text on their opener token, but the DOM-style text recipe also says ordinary subtree text extraction should append only #text tokens unless another token type is intentionally wanted. A read-only probe confirmed this matters: for a cell containing <script>1 &amp; 2</script>z, the canonical reference returns only z, while candidates return 1 &amp; 2z. This is a documentation ambiguity around the phrase 'text content' versus 'modifiable text on special element tokens', not an undocumented API failure.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree; get_modifiable_text()",
+      "problem": "The docs mention both '#text-only' DOM-style extraction and special elements whose text lives on opener tokens, but they do not sharply define when special-token text should be excluded from ordinary subtree text extraction.",
+      "suggestion": "Add a small generic example with normal text, a comment, SCRIPT/STYLE, and TEXTAREA/TITLE showing the default '#text only' result and a separate explicit opt-in variant for special-token text, including raw-vs-decoded behavior."
+    },
+    {
+      "location": "html-processor.md, next_token() and get_current_depth()",
+      "problem": "The docs explain virtual closers and incomplete-token checks, but the policy distinction for read-only extraction is scattered: best-effort extraction may be acceptable, while exact extraction may need paused_at_incomplete_token() and get_last_error().",
+      "suggestion": "Add a short 'After a bounded read-only scan' note showing the two documented policies: accept virtual-closer best effort, or reject/fallback when paused_at_incomplete_token() or get_last_error() is set."
+    },
+    {
+      "location": "html-processor.md, HTML Support / table insertion-mode discussion",
+      "problem": "The docs mention synthesized TBODY and broad table support, but omitted TD/TH/TR closers are not called out near the table-support text, even though this is a common reason to choose the HTML Processor over lexical scanning.",
+      "suggestion": "Add a general note that table insertion modes may synthesize TBODY and virtual TD/TH/TR closers, and that token walkers should flush state on closers rather than relying on source end tags."
+    }
+  ]
+}

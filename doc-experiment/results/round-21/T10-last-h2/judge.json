@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Correctly chose WP_HTML_Tag_Processor, used only documented calls, and followed the documented moving-bookmark idiom for remembering the last matching tag before seek(), add_class(), and get_updated_html(). Returning the original HTML when no H2 was found is acceptable because no updates were queued."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Equivalent to trial-1: correct processor choice, no undocumented API usage, no _doing_it_wrong records, and idiomatic single-pass scan with set_bookmark(), seek(), add_class(), release_bookmark(), and get_updated_html()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Correctly used WP_HTML_Tag_Processor, next_tag('H2'), a repeatedly moved bookmark, has_bookmark(), seek(), add_class(), release_bookmark(), and get_updated_html(). This is essentially the reference approach plus explicit bookmark cleanup."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, and none produced _doing_it_wrong records. The docs worked well for this task because the Tag Processor overview explicitly says to use it for flat, position-based tag/class edits; the usage section documents construction with new WP_HTML_Tag_Processor($html); next_tag() documents string tag-name queries; the Bookmarks section directly describes the exact needed pattern: re-set one bookmark name on every match to remember the last occurrence, then seek to it; add_class() documents creating/appending the class while preserving existing classes; and get_updated_html() is clearly identified as the way to read modified markup. Near-miss: the task did not stress incomplete trailing input, decoded/raw text, or attribute null/true/empty-string semantics, so those parts of the docs did not materially affect these implementations. The only potentially fragile area is that next_tag() returning false can mean either no matching tag or incomplete input; these candidates treated it as scan completion, which matches the reference and hidden tests here, but a different task requiring rejection of truncated input would need stronger nearby guidance.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor docs, Bookmarks section",
+      "problem": "The section has the right last-match idiom, but it is embedded in a more complex list example, so models may have to infer the minimal pattern for simple 'last matching tag' edits.",
+      "suggestion": "Add a short, standalone example showing a single pass that moves one literal bookmark on each matching opener, checks has_bookmark(), seeks back once, applies an edit, and returns get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor docs, next_tag() / When matching fails",
+      "problem": "The docs explain that false can mean either no match or paused incomplete input, but the consequence for mutation workflows is separated from simple scanning examples.",
+      "suggestion": "Add guidance near mutation examples stating when it is acceptable to treat false as end-of-scan and when callers should check paused_at_incomplete_token() before applying a queued or bookmark-based edit."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor docs, add_class() examples",
+      "problem": "The class examples show adding to current tags, but not in combination with a seeked bookmark after a full scan.",
+      "suggestion": "Cross-reference add_class() from the bookmark examples, emphasizing that after seek() the processor is matched on that bookmarked token and normal mutation methods such as add_class() can be called before get_updated_html()."
+    }
+  ]
+}
