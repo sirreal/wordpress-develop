@@ -47,6 +47,44 @@ def trial_payload_from_output(payload: dict) -> dict:
     return payload
 
 
+def validate_isolated_workdir_attestation(attestation: dict) -> list[str]:
+    errors = []
+
+    expected_values = {
+        "agent_type": "codex-cli-isolated-workdir",
+        "runner": "codex exec",
+        "sandbox_mode": "read-only",
+        "approval_policy": "never",
+        "project_rules_loaded": False,
+        "user_config_loaded": False,
+        "repo_available_to_subject": False,
+    }
+    for key, expected in expected_values.items():
+        if attestation.get(key) != expected:
+            errors.append(f"subject_isolation.{key} must be {expected!r}")
+
+    input_files = attestation.get("input_files")
+    if not isinstance(input_files, list):
+        errors.append("subject_isolation.input_files must list isolated input files")
+    elif sorted(input_files) != ["html-processor.md", "html-tag-processor.md", "task.md"]:
+        errors.append(
+            "subject_isolation.input_files must be exactly html-processor.md, "
+            "html-tag-processor.md, and task.md"
+        )
+
+    work_root = attestation.get("work_root")
+    if not isinstance(work_root, str) or not work_root.strip():
+        errors.append("subject_isolation.work_root must be a non-empty string")
+
+    notes = attestation.get("equivalent_boundary_notes")
+    if not isinstance(notes, str) or not notes.strip():
+        errors.append(
+            "subject_isolation.equivalent_boundary_notes must explain isolated-workdir mode"
+        )
+
+    return errors
+
+
 def validate_subject_isolation(payload: dict) -> list[str]:
     attestation = payload.get("subject_isolation")
     if not isinstance(attestation, dict):
@@ -56,24 +94,34 @@ def validate_subject_isolation(payload: dict) -> list[str]:
     if attestation.get("enforced") is not True:
         errors.append("subject_isolation.enforced must be true")
 
-    agent_type = attestation.get("agent_type")
-    if not isinstance(agent_type, str) or not agent_type.strip():
-        errors.append("subject_isolation.agent_type must be a non-empty string")
+    isolation_mode = attestation.get("isolation_mode", "read-grep-tool-boundary")
+    if isolation_mode == "isolated-workdir":
+        errors.extend(validate_isolated_workdir_attestation(attestation))
+    elif isolation_mode == "read-grep-tool-boundary":
+        agent_type = attestation.get("agent_type")
+        if not isinstance(agent_type, str) or not agent_type.strip():
+            errors.append("subject_isolation.agent_type must be a non-empty string")
 
-    allowed_tools = attestation.get("allowed_tools")
-    if not isinstance(allowed_tools, list):
-        errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
-    elif any(not isinstance(tool, str) for tool in allowed_tools):
-        errors.append("subject_isolation.allowed_tools entries must be strings")
-    elif sorted(allowed_tools) != ["Grep", "Read"]:
-        errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
+        allowed_tools = attestation.get("allowed_tools")
+        if not isinstance(allowed_tools, list):
+            errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
+        elif any(not isinstance(tool, str) for tool in allowed_tools):
+            errors.append("subject_isolation.allowed_tools entries must be strings")
+        elif sorted(allowed_tools) != ["Grep", "Read"]:
+            errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
 
-    if isinstance(agent_type, str) and agent_type.strip() != "docs-test-subject":
-        notes = attestation.get("equivalent_boundary_notes")
-        if not isinstance(notes, str) or not notes.strip():
-            errors.append(
-                "subject_isolation.equivalent_boundary_notes must explain non-standard agent type"
-            )
+        if isinstance(agent_type, str) and agent_type.strip() != "docs-test-subject":
+            notes = attestation.get("equivalent_boundary_notes")
+            if not isinstance(notes, str) or not notes.strip():
+                errors.append(
+                    "subject_isolation.equivalent_boundary_notes must explain "
+                    "non-standard agent type"
+                )
+    else:
+        errors.append(
+            "subject_isolation.isolation_mode must be read-grep-tool-boundary "
+            "or isolated-workdir"
+        )
 
     notes = attestation.get("notes")
     if notes is not None and (not isinstance(notes, str) or not notes.strip()):

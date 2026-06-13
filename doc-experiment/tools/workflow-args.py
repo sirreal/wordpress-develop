@@ -158,6 +158,21 @@ def launch_manifest(metadata: dict) -> dict:
             "required_agent_type": "docs-test-subject",
             "agent_option_key": "agent_type",
             "allowed_tools": ["Read", "Grep"],
+            "accepted_isolation_modes": [
+                "read-grep-tool-boundary",
+                "isolated-workdir",
+            ],
+            "local_codex_fallback": {
+                "agent_type": "codex-cli-isolated-workdir",
+                "runner": "codex exec",
+                "sandbox_mode": "read-only",
+                "approval_policy": "never",
+                "input_files": [
+                    "html-processor.md",
+                    "html-tag-processor.md",
+                    "task.md",
+                ],
+            },
             "trusted_only_if_enforced": True,
             "attestation_required_in_trials_output": True,
             "attestation_output_key": "subject_isolation",
@@ -176,6 +191,16 @@ def launch_manifest(metadata: dict) -> dict:
         },
         "commands": {
             "preflight": [command for command in preflight_commands if command],
+            "local_codex_trials": [
+                f"python3 doc-experiment/tools/run-codex-trials.py {round_name} "
+                f"--output doc-experiment/results/{round_name}/codex-trials-output.json",
+                f"python3 doc-experiment/tools/validate-workflow-output.py trials "
+                f"doc-experiment/results/{round_name}/codex-trials-output.json {round_name}",
+                f"python3 doc-experiment/tools/ingest-trials.py "
+                f"doc-experiment/results/{round_name}/codex-trials-output.json {round_name}",
+                f"python3 doc-experiment/tools/validate-round.py {round_name} "
+                "--require-trials-complete",
+            ],
             "after_trials_workflow": [
                 f"python3 doc-experiment/tools/validate-workflow-output.py trials <trials-output.json> {round_name}",
                 f"python3 doc-experiment/tools/ingest-trials.py <trials-output.json> {round_name}",

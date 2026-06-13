@@ -12,6 +12,15 @@ Scratch isolation passed: only the two rendered docs and selected task prompts
 are exposed. No subject trials, hidden-test executions, judge verdicts, or
 round summary exist yet, so round 18 is not a trusted score.
 
+Added a local Codex CLI trial runner to avoid deadlocking on the external
+Workflow UI when it is unavailable. The runner writes the same trial-output
+shape as the Workflow script, but records `subject_isolation.isolation_mode`
+as `isolated-workdir`: each subject gets a private non-repo directory
+containing only the two rendered docs, one task prompt, and the output schema;
+project rules and user config are ignored, the sandbox is read-only, and the
+approval policy is `never`. Scores from this runner must be compared only with
+rounds using the same isolation mode.
+
 Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
 round is prepared, partially trialed, trial-complete, judged, or scored, and it
 lists missing trial, judge, or summary files before a score can be trusted.

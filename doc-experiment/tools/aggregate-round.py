@@ -26,6 +26,13 @@ def load_metadata(results_dir: Path) -> dict | None:
     return json.loads(metadata_file.read_text())
 
 
+def load_subject_isolation(results_dir: Path) -> dict | None:
+    attestation_file = results_dir / "subject-isolation.json"
+    if not attestation_file.exists():
+        return None
+    return json.loads(attestation_file.read_text())
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: aggregate-round.py <results-dir>", file=sys.stderr)
@@ -172,6 +179,9 @@ def main() -> int:
                 "git_status_short",
             )
         }
+    subject_isolation = load_subject_isolation(results_dir)
+    if subject_isolation is not None:
+        summary["subject_isolation"] = subject_isolation
 
     print(json.dumps(summary, indent=2))
     return 0

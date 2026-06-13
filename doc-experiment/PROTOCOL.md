@@ -127,10 +127,28 @@ older than the definition, fall back to a general agent with the
 prompt-level restrictions below and spot-check transcripts for isolation
 violations. Substitute `{SCRATCH}` and `{TASK_MD}`:
 
-For trusted scored rounds, the runner must enforce the `docs-test-subject`
-tool boundary or an equivalent Read+Grep-only boundary. A prompt-only fallback
-is diagnostic unless transcripts are inspected and the isolation risk is
-explicitly recorded.
+For trusted scored rounds, the preferred runner must enforce the
+`docs-test-subject` tool boundary or an equivalent Read+Grep-only boundary. If
+that Workflow runner is unavailable, use the local Codex CLI fallback:
+
+```sh
+python3 doc-experiment/tools/run-codex-trials.py round-NN \
+  --output doc-experiment/results/round-NN/codex-trials-output.json
+python3 doc-experiment/tools/validate-workflow-output.py trials \
+  doc-experiment/results/round-NN/codex-trials-output.json round-NN
+python3 doc-experiment/tools/ingest-trials.py \
+  doc-experiment/results/round-NN/codex-trials-output.json round-NN
+python3 doc-experiment/tools/validate-round.py round-NN --require-trials-complete
+```
+
+The local fallback runs each subject from a private non-repo directory
+containing only the two rendered docs, one task prompt, and the output schema.
+It ignores project rules and user config, uses a read-only sandbox, sets
+approval policy `never`, and persists `subject_isolation.isolation_mode` as
+`isolated-workdir`. Scores from this runner are comparable only with rounds
+using the same isolation mode and runner policy. A prompt-only fallback without
+one of these persisted isolation attestations remains diagnostic unless
+transcripts are inspected and the isolation risk is explicitly recorded.
 
 ````text
 You are implementing a PHP function for WordPress using the HTML API.
@@ -184,9 +202,12 @@ returns an object with a `result` array and a `subject_isolation` attestation:
 }
 ```
 
-If a runner uses an equivalent agent type, `agent_type` may differ, but
-`allowed_tools` must still be exactly `Read` and `Grep`, and
-`equivalent_boundary_notes` must explain the equivalent enforced boundary.
+If a Workflow runner uses an equivalent agent type, `agent_type` may differ,
+but `allowed_tools` must still be exactly `Read` and `Grep`, and
+`equivalent_boundary_notes` must explain the equivalent enforced boundary. If
+the local Codex CLI fallback is used, `allowed_tools` is replaced by the
+`isolated-workdir` fields validated by `validate-workflow-output.py` and
+`validate-round.py`.
 `ingest-trials.py` persists this as `subject-isolation.json`; `validate-round.py`
 rejects trial artifacts that lack it. If the workflow runner saves returned
 values under a top-level `result` key, `validate-workflow-output.py` and
