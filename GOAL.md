@@ -13,6 +13,11 @@ Do not change PHP behavior. Infrastructure/tooling changes are allowed only
 when needed to keep the experiment valid, and must be tracked separately from
 documentation hypothesis edits.
 
+The primary deliverable is improved source documentation in the two HTML API
+docblock files. Tooling, handoff files, audits, manifests, and result hygiene
+are support work only; they are not progress on the goal unless they unblock
+the next documentation-measurement or documentation-edit step.
+
 ## Authoritative State
 
 `GOAL.md` defines the stable objective and guardrails. It must not be treated
@@ -45,8 +50,31 @@ Before making edits or running a score:
 6. Determine the next action implied by the plan: calibration, probe, scratch
    A/B, normal scoring, checkpoint, source promotion, revert, or stop.
 7. Record any mismatch before trusting new scores.
+8. Classify the next action as one of:
+   - `documentation-edit`
+   - `measurement`
+   - `result-ingestion`
+   - `state-reconciliation`
+   - `external-action-required`
+   If the next action is `external-action-required`, do not substitute
+   unrelated tooling work for it.
 
 ## Operating Rules
+
+### Progress Priority
+
+- Prefer actions in this order:
+  1. Run or ingest the measurement required by the active phase.
+  2. Analyze trusted measurements and choose a documentation hypothesis.
+  3. Edit source docblocks for one evidence-backed hypothesis.
+  4. Stage, score, aggregate, log, and commit that hypothesis.
+  5. Fix tooling only when a specific observed or imminent failure would make
+     the above steps invalid or non-retryable.
+- Do not perform opportunistic infrastructure hardening merely because the
+  required scoring or documentation action is unavailable.
+- A tooling change must name the experiment-validity failure it prevents and
+  must be followed by a re-audit of the actual next documentation/measurement
+  action.
 
 - Test subjects may read only the staged markdown docs and task prompt.
 - Never expose `reference.php`, `tests.json`, source files, logs, plans, or
@@ -77,6 +105,21 @@ Before making edits or running a score:
 - Stop or pause according to `PLAN.md`/`PROTOCOL.md`, especially when signal is
   exhausted, failures are generic model noise, or the experiment state is
   inconsistent.
+
+### External Runner Gate
+
+- If the active next action is to launch trials or judges in an external
+  Workflow runner and that runner is not available in the current session:
+  1. Generate or verify the exact handoff payload once.
+  2. Report the command/files needed for the external runner.
+  3. Stop work and ask for one of:
+     - external runner output to ingest,
+     - explicit authorization to use an alternative runner,
+     - explicit authorization to bypass the measurement gate.
+- Do not continue with additional tooling, corpus, or documentation edits while
+  waiting for that external action unless the user explicitly asks for them.
+- Do not mark the documentation goal as making substantive progress from
+  handoff preparation alone.
 
 ## Promotion Standard
 
