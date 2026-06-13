@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize a BODY-context HTML fragment, and returned the required fallback paragraph when normalization is not possible because the method returns `null`.",
+  "confidence": 98
+}

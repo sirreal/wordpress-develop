@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked token-by-token with `next_token()` and rebuilt the output by concatenating `serialize_token()` for every token except `SPAN` openers and closers. That preserves normalized serialization while removing spans and their attributes, and it naturally unwraps nested spans by skipping all `SPAN` tokens.",
+  "confidence": 91
+}
