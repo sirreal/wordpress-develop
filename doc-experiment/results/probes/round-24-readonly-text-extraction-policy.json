@@ -1,0 +1,149 @@
+{
+  "round": "round-24",
+  "mode": "discoverability-probe",
+  "question_id": "readonly-text-extraction-policy",
+  "question": "Using only the rendered HTML API docs, explain the policy for a read-only function that receives an HTML fragment found inside BODY and extracts ordinary subtree text from selected elements. Should it append only tokens where get_token_type() === '#text', or should it also call get_modifiable_text() on every opening tag? When, if ever, should it opt into text carried on SCRIPT, STYLE, TITLE, or TEXTAREA opener tokens? If next_token() stops with get_last_error() non-null or paused_at_incomplete_token() true after some text was already collected, do the docs require discarding the collected read-only text, or is that a caller policy? Cite the relevant rendered markdown file headings and give a one-sentence rationale.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-24/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "readonly-text-extraction-policy",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "For a read-only function extracting ordinary subtree text from an HTML fragment inside `BODY`, the docs say to use `WP_HTML_Processor::create_fragment()` and append only tokens where `get_token_type() === '#text'`; it should not call `get_modifiable_text()` on every opening tag, because non-text tokens such as comments and special-element opener tokens also carry modifiable text but are not ordinary DOM text descendants. It should read opener-carried text only when the caller intentionally wants text from `SCRIPT`, `STYLE`, `TITLE`, or `TEXTAREA`; otherwise the ordinary `#text` filter skips those elements naturally. If scanning later stops with `get_last_error()` non-null or `paused_at_incomplete_token()` true after some text was collected, the docs do not require discarding already collected read-only text; they frame that as caller policy, though they explicitly say to reject or fall back on non-null `get_last_error()`, and to separately decide whether incomplete trailing syntax is acceptable.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Append only ordinary `#text` tokens unless you intentionally want some other token type. Do not call `get_modifiable_text()` on every token: comments, processing instructions, and special element tokens can also carry modifiable text, but they are not ordinary DOM text descendants.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "“It is not parsed fragment text-content extraction… For DOM-style text extraction from markup that belongs inside BODY, create a `WP_HTML_Processor` with `WP_HTML_Processor::create_fragment` and use an HTML Processor subtree text walk.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token with `WP_HTML_Tag_Processor::get_modifiable_text`; otherwise the `#text` filter above skips it naturally.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all… Read their text with `WP_HTML_Tag_Processor::get_modifiable_text` while matched on the element's opening tag instead.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "“Decide separately whether incomplete trailing syntax is acceptable… If the caller needs proof that the source ended cleanly, also reject when `WP_HTML_Tag_Processor::paused_at_incomplete_token` is true. Always reject or fall back when `WP_HTML_Processor::get_last_error` is non-null, because the parser stopped at unsupported markup.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_current_depth()",
+            "support": "“If the scan's result will drive an edit or must reject truncated input, check `WP_HTML_Tag_Processor::paused_at_incomplete_token` after the bounded walk, and separately check `WP_HTML_Processor::get_last_error` for unsupported markup.”"
+          }
+        ],
+        "rationale": "The cited subtree-text guidance directly prescribes `#text`-only accumulation for ordinary DOM-style extraction, separately documents the opt-in path for opener-carried text in `SCRIPT`/`STYLE`/`TITLE`/`TEXTAREA`, and treats truncation acceptance as a caller decision while requiring rejection or fallback on unsupported-markup errors.",
+        "confidence": 94
+      }
+    },
+    {
+      "id": "readonly-text-extraction-policy",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "For ordinary subtree text from an HTML fragment that belongs in `BODY`, the docs say to use `WP_HTML_Processor::create_fragment()` and append only tokens where `get_token_type() === '#text'`; you should not call `get_modifiable_text()` on every opening tag, because other tokens with modifiable text are not ordinary DOM text descendants. `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` are opt-in only: read them from the element’s own opening token with `get_modifiable_text()` only if the caller explicitly wants that text, since they do not produce child `#text` tokens. If scanning later stops with `get_last_error() !== null` or `paused_at_incomplete_token() === true`, the rendered docs do not require discarding already collected read-only text; they frame that as caller policy about whether best-effort text is acceptable or whether truncation/unsupported markup must be rejected.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text extraction is usually a tree-aware operation, so use the HTML Processor and walk the subtree. Append only ordinary `#text` tokens unless you intentionally want some other token type. Do not call `get_modifiable_text()` on every token: comments, processing instructions, and special element tokens can also carry modifiable text, but they are not ordinary DOM text descendants.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token with {@see WP_HTML_Tag_Processor::get_modifiable_text}; otherwise the `#text` filter above skips it naturally.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "“It is not parsed fragment text-content extraction: this class does not apply BODY-fragment parsing, implied closing behavior, tree order, or the HTML Processor's unsupported-markup policy. For DOM-style text extraction from markup that belongs inside BODY, create a {@see WP_HTML_Processor} with {@see WP_HTML_Processor::create_fragment} and use an HTML Processor subtree text walk.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“If the scan's result will drive an edit or must reject truncated input, check {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the scan, and check {@see WP_HTML_Processor::get_last_error} for an unsupported-parser abort.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: rewrite while serializing tokens",
+            "support": "“Decide separately whether incomplete trailing syntax is acceptable… If the caller needs proof that the source ended cleanly, also reject when {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} is true. Always reject or fall back when {@see WP_HTML_Processor::get_last_error} is non-null, because the parser stopped at unsupported markup.”"
+          }
+        ],
+        "rationale": "The cited subtree-text recipe directly defines the ordinary-text collection policy and the special-element opt-in rule, while the truncation/error citations show the docs require checking parser state but leave acceptance of already-collected best-effort text to caller policy rather than mandating discard for read-only extraction.",
+        "confidence": 95
+      }
+    },
+    {
+      "id": "readonly-text-extraction-policy",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "For ordinary subtree text from a BODY fragment, the docs say to use `WP_HTML_Processor::create_fragment()` and append only tokens where `get_token_type() === '#text'`; they explicitly say not to call `get_modifiable_text()` on every token/opening tag because other token kinds and special elements also carry modifiable text that is not ordinary DOM text. Text from `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` should be included only if the caller intentionally wants it, and then it must be read from that element’s own opening token with `get_modifiable_text()`, because those elements expose no child `#text` tokens. If scanning later stops with `get_last_error()` non-null or `paused_at_incomplete_token()` true after some text was collected, the rendered docs do not state that already-collected read-only text must be discarded; they frame rejection of truncated/unsupported input as a caller policy depending on whether the result must prove a clean, complete scan.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Append only ordinary `#text` tokens unless you intentionally want some other token type. Do not call {@see WP_HTML_Tag_Processor::get_modifiable_text} on every token: comments, processing instructions, and special element tokens can also carry modifiable text, but they are not ordinary DOM text descendants.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "“It is not parsed fragment text-content extraction: this class does not apply BODY-fragment parsing, implied closing behavior, tree order, or the HTML Processor's unsupported-markup policy. For DOM-style text extraction from markup that belongs inside BODY, create a {@see WP_HTML_Processor} with {@see WP_HTML_Processor::create_fragment} and use an HTML Processor subtree text walk.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token with {@see WP_HTML_Tag_Processor::get_modifiable_text}; otherwise the `#text` filter above skips it naturally.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text is carried on the element's own token … Read their text with {@see WP_HTML_Tag_Processor::get_modifiable_text} while matched on the element's opening tag instead.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: scan a region before editing its opener",
+            "support": "“If a mutation depends on a complete scan, check {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} for truncation and {@see WP_HTML_Processor::get_last_error} for unsupported markup before applying the edit.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“This reliability is structural… It does not prove that the source bytes for that region were complete. If a scan will drive a mutation or another result that must reject truncated input, check {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the scan, and check {@see WP_HTML_Processor::get_last_error} for an unsupported-parser abort.”"
+          }
+        ],
+        "rationale": "The cited subtree-text guidance directly prescribes `#text`-only collection for ordinary text, separately carves out SCRIPT/STYLE/TITLE/TEXTAREA as opt-in opener-token text, and the error/incomplete guidance only says to reject when the caller needs a clean complete scan, leaving any discard policy for read-only collected text unstated.",
+        "confidence": 91
+      }
+    }
+  ]
+}

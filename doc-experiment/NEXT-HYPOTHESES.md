@@ -95,6 +95,15 @@ fallback policy after `get_last_error()` or `paused_at_incomplete_token()`.
 Keep the T09/T12 serialization fallback and decoded-text reparse signal as a
 separate hypothesis.
 
+The round-24 read-only text policy probe passed 3/3 at
+`gpt-5.4` / `medium`: subjects found the ordinary `#text` rule, the
+special-element opt-in rule, and the caller-policy distinction for read-only
+fallbacks. Treat this as a placement/density problem before editing source.
+The next diagnostic should be a scratch rendered-doc A/B that adds a compact
+policy matrix near the HTML Processor text recipe and/or `next_token()`, then
+tests whether task implementation stops over-including special-element opener
+text.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -285,6 +294,13 @@ Next diagnostic: ask subjects to cite the rendered docs for a read-only
 fragment text extractor that collects ordinary subtree text, decides whether
 to include TITLE/TEXTAREA/SCRIPT/STYLE opener text, and states a caller policy
 for `get_last_error()` and `paused_at_incomplete_token()`.
+
+Probe result: passed 3/3. Directly asked subjects cited the existing
+`Recipe: collect DOM-style text from a subtree`, `next_token()`, and Tag
+Processor lexical-boundary sections, and correctly answered that ordinary text
+uses `#text` only, special-element opener text is opt-in, and read-only
+fallback is caller policy. Do not promote source prose yet; test whether a
+scratch-only policy matrix improves transfer in task code.
 
 Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
 recipe. Phrase the edit, if promoted, as a token/policy matrix.

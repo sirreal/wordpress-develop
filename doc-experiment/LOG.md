@@ -35,6 +35,20 @@ round-23 T03/N06/T05 and round-24 N06/N02 notes. Keep the
 `serialize_token()`/decoded-text reparse issue as a separate follow-up probe or
 scratch A/B candidate; do not merge the two hypotheses into one source edit.
 
+Follow-up citation-only probe:
+`round-24-readonly-text-extraction-policy` asked three `gpt-5.4` / `medium`
+subjects to explain ordinary read-only subtree text extraction, special
+element opener text opt-in, and fallback policy after `get_last_error()` or
+`paused_at_incomplete_token()`. All three answered the main boundary
+correctly: ordinary subtree text uses only `#text`; callers should not call
+`get_modifiable_text()` on every opening tag; SCRIPT/STYLE/TITLE/TEXTAREA
+opener text is opt-in; and read-only fallback is caller policy rather than an
+automatic discard of already collected text. Interpretation: the facts are
+discoverable when directly requested. The remaining train near-misses are a
+placement/transfer or signal-density problem, so the next diagnostic should be
+a scratch rendered-doc A/B for a compact policy matrix before source
+promotion.
+
 ## Round 23 — Tag Processor lexical-text boundary confirmed
 
 **Train 99.50 / core 99.42** under `scored-train`, with subjects
