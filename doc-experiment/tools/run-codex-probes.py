@@ -240,7 +240,7 @@ def main() -> int:
     reasoning_effort = args.reasoning_effort or subject.get("reasoning_effort", "medium")
     service_tier = args.service_tier or subject.get("service_tier", "priority")
     output_path = args.output or (
-        results_dir(round_name) / "probes" / f"{args.question_id}.json"
+        EXPERIMENT_ROOT / "results" / "probes" / f"{round_name}-{args.question_id}.json"
     )
     default_work_root = Path(tempfile.gettempdir()) / "html-api-docs-eval" / round_name / "codex-cli-probes"
     work_root = args.work_root or default_work_root

@@ -260,7 +260,7 @@ If the Workflow runner is unavailable, use the local Codex CLI probe fallback:
 python3 doc-experiment/tools/run-codex-probes.py round-NN \
   --question-id <stable-id> \
   --question '<citation-only question>' \
-  --output doc-experiment/results/round-NN/probes/<stable-id>.json
+  --output doc-experiment/results/probes/round-NN-<stable-id>.json
 ```
 
 The local fallback runs each probe subject from a private non-repo directory,
