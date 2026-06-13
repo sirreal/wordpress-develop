@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then `next_tag('H1')` to locate the first heading and `next_token()` with `get_current_depth()` to walk just that subtree. I only append tokens where `get_token_type() === '#text'`, and read decoded text with `get_modifiable_text()`, which matches the documented DOM-style text extraction behavior for ordinary text nodes.",
+  "confidence": 95
+}

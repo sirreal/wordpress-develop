@@ -1,0 +1,25 @@
+<?php
+function mark_last_h2( string $html ): string {
+	$processor = new WP_HTML_Tag_Processor( $html );
+	$last_h2   = null;
+
+	while ( $processor->next_tag( 'h2' ) ) {
+		$last_h2 = 'last-h2';
+		$processor->set_bookmark( $last_h2 );
+	}
+
+	if ( null === $last_h2 ) {
+		return $html;
+	}
+
+	if ( $processor->seek( $last_h2 ) ) {
+		$processor->add_class( 'final-section' );
+		$updated = $processor->get_updated_html();
+		$processor->release_bookmark( $last_h2 );
+
+		return $updated;
+	}
+
+	$processor->release_bookmark( $last_h2 );
+	return $html;
+}

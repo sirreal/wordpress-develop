@@ -2,6 +2,45 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 64 — roadmap prose removal does not win
+
+`round-64` tested a lower-risk non-contract pruning candidate as a scratch-only
+`shadow-doc-a/b` full-train variant. It removed only roadmap/future-direction
+rendered prose: the Tag Processor file-level "Possible future direction"
+section and the HTML Processor "Eventually the HTML Processor will also
+support" list. Source docblocks, corpus fixtures, runner policy, and harness
+behavior were unchanged.
+
+The scratch edit removed 17 rendered lines total: 5 from
+`html-tag-processor.md` and 12 from `html-processor.md`.
+
+Numeric result: **98.25 train / 97.98 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. Most tasks were
+stable, but `N03-first-list-count` fell **99.70 -> 82.65** because one trial
+passed only 4/11 hidden cases. That candidate counted direct children with a
+reasonable depth walk, but tried `seek( 'first-list' )` before ever setting
+that bookmark on the opener, then reparsed and set the bookmark too late.
+Judges tied the failure to missing/ambiguous bookmark precondition guidance,
+not to the removed roadmap prose. `T10-last-h2` also dipped 100.00 -> 97.80
+because one trial again chose the HTML Processor for a flat source-order class
+edit.
+
+Interpretation: do not promote roadmap prose removal from this round. The
+deleted prose is still not known to be load-bearing, but this full-train sample
+is not a clean preservation result and cannot justify source deletion. The
+actionable signal is instead a recurring bookmark contract gap, now seen in
+round 64 N03 and earlier in round 59: weaker subjects may treat `seek()` as an
+existence probe or try to bookmark an opener after scanning away from it.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch simplification/refinement A/B for bookmark contracts on
+`N03-first-list-count`, `T07-nested-lists`, and `T10-last-h2`. The variant
+should be net concise: state that bookmarks must be set while matched on the
+token to revisit, `seek()` is not an existence probe, and re-setting one literal
+bookmark is the supported last-match idiom. Do not change source docblocks
+unless the scratch variant wins.
+
 ## Round 63 — text-policy de-duplication ablation damages N06
 
 `round-63` tested the narrower reduction candidate from the round-62 next

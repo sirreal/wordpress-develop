@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` linear scan to visit every tag, `get_attribute_names_with_prefix( 'data-track-' )` to find only matching attributes, and `remove_attribute()` to delete them without affecting similarly named attributes. The modified document is returned with `get_updated_html()`, which preserves untouched bytes exactly as documented.",
+  "confidence": 98
+}

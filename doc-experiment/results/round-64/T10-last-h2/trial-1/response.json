@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor` because the task depends on document structure, not just flat tag edits. The function scans for every `H2` opener with `next_tag()`, remembers the last one via a bookmark, then `seek()`s back and adds the `final-section` class with `add_class()`, returning `get_updated_html()`; if no `H2` is found or the processor cannot be created, it returns the input unchanged.",
+  "confidence": 92
+}

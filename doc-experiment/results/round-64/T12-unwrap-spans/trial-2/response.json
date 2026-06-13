@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` and rebuilt the normalized output with `serialize_token()`. Every `SPAN` token is skipped, so both span openers and closers are removed while their inner tokens are preserved and serialized canonically.",
+  "confidence": 92
+}

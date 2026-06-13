@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token(). For each opening A tag I read the decoded href with get_attribute('href') and only kept string-valued hrefs; for ordinary text tokens inside an active link I concatenated get_modifiable_text(). Closing A tags flush the accumulated link entry in document order, and any unclosed links are emitted at the end.",
+  "confidence": 93
+}

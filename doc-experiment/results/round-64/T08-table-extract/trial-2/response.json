@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, `next_tag()` to find the first `TABLE`, and then a single `next_token()` walk with `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect row and cell text while respecting the processor\u2019s table structure handling.",
+  "confidence": 86
+}

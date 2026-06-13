@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() and appended serialize_token() for everything except SPAN openers and closers, which removes wrappers while preserving and normalizing their contents. I also checked get_last_error() to avoid returning partial output if the HTML Processor aborted.",
+  "confidence": 91
+}

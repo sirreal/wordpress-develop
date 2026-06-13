@@ -8,7 +8,28 @@ from discoverability gaps.
 
 ## Current read
 
-Latest update: round 63 tested text-policy de-duplication on the focused
+Latest update: round 64 tested low-risk roadmap/future-prose pruning as a
+full-train scratch ablation. It removed only 17 rendered lines: the Tag
+Processor file-level "Possible future direction" section and the HTML
+Processor "Eventually the HTML Processor will also support" list. It did not
+win: 98.25 train / 97.98 core versus the comparable round-56 source-doc score
+of 99.61 / 99.55. The main regression was `N03-first-list-count`, 99.70 ->
+82.65, because one subject called `seek( 'first-list' )` before any bookmark by
+that name had been set, then tried to set the bookmark after scanning away from
+the opener. Judges tied this to bookmark-contract ambiguity, not to the removed
+roadmap prose. Do not promote roadmap prose removal from this sample.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch simplification/refinement A/B for bookmark contracts on
+`N03-first-list-count`, `T07-nested-lists`, and `T10-last-h2`. The variant
+should be net concise: state that bookmarks must be set while matched on the
+token to revisit, `seek()` is not an existence probe, callers should track
+successful `set_bookmark()` or use `has_bookmark()` before optional seeks, and
+re-setting one literal bookmark is the supported last-match idiom. Do not
+change source docblocks unless the scratch variant wins.
+
+Previous update: round 63 tested text-policy de-duplication on the focused
 `T03`/`N06`/`T05`/`T06`/`T08` subset. The scratch variant kept the overview
 DOM-style text recipe and compact policy table, but removed 14 rendered lines:
 the duplicate special-element opt-in paragraph from `next_token()` and the
@@ -18,15 +39,6 @@ badly: 95.87 vs 99.28 for the same round-56 subset. `N06-extract-toc` fell
 guard, making text collection unreachable. Do not promote this
 de-duplication; the method-local text-policy reminders remain load-bearing for
 repeated-subtree text extraction.
-
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and continue the
-reduction loop only with lower-risk non-contract pruning. The next scratch
-candidate is removing roadmap/future-direction prose from the rendered docs:
-the Tag Processor file-level "Possible future direction" note and the HTML
-Processor "Eventually the HTML Processor will also support" list. Do not remove
-the current text-policy method-local reminders unless a replacement explicitly
-teaches single-loop repeated-subtree extraction without adding net prose.
 
 Previous update: round 62 began the new reduction directive with a scratch-only
 public-API-only ablation. It removed rendered `Properties` sections and all

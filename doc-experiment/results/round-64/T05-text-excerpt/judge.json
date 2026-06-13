@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right surface: `WP_HTML_Processor::create_fragment()`, one `next_token()` walk, `get_token_type()` for `#text`, explicit `#tag`/opener checks for `TITLE` and `TEXTAREA`, and `get_modifiable_text()` for decoded UTF-8 text. All API methods are present in the rendered docs and execution recorded no `_doing_it_wrong`. Minor deduction only for not considering a post-scan unsupported/incomplete-input policy, though the task and reference accept best-effort extraction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API use throughout: `create_fragment()`, `next_token()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()`. It follows the documented special-element opener pattern and has a UTF-8-aware fallback for missing mbstring. Slightly less idiomatic than trial-1 because it compares `get_token_name()` on every non-text token instead of first gating on `#tag`, and it does not define an explicit unsupported/incomplete-input policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Same correct HTML Processor approach and no undocumented HTML API calls. It passed all frozen cases and had no `_doing_it_wrong` records. Deductions: special-element checks are not guarded by `get_token_type() === '#tag'`, and the fallback to byte `substr()` would violate the task's Unicode code-point truncation contract if `mb_substr()` were unavailable."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 frozen cases, so there are no failed hidden cases to attribute to a documentation gap.\n\nThe docs did the important work well. The `WP_HTML_Processor` overview explicitly says text extraction is tree-aware and should use the HTML Processor, not the lexical Tag Processor. The \"Recipe: collect DOM-style text from a subtree\" and `next_token()` docs explain accumulating `#text` tokens, that text may be split across tokens, and that malformed input still produces structural closers. The `next_token()` special-element exception and `get_modifiable_text()` docs explain that `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` do not produce child `#text` tokens, and that `TITLE`/`TEXTAREA` text is decoded while `SCRIPT`/`STYLE` is raw. The `get_modifiable_text()` docs also explicitly warn not to use that method as a predicate for ordinary text, which prevented the common mistake of including comments or script/style content.\n\nNear-misses: trials 2 and 3 leaned on `get_token_name()` comparisons for non-text tokens without an explicit `#tag` guard. That is documented and safe here, but less crisp than the quick policy table's \"match that opening tag explicitly\" guidance. Trial 3 also had an unsafe byte-string fallback for Unicode truncation; the docs say to use `mb_substr(..., 'UTF-8')`, but do not spell out that `substr()` is not an acceptable fallback for code-point limits.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` / text-extraction recipes",
+      "problem": "The docs cover subtree text extraction and special-element exceptions, but there is no compact whole-fragment extraction pattern. Models had to synthesize the body-fragment version from multiple passages.",
+      "suggestion": "Add a general recipe for collecting text from a fragment: create a fragment processor, walk once with `next_token()`, append only `#text`, and explicitly opt in to opener-carried text for named special elements according to the caller's contract."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_token_name()` and special-element examples",
+      "problem": "Examples often compare `get_token_name()` directly while walking all tokens. This works, but it can blur the distinction between tag-name checks and token-type checks.",
+      "suggestion": "Add a sentence recommending `get_token_type() === '#tag'` before element-name logic in broad token scans, especially before closer checks or special-element handling."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_modifiable_text()` UTF-8 note",
+      "problem": "The docs recommend `mb_substr()` with an explicit UTF-8 encoding, but do not warn against byte slicing when mbstring is unavailable.",
+      "suggestion": "State that byte functions such as `substr()`/`strlen()` are invalid for Unicode code-point limits on returned text; callers without mbstring need a UTF-8-aware fallback or a defined failure policy."
+    }
+  ]
+}

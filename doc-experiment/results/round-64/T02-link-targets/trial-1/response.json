@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, match only `A` tags, and check `get_attribute( 'href' )` so empty-string and boolean `href` values still count as present. For each matching link I overwrite `target` with `set_attribute( 'target', '_blank' )`, then return `get_updated_html()` to preserve all untouched bytes exactly.",
+  "confidence": 98
+}

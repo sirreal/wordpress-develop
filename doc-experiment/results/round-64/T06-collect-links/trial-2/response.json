@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and a single `next_token()` walk to preserve document order. For each non-closing `A` tag with a string `href`, I recorded its current depth with `get_current_depth()` and accumulated only `#text` tokens inside that subtree via `get_modifiable_text()`, which already returns decoded text.",
+  "confidence": 95
+}

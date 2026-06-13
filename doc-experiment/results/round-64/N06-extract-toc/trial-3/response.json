@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order. Heading openers are detected with `get_token_type()`, `get_tag()`, and `is_tag_closer()`, then the heading text is accumulated only from `#text` tokens via `get_modifiable_text()` until the processor depth drops below the heading opener\u2019s depth, which captures each H1-H6 heading in order including empty headings.",
+  "confidence": 93
+}

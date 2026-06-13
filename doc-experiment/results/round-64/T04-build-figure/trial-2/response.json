@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` with a literal template that already contains `src`, `alt`, and a placeholder text node, so the HTML API can preserve attribute order and safely encode all three unescaped inputs. I then used `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()` to produce the final fragment.",
+  "confidence": 94
+}
