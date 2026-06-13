@@ -32,11 +32,13 @@ signals. The facts are discoverable when weak subjects are asked directly, and
 two transfer-oriented traversal A/B variants already lost. The remaining gaps
 are placement/transfer or task-reasoning issues, not clear missing contracts.
 
-Next action: stop the traversal/factory diagnostic line unless a future trusted
-scored train round repeats one of these failures. Before any source docblock
-edit, re-analyze trusted full-round train evidence for a separate non-traversal
-hypothesis; if no non-held-out, non-noise train pattern remains, pause per the
-protocol's signal-exhaustion rule rather than adding speculative prose.
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority`, and stop the traversal/factory diagnostic line unless a future
+trusted scored train round at that tier repeats one of these failures. Before
+any source docblock edit, re-analyze trusted full-round train evidence for a
+separate non-traversal hypothesis; if no non-held-out, non-noise train pattern
+remains, pause per the protocol's signal-exhaustion rule rather than adding
+speculative prose.
 
 ## Round 60 — bounded-loop scratch A/B also loses
 
