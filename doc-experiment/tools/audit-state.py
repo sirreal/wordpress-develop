@@ -281,6 +281,7 @@ def build_audit() -> dict:
     if not current_baseline_exists:
         mismatches.append("no current-corpus no-edit baseline for current subject/judge policy")
 
+    next_action_commands = []
     if status_short:
         next_action = "reconcile local worktree drift before scoring"
     elif latest_prepared and latest_prepared["errors"]:
@@ -288,8 +289,21 @@ def build_audit() -> dict:
     elif latest_prepared and latest_prepared["lifecycle"] == "prepared":
         next_action = (
             f"launch trials for prepared current-corpus baseline {latest_prepared['round']} "
-            "with gpt-5.4/medium/priority"
+            "with gpt-5.4/medium/priority; use the local Codex CLI runner when the "
+            "Workflow UI runner is unavailable"
         )
+        next_action_commands = [
+            f"python3 doc-experiment/tools/run-codex-trials.py {latest_prepared['round']} "
+            f"--output doc-experiment/results/{latest_prepared['round']}/codex-trials-output.json",
+            f"python3 doc-experiment/tools/validate-workflow-output.py trials "
+            f"doc-experiment/results/{latest_prepared['round']}/codex-trials-output.json "
+            f"{latest_prepared['round']}",
+            f"python3 doc-experiment/tools/ingest-trials.py "
+            f"doc-experiment/results/{latest_prepared['round']}/codex-trials-output.json "
+            f"{latest_prepared['round']}",
+            f"python3 doc-experiment/tools/validate-round.py {latest_prepared['round']} "
+            "--require-trials-complete",
+        ]
     elif latest_prepared and latest_prepared["lifecycle"] == "trials-partial":
         next_action = f"complete missing trial artifacts for {latest_prepared['round']}"
     elif latest_prepared and latest_prepared["lifecycle"] == "trials-complete":
@@ -341,6 +355,7 @@ def build_audit() -> dict:
         },
         "mismatches": mismatches,
         "next_action": next_action,
+        "next_action_commands": next_action_commands,
     }
 
 
@@ -392,6 +407,10 @@ def print_text(audit: dict) -> None:
         for mismatch in audit["mismatches"]:
             print(f"  - {mismatch}")
     print(f"- next action: {audit['next_action']}")
+    if audit["next_action_commands"]:
+        print("- next action commands:")
+        for command in audit["next_action_commands"]:
+            print(f"  - {command}")
 
 
 def main() -> int:

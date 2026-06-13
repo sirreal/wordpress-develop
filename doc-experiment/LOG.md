@@ -20,6 +20,9 @@ containing only the two rendered docs, one task prompt, and the output schema;
 project rules and user config are ignored, the sandbox is read-only, and the
 approval policy is `never`. Scores from this runner must be compared only with
 rounds using the same isolation mode.
+`audit-state.py` now prints the local runner command sequence for prepared
+rounds waiting on trials, so autonomous continuations do not reinterpret that
+state as an external-only Workflow gate.
 
 Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
 round is prepared, partially trialed, trial-complete, judged, or scored, and it
