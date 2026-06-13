@@ -804,6 +804,24 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next tag matching the $query.
 	 *
+	 * Searches start at the current cursor position and move forward. If
+	 * `next_tag()` returns false, it did not find a later matching tag; it does
+	 * not rewind the processor, and a later call with a different query will
+	 * not rescan tags already passed. To intentionally revisit earlier tags,
+	 * set a bookmark before scanning and seek back to it, or create a new
+	 * processor for the same HTML.
+	 *
+	 * The `tag_name` query accepts one tag name string, or `null` for any tag.
+	 * It is not a list of alternatives. To find the first of several tag names
+	 * in document order, scan for any tag and branch on {@see self::get_tag()}:
+	 *
+	 *     $wanted = array( 'UL', 'OL' );
+	 *     while ( $processor->next_tag() ) {
+	 *         if ( in_array( $processor->get_tag(), $wanted, true ) ) {
+	 *             break;
+	 *         }
+	 *     }
+	 *
 	 * @todo Support matching the class name and tag name.
 	 *
 	 * @since 6.4.0
