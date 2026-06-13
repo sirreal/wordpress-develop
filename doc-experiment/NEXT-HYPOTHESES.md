@@ -180,6 +180,16 @@ comment-like tokens. If a weaker tier exposes the same pattern functionally,
 or a scratch A/B shows improvement, promote this as a generic main-class
 recipe/matrix rather than a task-shaped answer.
 
+Round-20 follow-up probe result: a direct generic recipe probe at
+`gpt-5.4` / `low` found the DOM-style text recipe in all three trials, so the
+text rows alone are still a placement/density hypothesis rather than a missing
+fact. The same probe exposed a stronger rewrite-policy gap: all three trials
+over-applied `paused_at_incomplete_token()` and recommended rejecting every
+rewrite after incomplete trailing syntax, even when a best-effort normalized
+rewrite of visited tokens would be acceptable. This supports promoting a
+generic HTML Processor recipe that separates unsupported parser aborts from
+caller policy for incomplete trailing tokens.
+
 Risk: medium-low if phrased as a token model instead of a task recipe.
 
 ### 4. Contract-card rendered-doc A/B

@@ -39,6 +39,19 @@ specific corpus tasks. Per the subject ladder, the next measurement action is
 a no-edit `gpt-5.4-mini` / `high` / `priority` calibration before using weaker
 tier results to promote another source docblock hypothesis.
 
+Follow-up citation-only probe: a generic text/rewrite recipe probe at
+`gpt-5.4` / `low` asked for (1) DOM-style text collection from a subtree and
+(2) token-by-token rewrite completion policy when input may end incomplete or
+unsupported. All three subjects found the DOM-style `#text` recipe and cited
+the rendered docs correctly, but all three gave an over-conservative rewrite
+policy: reject or fall back whenever `paused_at_incomplete_token()` is true.
+That repeats the round-20 T09 near-miss where a rewrite loop risks discarding
+already-emitted changes by re-normalizing the original HTML. The evidence
+supports a narrow generic recipe/source hypothesis: token-by-token rewrites
+should distinguish unsupported parser aborts from acceptable best-effort
+omission of an incomplete trailing token, and should make the accumulated
+output the rewrite.
+
 ## Round 19 — generic region-scan recipe lands
 
 **Train 99.59 / core 99.53** against the current train corpus with subject
