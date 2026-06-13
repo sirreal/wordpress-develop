@@ -48,6 +48,13 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_payload(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(text)
+    temporary.replace(path)
+
+
 def verify_round(round_name: str) -> None:
     proc = subprocess.run(
         [
@@ -207,6 +214,11 @@ def main() -> int:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Also write the emitted JSON payload to this file atomically",
+    )
     args = parser.parse_args()
 
     metadata = load_metadata(args.round)
@@ -219,13 +231,14 @@ def main() -> int:
         payload = judge_args(metadata)
     else:
         payload = launch_manifest(metadata)
-    print(
-        json.dumps(
-            payload,
-            separators=(",", ":") if args.compact else None,
-            indent=None if args.compact else 2,
-        )
+    output = json.dumps(
+        payload,
+        separators=(",", ":") if args.compact else None,
+        indent=None if args.compact else 2,
     )
+    if args.output:
+        write_payload(args.output, output + "\n")
+    print(output)
     return 0
 
 

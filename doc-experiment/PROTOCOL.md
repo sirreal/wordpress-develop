@@ -223,6 +223,8 @@ external runner handoff so tooling-only commits can be distinguished from the
 staged rendered-doc/corpus state. Its preflight commands validate exactly the
 selected tasks recorded in round metadata; they are intentionally not split
 shortcuts such as `--split train`.
+Use `--output <path>` to write the emitted trials, judges, or manifest JSON to
+a handoff file while still printing it to stdout.
 
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and

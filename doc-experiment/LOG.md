@@ -94,6 +94,9 @@ in the round metadata before emitting trial, judge, or manifest payloads, so
 the launch handoff cannot skip reference-fixture validation accidentally.
 The manifest's human-readable preflight command now mirrors that exact task
 selection instead of using a train-split shortcut.
+`workflow-args.py` can also write the emitted JSON with `--output`, so the
+external runner handoff can persist exact launch payloads without manual
+copy/paste.
 
 `validate-round.py` lifecycle counts now require valid artifacts. Malformed
 trial files or judge verdicts no longer count toward `trials-complete` or
