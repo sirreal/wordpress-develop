@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat attribute-editing task. All called APIs are documented in the supplied markdown: constructor usage, next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html(). The loop follows the documented tag-walking/update pattern, handles the documented null return from get_attribute_names_with_prefix(), relies on documented case-insensitive prefix matching, and returns byte-preserving updated HTML."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct processor choice, no undocumented API calls, no _doing_it_wrong records, and idiomatic use of next_tag(), prefix attribute discovery, remove_attribute(), and get_updated_html(). Edge behavior around case-insensitive attributes, no matching prefix, comments, and preserving untouched bytes is aligned with the docs."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Uses the documented Tag Processor path for per-tag attribute edits, avoids Processor serialization/normalization APIs that would be inappropriate here, and makes only documented calls. Execution recorded no warnings or misuse."
+    }
+  ],
+  "failure_analysis": "All three trials passed all hidden cases: single-link, multiple-tags, multiple-matching-attributes, similar-prefixes-kept, uppercase-source-attribute, comments-untouched, and no-matches. The docs worked well for this task because the Tag Processor overview explicitly says to use it for flat attribute/class edits with byte-preserving output, the usage section shows new WP_HTML_Tag_Processor($html) plus next_tag(), get_attribute_names_with_prefix() documents case-insensitive prefix matching and lowercase returned names, remove_attribute() documents safe attribute removal, and get_updated_html() documents that untouched bytes are preserved. The main near-miss is that get_attribute_names_with_prefix() is clearer about null when no tag opener is matched than about the matched-tag/no-prefix case; the candidates wrote a null guard and relied on foreach over an empty array, which worked, but the exact empty-array contract should be more explicit.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md#get_attribute_names_with_prefix",
+      "problem": "The return contract distinguishes null for no matched opener, but does not prominently state what is returned when a tag is matched and no attributes have the requested prefix.",
+      "suggestion": "State explicitly that a matched opener with no prefix matches returns an empty array, while null means the processor is not currently matched on a tag opener. Add a small example for both cases."
+    },
+    {
+      "location": "html-tag-processor.md#remove_attribute",
+      "problem": "The method docs are thin and do not directly connect normalized lowercase names returned from get_attribute_names_with_prefix() with removing source attributes that used different casing.",
+      "suggestion": "Document that attribute-name matching for removal is ASCII case-insensitive in HTML context and that names returned by get_attribute_names_with_prefix() are safe to pass to remove_attribute()."
+    },
+    {
+      "location": "html-tag-processor.md#Modifying HTML attributes for a found tag",
+      "problem": "The section explains setting/removing individual known attributes, but does not include a general pattern for bulk edits over discovered attribute names.",
+      "suggestion": "Add a generic bulk-attribute-edit recipe showing: walk tags with next_tag(), collect matching attribute names via a documented discovery API, mutate each attribute, then return get_updated_html(). Keep the example domain-neutral rather than task-specific."
+    }
+  ]
+}

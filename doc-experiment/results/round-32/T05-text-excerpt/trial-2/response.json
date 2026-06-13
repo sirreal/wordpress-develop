@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the HTML fragment with structure awareness, then walks tokens with `next_token()`, appending ordinary `#text` token text via `get_modifiable_text()` and explicitly whitelisting opener tokens for `TITLE` and `TEXTAREA`, whose text is carried on the element token itself. It excludes script/style content by never reading special-element text except for those two tags, and truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using UTF-8.",
+  "confidence": 92
+}

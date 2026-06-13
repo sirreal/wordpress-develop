@@ -1,0 +1,172 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-32/T08-table-extract/trial-1/candidate.php",
+  "function": "table_to_array",
+  "passed": 8,
+  "total": 8,
+  "cases": [
+    {
+      "id": "simple",
+      "status": "pass",
+      "expected": [
+        [
+          "Name",
+          "Age"
+        ],
+        [
+          "Ada",
+          "36"
+        ]
+      ],
+      "actual": [
+        [
+          "Name",
+          "Age"
+        ],
+        [
+          "Ada",
+          "36"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "thead-tbody",
+      "status": "pass",
+      "expected": [
+        [
+          "H"
+        ],
+        [
+          "a"
+        ],
+        [
+          "b"
+        ]
+      ],
+      "actual": [
+        [
+          "H"
+        ],
+        [
+          "a"
+        ],
+        [
+          "b"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "omitted-closers",
+      "status": "pass",
+      "expected": [
+        [
+          "one",
+          "two"
+        ],
+        [
+          "three",
+          "four"
+        ]
+      ],
+      "actual": [
+        [
+          "one",
+          "two"
+        ],
+        [
+          "three",
+          "four"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "markup-in-cells",
+      "status": "pass",
+      "expected": [
+        [
+          "bold text",
+          "link"
+        ]
+      ],
+      "actual": [
+        [
+          "bold text",
+          "link"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entities-in-cells",
+      "status": "pass",
+      "expected": [
+        [
+          "Fish & Chips"
+        ]
+      ],
+      "actual": [
+        [
+          "Fish & Chips"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-table",
+      "status": "pass",
+      "expected": [],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "first-table-only",
+      "status": "pass",
+      "expected": [
+        [
+          "first"
+        ]
+      ],
+      "actual": [
+        [
+          "first"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "empty-cells",
+      "status": "pass",
+      "expected": [
+        [
+          "",
+          "x"
+        ]
+      ],
+      "actual": [
+        [
+          "",
+          "x"
+        ]
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

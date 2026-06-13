@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. A first pass with `next_tag()`, `paused_at_incomplete_token()`, and `get_last_error()` rejects incomplete or unsupported fragments so no partial edits are applied. A second pass scans tags with `next_tag()`, checks each `UL`/`OL` opener\u2019s ancestors via `get_breadcrumbs()`, and adds the `nested-list` class with `add_class()`, then returns the byte-preserving result from `get_updated_html()`.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction is structure-sensitive, then finds the first `TABLE` with `next_tag()`, records its depth with `get_current_depth()`, and walks tokens with `next_token()` until leaving that subtree. It collects rows and cells from `TR`/`TD`/`TH` tag openers and closers via `get_token_type()`, `get_token_name()`, and `is_tag_closer()`, appending decoded text from `#text` tokens with `get_modifiable_text()` and also reading special text-only element contents (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) from their opening tokens when they appear inside a cell.",
+  "confidence": 86
+}

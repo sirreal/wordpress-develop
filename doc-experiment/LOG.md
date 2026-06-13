@@ -2,6 +2,41 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 32 — HTML Processor next_tag() cursor source edit confirmed
+
+**Train 99.67 / core 99.62** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `19a49c1479`, which promoted the winning
+round-31 scratch method-local card into `WP_HTML_Processor::next_tag()`:
+searches are cursor-relative, a failed search does not rewind, `tag_name` is
+one string or null rather than a list of alternatives, and first-of-several
+tag searches should use one forward scan plus `get_tag()` branching unless
+the caller intentionally bookmarks/seeks or creates a new processor.
+
+Outcome: confirmed. The round improved from the comparable round-29
+scored-train baseline 98.31 to 99.67, well clear of the revert threshold.
+All 45 subject trials passed all hidden cases. The target failure recovered:
+T07-nested-lists moved from 81.13 to 99.30, and all three T07 trials used a
+single forward scan rather than sequential filtered searches. N03 stayed
+perfect at 100.00.
+
+Residual signal is adherence-only. The lowest task was T08-table-extract at
+97.60, with judges again pointing at generic traversal/depth traces,
+virtual-closer and incomplete-token policy, and ordinary-text versus
+special-element opt-in wording. T03 and N06 passed all hidden cases but still
+showed occasional special-element text over-inclusion in explanations or
+implementations. T09 and T12 were strong, but judges still noted inconsistent
+fallback policy for token-serialization helpers that promise normalized
+output.
+
+Decision: keep `19a49c1479`. Before another source docblock edit, run a
+checkpoint/regression sentinel because this source edit has only train scoring
+so far and held-out must stay protected. The suggested generic recipe
+direction remains plausible, but should be tested by checkpoint-supported
+train evidence, a discoverability probe, or a scratch rendered-doc A/B before
+source promotion; do not directly add broad class-level recipe prose from
+round-32 judge suggestions alone.
+
 ## Round 29 — ordinary subtree text policy source edit is mixed
 
 **Train 98.31 / core 98.05** under `scored-train`, with subjects

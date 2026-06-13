@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a single linear scan of the HTML, repeatedly moving the same bookmark to each matched `H2` with `next_tag()` and `set_bookmark()`. After the scan, if a bookmark exists, it seeks back to that last `H2`, adds the `final-section` class with `add_class()`, and returns the modified markup with `get_updated_html()`.",
+  "confidence": 96
+}

@@ -139,6 +139,21 @@ for `OL`, assuming the second scan restarted from the beginning. It did not;
 N03-style sequential tag searches. Treat HTML Processor `next_tag()` cursor
 semantics and first-of-several-tags idiom as a strong next source candidate.
 
+Rounds 30/31 confirmed that candidate in scratch rendered docs, and round 32
+confirmed it as a source edit. The method-local `WP_HTML_Processor::next_tag()`
+card raised train from 98.31 to 99.67, recovered T07 from 81.13 to 99.30, and
+kept N03 perfect. Treat the cursor/OR-search gap as resolved for now.
+
+The next action should be a checkpoint/regression sentinel before another
+source edit. If held-out stays stable, the best train-backed diagnostics are
+generic but still need an evidence gate before source promotion: a compact
+depth-boundary/direct-child recipe, a factory and token-serialization fallback
+contract, or a method-local text policy clarification around the remaining
+special-element over-inclusion signal. The user-suggested "generic recipes in
+the main class documentation" direction fits this diagnostic path, but should
+win a focused probe or scratch A/B before another broad class-level source
+edit.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -236,7 +251,7 @@ hallucinations. This is a broad API boundary, not a task-specific patch.
 
 Risk: low.
 
-### 2b. HTML Processor next_tag() cursor and OR-search contract
+### 2b. HTML Processor next_tag() cursor and OR-search contract — confirmed in round 32
 
 Core idea: make `WP_HTML_Processor::next_tag()` cursor movement and
 multi-name searches explicit near the method heading.
@@ -275,8 +290,13 @@ HTML Processor first-of-several-tags idiom.
 Scratch A/B result: round 31's method-local `next_tag()` cursor card beat the
 fresh round-30 control (99.80 vs 99.30) on N03/T07. N03 remained perfect and
 T07 improved from 98.60 to 99.60, with all variant T07 trials using one
-forward scan rather than sequential filtered searches. Promote this as a
+forward scan rather than sequential filtered searches. This justified a
 source edit near `WP_HTML_Processor::next_tag()`.
+
+Round-32 result: source promotion confirmed. The full train score rose from
+round 29's 98.31 to 99.67, all hidden tests passed, T07 recovered to 99.30,
+and N03 stayed 100.00. Do not keep spending source-edit budget here unless a
+future weaker tier or checkpoint exposes a new cursor variant.
 
 Risk: low-medium. Keep it generic and avoid a nested-list recipe; teach cursor
 state and first-of-several-tags search.
