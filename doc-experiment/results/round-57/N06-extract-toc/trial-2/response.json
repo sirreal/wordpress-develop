@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and a single `next_token()` walk to preserve document order and collect only ordinary `#text` descendants for heading openers. The implementation relies on documented `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `get_modifiable_text()` behavior to capture heading text while ignoring tags.",
+  "confidence": 94
+}

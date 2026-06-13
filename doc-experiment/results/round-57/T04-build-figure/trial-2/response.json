@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template with the target attribute order already present, then filled it with `WP_HTML_Tag_Processor::set_attribute()` and replaced the placeholder text in `figcaption` with `WP_HTML_Tag_Processor::set_modifiable_text()`. This lets the HTML API handle all required encoding while preserving the exact fragment shape.",
+  "confidence": 95
+}

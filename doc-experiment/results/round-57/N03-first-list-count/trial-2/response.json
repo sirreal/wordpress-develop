@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for BODY-fragment parsing, then `next_tag()` to find the first `UL` or `OL` opener, `get_current_depth()` to bound a structural walk, and `next_token()` plus `get_token_type()`, `get_tag()`, and `is_tag_closer()` to count only direct `LI` child openers. A bookmark lets the code return to the list opener and apply `set_attribute()` only after the scan finishes cleanly, with `paused_at_incomplete_token()` and `get_last_error()` used to fail closed on incomplete or unsupported input.",
+  "confidence": 91
+}

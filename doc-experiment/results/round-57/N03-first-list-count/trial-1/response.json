@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then scanned forward with next_tag() and next_token() semantics via get_current_depth() to identify the first UL/OL and count only direct LI children at one level deeper. I guarded against truncated or unsupported input with paused_at_incomplete_token() and get_last_error(), then used a bookmark plus seek() and set_attribute() to add data-item-count on the first list opener.",
+  "confidence": 94
+}

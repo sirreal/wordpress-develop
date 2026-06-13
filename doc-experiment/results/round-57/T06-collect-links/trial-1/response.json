@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and collected ordinary `#text` tokens via `get_modifiable_text()` only while inside anchor elements. Anchor `href` values come from `get_attribute('href')`, which the docs say returns decoded strings and `null`/`true` for missing or boolean attributes, so only string-valued `href`s are included.",
+  "confidence": 76
+}

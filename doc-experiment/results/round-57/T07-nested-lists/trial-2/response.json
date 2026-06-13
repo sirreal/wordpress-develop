@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to get structural awareness of the fragment, then walked tokens with next_token() so I could inspect each UL/OL opener's breadcrumbs via get_breadcrumbs(). When an ancestor UL or OL appeared above the current list, I added the documented class with add_class(), and returned the result with get_updated_html() to preserve untouched bytes exactly.",
+  "confidence": 92
+}

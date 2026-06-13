@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()`, tracking open `FIGURE` elements by depth and collecting decoded `src` values from `IMG` openers only when currently inside at least one figure. The implementation relies on documented `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `get_attribute()` behavior.",
+  "confidence": 96
+}

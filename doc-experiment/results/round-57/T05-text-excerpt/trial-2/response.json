@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` and `next_token()` to walk the fragment in document order, appending only ordinary `#text` tokens plus opener text from `TITLE` and `TEXTAREA`, which are the documented special cases that carry decoded text on the element token itself. I then truncate the accumulated UTF-8 text with `mb_strlen()`/`mb_substr()` so the result is limited by Unicode code points.",
+  "confidence": 92
+}

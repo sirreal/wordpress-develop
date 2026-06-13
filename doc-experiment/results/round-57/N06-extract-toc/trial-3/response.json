@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and WP_HTML_Processor::next_token(), get_token_type(), get_tag(), get_current_depth(), and get_modifiable_text() to walk heading subtrees in document order while collecting only ordinary #text content. The function emits one entry per H1 through H6 opener and returns headings with empty text when no text tokens are present.",
+  "confidence": 79
+}

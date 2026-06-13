@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 9/9. Correctly chose WP_HTML_Processor::create_fragment() for tree-aware containment. All HTML API calls are documented. The single next_token() loop with tag/closer checks is a documented pattern, and the is_string($src) && '' !== $src guard correctly handles absent, valueless, empty, and decoded attributes. Minor deduction: it manually tracks figure state with stored depths it never uses, where breadcrumbs would be simpler."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/9. Correct processor choice and very idiomatic use of next_token() plus get_breadcrumbs() to test ancestor containment. All API calls are documented. The only adherence problem is the attribute edge contract: it skips null and empty string but not true, so a valueless src is returned as true."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/9. Correctly uses WP_HTML_Processor and documented token-walking APIs. The manual FIGURE stack is acceptable because next_token() documents virtual/end-of-input closers, though breadcrumbs would be more direct. It has the same edge-contract miss as trial-2: null/empty checks do not exclude get_attribute() returning true for a valueless src."
+    }
+  ],
+  "failure_analysis": "Only the hidden case empty-and-valueless-src-skipped failed, in trial-2 and trial-3. Both implementations treated get_attribute('src') as though invalid values were only null or ''. In the actual contract, <img src> returns true because the attribute is present with no value; only <img src=\"\"> returns ''. That misconception maps to WP_HTML_Processor::get_attribute(), whose signature and return text say string|true|null and 'Boolean attributes return true', plus the example where enabled returns true. The Tag Processor docs under Finding tags are clearer about null vs empty string vs true, and the Tag Processor get_attribute() section says decoded string values are returned. The documentation did contain enough information to solve this, but the wording 'Boolean attributes' is easy to misread as applying only to known HTML boolean attributes rather than any syntactically valueless attribute name, including src. The docs did well on the other cases: the 'Which processor should I use?' and HTML Processor overview point users to WP_HTML_Processor for nested structure; the breadcrumbs section explains ancestor paths; next_token() documents virtual closers for malformed/unclosed input; and get_attribute() returning decoded strings prevented entity-decoding mistakes across all trials.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute()",
+      "problem": "The method docs state string|true|null and show enabled => true, but they do not explicitly distinguish absent, explicit empty value, and syntactically valueless attributes in the HTML Processor section.",
+      "suggestion": "Add a short contract paragraph and example: absent returns null, attr=\"\" returns '', and attr with no '=' returns true regardless of attribute name. Recommend is_string($value) && '' !== $value before treating an attribute as a URL/text value."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor and WP_HTML_Processor get_attribute() return descriptions",
+      "problem": "The phrase 'Boolean attributes return true' can be read as only formal HTML boolean attributes, not arbitrary valueless attributes such as src with no value.",
+      "suggestion": "Reword to 'Attributes written without a value return true' and optionally note that this includes non-boolean attribute names; false is only used for requested updates/removal, not reads."
+    },
+    {
+      "location": "WP_HTML_Processor::get_attribute() inherited behavior docs",
+      "problem": "The HTML Processor override omits the Tag Processor paragraph saying string values are already decoded, even though callers commonly read attributes through WP_HTML_Processor.",
+      "suggestion": "Duplicate or cross-link the decoded-string contract directly in the HTML Processor method docs so users do not have to infer inherited behavior from the Tag Processor page."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly and update only matching `A` tag openers. The function checks `get_attribute( 'href' )` so empty-string and boolean `href` values count as present, then calls `set_attribute( 'target', '_blank' )`, which overwrites any existing target while preserving the rest of the HTML byte-for-byte except for the touched tag.",
+  "confidence": 98
+}

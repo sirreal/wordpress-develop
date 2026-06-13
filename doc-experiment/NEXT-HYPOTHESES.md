@@ -300,6 +300,23 @@ fails. Record this as a future scratch-test candidate, not an immediate source
 edit. Next action: run a checkpoint/regression sentinel with
 `gpt-5.4-mini` / `low` / `priority` before any further source promotion.
 
+Round 57 supplied that checkpoint: all 97.90 / train 97.95 / held-out 97.73 /
+core 97.66. Two audit-only tooling commits occurred between round 56 and this
+checkpoint to keep next-action selection autonomous; they did not change source
+docs, corpus, runners, harness, or aggregation. The source edit stays under the
+revert rule: train fell 1.66 from round 56, below the 2-point threshold, and no
+task regressed across all trials. T09 held at 99.40 and T12 moved 99.30 ->
+98.80. Held-out N02 exposed the valueless-attribute `true`/`''` distinction
+again, but it remains sentinel-only evidence. T06's low trial was a PHP array-key
+typo, not an HTML API misconception. The strongest train documentation signal is
+N03: one trial used plain `next_tag()` plus `get_current_depth()` as a bounded
+subtree scan, forgetting that plain `next_tag()` skips closers and therefore may
+miss the depth boundary. Next action: run a focused `shadow-doc-a/b` diagnostic
+on N03 and nearby traversal controls, testing a compact contrast card that
+states depth-boundary scans must use `next_token()` or
+`next_tag( array( 'tag_closers' => 'visit' ) )`; plain `next_tag()` skips the
+closing boundary.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

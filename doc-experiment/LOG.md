@@ -2,6 +2,45 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 57 — checkpoint after serialization fallback source edit
+
+**All 97.90 / train 97.95 / held-out 97.73 / core 97.66** under
+`checkpoint`, with subjects `gpt-5.4-mini` / `low` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This checkpoint scored the current source
+docs after the round-56 source confirmation.
+
+Operational note: two audit-only tooling commits landed between round 56 and
+this checkpoint to stop the process from blocking on a log-requested checkpoint
+or on expected prepared-round result artifacts. They changed
+`doc-experiment/tools/audit-state.py` only. Source docs, corpus, staging,
+subject runner, judge runner, harness, and aggregation policy were unchanged.
+
+Outcome: keep the round-56 source edit. The train split moved 99.61 -> 97.95
+versus round 56, below the 2-point revert threshold, and no train task
+regressed across all trials. The target serialization tasks stayed stable:
+T09 remained 99.40 and T12 moved 99.30 -> 98.80. Held-out is sentinel-only;
+N02 scored 93.31 because two trials treated a valueless `src` as usable, but
+held-out evidence must not drive source edits.
+
+The largest train dip was T06 at 80.00, caused by one trial with a PHP array-key
+typo; the judge explicitly said this was not an HTML API misconception. The
+strongest train documentation signal is N03 at 94.56: one trial used plain
+`next_tag()` plus `get_current_depth()` as though it could detect a subtree
+boundary, but plain `next_tag()` skips closers by default and can over-scan into
+later incomplete or unsupported markup. Judges pointed to a missing contrast:
+depth-boundary logic only works on a stream that visits the boundary token,
+such as `next_token()` or `next_tag( array( 'tag_closers' => 'visit' ) )`.
+
+Decision: do not revert. Do not edit source directly from held-out N02 or from
+the T06 generic PHP typo. Treat the N03 train failure as the next diagnostic
+candidate.
+
+Next action: commit round-57 results separately, then run a focused
+`shadow-doc-a/b` diagnostic with `gpt-5.4-mini` / `low` / `priority` on N03 and
+nearby traversal controls, testing a compact generic contrast card for
+depth-boundary scans: use `next_token()` or visit closers when the loop relies
+on `get_current_depth()` to leave a subtree; plain `next_tag()` skips closers.
+
 ## Round 56 — serialization fallback source edit confirmed
 
 **Train 99.61 / core 99.55** under `scored-train`, with subjects

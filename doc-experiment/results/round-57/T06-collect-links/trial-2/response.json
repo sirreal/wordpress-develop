@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then a single next_token() walk to preserve document order while tracking when I am inside an A element. For each opening A tag I read href with get_attribute(), which returns decoded strings or true/null for boolean/absent attributes, and I accumulated only #text tokens via get_modifiable_text() until the matching closer.",
+  "confidence": 86
+}

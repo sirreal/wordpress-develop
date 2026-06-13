@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, then walked tags with next_tag() and inspected structural context via get_breadcrumbs() to detect whether each UL or OL has a UL/OL ancestor. Matching lists get add_class('nested-list'), and the result is returned with get_updated_html() so untouched bytes stay preserved.",
+  "confidence": 95
+}

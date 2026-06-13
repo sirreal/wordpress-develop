@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so I could collect ordinary `#text` content inside each anchor while respecting tree order. I read decoded href values with `get_attribute('href')` and link text with `get_modifiable_text()` only for `#text` tokens, which matches the documented HTML Processor text-extraction model.",
+  "confidence": 86
+}
