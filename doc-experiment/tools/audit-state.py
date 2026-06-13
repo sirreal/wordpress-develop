@@ -29,6 +29,8 @@ CURRENT_JUDGE = {
     "service_tier": "priority",
 }
 
+DIAGNOSTIC_MODES = {"discoverability-probe", "shadow-doc-a/b"}
+
 
 def run_text(command: list[str]) -> str:
     proc = subprocess.run(
@@ -88,10 +90,32 @@ def completed_rounds() -> list[dict]:
                 "score": summary.get("round_score"),
                 "by_split": summary.get("by_split", {}),
                 "task_ids": sorted(summary.get("tasks", {}).keys()),
+                "mode": metadata.get("mode") if metadata else None,
                 "metadata": metadata,
             }
         )
     return sorted(rounds, key=lambda item: item["number"])
+
+
+def latest_log_next_action() -> str | None:
+    log_file = EXPERIMENT_ROOT / "LOG.md"
+    if not log_file.exists():
+        return None
+
+    text = log_file.read_text()
+    first_heading = text.find("\n## ")
+    if first_heading == -1:
+        return None
+    next_heading = text.find("\n## ", first_heading + 1)
+    first_entry = text[first_heading: next_heading if next_heading != -1 else len(text)]
+    match = re.search(
+        r"Next action:\s*(.+?)(?:\n\n|$)",
+        first_entry,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    return " ".join(match.group(1).split())
 
 
 def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
@@ -250,6 +274,7 @@ def build_audit() -> dict:
     holdout_ids = sorted(task_id for task_id, task in tasks.items() if task["split"] == "holdout")
     rounds = completed_rounds()
     latest = rounds[-1] if rounds else None
+    latest_log_action = latest_log_next_action()
 
     latest_commit = last_commit_for(latest["summary_file"]) if latest else None
     changed_since_latest = paths_changed_since(latest_commit) if latest_commit else []
@@ -259,9 +284,19 @@ def build_audit() -> dict:
     latest_task_set = set(latest["task_ids"]) if latest else set()
     current_train_set = set(train_ids)
     current_all_set = set(tasks.keys())
+    current_train_rounds = [
+        item for item in rounds
+        if set(item["task_ids"]) == current_train_set
+    ]
+    latest_current_train = current_train_rounds[-1] if current_train_rounds else None
 
     corpus_matches_latest_train = latest_task_set == current_train_set
     corpus_matches_latest_active = latest_task_set == current_all_set
+    latest_is_diagnostic_subset = (
+        latest is not None
+        and latest.get("mode") in DIAGNOSTIC_MODES
+        and latest_task_set.issubset(current_train_set)
+    )
     current_baselines = current_no_edit_baselines(rounds, train_ids)
     current_baseline_exists = any(baseline["valid"] for baseline in current_baselines)
     prepared_rounds = prepared_current_rounds(train_ids)
@@ -270,7 +305,7 @@ def build_audit() -> dict:
     mismatches = []
     if status_short:
         mismatches.append("worktree has local drift")
-    if latest and not corpus_matches_latest_train:
+    if latest and not corpus_matches_latest_train and not latest_is_diagnostic_subset:
         mismatches.append("latest completed round task set differs from current train set")
     if changed_groups["source_docs"]:
         mismatches.append("source doc files changed since latest completed score")
@@ -327,6 +362,13 @@ def build_audit() -> dict:
             "prepare and run weak-tier-calibration no-edit baseline on current train corpus "
             "with gpt-5.4/medium/priority"
         )
+    elif latest_is_diagnostic_subset and latest_log_action:
+        next_action = latest_log_action
+    elif latest_is_diagnostic_subset:
+        next_action = (
+            "analyze latest diagnostic subset result and update LOG/NEXT before "
+            "source promotion or the next measurement"
+        )
     else:
         next_action = "run citation-only discoverability probes or shadow-doc A/B diagnostics"
 
@@ -345,11 +387,22 @@ def build_audit() -> dict:
         },
         "latest_completed_round": {
             "round": latest["round"] if latest else None,
+            "mode": latest["mode"] if latest else None,
             "score": latest["score"] if latest else None,
             "by_split": latest["by_split"] if latest else {},
             "task_count": len(latest["task_ids"]) if latest else 0,
             "task_ids": latest["task_ids"] if latest else [],
             "summary_commit": latest_commit,
+        },
+        "latest_current_train_round": {
+            "round": latest_current_train["round"] if latest_current_train else None,
+            "mode": latest_current_train["mode"] if latest_current_train else None,
+            "score": latest_current_train["score"] if latest_current_train else None,
+            "by_split": latest_current_train["by_split"] if latest_current_train else {},
+            "task_count": (
+                len(latest_current_train["task_ids"]) if latest_current_train else 0
+            ),
+            "task_ids": latest_current_train["task_ids"] if latest_current_train else [],
         },
         "current_policy": {
             "subject": CURRENT_SUBJECT,
@@ -358,6 +411,7 @@ def build_audit() -> dict:
         "comparability": {
             "latest_tasks_match_current_train": corpus_matches_latest_train,
             "latest_tasks_match_current_active": corpus_matches_latest_active,
+            "latest_is_diagnostic_subset": latest_is_diagnostic_subset,
             "tasks_added_vs_latest": sorted(current_train_set - latest_task_set),
             "tasks_removed_vs_latest": sorted(latest_task_set - current_train_set),
             "current_no_edit_baseline_exists": current_baseline_exists,
@@ -373,6 +427,7 @@ def build_audit() -> dict:
 
 def print_text(audit: dict) -> None:
     latest = audit["latest_completed_round"]
+    latest_train = audit["latest_current_train_round"]
     print("HTML API docs experiment state")
     print(f"- git head: {audit['git']['head']}")
     print(f"- worktree: {'dirty' if audit['git']['status_short'] else 'clean'}")
@@ -381,13 +436,22 @@ def print_text(audit: dict) -> None:
         f"{audit['active_corpus']['holdout_count']} holdout"
     )
     print(
-        f"- latest completed round: {latest['round']} score {latest['score']} "
+        f"- latest completed round: {latest['round']} mode {latest['mode']} "
+        f"score {latest['score']} "
         f"split {latest['by_split']}"
     )
+    if latest_train["round"] and latest_train["round"] != latest["round"]:
+        print(
+            f"- latest current-train round: {latest_train['round']} "
+            f"mode {latest_train['mode']} score {latest_train['score']} "
+            f"split {latest_train['by_split']}"
+        )
     print(
         "- latest round matches current train: "
         f"{audit['comparability']['latest_tasks_match_current_train']}"
     )
+    if audit["comparability"].get("latest_is_diagnostic_subset"):
+        print("- latest round is a diagnostic subset; not treated as corpus drift")
     print(
         "- current no-edit baseline exists for current subject/judge policy: "
         f"{audit['comparability']['current_no_edit_baseline_exists']}"
