@@ -3,8 +3,8 @@
   "mode": "weak-tier-calibration",
   "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
   "launch_provenance": {
-    "current_git_head": "a3495aaebb7d62794e6ed24434a934e059cc22c1",
-    "current_git_status_short": "",
+    "current_git_head": "6815e3b1be405a1aa9e4da9f2f9c9c4c39d09d9a",
+    "current_git_status_short": "M doc-experiment/results/round-18/workflow-manifest.json",
     "round_metadata_git_head": "5d02b9163665c2146f985fce131bbbb0b3c3a899",
     "round_metadata_git_status_short": "",
     "workflow_script_sha256": {
@@ -26,6 +26,7 @@
     "local_codex_fallback": {
       "agent_type": "codex-cli-isolated-workdir",
       "runner": "codex exec",
+      "input_delivery": "prompt-embedded-docs",
       "sandbox_mode": "read-only",
       "approval_policy": "never",
       "input_files": [
@@ -113,6 +114,12 @@
       "python3 doc-experiment/tools/validate-workflow-output.py trials <trials-output.json> round-18",
       "python3 doc-experiment/tools/ingest-trials.py <trials-output.json> round-18",
       "python3 doc-experiment/tools/validate-round.py round-18 --require-trials-complete"
+    ],
+    "local_codex_judges": [
+      "python3 doc-experiment/tools/run-codex-judges.py round-18 --output doc-experiment/results/round-18/codex-judges-output.json",
+      "python3 doc-experiment/tools/validate-workflow-output.py judges doc-experiment/results/round-18/codex-judges-output.json round-18",
+      "python3 doc-experiment/tools/ingest-judges.py doc-experiment/results/round-18/codex-judges-output.json round-18",
+      "python3 doc-experiment/tools/validate-round.py round-18 --require-scored"
     ],
     "after_judges_workflow": [
       "python3 doc-experiment/tools/validate-workflow-output.py judges <judges-output.json> round-18",
