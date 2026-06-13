@@ -8,7 +8,31 @@ from discoverability gaps.
 
 ## Current read
 
-Latest update: round 65 tested a focused scratch bookmark-contract
+Latest update: round 66 tested a combined scratch simplification on
+`T01-add-image-class`, `T02-link-targets`, `T10-last-h2`,
+`T11-strip-tracking-attributes`, `N03-first-list-count`, and
+`T07-nested-lists`. It removed 61 rendered lines net by deleting
+roadmap/future prose, rewriting the HTML Processor overview to stop presenting
+it as the more-capable default, making the flat-source-order decision rule
+explicit in both overviews, and carrying forward the round-65 bookmark
+simplification. It did not win: **97.21** on the six-task subset versus
+**99.85** for the same round-56 weak-tier source-doc subset. The
+processor-choice cue worked for flat edits: `T01`, `T02`, `T10`, `T11`, and
+`T07` all scored 100.00, and all three `T10` subjects chose
+`WP_HTML_Tag_Processor`. `N03` fell 99.70 -> 83.25 because one subject counted
+correctly but tried `set_attribute()` after scanning away from the list opener,
+without bookmarking and seeking back. Do not promote the combined variant.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch A/B for processor choice only on the same six-task subset.
+Start from current rendered source docs, remove only roadmap/future prose and
+replace the top HTML Processor "more capable" wording with the concise
+decision rule that flat source-order attribute/class edits use
+`WP_HTML_Tag_Processor`; leave bookmark sections and `set_bookmark()` examples
+unchanged. Do not change source docblocks unless the scratch variant wins.
+
+Previous update: round 65 tested a focused scratch bookmark-contract
 simplification on `N03-first-list-count`, `T07-nested-lists`, and
 `T10-last-h2`. It removed 46 rendered lines net and made the bookmark
 preconditions explicit: set the bookmark while matched on the token to revisit,
@@ -20,18 +44,6 @@ subset versus **99.70** for the same round-56 weak-tier source-doc subset.
 but `T10` fell 100.00 -> 96.30 because two of three subjects still chose
 `WP_HTML_Processor` for a flat source-order class edit. Do not promote the
 bookmark simplification as-is.
-
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
-focused scratch simplification/refinement A/B for processor choice. The
-variant should be net concise: reduce the HTML Processor overview's "more
-capable default" pull, remove or shorten non-current roadmap prose, and make
-the decision rule explicit that first/last/Nth matching tags and attribute or
-class edits in source order should use `WP_HTML_Tag_Processor`; use
-`WP_HTML_Processor` only when tree position, implied structure, subtree text,
-or normalized output matters. Include flat Tag Processor tasks plus N03/T07
-structural regressions in the measured subset. Do not change source docblocks
-unless a scratch variant wins.
 
 Previous update: round 64 tested low-risk roadmap/future-prose pruning as a
 full-train scratch ablation. It removed only 17 rendered lines: the Tag

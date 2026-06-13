@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 66 — processor-choice simplification fixes flat edits but regresses N03
+
+`round-66` tested a scratch-only `shadow-doc-a/b` variant on six train tasks:
+flat Tag Processor tasks `T01-add-image-class`, `T02-link-targets`,
+`T10-last-h2`, and `T11-strip-tracking-attributes`, plus structural regression
+sentinels `N03-first-list-count` and `T07-nested-lists`. The variant removed
+61 rendered lines net. It deleted roadmap/future prose, rewrote the HTML
+Processor overview to stop presenting it as the more-capable default, made the
+flat-source-order decision rule explicit in both overviews, and carried forward
+the round-65 bookmark simplification. Source docblocks, corpus fixtures,
+runner policy, and harness behavior were unchanged.
+
+Numeric result: **97.21 on the six-task subset**, versus **99.85** for the
+same tasks in the comparable round-56 weak-tier source-doc baseline. The
+processor-choice part worked: `T01`, `T02`, `T10`, `T11`, and `T07` all scored
+**100.00**, and all three `T10-last-h2` subjects chose
+`WP_HTML_Tag_Processor`. The round is still a clear loss because
+`N03-first-list-count` fell **99.70 -> 83.25**. One subject counted direct
+children correctly, but after the bounded `next_token()` walk it tried
+`set_attribute()` without bookmarking and seeking back to the original list
+opener, so the mutation was attempted on the boundary/closer token and only
+4/11 hidden cases passed.
+
+Interpretation: do not promote the round-66 combined variant. The explicit
+processor-choice rewrite is promising, but carrying it together with bookmark
+section pruning is not safe enough: N03 remains sensitive to the opener
+bookmark before scan, then seek back before mutation, contract. The next test
+should isolate the processor-choice simplification without changing bookmark
+sections, so any N03 regression can be distinguished from the bookmark
+reduction.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch A/B for processor choice only on the same six-task subset.
+Start from current rendered source docs, remove only roadmap/future prose and
+replace the top HTML Processor "more capable" wording with the concise
+decision rule that flat source-order attribute/class edits use
+`WP_HTML_Tag_Processor`; leave bookmark sections and `set_bookmark()` examples
+unchanged. Do not change source docblocks unless the scratch variant wins.
+
 ## Round 65 — bookmark simplification fixes N03 pattern but loses on processor choice
 
 `round-65` tested a scratch-only `shadow-doc-a/b` bookmark-contract

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 85,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware `WP_HTML_Processor::create_fragment()` and only documented API calls. The token/depth scan and incomplete/unsupported checks were mostly sound, but it did not bookmark the list opener before scanning. After `next_token()` walked out of the list, `set_attribute()` was attempted on the list closer, returned false, and no mutation was queued."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API usage throughout. It used the documented bookmark-then-scan-then-seek pattern, depth-bounded token walking, `paused_at_incomplete_token()`, `get_last_error()`, and `get_updated_html()`. Minor deductions only for not checking the final `set_attribute()` return and not releasing the bookmark."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API usage throughout. It cleanly applied the documented tree-aware traversal pattern with a bookmark, bounded `next_token()` scan, direct-child depth check, incomplete/error rejection, seek back, and `get_updated_html()`. Minor deductions only for not checking the final `set_attribute()` return and not releasing the bookmark."
+    }
+  ],
+  "failure_analysis": "Only trial-1 failed hidden cases. The failed cases were `simple-ul`, `ol`, `existing-count-overwritten`, `omitted-li-closers`, `nested-list-counts-direct-children`, `incomplete-token-after-closed-list`, and `unsupported-after-closed-list`. The shared misconception was that, after a bounded `next_token()` scan, the processor was still positioned on the original list opener. In reality the scan consumed tokens until the list boundary; the current token was the `UL`/`OL` closer, including virtual closers for malformed list markup. `set_attribute()` on that closer returned false, so the output stayed unchanged. The rendered docs did include the right pattern under `Recipe: scan a region before editing its opener`, which says to bookmark the opener, walk forward, seek back, then edit. The `next_token()` docs also warn there is one cursor and that `next_token()` does not stop automatically at the earlier element. The weak spot is the `set_attribute()` docs: they say it updates the currently matched tag and returns whether a value was set, but do not explicitly list that closers, text/comment tokens, virtual nodes, and no-current-token states are non-mutable. For the omitted-closer and nested-list failures, trial-1 actually counted correctly; the mutation was lost. For the after-closed-list incomplete/unsupported cases, trial-1 correctly ignored bad syntax after the fully scanned list, but still could not apply the update because it had not saved the opener. Trials 2 and 3 passed all hidden cases; the docs did well on processor choice, fragment creation, depth-based direct-child walking, bookmark/seek usage, and incomplete/unsupported scan checks.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::set_attribute()` and inherited `WP_HTML_Tag_Processor::set_attribute()` docs",
+      "problem": "The return contract says only whether an attribute value was set. It does not explicitly state the non-mutable cursor states that return false, especially tag closers and virtual nodes in `WP_HTML_Processor`.",
+      "suggestion": "Add a failure-condition note: this succeeds only while matched on a real opening tag from the source; it returns false on closing tags, virtual nodes, text/comment tokens, or when no token is matched. Cross-reference bookmarks for mutations that depend on later tokens."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` depth-bounded walk guidance",
+      "problem": "The docs say a shallower depth means the walk moved past the container, but do not emphasize that the boundary token has already become the current token and the original opener is no longer current.",
+      "suggestion": "After the depth-bounded loop example, add a note that any later mutation of the original container must use a bookmark set before the walk, then `seek()` back before calling mutation methods."
+    },
+    {
+      "location": "`Recipe: scan a region before editing its opener`",
+      "problem": "The recipe is correct, but the example uses `add_class()` and may not make the attribute-mutation failure mode obvious enough for callers computing a value before setting a `data-*` attribute.",
+      "suggestion": "Add a generic attribute-update variant that computes a fact from descendants, checks scan completeness, seeks back to the opener, checks the mutation return value, then calls `get_updated_html()`."
+    }
+  ]
+}

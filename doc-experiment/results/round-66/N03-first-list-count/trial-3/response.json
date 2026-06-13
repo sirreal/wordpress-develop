@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the tree-aware `WP_HTML_Processor::create_fragment()` API so the scan can respect element nesting, then recorded the first `UL`/`OL` opener with a bookmark, walked forward with `next_token()` to count only direct `LI` children at the next depth level, and rejected the change if the scan ended on incomplete input or unsupported markup before restoring the opener and setting `data-item-count`.",
+  "confidence": 92
+}

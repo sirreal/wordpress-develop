@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for tree-aware fragment parsing, then walked tags with `next_tag()`, checked ancestry with `get_breadcrumbs()`, and added the class via `add_class()` only when a `UL` or `OL` had another list ancestor above it. The modified fragment is returned with `get_updated_html()`, which preserves untouched bytes exactly.",
+  "confidence": 97
+}
