@@ -60,8 +60,11 @@ Pick exactly one round mode:
 
 If the active corpus has changed since the last trusted score, do not compare
 against that older score and do not promote source docblock edits. First run a
-no-edit baseline/calibration on the current corpus with the current model
-policy, then use that result as the current comparison point.
+no-edit baseline/calibration on the current corpus with the current subject and
+judge model policy, then use that result as the current comparison point. The
+start-of-run audit treats a baseline as current only when the scored artifacts
+validate cleanly and the metadata matches the current task set, subject tier,
+and judge tier.
 
 ## 1. Stage
 

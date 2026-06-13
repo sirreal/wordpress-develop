@@ -113,6 +113,11 @@ was backfilled with these digests. `workflow-args.py` now runs the full round
 preflight before emitting launch args, so drifted corpus inputs cannot be
 handed to the external runner by accident.
 
+The start-of-run audit now treats a current no-edit baseline as valid only
+when it matches the current task set, subject tier, and judge tier, and when
+`validate-round.py` accepts the scored artifacts. A scored round with the wrong
+judge policy or invalid summary can no longer unblock source doc edits.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

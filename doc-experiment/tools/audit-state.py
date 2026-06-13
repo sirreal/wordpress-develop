@@ -107,10 +107,19 @@ def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
         capture_output=True,
         check=False,
     )
-    if proc.returncode != 0:
+    report = None
+    errors = []
+    if proc.stdout.strip():
+        try:
+            report = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            report = None
+    if report:
+        errors.extend(report.get("errors", []))
+    if proc.returncode != 0 and not errors:
         message = (proc.stderr or proc.stdout).strip()
-        return None, [message or f"validate-round.py failed for {round_name}"]
-    return json.loads(proc.stdout), []
+        errors.append(message or f"validate-round.py failed for {round_name}")
+    return report, errors
 
 
 def prepared_current_rounds(train_ids: list[str]) -> list[dict]:
@@ -145,7 +154,7 @@ def prepared_current_rounds(train_ids: list[str]) -> list[dict]:
                 "complete_trials": report.get("complete_trials") if report else 0,
                 "expected_trials": report.get("expected_trials") if report else 0,
                 "tasks_with_judges": report.get("tasks_with_judges") if report else 0,
-                "errors": (report.get("errors", []) if report else []) + errors,
+                "errors": errors,
                 "warnings": report.get("warnings", []) if report else [],
             }
         )
@@ -199,8 +208,9 @@ def classify_paths(paths: list[str]) -> dict[str, list[str]]:
     return groups
 
 
-def has_current_no_edit_baseline(rounds: list[dict], train_ids: list[str]) -> bool:
+def current_no_edit_baselines(rounds: list[dict], train_ids: list[str]) -> list[dict]:
     train_set = set(train_ids)
+    baselines = []
     for round_info in rounds:
         metadata = round_info["metadata"]
         if not metadata:
@@ -209,11 +219,29 @@ def has_current_no_edit_baseline(rounds: list[dict], train_ids: list[str]) -> bo
             continue
         if metadata.get("subject") != CURRENT_SUBJECT:
             continue
+        if metadata.get("judge") != CURRENT_JUDGE:
+            continue
         if set(metadata.get("task_ids", [])) != train_set:
             continue
-        if set(round_info["task_ids"]) == train_set:
-            return True
-    return False
+        if set(round_info["task_ids"]) != train_set:
+            continue
+
+        report, errors = validate_round(round_info["round"])
+        lifecycle = report.get("lifecycle") if report else "invalid"
+        valid = lifecycle == "scored" and not errors
+        baselines.append(
+            {
+                "round": round_info["round"],
+                "number": round_info["number"],
+                "score": round_info["score"],
+                "by_split": round_info["by_split"],
+                "lifecycle": lifecycle,
+                "valid": valid,
+                "errors": errors,
+                "warnings": report.get("warnings", []) if report else [],
+            }
+        )
+    return sorted(baselines, key=lambda item: item["number"])
 
 
 def build_audit() -> dict:
@@ -234,7 +262,8 @@ def build_audit() -> dict:
 
     corpus_matches_latest_train = latest_task_set == current_train_set
     corpus_matches_latest_active = latest_task_set == current_all_set
-    current_baseline_exists = has_current_no_edit_baseline(rounds, train_ids)
+    current_baselines = current_no_edit_baselines(rounds, train_ids)
+    current_baseline_exists = any(baseline["valid"] for baseline in current_baselines)
     prepared_rounds = prepared_current_rounds(train_ids)
     latest_prepared = prepared_rounds[-1] if prepared_rounds else None
 
@@ -306,6 +335,7 @@ def build_audit() -> dict:
             "tasks_added_vs_latest": sorted(current_train_set - latest_task_set),
             "tasks_removed_vs_latest": sorted(latest_task_set - current_train_set),
             "current_no_edit_baseline_exists": current_baseline_exists,
+            "current_no_edit_baselines": current_baselines,
             "prepared_current_round": latest_prepared,
             "changed_since_latest_summary_commit": changed_groups,
         },
@@ -335,6 +365,17 @@ def print_text(audit: dict) -> None:
         "- current no-edit baseline exists: "
         f"{audit['comparability']['current_no_edit_baseline_exists']}"
     )
+    current_baselines = audit["comparability"].get("current_no_edit_baselines", [])
+    for baseline in current_baselines:
+        status = "valid" if baseline["valid"] else "invalid"
+        print(
+            f"- current no-edit baseline candidate: {baseline['round']} {status} "
+            f"score {baseline['score']}"
+        )
+        if baseline["errors"]:
+            print("  errors:")
+            for error in baseline["errors"]:
+                print(f"  - {error}")
     prepared = audit["comparability"]["prepared_current_round"]
     if prepared:
         print(

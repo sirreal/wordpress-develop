@@ -69,7 +69,7 @@ python3 render-docs-markdown.py \
 
 - `tools/audit-state.py` — read-only start-of-run audit for worktree drift,
   latest trusted score, corpus comparability, prepared-round lifecycle, model
-  policy, and next action.
+  policy, valid current-policy baseline status, and next action.
 - `tools/prepare-round.py` — preferred current entry point for a round. It
   stages rendered docs, copies only selected `task.md` prompts into scratch,
   and writes `results/round-NN/round-metadata.json`.
