@@ -165,6 +165,7 @@ def launch_manifest(metadata: dict) -> dict:
             "local_codex_fallback": {
                 "agent_type": "codex-cli-isolated-workdir",
                 "runner": "codex exec",
+                "input_delivery": "prompt-embedded-docs",
                 "sandbox_mode": "read-only",
                 "approval_policy": "never",
                 "input_files": [

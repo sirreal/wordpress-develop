@@ -17,9 +17,12 @@ Workflow UI when it is unavailable. The runner writes the same trial-output
 shape as the Workflow script, but records `subject_isolation.isolation_mode`
 as `isolated-workdir`: each subject gets a private non-repo directory
 containing only the two rendered docs, one task prompt, and the output schema;
+the task and rendered docs are embedded directly in the subject prompt because
+local `codex exec` does not expose the experiment's Read/Grep-only tools;
 project rules and user config are ignored, the sandbox is read-only, and the
 approval policy is `never`. Scores from this runner must be compared only with
-rounds using the same isolation mode.
+rounds using the same isolation mode and `input_delivery:
+prompt-embedded-docs`.
 `audit-state.py` now prints the local runner command sequence for prepared
 rounds waiting on trials, so autonomous continuations do not reinterpret that
 state as an external-only Workflow gate.

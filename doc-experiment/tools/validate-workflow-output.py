@@ -53,6 +53,7 @@ def validate_isolated_workdir_attestation(attestation: dict) -> list[str]:
     expected_values = {
         "agent_type": "codex-cli-isolated-workdir",
         "runner": "codex exec",
+        "input_delivery": "prompt-embedded-docs",
         "sandbox_mode": "read-only",
         "approval_policy": "never",
         "project_rules_loaded": False,

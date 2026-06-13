@@ -142,13 +142,16 @@ python3 doc-experiment/tools/validate-round.py round-NN --require-trials-complet
 ```
 
 The local fallback runs each subject from a private non-repo directory
-containing only the two rendered docs, one task prompt, and the output schema.
+containing only the two rendered docs, one task prompt, and the output schema,
+then embeds the task and rendered docs directly in the subject prompt because
+local `codex exec` does not expose the experiment's Read/Grep-only agent tools.
 It ignores project rules and user config, uses a read-only sandbox, sets
 approval policy `never`, and persists `subject_isolation.isolation_mode` as
-`isolated-workdir`. Scores from this runner are comparable only with rounds
-using the same isolation mode and runner policy. A prompt-only fallback without
-one of these persisted isolation attestations remains diagnostic unless
-transcripts are inspected and the isolation risk is explicitly recorded.
+`isolated-workdir` with `input_delivery: prompt-embedded-docs`. Scores from
+this runner are comparable only with rounds using the same isolation mode and
+runner policy. A prompt-only fallback without one of these persisted isolation
+attestations remains diagnostic unless transcripts are inspected and the
+isolation risk is explicitly recorded.
 
 ````text
 You are implementing a PHP function for WordPress using the HTML API.

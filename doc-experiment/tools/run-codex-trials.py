@@ -13,16 +13,17 @@ only:
 - task.md
 - output-schema.json
 
-The Codex process is launched with project rules and user config ignored,
-read-only sandboxing, and approval policy `never`. This is a different
-isolation mechanism than the Workflow runner's Read/Grep-only agent type, so
-the emitted `subject_isolation` attestation records `isolated-workdir` mode.
+The task and rendered docs are embedded directly in the prompt because local
+`codex exec` does not expose the experiment's Read/Grep-only agent tools. The
+Codex process is launched with project rules and user config ignored, read-only
+sandboxing, and approval policy `never`. This is a different isolation
+mechanism than the Workflow runner's Read/Grep-only agent type, so the emitted
+`subject_isolation` attestation records `isolated-workdir` mode.
 """
 
 import argparse
 import concurrent.futures
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -113,22 +114,21 @@ def copy_subject_inputs(scratch: Path, task_id: str, trial_dir: Path) -> None:
     write_json_atomic(trial_dir / "output-schema.json", TRIAL_SCHEMA)
 
 
-def prompt() -> str:
-    return """You are a test subject in a documentation-quality experiment.
+def prompt(task_text: str, tag_processor_doc: str, html_processor_doc: str) -> str:
+    return f"""You are a test subject in a documentation-quality experiment.
 
-Implement the PHP function requested in `task.md` using the WordPress HTML API.
+Implement the PHP function requested in TASK using the WordPress HTML API.
 
-Your ONLY allowed information sources about the API are the files in this
-isolated working directory:
+Your ONLY allowed information sources about the API are embedded below:
 
-- html-tag-processor.md
-- html-processor.md
-- task.md
+- TASK
+- HTML_TAG_PROCESSOR_DOC
+- HTML_PROCESSOR_DOC
 
-Do not read any other file or directory. Do not run code or commands. Do not
-use web search. Do not rely on memory of WordPress source code; if the
+Do not read any file or directory. Do not run code or commands. Do not use web
+search. Do not rely on memory of WordPress source code; if the
 documentation contradicts your memory, trust the documentation. Methods not
-documented in the two markdown files do not exist.
+documented in the two embedded markdown documents do not exist.
 
 Return structured output matching the supplied schema:
 
@@ -137,6 +137,21 @@ Return structured output matching the supplied schema:
 - explanation: one short paragraph describing your approach and which
   documented APIs you used
 - confidence: an integer from 0 to 100
+
+TASK:
+```text
+{task_text}
+```
+
+HTML_TAG_PROCESSOR_DOC:
+```markdown
+{tag_processor_doc}
+```
+
+HTML_PROCESSOR_DOC:
+```markdown
+{html_processor_doc}
+```
 """
 
 
@@ -165,6 +180,9 @@ def run_trial(
 ) -> dict:
     trial_dir = work_root / task_id / f"trial-{trial_number}"
     copy_subject_inputs(scratch, task_id, trial_dir)
+    task_text = (trial_dir / "task.md").read_text()
+    tag_processor_doc = (trial_dir / "html-tag-processor.md").read_text()
+    html_processor_doc = (trial_dir / "html-processor.md").read_text()
     last_message = trial_dir / "codex-last-message.json"
     stdout_file = trial_dir / "codex-stdout.jsonl"
     stderr_file = trial_dir / "codex-stderr.txt"
@@ -198,7 +216,7 @@ def run_trial(
 
     proc = subprocess.run(
         command,
-        input=prompt(),
+        input=prompt(task_text, tag_processor_doc, html_processor_doc),
         text=True,
         capture_output=True,
         timeout=timeout_seconds,
@@ -261,6 +279,7 @@ def isolation_attestation(work_root: Path) -> dict:
         "agent_type": "codex-cli-isolated-workdir",
         "isolation_mode": "isolated-workdir",
         "runner": "codex exec",
+        "input_delivery": "prompt-embedded-docs",
         "sandbox_mode": "read-only",
         "approval_policy": "never",
         "project_rules_loaded": False,
@@ -275,8 +294,11 @@ def isolation_attestation(work_root: Path) -> dict:
         "equivalent_boundary_notes": (
             "Each subject process runs from a private non-repo directory containing "
             "only the two staged rendered docs, one task prompt, and the output "
-            "schema. Codex project rules and user config are ignored; the process "
-            "uses a read-only sandbox and approval policy never."
+            "schema. The task and rendered docs are embedded directly in the "
+            "subject prompt because local codex exec does not expose the "
+            "experiment's Read/Grep-only tools. Codex project rules and user "
+            "config are ignored; the process uses a read-only sandbox and "
+            "approval policy never."
         ),
     }
 
@@ -325,8 +347,6 @@ def main() -> int:
     preflight(round_name, task_ids)
 
     output_path = args.output or (results_dir(round_name) / "codex-trials-output.json")
-    if output_path.exists() and not args.force:
-        raise FileExistsError(f"refusing to overwrite existing output: {output_path}")
 
     default_work_root = Path(tempfile.gettempdir()) / "html-api-docs-eval" / round_name / "codex-cli-trials"
     work_root = args.work_root or default_work_root
@@ -348,6 +368,9 @@ def main() -> int:
             )
         )
         return 0
+
+    if output_path.exists() and not args.force:
+        raise FileExistsError(f"refusing to overwrite existing output: {output_path}")
 
     subject = metadata.get("subject") or {}
     results = []
