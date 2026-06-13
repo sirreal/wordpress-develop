@@ -297,6 +297,11 @@ def build_audit() -> dict:
         and latest.get("mode") in DIAGNOSTIC_MODES
         and latest_task_set.issubset(current_train_set)
     )
+    latest_is_current_active_checkpoint = (
+        latest is not None
+        and latest.get("mode") == "checkpoint"
+        and corpus_matches_latest_active
+    )
     current_baselines = current_no_edit_baselines(rounds, train_ids)
     current_baseline_exists = any(baseline["valid"] for baseline in current_baselines)
     prepared_rounds = prepared_current_rounds(train_ids)
@@ -305,7 +310,12 @@ def build_audit() -> dict:
     mismatches = []
     if status_short:
         mismatches.append("worktree has local drift")
-    if latest and not corpus_matches_latest_train and not latest_is_diagnostic_subset:
+    if (
+        latest
+        and not corpus_matches_latest_train
+        and not latest_is_diagnostic_subset
+        and not latest_is_current_active_checkpoint
+    ):
         mismatches.append("latest completed round task set differs from current train set")
     if changed_groups["source_docs"]:
         mismatches.append("source doc files changed since latest completed score")
@@ -362,7 +372,7 @@ def build_audit() -> dict:
             "prepare and run weak-tier-calibration no-edit baseline on current train corpus "
             "with gpt-5.4/medium/priority"
         )
-    elif latest_is_diagnostic_subset and latest_log_action:
+    elif (latest_is_diagnostic_subset or latest_is_current_active_checkpoint) and latest_log_action:
         next_action = latest_log_action
     elif latest_is_diagnostic_subset:
         next_action = (
@@ -412,6 +422,7 @@ def build_audit() -> dict:
             "latest_tasks_match_current_train": corpus_matches_latest_train,
             "latest_tasks_match_current_active": corpus_matches_latest_active,
             "latest_is_diagnostic_subset": latest_is_diagnostic_subset,
+            "latest_is_current_active_checkpoint": latest_is_current_active_checkpoint,
             "tasks_added_vs_latest": sorted(current_train_set - latest_task_set),
             "tasks_removed_vs_latest": sorted(latest_task_set - current_train_set),
             "current_no_edit_baseline_exists": current_baseline_exists,
@@ -450,8 +461,14 @@ def print_text(audit: dict) -> None:
         "- latest round matches current train: "
         f"{audit['comparability']['latest_tasks_match_current_train']}"
     )
+    print(
+        "- latest round matches current active corpus: "
+        f"{audit['comparability']['latest_tasks_match_current_active']}"
+    )
     if audit["comparability"].get("latest_is_diagnostic_subset"):
         print("- latest round is a diagnostic subset; not treated as corpus drift")
+    if audit["comparability"].get("latest_is_current_active_checkpoint"):
+        print("- latest round is a checkpoint; held-out tasks are expected")
     print(
         "- current no-edit baseline exists for current subject/judge policy: "
         f"{audit['comparability']['current_no_edit_baseline_exists']}"
