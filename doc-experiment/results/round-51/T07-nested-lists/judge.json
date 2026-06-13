@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural parser, `WP_HTML_Processor::create_fragment()`, then walked open tags, used `get_breadcrumbs()` with the current element excluded, added the class via `add_class()`, and returned edits with `get_updated_html()`. Every called API is documented in the provided markdown and execution showed 7/7 passes with no `_doing_it_wrong`. Minor edge-case gap: it checks `get_last_error()` but not `paused_at_incomplete_token()`, so its policy on truncated trailing syntax is implicit."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor` and used documented methods only. The breadcrumb logic and `add_class()`/`get_updated_html()` flow are idiomatic and passed 7/7 with no misuse records. It adds a redundant `is_tag_closer()` guard after plain `next_tag()`, despite the docs saying closers are skipped by default, and it does not explicitly handle incomplete trailing input."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct structural parser choice and fully documented API usage: `create_fragment()`, `next_tag()`, `get_tag()`, `get_breadcrumbs()`, `add_class()`, `paused_at_incomplete_token()`, `get_last_error()`, and `get_updated_html()`. It follows the documented mutation pattern, handles unsupported and incomplete scans conservatively, and passed 7/7 with no `_doing_it_wrong` records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 7 frozen cases, with no `_doing_it_wrong` or trigger-error records. The docs did well on the core decision points: the processor-choice guidance says to use `WP_HTML_Processor` for structure and containment, `create_fragment()` is shown for body fragments, `next_tag()` explains scanning any tag when matching one of several names, `get_breadcrumbs()` states that the current node and implicit `HTML`/`BODY` ancestors are included, and `add_class()` plus `get_updated_html()` document byte-preserving class edits. The near-misses were small: trial-2 carried a redundant closer check into an opener-only scan, and trials 1/2 did not check `paused_at_incomplete_token()` while trial-3 did, showing some remaining ambiguity around mutation policy after incomplete trailing syntax.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock",
+      "problem": "The docs say breadcrumbs include the matched node, but they do not explicitly call out the common ancestor-only pattern. This can lead to off-by-one reasoning when checking whether the current element has a given ancestor.",
+      "suggestion": "Add a short note or example showing that ancestor checks should ignore the final breadcrumb entry, e.g. by slicing off the current node, and remind readers that implicit `HTML` and `BODY` may precede fragment content."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock and examples",
+      "problem": "The method docs state that plain `next_tag()` skips closers by default, but examples elsewhere use `is_tag_closer()`, making it easy to add unnecessary closer guards in simple opener scans.",
+      "suggestion": "Make the opener-only loop pattern prominent, and state that `is_tag_closer()` is needed when `tag_closers => 'visit'` is requested or when walking tokens that may include closers."
+    },
+    {
+      "location": "WP_HTML_Processor method index / inherited Tag Processor methods",
+      "problem": "Important inherited methods used in HTML Processor workflows, especially `get_updated_html()` and `paused_at_incomplete_token()`, are referenced but not easy to discover from the HTML Processor method index.",
+      "suggestion": "Add an inherited-public-methods section or explicit cross-links under the HTML Processor usage/method index for mutation and scan-state methods inherited from `WP_HTML_Tag_Processor`."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() and paused_at_incomplete_token() docblocks",
+      "problem": "The policy for queued edits when scanning stops at incomplete trailing syntax is spread across recipes, and candidates diverged on whether to return modified HTML or fall back to the original.",
+      "suggestion": "Clarify that `get_updated_html()` can still emit queued edits to complete tokens while preserving untouched bytes, but callers whose result depends on scanning the entire input should check `paused_at_incomplete_token()` and choose an explicit fallback policy."
+    }
+  ]
+}

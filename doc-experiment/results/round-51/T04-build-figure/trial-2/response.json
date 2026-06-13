@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template so the exact element structure and `img` attribute order are preserved, then uses `WP_HTML_Tag_Processor` to safely fill in unescaped values. I used `next_tag()` plus `set_attribute()` for `src` and `alt`, `next_token()` plus `get_token_type()` to find the placeholder text node inside `figcaption`, `set_modifiable_text()` to encode the caption text safely, and `get_updated_html()` to return the final fragment.",
+  "confidence": 95
+}

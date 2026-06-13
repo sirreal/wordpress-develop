@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structure awareness, scans forward with `next_tag()` until the first `UL` or `OL`, bookmarks that opener, then walks its subtree with `next_token()` and `get_current_depth()` to count only direct `LI` child openers at depth `list_depth + 1`. If the subtree scan ends on incomplete input or unsupported markup (`paused_at_incomplete_token()` or `get_last_error()`), it returns the original HTML unchanged; otherwise it seeks back to the bookmarked list and adds `data-item-count` with `set_attribute()`, returning `get_updated_html()`.",
+  "confidence": 91
+}

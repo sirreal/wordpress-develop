@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented `WP_HTML_Processor::normalize()` convenience API, which is the right BODY-fragment normalization path. Strict `null` handling preserves valid empty output. No undocumented calls or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same as reference: `WP_HTML_Processor::normalize()` plus exact fallback on `null`. Correct processor choice, documented API only, and edge cases such as unsupported markup versus empty-string normalization are handled by strict comparison."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly relied on the documented static normalizer instead of hand-walking tokens or using the Tag Processor. No hallucinated APIs, no misuse records, and all hidden cases passed."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials. The docs performed well for this task because `WP_HTML_Processor::normalize()` has a dedicated method section saying it normalizes BODY-context fragments and returns `string|null`, with `null` meaning unable to normalize. The HTML Processor overview also explicitly distinguishes it from the Tag Processor for normalized output and says output-producing methods such as `serialize()` and `normalize()` return `null` after unsupported markup. The examples showed the exact classes of normalization the tests exercised: quoted attributes, omitted/implied tags, table insertion, entity-safe serialization, and trailing incomplete syntax behavior. Near miss: unsupported cases produced `trigger_error` records from `serialize()` even though the candidate behavior was correct; the rendered docs document the `null` return but do not make warning/notice behavior obvious.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` method docs",
+      "problem": "The return contract says `null` means unable to normalize, but the examples only show successful normalization. Readers must connect unsupported-markup behavior from the broader support section.",
+      "suggestion": "Add a short general example where unsupported HTML returns `null`, and state that callers needing fail-closed behavior should branch on strict `null` rather than falsiness."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` and `serialize()` method docs",
+      "problem": "Unsupported input can emit a `trigger_error` from serialization while still returning `null`; the rendered docs do not clearly describe whether this diagnostic is expected API behavior.",
+      "suggestion": "Document diagnostic side effects for unsupported parser aborts, or explicitly state that `null` is the programmatic signal and warnings are diagnostic."
+    },
+    {
+      "location": "HTML Processor support/normalization docs",
+      "problem": "Recoverable malformed HTML, incomplete trailing syntax, and unsupported tree-construction cases are described in separate places, which can blur when normalization returns output versus `null`.",
+      "suggestion": "Add a compact policy table distinguishing recoverable normalization, omitted incomplete trailing tokens, and unsupported parser aborts, with the output contract for each."
+    }
+  ]
+}

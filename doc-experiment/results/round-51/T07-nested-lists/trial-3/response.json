@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans list openers with `next_tag()`, checks each matched list\u2019s ancestor chain via `get_breadcrumbs()`, adds `nested-list` with `add_class()` only when a `UL` or `OL` appears earlier in the breadcrumbs, and returns the edited fragment with `get_updated_html()`. If the processor cannot safely complete because fragment creation fails, parsing pauses on incomplete input, or unsupported markup is encountered (`get_last_error()`), it returns the original HTML unchanged.",
+  "confidence": 91
+}

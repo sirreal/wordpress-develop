@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a literal template so the required element shape and `img` attribute order are preserved, then uses `WP_HTML_Tag_Processor::set_attribute()` to safely encode and fill `src` and `alt`, and `WP_HTML_Tag_Processor::next_token()`, `get_token_type()`, and `set_modifiable_text()` to replace the placeholder text inside `figcaption` with safely encoded caption text.",
+  "confidence": 95
+}

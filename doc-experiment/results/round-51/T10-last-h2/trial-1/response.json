@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat, position-based edit: it scans forward with `next_tag( 'H2' )`, repeatedly moves a single bookmark with `set_bookmark()` so it always points at the last matched `H2`, then `seek()`s back to that opener and adds the `final-section` class with `add_class()`. If no `H2` was ever bookmarked, it returns the original HTML unchanged.",
+  "confidence": 96
+}

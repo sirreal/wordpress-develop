@@ -244,6 +244,15 @@ Per owner direction, pause source promotion and move to weaker-tier testing.
 Next action: run a no-edit `weak-tier-calibration` on current docs with the
 next protocol subject tier, `gpt-5.4` / `low` / `priority`.
 
+Round 51 supplied that calibration: train 99.65 / core 99.59 with all 45
+subject trials passing hidden cases. This tier is still saturated enough that
+the remaining signal is adherence-only, concentrated in read-only completion
+policy for T05/T06/N06 and normalized rewrite fallback for T09. Record
+`gpt-5.4` / `low` as a current-docs no-edit baseline, but do not promote a
+source edit from it. The next protocol-consistent action is to step down to
+`gpt-5.4-mini` / `high` / `priority` and run another no-edit
+`weak-tier-calibration`.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

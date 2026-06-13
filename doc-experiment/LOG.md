@@ -2,6 +2,37 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 51 — weak-tier calibration still saturated
+
+**Train 99.65 / core 99.59** under `weak-tier-calibration`, with subjects
+`gpt-5.4` / `low` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This was a no-edit calibration on the current source docs after
+round 50, run because the experiment owner asked to move to a weaker testing
+tier before promoting another documentation hypothesis.
+
+Outcome: still too saturated to be the main source-edit driver. All 45
+subject trials passed all hidden cases. The weakest task scores were
+T06-collect-links at 98.50, T05-text-excerpt at 99.00,
+T07-nested-lists at 99.20, T08-table-extract at 99.30,
+T09-mark-keyword at 99.40, and N06-extract-toc at 99.50. Concept means were
+attributes/classes/normalization 100.00, serialization 99.70, traversal 99.56,
+and text 99.17.
+
+The useful signal remains adherence-only: T05/N06 still show occasional
+fail-closed handling of already visited read-only text after
+`paused_at_incomplete_token()` or `get_last_error()`, T06 still varies on
+read-only completion policy, and T09 still shows occasional uncertainty about
+normalized rewrite fallback. None of this justifies a new source docblock edit
+before a less saturated tier is calibrated.
+
+Decision: record round 51 as a no-edit calibration baseline for
+`gpt-5.4` / `low`, but do not use it to promote source documentation. Per the
+subject ladder in `PROTOCOL.md`, step down one more rung.
+
+Next action: commit round-51 results separately, then prepare and run a
+`weak-tier-calibration` round on current docs using `gpt-5.4-mini` / `high` /
+`priority`.
+
 ## Round 50 — checkpoint before weaker-tier calibration
 
 **All 99.08 / train 99.65 / held-out 96.93 / core 98.97** under
