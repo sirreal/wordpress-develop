@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path and only documented APIs. The implementation follows the documented single `next_token()` loop, depth-bounded subtree walk, virtual closer handling, and `#text` + `get_modifiable_text()` pattern. Minor deductions: the final post-loop row/cell flush is unnecessary because the HTML Processor documents reliable closer emission, and it can turn an unsupported-parser abort into a partial row; it also has no explicit `get_last_error()`/incomplete-input policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and only documented methods, including the inherited/documented `paused_at_incomplete_token()` and `get_last_error()` checks. The token walk is idiomatic: one cursor loop, depth guard, row/cell state, tag closer dispatch, and decoded text only from `#text` tokens. The fail-closed completion policy is allowed by the docs for read-only extraction; only a tiny deduction because the policy is stricter than the task required and the docs leave it caller-defined."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor and all method calls are present in the rendered docs. The structure matches the recommended repeated-region pattern: a single bounded `next_token()` walk with explicit state, `is_tag_closer()` flushes, and `get_modifiable_text()` guarded by `#text`. It checks `get_last_error()` but not `paused_at_incomplete_token()`, so its completion policy is slightly less complete than trial 2, though still reasonable for the tested read-only extraction."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 8 frozen cases. The docs appear to have done well on the main risks for this task. The successful choices map directly to `html-tag-processor.md` > `Which processor should I use?`, `html-processor.md` > `Supported elements`, `next_token()`, `get_current_depth()`, and `Recipe: collect DOM-style text from a subtree`. Those passages explain why the HTML Processor is needed for browser-like table structure, why `next_token()` sees implied/virtual elements, why a subtree walk should be bounded with `get_current_depth() >= $container_depth`, and why cell text should be accumulated only from `#text` tokens via decoded `get_modifiable_text()`.\n\nNear-misses were around completion policy, not hidden test failures. Trial 1 trusted its own final cleanup instead of the documented closer-driven flush, which can expose partial rows if the parser aborts on unsupported table markup after a cell. Trials 2 and 3 chose to return an empty result on `get_last_error()`, which is a valid caller policy but stricter than ordinary read-only extraction necessarily requires. The docs already say read-only callers must choose a policy, but they could make the consequences more explicit for bounded subtree scans.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Recipe: collect DOM-style text from a subtree / Quick policy table",
+      "problem": "The docs say read-only callers choose how to handle `get_last_error()` and `paused_at_incomplete_token()`, but do not show how that choice affects already-accumulated subtree data when a scan aborts after partial results.",
+      "suggestion": "Add a short policy note contrasting fail-open partial extraction, fail-closed empty/null extraction, and mutation/rewrite rejection for bounded read-only scans."
+    },
+    {
+      "location": "html-processor.md > next_token() repeated-region example",
+      "problem": "The docs explain that closers are reliably emitted, but they do not explicitly warn that post-loop cleanup flushes are usually unnecessary and can record partial data after an unsupported-parser abort.",
+      "suggestion": "Add one sentence after the repeated-region example: prefer flushing on the documented closing token; only add end-of-loop cleanup when the caller deliberately wants partial data from an aborted or truncated scan."
+    },
+    {
+      "location": "html-processor.md > Method Index / incomplete-token references",
+      "problem": "`paused_at_incomplete_token()` is used in HTML Processor examples but its detailed contract appears under the Tag Processor docs, which makes the inherited stream-state API easier to miss.",
+      "suggestion": "Add an inherited-method entry or cross-reference in the HTML Processor method index explaining that `paused_at_incomplete_token()` applies to HTML Processor scans and is most meaningful after the relevant scan has advanced far enough to encounter truncation."
+    }
+  ]
+}

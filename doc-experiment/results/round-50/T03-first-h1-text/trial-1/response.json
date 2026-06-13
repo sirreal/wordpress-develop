@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, finds the first `H1` with `next_tag('H1')`, then walks that element\u2019s subtree with `next_token()` while the current depth remains inside the heading. It appends only `#text` token contents via `get_modifiable_text()`, which the documentation says already returns decoded text, so nested markup contributes only its descendant text and non-text tokens are ignored.",
+  "confidence": 92
+}

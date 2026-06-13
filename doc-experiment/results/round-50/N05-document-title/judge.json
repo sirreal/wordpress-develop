@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used the right class and factory: WP_HTML_Processor::create_full_parser() for a complete document. Called only documented methods: create_full_parser(), next_tag(), get_modifiable_text(). The direct next_tag('TITLE') plus get_modifiable_text() pattern is documented and handles decoded entities and empty titles. Main near-miss: it does not check get_namespace() === 'html', so a foreign-content SVG/MathML TITLE could be mistaken for the document title outside the frozen cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as trial-1: correct full-document processor, documented methods only, and idiomatic use of next_tag('TITLE') with get_modifiable_text(). It correctly distinguishes no match from an empty matched TITLE. The only substantive omission is the missing HTML-namespace guard used by the reference."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_full_parser() and a documented next_token() walk. The TITLE opener check with get_token_name() and ! is_tag_closer() mirrors the get_modifiable_text() documentation example, and all called methods are documented. It is slightly more verbose than necessary but idiomatic. Same namespace near-miss: it matches token name TITLE without verifying the html namespace."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, so there are no failed hidden cases to attribute. The docs did well on the key contracts: create_full_parser() is clearly positioned for complete documents and HEAD content; get_modifiable_text() explicitly says TITLE/TEXTAREA text is carried on the opener token and decoded; next_tag() documents that plain matches skip closers, which made trial-1 and trial-2 valid without an is_tag_closer() guard. The main near-miss across all trials is namespace handling. The reference checks get_namespace() === 'html', but every candidate omitted it. A probe confirmed next_tag('TITLE') can match an SVG title token in the svg namespace, which would make these candidates return the wrong result for a document containing only an SVG title. The rendered docs expose get_namespace(), but the TITLE examples and special-element prose do not make the namespace precondition prominent enough.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock and example",
+      "problem": "The TITLE example checks only get_token_name() === 'TITLE' and ! is_tag_closer(). It does not show a namespace check, even though TITLE special-element text semantics are for HTML-namespace TITLE, not every foreign element with the same token name.",
+      "suggestion": "Update the special-element example to include get_namespace() === 'html', and state that decoded opener text for TITLE/TEXTAREA applies to HTML-namespace special elements."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() query parameter documentation",
+      "problem": "The docs do not clearly warn that tag-name or breadcrumb matching can find same-named SVG/MathML elements, and that namespace-sensitive callers must inspect get_namespace() after a match.",
+      "suggestion": "Add a note under tag_name/breadcrumb matching: when documents may contain foreign content, tag names alone are not enough to identify HTML elements; combine the match with get_namespace() or another documented namespace-aware check."
+    },
+    {
+      "location": "WP_HTML_Processor overview / full-document parsing guidance",
+      "problem": "The docs explain that create_full_parser() handles complete documents and HEAD content, but do not connect document-level metadata extraction with namespace and parsed-tree context concerns.",
+      "suggestion": "Add a general metadata-oriented note: for HEAD/document metadata elements, use the full parser and verify the matched element is in the HTML namespace, especially for names that also exist in SVG or MathML."
+    }
+  ]
+}

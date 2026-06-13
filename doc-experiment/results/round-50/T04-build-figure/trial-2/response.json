@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a literal HTML template with empty `src` and `alt` attributes in the required order and a placeholder text node inside `figcaption`, then uses `WP_HTML_Tag_Processor::next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()` so the HTML API performs all required encoding without manual escaping.",
+  "confidence": 96
+}

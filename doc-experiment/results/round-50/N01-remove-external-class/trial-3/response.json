@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat attribute/class edit: it constructs the processor with the input HTML, repeatedly finds `A` tags that contain the `external` class via `next_tag()`, removes that class with `remove_class()`, and returns the modified markup with `get_updated_html()`.",
+  "confidence": 98
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor::create_fragment()` for tree-aware traversal. All called methods are documented in the rendered files. Uses the documented bookmark + depth-bounded `next_token()` scan, direct-child opener test, `seek()`, `set_attribute()`, and `get_updated_html()`. It checks `paused_at_incomplete_token()` and `get_last_error()` before mutating."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct structural approach: HTML Processor, scan to first `UL`/`OL`, bookmark opener, count only `LI` openers at `list_depth + 1`, fail closed on truncation or unsupported markup, then seek back and update the opener. No undocumented API use or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout. The explicit `$scan_finished` flag is slightly more conservative than the examples, but still follows the documented virtual-closer/depth-drop model and passed the incomplete-input cases. Uses bookmark, depth, `next_token()`, clean-scan checks, and `get_updated_html()` idiomatically."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three passed 11/11 with no `_doing_it_wrong` records. The docs did the important things well for this task: `Which processor should I use?` steers structural work away from the Tag Processor; `Recipe: scan a region before editing its opener` directly describes bookmark, forward scan, clean-scan check, seek-back, then mutate; `Recipe: test subtree membership and direct children` gives the `#tag`, non-closer, depth-plus-one pattern; `next_token()` and `get_current_depth()` explain virtual/implied closers and why `>=` is the right subtree guard; `set_attribute()` and `get_updated_html()` make the mutation/output path clear. Near-misses: the rendered `next_token()` method still has a stale “Added for internal support; do not use” since-note despite the surrounding docs recommending it; `paused_at_incomplete_token()` says to drain all tokens first, which can conflict with bounded-subtree tasks where trailing unrelated incomplete syntax should not invalidate a completed region; and the public docs expose many private methods in the method index, which did not hurt these trials but increases misuse risk for weaker subjects.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / rendered `html-processor.md` method section",
+      "problem": "The method body documentation actively recommends `next_token()` for structural walks, but the since-note still says it was added for internal support and should not be used.",
+      "suggestion": "Remove or update the stale “do not use” since-note so the public contract consistently presents `next_token()` as supported for HTML Processor traversal."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() docblock, cross-referenced by HTML Processor traversal docs",
+      "problem": "The docblock says to drain all tokens first, but bounded subtree mutations often should stop once the relevant region is left and then check whether that scan paused on an incomplete token. Draining the entire document would incorrectly make unrelated trailing truncation part of the caller contract.",
+      "suggestion": "Clarify that callers should scan as far as their contract requires, then check `paused_at_incomplete_token()`: drain the whole document only when complete-document input is required; for bounded region scans, check after the bounded walk and separately decide whether later input matters."
+    },
+    {
+      "location": "Rendered method index for `WP_HTML_Processor` and `WP_HTML_Tag_Processor`",
+      "problem": "Private/internal methods are listed alongside public methods, which can make the supported API surface less clear to documentation-only implementers.",
+      "suggestion": "Separate public API from private internals in rendered docs, or collapse private methods into an internal section clearly marked as not callable by consumers."
+    }
+  ]
+}

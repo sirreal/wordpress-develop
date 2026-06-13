@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then repeatedly calls `next_tag()` with the documented `breadcrumbs` query `array( 'FIGURE', 'IMG' )` so only `IMG` elements inside a `FIGURE` are matched at any depth and in document order. For each match it reads the already-decoded `src` via `get_attribute()` and keeps only non-empty string values.",
+  "confidence": 95
+}

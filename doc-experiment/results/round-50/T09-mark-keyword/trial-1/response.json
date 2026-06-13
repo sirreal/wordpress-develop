@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, rewrites only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, and otherwise appends each token\u2019s normalized HTML via `serialize_token()`. Using the HTML Processor ensures fragment parsing in BODY context and normalized serialization, while special text-bearing elements like `script`, `style`, `title`, and `textarea` are naturally excluded because their contents are not exposed as `#text` tokens.",
+  "confidence": 82
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` approach for a structural/ancestor query. All called methods are documented in the supplied markdown: `create_fragment`, `next_tag`, `get_tag`, `get_breadcrumbs`, `add_class`, `get_last_error`, and inherited `get_updated_html`. The traversal is idiomatic and byte-preserving. Minor edge-case deduction: it checks `get_last_error()` but not `paused_at_incomplete_token()`, so truncated trailing syntax would not trigger the same fail-closed policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same high-quality pattern as trial 1. Correct processor choice, documented APIs only, no `_doing_it_wrong` records, and proper use of breadcrumbs excluding the current node before testing ancestors. Existing classes are preserved via `add_class()`. Minor deduction for incomplete-input handling: `get_last_error()` does not detect a paused incomplete token."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct HTML Processor solution using documented structural breadcrumbs and `get_updated_html()` for class mutation output. No undocumented calls or runtime misuse. The only near-miss is edge-policy completeness: the code falls back on unsupported parser errors but not on `paused_at_incomplete_token()`."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases, so there are no failed hidden cases to attribute to a misconception. The docs did well in three places: `WP_HTML_Tag_Processor` under `Which processor should I use?` explicitly says it has no ancestor/tree awareness; `WP_HTML_Processor` overview and `Supported elements` direct structural/containment work to the HTML Processor; and the `Breadcrumbs`, `next_tag()`, `add_class()`, and `get_updated_html()` sections give enough contract detail to build a byte-preserving mutation. The only near-miss is incomplete input: the candidates copied the documented `get_last_error()` fallback pattern but did not also check `paused_at_incomplete_token()`. A read-only probe confirms truncated trailing syntax can leave `get_last_error()` null while `paused_at_incomplete_token()` is true, so a complete-source mutation policy would need both checks.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_breadcrumbs()` / `Breadcrumbs` overview",
+      "problem": "The docs explain that breadcrumbs include the current node, but they do not give a compact example of testing for any ancestor while excluding the current element. This is an easy off-by-one trap for ancestor predicates.",
+      "suggestion": "Add a general example showing how to derive `$ancestors = array_slice( $processor->get_breadcrumbs(), 0, -1 )` before checking containment-style predicates."
+    },
+    {
+      "location": "`WP_HTML_Processor` usage or methods overview",
+      "problem": "`get_updated_html()` is inherited and mentioned later, but it is not prominent near the basic HTML Processor mutation workflow. Users may be unsure whether class/attribute mutation output should use serialization or `get_updated_html()`.",
+      "suggestion": "Add a short inherited-mutation note near `Usage`: after `set_attribute()`, `add_class()`, `remove_class()`, or text mutations on an HTML Processor, use inherited `get_updated_html()` for byte-preserving edited source; use serialization APIs only for normalized token rewrites."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_tag()` / incomplete-input guidance",
+      "problem": "The distinction between parser errors and incomplete trailing syntax is spread across several sections. Candidates handled `get_last_error()` but missed `paused_at_incomplete_token()`.",
+      "suggestion": "Add a small class/attribute mutation example that finishes a `next_tag()` loop and then checks both `null === get_last_error()` and `! paused_at_incomplete_token()` when the caller requires complete input before returning edited HTML."
+    }
+  ]
+}

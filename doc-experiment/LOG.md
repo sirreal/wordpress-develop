@@ -2,6 +2,37 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 50 — checkpoint before weaker-tier calibration
+
+**All 99.08 / train 99.65 / held-out 96.93 / core 98.97** under
+`checkpoint`, with subjects `gpt-5.4` / `medium` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This scored the current source docs after
+the round-47 text-policy source edit and after the rounds-48/49 read-only
+completion-policy scratch A/B. Source docblocks were unchanged since
+`29a148a4f7`.
+
+Outcome: stable enough not to revert. Compared with the previous checkpoint,
+round 46, train rose 99.63 -> 99.65 while held-out fell 98.33 -> 96.93. The
+held-out movement is below the 2-point revert threshold and is not an
+all-trial task regression. The drop is concentrated in N02 trial 3, which
+passed 6/9 after interpreting `array( 'FIGURE', 'IMG' )` breadcrumbs as
+arbitrary-depth containment rather than a contiguous breadcrumb path. This is
+held-out-only sentinel evidence and must not drive a source edit.
+
+The train tasks tied to the read-only completion-policy candidate stayed
+strong: T05 was 99.90, T06 was 98.40, T08 was 99.30, and N06 was 100.00.
+This keeps the round-49 scratch variant viable, but the current primary tier
+is saturated enough that another immediate source promotion would have weak
+signal.
+
+Decision: do not revert. Do not promote another source docblock edit yet.
+Per experiment-owner direction, move to a weaker subject tier and run a
+no-edit calibration before using that tier to drive source edits.
+
+Next action: commit round-50 results separately, then prepare and run a
+`weak-tier-calibration` round on current docs using the next subject tier in
+`PROTOCOL.md`, `gpt-5.4` / `low` / `priority`.
+
 ## Rounds 48/49 — read-only completion-policy scratch A/B wins
 
 `round-48` was the control rendered-doc round and `round-49` was a

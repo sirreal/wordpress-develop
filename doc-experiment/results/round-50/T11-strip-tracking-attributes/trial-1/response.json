@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, tag-by-tag scan of the input, calling `next_tag()` to visit each opener, `get_attribute_names_with_prefix( 'data-track-' )` to find only matching attributes case-insensitively, `remove_attribute()` to delete each one, and `get_updated_html()` to return the edited HTML while preserving untouched bytes.",
+  "confidence": 97
+}

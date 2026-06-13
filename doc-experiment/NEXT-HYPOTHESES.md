@@ -236,6 +236,14 @@ after the checkpoint gate, but adapt rather than copy: keep it short, keep the
 caller-contract framing, and do not imply that all read-only extraction should
 keep partial results.
 
+Round 50 supplied the checkpoint: all 99.08 / train 99.65 / held-out 96.93.
+The held-out decline is below the revert threshold, but N02 had one functional
+holdout miss from treating a breadcrumbs query as arbitrary-depth containment.
+Keep that as sentinel-only evidence; held-out must not drive the next edit.
+Per owner direction, pause source promotion and move to weaker-tier testing.
+Next action: run a no-edit `weak-tier-calibration` on current docs with the
+next protocol subject tier, `gpt-5.4` / `low` / `priority`.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

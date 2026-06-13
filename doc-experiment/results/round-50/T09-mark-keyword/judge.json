@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), and get_last_error(), all documented. Processor choice and token-by-token serialization are exactly aligned with the rendered docs. The #text guard avoids attributes, comments, and special text-bearing element opener text, while get_modifiable_text() gives decoded text for matching."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used only documented APIs, including normalize(). The main implementation is idiomatic: fragment processor, next_token() walk, #text guard, decoded get_modifiable_text(), and serialize_token() accumulation. Minor adherence loss because its fallback returns raw input on create_fragment() failure or get_last_error(), despite the docs warning that returning original input is not normalized and discards the accumulated rewrite. The empty-keyword normalize branch is extra code outside the stated non-empty-keyword contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "All called APIs are documented: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), set_modifiable_text(), get_updated_html(), and get_last_error(). It chose the correct processor and correctly limited matches to #text tokens. It is less idiomatic because it builds a secondary <mark>.</mark> template and mutates it with set_modifiable_text()/get_updated_html() instead of directly wrapping the current token's serialize_token(); that is documented, but roundabout for a serialization rewrite. Like trial-2, its raw-input fallback is not normalized."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the key distinctions this task stresses: html-processor.md points BODY fragments to WP_HTML_Processor::create_fragment(); the next_token() section says to use token walking when text and non-tag content matter and explains implied closers for malformed input; the text-extraction recipe and get_modifiable_text() docs say ordinary DOM text means get_token_type() === '#text' before reading decoded modifiable text; the same passages warn that comments and special element opener text are also modifiable text but are not ordinary text descendants; and serialize_token() documents token-by-token normalized rewrites with inserted wrapper markup. The main near-miss was fallback policy: trials 2 and 3 returned the original input after parser failure, even though the serialize_token() section says original input preserves bytes but is neither normalized nor the rewritten output. Trial 3 also shows that the docs make template mutation discoverable, but do not strongly steer simple token-wrapper rewrites toward serialize_token() as the shorter, lower-risk pattern.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md serialize_token() and create_fragment() return/error guidance",
+      "problem": "The docs explain that returning original input is not normalized, but this warning is separated from create_fragment() null handling and easy to miss when writing string-returning helpers.",
+      "suggestion": "Add a concise fallback table for normalized-output functions: create_fragment() returns null before a rewrite starts; get_last_error() means the rewrite stopped early; returning raw input preserves bytes but violates normalized-output contracts; callers should choose null, empty string, exception, or documented partial output intentionally."
+    },
+    {
+      "location": "html-processor.md serialize_token() examples",
+      "problem": "The docs say serialize_token() can emit extra markup around selected tokens, but the example only removes tokens. Subjects still succeeded, but one used a secondary template mutation instead of the direct wrapper pattern.",
+      "suggestion": "Add a general example of a token-by-token rewrite that emits markup before and after selected current tokens, emphasizing that serialize_token() is the normalized representation to wrap and that get_updated_html() is for queued mutations."
+    },
+    {
+      "location": "html-processor.md inherited mutation API cross-references",
+      "problem": "HTML Processor inherits get_updated_html() and set_modifiable_text(), but the normalization-vs-mutation distinction is mostly documented in the Tag Processor page. This can make get_updated_html() look interchangeable with serialize_token() during HTML Processor rewrites.",
+      "suggestion": "In the HTML Processor serialization section, explicitly contrast accumulated serialize_token() output with inherited get_updated_html(): serialize_token() produces normalized token streams; get_updated_html() applies queued edits while preserving untouched source bytes."
+    },
+    {
+      "location": "html-processor.md next_token()/get_modifiable_text() quick-reference",
+      "problem": "The ordinary-text rules are documented well but spread across recipe, next_token(), and get_modifiable_text() sections.",
+      "suggestion": "Add a small checklist near get_modifiable_text(): for ordinary text, require #text, compare the already-decoded string, and serialize or set plaintext through the API to re-encode; for comments and SCRIPT/STYLE/TEXTAREA/TITLE opener text, opt in explicitly."
+    }
+  ]
+}

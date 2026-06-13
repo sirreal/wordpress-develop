@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment input, then walks every token with `next_token()`, skipping any token whose `get_tag()` is `SPAN` so both opening and closing span tags are removed while their contents remain. Every other token is appended via `serialize_token()`, which produces the normalized HTML serialization documented by the HTML Processor.",
+  "confidence": 90
+}

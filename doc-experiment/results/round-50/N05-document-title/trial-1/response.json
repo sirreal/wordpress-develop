@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_full_parser()` because the input is a complete HTML document and TITLE lives in document HEAD parsing, then searches for the first `TITLE` opener with `next_tag( 'TITLE' )` and reads its decoded text via `get_modifiable_text()`. If no TITLE is found, or no full parser can be created, it returns `null`.",
+  "confidence": 96
+}
