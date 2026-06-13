@@ -106,11 +106,28 @@
  *         }
  *     }
  *
- * Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do
- * not expose their contents as child `#text` tokens. If a caller wants that
- * text, read it from the element's own opening token with
- * {@see WP_HTML_Tag_Processor::get_modifiable_text}; otherwise the `#text`
- * filter above skips it naturally.
+ * Default policy: ordinary subtree text is not "every token with modifiable
+ * text." It is only the `#text` tokens reached by the walk. For example, in
+ * `<section>A<em>B</em><script>C</script><textarea>D</textarea></section>`,
+ * ordinary subtree text is `AB`: inline markup may split text across multiple
+ * `#text` tokens, but SCRIPT and TEXTAREA do not add ordinary `#text`
+ * descendants.
+ *
+ * Do not use {@see WP_HTML_Tag_Processor::get_modifiable_text} as the test
+ * for ordinary text. This is too broad:
+ *
+ *     $text .= $processor->get_modifiable_text();
+ *
+ * That unguarded form can append comments, processing instructions, and
+ * special-element opener text. First decide which token types belong in the
+ * caller's result, then read modifiable text only from those tokens.
+ *
+ * Opt-in policy: when the caller's contract explicitly asks for a special
+ * element's content, whitelist those opening element tokens and read their
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text}. TITLE and TEXTAREA
+ * provide decoded text on their opener tokens; SCRIPT and STYLE provide raw
+ * script or stylesheet text. Do not include special-element opener text merely
+ * because it is available.
  *
  * #### Recipe: rewrite while serializing tokens
  *
