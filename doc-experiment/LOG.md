@@ -95,6 +95,10 @@ the launch handoff cannot skip reference-fixture validation accidentally.
 The manifest's human-readable preflight command now mirrors that exact task
 selection instead of using a train-split shortcut.
 
+`validate-round.py` lifecycle counts now require valid artifacts. Malformed
+trial files or judge verdicts no longer count toward `trials-complete` or
+`judged` just because the files are present.
+
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.

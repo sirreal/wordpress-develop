@@ -479,6 +479,7 @@ def validate_round(results_dir: Path) -> dict:
 
     task_status = {}
     total_trials = 0
+    present_trial_artifacts = 0
     complete_trials = 0
     tasks_with_all_trials = 0
     tasks_with_judges = 0
@@ -488,6 +489,7 @@ def validate_round(results_dir: Path) -> dict:
         expected_trial_names = [f"trial-{i}" for i in range(1, expected_trials + 1)]
         missing_trials = []
         incomplete_trials = []
+        invalid_trials = []
         present_trials = []
 
         for trial_name in expected_trial_names:
@@ -501,6 +503,7 @@ def validate_round(results_dir: Path) -> dict:
             if not trial_dir.exists():
                 missing_trials.append(trial_name)
                 continue
+            present_trial_artifacts += 1
             present_trials.append(trial_name)
             missing_files = [name for name, path in files.items() if not path.exists()]
             if missing_files:
@@ -508,26 +511,37 @@ def validate_round(results_dir: Path) -> dict:
                     {"trial": trial_name, "missing_files": missing_files}
                 )
             else:
-                errors.extend(validate_trial_artifacts(trial_dir))
-                complete_trials += 1
+                trial_errors = validate_trial_artifacts(trial_dir)
+                if trial_errors:
+                    errors.extend(trial_errors)
+                    invalid_trials.append(trial_name)
+                else:
+                    complete_trials += 1
 
         judge_file = task_dir / "judge.json"
         has_judge = judge_file.exists()
+        valid_judge = False
         if has_judge:
-            tasks_with_judges += 1
-            errors.extend(validate_judge_artifact(judge_file, expected_trials))
+            judge_errors = validate_judge_artifact(judge_file, expected_trials)
+            if judge_errors:
+                errors.extend(judge_errors)
+            else:
+                tasks_with_judges += 1
+                valid_judge = True
 
-        if not missing_trials and not incomplete_trials:
+        if not missing_trials and not incomplete_trials and not invalid_trials:
             tasks_with_all_trials += 1
 
         task_status[task_id] = {
             "present_trials": present_trials,
             "missing_trials": missing_trials,
             "incomplete_trials": incomplete_trials,
+            "invalid_trials": invalid_trials,
             "has_judge": has_judge,
+            "valid_judge": valid_judge,
         }
 
-    has_trials = complete_trials > 0
+    has_trials = present_trial_artifacts > 0
     trials_complete = bool(expected_tasks) and complete_trials == total_trials
     judged = trials_complete and tasks_with_judges == len(expected_tasks)
     scored = judged and (results_dir / "round-summary.json").exists()
@@ -564,6 +578,7 @@ def validate_round(results_dir: Path) -> dict:
         "expected_task_count": len(expected_tasks),
         "expected_trials_per_task": expected_trials,
         "complete_trials": complete_trials,
+        "present_trial_artifacts": present_trial_artifacts,
         "expected_trials": total_trials,
         "tasks_with_all_trials": tasks_with_all_trials,
         "tasks_with_judges": tasks_with_judges,
@@ -600,7 +615,12 @@ def print_text(report: dict) -> None:
         missing = [
             task_id
             for task_id, status in report["task_status"].items()
-            if status["missing_trials"] or status["incomplete_trials"] or not status["has_judge"]
+            if (
+                status["missing_trials"]
+                or status["incomplete_trials"]
+                or status["invalid_trials"]
+                or not status["valid_judge"]
+            )
         ]
         if missing:
             print("- incomplete tasks: " + ", ".join(missing[:12]))

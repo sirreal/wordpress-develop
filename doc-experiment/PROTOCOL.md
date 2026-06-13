@@ -348,6 +348,10 @@ content-validated before a round can be considered judged or scored: every
 expected trial must have an adherence score, hallucinated-method list, and
 non-empty notes, and the task verdict must include non-empty failure analysis
 plus structured doc-gap entries.
+Lifecycle counts in `validate-round.py` include only valid artifacts; a
+present but malformed `candidate.php`, `response.json`, `execution.json`, or
+`judge.json` keeps the round incomplete and must be reconciled before
+advancing.
 `ingest-judges.py` validates trial completeness before writing judges and
 judged-state completeness before writing a summary. It also preflights judge
 workflow output shape:
