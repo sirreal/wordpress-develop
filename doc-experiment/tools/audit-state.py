@@ -29,6 +29,30 @@ CURRENT_JUDGE = {
     "service_tier": "priority",
 }
 
+SUBJECT_LADDER = [
+    {
+        "model": "gpt-5.4",
+        "reasoning_effort": "medium",
+        "service_tier": "priority",
+    },
+    {
+        "model": "gpt-5.4",
+        "reasoning_effort": "low",
+        "service_tier": "priority",
+    },
+    {
+        "model": "gpt-5.4-mini",
+        "reasoning_effort": "high",
+        "service_tier": "priority",
+    },
+    {
+        "model": "gpt-5.4-mini",
+        "reasoning_effort": "low",
+        "service_tier": "priority",
+    },
+]
+
+SATURATED_SCORE = 97.0
 DIAGNOSTIC_MODES = {"discoverability-probe", "shadow-doc-a/b"}
 
 
@@ -118,6 +142,68 @@ def latest_log_next_action() -> str | None:
     return " ".join(match.group(1).split())
 
 
+def format_policy(policy: dict | None) -> str:
+    if not policy:
+        return "unknown"
+    return (
+        f"{policy.get('model')}/"
+        f"{policy.get('reasoning_effort')}/"
+        f"{policy.get('service_tier')}"
+    )
+
+
+def policy_index(policy: dict | None, ladder: list[dict]) -> int | None:
+    if not policy:
+        return None
+    for index, item in enumerate(ladder):
+        if item == policy:
+            return index
+    return None
+
+
+def next_subject_tier(policy: dict | None) -> dict | None:
+    index = policy_index(policy, SUBJECT_LADDER)
+    if index is None or index + 1 >= len(SUBJECT_LADDER):
+        return None
+    return SUBJECT_LADDER[index + 1]
+
+
+def subject_from_text(text: str | None) -> dict | None:
+    if not text:
+        return None
+    normalized = text.replace("`", "").lower()
+    for policy in SUBJECT_LADDER:
+        needle = (
+            f"{policy['model']} / {policy['reasoning_effort']} / "
+            f"{policy['service_tier']}"
+        ).lower()
+        if needle in normalized:
+            return policy
+    return None
+
+
+def selected_subject(latest: dict | None, latest_log_action: str | None) -> tuple[dict, str]:
+    log_subject = subject_from_text(latest_log_action)
+    if log_subject:
+        return log_subject, "latest LOG.md next action"
+
+    if latest and latest.get("mode") == "weak-tier-calibration":
+        latest_subject = latest.get("metadata", {}).get("subject")
+        latest_score = latest.get("score")
+        if (
+            latest_subject
+            and latest_score is not None
+            and latest_score >= SATURATED_SCORE
+        ):
+            next_subject = next_subject_tier(latest_subject)
+            if next_subject:
+                return next_subject, f"saturated {latest['round']} weak-tier calibration"
+        if latest_subject:
+            return latest_subject, f"latest {latest['round']} weak-tier calibration"
+
+    return CURRENT_SUBJECT, "default current subject tier"
+
+
 def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
     proc = subprocess.run(
         [
@@ -146,7 +232,7 @@ def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
     return report, errors
 
 
-def prepared_current_rounds(train_ids: list[str]) -> list[dict]:
+def prepared_current_rounds(train_ids: list[str], subject_policy: dict) -> list[dict]:
     train_set = set(train_ids)
     prepared = []
     for round_dir in sorted((EXPERIMENT_ROOT / "results").glob("round-*")):
@@ -158,7 +244,7 @@ def prepared_current_rounds(train_ids: list[str]) -> list[dict]:
         metadata = json.loads(metadata_file.read_text())
         if metadata.get("mode") != "weak-tier-calibration":
             continue
-        if metadata.get("subject") != CURRENT_SUBJECT:
+        if metadata.get("subject") != subject_policy:
             continue
         if metadata.get("judge") != CURRENT_JUDGE:
             continue
@@ -232,7 +318,11 @@ def classify_paths(paths: list[str]) -> dict[str, list[str]]:
     return groups
 
 
-def current_no_edit_baselines(rounds: list[dict], train_ids: list[str]) -> list[dict]:
+def current_no_edit_baselines(
+    rounds: list[dict],
+    train_ids: list[str],
+    subject_policy: dict,
+) -> list[dict]:
     train_set = set(train_ids)
     baselines = []
     for round_info in rounds:
@@ -241,7 +331,7 @@ def current_no_edit_baselines(rounds: list[dict], train_ids: list[str]) -> list[
             continue
         if metadata.get("mode") not in {"weak-tier-calibration", "scored-train"}:
             continue
-        if metadata.get("subject") != CURRENT_SUBJECT:
+        if metadata.get("subject") != subject_policy:
             continue
         if metadata.get("judge") != CURRENT_JUDGE:
             continue
@@ -275,6 +365,7 @@ def build_audit() -> dict:
     rounds = completed_rounds()
     latest = rounds[-1] if rounds else None
     latest_log_action = latest_log_next_action()
+    active_subject, active_subject_reason = selected_subject(latest, latest_log_action)
 
     latest_commit = last_commit_for(latest["summary_file"]) if latest else None
     changed_since_latest = paths_changed_since(latest_commit) if latest_commit else []
@@ -302,10 +393,11 @@ def build_audit() -> dict:
         and latest.get("mode") == "checkpoint"
         and corpus_matches_latest_active
     )
-    current_baselines = current_no_edit_baselines(rounds, train_ids)
+    current_baselines = current_no_edit_baselines(rounds, train_ids, active_subject)
     current_baseline_exists = any(baseline["valid"] for baseline in current_baselines)
-    prepared_rounds = prepared_current_rounds(train_ids)
+    prepared_rounds = prepared_current_rounds(train_ids, active_subject)
     latest_prepared = prepared_rounds[-1] if prepared_rounds else None
+    next_round_name = f"round-{(latest['number'] + 1) if latest else 1}"
 
     mismatches = []
     if status_short:
@@ -334,7 +426,7 @@ def build_audit() -> dict:
     elif latest_prepared and latest_prepared["lifecycle"] == "prepared":
         next_action = (
             f"launch trials for prepared current-corpus baseline {latest_prepared['round']} "
-            "with gpt-5.4/medium/priority; use the local Codex CLI runner when the "
+            f"with {format_policy(active_subject)}; use the local Codex CLI runner when the "
             "Workflow UI runner is unavailable"
         )
         next_action_commands = [
@@ -372,8 +464,15 @@ def build_audit() -> dict:
     elif not current_baseline_exists:
         next_action = (
             "prepare and run weak-tier-calibration no-edit baseline on current train corpus "
-            "with gpt-5.4/medium/priority"
+            f"with {format_policy(active_subject)}"
         )
+        next_action_commands = [
+            f"python3 doc-experiment/tools/prepare-round.py {next_round_name} "
+            f"--mode weak-tier-calibration "
+            f"--subject-model {active_subject['model']} "
+            f"--subject-reasoning-effort {active_subject['reasoning_effort']} "
+            f"--subject-service-tier {active_subject['service_tier']}",
+        ]
     elif (latest_is_diagnostic_subset or latest_is_current_active_checkpoint) and latest_log_action:
         next_action = latest_log_action
     elif latest_is_diagnostic_subset:
@@ -417,7 +516,8 @@ def build_audit() -> dict:
             "task_ids": latest_current_train["task_ids"] if latest_current_train else [],
         },
         "current_policy": {
-            "subject": CURRENT_SUBJECT,
+            "subject": active_subject,
+            "subject_reason": active_subject_reason,
             "judge": CURRENT_JUDGE,
         },
         "comparability": {
@@ -447,6 +547,11 @@ def print_text(audit: dict) -> None:
     print(
         f"- active corpus: {audit['active_corpus']['train_count']} train, "
         f"{audit['active_corpus']['holdout_count']} holdout"
+    )
+    print(
+        "- selected subject policy: "
+        f"{format_policy(audit['current_policy']['subject'])} "
+        f"({audit['current_policy']['subject_reason']})"
     )
     print(
         f"- latest completed round: {latest['round']} mode {latest['mode']} "
