@@ -165,6 +165,7 @@ def run_probe(
         "--ephemeral",
         "--ignore-user-config",
         "--ignore-rules",
+        "--skip-git-repo-check",
         "--sandbox",
         "read-only",
         "--cd",
