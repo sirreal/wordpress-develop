@@ -25,10 +25,12 @@ text-policy issue: subjects sometimes over-include SCRIPT/STYLE/TEXTAREA/TITLE
 opener-carried modifiable text when ordinary `#text` extraction was intended.
 That is separate from the depth/direct-child traversal card.
 
-Decision: the held-out gate is clear. Promote an adapted, concise version of
-the round-34 depth-bounded traversal/direct-child card into the
-`WP_HTML_Processor` class documentation as one source hypothesis, then run the
-docs-only guard, stage docs, and score it as the next normal source round.
+Decision: the held-out gate is clear.
+
+Next action: promote an adapted, concise version of the round-34
+depth-bounded traversal/direct-child card into the `WP_HTML_Processor` class
+documentation as one source hypothesis, then run the docs-only guard, stage
+docs, and score it as the next normal source round.
 
 ## Rounds 33/34 — depth-bounded traversal scratch A/B wins
 
