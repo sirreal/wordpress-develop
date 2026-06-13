@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and structural token walking with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()`. It finds the first `TABLE`, then does a single depth-bounded pass that collects `TR` rows and `TD`/`TH` cell text the way the HTML Processor parses table structure, including implied table elements and decoded text content.",
+  "confidence": 84
+}

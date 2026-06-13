@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, finds the first `H1` with `next_tag()`, records its depth with `get_current_depth()`, then walks tokens inside that subtree with `next_token()`, concatenating only `#text` token content via `get_modifiable_text()`. That yields decoded text from nested elements while ignoring markup, and returns `null` only if no `H1` is found.",
+  "confidence": 93
+}

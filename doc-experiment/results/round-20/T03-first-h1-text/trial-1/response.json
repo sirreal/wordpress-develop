@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because structure matters, finds the first `H1` with `next_tag()`, records its opening depth with `get_current_depth()`, then walks its subtree with `next_token()` while the depth stays inside the heading. It concatenates decoded text from `#text` tokens via `get_modifiable_text()`, and also reads `get_modifiable_text()` from nested opening tag tokens so raw-text elements carried on their own token are included if present.",
+  "confidence": 87
+}

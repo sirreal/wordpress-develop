@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 20 — low-effort weak-tier calibration still saturated
+
+**Train 99.43 / core 99.34** under `weak-tier-calibration`, with subjects
+`gpt-5.4` / `low` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This was a no-edit calibration round using the round-19 source
+docs to test whether one step down the subject ladder gives a less saturated
+measurement instrument.
+
+Outcome: the tier is still functionally saturated on the current train corpus.
+All 45 subject trials passed all hidden tests. Concept means: attributes
+100.00, classes 100.00, normalization 100.00, serialization 99.40, text
+98.47, traversal 99.44.
+
+The round does produce useful adherence-only signal, especially for generic
+main-class recipe candidates:
+- T05-text-excerpt was the lowest task at 96.70, with all three trials passing
+  10/10 but adherence 90/88/89. Judge notes point to scattered guidance for
+  DOM-style text extraction: use `WP_HTML_Processor`, filter ordinary text
+  with `get_token_type() === '#text'`, skip comments and attributes, and opt
+  into element-carried text only when wanted.
+- N06-extract-toc scored 98.50. Trial 3 passed hidden cases but overused
+  `get_modifiable_text()` on non-closing named tokens; a judge probe showed it
+  would include comment text in a heading. This reinforces the same
+  "where text lives" / "DOM text versus modifiable text" gap.
+- T09-mark-keyword scored 98.80. Trial 3 over-applied incomplete-input and
+  normalization fallback guidance after a token-rewrite loop, risking loss of
+  accumulated edits. This supports a clearer token-rewrite completion policy,
+  not a task-shaped example.
+
+Interpretation: `gpt-5.4` / `low` is not a meaningfully weaker measuring
+instrument for functional failures, but it strengthens the case for a
+scratch-tested generic recipe block in the class-level docs: text extraction
+and token-rewrite recipes should teach broad API contracts rather than solve
+specific corpus tasks. Per the subject ladder, the next measurement action is
+a no-edit `gpt-5.4-mini` / `high` / `priority` calibration before using weaker
+tier results to promote another source docblock hypothesis.
+
 ## Round 19 — generic region-scan recipe lands
 
 **Train 99.59 / core 99.53** against the current train corpus with subject

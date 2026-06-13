@@ -38,6 +38,16 @@ placement/transfer edit as a generic class-level recipe plus compact
 method-local guard notes. N03 moved from 85.07 to 100.00 with all three
 trials at 11/11 and 100 adherence, so this hypothesis is confirmed.
 
+Round 20 calibrated the next subject setting,
+`gpt-5.4` / `low` / `priority`, against the same current docs. It scored
+99.43 train / 99.34 core with every hidden test passing, so this tier is still
+too saturated to be the main source-edit driver. Its adherence-only signal
+does support generic class-level recipe candidates, especially DOM-style text
+collection and token-rewrite completion policy. The next protocol-consistent
+action is a no-edit calibration one step lower, `gpt-5.4-mini` / `high` /
+`priority`, or a scratch A/B for the generic recipe idea if the owner chooses
+diagnostics over another ladder step.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -160,6 +170,15 @@ Round-19 probe result: a direct citation-only text-content recipe probe passed
 depth-bounded `#text` accumulation recipe and the SCRIPT/STYLE/TITLE/TEXTAREA
 element-token exception. Keep this as a weaker-tier or shadow-doc A/B
 candidate, not the next immediate source edit at the current tier.
+
+Round-20 calibration result: `gpt-5.4` / `low` remained functionally
+saturated, but gave repeated adherence-only evidence for this hypothesis.
+T05 was the lowest task (96.70) with all trials passing hidden tests but
+showing uncertainty about a general DOM-style text-extraction recipe. N06 had
+a passed near-miss where a subject appended `get_modifiable_text()` from
+comment-like tokens. If a weaker tier exposes the same pattern functionally,
+or a scratch A/B shows improvement, promote this as a generic main-class
+recipe/matrix rather than a task-shaped answer.
 
 Risk: medium-low if phrased as a token model instead of a task recipe.
 

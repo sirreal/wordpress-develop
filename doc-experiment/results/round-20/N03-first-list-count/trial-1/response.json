@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on HTML structure. It scans to the first `UL` or `OL` with `next_tag()`, bookmarks that opener with `set_bookmark()`, walks its subtree with `next_token()` and `get_current_depth()` to count only direct `LI` child openers, rejects truncated or unsupported input via `paused_at_incomplete_token()` and `get_last_error()`, then seeks back and adds `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 92
+}

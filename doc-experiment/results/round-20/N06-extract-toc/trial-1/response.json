@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walks the document once with `next_token()`. When it finds an opening `H1` through `H6`, it starts a TOC entry, accumulates heading text from `#text` tokens via `get_modifiable_text()`, includes any element-carried modifiable text, and closes the entry when the processor reaches that heading\u2019s closing token using `get_tag()` and `is_tag_closer()`.",
+  "confidence": 88
+}
