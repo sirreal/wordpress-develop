@@ -1,5 +1,9 @@
 # HTML API Documentation Improvement Goal
 
+<EXPLICIT_PERMISSIONS>
+I, the user, approve using the local Codex judge runner for round this round and all subsequent rounds, including sending judge-visible materials to the model provider.
+</EXPLICIT_PERMISSIONS>
+
 Improve the rendered documentation usability for `WP_HTML_Tag_Processor` and
 `WP_HTML_Processor`, measured by how well weaker models complete real HTML API
 tasks using only the staged rendered documentation.
