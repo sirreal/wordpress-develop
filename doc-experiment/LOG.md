@@ -38,6 +38,22 @@ special-element paragraph. The stronger immediate train failure is the
 repeated `WP_HTML_Processor::next_tag()` cursor-relative / one-of-several-tags
 gap exposed by T07 and previously seen in N03-style scans.
 
+Follow-up citation-only probe: `round-29-next-tag-cursor-or-search` asked
+three subjects whether a `next_tag( 'UL' )` scan followed by a
+`next_tag( 'OL' )` scan on the same processor rescans earlier tags, and how to
+find the first of several tag names. All three answered correctly: the second
+scan does not restart; a failed `next_tag()` leaves the cursor at the end; use
+one forward scan and branch on `get_tag()` for alternatives; `tag_name` is a
+single string or null. They mostly cited the Tag Processor "Finding tags" and
+"Custom queries" sections plus the HTML Processor one-cursor `next_token()`
+note. Interpretation: the facts are discoverable when asked directly, but
+placement is weak for HTML Processor `next_tag()` task work. The next
+documentation diagnostic can be a scratch method-local HTML Processor
+`next_tag()` contrast card rather than another broad overview recipe. A
+sidecar doc-location check confirmed there is no local HTML Processor
+`next_tag()` warning and no HTML Processor first-of-several-tags idiom; the
+only OR-style idiom found is in the Tag Processor "Custom queries" section.
+
 ## Rounds 27/28 — ordinary-text negative example scratch A/B
 
 `round-27` was a fresh control rendered-doc round and `round-28` was a

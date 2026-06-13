@@ -1,0 +1,149 @@
+{
+  "round": "round-29",
+  "mode": "discoverability-probe",
+  "question_id": "next-tag-cursor-or-search",
+  "question": "Using only the rendered docs, answer with citations: On a single WP_HTML_Processor instance, if code calls next_tag( 'UL' ) until it returns false and then calls next_tag( 'OL' ), will the second search rescan earlier tags from the beginning? Why or why not? What is the documented way to find the first occurrence of one of several tag names such as UL or OL in document order? Does tag_name accept multiple alternatives? Cite the relevant rendered-doc headings or method sections.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-29/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "next-tag-cursor-or-search",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "No. On a single processor instance, `next_tag( 'OL' )` will not rescan earlier tags after `next_tag( 'UL' )` has already run to `false`; the cursor is already at end-of-file, and the docs say you must recreate the processor to reach earlier tags again unless you planned ahead with bookmarks. To find the first `UL` or `OL` in document order, the documented approach is to scan forward and inspect each match with `get_tag()` in user code, as shown by the custom-query example for `DIV` or `SPAN`. `tag_name` is documented as a single `string|null`, not multiple alternatives.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Finding tags",
+            "support": "\"If it returns `false`, however, it failed to find the tag and moved the cursor to the end of the file.\" and \"Once the cursor reaches the end of the file the processor is done and if you want to reach an earlier tag you will need to recreate the processor and start over, as it's unable to back up or move in reverse.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Bookmarks",
+            "support": "\"Later on, after continuing to scan other tags, it's possible to `seek` to one of the set bookmarks and then proceed again from that point forward.\" This is documented as the exception to the no-backing-up rule."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "\"There is only ONE cursor. Every call to `next_token()` advances the same shared position.\" This supports that a single processor instance advances through one shared position rather than restarting searches from the beginning."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Custom queries",
+            "support": "The documented example for multiple tag names is: `while ( $remaining_count > 0 && $tags->next_tag() ) { if ( ( 'DIV' === $tags->get_tag() || 'SPAN' === $tags->get_tag() ) ... ) { ... } }`, which shows scanning in document order and testing `get_tag()` for alternatives in code."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_tag()",
+            "support": "The parameter contract documents `@type string|null $tag_name Which tag to find, or `null` for \"any tag.\"`"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_tag()",
+            "support": "The HTML Processor query contract likewise documents `@type string|null $tag_name Which tag to find, or `null` for \"any tag.\"` and does not document an array or list of alternative tag names."
+          }
+        ],
+        "rationale": "The docs explicitly say a failed `next_tag()` leaves the cursor at EOF and earlier tags require recreating the processor or using bookmarks, while the only documented multi-tag pattern is a forward scan plus `get_tag()` checks, and `tag_name` is specified only as a single string.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "next-tag-cursor-or-search",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "No. On a single `WP_HTML_Processor`/`WP_HTML_Tag_Processor` instance, calling `next_tag( 'UL' )` until it returns `false` leaves the cursor at end-of-file, and the docs say that once the cursor reaches the end, you must recreate the processor to reach earlier tags. So a later `next_tag( 'OL' )` does not rescan from the beginning. The documented way to find the first `UL` or `OL` in document order is to scan forward and inspect each match yourself, e.g. with `next_tag()` and `get_tag()` as shown in the “Custom queries” example. `tag_name` does not document multiple alternatives; its documented type is a single `string|null`, not an array/list of tag names.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Finding tags",
+            "support": "“If it returns `false`, however, it failed to find the tag and moved the cursor to the end of the file. Once the cursor reaches the end of the file the processor is done and if you want to reach an earlier tag you will need to recreate the processor and start over, as it's unable to back up or move in reverse.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_tag()`",
+            "support": "The query contract documents `@type string|null $tag_name Which tag to find, or \u0000null` for “any tag.”` and does not list multiple tag-name alternatives."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`next_tag()`",
+            "support": "The parameter contract documents `@type string|null $tag_name Which tag to find, or `null` for “any tag.” Matching is ASCII case-insensitive.`"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Custom queries",
+            "support": "The docs show the supported pattern for multiple names: `while ( $remaining_count > 0 && $tags->next_tag() ) { if ( ( 'DIV' === $tags->get_tag() || 'SPAN' === $tags->get_tag() ) ... ) { ... } }`, which scans in document order and checks `get_tag()` against several alternatives."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“There is only ONE cursor. Every call to `next_token()` advances the same shared position…” This reinforces that the processor advances a shared forward position rather than restarting searches automatically."
+          }
+        ],
+        "rationale": "The cited sections directly state that the cursor advances to end-of-file and cannot move backward without recreating or seeking, while the query contracts only allow a single `tag_name`; the only documented multi-name pattern is to scan forward and test `get_tag()` yourself.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "next-tag-cursor-or-search",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "No. On the same processor instance, once `next_tag( 'UL' )` has been called until it returns `false`, the cursor is at the end of the document, so a later `next_tag( 'OL' )` does not rescan earlier tags from the beginning. The documented way to find the first `UL` or `OL` in document order is to scan forward with `next_tag()` and inspect `get_tag()` on each match, as shown in the custom-query example. `tag_name` is only documented as a single `string|null`, not a list of alternatives.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Finding tags",
+            "support": "“If it returns `false`, however, it failed to find the tag and moved the cursor to the end of the file.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Finding tags",
+            "support": "“Once the cursor reaches the end of the file the processor is done and if you want to reach an earlier tag you will need to recreate the processor and start over, as it's unable to back up or move in reverse.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`next_tag()`",
+            "support": "`$query` is documented with `@type string|null $tag_name Which tag to find, or null for \"any tag.\"`"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Custom queries",
+            "support": "The documented example finds multiple tag names by scanning and checking `get_tag()`: `if ( ( 'DIV' === $tags->get_tag() || 'SPAN' === $tags->get_tag() ) ... )` inside `while ( $remaining_count > 0 && $tags->next_tag() )`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“There is only ONE cursor. Every call to `next_token()` advances the same shared position...”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_tag()`",
+            "support": "For `WP_HTML_Processor::next_tag()`, the query docs list `@type string|null $tag_name Which tag to find, or `null` for \"any tag.\"` and do not document multiple tag-name alternatives."
+          }
+        ],
+        "rationale": "The docs explicitly say a failed `next_tag()` leaves the cursor at end-of-file and earlier tags require recreating the processor, while the only documented multi-tag pattern is an unrestricted scan plus `get_tag()` checks; `tag_name` is documented as a single string or null, not an array of alternatives.",
+        "confidence": 97
+      }
+    }
+  ]
+}

@@ -258,6 +258,20 @@ earlier nested `OL` elements because the cursor was already at EOF. Judges
 noted that the Tag Processor overview has the cursor warning, but the HTML
 Processor `next_tag()` method docs do not make it local enough.
 
+Probe result: `round-29-next-tag-cursor-or-search` passed 3/3. Directly asked
+subjects found the cursor rule and OR-search idiom, but they cited Tag
+Processor "Finding tags"/"Custom queries" and HTML Processor `next_token()`
+one-cursor guidance rather than local HTML Processor `next_tag()` wording.
+Treat this as a placement/transfer hypothesis. Next diagnostic: scratch
+method-local `next_tag()` card near the HTML Processor method docs, then test
+T07/N03-style tasks before source promotion.
+
+Sidecar doc-location check: the cursor movement rule is currently under
+Tag Processor "Finding tags" / "When matching fails"; the only OR-style idiom
+is under Tag Processor "Custom queries". The rendered HTML Processor
+`next_tag()` method section has neither a local cursor warning nor an
+HTML Processor first-of-several-tags idiom.
+
 Risk: low-medium. Keep it generic and avoid a nested-list recipe; teach cursor
 state and first-of-several-tags search.
 
