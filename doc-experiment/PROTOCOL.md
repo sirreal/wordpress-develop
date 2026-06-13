@@ -309,7 +309,10 @@ python3 doc-experiment/tools/validate-workflow-output.py judges \
 ```
 
 `aggregate-round.py` refuses metadata-backed rounds with missing judges,
-missing trial executions, or mismatched task sets.
+missing trial executions, or mismatched task sets. For metadata-backed scored
+rounds, `validate-round.py --require-scored` recomputes the aggregate and
+rejects a `round-summary.json` that no longer matches the persisted trial
+executions, judge verdicts, metadata, and current corpus labels.
 
 ```sh
 python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN

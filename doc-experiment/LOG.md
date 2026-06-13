@@ -101,6 +101,11 @@ Workflow output validation now rejects malformed envelopes, non-array
 Trial and judge ingestion run this validation before reading or persisting the
 payload, keeping bad runner output from creating partial round artifacts.
 
+For metadata-backed scored rounds, round validation now recomputes the
+aggregate from persisted trial executions, judge verdicts, metadata, and corpus
+labels before trusting `round-summary.json`. A hand-edited or stale summary
+therefore cannot make a round appear scored.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

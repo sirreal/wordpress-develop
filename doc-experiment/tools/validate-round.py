@@ -298,6 +298,35 @@ def validate_judge_artifact(judge_file: Path, expected_trials: int) -> list[str]
     return errors
 
 
+def validate_summary_reproducibility(results_dir: Path, summary: dict) -> list[str]:
+    proc = subprocess.run(
+        [
+            "python3",
+            str(EXPERIMENT_ROOT / "tools" / "aggregate-round.py"),
+            str(results_dir),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout).strip()
+        return [f"round-summary reproducibility failed: {message}"]
+
+    try:
+        expected = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return [f"round-summary reproducibility produced invalid JSON: {exc}"]
+
+    errors = []
+    keys = ("round_score", "core_score", "by_split", "by_concept", "tasks", "round_metadata")
+    for key in keys:
+        if summary.get(key) != expected.get(key):
+            errors.append(f"round-summary mismatch for {key}")
+    return errors
+
+
 def validate_round(results_dir: Path) -> dict:
     metadata, metadata_tasks, metadata_trials = expected_from_metadata(results_dir)
     summary, summary_tasks, summary_trials = expected_from_summary(results_dir)
@@ -383,6 +412,8 @@ def validate_round(results_dir: Path) -> dict:
         warnings.append("trials are complete but one or more judge.json files are missing")
     if judged and not scored:
         warnings.append("judges are complete but round-summary.json is missing")
+    if metadata and scored and not errors:
+        errors.extend(validate_summary_reproducibility(results_dir, summary))
 
     if scored:
         lifecycle = "scored"
