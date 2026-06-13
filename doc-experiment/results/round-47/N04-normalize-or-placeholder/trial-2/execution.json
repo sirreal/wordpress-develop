@@ -1,0 +1,83 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-47/N04-normalize-or-placeholder/trial-2/candidate.php",
+  "function": "normalize_or_placeholder",
+  "passed": 7,
+  "total": 7,
+  "cases": [
+    {
+      "id": "unclosed-tags-normalize",
+      "status": "pass",
+      "expected": "<div><p>Hello</p></div>",
+      "actual": "<div><p>Hello</p></div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "table-normalizes",
+      "status": "pass",
+      "expected": "<table><tbody><tr><td>ok</td></tr></tbody></table>",
+      "actual": "<table><tbody><tr><td>ok</td></tr></tbody></table>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "attribute-quoting-normalizes",
+      "status": "pass",
+      "expected": "<a href=\"x\" class=\"test\">go</a>",
+      "actual": "<a href=\"x\" class=\"test\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entities-normalize",
+      "status": "pass",
+      "expected": "<p>Fish &amp; chips</p>",
+      "actual": "<p>Fish &amp; chips</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unsupported-misnested-formatting",
+      "status": "pass",
+      "expected": "<p>Unsupported HTML</p>",
+      "actual": "<p>Unsupported HTML</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": [
+        {
+          "function": "WP_HTML_Processor::serialize",
+          "message": "Cannot serialize HTML Processor with parsing error: unsupported.",
+          "level": 512
+        }
+      ]
+    },
+    {
+      "id": "unsupported-anchor-misnesting",
+      "status": "pass",
+      "expected": "<p>Unsupported HTML</p>",
+      "actual": "<p>Unsupported HTML</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": [
+        {
+          "function": "WP_HTML_Processor::serialize",
+          "message": "Cannot serialize HTML Processor with parsing error: unsupported.",
+          "level": 512
+        }
+      ]
+    },
+    {
+      "id": "empty-fragment",
+      "status": "pass",
+      "expected": "",
+      "actual": "",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

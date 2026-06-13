@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat tag-attribute edit where the rest of the HTML must be preserved exactly. The function constructs a processor with `new WP_HTML_Tag_Processor( $html )`, scans all `IMG` tags case-insensitively with `next_tag( 'img' )`, adds `wp-image` via `add_class()`, and returns the result with `get_updated_html()`, which preserves untouched bytes and does not treat comment contents as real tags.",
+  "confidence": 98
+}

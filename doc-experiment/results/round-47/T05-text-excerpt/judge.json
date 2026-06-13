@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), read decoded #text plus opening TITLE/TEXTAREA modifiable text, and avoided SCRIPT/STYLE. All HTML API calls are documented. Minor adherence issue: it treats paused_at_incomplete_token() or get_last_error() as grounds to erase already-collected read-only text; the docs say those flags report scan completeness and caller policy should decide."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 85,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Primary path uses the right HTML Processor token-walk pattern and documented methods. The main weakness is the fallback to new WP_HTML_Tag_Processor() after create_fragment() failure or get_last_error(); the rendered docs explicitly distinguish lexical Tag Processor scans from parsed BODY-fragment text extraction. This fallback can produce text that is not the parsed fragment text when unsupported structural markup is involved."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Uses the correct processor, only documented APIs, a single token walk, explicit #text handling, explicit opening TITLE/TEXTAREA opt-in, decoded modifiable text, and Unicode-aware truncation. Its behavior also aligns with the docs' read-only completion policy: already-visited text is not discarded solely because later input is incomplete or unsupported."
+    }
+  ],
+  "failure_analysis": "All three trials passed every hidden case, so there were no hidden-case failures to attribute. The docs did well on the key concepts for this task: html-processor.md's overview and create_fragment() guidance point subjects to WP_HTML_Processor for BODY fragments; the 'Recipe: collect DOM-style text from a subtree' section warns that ordinary text is #text tokens only; the opt-in policy table explains TITLE/TEXTAREA opener-carried decoded text versus SCRIPT/STYLE raw text; get_modifiable_text() explicitly says the returned #text, TITLE, and TEXTAREA text is decoded and UTF-8.\n\nNear-misses: trial-1 over-applied completion diagnostics, returning an empty string after an otherwise useful read-only scan if paused_at_incomplete_token() or get_last_error() was set. That likely came from mutation/rewrite examples that emphasize rejecting incomplete or unsupported scans, despite the later read-only policy note. trial-2 treated WP_HTML_Tag_Processor as a recovery parser after an HTML Processor abort. The docs state that the Tag Processor is lexical and not parsed fragment text extraction, but the fallback-policy language could more directly warn that a Tag Processor fallback is not semantically equivalent for text content.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Recipe: collect DOM-style text from a subtree / Quick policy table",
+      "problem": "The read-only completion policy is correct but easy to miss after several mutation-oriented examples that recommend rejecting incomplete or unsupported scans.",
+      "suggestion": "Add a short read-only example or note showing that already-visited text remains valid data, and that clearing it on paused_at_incomplete_token() is only appropriate when the caller explicitly requires complete source bytes."
+    },
+    {
+      "location": "html-processor.md > Design and limitations / unsupported markup and fallback discussion",
+      "problem": "The docs say fallback is the caller's contract, but do not explicitly warn that WP_HTML_Tag_Processor is not a semantic fallback for parsed text extraction after get_last_error().",
+      "suggestion": "State that Tag Processor fallback is lexical/byte-oriented and may include text the HTML Processor would not expose in parsed tree order; use it only for deliberately degraded behavior, not as equivalent DOM text extraction."
+    },
+    {
+      "location": "html-processor.md > get_tag()",
+      "problem": "The WP_HTML_Processor get_tag() method section uses a WP_HTML_Tag_Processor example, which blurs which inherited methods are intended to be called on an HTML Processor.",
+      "suggestion": "Use a WP_HTML_Processor::create_fragment() example there, or add a sentence that inherited Tag Processor accessors shown in the HTML Processor docs are callable on WP_HTML_Processor instances."
+    }
+  ]
+}

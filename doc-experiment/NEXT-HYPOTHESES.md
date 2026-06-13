@@ -218,6 +218,16 @@ text-policy decision table in `WP_HTML_Processor`, keeping the compact
 decision-table shape and method-local opt-in reminder while preserving the
 caller-policy framing for read-only partial scans.
 
+Round 47 confirmed that source promotion: train 99.55 / core 99.48, all 45
+train trials passed hidden cases, and the ordinary `#text` vs special-element
+opener-text boundary held across T03/T05/T06/T08/N06. Keep the source edit.
+The remaining train near-miss is narrower: read-only extractors still often
+discard already visited tokens when `paused_at_incomplete_token()` is true.
+Because the fact is already present but weakly transferred, the next valid
+action is a scratch rendered-doc A/B, not a direct source edit. Test a compact
+read-only completion-policy note/example against T05/T06/T08/N06, with the
+decision framed as best-effort extraction versus complete-source validation.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

@@ -2,6 +2,41 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 47 — text-policy decision table source edit confirmed
+
+**Train 99.55 / core 99.48** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `29a148a4f7`, which promoted the winning
+rounds-44/45 text-policy decision table into the `WP_HTML_Processor` source
+docs.
+
+Outcome: keep. All 45 subject trials passed all hidden cases. Compared with
+the previous comparable scored-train round, round 43, train rose 98.18 ->
+99.55. That comparison includes round 43's known generic T05 PHP bug, so the
+more useful read is that round 47 is back in the high-signal band and below
+round 36 only by judge noise, 99.65 -> 99.55. There is no revert signal and
+no all-trial task regression.
+
+Target tasks stayed strong: T03 was 100.00, T05 was 98.00, T06 was 99.40,
+T08 was 99.40, and N06 was 99.20. Judges credited the promoted table and
+method-local reminders for the key transfer: candidates consistently used
+ordinary `#text` tokens for DOM-style heading, table-cell, link, and article
+text, and treated SCRIPT/STYLE/TITLE/TEXTAREA opener-carried text as opt-in
+data rather than ordinary subtree text.
+
+Residual signal: read-only completion policy is still not crisp enough. In
+T05, T06, T08, and N06, judges repeatedly saw candidates erase already
+collected read-only results when `paused_at_incomplete_token()` was true, even
+though the new source docs say this is caller policy. This is a real train
+near-miss, but the source docs already contain the basic fact, so do not
+promote another source wording change directly. Test a scratch variant that
+makes the read-only best-effort vs complete-source-validation decision more
+concrete.
+
+Next action: commit round-47 results separately, then run a focused scratch
+A/B for read-only completion policy on the affected train tasks before any
+additional source promotion.
+
 ## Round 46 — checkpoint clears text-policy promotion gate
 
 **All 99.36 / train 99.63 / held-out 98.33 / core 99.28** under

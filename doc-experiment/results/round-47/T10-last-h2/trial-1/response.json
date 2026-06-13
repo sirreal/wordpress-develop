@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, position-based scan: `next_tag( 'H2' )` finds each `H2` opener, `set_bookmark()` repeatedly moves the same bookmark to the latest match, `has_bookmark()` detects whether any `H2` was found, `seek()` jumps back to the last one, `add_class()` adds `final-section`, and `get_updated_html()` returns the modified HTML while preserving untouched bytes.",
+  "confidence": 95
+}

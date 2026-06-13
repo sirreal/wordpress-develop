@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction is structure-sensitive, then scans tags in document order with `next_tag()`. For each `H1` through `H6`, it records the opening tag depth with `get_current_depth()` and walks that heading\u2019s subtree with `next_token()`, appending only ordinary `#text` token content via `get_token_type()` and `get_modifiable_text()` so nested markup contributes text but not tags.",
+  "confidence": 87
+}

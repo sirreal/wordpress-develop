@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, which the docs recommend for flat position-based class edits. All called APIs are documented: constructor, next_tag, set_bookmark, has_bookmark, seek, add_class, release_bookmark, and get_updated_html. The repeated same-name bookmark pattern is explicitly documented for remembering the last match. Passed 6/6 cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct processor choice, no undocumented calls, idiomatic forward scan plus bookmark seek, add_class for existing/missing class handling, and get_updated_html for byte-preserving output. Passed 6/6 cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. The explanation correctly identifies the byte-preserving linear scan and bookmark overwrite behavior. No hallucinated APIs or misuse. Passed 6/6 cases with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there were no case-specific failures to attribute to misconceptions. The docs appear to have worked well for this task in three places: html-tag-processor.md > Which processor should I use? clearly distinguishes flat tag/class edits from structural parsing; html-tag-processor.md > Finding tags documents next_tag('img') style tag-name scanning and its forward-only cursor; and html-tag-processor.md > set_bookmark explicitly says a common use is remembering the last matching tag by re-setting the same bookmark name on every match, then seeking back once after the scan completes. The add_class and get_updated_html method docs also directly support the expected existing-class behavior and byte-preserving output. The only near-miss is incomplete input: html-tag-processor.md > When matching fails explains that next_tag() returning false can mean either no match or an incomplete trailing syntax element, but the bookmark-based 'last match' recipe does not restate how to decide whether a trailing incomplete token should invalidate a 'last item' edit. The task/reference accepted the simple best-effort interpretation, and no hidden case exercised truncation.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md > Finding tags / Bookmarks",
+      "problem": "The direct 'remember the last matching tag' pattern is present under set_bookmark(), but it is easy to miss when starting from next_tag() and the forward-only cursor discussion.",
+      "suggestion": "Add a short cross-reference from Finding tags to the bookmark recipe for backward edits after a full scan, phrased generally as 'remember the last matching token by reusing one bookmark name.'"
+    },
+    {
+      "location": "html-tag-processor.md > When matching fails",
+      "problem": "The docs explain that next_tag() false can also mean incomplete input, but they do not connect that ambiguity to algorithms that act after scanning to the end, such as 'edit the last match seen.'",
+      "suggestion": "Document the contract decision: if code must prove no later match exists, check paused_at_incomplete_token() after the scan; if best-effort over complete tokens is acceptable, acting on the saved bookmark is reasonable."
+    },
+    {
+      "location": "html-tag-processor.md > add_class",
+      "problem": "The text describes appending to existing class attributes and creating missing ones, but examples would make the output contract easier to internalize for generated code.",
+      "suggestion": "Add compact before/after examples showing add_class on a tag with no class, with an existing class list, and with the target class already present."
+    }
+  ]
+}

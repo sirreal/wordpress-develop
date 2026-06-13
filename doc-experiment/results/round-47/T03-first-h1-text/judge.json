@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used `WP_HTML_Processor::create_fragment()`, `next_tag('H1')`, `get_current_depth()`, `next_token()`, `get_token_type()`, and `get_modifiable_text()`, all documented. The depth-bounded subtree walk and `#text` guard match the documented DOM-style text extraction recipe. Passed 8/8 with no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern as the reference: HTML Processor for tree-aware BODY-fragment parsing, first matching `H1`, depth-bounded token walk, and decoded text from `#text` tokens only. Passed 8/8 with no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "All API calls are documented and used idiomatically. It handles nested markup, empty text, decoded entities, no-H1 null, and unclosed H1 behavior through the documented processor/token semantics. Passed 8/8 with no `_doing_it_wrong` records."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the trials. The docs did the important things well: `html-processor.md` explicitly says text extraction is tree-aware, recommends the HTML Processor for collecting an element's text, shows the depth-bounded `next_token()` subtree walk, and warns to append only `#text` tokens rather than treating every `get_modifiable_text()` result as DOM text. The `next_token()` section also explains that the HTML Processor reports closing tokens for unclosed input, which supports the unclosed-H1 case. The `get_modifiable_text()` section states that `#text` content is already decoded, preventing double-decoding or raw entity output. Near-miss: the incomplete-input guidance is mutation-focused in places, but the read-only extraction policy table correctly leaves truncation handling to the caller, so subjects did not reject the partial unclosed heading.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > `next_token()` / subtree-depth recipes",
+      "problem": "The depth-bound contract is demonstrated in recipes, but the opener/descendant/closer/next-sibling depth transitions are not shown as a compact reusable trace. Readers could still make off-by-one mistakes when adapting the pattern.",
+      "suggestion": "Add a small generic token/depth table for a container with nested inline markup and a following sibling, including the unclosed-input virtual closer case, and state the reusable rule: after matching an opener, descendants remain in the subtree while current depth is greater than or equal to the opener depth."
+    },
+    {
+      "location": "html-tag-processor.md and html-processor.md > processor choice guidance",
+      "problem": "The guidance is strong, but split across two files. Because the Tag Processor also exposes `next_token()` and `get_modifiable_text()`, readers may still try lexical scans for nested text extraction.",
+      "suggestion": "Add a cross-linked 'text content extraction' note near both construction sections: use `WP_HTML_Processor::create_fragment()` for BODY-fragment element text or containment-sensitive work; reserve Tag Processor token walks for lexical scans that do not require tree structure or implied-closing semantics."
+    },
+    {
+      "location": "`get_modifiable_text()` docs",
+      "problem": "The method can return `''` for non-text tokens, empty text, or valid empty content. The docs warn it is not a predicate, but the empty-string distinction is easy to miss in extraction tasks where empty content is different from absence.",
+      "suggestion": "Add a concise example showing an ordinary container opener, an image-only/empty container, and a real `#text` token, emphasizing that callers should test `get_token_type()` first and preserve `''` when the caller distinguishes empty content from no matching element."
+    }
+  ]
+}
