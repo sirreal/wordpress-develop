@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the document for the first `<title>` tag with `next_tag( 'title' )`. Because `TITLE` is documented as a special element whose contents are exposed as decoded modifiable text on the matched opener token, `get_modifiable_text()` returns the title text, including the empty string for an empty `<title></title>`, while a missing title returns `null`.",
+  "confidence": 95
+}

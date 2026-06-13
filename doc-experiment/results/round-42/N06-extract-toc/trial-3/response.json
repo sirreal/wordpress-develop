@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, scans tokens in document order with `next_token()`, detects heading openers via `get_token_type()`, `is_tag_closer()`, and `get_tag()`, then walks each heading subtree bounded by `get_current_depth()` and concatenates descendant text from `#text` tokens with `get_modifiable_text()`, also opting in to documented special text-carrying element tokens when they appear inside a heading.",
+  "confidence": 87
+}

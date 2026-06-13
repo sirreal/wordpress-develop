@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat scan over every tag with `next_tag()`, collects matching attribute names via `get_attribute_names_with_prefix( 'data-track-' )`, removes each one with `remove_attribute()`, and returns the edited markup with `get_updated_html()`. That prefix match is case-insensitive and only targets names beginning with `data-track-`, so similar names like `data-track` and `data-tracker` are preserved.",
+  "confidence": 98
+}

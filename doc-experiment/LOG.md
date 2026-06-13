@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 42 — checkpoint clears fallback-policy promotion gate
+
+**All 99.29 / train 99.54 / held-out 98.38 / core 99.21** under
+`checkpoint`, with subjects `gpt-5.4` / `medium` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This scored the current source docs after
+the round-36 depth/direct-child source edit and before promoting the winning
+round-41 serialization fallback-policy scratch card.
+
+Outcome: stable enough to continue. All 57 subject trials passed all hidden
+cases. Compared with the previous checkpoint, round 35, train rose 99.50 ->
+99.54 while held-out fell 99.38 -> 98.38. The held-out decline is below the
+2-point revert threshold and is not an all-trial functional regression:
+N01-remove-external-class stayed 100.00, N02-collect-figure-images was 98.90,
+H04-remove-empty-paragraphs was 98.20, and N05-document-title fell to 96.40
+from one adherence-only trial. Held-out judge gaps remain regression-sentinel
+data only and must not drive the next edit.
+
+The train tasks tied to the fallback-policy candidate stayed strong:
+N04-normalize-or-placeholder was 100.00, T12-unwrap-spans was 98.80, and
+T09-mark-keyword was 99.80. Round-42 judges still noted the same generic gap:
+after a token-by-token `serialize_token()` rewrite, `normalize( $html )` on
+the original input or returning raw input discards the accumulated rewrite and
+is only a caller-chosen fallback, not normalized rewritten output.
+
+Decision: checkpoint gate is clear. Promote one adapted source docblock
+hypothesis for serialization fallback policy, making the anti-pattern more
+explicit than the round-41 scratch wording.
+
+Next action: commit round-42 results separately, then edit the
+`WP_HTML_Processor` source docs for the fallback-policy hypothesis, run the
+docs-only guard, stage docs, and score the source edit as the next normal
+source round.
+
 ## Rounds 40/41 — serialization fallback scratch A/B wins
 
 `round-40` was the control rendered-doc round and `round-41` was a

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used the intended WP_HTML_Processor::create_full_parser(), checked null creation, used documented next_tag('TITLE') and get_modifiable_text(). Correctly relies on decoded TITLE modifiable text and preserves empty string versus null. Small deduction: it does not check get_namespace() or structural location, so a preceding SVG/MathML TITLE could be mistaken for the document title."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Same strong API use as trial-1: full parser, documented cursor walk, documented decoded TITLE text. No _doing_it_wrong records. The while loop does not actually filter anything, so it still has the same namespace/structure near-miss as trial-1."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 74,
+      "hallucinated_methods": [],
+      "notes": "All called APIs are documented: WP_HTML_Tag_Processor constructor, next_tag(), and get_modifiable_text(). It passes because TITLE is documented as a special element with decoded modifiable text. Major deduction: the task is complete-document/document-title work, and the rendered docs specifically steer TITLE-in-HEAD/full-document parsing to WP_HTML_Processor::create_full_parser(); the Tag Processor is only lexical and lacks structural/namespace awareness."
+    }
+  ],
+  "failure_analysis": "All trials passed the frozen hidden cases, with no _doing_it_wrong records. The docs did well on the core contract: create_full_parser() is documented for complete documents, next_tag() is documented as a forward cursor search, and get_modifiable_text() explicitly says TITLE/TEXTAREA text is decoded and carried on the opening element token, which led all subjects to preserve decoded entities and empty titles. Near-misses: trials 1 and 2 omit the reference implementation's get_namespace() guard, and trial 3 chose the lexical Tag Processor. The likely documentation cause is that namespace collisions are not called out near the TITLE/get_modifiable_text examples, while the Tag Processor page contains a token-walking example that extracts TITLE text and can look suitable despite later reminders that complete-document TITLE-in-HEAD parsing belongs to the HTML Processor.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md#get_modifiable_text",
+      "problem": "The TITLE example shows how to read special-element text but does not warn that tag-name searches can encounter same-named foreign-content elements.",
+      "suggestion": "Add a general note that when selecting HTML elements by name in full documents with SVG/MathML, callers should check get_namespace() === 'html' or otherwise constrain by structure."
+    },
+    {
+      "location": "html-processor.md#next_tag",
+      "problem": "The tag_name query docs do not make namespace matching behavior explicit.",
+      "suggestion": "Clarify whether next_tag('NAME') matches by local name across namespaces, and show the paired namespace-check pattern for names that exist in HTML and foreign content."
+    },
+    {
+      "location": "html-tag-processor.md#Tokens and finer-grained processing",
+      "problem": "The lexical token example extracts TITLE text, which can encourage Tag Processor use for document metadata even though it lacks document-tree semantics.",
+      "suggestion": "Label that example as lexical extraction only, and cross-link to the HTML Processor full-parser pattern for document-level metadata or HEAD-sensitive reads."
+    },
+    {
+      "location": "html-tag-processor.md#get_modifiable_text",
+      "problem": "The reminder about complete-document TITLE-in-HEAD parsing is useful but buried after the generic decoded-text explanation.",
+      "suggestion": "Move or duplicate that reminder near the TITLE special-element discussion so users choosing between processors see it before copying Tag Processor patterns."
+    }
+  ]
+}

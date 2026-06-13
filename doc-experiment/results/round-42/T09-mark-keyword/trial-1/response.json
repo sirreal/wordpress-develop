@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walks tokens with `next_token()` and rebuilds normalized HTML with `serialize_token()`. Only ordinary `#text` tokens are considered for wrapping, and their decoded text is read via `get_modifiable_text()` so character references match the keyword correctly; special text-bearing elements like `script`, `style`, `title`, and `textarea` are not wrapped because their text is carried on the element token, not as `#text` children.",
+  "confidence": 74
+}

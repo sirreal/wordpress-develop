@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because ancestor-aware structure is required. It scans list openers with `next_tag()`, checks each matched tag\u2019s `get_breadcrumbs()` for any earlier `UL` or `OL` ancestor, adds the `nested-list` class with `add_class()`, and returns the byte-preserving edited fragment with `get_updated_html()`.",
+  "confidence": 90
+}

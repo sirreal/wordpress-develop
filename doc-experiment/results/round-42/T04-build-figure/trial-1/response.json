@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template using `WP_HTML_Tag_Processor`, which the docs recommend when exact attribute order matters. It updates the existing `src` and `alt` attributes with `set_attribute()`, then walks tokens with `next_token()` to find the placeholder `#text` node inside `figcaption` and replaces it with `set_modifiable_text()`, letting the HTML API handle all required encoding.",
+  "confidence": 95
+}

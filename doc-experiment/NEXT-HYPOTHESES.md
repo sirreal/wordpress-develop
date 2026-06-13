@@ -182,6 +182,16 @@ variant trial still used `normalize( $html )` after the rewrite loop, so
 source promotion should adapt rather than copy the scratch wording. Next
 action: run a checkpoint before promoting another source docblock edit.
 
+Round 42 supplied that checkpoint: all 99.29 / train 99.54 / held-out 98.38,
+with all 57 subject trials passing hidden cases. Held-out fell 1.0 from round
+35, mostly one N05 adherence-only trial, but this is below the revert
+threshold and not a source-edit driver. The promotion gate is clear. Next
+action: promote one adapted source docblock hypothesis for serialization
+fallback policy, emphasizing that after a `serialize_token()` rewrite loop the
+accumulated string is the rewrite, while `normalize( $html )` on the original
+input and raw-input return paths both abandon emitted changes unless the
+caller deliberately chooses them as fallbacks.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

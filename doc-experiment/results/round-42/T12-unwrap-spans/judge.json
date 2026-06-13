@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Processor fragment parser, walked with next_token(), skipped SPAN tokens, and accumulated serialize_token() output. All called methods are documented. Minor deduction: the final get_last_error() fallback returns an empty string, which is a policy choice not specified by the task, though it follows the docs' warning not to trust output after unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented pattern as trial-1: create_fragment(), next_token(), get_tag(), serialize_token(), get_last_error(). Minor additional deduction because fallback to the original input on create/parse failure would not be normalized and may retain spans, so the edge policy is less aligned with the task contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference. It uses WP_HTML_Processor::create_fragment(), a token walk, explicit #tag filtering, get_tag(), and serialize_token(). All methods are documented, and there were no _doing_it_wrong records. The only small deduction is the unspecified empty-string fallback on parser error."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases. The docs did well on the key concepts needed here: the processor-choice sections distinguish Tag Processor byte-preserving attribute edits from HTML Processor structure/normalization; next_token() documents that closers, implied closers, and end-of-input closers are visited; serialize_token() explicitly presents token-by-token rewriting where selected element tokens are skipped while contents remain; and create_fragment() says BODY-fragment parsing is the right default for rendered content fragments. Near-misses were around fallback policy: every trial added get_last_error() handling, but chose either '' or the original input. That did not affect these cases, but it reflects that the docs explain parser-abort detection better than they explain how a string-returning caller should choose a contract-specific fallback. There were no hallucinated API calls and no hidden-case failures to attribute to documentation gaps.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock / rewrite examples",
+      "problem": "The docs say to reject or fall back on get_last_error(), but examples often return null. For callers whose contract requires string output, subjects guessed inconsistent fallbacks such as '' or the original unnormalized input.",
+      "suggestion": "Add a short contract note: after token-serialization rewrites, get_last_error() means the accumulated output may be partial; choose a caller-specific fallback, and returning original input preserves bytes but is not normalized and does not include token-loop edits."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() docblock",
+      "problem": "The method says it returns the matched tag name, but the important token-walking detail that it matches both openers and closers is only made obvious indirectly by the serialize_token() example.",
+      "suggestion": "State explicitly that during next_token() walks, get_tag() returns the element name for both opening and closing tag tokens, and null for non-tag tokens."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() / serialize_token() incomplete-input notes",
+      "problem": "The docs discuss virtual closers and incomplete trailing syntax in separate places, which can leave readers unsure whether an unclosed element is an error or a normal virtual close.",
+      "suggestion": "Add a concise contrast: missing optional/end tags still produce structural closing tokens, while an incomplete syntax token is not visited and must be detected with paused_at_incomplete_token() when the caller requires complete source bytes."
+    }
+  ]
+}

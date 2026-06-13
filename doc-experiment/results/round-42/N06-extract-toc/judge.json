@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single next_token() pass, documented token/type/name checks, closer handling, and guarded get_modifiable_text(). Strong fit for fragment text extraction, including decoded text and a documented special-element opt-in. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all API calls are documented. The single-pass closer-driven accumulator is explicitly supported by the next_token() docs and handled virtual heading closers. Main near-miss: it only accumulates #text tokens, so documented text-carrying special element openers such as TEXTAREA/TITLE inside a collected subtree would be missed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented APIs throughout. The depth-bounded subtree walk matches the get_current_depth()/next_token() recipe and uses >= correctly, plus a special-element opt-in. Slight idiom caveat: it nests next_token() loops for repeated regions, which the docs warn can skip boundaries in less constrained cases, though this implementation is safe for the tested heading traversal."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases with no _doing_it_wrong or trigger_error records. The docs did well on the key decision points: they clearly steer tree-aware text extraction toward WP_HTML_Processor rather than WP_HTML_Tag_Processor; next_token() documents virtual/implied/end-of-input closers, which is what made the implied-heading-close case work; get_modifiable_text() documents decoded #text output, which made the entity case work; and get_current_depth() explains the >= subtree guard used by trial-3. Near-misses were outside the hidden cases: trial-2 missed the documented exception that SCRIPT/STYLE/TITLE/TEXTAREA carry text on the opener rather than #text children, and trial-3 followed the depth-bounded recipe but in the nested-loop shape that another passage warns against for repeated regions.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() docblock/rendered section",
+      "problem": "In the HTML Processor docs, the inherited get_tag() example constructs WP_HTML_Tag_Processor, which weakens the distinction the overview is trying to teach.",
+      "suggestion": "Use WP_HTML_Processor::create_fragment() in the HTML Processor rendering and add one sentence clarifying get_tag() vs get_token_name() on tag tokens, including virtual closers."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() recipes",
+      "problem": "The docs both show a depth-bounded inner walk and warn against nested next_token() loops for repeated regions; the boundary between safe and risky nested walks is not explicit.",
+      "suggestion": "Add a short note explaining resumption semantics: a bounded subtree walk exits while matched on the boundary token, and a single-loop state machine is preferred when the caller must process every sibling boundary as its own region."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / collect DOM-style text recipe",
+      "problem": "The ordinary #text recipe and special-element exception are documented, but there is no compact pattern for callers whose contract wants textContent-like extraction including special elements.",
+      "suggestion": "Add a general example that collects #text tokens and, only by explicit policy, whitelisted special-element opener text; state which returned text is decoded and which remains raw."
+    },
+    {
+      "location": "HTML Processor supported markup section",
+      "problem": "The heading implied-close example is terse and uses a mismatched end tag; it does not clearly show that a following heading opener closes the previous heading in the parsed tree.",
+      "suggestion": "Add a general supported-markup note that opening one heading while another heading is open produces a closer for the previous heading, visible during next_token() traversal."
+    },
+    {
+      "location": "paused_at_incomplete_token() guidance in WP_HTML_Processor text-walk docs",
+      "problem": "The docs explain checking truncation for mutations or rejection, but do not spell out the read-only extraction policy choice.",
+      "suggestion": "Add a sentence distinguishing best-effort extraction, which may return visited text plus virtual closers, from strict extraction, which should drain the processor and inspect paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}
