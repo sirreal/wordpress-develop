@@ -24,6 +24,16 @@ that region scans which will drive mutations must treat a depth drop as a
 structural boundary only, then separately check incomplete-token and parser
 error state before trusting the scan.
 
+A focused citation-only probe against the same staged rendered docs asked
+whether an HTML Processor virtual closer proves the source region was complete
+when input may be truncated, and which methods to check. All three
+`gpt-5.4` / `medium` probe subjects answered correctly and cited
+`next_token()`, `paused_at_incomplete_token()`, `get_last_error()`, and
+`get_unsupported_exception()`. Interpretation: the facts are discoverable when
+the question names the issue, so the source hypothesis should be a short
+placement/transfer edit near the subtree-walk and mutation examples, not a
+large new concept section.
+
 Concept means: attributes 100.00, classes 100.00, normalization 100.00,
 serialization 99.90, text 99.03, traversal 96.81. Secondary non-failing gaps
 remain useful as low-risk polish candidates, especially factory null/failure

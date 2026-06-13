@@ -30,6 +30,13 @@ one step down the subject ladder if the experiment owner wants a less
 saturated measuring instrument before promotion. Do not compare round 18
 against round 17 except as historical context.
 
+A focused citation-only probe after round 18 asked the current subject tier
+whether an HTML Processor virtual closer proves a truncated source region was
+complete, and which methods to check. All three probes answered correctly and
+cited the relevant rendered-doc headings. Treat the remaining N03 signal as a
+transfer/placement failure: the facts exist, but the docs do not put the guard
+beside the subtree-walk/mutation pattern where task solvers need it.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -70,6 +77,10 @@ Why this is strong: round 18's only functional train failure was exactly this
 gap. All three N03 trials used the documented depth-bounded HTML Processor
 walk, passed ordinary omitted-end-tag and malformed-list cases, and failed
 only incomplete token/comment tails inside the scanned list.
+
+Probe result: direct citation-only discoverability passed 3/3, so the source
+edit should not add a long explanation. Prefer a compact guard sentence or
+post-loop snippet beside the existing depth-bounded walk/mutation examples.
 
 Risk: low-medium. Keep it framed as a general scan-completion contract, not as
 a list-counting recipe. Best placement is near
