@@ -28,11 +28,13 @@ Do not promote either traversal variant, and do not promote a constructor or
 breadcrumbs source edit from these probes alone. The facts are discoverable
 when asked directly, and the transfer-oriented A/B variants lost. Keep the
 selected subject policy at `gpt-5.4-mini` / `low` / `priority`. Next action:
-re-analyze trusted full-round train evidence at that tier for a separate
-non-traversal hypothesis. If no non-held-out, non-noise train pattern remains,
 pause under the signal-exhaustion rule instead of adding speculative prose.
-Keep the usable-attribute predicate as backlog unless a train task repeats the
-confusion; held-out N02 alone is not a source-edit driver.
+Full-round reanalysis found no remaining non-held-out, non-noise train pattern
+strong enough to justify a source docblock edit. Keep the usable-attribute
+predicate as backlog unless a train task repeats the confusion; held-out N02
+alone is not a source-edit driver. Resume only if the corpus changes, a future
+trusted train round repeats one of the backlogged patterns, or the experiment
+owner explicitly asks to test a new hypothesis despite the weak signal.
 
 Round 17 was a no-edit hold round on the previous active corpus and scored
 98.93 on train. After that hold round, several active tasks were intentionally

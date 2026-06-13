@@ -40,13 +40,13 @@ lost. The attribute-value probe found one missing named idiom, but current
 train evidence is only near-miss level, so this is backlog rather than a source
 promotion gate.
 
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority`, and stop the traversal/factory diagnostic line unless a future
-trusted scored train round at that tier repeats one of these failures. Before
-any source docblock edit, re-analyze trusted full-round train evidence for a
-separate non-traversal hypothesis; if no non-held-out, non-noise train pattern
-remains, pause per the protocol's signal-exhaustion rule rather than adding
-speculative prose.
+Full-round reanalysis after these probes found no remaining non-held-out,
+non-noise train pattern strong enough to justify a source docblock edit. The
+selected subject policy remains `gpt-5.4-mini` / `low` / `priority`, but the
+current action is to pause under the protocol's signal-exhaustion rule rather
+than adding speculative prose. Resume only if the corpus changes, a future
+trusted train round repeats one of the backlogged patterns, or the experiment
+owner explicitly asks to test a new hypothesis despite the weak signal.
 
 ## Round 60 — bounded-loop scratch A/B also loses
 
