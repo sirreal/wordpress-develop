@@ -2290,6 +2290,7 @@ class WP_HTML_Tag_Processor {
 		 * need to be flushed to raw lexical updates.
 		 */
 		$this->class_name_updates_to_attributes_updates();
+		$this->rewrite_br_tag_closer();
 
 		/*
 		 * Purge updates if there are too many. The actual count isn't
@@ -2496,6 +2497,64 @@ class WP_HTML_Tag_Processor {
 		} else {
 			$this->remove_attribute( 'class' );
 		}
+	}
+
+	/**
+	 * Rewrites BR end tag tokens with enqueued attribute updates as tag openers.
+	 *
+	 * According to the HTML specification `</br attr>` is treated as a BR element
+	 * with no attributes. When adding attributes to such a token, the existing
+	 * attribute-like text must be discarded before new attributes can appear.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 */
+	private function rewrite_br_tag_closer(): void {
+		if (
+			self::STATE_MATCHED_TAG !== $this->parser_state ||
+			! $this->is_closing_tag ||
+			'BR' !== $this->get_tag()
+		) {
+			return;
+		}
+
+		$attribute_updates = array();
+		foreach ( $this->lexical_updates as $name => $update ) {
+			if ( is_int( $name ) ) {
+				continue;
+			}
+
+			$attribute_updates[] = $update;
+			unset( $this->lexical_updates[ $name ] );
+		}
+
+		if ( 0 === count( $attribute_updates ) ) {
+			return;
+		}
+
+		usort( $attribute_updates, array( self::class, 'sort_start_ascending' ) );
+
+		$updated_attributes = '';
+		foreach ( $attribute_updates as $update ) {
+			$updated_attributes .= $update->text;
+		}
+
+		/*
+		 * Keep the original token start and tag-name bytes intact so bookmarks
+		 * remain anchored and source tag-name casing is preserved.
+		 */
+		$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+			$this->token_starts_at + 1,
+			1,
+			''
+		);
+
+		$attribute_like_text_starts_at = $this->tag_name_starts_at + $this->tag_name_length;
+		$this->lexical_updates[]      = new WP_HTML_Text_Replacement(
+			$attribute_like_text_starts_at,
+			$this->token_starts_at + $this->token_length - 1 - $attribute_like_text_starts_at,
+			$updated_attributes
+		);
 	}
 
 	/**
@@ -4319,7 +4378,7 @@ class WP_HTML_Tag_Processor {
 	public function set_attribute( $name, $value ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4470,7 +4529,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_attribute( $name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4548,7 +4607,7 @@ class WP_HTML_Tag_Processor {
 	public function add_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4590,7 +4649,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4664,6 +4723,7 @@ class WP_HTML_Tag_Processor {
 		 * 1. Apply the enqueued edits and update all the pointers to reflect those changes.
 		 */
 		$this->class_name_updates_to_attributes_updates();
+		$this->rewrite_br_tag_closer();
 		$before_current_tag += $this->apply_attributes_updates( $before_current_tag );
 
 		/*
