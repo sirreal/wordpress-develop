@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get structural awareness of the fragment, then walked tokens with `next_token()`, inspected `get_token_type()`, `is_tag_closer()`, `get_tag()`, and `get_breadcrumbs()` to detect `UL`/`OL` elements that have a list ancestor, and finally applied `add_class()` so `get_updated_html()` preserves all untouched bytes exactly.",
+  "confidence": 92
+}

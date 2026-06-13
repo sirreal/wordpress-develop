@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor::create_fragment()` for structure-aware fragment parsing. Every called method is documented, and there were no `_doing_it_wrong` records. Uses a single token walk, `get_breadcrumbs()` with the current element excluded, `add_class()`, and `get_updated_html()`. Minor deduction: `next_tag()` would have been a simpler documented opener-only walk, and there is no explicit `paused_at_incomplete_token()` policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same high-adherence pattern as trial 1: correct HTML Processor choice, documented APIs only, structural ancestor detection through breadcrumbs, and byte-preserving output via `get_updated_html()`. The fallback on `get_last_error()` is documented and conservative. Minor deduction for scanning all tokens when tag-only walking would suffice, and for not stating an incomplete-token policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose the HTML Processor and used only documented methods. The single `next_token()` loop and `get_updated_html()` return path are documented and functional. Main deduction: it manually maintains list nesting state instead of using the documented `get_breadcrumbs()` ancestor stack, which is less idiomatic for current-token containment checks even though it passed the frozen cases and additional malformed-list probes."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed 7/7. The docs did well at steering subjects to the HTML Processor rather than the Tag Processor: the Tag Processor overview says it has no tree awareness, while the HTML Processor overview and support sections explicitly recommend it for nested structure, breadcrumbs, and containment checks. The `get_updated_html()` documentation also successfully prevented normalization/serialization mistakes for class edits. Near-misses: trials 1 and 2 used a broader `next_token()` loop where `next_tag()` would have been enough; trial 3 reinvented ancestor tracking with an opener/closer counter instead of using breadcrumbs. These were not failures, but they show that the docs make the right tools available without quite making the shortest containment pattern obvious.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / `get_breadcrumbs()` docblock",
+      "problem": "The docs explain that breadcrumbs run down to the current node, but they do not show the common pattern of testing the current element's ancestors while excluding the current element.",
+      "suggestion": "Add a short example showing `array_slice( $processor->get_breadcrumbs(), 0, -1 )` and checking whether any ancestor tag is in a whitelist."
+    },
+    {
+      "location": "html-processor.md / `next_tag()` and Usage examples",
+      "problem": "For class or attribute edits on element openers, candidates may overuse `next_token()` plus `get_token_type()` and `is_tag_closer()` guards.",
+      "suggestion": "Add guidance that `next_tag()` is the preferred loop for tag-opener mutations, while `next_token()` is for text, closers, serialization rewrites, or subtree scans."
+    },
+    {
+      "location": "html-processor.md / `next_token()` and `is_tag_closer()` docblocks",
+      "problem": "Manual opener/closer counters are possible, but the docs do not clearly say when breadcrumbs are the safer current-location primitive.",
+      "suggestion": "Add a note: for questions like 'is the current element inside X?', prefer `get_breadcrumbs()` or breadcrumb queries; reserve manual state for aggregate facts not represented by the current breadcrumb stack."
+    },
+    {
+      "location": "html-processor.md / mutation output and incomplete-input guidance",
+      "problem": "Fallback policy for class/attribute mutations is spread across `get_last_error()`, `paused_at_incomplete_token()`, serialization, and recipe sections.",
+      "suggestion": "Add a concise mutation checklist: check factory `null`, use `get_updated_html()` after queued edits, fall back on non-null `get_last_error()` when the contract requires safe failure, and check `paused_at_incomplete_token()` only when the caller requires proof of complete source bytes."
+    }
+  ]
+}

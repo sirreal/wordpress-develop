@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 65 — bookmark simplification fixes N03 pattern but loses on processor choice
+
+`round-65` tested a scratch-only `shadow-doc-a/b` bookmark-contract
+simplification on `N03-first-list-count`, `T07-nested-lists`, and
+`T10-last-h2`. The variant removed 46 rendered lines net from the staged docs:
+it replaced long bookmark examples with shorter guidance that bookmarks must be
+set while matched on the token to revisit, `seek()` is not an existence probe,
+optional seeks should track a successful `set_bookmark()` or use
+`has_bookmark()`, and one literal bookmark name is the supported last-match
+idiom. Source docblocks, corpus fixtures, runner policy, and harness behavior
+were unchanged.
+
+Numeric result: **98.33 on the three-task subset**, versus **99.70** for the
+same tasks in the comparable round-56 weak-tier source-doc baseline. All
+hidden cases passed. `N03-first-list-count` rose **99.70 -> 100.00**, and the
+round-64 failure pattern of seeking an unset bookmark did not recur.
+`T07-nested-lists` dipped **99.40 -> 98.70** from minor adherence issues.
+`T10-last-h2` fell **100.00 -> 96.30** because two of three subjects still
+chose `WP_HTML_Processor` for a flat source-order class edit; they passed
+functionally but lost adherence for processor choice.
+
+Interpretation: do not promote the round-65 bookmark simplification as-is. It
+is evidence that the bookmark contract wording is useful and compressible, but
+the current limiting failure is the recurring Tag Processor versus HTML
+Processor selection cue. The HTML Processor overview describes it as more
+capable and opens with a class-modification example, which appears to compete
+with the Tag Processor overview's flat-edit guidance in weak-tier transfer.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch simplification/refinement A/B for processor choice. The
+variant should be net concise: reduce the HTML Processor overview's "more
+capable default" pull, remove or shorten non-current roadmap prose, and make
+the decision rule explicit that first/last/Nth matching tags and attribute or
+class edits in source order should use `WP_HTML_Tag_Processor`; use
+`WP_HTML_Processor` only when tree position, implied structure, subtree text,
+or normalized output matters. Include flat Tag Processor tasks plus N03/T07
+structural regressions in the measured subset. Do not change source docblocks
+unless a scratch variant wins.
+
 ## Round 64 — roadmap prose removal does not win
 
 `round-64` tested a lower-risk non-contract pruning candidate as a scratch-only

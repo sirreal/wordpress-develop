@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), depth-aware token walking, a bookmark/seek cycle, set_attribute(), and get_updated_html(). Every HTML API method called is present in the rendered docs, and execution recorded no _doing_it_wrong misuse."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern: fragment processor, next_tag() to find the first list, next_token() plus get_current_depth() and get_token_type() to count direct LI openers, then seek back and mutate. No undocumented API use or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the tree-aware processor and documented bookmark/depth/incomplete/error checks. The final return expression is redundant, but API adherence is otherwise exact and all called methods are documented."
+    }
+  ],
+  "failure_analysis": "All trials passed all 11 hidden cases, so there were no failed hidden cases to attribute to a misconception. The docs did well in the relevant places: the WP_HTML_Processor overview explains choosing it when structure matters; the 'Recipe: scan a region before editing its opener' directly teaches bookmark, subtree walk, clean-scan checks, seek, then edit; 'Recipe: test subtree membership and direct children' gives the get_token_type(), !is_tag_closer(), and depth + 1 pattern; get_current_depth() explains the >= boundary and why child closers still belong to the subtree; create_fragment() documents null returns; HTML Support explains unsupported markup and get_last_error(); set_attribute() documents overwrite behavior and escaping; paused_at_incomplete_token() explains truncated input after draining the relevant walk. Near miss: all candidates used next_token() correctly rather than next_tag(... tag_closers => 'visit'), which suggests the recipes are effective, but the inherited-method surface is still split across the two files and could be easier to discover from the HTML Processor page alone.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor overview / subtree scan recipes",
+      "problem": "The docs contain the right pieces, but the completion policy for a bounded subtree scan versus a whole-document scan is implicit. A reader could wrongly drain the whole document and reject an edit because of incomplete or unsupported markup after the already-closed target region.",
+      "suggestion": "Add a short 'scope of scan completion' note: after a bounded subtree walk, paused_at_incomplete_token() and get_last_error() describe what the processor encountered during that walk; continue scanning only if the caller's contract requires the rest of the document to be complete."
+    },
+    {
+      "location": "WP_HTML_Processor method index / inherited helpers",
+      "problem": "Important methods used with WP_HTML_Processor, especially paused_at_incomplete_token() and get_updated_html(), are documented on the Tag Processor page or mentioned by reference, but are not equally prominent as inherited HTML Processor helpers.",
+      "suggestion": "Add an inherited-helper subsection or index entries on the HTML Processor page for mutation output and truncation helpers, with links to the Tag Processor definitions."
+    },
+    {
+      "location": "WP_HTML_Processor examples around next_token() and next_tag()",
+      "problem": "The docs document both next_token() and next_tag() with tag_closers, but the distinction between tag-only walks and token walks is scattered.",
+      "suggestion": "Add a brief comparison: use next_token() for subtree scans where text/comments/incomplete tokens or all token boundaries matter; use next_tag() with tag_closers only for tag-only walks where non-tag tokens are irrelevant."
+    }
+  ]
+}

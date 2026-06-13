@@ -8,7 +8,32 @@ from discoverability gaps.
 
 ## Current read
 
-Latest update: round 64 tested low-risk roadmap/future-prose pruning as a
+Latest update: round 65 tested a focused scratch bookmark-contract
+simplification on `N03-first-list-count`, `T07-nested-lists`, and
+`T10-last-h2`. It removed 46 rendered lines net and made the bookmark
+preconditions explicit: set the bookmark while matched on the token to revisit,
+do not use `seek()` as an existence probe, track a successful `set_bookmark()`
+or use `has_bookmark()` before optional seeks, and re-set one literal bookmark
+name for the last-match idiom. It did not win: **98.33** on the three-task
+subset versus **99.70** for the same round-56 weak-tier source-doc subset.
+`N03` improved 99.70 -> 100.00 and the unset-bookmark failure did not recur,
+but `T10` fell 100.00 -> 96.30 because two of three subjects still chose
+`WP_HTML_Processor` for a flat source-order class edit. Do not promote the
+bookmark simplification as-is.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
+focused scratch simplification/refinement A/B for processor choice. The
+variant should be net concise: reduce the HTML Processor overview's "more
+capable default" pull, remove or shorten non-current roadmap prose, and make
+the decision rule explicit that first/last/Nth matching tags and attribute or
+class edits in source order should use `WP_HTML_Tag_Processor`; use
+`WP_HTML_Processor` only when tree position, implied structure, subtree text,
+or normalized output matters. Include flat Tag Processor tasks plus N03/T07
+structural regressions in the measured subset. Do not change source docblocks
+unless a scratch variant wins.
+
+Previous update: round 64 tested low-risk roadmap/future-prose pruning as a
 full-train scratch ablation. It removed only 17 rendered lines: the Tag
 Processor file-level "Possible future direction" section and the HTML
 Processor "Eventually the HTML Processor will also support" list. It did not
@@ -18,16 +43,6 @@ of 99.61 / 99.55. The main regression was `N03-first-list-count`, 99.70 ->
 that name had been set, then tried to set the bookmark after scanning away from
 the opener. Judges tied this to bookmark-contract ambiguity, not to the removed
 roadmap prose. Do not promote roadmap prose removal from this sample.
-
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
-focused scratch simplification/refinement A/B for bookmark contracts on
-`N03-first-list-count`, `T07-nested-lists`, and `T10-last-h2`. The variant
-should be net concise: state that bookmarks must be set while matched on the
-token to revisit, `seek()` is not an existence probe, callers should track
-successful `set_bookmark()` or use `has_bookmark()` before optional seeks, and
-re-setting one literal bookmark is the supported last-match idiom. Do not
-change source docblocks unless the scratch variant wins.
 
 Previous update: round 63 tested text-policy de-duplication on the focused
 `T03`/`N06`/`T05`/`T06`/`T08` subset. The scratch variant kept the overview

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware fragment parsing, then walked tokens with next_token(), filtered to opening UL/OL tags, inspected their ancestor chain via get_breadcrumbs(), and added the class with add_class() only when a UL or OL appeared above the current element. The final HTML is read back with get_updated_html() so untouched bytes are preserved exactly.",
+  "confidence": 93
+}
