@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 40/41 — serialization fallback scratch A/B wins
+
+`round-40` was the control rendered-doc round and `round-41` was a
+scratch-only HTML Processor rendered-doc variant for three train tasks:
+`T09-mark-keyword`, `T12-unwrap-spans`, and
+`N04-normalize-or-placeholder`. Both used `shadow-doc-a/b`, subjects
+`gpt-5.4` / `medium` / `priority`, and judge `gpt-5.5` / `xhigh` /
+`priority`. Source docblocks were unchanged.
+
+Variant: add method-local fallback-policy guidance around
+`WP_HTML_Processor::create_fragment()`, `normalize()`, and
+`serialize_token()`: factory `null` means no processor was created; later
+`get_last_error()` is an unsupported-parser abort; the accumulated
+`serialize_token()` output is the rewrite; `normalize( $html )` on the
+original input discards emitted rewrite changes; raw original input is not
+normalized output; and `paused_at_incomplete_token()` is a separate
+complete-input policy check.
+
+Numeric result: variant won, **99.83 vs 99.57** on the paired subset. All
+18 subject trials passed all hidden cases. N04 stayed perfect at 100.00.
+T12 improved 98.90 -> 100.00, with all variant trials using an explicit
+empty-string fallback instead of raw input or `normalize( $html )` after the
+rewrite loop. T09 fell slightly, 99.80 -> 99.50, because one variant trial
+still used `normalize( $html )` as an error fallback.
+
+Interpretation: promotable after the checkpoint gate, but adapt carefully.
+The source edit should keep the winning method-local fallback-policy shape,
+but should make the anti-pattern more explicit than the scratch wording:
+after a `serialize_token()` rewrite loop, `normalize( $html )` and raw input
+both abandon the accumulated rewrite; choose a caller-defined failure signal
+instead.
+
+Next action: run a checkpoint/regression sentinel on the current source docs
+before promoting another source docblock edit. If held-out remains stable,
+promote an adapted fallback-policy card as one source hypothesis and score it
+normally.
+
 ## Round 39 — serialization fallback citation probe passes
 
 `round-39` was a `discoverability-probe` against the current rendered docs,

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and the documented `WP_HTML_Processor::normalize()` shortcut for BODY-context fragment normalization. The method exists in `html-processor.md`; no undocumented calls or `_doing_it_wrong` records. Correctly treats only `null` as unsupported, preserving valid empty-string output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented approach as the reference: `WP_HTML_Processor::normalize()` followed by a strict `null` fallback check. No hallucinated API usage, no `_doing_it_wrong`, and the implementation relies on the documented normalization contract instead of unnecessary token walking."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly selected `WP_HTML_Processor` for normalized output and used the documented static `normalize()` method. No undocumented methods. The strict `null === $normalized` check handles unsupported markup without confusing empty normalized output with failure."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases. The docs succeeded mainly because `html-tag-processor.md` explicitly says to use the HTML Processor for normalized output, while `html-processor.md` documents `WP_HTML_Processor::normalize()` as a BODY-context fragment normalizer returning `string|null`. The `normalize()` section also lists normalization effects such as quoted attributes, inserted omitted tags, text re-encoding, and omitted incomplete trailing syntax, which directly covers the successful table, attribute, entity, and unclosed-tag cases. The unsupported-markup overview explains that unsupported input aborts processing and output-producing methods such as `serialize()` and `normalize()` return `null`, which explains the fallback behavior for misnested formatting and anchor misnesting. Near miss: unsupported cases emitted `trigger_error` records from internal serialization, but there were no `_doing_it_wrong` records and the candidates handled the returned `null` correctly. The docs could be clearer that these warnings may accompany a `null` result.",
+  "doc_gaps": [
+    {
+      "location": "`html-processor.md` `normalize()` docblock",
+      "problem": "The return contract says `string|null`, but it does not explicitly warn that an empty input can legitimately normalize to `''` while unsupported input returns `null`. Less careful readers could use a truthiness check and incorrectly replace empty valid output with a fallback.",
+      "suggestion": "Add a contract note: callers should test `null === WP_HTML_Processor::normalize( $html )` for failure; empty strings are valid normalized output."
+    },
+    {
+      "location": "`html-processor.md` unsupported-markup overview and `normalize()`/`serialize()` docs",
+      "problem": "Execution shows unsupported normalization may also emit a `trigger_error` from serialization while returning `null`. The rendered docs describe the `null` result but not the possible warning side effect.",
+      "suggestion": "Document whether `normalize()`/`serialize()` may emit a warning on unsupported markup, and how callers should handle that if they intentionally use `null` as a recoverable fallback signal."
+    },
+    {
+      "location": "`html-processor.md` `normalize()` examples",
+      "problem": "The examples demonstrate successful normalization but not the distinct unsupported-output path. The unsupported behavior is described elsewhere, so readers must connect two sections.",
+      "suggestion": "Add a general unsupported-markup example showing that normalization can return `null`, without prescribing any task-specific fallback HTML."
+    },
+    {
+      "location": "`html-processor.md` `normalize()` docblock",
+      "problem": "The distinction between recoverable malformed HTML, incomplete trailing syntax, and unsupported parser aborts is spread across bullets and the broader overview.",
+      "suggestion": "Add a compact summary: ordinary omitted tags are completed, incomplete trailing syntax may be omitted, and only unsupported parser states cause a `null` result."
+    }
+  ]
+}

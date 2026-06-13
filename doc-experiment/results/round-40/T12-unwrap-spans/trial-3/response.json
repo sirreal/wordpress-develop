@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, walks every token with `next_token()`, skips any token whose tag name is `SPAN` so both span openers and closers are removed, and appends every other token\u2019s normalized serialization with `serialize_token()`. It also checks `get_last_error()` because the HTML Processor documentation says unsupported markup should be rejected or handled by fallback.",
+  "confidence": 84
+}

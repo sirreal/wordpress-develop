@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, then walks every token with `next_token()` and rebuilds normalized HTML with `serialize_token()`, skipping both opening and closing `SPAN` tokens so their contents remain in place. It also checks `get_last_error()` because the HTML Processor aborts on unsupported markup.",
+  "confidence": 84
+}

@@ -175,6 +175,13 @@ the facts are present and discoverable when directly asked. The next
 diagnostic, if pursuing this hypothesis, should be scratch A/B transfer
 testing on implementation tasks, not a source edit from the probe alone.
 
+Rounds 40/41 tested that transfer with a scratch-only fallback-policy card.
+The variant won 99.83 vs 99.57 on T09/T12/N04, mainly by moving T12 to
+100.00 while keeping N04 perfect. T09 dipped 99.80 -> 99.50 because one
+variant trial still used `normalize( $html )` after the rewrite loop, so
+source promotion should adapt rather than copy the scratch wording. Next
+action: run a checkpoint before promoting another source docblock edit.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -291,6 +298,14 @@ check, and identified `normalize( $html )` after a token rewrite as discarding
 the accumulated changes. This is not source-edit evidence by itself. Use a
 scratch A/B next to test whether a compact method-local fallback card improves
 T09/T12/N04 transfer.
+
+Rounds 40/41 scratch A/B result: variant won 99.83 vs 99.57. T12 improved
+98.90 -> 100.00 and N04 stayed 100.00; T09 dipped slightly because one
+variant trial still normalized the original input in an error branch. This is
+promotable after checkpoint, but adapt the wording to foreground the exact
+anti-pattern: after a `serialize_token()` rewrite, `normalize( $html )` and
+raw input both discard the accumulated rewrite and are not normalized
+rewrites.
 
 Risk: low.
 
