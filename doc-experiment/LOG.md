@@ -107,6 +107,9 @@ harness output is unusable.
 That cleanup now applies to the entire current ingest attempt, preventing a
 mid-batch harness failure from stranding earlier trial artifacts without a
 matching isolation attestation.
+`ingest-trials.py` now also writes the isolation attestation atomically and
+removes the current attempt's trial directories if attestation persistence
+fails.
 Judge ingestion now similarly removes artifacts created by the current attempt
 if judge writing, post-write validation, aggregation, or summary persistence
 fails.

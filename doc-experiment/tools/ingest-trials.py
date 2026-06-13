@@ -6,6 +6,7 @@ Usage: python3 ingest-trials.py <workflow-output-file> <round-NN>
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,30 @@ def trial_payload(payload: dict) -> dict:
     if isinstance(result, dict) and "subject_isolation" in result and "result" in result:
         return result
     return payload
+
+
+def trial_artifact_dirs(results_dir: Path, trials: list[dict]) -> list[Path]:
+    return [
+        results_dir / str(trial["id"]) / f"trial-{trial['trial']}"
+        for trial in trials
+    ]
+
+
+def cleanup_trial_artifacts(trial_dirs: list[Path]) -> None:
+    for trial_dir in reversed(trial_dirs):
+        if trial_dir.exists():
+            shutil.rmtree(trial_dir)
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(text)
+        temporary.replace(path)
+    except OSError:
+        if temporary.exists():
+            temporary.unlink()
+        raise
 
 
 def main() -> int:
@@ -63,9 +88,15 @@ def main() -> int:
         print(proc.stderr, file=sys.stderr)
         return proc.returncode
 
-    subject_isolation_file.write_text(
-        json.dumps(subject_isolation, indent=2, ensure_ascii=False) + "\n"
-    )
+    try:
+        write_text_atomic(
+            subject_isolation_file,
+            json.dumps(subject_isolation, indent=2, ensure_ascii=False) + "\n",
+        )
+    except OSError as exc:
+        cleanup_trial_artifacts(trial_artifact_dirs(results_dir, trials))
+        print(f"ingest-trials.py: {exc}", file=sys.stderr)
+        return 1
 
     # Compact failure summary: only imperfect trials.
     failures = []

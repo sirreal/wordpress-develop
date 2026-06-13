@@ -247,6 +247,9 @@ php doc-experiment/harness/run-tests.php \
 valid execution JSON with `passed`, `total`, and `cases`; artifacts created for
 that failed ingest attempt are removed before the ingest exits non-zero, so a
 mid-batch harness failure does not leave partial trial artifacts behind.
+After `persist-trials.py` succeeds, `ingest-trials.py` writes
+`subject-isolation.json` atomically; if that write fails, it removes the trial
+directories from the current ingest attempt before exiting non-zero.
 
 For metadata-backed rounds, `ingest-trials.py` rejects workflow outputs whose
 task IDs, trial numbers, or structured-output fields do not match
