@@ -18,6 +18,11 @@ completion does not require EOF draining for unrelated suffix markup,
 breadcrumbs include the current node and breadcrumb queries are DOM sub-paths,
 and `WP_HTML_Processor` should be created through `create_fragment()` or
 `create_full_parser()`. All probes passed 3/3 at `gpt-5.4-mini` / `low`.
+A follow-up attribute-value probe also passed 3/3 for the
+`get_attribute()` return cases (`null`, `true`, `''`, decoded strings), but
+subjects noted that the docs do not explicitly name the
+`is_string( $value ) && '' !== $value` style predicate for usable non-empty URL
+strings.
 
 Do not promote either traversal variant, and do not promote a constructor or
 breadcrumbs source edit from these probes alone. The facts are discoverable
@@ -26,6 +31,8 @@ selected subject policy at `gpt-5.4-mini` / `low` / `priority`. Next action:
 re-analyze trusted full-round train evidence at that tier for a separate
 non-traversal hypothesis. If no non-held-out, non-noise train pattern remains,
 pause under the signal-exhaustion rule instead of adding speculative prose.
+Keep the usable-attribute predicate as backlog unless a train task repeats the
+confusion; held-out N02 alone is not a source-edit driver.
 
 Round 17 was a no-edit hold round on the previous active corpus and scored
 98.93 on train. After that hold round, several active tasks were intentionally

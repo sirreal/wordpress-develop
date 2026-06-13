@@ -26,11 +26,19 @@ rounds 58-60:
   use `create_fragment()` or `create_full_parser()` and should not instantiate
   `WP_HTML_Processor` directly. The docs do not spell out a runtime consequence
   beyond the do-not-use constructor warning.
+- `html-processor-attribute-value-contract`: 3/3 subjects found the
+  `get_attribute()` return cases (`null`, `true`, `''`, and decoded strings),
+  but subjects also said the docs do not explicitly name the predicate for a
+  usable non-empty URL string. This supports a future attribute-value contrast
+  card only if a train task repeats the confusion; held-out N02 alone must not
+  drive it.
 
 Interpretation: do not promote a traversal or factory source edit from these
-signals. The facts are discoverable when weak subjects are asked directly, and
-two transfer-oriented traversal A/B variants already lost. The remaining gaps
-are placement/transfer or task-reasoning issues, not clear missing contracts.
+signals. The traversal and factory facts are discoverable when weak subjects
+are asked directly, and two transfer-oriented traversal A/B variants already
+lost. The attribute-value probe found one missing named idiom, but current
+train evidence is only near-miss level, so this is backlog rather than a source
+promotion gate.
 
 Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
 `priority`, and stop the traversal/factory diagnostic line unless a future
