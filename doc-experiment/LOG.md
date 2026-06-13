@@ -142,7 +142,7 @@ baseline without creating a trusted score.
 Added `audit-state.py` as a read-only start-of-run guard. It reports worktree
 drift, the latest completed score, current corpus task IDs, source/tooling/corpus
 changes since that score, whether a current-corpus no-edit baseline exists for
-the active subject tier, and the protocol-safe next action.
+the active subject/judge policy, and the protocol-safe next action.
 
 Added `verify-scratch-isolation.py` and wired it into `prepare-round.py` so
 round staging fails before model launch if scratch contains anything beyond

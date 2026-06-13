@@ -279,7 +279,7 @@ def build_audit() -> dict:
     if changed_groups["corpus"]:
         mismatches.append("corpus changed since latest completed score")
     if not current_baseline_exists:
-        mismatches.append("no current-corpus no-edit baseline for current subject tier")
+        mismatches.append("no current-corpus no-edit baseline for current subject/judge policy")
 
     if status_short:
         next_action = "reconcile local worktree drift before scoring"
@@ -362,7 +362,7 @@ def print_text(audit: dict) -> None:
         f"{audit['comparability']['latest_tasks_match_current_train']}"
     )
     print(
-        "- current no-edit baseline exists: "
+        "- current no-edit baseline exists for current subject/judge policy: "
         f"{audit['comparability']['current_no_edit_baseline_exists']}"
     )
     current_baselines = audit["comparability"].get("current_no_edit_baselines", [])
