@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment, structure-aware traversal. All API calls used are documented: next_tag(), next_token(), get_tag(), get_token_type(), get_current_depth(), is_tag_closer(), set_bookmark(), seek(), paused_at_incomplete_token(), get_last_error(), set_attribute(), and inherited get_updated_html(). It follows the scan-then-seek-back pattern and handles incomplete/unsupported input. Minor deduction: it keeps the bookmark instead of releasing it after use, despite the docs recommending release_bookmark()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully aligned with the documented recipe: create_fragment(), find the first UL/OL by scanning any tag, bookmark the opener, walk the subtree with next_token() bounded by get_current_depth(), count direct LI openers, reject incomplete or unsupported scans, seek back, set_attribute(), release the bookmark, and return get_updated_html()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented APIs throughout. The traversal, bookmark/seek, incomplete-token, unsupported-markup, and get_updated_html() usage are all sound. Small deduction only because the direct-child test omits the explicit get_token_type() === '#tag' check shown in the docs; the get_tag() guard makes this safe in practice."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 11 hidden cases, so there are no failed hidden cases to attribute to a misconception. The rendered docs appear to have worked well for this task. The decisive passages were WP_HTML_Processor > Usage > Recipe: scan a region before editing its opener, Recipe: test subtree membership and direct children, WP_HTML_Processor::get_current_depth(), WP_HTML_Processor::next_token(), WP_HTML_Processor::create_fragment(), WP_HTML_Processor::get_last_error(), and WP_HTML_Tag_Processor::paused_at_incomplete_token(). These collectively told subjects to use the structure-aware processor, record opener depth, keep walking while depth is >= the opener depth, avoid counting closers, bookmark/seek before editing, and fail closed on incomplete or unsupported markup. Near-misses were minor: trial-1 did not release its bookmark, and trial-3 used get_tag() as an implicit tag-token guard rather than the exact documented three-check direct-child predicate. The docs also successfully steered candidates away from whole-document serialization and toward inherited get_updated_html() after queued attribute mutation.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor Method Index / mutation output documentation",
+      "problem": "get_updated_html() is inherited and referenced in prose, but it is not listed as an HTML Processor output method. Users scanning only the HTML Processor method list may reach for serialize() or normalize() after set_attribute().",
+      "suggestion": "Add an inherited public methods subsection, or a short get_updated_html() entry near set_attribute(), stating that queued mutations on WP_HTML_Processor are retrieved with inherited WP_HTML_Tag_Processor::get_updated_html(), not serialize() or normalize()."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() subtree-walk guidance",
+      "problem": "The docs explain bounded walks and completion checks, but could be clearer that validation after a bounded walk only covers the scanned region; trailing markup after the boundary is intentionally unexamined unless the caller drains the rest of the document.",
+      "suggestion": "Add a general note distinguishing region-complete scans from whole-document-complete scans: stop at the depth drop for subtree-scoped edits, then check paused_at_incomplete_token() and get_last_error(); drain only when the function contract requires validating later document content too."
+    },
+    {
+      "location": "WP_HTML_Processor > Recipe: test subtree membership and direct children",
+      "problem": "The direct-child predicate is documented, but there is no complete generic example for counting or selecting named direct child elements across omitted end tags and nested descendants.",
+      "suggestion": "Add a generic container/child example showing the recorded opener depth, next_token() loop, get_token_type() === '#tag', ! is_tag_closer(), and get_current_depth() === $container_depth + 1, with a note that implicit and omitted closers must not be counted as child openers."
+    }
+  ]
+}

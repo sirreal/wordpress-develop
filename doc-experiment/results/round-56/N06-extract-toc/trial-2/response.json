@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for body-fragment parsing and `next_token()` to walk the document in tree order, then read `get_token_type()`, `get_token_name()`, `get_current_depth()`, `is_tag_closer()`, and `get_modifiable_text()` to collect heading text while ignoring markup inside headings. The function flushes each heading when its subtree ends or when a new heading opener begins, and it returns empty text for headings with no `#text` content.",
+  "confidence": 86
+}

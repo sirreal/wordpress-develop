@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor for ancestor-aware traversal, used only documented methods, and followed the canonical next_tag/get_breadcrumbs/add_class/get_updated_html pattern. The count($breadcrumbs) < 2 guard is redundant because fragment breadcrumbs include HTML and BODY, but it is harmless."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. This is essentially the reference approach: create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). It stays inside the rendered docs and uses the structural processor exactly for the documented containment/breadcrumb use case."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor and all HTML API methods used are documented. The next_token()/get_token_type()/is_tag_closer() walk is valid and carefully guarded, but it is lower-level than needed for a tag-only mutation where next_tag() is the more idiomatic documented pattern. The class_exists() check is unnecessary harness boilerplate but not an API hallucination."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in execution.json for any trial. The docs did well at steering all subjects to WP_HTML_Processor rather than WP_HTML_Tag_Processor: the Tag Processor overview explicitly says it has no tree awareness and that get_breadcrumbs() belongs to WP_HTML_Processor, while the HTML Processor overview says to choose it when document structure or containment matters. The Breadcrumbs section also gave the key mental model: get_breadcrumbs() returns the open-element stack including implicit HTML/BODY and the current matched node, which trials 1 and 2 handled by slicing off the current list, and trial 3 handled by requiring more than one list breadcrumb. The add_class() and get_updated_html() docs covered the class-preservation and byte-preservation requirements, including the existing-class case. The only near-miss was trial 3's use of next_token() for a tag-only task; the docs make that legal and explain the closer/depth hazards, but a shorter ancestor-filter recipe would likely push future subjects toward next_tag() plus breadcrumbs for this class of mutation.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs section",
+      "problem": "The docs state that breadcrumbs include the current matched node, but ancestor-only checks still require readers to infer that they must drop the last breadcrumb on opener tokens or otherwise account for the current element.",
+      "suggestion": "Add an explicit note: when matched on an opening tag, the current element is the final breadcrumb; to test only ancestors, ignore the final entry. Cross-reference is_tag_closer() for the different closer behavior."
+    },
+    {
+      "location": "WP_HTML_Processor overview or next_tag() examples",
+      "problem": "There is no compact recipe for the common pattern 'modify tags that have some ancestor anywhere above them.' Readers may reach for manual stacks or next_token() even when next_tag() plus get_breadcrumbs() is enough.",
+      "suggestion": "Add a general example that walks element openers with next_tag(), inspects array_slice(get_breadcrumbs(), 0, -1), and mutates the current tag when an ancestor predicate matches. Keep it generic, such as marking images inside any FIGURE/PICTURE ancestor."
+    },
+    {
+      "location": "WP_HTML_Processor next_tag() breadcrumb query documentation",
+      "problem": "The breadcrumb query examples cover direct paths and suffix matching, but they do not clearly distinguish exact path matching from 'any ancestor at any depth' matching.",
+      "suggestion": "Clarify that breadcrumbs in next_tag() queries describe a contiguous path, wildcard '*' matches one element, and arbitrary-depth ancestor checks should inspect get_breadcrumbs() in a normal scan."
+    },
+    {
+      "location": "WP_HTML_Processor mutation/error guidance near get_updated_html() inheritance",
+      "problem": "The docs discuss get_last_error() and paused_at_incomplete_token() in recipe contexts, but the contract for returning queued mutations after a traversal stops early is easy to miss.",
+      "suggestion": "Add a short mutation-policy note: after a scan that may stop on unsupported or incomplete input, callers should decide whether partial queued updates are acceptable; if complete-source confidence matters, check get_last_error() and paused_at_incomplete_token() before returning get_updated_html()."
+    }
+  ]
+}

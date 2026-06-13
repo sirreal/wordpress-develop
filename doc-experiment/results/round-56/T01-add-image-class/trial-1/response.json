@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor directly, scanning for `img` tags with `next_tag( 'img' )` and appending the class with `add_class( 'wp-image' )`; `get_updated_html()` returns the document with untouched bytes preserved exactly outside the edited attributes, and tag-name matching is ASCII case-insensitive per the documented API.",
+  "confidence": 98
+}

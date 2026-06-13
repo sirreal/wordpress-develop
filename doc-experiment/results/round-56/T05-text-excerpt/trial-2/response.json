@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()`, collecting only ordinary `#text` tokens plus the opener text for `TITLE` and `TEXTAREA` via `get_modifiable_text()`. Final truncation is by Unicode code points using `mb_substr()` with a `preg_match_all('/./us')` fallback.",
+  "confidence": 86
+}

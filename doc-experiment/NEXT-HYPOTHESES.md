@@ -288,6 +288,18 @@ fallback-policy transfer. Promote an adapted source edit in
 method-local `serialize_token()` wrapper / anti-pattern example. Keep fallback
 wording as caller policy; do not prescribe one universal return value.
 
+Round 56 confirmed that adapted source edit under `scored-train`:
+train 99.61 / core 99.55 with subjects `gpt-5.4-mini` / `low` / `priority`.
+All 45 subject trials passed hidden cases. Against the comparable weak-tier
+no-edit baseline, round 53, train moved 99.51 -> 99.61, serialization moved
+98.85 -> 99.35, T09 moved 99.10 -> 99.40, and T12 moved 98.60 -> 99.30. Keep
+the source edit. The remaining serialization pattern is narrower: candidates
+still sometimes choose `normalize( $html ) ?? $html` after a rewrite loop,
+which can abandon emitted changes and return raw source bytes if normalization
+fails. Record this as a future scratch-test candidate, not an immediate source
+edit. Next action: run a checkpoint/regression sentinel with
+`gpt-5.4-mini` / `low` / `priority` before any further source promotion.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

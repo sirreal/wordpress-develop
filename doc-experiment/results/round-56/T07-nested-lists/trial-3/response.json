@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so the function can inspect nested structure with `next_token()`, `get_token_type()`, `is_tag_closer()`, and `get_breadcrumbs()`, then applied `add_class()` only to `UL`/`OL` openers whose breadcrumb path already contains another list ancestor. The final HTML is read back with `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 91
+}

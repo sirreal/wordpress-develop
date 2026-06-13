@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then `next_tag()` to find the first `UL` or `OL`. After bookmarking that opener, I walked forward with `next_token()`, counted direct `LI` openers by checking `get_current_depth()` against the list depth, and rejected truncated or unsupported input using `paused_at_incomplete_token()` and `get_last_error()` before seeking back and writing `data-item-count` with `set_attribute()`.",
+  "confidence": 90
+}

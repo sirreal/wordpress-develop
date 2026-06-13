@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to get browser-like table structure, then walked tokens from the first TABLE opener and collected only `#text` tokens inside `TR`/`TD`/`TH` regions, relying on documented `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` behavior. This preserves decoded cell text and handles implied table structure such as generated tbody/tr tokens.",
+  "confidence": 90
+}

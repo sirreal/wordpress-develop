@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to preserve the fragment byte-for-byte while gaining structural awareness, then walked tags with `next_tag()`, inspected nesting via `get_breadcrumbs()`, and added the class with `add_class()` only when a UL or OL had another list element somewhere in its ancestor chain. The final bytes come from `get_updated_html()`, which applies only the queued attribute changes.",
+  "confidence": 97
+}

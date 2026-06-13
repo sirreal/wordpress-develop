@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 56 — serialization fallback source edit confirmed
+
+**Train 99.61 / core 99.55** under `scored-train`, with subjects
+`gpt-5.4-mini` / `low` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `1107adb72d`, which promoted the winning
+rounds-54/55 serialization rewrite fallback card into the
+`WP_HTML_Processor` source docs.
+
+Outcome: keep. All 45 train trials passed all hidden cases. Compared with the
+comparable weak-tier no-edit baseline, round 53, train moved 99.51 -> 99.61 and
+core moved 99.43 -> 99.55. The target serialization concept moved 98.85 ->
+99.35; T09-mark-keyword moved 99.10 -> 99.40; and T12-unwrap-spans moved
+98.60 -> 99.30. No task crossed the revert threshold and no previously passing
+task regressed across all trials.
+
+The source wording transferred the core recipe: candidates used
+`get_modifiable_text()` for decoded inspection and `serialize_token()` for
+emitting rewritten tokens. The residual near-miss is narrower than the promoted
+hypothesis: T09 and T12 candidates still sometimes used
+`normalize( $html ) ?? $html` as an explicit parser-error fallback after a
+rewrite loop. Judges accepted this for the tested inputs but flagged that raw
+input is not a normalized fallback and that `normalize( $html )` abandons
+emitted rewrites.
+
+Decision: keep the source edit. Treat the remaining fallback issue as a future
+diagnostic, not an immediate source edit, because the current weak tier is still
+functionally saturated and the source hypothesis just scored stable.
+
+Next action: commit round-56 results separately, then run a checkpoint with the
+same primary subject tier, `gpt-5.4-mini` / `low` / `priority`, and the same
+judge tier, `gpt-5.5` / `xhigh` / `priority`, before promoting another source
+docblock edit.
+
 ## Rounds 54/55 — serialization rewrite fallback scratch A/B wins
 
 `round-54` was the control rendered-doc round and `round-55` was a

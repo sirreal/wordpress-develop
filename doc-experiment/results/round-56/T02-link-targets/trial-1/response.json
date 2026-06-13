@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan tags linearly, checked `href` with `get_attribute()` so empty-string and boolean-style `href` still count as present, and then overwrote/added `target` with `set_attribute()`. `get_updated_html()` returns the original document with only those byte-precise attribute edits applied.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly and `next_tag( 'a' )` to visit each anchor opener while preserving untouched bytes. For each matched `A` tag, I checked `get_attribute( 'href' )` for presence, then overwrote `target` with `set_attribute( 'target', '_blank' )`, and finally returned the result with `get_updated_html()`.",
+  "confidence": 97
+}
