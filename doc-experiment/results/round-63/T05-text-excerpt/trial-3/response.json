@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() and next_token() to walk the fragment in document order, appended only ordinary #text tokens plus TITLE/TEXTAREA opener text via get_modifiable_text(), and then truncated the decoded UTF-8 result by code points with mb_strlen()/mb_substr() when available.",
+  "confidence": 87
+}

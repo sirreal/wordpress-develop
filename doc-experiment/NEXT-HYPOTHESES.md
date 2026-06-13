@@ -8,7 +8,27 @@ from discoverability gaps.
 
 ## Current read
 
-Latest update: round 62 began the new reduction directive with a scratch-only
+Latest update: round 63 tested text-policy de-duplication on the focused
+`T03`/`N06`/`T05`/`T06`/`T08` subset. The scratch variant kept the overview
+DOM-style text recipe and compact policy table, but removed 14 rendered lines:
+the duplicate special-element opt-in paragraph from `next_token()` and the
+method-local special-element example from `get_modifiable_text()`. It lost
+badly: 95.87 vs 99.28 for the same round-56 subset. `N06-extract-toc` fell
+99.80 -> 81.13 because one subject placed `#text` handling behind a `#tag`
+guard, making text collection unreachable. Do not promote this
+de-duplication; the method-local text-policy reminders remain load-bearing for
+repeated-subtree text extraction.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and continue the
+reduction loop only with lower-risk non-contract pruning. The next scratch
+candidate is removing roadmap/future-direction prose from the rendered docs:
+the Tag Processor file-level "Possible future direction" note and the HTML
+Processor "Eventually the HTML Processor will also support" list. Do not remove
+the current text-policy method-local reminders unless a replacement explicitly
+teaches single-loop repeated-subtree extraction without adding net prose.
+
+Previous update: round 62 began the new reduction directive with a scratch-only
 public-API-only ablation. It removed rendered `Properties` sections and all
 non-public method index/detail sections from both staged docs, cutting the
 subject-visible docs from 5,265 to 3,049 lines. The full train score was
@@ -20,16 +40,6 @@ subjects used `WP_HTML_Processor` for a flat source-order class edit. Do not
 promote the broad public-API-only ablation as-is. It shows large reductions
 can preserve functional behavior, but processor-choice cues must remain
 dominant for flat Tag Processor tasks.
-
-Next action: continue the reduction loop with a narrower scratch ablation
-instead of source promotion. First candidate: text-policy de-duplication. Keep
-the compact DOM-style text decision table and class-level recipe, but collapse
-or remove duplicate method-local special-element reminders that previously had
-mixed/negative signal. Test on `T03-first-h1-text`, `N06-extract-toc`,
-`T05-text-excerpt`, `T06-collect-links`, and `T08-table-extract` with the same
-weak subject and judge policy. Success means no return of special-element
-over-inclusion, no worse fail-closed read-only extraction behavior, and
-equal-or-better subset score before any source promotion.
 
 Previous update: rounds 58/59 and 60 tested two weak-tier traversal-boundary
 scratch A/B variants against the round-58 control. Both lost: the compact

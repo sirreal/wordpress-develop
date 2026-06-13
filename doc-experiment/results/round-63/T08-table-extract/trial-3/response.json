@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_tag()/next_token() using get_current_depth() to stay within the first TABLE subtree. Cell text is accumulated only from #text tokens via get_modifiable_text(), and rows/cells are finalized on TR, TD, and TH closing tags so browser-style implied table structure is handled correctly.",
+  "confidence": 90
+}

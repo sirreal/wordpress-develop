@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and a next_token() walk. All HTML API calls are documented, with no _doing_it_wrong records. It follows the documented #text-only default and explicit TITLE/TEXTAREA opt-in using get_modifiable_text(). Minor reservation: the strlen()/substr() fallback would be byte-based if mbstring were absent, and the function does not make an explicit post-scan policy for parser aborts or incomplete input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented token-walking pattern. It uses only documented HTML API methods and cleanly separates ordinary #text tokens from explicitly whitelisted TITLE/TEXTAREA opener text, excluding SCRIPT/STYLE raw text. Minor reservation: it checks mb_strlen() but not mb_substr(), and like the others does not state an explicit incomplete-input or unsupported-markup policy after scanning."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API usage throughout. The token loop and special-element allow-list match the rendered documentation closely. Minor reservation: the strlen()/substr() fallback is not codepoint-safe without mbstring, and parser abort/incomplete-input handling is implicit best-effort rather than an explicit policy."
+    }
+  ],
+  "failure_analysis": "All trials passed all 10 hidden cases, and none triggered _doing_it_wrong. The docs did well on the decisive points: the 'Which processor should I use?' guidance pushed subjects to WP_HTML_Processor for structural text extraction; the 'Recipe: collect DOM-style text from a subtree' and quick policy table taught them not to treat every get_modifiable_text() result as DOM text; get_modifiable_text() explicitly documented decoded UTF-8 for #text, TITLE, and TEXTAREA, and raw/verbatim SCRIPT/STYLE content; next_token() explained that text can be split across tokens and that malformed/implied structure is handled by the processor. Near-misses were mostly outside the hidden cases: candidates did not explicitly inspect get_last_error() or paused_at_incomplete_token(), relying on the docs' allowed read-only best-effort policy, and two candidates included a byte-slicing fallback that would violate Unicode codepoint truncation if mbstring were unavailable.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor overview, 'Recipe: collect DOM-style text from a subtree' / quick policy table",
+      "problem": "Readers must combine the ordinary #text policy with the special-element opt-in policy to build a full text-extraction policy. The docs are correct, but the composition point is easy to miss.",
+      "suggestion": "Add a general note that text extraction should start by defining an explicit token allow-list: ordinary DOM text uses #text tokens; special element contents require matching non-closer opener tokens by name; raw-text elements such as SCRIPT and STYLE should remain excluded unless the caller explicitly asks for them."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / WP_HTML_Tag_Processor::get_modifiable_text()",
+      "problem": "The docs say returned text is decoded UTF-8 and show mb_substr(), but they do not warn that strlen()/substr() are unsafe fallbacks for character limits.",
+      "suggestion": "Add a short warning that returned text should be measured and sliced with UTF-8-aware codepoint tools, and that byte-based strlen()/substr() can split characters or miscount decoded entities."
+    },
+    {
+      "location": "WP_HTML_Processor overview text-extraction recipe and WP_HTML_Processor::next_token()",
+      "problem": "The docs describe paused_at_incomplete_token() and get_last_error() as caller-policy decisions, but the extraction examples do not show an after-loop policy decision.",
+      "suggestion": "Add a small after-loop pattern contrasting best-effort read-only extraction with complete-source extraction: best-effort may return accumulated text, while complete-source callers should reject or fallback when paused_at_incomplete_token() is true or get_last_error() is non-null."
+    },
+    {
+      "location": "Special-element text guidance near get_modifiable_text()",
+      "problem": "Examples and prose alternate between get_tag() and get_token_name(); both can work with a #tag guard, but the preferred special-element opener test is not explicit.",
+      "suggestion": "Show the canonical opener predicate for special text-bearing elements, including get_token_type() === '#tag', ! is_tag_closer(), and either get_token_name() or a note that get_tag() is equivalent only while matched on a tag token."
+    }
+  ]
+}

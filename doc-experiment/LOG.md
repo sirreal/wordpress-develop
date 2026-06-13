@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 63 — text-policy de-duplication ablation damages N06
+
+`round-63` tested the narrower reduction candidate from the round-62 next
+action. It was a scratch-only `shadow-doc-a/b` variant on the focused
+text/traversal-adjacent subset: `T03-first-h1-text`, `N06-extract-toc`,
+`T05-text-excerpt`, `T06-collect-links`, and `T08-table-extract`. Source
+docblocks, corpus fixtures, runner policy, and harness behavior were
+unchanged.
+
+Variant: keep the HTML Processor overview DOM-style text recipe and compact
+policy table, but remove duplicate method-local text-policy prose. Specifically
+the scratch edit removed the special-element opt-in paragraph from
+`next_token()` and shortened the `get_modifiable_text()` special-element
+example to a cross-reference-level sentence. This removed 14 rendered lines
+from `html-processor.md`.
+
+Numeric result: **95.87 on the five-task subset**, versus **99.28** for the
+same tasks in round 56. `T03`, `T05`, `T06`, and `T08` stayed stable or rose
+slightly, but `N06-extract-toc` collapsed **99.80 -> 81.13** because one trial
+passed only 2/7 hidden cases. The failed candidate put the `#text` handling
+branch after a `'#tag' !== get_token_type()` `continue`, making heading text
+collection unreachable. The judge attributed this to a token-type control-flow
+misconception: a token is either `#tag`, `#text`, comment, etc.; text handling
+must not be nested under a tag-only guard.
+
+Interpretation: do not promote this de-duplication. The removed local
+text-policy cues appear load-bearing for repeated-subtree text extraction, even
+though most other text tasks remained strong. Keep the current method-local
+`next_token()` and `get_modifiable_text()` reminders until a replacement
+example explicitly teaches single-loop repeated-subtree extraction without
+adding more net prose.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and continue
+the reduction loop only with lower-risk non-contract pruning. The next scratch
+candidate is removing roadmap/future-direction prose from the rendered docs:
+the Tag Processor file-level "Possible future direction" note and the HTML
+Processor "Eventually the HTML Processor will also support" list. Do not remove
+text-policy method-local reminders.
+
 ## Round 62 — public-API-only ablation is too broad to promote
 
 `round-62` tested the new documentation-reduction directive as a scratch-only
