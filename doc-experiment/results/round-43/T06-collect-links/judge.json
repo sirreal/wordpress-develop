@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), token walking, get_attribute() with is_string(), and #text + get_modifiable_text() correctly. All called APIs are documented and execution recorded no misuse. Slightly less canonical than the reference because it tracks A state manually rather than using a depth-bounded subtree walk, but this matches the docs' single-cursor/state guidance for repeated regions."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented APIs throughout. The main adherence issue is the final paused_at_incomplete_token() policy: for a read-only extraction task, returning an empty result on any trailing incomplete syntax can discard links already parsed. The docs describe that as a caller policy choice, not a default for extraction. Otherwise handles decoded href/text and valueless href correctly."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API calls. Uses a documented one-pass next_token() state-machine pattern and the right string-valued href check. The final get_last_error() rejection is defensible for unsupported markup, though the docs could better distinguish strict-abort extraction from best-effort partial extraction."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases. The docs did well on the essentials: 'Which processor should I use?' and create_fragment() pointed subjects to WP_HTML_Processor for BODY fragments; get_attribute() documented string|true|null, which led all trials to exclude missing and valueless hrefs with is_string(); get_modifiable_text() documented decoded #text behavior; and next_token() documented one shared cursor, virtual closers, and explicit state, which the candidates followed. Near-misses: trial-2 appears to overgeneralize the incomplete-input guidance from next_token()/paused_at_incomplete_token(), treating any trailing incomplete syntax as grounds to erase collected results. The relevant docs say this depends on caller policy, but the examples are mostly mutation/rewrite-oriented, making strict rejection look like a default. Trials also rely on closer-driven A stack state; the is_tag_closer() docs imply this works, but they do not explicitly say get_tag() still names the element being closed on real and virtual closers.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / Recipe: collect DOM-style text from a subtree",
+      "problem": "The docs show single-subtree text extraction and a DT state-machine example, but not a general repeated-element extraction pattern that combines opener attributes, text accumulation, and closer finalization.",
+      "suggestion": "Add a generalized example for collecting data from repeated elements in one pass: record state on an opener, append only #text token get_modifiable_text(), finalize on the element closer, and explain when a depth-bounded inner walk is appropriate instead."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and WP_HTML_Processor::next_token() incomplete-input notes",
+      "problem": "The distinction between an unclosed element, which still gets a virtual closer, and an incomplete trailing syntax token, which sets paused_at_incomplete_token(), is easy to blur.",
+      "suggestion": "State explicitly that unclosed elements at EOF are structurally closed by the processor and are not necessarily 'incomplete tokens'; checking paused_at_incomplete_token() is a strict-source-completeness policy that may discard otherwise valid visited data."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error()",
+      "problem": "The docs explain how to detect unsupported markup, but mostly frame the response around output-producing methods like serialize()/normalize(). Extraction callers need clearer guidance on partial results.",
+      "suggestion": "Document that tokens visited before get_last_error() became non-null were parsed, but the traversal is incomplete; callers should choose and document a policy such as reject all, return partial results with a flag, or fall back."
+    },
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() / get_tag()",
+      "problem": "Closer-driven state machines depend on get_tag() returning the closed element name on closer tokens, including virtual closers. The docs imply this through examples but do not state the contract directly.",
+      "suggestion": "Add one sentence and a tiny example showing that when matched on a closer, is_tag_closer() is true, get_tag() returns the element being closed, while breadcrumbs/depth already reflect the parent context."
+    }
+  ]
+}

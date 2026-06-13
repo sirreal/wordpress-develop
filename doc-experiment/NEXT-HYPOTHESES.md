@@ -192,6 +192,15 @@ accumulated string is the rewrite, while `normalize( $html )` on the original
 input and raw-input return paths both abandon emitted changes unless the
 caller deliberately chooses them as fallbacks.
 
+Round 43 scored that source promotion. It was neutral, not a clean win: train
+fell 99.65 -> 98.18 versus the comparable scored-train source round, below the
+2-point revert threshold and without an all-trial task regression. The drop
+came from one T05 PHP `preg_match_all()` bug that the judge classified as not
+HTML API misuse. Serialization targets stayed stable (N04 100.00, T12 99.80,
+T09 99.10) but the raw-input fallback near-miss persisted. Keep the source
+edit under the revert rule, but do not immediately add more fallback-policy
+source prose without a fresh diagnostic.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

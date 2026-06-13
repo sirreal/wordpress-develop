@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor::normalize()`, which is documented in the rendered HTML Processor docs as a public static normalizer for BODY-context fragments returning `string|null`. It uses a strict `null` fallback check and avoids unnecessary token walking or mutation APIs."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct solution as the reference: documented HTML Processor static normalization plus strict mapping of `null` to the placeholder. No undocumented API usage or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and API choice. The implementation follows the documented `normalize()` contract directly and handles unsupported input via the documented `null` return."
+    }
+  ],
+  "failure_analysis": "All trials passed all seven hidden cases, so there were no functional failures to attribute to documentation gaps. The rendered docs did the important work well: `html-tag-processor.md` explicitly says to use the HTML Processor for producing normalized output, while `html-processor.md` documents `WP_HTML_Processor::normalize()` as normalizing BODY-context fragments, lists normalization effects such as quoted attributes, omitted tags, table structure insertion, and text re-encoding, and states that unsupported markup makes output methods such as `serialize()` and `normalize()` return `null`. That gave subjects a direct, low-risk path to the reference solution. The only near-miss is that unsupported cases record a `trigger_error` from serialization even though `normalize()` returns `null`; because the canonical solution has the same behavior and there are no `_doing_it_wrong` records, this is not candidate misuse, but the docs could make the warning/null behavior less surprising.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md `normalize()` return contract",
+      "problem": "The docs say `string|null`, but do not explicitly contrast unsupported `null` with valid empty-string output for an empty fragment.",
+      "suggestion": "Add a short return-contract note: callers should use a strict `null` check for inability to normalize; an empty input fragment may normalize to `''` and is not a failure."
+    },
+    {
+      "location": "html-processor.md `normalize()` / `serialize()` unsupported-markup behavior",
+      "problem": "Unsupported markup returns `null`, but execution also records a serialization warning. Readers may not know whether that warning is expected API behavior or evidence of misuse.",
+      "suggestion": "Document whether normalization/serialization may emit a warning when the parser aborts, and distinguish that from `_doing_it_wrong` misuse."
+    },
+    {
+      "location": "html-processor.md HTML Support unsupported constructs",
+      "problem": "The unsupported examples cover foster parenting and one mis-nested formatting case, but anchor/adoption-agency failures are less discoverable.",
+      "suggestion": "Broaden the unsupported-markup examples with a general note that some active-formatting-element and nested-anchor reconstruction cases can abort, with callers expected to treat `null` output as the fallback signal."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a token-by-token rewrite with `next_token()`, `get_token_type()`, `get_modifiable_text()`, and `serialize_token()`. Ordinary `#text` tokens are matched against the decoded text and wrapped with literal `<mark>` tags, while every other token is emitted via `serialize_token()`, which preserves the HTML Processor\u2019s normalized serialization and automatically excludes special text-bearing elements because their contents are not exposed as ordinary `#text` child tokens.",
+  "confidence": 82
+}

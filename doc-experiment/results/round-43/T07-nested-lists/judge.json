@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for structure-aware parsing. All called methods are documented in the rendered files. The implementation uses the intended token walk, get_tag(), get_breadcrumbs(), add_class(), and get_updated_html() pattern, excludes the current node from ancestor checks, handles null factory return, and checks get_last_error(). No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. This is idiomatic for the task: scan openers with next_tag(), inspect breadcrumbs for ancestors, add the class with add_class(), and return get_updated_html(). It also explicitly checks paused_at_incomplete_token() and get_last_error(), which is conservative but documented. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose the HTML Processor and used only documented methods. The breadcrumb handling is clean: array_pop() removes the current list before testing ancestors. Uses add_class() and get_updated_html() appropriately, handles null factory return and unsupported parser aborts via get_last_error(). No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, and none produced _doing_it_wrong records. The docs succeeded on the main decision points: the Tag Processor page explicitly says it has no tree awareness and points structural work to WP_HTML_Processor; the HTML Processor page documents create_fragment() for body fragments; next_tag() documents opener-only walking by default; get_breadcrumbs() documents the current-node path including implicit HTML/BODY; add_class() documents class merging; and get_updated_html() documents byte-preserving output after queued edits. The only near-miss is incomplete-input policy: trial-2 rejects any paused incomplete token, while trials 1 and 3 do not. The docs describe both policies as caller-dependent, so this was not an adherence failure for this task, but it is an area where examples could make the choice more explicit for simple mutation loops.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs section",
+      "problem": "The docs state that breadcrumbs include the current matched node, but they do not show the common ancestor-only idiom. This can lead models to accidentally count the current element as its own ancestor.",
+      "suggestion": "Add a short general note and example showing that ancestor checks should use the breadcrumb array without its last element, because the last item is the current token."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() breadcrumb query docs",
+      "problem": "The docs explain fixed breadcrumb sub-path matching, but do not clearly distinguish that from arbitrary ancestor membership checks or disjunctions across ancestor names.",
+      "suggestion": "Clarify that breadcrumb queries match a specified path shape; for conditions like 'has any ancestor matching X' or 'has one of several possible ancestors', scan matching tags and inspect get_breadcrumbs()."
+    },
+    {
+      "location": "WP_HTML_Processor simple mutation examples / inherited get_updated_html() guidance",
+      "problem": "Incomplete-token and get_last_error() policy is documented, but mostly in region-scan and serialization contexts. For simple class/attribute mutation loops, it is less obvious whether to return updated HTML, original HTML, or null after a paused incomplete token.",
+      "suggestion": "Add a brief post-loop policy note for mutation examples: get_updated_html() returns queued byte-preserving edits; check get_last_error() after scanning, and check paused_at_incomplete_token() only when the caller requires complete input rather than best-effort edits to complete tokens."
+    }
+  ]
+}

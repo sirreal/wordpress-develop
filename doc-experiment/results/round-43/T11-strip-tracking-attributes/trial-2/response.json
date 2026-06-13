@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, tag-by-tag scan of the input, which is the documented choice for attribute edits that should otherwise preserve the original HTML bytes. For each matched tag, it calls `get_attribute_names_with_prefix( 'data-track-' )` to find exactly the tracking attributes to remove, then removes each one with `remove_attribute()`, and finally returns the modified markup with `get_updated_html()`.",
+  "confidence": 96
+}

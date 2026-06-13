@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat scan of every tag in the input, because the task is purely attribute-based and does not require tree awareness. For each matched tag, it calls the documented `get_attribute_names_with_prefix( 'data-track-' )` to find only attributes whose names start with that exact prefix, removes each one with `remove_attribute()`, and returns the modified markup with `get_updated_html()`.",
+  "confidence": 96
+}

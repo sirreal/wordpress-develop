@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Processor fragment parser and the documented token-rewrite pattern: next_token(), #text guard, get_modifiable_text() for decoded matching, and serialize_token() for normalized output. All called HTML API methods are documented. Minor deduction: on get_last_error() it returns the original input, which the serialize_token docs explicitly warn is not normalized and discards the rewrite; no frozen case triggered that path."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation pattern as trial-1. Processor choice, decoded text handling, comment/attribute avoidance, split text-node behavior, special element avoidance, and normalized serialization are all aligned with the docs. Minor deduction for raw-input fallback after parser abort."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation pattern as trial-1. No undocumented API calls or _doing_it_wrong records. It follows the documented serialize-token rewrite recipe closely. Minor deduction for returning unnormalized raw input on unsupported parser errors."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 frozen cases, so there are no failed hidden cases to diagnose. The docs did well on this task: 'Which processor should I use?' points readers to WP_HTML_Processor when structure, implied closing tags, and normalized output matter; 'collect DOM-style text from a subtree' says to append only ordinary #text tokens and not use get_modifiable_text() as the text-node test; get_modifiable_text() clearly states decoded text semantics for #text/TITLE/TEXTAREA and raw semantics for SCRIPT/STYLE/comments; and serialize_token() explicitly describes token-by-token rewrites with added wrappers. The main near-miss is that every candidate copied a conservative get_last_error() fallback returning the original HTML. That is documented as preserving source bytes but not normalized output, so it would be wrong for an unsupported-markup case if the function contract still required normalized serialization. No provided test exercised unsupported-parser aborts.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / Recipe: rewrite while serializing tokens and serialize_token()",
+      "problem": "The docs correctly warn that returning original input discards the rewrite, but examples with string-returning functions can still lead models to choose raw-input fallback after get_last_error().",
+      "suggestion": "Add a short fallback policy table contrasting accumulated best-effort output, null/error sentinel, empty string, and original input, with explicit notes about which choices preserve normalization and which preserve source bytes only."
+    },
+    {
+      "location": "html-processor.md / create_fragment()",
+      "problem": "The null-return guidance says to check before walking, but does not clarify how rare/null-producing conditions relate to the default BODY/UTF-8 path or normalized-output contracts.",
+      "suggestion": "Clarify that callers should choose a fallback consistent with their contract, and that returning raw input from a normalizer is not a normalized result."
+    },
+    {
+      "location": "html-tag-processor.md / get_modifiable_text() and html-processor.md / serialize_token()",
+      "problem": "The decoded-text-read path and normalized-token-output path are documented separately; this task depended on combining them correctly.",
+      "suggestion": "Cross-reference the common pattern: inspect decoded get_modifiable_text() for #text matching, but emit serialize_token() when preserving normalized markup rather than rebuilding output from the decoded string."
+    }
+  ]
+}

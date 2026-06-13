@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat, byte-preserving attribute edit. All calls are documented: direct construction, next_tag, get_attribute, set_attribute, and get_updated_html. The null check handles absent vs empty vs valueless href semantics, and no _doing_it_wrong records appeared."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented and idiomatic Tag Processor pattern as the reference: scan A openers, test href presence with get_attribute() !== null, set target, return get_updated_html(). Passed all edge semantics without undocumented API use."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses lower-case next_tag('a'), which is documented as ASCII case-insensitive. Otherwise matches the canonical documented pattern and correctly relies on get_attribute null/true/empty-string semantics. No hallucinated methods or misuse records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, so there were no failed hidden cases to attribute to a documentation failure. The docs worked well here: the Tag Processor overview and the HTML Processor support section clearly steer byte-exact flat attribute/class edits to WP_HTML_Tag_Processor; the Usage and Finding tags sections show direct construction and next_tag scanning; get_attribute documents null for absent attributes, empty string for empty attributes, and true for valueless boolean attributes; set_attribute documents overwrite behavior and placement of newly-added attributes; get_updated_html documents that queued edits are applied while untouched bytes are preserved. The main near-miss is that the safe attribute-presence idiom has to be inferred from the return-value contract rather than being named directly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute docblock",
+      "problem": "The return contract contains the needed null/empty-string/true distinction, but it does not explicitly name the common presence-test idiom. Less careful readers may use truthiness and skip href=\"\" while still thinking they followed the docs.",
+      "suggestion": "Add a short note: to test whether an attribute is present, compare the result to null; do not use a truthiness check because empty-string and true are both present attributes."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute and set_attribute docblocks",
+      "problem": "Attribute name matching case-insensitivity is not prominent at the exact lookup/update methods. The uppercase-attribute case relies on this behavior.",
+      "suggestion": "State on both methods that attribute names are matched ASCII case-insensitively, while untouched original attribute spelling is preserved in output."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag docblock",
+      "problem": "The docs say next_tag finds tags and separately discuss incomplete input, but the skip behavior for markup-like text in comments/raw text is not summarized where users choose next_tag for scanning.",
+      "suggestion": "Add a compact note that next_tag matches real HTML tag tokens only; markup-looking text inside comments and raw/plaintext regions is not reported as a tag, and incomplete trailing tags are not matched."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute attribute placement section",
+      "problem": "The placement rules are documented, but the single-new-attribute case that surprises users most is easy to miss when exact output order matters.",
+      "suggestion": "Add a general one-line example showing that adding one new attribute to a tag with existing attributes inserts it immediately after the tag name, while updating an existing attribute keeps its position."
+    }
+  ]
+}

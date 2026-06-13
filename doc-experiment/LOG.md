@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 43 — serialization fallback source edit scored neutral
+
+**Train 98.18 / core 97.89** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `27c764f6f0`, which promoted the round-41
+fallback-policy card into source docs around the HTML Processor class recipe,
+`create_fragment()`, `normalize()`, and `serialize_token()`.
+
+Outcome: keep under the revert rule, but treat as neutral rather than a clean
+win. Compared with the primary scored-train comparator, round 36, train fell
+99.65 -> 98.18. The drop is below the 2-point revert threshold and is not an
+all-trial task regression. It is concentrated in one unrelated T05-text-excerpt
+trial that passed 2/10 because the candidate treated `preg_match_all()` as a
+boolean/single-match API and skipped multi-codepoint text chunks. The judge
+explicitly called this a PHP bug, not an HTML API documentation failure.
+
+Target serialization tasks remained stable but did not show a decisive win:
+N04-normalize-or-placeholder stayed 100.00, T12-unwrap-spans rose 99.70 ->
+99.80, and T09-mark-keyword fell 99.30 -> 99.10. All target hidden cases
+passed. The remaining near-miss is still raw-input fallback after parser
+abort: T09 candidates returned the original HTML even though the source docs
+now state that raw input is not normalized rewritten output. The edit improved
+local correctness of the docs, but the transfer problem is not fully solved.
+
+Decision: keep `27c764f6f0`; do not revert. Do not spend another immediate
+source edit on fallback-policy wording without fresh diagnostic evidence.
+
+Next action: commit round-43 results separately, then analyze trusted judge
+notes for the next diagnostic. The strongest current signals are still text
+policy/read-only extraction and UTF-8 decoded-text measurement, but the T05
+functional failure alone is generic model noise and should not drive a source
+edit by itself.
+
 ## Round 42 — checkpoint clears fallback-policy promotion gate
 
 **All 99.29 / train 99.54 / held-out 98.38 / core 99.21** under
