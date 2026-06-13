@@ -54,6 +54,7 @@ SUBJECT_LADDER = [
 
 SATURATED_SCORE = 97.0
 DIAGNOSTIC_MODES = {"discoverability-probe", "shadow-doc-a/b"}
+PREPARABLE_MODES = {"checkpoint", "scored-train", "weak-tier-calibration"}
 
 
 def run_text(command: list[str]) -> str:
@@ -140,6 +141,24 @@ def latest_log_next_action() -> str | None:
     if not match:
         return None
     return " ".join(match.group(1).split())
+
+
+def mode_from_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    normalized = text.lower()
+    for mode in (
+        "checkpoint",
+        "weak-tier-calibration",
+        "scored-train",
+        "discoverability-probe",
+        "shadow-doc-a/b",
+    ):
+        if mode in normalized:
+            return mode
+    if "regression sentinel" in normalized:
+        return "checkpoint"
+    return None
 
 
 def format_policy(policy: dict | None) -> str:
@@ -232,8 +251,22 @@ def validate_round(round_name: str) -> tuple[dict | None, list[str]]:
     return report, errors
 
 
-def prepared_current_rounds(train_ids: list[str], subject_policy: dict) -> list[dict]:
-    train_set = set(train_ids)
+def expected_task_ids_for_mode(
+    mode: str | None,
+    train_ids: list[str],
+    holdout_ids: list[str],
+) -> list[str]:
+    if mode == "checkpoint":
+        return sorted([*train_ids, *holdout_ids])
+    return train_ids
+
+
+def prepared_current_rounds(
+    expected_task_ids: list[str],
+    subject_policy: dict,
+    mode: str,
+) -> list[dict]:
+    expected_task_set = set(expected_task_ids)
     prepared = []
     for round_dir in sorted((EXPERIMENT_ROOT / "results").glob("round-*")):
         metadata_file = round_dir / "round-metadata.json"
@@ -242,13 +275,13 @@ def prepared_current_rounds(train_ids: list[str], subject_policy: dict) -> list[
             continue
 
         metadata = json.loads(metadata_file.read_text())
-        if metadata.get("mode") != "weak-tier-calibration":
+        if metadata.get("mode") != mode:
             continue
         if metadata.get("subject") != subject_policy:
             continue
         if metadata.get("judge") != CURRENT_JUDGE:
             continue
-        if set(metadata.get("task_ids", [])) != train_set:
+        if set(metadata.get("task_ids", [])) != expected_task_set:
             continue
 
         report, errors = validate_round(round_dir.name)
@@ -365,6 +398,7 @@ def build_audit() -> dict:
     rounds = completed_rounds()
     latest = rounds[-1] if rounds else None
     latest_log_action = latest_log_next_action()
+    latest_log_mode = mode_from_text(latest_log_action)
     active_subject, active_subject_reason = selected_subject(latest, latest_log_action)
 
     latest_commit = last_commit_for(latest["summary_file"]) if latest else None
@@ -395,7 +429,21 @@ def build_audit() -> dict:
     )
     current_baselines = current_no_edit_baselines(rounds, train_ids, active_subject)
     current_baseline_exists = any(baseline["valid"] for baseline in current_baselines)
-    prepared_rounds = prepared_current_rounds(train_ids, active_subject)
+    prepared_mode = (
+        latest_log_mode
+        if latest_log_mode in PREPARABLE_MODES
+        else "weak-tier-calibration"
+    )
+    expected_prepared_task_ids = expected_task_ids_for_mode(
+        prepared_mode,
+        train_ids,
+        holdout_ids,
+    )
+    prepared_rounds = prepared_current_rounds(
+        expected_prepared_task_ids,
+        active_subject,
+        prepared_mode,
+    )
     latest_prepared = prepared_rounds[-1] if prepared_rounds else None
     next_round_name = f"round-{(latest['number'] + 1) if latest else 1}"
 
@@ -425,7 +473,7 @@ def build_audit() -> dict:
         next_action = f"repair or restage {latest_prepared['round']} before launching agents"
     elif latest_prepared and latest_prepared["lifecycle"] == "prepared":
         next_action = (
-            f"launch trials for prepared current-corpus baseline {latest_prepared['round']} "
+            f"launch trials for prepared {latest_prepared['mode']} {latest_prepared['round']} "
             f"with {format_policy(active_subject)}; use the local Codex CLI runner when the "
             "Workflow UI runner is unavailable"
         )
@@ -469,6 +517,15 @@ def build_audit() -> dict:
         next_action_commands = [
             f"python3 doc-experiment/tools/prepare-round.py {next_round_name} "
             f"--mode weak-tier-calibration "
+            f"--subject-model {active_subject['model']} "
+            f"--subject-reasoning-effort {active_subject['reasoning_effort']} "
+            f"--subject-service-tier {active_subject['service_tier']}",
+        ]
+    elif latest_log_mode == "checkpoint":
+        next_action = latest_log_action
+        next_action_commands = [
+            f"python3 doc-experiment/tools/prepare-round.py {next_round_name} "
+            f"--mode checkpoint "
             f"--subject-model {active_subject['model']} "
             f"--subject-reasoning-effort {active_subject['reasoning_effort']} "
             f"--subject-service-tier {active_subject['service_tier']}",
@@ -530,6 +587,8 @@ def build_audit() -> dict:
             "current_no_edit_baseline_exists": current_baseline_exists,
             "current_no_edit_baselines": current_baselines,
             "prepared_current_round": latest_prepared,
+            "prepared_mode": prepared_mode,
+            "prepared_task_count": len(expected_prepared_task_ids),
             "changed_since_latest_summary_commit": changed_groups,
         },
         "mismatches": mismatches,
