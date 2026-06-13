@@ -308,6 +308,18 @@ def build_audit() -> dict:
         next_action = f"complete missing trial artifacts for {latest_prepared['round']}"
     elif latest_prepared and latest_prepared["lifecycle"] == "trials-complete":
         next_action = f"run judges for {latest_prepared['round']} with gpt-5.5/xhigh/priority"
+        next_action_commands = [
+            f"python3 doc-experiment/tools/run-codex-judges.py {latest_prepared['round']} "
+            f"--output doc-experiment/results/{latest_prepared['round']}/codex-judges-output.json",
+            f"python3 doc-experiment/tools/validate-workflow-output.py judges "
+            f"doc-experiment/results/{latest_prepared['round']}/codex-judges-output.json "
+            f"{latest_prepared['round']}",
+            f"python3 doc-experiment/tools/ingest-judges.py "
+            f"doc-experiment/results/{latest_prepared['round']}/codex-judges-output.json "
+            f"{latest_prepared['round']}",
+            f"python3 doc-experiment/tools/validate-round.py {latest_prepared['round']} "
+            "--require-scored",
+        ]
     elif latest_prepared and latest_prepared["lifecycle"] == "judged":
         next_action = f"aggregate {latest_prepared['round']} and record the current-corpus baseline"
     elif not current_baseline_exists:

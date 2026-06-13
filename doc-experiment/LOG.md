@@ -34,6 +34,9 @@ Added the matching local Codex CLI judge runner for the next round-18 phase.
 It uses the same judge model policy as the Workflow script, runs from the repo
 root under a read-only sandbox, and writes the existing judge-output envelope
 for `ingest-judges.py`.
+`audit-state.py` now prints the local judge command sequence when a prepared
+round is trial-complete, so the next autonomous continuation can move straight
+to judging once the judge data-export approval is present.
 
 Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
 round is prepared, partially trialed, trial-complete, judged, or scored, and it
