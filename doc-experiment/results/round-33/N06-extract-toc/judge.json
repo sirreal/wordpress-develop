@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single next_token() pass, documented get_token_name()/get_token_type()/is_tag_closer(), and get_modifiable_text() only for #text tokens. This follows the documented tree-aware text extraction and virtual-closer model. Minor deduction: it relies entirely on closer-driven state rather than a depth/breadcrumb boundary and does not check paused_at_incomplete_token() or get_last_error(), though the task did not require rejecting partial input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best adherence of the three. Correct processor, all API calls are documented, token type checks are explicit, text extraction is limited to #text tokens, and heading finalization compares the closer tag to the active heading tag. The EOF fallback is harmless but redundant under the documented HTML Processor guarantee that next_token() visits closers for unclosed elements."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented APIs, with a generally idiomatic single-pass token walk. The main weakness is precision: the explanation says it finalizes on a matching heading closer, but the code flushes on any H1-H6 closer while a heading is active. The HTML Processor's virtual closer behavior made this pass, but the state machine is less carefully tied to the documented opener/closer contract."
+    }
+  ],
+  "failure_analysis": "All three trials passed all hidden cases. The docs did well in three important places: the Tag Processor overview says tree-aware text extraction should use WP_HTML_Processor::create_fragment(); the HTML Processor text-extraction recipe says to append only ordinary #text tokens and use get_modifiable_text(), which handled nested markup and decoded &amp; correctly; and the next_token() docs explicitly say the HTML Processor visits virtual closers for implied and end-of-input closes, which explains why the implied-heading-close case passed. The near-miss is that every solution used a hand-rolled active-heading state machine. That pattern is documented as reliable, but trial-3 shows a small ambiguity: it flushed on any heading closer, not the active heading's closer. No hidden case exposed this. None of the candidates checked paused_at_incomplete_token() or get_last_error(); that is acceptable for this best-effort extraction task, but would matter for callers whose contract requires complete input.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / next_token() / single-pass repeated-region example",
+      "problem": "The DT example shows closer-driven flushing for one tag name, but does not spell out the safer pattern when the active region may be one of several tag names.",
+      "suggestion": "Add a general note or example saying that when tracking multiple possible element names, store the opener's token name and flush only when a closer with that same token name is reached."
+    },
+    {
+      "location": "html-processor.md / is_tag_closer() and get_token_name()/get_tag() docs",
+      "problem": "The docs explain that breadcrumbs/depth report the parent context on a closer, but the contract for get_token_name()/get_tag() on a closer is easy to infer rather than explicit.",
+      "suggestion": "State directly that on a closing tag token, get_token_name() and get_tag() return the name of the element being closed, while breadcrumbs/depth reflect the already-popped parent."
+    },
+    {
+      "location": "html-processor.md / collect DOM-style text from a subtree recipe",
+      "problem": "The docs provide both depth-bounded subtree walking and closer-driven single-pass state machines, but the decision point between those two idioms is scattered across sections.",
+      "suggestion": "Add a short guidance paragraph: use a recorded depth or breadcrumbs when collecting one matched element's subtree; use a single active-state loop when collecting many repeated regions in one pass."
+    },
+    {
+      "location": "html-processor.md / next_token() return behavior",
+      "problem": "Candidates did not distinguish normal end-of-input from parser pause/error, even though the docs mention the checks in several places.",
+      "suggestion": "In the next_token() return description, explicitly list the post-loop checks for callers that require complete input: paused_at_incomplete_token() for trailing incomplete syntax and get_last_error() for unsupported-parser aborts."
+    }
+  ]
+}

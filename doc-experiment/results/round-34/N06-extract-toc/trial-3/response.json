@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction depends on document structure. It scans tags in document order with `next_tag()`, filters `H1` through `H6`, then walks each heading subtree with `next_token()` using a depth guard from `get_current_depth()`. It appends ordinary text from `#text` tokens via `get_modifiable_text()`, and also includes text carried on special descendant element openers (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) because those elements store their text on the tag token rather than separate `#text` children.",
+  "confidence": 90
+}

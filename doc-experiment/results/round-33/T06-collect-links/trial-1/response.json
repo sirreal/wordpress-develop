@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text collection is tree-aware, then scans each `A` opener with `next_tag('A')`, reads `href` via `get_attribute()` and keeps only string-valued attributes, and walks that anchor\u2019s subtree with `next_token()` plus `get_current_depth()` to concatenate only `#text` tokens using decoded `get_modifiable_text()`.",
+  "confidence": 84
+}

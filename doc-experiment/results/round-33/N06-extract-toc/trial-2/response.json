@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with structural awareness, then makes a single `next_token()` pass. When it sees an `H1` through `H6` opening tag it starts a heading record, appends only `#text` token content via `get_modifiable_text()` so nested markup contributes text but not tags, and finalizes the record when the matching heading closer is visited.",
+  "confidence": 90
+}

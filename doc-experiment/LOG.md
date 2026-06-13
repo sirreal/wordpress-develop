@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 33/34 — depth-bounded traversal scratch A/B wins
+
+`round-33` was the control rendered-doc round and `round-34` was a
+scratch-only HTML Processor rendered-doc variant for four train tasks:
+`N03-first-list-count`, `N06-extract-toc`, `T06-collect-links`, and
+`T08-table-extract`. Both used `shadow-doc-a/b`, subjects `gpt-5.4` /
+`medium` / `priority`, and judge `gpt-5.5` / `xhigh` / `priority`. Source
+docblocks were unchanged.
+
+Variant: add a compact class-level card after the existing "scan a region
+before editing its opener" recipe explaining depth-bounded subtree membership
+and direct-child opener tests: record the container opener depth; later tokens
+remain inside while depth is `>=` that value; direct child element openers
+require `get_token_type() === '#tag'`, `! is_tag_closer()`, and
+`get_current_depth() === $container_depth + 1`; child closers report parent
+depth and must not be counted; repeated regions should generally use one
+`next_token()` loop with explicit state rather than nested token loops.
+
+Numeric result: variant won, **99.08 vs 97.34** on the paired subset.
+Traversal improved from 96.62 to 99.00. N03 moved from 94.46 to 100.00: the
+control had one 9/11 trial that treated a depth drop plus null
+`get_last_error()` as a complete scan and missed
+`paused_at_incomplete_token()`, while all variant N03 trials passed 11/11
+with 100 adherence. T08 moved from 96.50 to 98.00. N06 was flat/slightly up
+at 99.00, and T06 dipped only 0.2 to 99.30. All variant hidden tests passed.
+
+Interpretation: promotable as a source hypothesis after the held-out cadence
+is satisfied. The edit is generic API documentation rather than a task-shaped
+answer, and it directly addresses repeated judge gaps around subtree
+membership, direct-child detection, and one-cursor traversal. Caveat: it does
+not solve the separate text-policy issue. Variant judges still saw
+special-element opener text over-inclusion in N06 and T08, so that remains a
+separate method-local/text-policy hypothesis.
+
+Next action: run a checkpoint/regression sentinel on the current source docs
+before promoting another source docblock edit. If held-out remains stable,
+promote an adapted, concise version of the depth-bounded traversal card into
+the `WP_HTML_Processor` class documentation and score it as one source
+hypothesis.
+
 ## Round 32 — HTML Processor next_tag() cursor source edit confirmed
 
 **Train 99.67 / core 99.62** under `scored-train`, with subjects
