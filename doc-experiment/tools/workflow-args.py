@@ -207,6 +207,15 @@ def launch_manifest(metadata: dict) -> dict:
                 f"python3 doc-experiment/tools/ingest-trials.py <trials-output.json> {round_name}",
                 f"python3 doc-experiment/tools/validate-round.py {round_name} --require-trials-complete",
             ],
+            "local_codex_judges": [
+                f"python3 doc-experiment/tools/run-codex-judges.py {round_name} "
+                f"--output doc-experiment/results/{round_name}/codex-judges-output.json",
+                f"python3 doc-experiment/tools/validate-workflow-output.py judges "
+                f"doc-experiment/results/{round_name}/codex-judges-output.json {round_name}",
+                f"python3 doc-experiment/tools/ingest-judges.py "
+                f"doc-experiment/results/{round_name}/codex-judges-output.json {round_name}",
+                f"python3 doc-experiment/tools/validate-round.py {round_name} --require-scored",
+            ],
             "after_judges_workflow": [
                 f"python3 doc-experiment/tools/validate-workflow-output.py judges <judges-output.json> {round_name}",
                 f"python3 doc-experiment/tools/ingest-judges.py <judges-output.json> {round_name}",

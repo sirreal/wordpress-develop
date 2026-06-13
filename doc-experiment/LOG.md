@@ -30,6 +30,10 @@ prompt-embedded-docs`.
 `audit-state.py` now prints the local runner command sequence for prepared
 rounds waiting on trials, so autonomous continuations do not reinterpret that
 state as an external-only Workflow gate.
+Added the matching local Codex CLI judge runner for the next round-18 phase.
+It uses the same judge model policy as the Workflow script, runs from the repo
+root under a read-only sandbox, and writes the existing judge-output envelope
+for `ingest-judges.py`.
 
 Added `validate-round.py` as an artifact lifecycle gate. It reports whether a
 round is prepared, partially trialed, trial-complete, judged, or scored, and it

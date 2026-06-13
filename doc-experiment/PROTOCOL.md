@@ -315,6 +315,23 @@ This performs the same scratch/hash preflight because judges must see the exact
 rendered docs that subjects saw, and it revalidates the selected corpus
 references before judge launch.
 
+If the Workflow runner is unavailable, use the local Codex CLI judge fallback:
+
+```sh
+python3 doc-experiment/tools/run-codex-judges.py round-NN \
+  --output doc-experiment/results/round-NN/codex-judges-output.json
+python3 doc-experiment/tools/validate-workflow-output.py judges \
+  doc-experiment/results/round-NN/codex-judges-output.json round-NN
+python3 doc-experiment/tools/ingest-judges.py \
+  doc-experiment/results/round-NN/codex-judges-output.json round-NN
+python3 doc-experiment/tools/validate-round.py round-NN --require-scored
+```
+
+The local judge runner uses the same judge model policy, runs from the
+repository root under a read-only sandbox, ignores project rules and user
+config, and writes the same judge workflow-output shape consumed by
+`ingest-judges.py`.
+
 The judge returns JSON:
 
 ```json
