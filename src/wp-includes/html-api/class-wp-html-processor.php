@@ -176,6 +176,25 @@
  * original HTML or return the raw input unless the intention is to discard
  * every change emitted by the loop.
  *
+ * String-returning rewrite checklist:
+ *
+ *  - Build one `$output` string in the token loop; return that string when
+ *    the rewrite succeeds.
+ *  - Use {@see WP_HTML_Tag_Processor::get_modifiable_text} for decoded
+ *    comparisons and measurements. Do not rebuild the current token from
+ *    that plaintext with `htmlspecialchars()` when normalized token output is
+ *    needed.
+ *  - To wrap a token, emit trusted wrapper markup around
+ *    `$processor->serialize_token()`, for example
+ *    `'<mark>' . $processor->serialize_token() . '</mark>'`.
+ *  - If processor creation fails or {@see WP_HTML_Processor::get_last_error}
+ *    becomes non-null, choose a clear fallback for the function contract.
+ *    Returning `null`, an empty string, the accumulated best-effort `$output`,
+ *    `normalize( $html )`, or the raw input are different policies.
+ *  - `normalize( $html )` and the raw input both start over from the
+ *    original bytes. They do not contain wrappers, skipped tokens,
+ *    replacements, or other changes already emitted into `$output`.
+ *
  * Example:
  *
  *     $processor = WP_HTML_Processor::create_fragment( $html );
@@ -1767,6 +1786,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * extra markup around them to insert wrappers. Closing tokens of
 	 * skipped elements must be skipped too.
 	 *
+	 * Use text APIs and serialization APIs for different jobs:
+	 * {@see WP_HTML_Tag_Processor::get_modifiable_text} gives decoded
+	 * plaintext for inspecting or changing the current token, while
+	 * `serialize_token()` emits the current token as normalized HTML. For a
+	 * wrapper rewrite, check decoded text with `get_modifiable_text()`, then
+	 * wrap `serialize_token()`; do not replace the token with hand-escaped
+	 * plaintext unless the caller explicitly wants to rewrite the text
+	 * contents.
+	 *
 	 * Example:
 	 *
 	 *     // Remove every SUP element but keep its contents.
@@ -1776,6 +1804,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *         if ( 'SUP' === $processor->get_tag() ) {
 	 *             continue; // Skips both the opener and the closer.
 	 *         }
+	 *         $output .= $processor->serialize_token();
+	 *     }
+	 *
+	 * Example:
+	 *
+	 *     // Wrap text tokens that match a caller-defined condition.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     $output    = '';
+	 *     while ( $processor->next_token() ) {
+	 *         if (
+	 *             '#text' === $processor->get_token_type() &&
+	 *             false !== strpos( $processor->get_modifiable_text(), $needle )
+	 *         ) {
+	 *             $output .= '<mark>' . $processor->serialize_token() . '</mark>';
+	 *             continue;
+	 *         }
+	 *
 	 *         $output .= $processor->serialize_token();
 	 *     }
 	 *
@@ -1796,6 +1841,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * discards the accumulated rewrite; it preserves source bytes, but is not
 	 * normalized output and does not contain emitted wrapper, skip, or
 	 * replacement changes.
+	 *
+	 * Common anti-pattern:
+	 *
+	 *     // This throws away every token skipped, wrapped, or replaced
+	 *     // in the loop.
+	 *     return WP_HTML_Processor::normalize( $html ) ?? $html;
 	 *
 	 * Serialization is NOT the way to retrieve a document after modifying
 	 * it with {@see WP_HTML_Tag_Processor::set_attribute},
