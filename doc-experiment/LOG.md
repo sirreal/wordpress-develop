@@ -132,7 +132,9 @@ Trial workflow output must now include a `subject_isolation` attestation before
 ingestion. `ingest-trials.py` persists it as `subject-isolation.json`, and
 round validation rejects present trial artifacts without that file. This turns
 the docs-test-subject tool-boundary requirement from prompt/runbook prose into
-a persisted scoring precondition.
+a persisted scoring precondition. The bundled trial workflow now returns that
+attestation envelope directly, and ingestion also accepts runner-wrapped saved
+output where the returned envelope appears under a top-level `result` key.
 
 ## Tooling hardening for current-corpus baseline
 

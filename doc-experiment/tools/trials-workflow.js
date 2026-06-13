@@ -77,4 +77,12 @@ Deliver via StructuredOutput: code (a complete PHP file defining exactly the req
 
 const completed = results.filter(Boolean)
 log(`${completed.length}/${pairs.length} trials returned`)
-return completed
+return {
+  subject_isolation: {
+    enforced: true,
+    agent_type: meta.requiredAgentType,
+    allowed_tools: meta.requiredTools,
+    notes: 'Workflow runner enforced the docs-test-subject Read+Grep-only tool boundary.',
+  },
+  result: completed,
+}

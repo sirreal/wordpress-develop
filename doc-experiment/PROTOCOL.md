@@ -169,9 +169,8 @@ When orchestrating via the Workflow tool, prefer `schema` structured
 output with fields `code` (string), `explanation` (string), `confidence`
 (integer 0-100) instead of free-text parsing.
 
-Trusted trials must also persist runner isolation evidence. The workflow output
-file ingested by `ingest-trials.py` must be an object with a `result` array and
-a `subject_isolation` attestation:
+Trusted trials must also persist runner isolation evidence. The trials workflow
+returns an object with a `result` array and a `subject_isolation` attestation:
 
 ```json
 {
@@ -189,7 +188,9 @@ If a runner uses an equivalent agent type, `agent_type` may differ, but
 `allowed_tools` must still be exactly `Read` and `Grep`, and
 `equivalent_boundary_notes` must explain the equivalent enforced boundary.
 `ingest-trials.py` persists this as `subject-isolation.json`; `validate-round.py`
-rejects trial artifacts that lack it.
+rejects trial artifacts that lack it. If the workflow runner saves returned
+values under a top-level `result` key, `validate-workflow-output.py` and
+`ingest-trials.py` also accept `{ "result": { "subject_isolation": ..., "result": [...] } }`.
 
 For the bundled workflow script, generate the task list and model policy from
 the round metadata:

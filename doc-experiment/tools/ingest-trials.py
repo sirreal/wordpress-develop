@@ -13,6 +13,13 @@ from pathlib import Path
 EXPERIMENT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def trial_payload(payload: dict) -> dict:
+    result = payload.get("result")
+    if isinstance(result, dict) and "subject_isolation" in result and "result" in result:
+        return result
+    return payload
+
+
 def main() -> int:
     output_file, round_name = sys.argv[1], sys.argv[2]
     results_dir = EXPERIMENT_ROOT / "results" / round_name
@@ -33,7 +40,7 @@ def main() -> int:
         print(validate.stderr, file=sys.stderr)
         return validate.returncode
 
-    payload = json.load(open(output_file))
+    payload = trial_payload(json.load(open(output_file)))
     trials = payload["result"]
     subject_isolation = payload["subject_isolation"]
     results_dir.mkdir(parents=True, exist_ok=True)

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Validate workflow output JSON before ingesting it into round results.
 
-Trial workflow output must include a top-level subject_isolation attestation
-alongside its result array so scored artifacts record the enforced tool
-boundary.
+Trial workflow output must include a subject_isolation attestation alongside
+its result array so scored artifacts record the enforced tool boundary.
 """
 
 import argparse
@@ -39,6 +38,13 @@ def result_from_payload(payload: dict) -> list[dict]:
     if not isinstance(result, list):
         raise ValueError("workflow output must contain a result array")
     return result
+
+
+def trial_payload_from_output(payload: dict) -> dict:
+    result = payload.get("result")
+    if isinstance(result, dict) and "subject_isolation" in result and "result" in result:
+        return result
+    return payload
 
 
 def validate_subject_isolation(payload: dict) -> list[str]:
@@ -253,6 +259,8 @@ def main() -> int:
 
     meta = metadata(args.round)
     payload = load_payload(args.output_file)
+    if args.phase == "trials":
+        payload = trial_payload_from_output(payload)
     entries = result_from_payload(payload)
     errors = (
         [*validate_subject_isolation(payload), *validate_trials(entries, meta)]

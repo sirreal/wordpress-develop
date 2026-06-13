@@ -82,6 +82,10 @@ def launch_manifest(metadata: dict) -> dict:
             "trusted_only_if_enforced": True,
             "attestation_required_in_trials_output": True,
             "attestation_output_key": "subject_isolation",
+            "accepted_trials_output_shapes": [
+                "{subject_isolation, result}",
+                "{result: {subject_isolation, result}}",
+            ],
         },
         "scripts": {
             "trials": str(EXPERIMENT_ROOT / "tools" / "trials-workflow.js"),
