@@ -44,6 +44,45 @@
  *         $processor->add_class( 'responsive-image' );
  *     }
  *
+ * #### Recipe: scan a region before editing its opener
+ *
+ * Some edits depend on facts discovered later in an element's contents:
+ * "does this section contain a heading?", "how many direct children did this
+ * element have?", "what text appears before this element closes?" Use a
+ * bookmark on the opener, walk forward with {@see WP_HTML_Processor::next_token},
+ * then seek back and edit only if the scan finished cleanly.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( $processor->next_tag( 'SECTION' ) && $processor->set_bookmark( 'section-opener' ) ) {
+ *         $section_depth = $processor->get_current_depth();
+ *         $saw_heading   = false;
+ *
+ *         while ( $processor->next_token() && $processor->get_current_depth() >= $section_depth ) {
+ *             if ( 'H2' === $processor->get_tag() && ! $processor->is_tag_closer() ) {
+ *                 $saw_heading = true;
+ *             }
+ *         }
+ *
+ *         $scan_finished_cleanly =
+ *             ! $processor->paused_at_incomplete_token() &&
+ *             null === $processor->get_last_error();
+ *
+ *         if ( $scan_finished_cleanly && $saw_heading && $processor->seek( 'section-opener' ) ) {
+ *             $processor->add_class( 'has-heading' );
+ *         }
+ *
+ *         $processor->release_bookmark( 'section-opener' );
+ *     }
+ *
+ * A depth drop or virtual closer tells you that the parser has left the
+ * element in the parsed tree. It does not prove the input bytes for that
+ * region were complete. If a mutation depends on a complete scan, check
+ * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} for truncation
+ * and {@see WP_HTML_Processor::get_last_error} for unsupported markup before
+ * applying the edit.
+ *
  * #### Breadcrumbs
  *
  * Breadcrumbs represent the stack of open elements from the root
@@ -865,6 +904,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * opener and closer back-to-back with no `#text` between, so the
 	 * flush records an empty string rather than skipping the region.
 	 *
+	 * This reliability is structural: it means the parser reports when
+	 * it leaves each element, including virtual closers. It does not
+	 * prove that the source bytes for that region were complete. If a
+	 * scan will drive a mutation or another result that must reject
+	 * truncated input, check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the
+	 * scan, and check {@see WP_HTML_Processor::get_last_error} for an
+	 * unsupported-parser abort.
+	 *
 	 * Example:
 	 *
 	 *     // Collect the text content of the first LI element.
@@ -1359,7 +1407,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * This gives a reliable way to visit every token inside an element:
 	 * record the depth when matched on its opening tag and continue while
-	 * the depth remains at or above that value.
+	 * the depth remains at or above that value. This boundary is about
+	 * the tree location, not about source completeness: virtual closers
+	 * can appear after trailing incomplete syntax. If the scan's result
+	 * will drive an edit or must reject truncated input, check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the
+	 * bounded walk, and separately check
+	 * {@see WP_HTML_Processor::get_last_error} for unsupported markup.
 	 *
 	 * Example:
 	 *
@@ -1399,6 +1453,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *             // sibling text — both stay in the loop). The loop ends
 	 *             // at the UL's own closing token, whose depth is lower.
 	 *         }
+	 *         $scan_finished_cleanly =
+	 *             ! $processor->paused_at_incomplete_token() &&
+	 *             null === $processor->get_last_error();
 	 *     }
 	 *
 	 * The `>=` comparison is what makes this loop correct at any nesting
