@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(), all documented. This is the intended structural approach. Minor deductions for the unnecessary tag_name => null query and a magic breadcrumbs length guard, but it otherwise follows the documented breadcrumb and byte-preserving update patterns."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Chose WP_HTML_Processor and only used documented methods: create_fragment(), next_token(), get_token_type(), get_tag(), is_tag_closer(), add_class(), get_last_error(), and get_updated_html(). The manual list-depth counter passed because HTML Processor next_token() documents opener/closer structural reliability, but for an ancestor predicate this is less idiomatic than inspecting get_breadcrumbs() and partially recreates parser state."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and documented methods: create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). Counting list entries in breadcrumbs works because next_tag() defaults to openers and breadcrumbs include the current element, but it is slightly less explicit than slicing off the current token and checking ancestors directly. No unsupported API usage or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases, with no hidden-case failures and no _doing_it_wrong records. The docs did well at steering models to WP_HTML_Processor for nested structure: the Tag Processor docs explicitly say it has no tree awareness, while the HTML Processor overview, Breadcrumbs section, create_fragment(), next_tag(), add_class(), and get_updated_html() docs support the successful solutions. Near-misses: trial 2 used a manual opener/closer depth counter instead of breadcrumbs; this was still documented by next_token()'s structural closer guarantees, but it is not the simplest contract for ancestor tests. Trial 1 used a magic breadcrumbs count threshold, and trial 3 counted the current element as part of the list count; both show that models understood breadcrumbs but had to infer the exact ancestor-only idiom.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Breadcrumbs / get_breadcrumbs()",
+      "problem": "The docs explain that breadcrumbs are the full path and include implicit HTML/BODY nodes, but they do not show the common 'does the current element have an ancestor of type X?' pattern.",
+      "suggestion": "Add a short example that slices off the current element before checking ancestors, e.g. array_slice( get_breadcrumbs(), 0, -1 ), and explicitly states that the last breadcrumb is the current matched opener."
+    },
+    {
+      "location": "html-processor.md: next_tag() query parameter docs",
+      "problem": "The breadcrumbs query examples show contiguous structural paths, but the docs do not clearly contrast that with arbitrary ancestor checks or multiple possible tag names.",
+      "suggestion": "State that breadcrumbs queries match a path/sub-path, not 'any ancestor anywhere' and not tag-name alternatives; recommend scanning all tags and branching on get_tag() plus get_breadcrumbs() for those cases."
+    },
+    {
+      "location": "html-processor.md: next_token() / explicit state recipes",
+      "problem": "The single-loop state-machine guidance is useful, but it can make manual depth or opener/closer counters look like the preferred approach even for simple ancestry predicates.",
+      "suggestion": "Add guidance that manual token state is best for aggregating ranges or repeated regions, while get_breadcrumbs() or get_current_depth() should be preferred for tree membership and ancestor predicates."
+    },
+    {
+      "location": "html-tag-processor.md: get_updated_html() and html-processor.md mutation examples",
+      "problem": "The byte-preserving update contract is clear, but the completion policy for mutations is spread across recipes, so candidates inconsistently checked get_last_error() and never checked paused_at_incomplete_token().",
+      "suggestion": "Add a compact note near mutation output APIs: get_updated_html() preserves untouched bytes, but callers whose result depends on fully scanning the input should check processor creation, get_last_error(), and paused_at_incomplete_token() according to their fallback contract."
+    }
+  ]
+}

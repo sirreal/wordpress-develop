@@ -2,6 +2,47 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 60 — bounded-loop scratch A/B also loses
+
+`round-60` was a second scratch-only HTML Processor rendered-doc variant for
+the same traversal subset as round 58/59:
+`N03-first-list-count`, `T07-nested-lists`, and `T08-table-extract`. It used
+`shadow-doc-a/b`, subjects `gpt-5.4-mini` / `low` / `priority`, and judge
+`gpt-5.5` / `xhigh` / `priority`. Source docblocks were unchanged.
+
+Variant: replace the failed closer contrast with a full generic bounded-loop
+recipe. The loop checked `get_current_depth() < $container_depth` immediately
+after advancing and before token-type, closer, and direct-child filters. It
+also added regional completion wording: do not drain to EOF solely to reject
+trailing malformed input unless the caller requires whole-document
+completeness.
+
+Numeric result: variant lost, **90.18 vs the round-58 control 97.35**. N03
+improved only 93.66 -> 94.26: two trials followed the intended `next_token()`
+bounded-loop shape, but one still used plain `next_tag()` and over-scanned past
+the list into trailing malformed input. T07 fell 99.40 -> 98.60. T08 collapsed
+99.00 -> 77.68 because one trial misapplied the repeated-region state-machine
+guidance and manufactured empty cells by flushing a null child accumulator and
+pre-flushing on sibling openers instead of trusting the processor's virtual
+closers.
+
+Interpretation: do not promote. Two adjacent traversal A/B variants have now
+failed to beat the control. The N03 issue is real but the tested generic
+recipes are not an improvement as rendered; they add enough state-machine
+surface area to hurt T08. Treat the T08 hierarchical-state notes as
+variant-induced evidence only, not a source-edit driver by themselves. The
+remaining repeated signals are method-local discoverability questions:
+whether subjects can cite that plain `next_tag()` is not a subtree-boundary
+detector, whether completion checks are scoped to the promised bounded region,
+and whether breadcrumbs should be sliced before ancestor checks.
+
+Next action: commit round-60 results separately, then prepare a
+`discoverability-probe` round on current source docs with subjects
+`gpt-5.4-mini` / `low` / `priority`. Probe the method-local contracts above
+with citation-only questions before any further traversal source edit or
+scratch A/B. Keep `seek()` unknown-bookmark behavior as a separate candidate
+unless it repeats outside the losing round-59 sample.
+
 ## Rounds 58/59 — depth-boundary closer-card scratch A/B loses
 
 `round-58` was the control rendered-doc round and `round-59` was a

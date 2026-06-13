@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full structural awareness, then walked tokens with `next_tag()` and `next_token()` to find the first `UL` or `OL`, count direct `LI` children at `current_depth + 1`, and only apply the `data-item-count` attribute after confirming the scan finished cleanly with no `paused_at_incomplete_token()` or parser error. I used bookmarks and `seek()` to return to the first list opener before calling `set_attribute()`, then serialized the edit with `get_updated_html()`.",
+  "confidence": 90
+}
