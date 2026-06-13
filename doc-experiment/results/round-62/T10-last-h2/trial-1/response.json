@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor` so the scan can track document structure and remember the last `H2` opener with a bookmark, then seek back and add the `final-section` class with `add_class()`. I return `get_updated_html()` so the processor\u2019s byte-preserving edits are emitted unchanged apart from the targeted class update.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get structural awareness, then walked tokens with `next_token()` while tracking open `UL`/`OL` elements so I could detect when a list opener appears inside another list. For matching openers I used `get_token_type()`, `get_tag()`, and `is_tag_closer()`, and I applied the edit with `add_class()` before reading the result back with `get_updated_html()`.",
+  "confidence": 89
+}

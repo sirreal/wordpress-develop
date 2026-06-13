@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walked tokens with `next_token()` so I could collect only ordinary `#text` descendants inside each `A` element. I relied on `get_attribute('href')` to keep only string-valued `href` attributes, `is_tag_closer()` to know when a link ends, and `get_modifiable_text()` for decoded text content.",
+  "confidence": 90
+}

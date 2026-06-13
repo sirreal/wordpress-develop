@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor because the task is a flat attribute edit that must preserve the rest of the document byte-for-byte. The loop finds each case-insensitive IMG tag with next_tag('img') and appends the class using add_class('wp-image'); get_updated_html() returns the original HTML with only those queued class updates applied.",
+  "confidence": 98
+}

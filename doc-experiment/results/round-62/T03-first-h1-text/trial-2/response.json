@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in BODY context, then `next_tag( 'H1' )` to locate the first heading. From there I walked the subtree with `next_token()`, appending only `#text` tokens via `get_modifiable_text()` until the depth dropped below the H1 opener, which yields the heading\u2019s decoded text content and returns `''` for an empty heading.",
+  "confidence": 95
+}

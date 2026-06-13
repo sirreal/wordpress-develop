@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to start from a literal figure template so the `img` attributes stay in the required `src`, then `alt` order, and then replaced the placeholder text node inside `figcaption` with `set_modifiable_text()`. Both `set_attribute()` and `set_modifiable_text()` handle the needed HTML encoding for plain input strings, and `get_updated_html()` returns the final fragment.",
+  "confidence": 94
+}

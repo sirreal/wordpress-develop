@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented WP_HTML_Processor::normalize() static method, checked strictly for null, and returned the required fallback. This is the intended BODY-fragment normalization API and matches the documented unsupported-markup contract."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct implementation as trial-1. No undocumented APIs, no processor misuse, and the null fallback policy is exactly aligned with the normalize() return contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Equivalent correct implementation with the condition inverted. Calls only documented WP_HTML_Processor::normalize() and handles null as the unsupported-input sentinel."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases. The docs successfully led every subject to the key contract: the input is a BODY-context fragment, WP_HTML_Processor is the structural processor for normalized output, normalize() normalizes a BODY fragment, and normalize() returns string|null with null meaning unable to normalize. The HTML Processor overview and Supported elements section were especially useful because they say the HTML Processor should be chosen for normalizing markup, that unsupported markup aborts processing, and that output-producing methods such as serialize() and normalize() return null. The normalize() section also directly covered the tested transformations: quoted attributes, added omitted tags, lower-casing, re-encoding, and omitted incomplete trailing syntax. Near-miss: unsupported cases recorded E_USER_WARNING from WP_HTML_Processor::serialize even though the candidates only called normalize(). This did not break the functional contract here, but the rendered normalize() docs only state that null is returned if unable to normalize; they do not make warning side effects visible.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() docblock",
+      "problem": "The return contract says null is returned if unable to normalize, but it does not state whether unsupported markup also emits a warning through the underlying serialize() path.",
+      "suggestion": "Document the observable side effects for unsupported input: either explicitly say normalize() may trigger the same E_USER_WARNING as serialize() before returning null, or guarantee and document warning-free null behavior if that is the intended API."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() docblock",
+      "problem": "The docs imply normalize() is the shortcut for BODY-fragment normalization, but the relationship to create_fragment($html)->serialize() is only indirect.",
+      "suggestion": "Add one sentence that normalize($html) is the convenience form for creating a BODY-context fragment processor and serializing it, so callers know when to use normalize() versus create_fragment()/serialize()."
+    },
+    {
+      "location": "HTML Processor unsupported-markup section",
+      "problem": "The section says output methods return null on unsupported markup, but does not distinguish parse failure from incomplete trailing syntax, which normalize() omits rather than treating as unsupported.",
+      "suggestion": "Add a small contract note contrasting unsupported parser aborts, which produce null, with incomplete trailing syntax, which is omitted from normalized serialization unless the caller separately requires complete-source validation."
+    }
+  ]
+}

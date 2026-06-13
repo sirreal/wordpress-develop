@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` body-fragment parser, walked `next_token()`, selected `#text` plus opener-carried `TITLE`/`TEXTAREA` text, and used only methods documented in the rendered files. The extra `get_last_error()` empty-result policy is documented and not misuse, but it is stricter than the read-only extraction contract requires. Its byte-based fallback would not preserve code-point truncation if mbstring were unavailable."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and documented methods only. `get_tag()` is documented and works here because it is called only after confirming a tag token, though `get_token_name()` would mirror the mixed-token examples more directly. The main edge weakness is the multibyte fallback: it checks only `mb_strlen()` before calling `mb_substr()`, and falls back to byte slicing when mbstring is absent."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and documented token-walking pattern, with explicit `#text` handling and an opener whitelist for `TITLE`/`TEXTAREA`. All HTML API calls are documented. The `preg_split('//u', ...)` truncation approach avoids byte slicing and handled the tested code-point cases; the only minor gap is that it does not make an explicit completion policy for incomplete trailing input, which the docs describe as caller-defined."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three passed 10/10 and produced no `_doing_it_wrong` records. The docs succeeded on the important concepts: the Tag Processor docs tell readers to use the HTML Processor for DOM-style text extraction from BODY fragments; the HTML Processor `next_token()` docs explain that text may be split across tokens and that malformed input still yields structural closers; the text-extraction recipe warns not to treat every `get_modifiable_text()` token as DOM text; and the `get_modifiable_text()` docs explain decoded UTF-8 for `#text`, `TITLE`, and `TEXTAREA` versus raw `SCRIPT`/`STYLE`. Near misses were around completion policy and truncation: trial 1 treated `get_last_error()` as a fail-closed read-only policy, which is allowed but not required, and trials 1/2 included byte-based fallbacks despite the task's code-point requirement. Those are not hidden-test failures, but they show places where the docs could be more explicit.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::get_modifiable_text()` and inherited HTML Processor docs",
+      "problem": "The opening definition of modifiable text lists SCRIPT, STYLE, and TEXTAREA but does not consistently list TITLE until later paragraphs. This can make TITLE feel like a special exception rather than part of the same opener-carried text contract.",
+      "suggestion": "Consistently list `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` together, then immediately classify which return decoded text (`#text`, `TITLE`, `TEXTAREA`) and which return raw text (`SCRIPT`, `STYLE`, comments)."
+    },
+    {
+      "location": "HTML Processor text extraction recipe / `next_token()` docs",
+      "problem": "The docs have a subtree text recipe and a special-element policy table, but no compact general example for extracting text from a whole fragment with a caller-selected special-element whitelist.",
+      "suggestion": "Add a general read-only extraction example that walks one `create_fragment()` cursor, appends ordinary `#text`, and separately opts into named opener-carried special elements while excluding comments and raw script/style text by default."
+    },
+    {
+      "location": "Completion policy notes under `next_token()` and the text-extraction recipe",
+      "problem": "The docs say `get_last_error()` and `paused_at_incomplete_token()` are caller policy for read-only extraction, but they do not sharply distinguish supported malformed HTML, incomplete trailing syntax, and unsupported parser aborts.",
+      "suggestion": "Add a small policy table or examples showing that supported malformed nesting can still produce complete text with `get_last_error() === null`, incomplete trailing tokens are reported by `paused_at_incomplete_token()`, and unsupported markup is reported by `get_last_error()`."
+    },
+    {
+      "location": "`get_modifiable_text()` UTF-8/code-point note",
+      "problem": "The docs mention using explicit UTF-8 with `mb_substr()`, but do not show the paired measure-and-slice pattern or warn that `strlen()`/`substr()` are byte-based.",
+      "suggestion": "Include a brief code-point-safe truncation snippet using `mb_strlen($text, 'UTF-8')` and `mb_substr($text, 0, $limit, 'UTF-8')`, plus a warning not to use byte string functions when character limits matter."
+    },
+    {
+      "location": "`get_tag()` and `get_token_name()` docs/examples",
+      "problem": "Examples alternate between `get_tag()` and `get_token_name()` in mixed token walks, which can leave readers unsure which name API is intended for opener-carried special element checks.",
+      "suggestion": "Clarify that after `get_token_type() === '#tag'`, `get_tag()` returns the uppercase element tag name, while `get_token_name()` is the uniform mixed-token node-name API; recommend `get_token_name()` when dispatching across tags, text, comments, and special tokens in one loop."
+    }
+  ]
+}

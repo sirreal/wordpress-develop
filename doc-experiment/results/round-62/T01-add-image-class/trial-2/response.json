@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses WP_HTML_Tag_Processor to scan the HTML linearly, match only real IMG tag openers case-insensitively, and add the `wp-image` class with `add_class()`. The modified document is returned with `get_updated_html()`, which preserves every untouched byte exactly as documented.",
+  "confidence": 99
+}

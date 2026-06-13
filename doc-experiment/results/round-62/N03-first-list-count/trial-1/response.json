@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then scanned forward with next_tag()/next_token() to find the first UL or OL, bookmarked its opener, counted direct LI child openers by comparing token type, tag name, and depth, and only applied the data-item-count attribute after confirming the scan completed cleanly with paused_at_incomplete_token() and get_last_error().",
+  "confidence": 95
+}

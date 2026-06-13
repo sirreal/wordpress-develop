@@ -2,6 +2,45 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 62 — public-API-only ablation is too broad to promote
+
+`round-62` tested the new documentation-reduction directive as a scratch-only
+`shadow-doc-a/b` ablation. The variant removed rendered `Properties` sections
+and all non-public method index/detail sections from both staged docs so
+subjects saw only the public API surface. Source docblocks, corpus fixtures,
+runner policy, and harness behavior were unchanged.
+
+The variant used the current weak subject policy, `gpt-5.4-mini` / `low` /
+`priority`, and judge policy `gpt-5.5` / `xhigh` / `priority`, on the full
+15-task train set. It reduced the rendered docs from 5,265 lines to 3,049
+lines: `html-tag-processor.md` 2,375 -> 1,422 and `html-processor.md`
+2,890 -> 1,627.
+
+Numeric result: **99.18 train / 99.05 core**, versus the comparable current
+source-doc weak-tier train round 56 at **99.61 train / 99.55 core**. Every
+trial passed every hidden case, but the ablation is not a clean promotion:
+traversal fell 99.60 -> 98.46 and `T10-last-h2` fell 100.00 -> 95.60 because
+two subjects selected `WP_HTML_Processor` for a flat source-order class edit
+where `WP_HTML_Tag_Processor` is the intended lower-risk API. `T08-table-extract`
+improved 99.10 -> 100.00, and text rose slightly 99.17 -> 99.27, so removing
+internals appears low-risk for many tasks but not sufficient as a source or
+tooling promotion.
+
+Interpretation: do not promote the broad public-API-only ablation as-is. It
+confirms that large rendered-doc reductions can preserve functional behavior,
+but it also shows that pruning must keep processor-choice cues dominant for
+flat source-order edits. Treat private/internal rendered-doc noise as a
+validated risk, but test narrower reductions before changing source docblocks
+or renderer policy.
+
+Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and continue
+the reduction loop with a narrower scratch ablation. The best next candidate is
+text-policy de-duplication: keep the compact DOM-style text decision table and
+class-level recipe, but remove duplicate method-local reminders that previously
+showed mixed or negative signal. Test on the text/traversal-adjacent subset
+before any source promotion.
+
 ## Round 61 — citation probes find facts discoverable
 
 `round-61` staged current rendered source docs under `discoverability-probe`

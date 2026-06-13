@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked the document with `next_tag()` and `next_token()` so the table structure is handled like a browser, including implied table elements. I collected only `#text` tokens inside the first `TABLE` subtree and assembled rows from `TR` open/close tokens, with `TD` and `TH` both treated as cells.",
+  "confidence": 88
+}

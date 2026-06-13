@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor so I could scan the document once, bookmark each matched H2 opener, then seek back to the final bookmark and add the `final-section` class with `add_class()`. I return the original HTML unchanged if no H2 is found, the processor cannot be created, or the scan aborts with an error or incomplete trailing token.",
+  "confidence": 91
+}

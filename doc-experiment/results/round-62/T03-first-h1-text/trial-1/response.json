@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for body-fragment parsing, then next_tag('H1') to locate the first heading and next_token() plus get_current_depth() to walk that heading's subtree. Only #text tokens are concatenated via get_modifiable_text(), which the documented HTML Processor returns decoded for ordinary text nodes, so nested markup contributes nothing and character references are already decoded.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so heading text could be collected from nested `#text` tokens via `get_modifiable_text()`. I tracked heading openers with `get_tag()`, `get_token_type()`, `is_tag_closer()`, and `get_current_depth()` so each `H1` through `H6` entry is emitted in document order, including empty headings.",
+  "confidence": 92
+}

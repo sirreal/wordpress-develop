@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked tokens with `next_token()`, appending only ordinary `#text` tokens plus opener text from `TITLE` and `TEXTAREA` via `get_modifiable_text()`. I truncated the final UTF-8 string by code points with `mb_strlen()` and `mb_substr()` when available.",
+  "confidence": 87
+}

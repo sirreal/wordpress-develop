@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses the documented `WP_HTML_Processor::normalize()` fragment normalizer, which is the API explicitly described for normalizing HTML found in `<body>` context. If normalization returns `null` because the fragment cannot be processed, it falls back to the exact placeholder HTML required by the task.",
+  "confidence": 98
+}

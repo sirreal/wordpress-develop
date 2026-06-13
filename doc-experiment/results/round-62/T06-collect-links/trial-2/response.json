@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor in fragment mode to walk the document token-by-token, relying on `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_attribute()`, and `get_modifiable_text()`. A small stack tracks open `A` elements with string `href` values, and each `#text` token is appended to all active links so the accumulated text matches the documented DOM-style extraction behavior.",
+  "confidence": 87
+}
