@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'H1' )` to find the first heading opener, then a depth-bounded `next_token()` walk with `get_current_depth()` to collect only ordinary `#text` tokens via `get_modifiable_text()`, which returns decoded text content.",
+  "confidence": 94
+}

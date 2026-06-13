@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only `A` tag openers, checked `href` with `get_attribute()` so empty and valueless `href` attributes still count as present, then overwrote or added `target` with `set_attribute()` and returned the result via `get_updated_html()` to preserve untouched bytes exactly.",
+  "confidence": 96
+}

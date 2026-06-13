@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a fragment template with the exact target shape, including empty `src` and `alt` attributes so their order is preserved, then walked it with `WP_HTML_Processor::create_fragment()`, `next_token()`, `set_attribute()`, and `set_modifiable_text()`. Those documented APIs handle all required HTML encoding, and `get_updated_html()` returns the finished fragment without hand-assembling or manually escaping strings.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Tag_Processor` constructor to scan the input linearly, `next_tag( 'img' )` to match only real IMG tags case-insensitively, `add_class( 'wp-image' )` to append the class without disturbing existing classes, and `get_updated_html()` to return the byte-preserving result with only the targeted tags changed.",
+  "confidence": 99
+}

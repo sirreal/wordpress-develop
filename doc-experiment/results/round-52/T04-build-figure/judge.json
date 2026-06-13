@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the ideal Tag Processor template pattern documented under \"Building markup from a template\": predeclared attributes preserve order, placeholder text enables set_modifiable_text(), next_token() finds the text node, and get_updated_html() returns queued edits. All called APIs are present in the rendered docs and execution recorded no _doing_it_wrong entries."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "All called APIs are documented, including WP_HTML_Processor::create_fragment(), next_token(), get_token_name(), is_tag_closer(), inherited set_attribute(), set_modifiable_text(), and get_updated_html(). The main adherence loss is processor choice: the docs recommend the lighter Tag Processor for known-shape, byte-exact template filling, while HTML Processor is for structural parsing. The implementation is still documented and idiomatic enough for this supported literal fragment."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented Tag Processor template-building recipe closely: known literal shape, attributes present in required order, placeholder text, plain-value set_attribute(), plain-text set_modifiable_text(), and get_updated_html(). All methods are documented and execution recorded no API misuse."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed simple, ampersand-in-caption, quotes-in-alt, special-chars-in-url, angle-brackets-in-caption, unicode, and html-in-caption-not-parsed. The docs did well here because the Tag Processor page contains a directly generalizable \"Building markup from a template\" section explaining the two key contracts: predeclare attributes to preserve written order, and include placeholder text so set_modifiable_text() has a text token to replace. The set_attribute() and set_modifiable_text() docs also clearly state that callers pass plain, unescaped strings and the API encodes them as needed. The get_updated_html() guidance prevented the common mistake of using serialize()/normalize() after queued mutations. The only near-miss is trial-2 choosing WP_HTML_Processor for a flat template-fill task; this still passed, but the docs' processor-choice guidance could make the cheaper/default choice more obvious for generated fragments that do not need tree awareness.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor overview / processor-choice guidance",
+      "problem": "A subject still chose WP_HTML_Processor for a flat, known-shape template-fill task where structural parsing was unnecessary.",
+      "suggestion": "Add a short decision note that constructing a fixed fragment by filling attributes and text placeholders is a Tag Processor use case unless the code needs tree-aware validation, implied tags, breadcrumbs, or subtree boundaries."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text docblock",
+      "problem": "The placeholder-text requirement is currently explained well in the overview recipe, but it is easy to miss when reading only the method reference.",
+      "suggestion": "Repeat in the method docblock that set_modifiable_text() only works when currently matched on a modifiable text-bearing token; empty elements contain no text node, so generated templates should include a placeholder text token to replace."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute docblock",
+      "problem": "Attribute order preservation is crucial for byte-exact generated markup, but the ordering behavior is not as prominent in the method-level contract as it is in the template recipe.",
+      "suggestion": "In the set_attribute() docblock, explicitly state that updating existing attributes preserves their written position, while newly added attributes are emitted according to the processor's insertion ordering rather than call order."
+    }
+  ]
+}

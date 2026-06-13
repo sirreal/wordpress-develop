@@ -2,6 +2,37 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 52 — mini/high weak-tier calibration still saturated
+
+**Train 99.53 / core 99.46** under `weak-tier-calibration`, with subjects
+`gpt-5.4-mini` / `high` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This was a no-edit calibration on the current source docs,
+staged after the audit tool was taught to follow the weak-tier subject
+ladder. The tooling change affected preflight next-action selection only; the
+rendered docs, source docblocks, corpus, runners, and judge policy were
+unchanged.
+
+Outcome: still saturated. All 45 subject trials passed all hidden cases. The
+round score fell only slightly from round 51, 99.65 -> 99.53. Concept means:
+classes 100.00, text 99.73, attributes 99.73, normalization 99.50,
+traversal 99.52, and serialization 98.75.
+
+The clearest adherence signal moved from read-only text extraction toward
+string-returning normalized rewrites. T09-mark-keyword scored 98.60 and
+T12-unwrap-spans scored 98.90 because candidates still used raw input or
+`normalize( $html )` as generic fallbacks after a `serialize_token()` rewrite
+loop, which discards the accumulated rewrite. Text extraction stayed strong:
+T05 was 99.60, T06 was 99.60, and N06 was 99.20.
+
+Decision: record round 52 as the no-edit baseline for `gpt-5.4-mini` /
+`high`, but do not promote source docs from another saturated calibration.
+Per the subject ladder in `PROTOCOL.md`, step down one final rung before
+choosing a primary weak tier for scratch A/B or source-hypothesis work.
+
+Next action: commit round-52 results separately, then prepare and run a
+`weak-tier-calibration` round on current docs using `gpt-5.4-mini` / `low` /
+`priority`.
+
 ## Round 51 — weak-tier calibration still saturated
 
 **Train 99.65 / core 99.59** under `weak-tier-calibration`, with subjects

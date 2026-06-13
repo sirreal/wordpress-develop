@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` so table structure and decoded text are handled the browser way. The function records each TR as a row and each TD/TH as a cell, appending only `#text` token content inside the current cell.",
+  "confidence": 89
+}

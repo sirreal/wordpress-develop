@@ -253,6 +253,17 @@ source edit from it. The next protocol-consistent action is to step down to
 `gpt-5.4-mini` / `high` / `priority` and run another no-edit
 `weak-tier-calibration`.
 
+Round 52 supplied the `gpt-5.4-mini` / `high` calibration: train 99.53 / core
+99.46, again with all 45 subject trials passing hidden cases. This tier is
+also saturated. The strongest adherence-only signal is now serialization
+fallback policy for string-returning `serialize_token()` rewrites: T09 scored
+98.60 and T12 scored 98.90 because candidates still used raw input or
+`normalize( $html )` as generic fallbacks after accumulating rewritten output.
+Text extraction remained strong, with T05 and T06 at 99.60 and N06 at 99.20.
+Do not promote source docs from this saturated calibration alone. The next
+protocol-consistent action is to step down to `gpt-5.4-mini` / `low` /
+`priority` and run one more no-edit `weak-tier-calibration`.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

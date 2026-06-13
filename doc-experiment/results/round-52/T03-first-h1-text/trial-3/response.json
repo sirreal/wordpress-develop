@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, next_tag() to find the first H1 opener, then a depth-bounded next_token() walk with get_current_depth() and get_token_type() to concatenate only ordinary #text tokens via get_modifiable_text(), which already returns decoded text.",
+  "confidence": 97
+}

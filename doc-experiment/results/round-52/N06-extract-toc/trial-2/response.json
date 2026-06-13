@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked the document with `next_token()`, collecting only `#text` tokens while an `H1` through `H6` opener was active. The heading closes are detected by comparing `get_current_depth()` against the recorded opener depth, which keeps headings in document order and preserves text from inline markup while ignoring tags.",
+  "confidence": 92
+}

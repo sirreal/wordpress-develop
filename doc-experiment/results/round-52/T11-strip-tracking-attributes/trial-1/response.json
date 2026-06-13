@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan every tag opener in document order, `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes with the requested prefix, `remove_attribute()` to delete them safely, and `get_updated_html()` to return the modified markup without reformatting untouched bytes.",
+  "confidence": 98
+}

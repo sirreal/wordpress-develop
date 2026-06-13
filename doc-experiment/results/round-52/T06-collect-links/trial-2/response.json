@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() with a single next_token() pass, collecting decoded #text tokens for each A opener that has a string href and preserving document order by tracking open A frames until their closing token appears.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan tags linearly, checked each matched `A` tag for a present `href` with `get_attribute()`, and then overwrote or added `target` via `set_attribute( 'target', '_blank' )`. The final HTML is returned with `get_updated_html()`, which preserves untouched bytes exactly.",
+  "confidence": 99
+}

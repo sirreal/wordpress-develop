@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() and a next_token() walk. All HTML API calls are documented. It correctly limits get_modifiable_text() to #text plus TITLE/TEXTAREA openers and avoids SCRIPT/STYLE. Minor deductions: it scans the whole input even after enough text is available, and it has no explicit get_last_error()/paused_at_incomplete_token() policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and idiomatic single-cursor token walk. All HTML API calls are documented. It incrementally tracks remaining code points, uses decoded modifiable text correctly, and whitelists TITLE/TEXTAREA opener text. Minor deduction only for not stating or implementing a parser-abort/incomplete-input policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same strong API usage as trial 2: HTML Processor fragment parsing, next_token(), documented token/type/name accessors, and decoded get_modifiable_text() only for the intended tokens. Minor deduction only for no explicit get_last_error()/paused_at_incomplete_token() policy."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 10/10 with no _doing_it_wrong records. The docs did well at steering subjects toward WP_HTML_Processor for BODY-fragment text extraction, next_token() for text-bearing tokens, and get_modifiable_text() only after first deciding the token policy. The strongest passages were the HTML Processor text-extraction recipe, the next_token() notes about split #text tokens and special elements, and get_modifiable_text() explaining decoded #text/TITLE/TEXTAREA versus raw SCRIPT/STYLE. Near-misses: the task required whole-fragment text, while the main recipe is framed as subtree text; candidates had to generalize it. None checked get_last_error() or paused_at_incomplete_token(), which reflects that the docs present incomplete/unsupported handling as caller policy and the task did not require rejection. Candidates also split between get_tag() and get_token_name() for special-element matching; both are documented and worked, but the accessor choice is somewhat dispersed across method docs.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and the “Recipe: collect DOM-style text from a subtree” section",
+      "problem": "The recipe teaches subtree extraction well, but whole-fragment extraction requires readers to infer that the same token policy can be applied without an initial next_tag()/depth boundary.",
+      "suggestion": "Add a short general note for full-fragment read-only scans: create a fragment processor, use one next_token() loop, collect #text by default, and opt into special-element opener text only when the caller contract requires it."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction completion-policy notes; WP_HTML_Tag_Processor::paused_at_incomplete_token(); WP_HTML_Processor::get_last_error()",
+      "problem": "The docs say completion handling is caller policy, but they do not spell out how that interacts with read-only extractors that intentionally stop early after reaching a length limit.",
+      "suggestion": "Clarify that best-effort read-only extractors may stop once they have enough data if their contract allows it, while callers that require proof of complete input must drain the processor and then check paused_at_incomplete_token() and get_last_error()."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag(), get_token_name(), and get_token_type() docblocks",
+      "problem": "The candidates used both get_tag() and get_token_name() for tag-name checks. Both are valid here, but the distinction between token kind, node name, and tag name is spread across separate method docs.",
+      "suggestion": "Add a compact comparison table: get_token_type() returns categories such as #tag/#text, get_token_name() returns node names including #text and tag names, and get_tag() returns an uppercase tag name only for matched tag tokens."
+    }
+  ]
+}
