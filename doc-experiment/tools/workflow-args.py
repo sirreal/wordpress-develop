@@ -78,6 +78,7 @@ def launch_manifest(metadata: dict) -> dict:
         "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
         "subject_isolation": {
             "required_agent_type": "docs-test-subject",
+            "agent_option_key": "agent_type",
             "allowed_tools": ["Read", "Grep"],
             "trusted_only_if_enforced": True,
             "attestation_required_in_trials_output": True,

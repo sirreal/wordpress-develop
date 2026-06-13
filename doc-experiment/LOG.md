@@ -72,6 +72,10 @@ and manifest: trusted scored trials require the `docs-test-subject` agent type
 or an equivalent Read+Grep-only tool boundary. Prompt-only fallback must be
 treated as diagnostic unless transcript isolation is recorded.
 
+The bundled trial workflow now passes `agent_type: docs-test-subject` on each
+subject `agent()` call, instead of relying only on workflow metadata, prompt
+text, and returned isolation attestation to describe the required boundary.
+
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.

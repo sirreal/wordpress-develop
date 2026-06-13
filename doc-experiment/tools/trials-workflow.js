@@ -68,6 +68,7 @@ Deliver via StructuredOutput: code (a complete PHP file defining exactly the req
       label: `${p.id}/trial-${p.trial}`,
       phase: 'Trials',
       schema: SCHEMA,
+      agent_type: meta.requiredAgentType,
       model,
       reasoning_effort,
       service_tier,
