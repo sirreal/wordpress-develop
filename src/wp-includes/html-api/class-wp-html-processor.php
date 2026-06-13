@@ -153,6 +153,20 @@
  * script or stylesheet text. Do not include special-element opener text merely
  * because it is available.
  *
+ * Quick policy table:
+ *
+ * | Caller wants | Tokens to read | Completion policy |
+ * | --- | --- | --- |
+ * | Ordinary DOM-style text inside an element, heading, cell, or link | Only `#text` tokens reached by the subtree walk. Ignore comments, processing instructions, and SCRIPT/STYLE/TEXTAREA/TITLE opener text. | Read-only callers choose whether partial results are acceptable; a complete-source caller should also check `paused_at_incomplete_token()` and `get_last_error()`. |
+ * | A named special element's own contents, such as a TITLE or TEXTAREA value | Match that opening tag explicitly, require `! $processor->is_tag_closer()`, then call `get_modifiable_text()`. TITLE/TEXTAREA are decoded; SCRIPT/STYLE are raw. | This is opt-in data, not ordinary ancestor text. Do not add it to unrelated heading, table, link, or article text. |
+ * | A mutation, normalization, or token-rewrite result | Use the mutation or serialization APIs for the matched tokens; do not treat every modifiable-text token as DOM text. | Fail closed or use an explicit fallback when `get_last_error()` is non-null; reject `paused_at_incomplete_token()` when complete source bytes matter. |
+ *
+ * For read-only extraction, `get_last_error()` and
+ * `paused_at_incomplete_token()` do not erase tokens already visited. They
+ * tell you the scan did not cover the rest of the input. Returning
+ * accumulated data, returning an empty result, or returning a sentinel are
+ * caller policies; choose the one promised by the function contract.
+ *
  * #### Recipe: rewrite while serializing tokens
  *
  * Use {@see WP_HTML_Processor::serialize_token} when output is built while
@@ -992,13 +1006,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * `#text` tokens: accumulate text while walking rather than assuming
 	 * one token carries all of an element's text.
 	 *
-	 * One important exception to the collect-`#text`-tokens recipe:
+	 * One important opt-in exception to the collect-`#text`-tokens recipe:
 	 * elements whose contents cannot contain markup (SCRIPT, STYLE,
 	 * TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text
 	 * is carried on the element's own token — walking inside them finds
 	 * nothing, so the recipe silently returns an empty string. Read their
 	 * text with {@see WP_HTML_Tag_Processor::get_modifiable_text} while
-	 * matched on the element's opening tag instead.
+	 * matched on the element's opening tag only when the caller's contract
+	 * asks for that element's own contents. Do not add this opener-carried
+	 * text to ordinary heading, table cell, link, or article text merely
+	 * because it is available.
 	 *
 	 * Note also that `next_token()` does not stop when the element
 	 * matched by an earlier `next_tag()` call ends: left unguarded, it
@@ -5995,6 +6012,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * avoid needless crashing or type errors. An empty string does not mean
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
+	 *
+	 * This method is not a predicate for ordinary text nodes. For ordinary
+	 * DOM-style text extraction, first require
+	 * `get_token_type() === '#text'`, then read this method. Use
+	 * special-element opener text only when the caller explicitly asks for
+	 * that element's own contents.
 	 *
 	 * For `#text` nodes and for elements whose contents allow character
 	 * references (TEXTAREA, TITLE), the returned text is DECODED: character
