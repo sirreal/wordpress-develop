@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware `WP_HTML_Processor::create_fragment()` and only documented methods: `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_attribute()`. The single token-walk with explicit figure state is documented and passed all cases, including valueless/empty `src`, decoded entities, and an unclosed figure. Minor idiom deduction: for this specific containment query, `get_breadcrumbs()` is the clearer documented structural API than maintaining a manual figure counter."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Closely matches the documented ideal pattern: HTML Processor fragment parsing, `next_tag( 'IMG' )` for document-order image openers, `get_breadcrumbs()` for ancestor membership, and `get_attribute()` with `is_string` plus non-empty filtering. No undocumented API use or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong pattern as trial-2: correct processor, documented methods only, breadcrumb-based containment at any depth, decoded attribute access, and correct handling of missing, valueless, and empty `src` values. No misuse recorded."
+    }
+  ],
+  "failure_analysis": "All trials passed all 9 hidden cases, so there are no failed hidden cases to attribute to documentation failures. The docs did well on the key decision points: the Tag Processor overview explicitly says it has no tree awareness and that `get_breadcrumbs()` belongs to `WP_HTML_Processor`; the HTML Processor overview and Breadcrumbs section show structure-aware matching; `create_fragment()` documents the null check; `next_tag()` documents opener-only default behavior; `next_token()` documents generated closers for unclosed elements; and `get_attribute()` documents null/true/empty-string semantics, with decoded string semantics visible in the inherited Tag Processor method docs. Near-misses: the HTML Processor `get_attribute()` method page itself does not repeat the decoded-value contract, and the Breadcrumbs docs emphasize direct breadcrumb paths more than the common 'current element has any ancestor at any depth' check. A weaker subject could have used `array( 'FIGURE', 'IMG' )` as a descendant query and failed the nested-depth case, or could have double-decoded `src` if they only read the HTML Processor method entry.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_attribute()` docblock",
+      "problem": "The method entry shows null/true semantics but omits the inherited guarantee that string attribute values are returned decoded.",
+      "suggestion": "Repeat the decoded string contract directly in the HTML Processor method docs, including a short `&amp;` example and a warning not to decode again."
+    },
+    {
+      "location": "HTML Processor Breadcrumbs section and `get_breadcrumbs()` docblock",
+      "problem": "The docs show exact/direct breadcrumb paths but do not explicitly show the common 'is the current element inside ancestor X at any depth?' pattern.",
+      "suggestion": "Add a general ancestor-membership example using `next_tag( 'IMG' )`, `array_slice( $processor->get_breadcrumbs(), 0, -1 )`, and `in_array( 'FIGURE', ... )`; state that breadcrumbs include the current node and implicit `HTML`/`BODY`."
+    },
+    {
+      "location": "`next_tag()` breadcrumb query parameter docs",
+      "problem": "`breadcrumbs` can be mistaken for a descendant selector when it is closer to a child-combinator path/suffix match.",
+      "suggestion": "Clarify that `array( 'FIGURE', 'IMG' )` matches an IMG directly on that breadcrumb path, not any-depth descendants; recommend `get_breadcrumbs()` or a token walk for arbitrary-depth containment."
+    },
+    {
+      "location": "`next_token()` structural-walk docs",
+      "problem": "The docs explain generated closers and explicit state, but do not contrast manual container counters with breadcrumb checks for simple containment queries.",
+      "suggestion": "Add guidance that manual state is useful when aggregating across regions, while checking the current token's ancestors is usually simpler and less fragile with `get_breadcrumbs()`."
+    }
+  ]
+}

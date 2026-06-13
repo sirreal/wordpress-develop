@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor with a literal template, predeclared src/alt attributes to preserve order, walked tokens to the #text placeholder, used set_modifiable_text() for encoded caption text, and returned get_updated_html(). All called methods appear in the rendered docs and execution recorded no misuse."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same reference-quality pattern as trial-1. Processor choice, documented method usage, token walking, text replacement, attribute encoding, and get_updated_html() retrieval all match the documented template-building guidance."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same reference-quality pattern as trial-1. It relies on documented plaintext input semantics for set_attribute() and set_modifiable_text(), so quotes, ampersands, angle brackets, and script-like caption text are encoded rather than parsed."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The rendered docs did especially well on this task: the Tag Processor overview clearly chose WP_HTML_Tag_Processor for flat byte-preserving edits, the 'Building markup from a template' section directly explained using a literal template with pre-existing attributes and placeholder text, set_attribute() documented plaintext input plus attribute-order behavior, set_modifiable_text() documented replacing only modifiable text tokens, and get_updated_html() was clearly presented as the way to retrieve queued edits. The only near-miss is that all candidates copied the recipe's unchecked set_modifiable_text() call; this is harmless for a fixed trusted template and a #text guard, but for variable templates it could silently do nothing if no placeholder text node exists.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md: Building markup from a template / set_modifiable_text()",
+      "problem": "The method section says set_modifiable_text() returns false when the current token is not modifiable and says to check the return value, but the template-building recipe does not model that check.",
+      "suggestion": "Add a short note or example branch explaining that a fixed trusted template with a guarded #text token is deterministic, while variable templates should handle a missing placeholder or false return."
+    },
+    {
+      "location": "html-tag-processor.md: Building markup from a template",
+      "problem": "The docs imply, but do not state explicitly, that the Tag Processor builds new fragments by modifying an existing valid template rather than by appending or creating arbitrary nodes.",
+      "suggestion": "Add one general sentence: when constructing markup, include every required element, attribute slot, and text placeholder in the template, then replace values through the API."
+    }
+  ]
+}

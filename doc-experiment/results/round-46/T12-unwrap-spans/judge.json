@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor for normalized BODY-fragment rewriting. All calls are documented: create_fragment, next_token, get_tag, serialize_token, get_last_error. The loop follows the documented serialize_token pattern and passed all cases, including nested and unclosed spans. Minor issue: on create_fragment null or parser error it returns raw input, which the docs explicitly warn is neither normalized nor the accumulated rewrite."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice, no undocumented API usage, and an idiomatic token-by-token rewrite using serialize_token while skipping SPAN tag tokens. Returning an empty string on creation/parser failure is a defensible string-returning rejection policy. Passed all hidden cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same API pattern as trial-1: correct HTML Processor use, documented methods only, and the documented serialization rewrite pattern. Passed all cases. Minor edge-policy issue: raw-input fallback on create_fragment null or get_last_error would violate the normalized-output contract if reached."
+    }
+  ],
+  "failure_analysis": "All trials passed every frozen case. The docs did well on the decisive points: the 'Which processor should I use?' guidance directs normalized/structural work to WP_HTML_Processor; create_fragment explains BODY-fragment parsing; next_token explains that the HTML Processor visits closers, including implicit/end-of-input closers; and serialize_token contains an almost directly transferable rewrite recipe: append serialized tokens and skip tokens to remove them, including skipped element closers. Near-misses were not functional failures: trials 1 and 3 copied a raw-input fallback policy even though this task asks for normalized rewritten output, likely because the serialize_token docs mention original-input fallback as one possible policy before reiterating that it is not normalized. The candidates also relied on get_tag returning null for non-tag tokens; this is valid and supported by the serialize_token example, but the inherited get_tag contract could state that behavior more explicitly for next_token walks.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token(), fallback/error-policy paragraph",
+      "problem": "The docs list returning original input as a possible fallback policy, and subjects used it in normalized rewrite functions. That preserves bytes but discards the rewrite and may leave removed tokens in place.",
+      "suggestion": "Add a prominent warning that raw-input fallback is only appropriate for byte-preservation contracts. For normalized or token-rewriting filters, choose an explicit rejection policy and do not describe raw input as normalized output."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() return-value docs",
+      "problem": "The null-return guidance says to check before walking, but does not tie fallback choice to output semantics. This leaves room for raw-input returns from functions promising normalized serialization.",
+      "suggestion": "State that when create_fragment returns null, no normalized serialization was produced; callers with normalized-output contracts should return their documented failure value rather than the original HTML."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_tag() / WP_HTML_Processor::next_token() cross-reference",
+      "problem": "get_tag() documents null after no matched tag, but not explicitly that next_token walks may be on text/comment/doctype tokens where get_tag() returns null. Candidates inferred correctly from examples, but the contract is indirect.",
+      "suggestion": "Add a sentence: during next_token iteration, get_tag() returns the uppercase tag name only for #tag tokens, including closers, and null for #text, comments, doctypes, and other non-tag tokens; use get_token_type() when an explicit token-type guard is clearer."
+    }
+  ]
+}

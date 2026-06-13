@@ -210,6 +210,14 @@ after the checkpoint gate: run a checkpoint before editing source, then promote
 an adapted compact table / method-local opt-in reminder if held-out remains
 stable.
 
+Round 46 supplied that checkpoint: all 99.36 / train 99.63 / held-out 98.33,
+with all 57 subject trials passing hidden cases. Held-out was effectively flat
+versus round 42 and did not show a functional regression. The promotion gate is
+clear. Next action: promote one adapted source docblock hypothesis for the
+text-policy decision table in `WP_HTML_Processor`, keeping the compact
+decision-table shape and method-local opt-in reminder while preserving the
+caller-policy framing for read-only partial scans.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

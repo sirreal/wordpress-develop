@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path and only documented API calls: `next_token()`, `get_token_type()`, `get_modifiable_text()`, `is_tag_closer()`, `get_token_name()`, and `get_last_error()`. The text-token policy is otherwise idiomatic and handles decoded text, `TITLE`/`TEXTAREA`, and `SCRIPT`/`STYLE` exclusion. Minor adherence loss: it scans past the requested limit and then returns empty on any later parser error, which is a caller-policy choice not required for this read-only prefix extraction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best match to the documented API contract. It chooses the HTML Processor, checks factory `null`, walks one token stream, reads only ordinary `#text` plus whitelisted opening `TITLE`/`TEXTAREA` tokens, relies on documented decoded UTF-8 text, excludes raw special elements, and truncates with `mb_*` using explicit UTF-8 while stopping once the requested prefix is complete."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Equivalent API usage to trial-1. All called HTML API methods are documented and there were no `_doing_it_wrong` records. The implementation follows the documented special-element text handling, but shares the same overbroad post-scan `get_last_error()` fallback and no early stop after the limit, which can discard a valid prefix if unsupported markup appears later."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 frozen cases, so there are no failed hidden cases to attribute. The docs did well on the main hazards: the Tag Processor overview says to use the HTML Processor for structure and DOM-style text extraction; the HTML Processor `next_token()` docs explain that text may be split across multiple `#text` tokens and that `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` do not produce child `#text` tokens; `get_modifiable_text()` states that `#text`, `TITLE`, and `TEXTAREA` are decoded UTF-8 while `SCRIPT` and `STYLE` are raw. The near-miss is trials 1 and 3: they interpreted the `create_fragment()`/`get_last_error()` guidance as a reason to discard the whole read-only result after any later unsupported markup. In a probe, the reference and trial-2 return `abc` for `<p>abcdef</p><b>one<i>two</b>three</i>` with limit 3, while trials 1 and 3 return empty because they continue scanning into the unsupported misnesting and then reject. That did not appear in the frozen cases, but it shows an ambiguity between mutation/serialization safety guidance and best-effort read-only extraction. Incomplete trailing syntax was not explicitly tested beyond malformed nesting; none of the candidates checked `paused_at_incomplete_token()`, which is acceptable only if the caller's policy is best-effort accumulation of visited text.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_last_error()` and `WP_HTML_Processor::create_fragment()` docs",
+      "problem": "The docs say to detect unsupported markup after scanning, but they do not clearly separate read-only extraction policy from mutation or serialization policy. This can lead callers to throw away already collected data even when their contract only needs a bounded prefix.",
+      "suggestion": "Clarify that non-null `get_last_error()` means the walk stopped before completing the document; mutation and serialization routines should reject or fall back, while read-only extractors must choose and document whether partial accumulated data is acceptable."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` text-walking examples",
+      "problem": "The examples emphasize complete scans, but bounded reads are a common pattern. Continuing after the caller has enough data can expose later unsupported markup and change the result under an overbroad error policy.",
+      "suggestion": "Add a general note that callers collecting a prefix, count, or first match may stop once the result is satisfied, and that any subsequent unsupported markup is irrelevant unless the caller's contract requires validating the whole input."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::paused_at_incomplete_token()` cross-references from `WP_HTML_Processor::next_token()`",
+      "problem": "Incomplete-input behavior is documented, but the read-only extraction consequence is spread across sections: incomplete trailing tokens are not visited, while already visited text remains available.",
+      "suggestion": "Add a concise policy note for token collectors: check `paused_at_incomplete_token()` only when complete source bytes are required; otherwise accumulated text from visited tokens is a best-effort result and incomplete trailing syntax contributes nothing."
+    }
+  ]
+}

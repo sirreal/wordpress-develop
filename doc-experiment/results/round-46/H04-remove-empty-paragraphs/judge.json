@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor (`WP_HTML_Processor::create_fragment`) and only documented methods. Strong use of `next_token()`, bookmarks, depth-bounded subtree scanning, `serialize_token()`, and fallback on `get_last_error()` / `paused_at_incomplete_token()`. Minor adherence issues: it uses nested `next_token()` loops for repeated regions despite the docs recommending a single stateful loop, and it treats any visited token as paragraph content rather than checking whether the token has normalized serialized output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Best aligned with the docs: HTML Processor, one stateful token walk, delayed emission of the opener, normalized output through `serialize_token()`, and explicit incomplete/unsupported fallback. All called APIs are documented and no `_doing_it_wrong` records occurred. The main near-miss is that a token with empty serialization, such as a presumptuous end tag, would still cause the pending element opener to be emitted."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all methods are documented. It follows the documented one-cursor/state-machine style and handles parser aborts and incomplete input. Slightly less precise than trial 2 because it recognizes `P` openers without a `#tag` token-type guard and infers the pending element's closer from depth alone. Like the other trials, it counts any visited token as content even if `serialize_token()` would emit an empty string."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 11 frozen hidden cases, with no runtime API misuse recorded. The docs did well on the key concepts for this task: the processor-choice sections clearly steer structural and normalized-output work to `WP_HTML_Processor`; `create_fragment()` explains body-fragment parsing and null creation; `next_token()` explains implicit and end-of-input closers; `get_current_depth()` explains why subtree walks use `>=` and why an element's own closer reports a lower depth; `serialize_token()` explains token-by-token normalized rewriting; and the error/incomplete-token passages led every candidate to return the original input when the parse did not finish cleanly.\n\nThe main near-miss is not covered by the frozen cases: all three candidates treat token presence as content. A probe with `<p></>` shows the reference returns an empty string, because the empty end tag is ignored and `serialize_token()` returns `''`; all candidates return `<p></p>`. The relevant docs do say presumptuous end tags are ignored and may serialize to an empty string, but that fact is not connected strongly enough to conditional subtree-emission decisions. The models learned how to walk and serialize, but not quite that normalized output content is not the same thing as “any visited token.”",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docblock and rewrite recipe",
+      "problem": "The docs mention that some visited tokens serialize to an empty string, but examples do not make clear that rewrite decisions based on whether a subtree emits content must ignore empty-serialization parser artifacts.",
+      "suggestion": "Add a short note and generic example: when deciding whether a visited region has emitted normalized content, test the serialized token string, because tokens such as presumptuous end tags may be visited but produce no output."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` state-machine examples",
+      "problem": "The docs show collecting text and removing known wrappers, but not the common delayed-emission pattern for conditionally dropping an element after inspecting whether its subtree produced any normalized output.",
+      "suggestion": "Add a general recipe for holding an opener pending, emitting it only after the first non-empty serialized descendant/token is seen, and dropping both opener and closer if no emitted content appears. Keep it element-agnostic rather than using this task's paragraph case."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_tag()` / `get_namespace()` docs",
+      "problem": "The method docs do not explicitly remind readers that tag-name based structural rewrites should normally guard on `get_token_type() === '#tag'` and, when HTML semantics matter, the `html` namespace.",
+      "suggestion": "Add a matching-pattern note showing `#tag`, `! is_tag_closer()`, tag name, and namespace checks together for transformations that target HTML elements."
+    }
+  ]
+}

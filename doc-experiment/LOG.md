@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 46 — checkpoint clears text-policy promotion gate
+
+**All 99.36 / train 99.63 / held-out 98.33 / core 99.28** under
+`checkpoint`, with subjects `gpt-5.4` / `medium` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This scored the current source docs after
+the round-43 serialization fallback source edit and before promoting the
+rounds-44/45 text-policy decision-table scratch variant.
+
+Outcome: stable enough to continue. All 57 subject trials passed all hidden
+cases. Compared with the previous checkpoint, round 42, train rose 99.54 ->
+99.63 while held-out was effectively flat, 98.38 -> 98.33. The held-out
+movement is below the revert threshold and is not an all-trial functional
+regression. Held-out judge gaps remain regression-sentinel data only and must
+not drive the next edit.
+
+The train tasks tied to the text-policy candidate stayed strong: T03 was
+100.00, T05 was 98.80, T06 was 99.50, T08 was 98.60, and N06 was 98.60. The
+checkpoint also repeated the same useful T05 near-miss from train evidence:
+visited parser artifacts are not necessarily emitted normalized content, so
+conditional subtree emission should test the serialized token string when the
+contract depends on emitted output.
+
+Decision: checkpoint gate is clear. Promote one adapted source docblock
+hypothesis for the text-policy decision table: ordinary DOM-style text reads
+visited `#text` tokens by default; special-element opener text is an explicit
+opt-in with different decoding/raw-text semantics; and read-only partial-scan
+fallback remains caller policy rather than a blanket reject-or-keep rule.
+
+Next action: commit round-46 results separately, then edit the
+`WP_HTML_Processor` source docs for the text-policy hypothesis, run the
+docs-only guard, stage docs, and score the source edit as the next normal
+source round.
+
 ## Rounds 44/45 — text-policy decision table scratch A/B wins
 
 `round-44` was the control rendered-doc round and `round-45` was a

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template so the output shape and attribute order stay exact, then uses `WP_HTML_Tag_Processor::set_attribute()` to safely encode `src` and `alt`, and `next_token()` plus `get_token_type()` and `set_modifiable_text()` to replace the placeholder figcaption text with the provided caption before returning `get_updated_html()`.",
+  "confidence": 96
+}

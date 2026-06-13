@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walks tokens once with `next_token()`. When it sees an opening `H1` through `H6` tag via `get_tag()` and `is_tag_closer()`, it starts a heading entry and appends only descendant `#text` token content from `get_modifiable_text()` until `get_current_depth()` drops below the heading\u2019s opening depth, which marks the heading\u2019s close.",
+  "confidence": 92
+}

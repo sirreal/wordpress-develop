@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for tree-aware parsing, then walks the fragment once with `next_token()`, tracking when the cursor is inside a `FIGURE` by counting `FIGURE` openers and closers via `get_tag()` and `is_tag_closer()`. When an `IMG` opener appears while inside a figure, it reads the already-decoded `src` with `get_attribute()` and collects only non-empty string values in document order.",
+  "confidence": 91
+}

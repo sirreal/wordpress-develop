@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment safely, then walks tokens with `next_token()` and rewrites the output with `serialize_token()`. For each `P` opener, it uses `set_bookmark()`, `get_current_depth()`, and a bounded subtree scan to detect whether the paragraph has any tokens inside; empty paragraphs are skipped, non-empty ones are replayed from the bookmark, and any unsupported or incomplete input detected via `get_last_error()` or `paused_at_incomplete_token()` causes the original HTML to be returned unchanged.",
+  "confidence": 84
+}

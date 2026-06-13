@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Excellent API adherence. It chose WP_HTML_Processor::create_fragment(), used a single next_token() walk with explicit state, identified heading openers via get_token_type()/get_tag()/is_tag_closer(), bounded collection by get_current_depth(), and read only #text tokens with get_modifiable_text(). All called processor methods are documented in the rendered files and execution recorded no _doing_it_wrong misuse. Minor deduction only for not checking get_last_error()/paused_at_incomplete_token(), though best-effort extraction did not require rejecting incomplete input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Good overall and all API methods used are documented: create_fragment(), next_tag(), next_token(), get_tag(), get_current_depth(), get_token_type(), is_tag_closer(), get_token_name(), and get_modifiable_text(). It correctly used the HTML Processor and a depth-bounded subtree walk. The main near-miss is the special-element branch: it includes SCRIPT, STYLE, TEXTAREA, and TITLE opener modifiable text inside headings. The docs' DOM-style text recipe says ordinary subtree text should append only #text tokens unless the caller explicitly opts into special-element content, and the reference follows that ordinary-text policy. The nested next_tag()/next_token() shape is functional here but less aligned with the docs' preferred single-cursor state-machine guidance for repeated regions."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Excellent API adherence. It used WP_HTML_Processor::create_fragment(), walked tokens once with state, created entries on H1-H6 openers, accumulated only #text token content via get_modifiable_text(), and used get_current_depth() to detect leaving the heading subtree. All processor methods are present in the rendered docs and no _doing_it_wrong records appeared. Minor deduction for not consulting get_last_error()/paused_at_incomplete_token() after traversal, which would matter only if the caller required strict rejection of unsupported or truncated input."
+    }
+  ],
+  "failure_analysis": "All three trials passed all seven frozen cases: basic nested inline text, all heading levels, decoded entity text, empty headings, source case normalization, implied heading closure, and no matches. The docs did well on the main decision points: the Tag Processor overview says it has no tree awareness and directs DOM-style text extraction to WP_HTML_Processor::create_fragment(); the HTML Processor text-extraction recipe shows recording opener depth, walking next_token(), using >= depth, and appending only #text get_modifiable_text(); get_modifiable_text documents decoded text, which prevented double-decoding mistakes; and the supported-markup section mentions heading elements closing other heading elements, which aligns with the implied-heading-close case. The main near-miss is trial-2's inclusion of special-element opener text. This likely came from the get_modifiable_text and next_token passages explaining that SCRIPT/STYLE/TEXTAREA/TITLE carry modifiable text on their opener tokens. The recipe also says this content is opt-in and not ordinary subtree text, but the two ideas are separated enough that a model could over-include it for a generic text-content task. A secondary near-miss is cursor-shape guidance: the docs warn against nested next_token() loops for repeated regions, while the reference and trial-2 use a bounded inner walk after next_tag(); this worked here but leaves room for confusion about when nested scanning is safe versus when a single state-machine loop is preferred.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Recipe: collect DOM-style text from a subtree; get_modifiable_text() docs",
+      "problem": "Special-element modifiable text is documented, but the boundary between 'ordinary DOM-style subtree text' and 'all modifiable text available while walking' is still easy to blur.",
+      "suggestion": "Add a compact policy table or example contrasting ordinary subtree text with opt-in special-element text for SCRIPT, STYLE, TEXTAREA, and TITLE. State that callers must define this policy, and that the ordinary recipe appends only #text tokens."
+    },
+    {
+      "location": "html-processor.md: next_token() single-cursor guidance",
+      "problem": "The docs warn that nested next_token() loops can skip boundaries, but do not clearly describe the safe pattern of next_tag() to find an opener followed by a bounded next_token() subtree scan, which the canonical implementation uses.",
+      "suggestion": "Clarify when a bounded inner scan is acceptable, what token the cursor is left on after it exits, and when a single state-machine loop is preferable for repeated sibling regions."
+    },
+    {
+      "location": "html-processor.md: Supported markup / heading elements",
+      "problem": "Heading implied-closure behavior is mentioned only as a bullet in the support list, not tied directly to traversal/depth examples.",
+      "suggestion": "Add a small traversal note showing that a later H1-H6 opener virtually closes an earlier heading, and that depth-based or closer-driven walks handle this without searching for literal closing tags."
+    }
+  ]
+}

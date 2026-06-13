@@ -1,0 +1,71 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-46/N01-remove-external-class/trial-1/candidate.php",
+  "function": "remove_external_class",
+  "passed": 7,
+  "total": 7,
+  "cases": [
+    {
+      "id": "among-others",
+      "status": "pass",
+      "expected": "<a class=\"link\" href=\"/x\">go</a>",
+      "actual": "<a class=\"link\" href=\"/x\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "only-class-removes-attribute",
+      "status": "pass",
+      "expected": "<a  href=\"/x\">go</a>",
+      "actual": "<a  href=\"/x\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-class-untouched",
+      "status": "pass",
+      "expected": "<a href=\"/y\">stay</a>",
+      "actual": "<a href=\"/y\">stay</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "case-sensitive-not-removed",
+      "status": "pass",
+      "expected": "<a class=\"EXTERNAL\">caps</a>",
+      "actual": "<a class=\"EXTERNAL\">caps</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multiple-links",
+      "status": "pass",
+      "expected": "<a class=\"a\">1</a><a class=\"b\">2</a><a class=\"c\">3</a>",
+      "actual": "<a class=\"a\">1</a><a class=\"b\">2</a><a class=\"c\">3</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "non-link-untouched",
+      "status": "pass",
+      "expected": "<div class=\"external\">not a link</div><a >link</a>",
+      "actual": "<div class=\"external\">not a link</div><a >link</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "middle-of-list",
+      "status": "pass",
+      "expected": "<a class=\"one two\">mid</a>",
+      "actual": "<a class=\"one two\">mid</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

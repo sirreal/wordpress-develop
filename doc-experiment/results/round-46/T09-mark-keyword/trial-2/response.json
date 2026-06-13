@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, walks every token with `next_token()`, wraps only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, and emits normalized output by concatenating `serialize_token()` for every token. This avoids wrapping special text-bearing elements like `script`, `style`, `title`, and `textarea`, whose text is carried on their element tokens rather than `#text` tokens.",
+  "confidence": 89
+}
