@@ -1,0 +1,262 @@
+{
+  "result": [
+    {
+      "id": "T01-add-image-class",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct flat-editing processor, documented `next_tag( array( 'tag_name' => 'img' ) )`, documented `add_class()`, and documented `get_updated_html()`. The loop and output pattern are idiomatic for this task; no `_doing_it_wrong` records and all cases passed."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct `WP_HTML_Tag_Processor` and the documented string shorthand `next_tag( 'img' )`. `add_class()` and `get_updated_html()` are documented and appropriate. No misuse records; all cases passed."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same strong pattern as trial 1: correct processor, documented query-array form, documented class helper, and documented updated-output retrieval. No hallucinated API usage or edge-case mishandling appeared; all cases passed."
+          }
+        ],
+        "failure_analysis": "No hidden case failed across the three trials. The docs did well on the exact decision path needed here: `WP_HTML_Tag_Processor`'s `Which processor should I use?` section points flat source-order class/attribute edits to the Tag Processor; `Usage` and `Finding tags` document both `next_tag( array( 'tag_name' => 'img' ) )` and `next_tag( 'img' )`; the `next_tag()` method docs explicitly cover case-insensitive tag matching, comments/raw-text not being matched as tags, and incomplete trailing tags not being modified; `add_class()` documents creating a missing class attribute and appending without removing or reordering existing classes; `get_updated_html()` documents byte preservation for untouched input. The near-miss is mostly locality: some details needed for byte-exact confidence, such as added-attribute placement and the full construct-scan-edit-return loop, are split across sections rather than repeated at the method most likely to be consulted.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Tag_Processor::add_class() docblock",
+            "problem": "It says a missing `class` attribute is created, but does not locally state where that new attribute is inserted or how it is serialized; that behavior is only implied by generic attribute-update documentation elsewhere.",
+            "suggestion": "Add a sentence linking `add_class()` creation of `class` to the normal added-attribute serialization and ordering contract, with a generic example using a non-task-specific tag/class."
+          },
+          {
+            "location": "Tag Processor CSS class examples",
+            "problem": "The class-helper examples show before/after transformations but not the full required lifecycle in the same snippet: construct processor, match a tag, call `add_class()`, then call `get_updated_html()`.",
+            "suggestion": "Include one complete generic class-modification loop so readers see that `add_class()` operates only on the currently matched tag and that `get_updated_html()` is the retrieval API."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::next_tag() incomplete-input documentation",
+            "problem": "The method docs correctly say incomplete trailing tags are not matched, but the preservation consequence is not stated next to that edge case.",
+            "suggestion": "Add a brief note that if no update touches an incomplete trailing token, `get_updated_html()` preserves those original bytes unchanged, while `paused_at_incomplete_token()` is available when callers need to reject partial input."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T02-link-targets",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct WP_HTML_Tag_Processor flow: construct directly, walk A tags with next_tag(), detect href presence with get_attribute() !== null, set target via set_attribute(), and return get_updated_html(). All called methods are documented; execution passed 8/8 with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same fully documented and idiomatic Tag Processor solution. Correctly treats empty-string and valueless href as present by checking only for null, overwrites existing target, and relies on get_updated_html() for byte-preserving output. Execution passed 8/8 with no misuse records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same fully documented Tag Processor pattern as the reference. Processor choice, token walking, attribute presence check, mutation, and output retrieval all match the rendered docs. Execution passed 8/8 with no _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "No hidden case failed in any trial. The docs did well on the exact concepts needed here: 'Which processor should I use?' directs flat source-order attribute edits to WP_HTML_Tag_Processor; 'Usage' and 'Finding tags' show direct construction and next_tag(); the get_attribute() docs distinguish null for absent attributes, empty string for present-empty attributes, and true for valueless attributes; set_attribute() documents overwriting and insertion behavior; get_updated_html() documents byte preservation for untouched input; and next_tag() documents case-insensitive tag matching plus ignoring tag-like text in comments/raw text. Near-misses were mostly presentation risks rather than observed failures: valueless attributes are described as 'boolean attributes', which can be confused with the HTML boolean-attribute list, and the initial Usage example mutates without immediately showing get_updated_html().",
+        "doc_gaps": [
+          {
+            "location": "html-tag-processor.md > Custom queries and get_attribute()",
+            "problem": "The docs use 'boolean attributes' for attributes written without a value. In HTML terminology, boolean attributes are a defined semantic subset, but this API behavior is syntactic: any present valueless attribute returns true.",
+            "suggestion": "Clarify that get_attribute() returns true for any attribute written without a value, even when that attribute is not an HTML boolean attribute; null alone means absent."
+          },
+          {
+            "location": "html-tag-processor.md > Usage",
+            "problem": "The quick three-step workflow stops at requesting mutations and the first example does not show how to retrieve the modified HTML, while get_updated_html() appears much later.",
+            "suggestion": "Add an explicit final step to read the result with get_updated_html(), and include that line in the first mutation example."
+          },
+          {
+            "location": "html-tag-processor.md > set_attribute()",
+            "problem": "Attribute order behavior is documented, but it is easy to miss for byte-exact transformations: new attributes are inserted after the tag name, while existing attributes keep their position when updated.",
+            "suggestion": "Add a compact before/after example showing one newly added generic attribute on a tag with existing attributes, and one existing attribute update that preserves its original position."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T10-last-h2",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly used WP_HTML_Tag_Processor for flat source-order work, walked matching H2 tags with documented next_tag('h2'), moved one bookmark to each match, sought back, used add_class(), and returned get_updated_html(). All called APIs are documented and execution recorded no _doing_it_wrong entries."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same correct documented pattern as the reference, with has_bookmark() and release_bookmark(). Processor choice, bookmark usage, class mutation, and output retrieval all match the rendered docs. No undocumented calls or _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correct flat-scan implementation using documented APIs only. Re-setting the same bookmark on every H2 match exactly follows the docs' last-match idiom; add_class() preserves existing classes. No API misuse was reported."
+          }
+        ],
+        "failure_analysis": "All trials passed all 6 hidden cases, so there are no failed hidden cases to attribute to a misconception. The docs worked well here: the Tag Processor overview explicitly says to use WP_HTML_Tag_Processor for flat source-order tasks like first/last/Nth matching tags; next_tag() documents string tag-name queries, ASCII case-insensitive matching, comments/raw text not matching as tags, and incomplete-token behavior; set_bookmark() explicitly describes re-setting the same bookmark name to remember the last matching tag; add_class() documents appending to existing class attributes; and get_updated_html() is clearly described as the way to retrieve queued mutations. Near-misses were minor: trial-1 used a separate boolean instead of has_bookmark() and did not release the bookmark, but both are harmless for this short-lived processor and consistent with the reference behavior. None of the candidates confused serialization with mutation output or chose the tree-aware processor unnecessarily.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Tag_Processor::set_bookmark() docblock",
+            "problem": "The docs say to release bookmarks when no longer needed, but do not distinguish long-lived scans from short-lived processors where object destruction immediately follows.",
+            "suggestion": "Clarify bookmark lifetime: releasing is useful before continuing a long scan or applying many later updates; at normal function exit it is optional because the processor is discarded."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::next_tag() / last-match bookmark recipe",
+            "problem": "The docs describe that next_tag() returning false can mean either not found or paused at incomplete input, but the last-match bookmark idiom does not remind readers to decide whether truncation matters to their contract.",
+            "suggestion": "Add a general note to full-scan recipes: after scanning to false, check paused_at_incomplete_token() when the caller must distinguish a complete scan from truncated trailing syntax; otherwise only complete matched tokens are considered."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::has_bookmark() docblock",
+            "problem": "The method is documented only as an existence check, while the common conditional-scan use case is left implicit.",
+            "suggestion": "Add a small generic example showing has_bookmark() after a loop that conditionally sets a fixed bookmark name, as an alternative to maintaining a separate found flag."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly used WP_HTML_Tag_Processor for flat source-order attribute removal. All called APIs are documented: constructor, next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html(). The implementation follows the documented scan/mutate/read pattern, handles null from get_attribute_names_with_prefix(), preserves similar non-matching attributes by using the exact data-track- prefix, and naturally leaves comments/incomplete non-matched tokens untouched through next_tag(). Passed 7/7 hidden cases with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same implementation as trial-1. Processor choice is ideal for byte-preserving flat attribute edits, uses only documented APIs, and follows the documented Tag Processor workflow. It correctly relies on lowercase prefix matches from get_attribute_names_with_prefix() and remove_attribute(), then returns get_updated_html(). Passed 7/7 hidden cases with no API misuse records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same implementation as trial-1. Uses the documented Tag Processor pattern idiomatically: walk tags, inspect matching attribute names by prefix, enqueue removals, return get_updated_html(). No undocumented methods or unsupported HTML Processor assumptions. Passed 7/7 hidden cases with no _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "No failed hidden cases across the three trials. The rendered docs supported this task well: the Tag Processor overview explicitly says to use WP_HTML_Tag_Processor for flat source-order reads and changes to attributes/classes, while reserving WP_HTML_Processor for structural work. The Usage section gives the exact create/scan/mutate/read workflow. The get_attribute_names_with_prefix() section states names are returned lowercase and matching is case-insensitive, which prevented failures on DATA-TRACK-ID. The next_tag() section says tag-like text inside comments is not matched and incomplete trailing tags are not modified. The get_updated_html() section clearly says this is the correct way to retrieve queued attribute edits while preserving untouched bytes. Near-misses: remove_attribute() works for case-insensitive names and duplicate attributes, but its method-level documentation is much thinner than surrounding prose; get_attribute_names_with_prefix() implies but does not explicitly demonstrate that a matched tag with no matching attributes returns an empty array rather than null.",
+        "doc_gaps": [
+          {
+            "location": "html-tag-processor.md#get_attribute_names_with_prefix()",
+            "problem": "The return contract distinguishes null for no matched tag, but does not explicitly call out the empty-array case for a matched tag with no attributes using the requested prefix.",
+            "suggestion": "Add a sentence and small method-level example: when currently matched on a tag opener and no attribute names match the prefix, the method returns array(), while null means there is no current tag opener."
+          },
+          {
+            "location": "html-tag-processor.md#remove_attribute()",
+            "problem": "The method-level documentation only says it removes an attribute and returns whether one was removed. It omits details that are important when composing it with get_attribute_names_with_prefix(): attribute-name matching is ASCII case-insensitive, absent attributes are safe no-ops, and duplicate case-variant attributes are removed together.",
+            "suggestion": "Expand the docblock to state the name comparison rules, no-op behavior when no opener or no such attribute is matched, and duplicate-attribute handling; include the precise meaning of the boolean return."
+          }
+        ]
+      }
+    },
+    {
+      "id": "N03-first-list-count",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor, used documented create_fragment(), next_tag(), next_token(), get_current_depth(), bookmarks, seek(), set_attribute(), get_updated_html(), paused_at_incomplete_token(), and get_last_error(). No _doing_it_wrong records. The depth-bounded scan and clean-scan checks match the documented patterns; only minor redundancy around is_tag_closer() after plain next_tag()."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Correct tree-aware processor choice and fully documented API usage. The implementation follows the docs' bookmark/seek pattern, uses a token walk bounded by depth, checks #tag before counting LI openers, overwrites the attribute through set_attribute(), and fails closed on incomplete or unsupported scans. No _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 90,
+            "hallucinated_methods": [],
+            "notes": "All called HTML API methods are documented and the subtree-counting portion is idiomatic. The main adherence issue is the initial search: consecutive filtered next_tag() calls were used as if they formed an OR query over UL/OL. That violates documented cursor semantics and fails to find OL-only input or the first list in source order when an OL precedes a later UL."
+          }
+        ],
+        "failure_analysis": "Only failed case was trial-3 on `ol`: expected the OL to receive `data-item-count=\"2\"`, but the function returned it unchanged. The misconception was that `next_tag( array( 'tag_name' => 'UL' ) )` followed by `next_tag( array( 'tag_name' => 'OL' ) )` would retry from the start. The rendered `WP_HTML_Processor::next_tag()` docs explicitly say searches start at the current cursor, a false return does not rewind, later queries do not rescan passed tags, and `tag_name` is one string rather than alternatives. The same section even gives the correct general pattern: scan any tag, then branch on get_tag(). This is more a salience/comprehension failure than an absent contract. The passing cases show the docs worked well for processor selection, direct-child depth checks, bookmark/seek mutation after scanning, get_updated_html(), and incomplete/unsupported input handling.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::next_tag() docblock near the first query examples",
+            "problem": "The correct contract is present, but a trial still treated consecutive filtered searches as an OR over tag names.",
+            "suggestion": "Add a labelled anti-pattern: do not use `$p->next_tag( 'H2' ) || $p->next_tag( 'H3' )` to find the first of several tags, because the first search advances the shared cursor. Pair it with the scan-any-tag/branch pattern."
+          },
+          {
+            "location": "WP_HTML_Processor::next_tag() parameter table for `$query['tag_name']`",
+            "problem": "Readers can miss that query predicates are conjunctive and `tag_name` accepts exactly one tag name, not alternatives.",
+            "suggestion": "State directly in the parameter row that alternatives require an unfiltered scan, a bookmark/seek reset, or a new processor."
+          },
+          {
+            "location": "HTML Processor recipe overview",
+            "problem": "The multi-tag search guidance is easy to overlook when copying single-tag examples like `next_tag( 'LI' )` or `next_tag( 'IMG' )`.",
+            "suggestion": "Add a compact recipe entry titled `Find the first element whose tag is one of several names` that links to the next_tag() cursor warning."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-nested-lists",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 91,
+            "hallucinated_methods": [],
+            "notes": "Used the correct tree-aware processor and only documented APIs: create_fragment, next_token, get_token_type, get_tag, is_tag_closer, add_class, and get_updated_html. The token-walking state machine is defensible because the HTML Processor emits closers, including virtual closers, but this task is more directly served by get_breadcrumbs(). Handles create_fragment() null; does not check get_last_error() before returning queued updates."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 94,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor and the documented breadcrumbs pattern correctly. next_tag( array( 'tag_closers' => 'visit' ) ) is documented, but unnecessary here because plain next_tag() visits only openers and the code immediately skips closers. Handles create_fragment() null; does not check get_last_error() before returning queued updates."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Closest to the reference: correct processor, documented next_tag/get_breadcrumbs/add_class/get_updated_html flow, and correctly excludes the current breadcrumb when testing ancestors. Also checks get_last_error() and falls back to the original input. It does not check paused_at_incomplete_token(), but that edge is not central to this class-editing task."
+          }
+        ],
+        "failure_analysis": "All three trials passed every frozen case: simple-ol-inside-ul, top-level-lists-untouched, ul-inside-ol, deep-descendant, existing-class-preserved, multiple-nested-levels, and mixed-document. The docs were effective on the main decision: the WP_HTML_Processor overview explicitly says to use it for tree-aware work, ancestors, and breadcrumbs; the Breadcrumbs section explains that breadcrumbs include implicit HTML/BODY and the matched node; next_tag() documents that default traversal visits openers only; add_class() and get_updated_html() document the byte-preserving mutation flow. Near-misses were documentation clarity issues rather than failures: trial-1 used a manual list-depth stack instead of the simpler breadcrumbs contract, trial-2 visited closers unnecessarily, and trials 1-2 omitted get_last_error(). A read-only probe confirmed get_updated_html() can still return queued updates after an unsupported-parser abort, so mutation examples should be clearer about checking get_last_error() when the caller requires all matches to have been considered.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs section",
+            "problem": "The docs state that breadcrumbs include the current matched node, but they do not provide a compact ancestor-only predicate. This leaves room for off-by-one mistakes when callers need an ancestor, not self-or-ancestor.",
+            "suggestion": "Add a short example showing how to test whether the current element has an ancestor with a given tag by excluding the final breadcrumb entry."
+          },
+          {
+            "location": "WP_HTML_Processor::next_tag()",
+            "problem": "The tag_closers option is documented, but examples do not strongly contrast it with the default opener-only behavior for ordinary element mutations.",
+            "suggestion": "Add a note or example saying class/attribute mutations on element openers usually should use plain next_tag(); tag_closers => 'visit' is for algorithms that explicitly need closing-token events."
+          },
+          {
+            "location": "WP_HTML_Processor mutation output docs / get_updated_html()",
+            "problem": "The HTML Processor support section says serialize() and normalize() return null after unsupported markup, but it is less explicit about get_updated_html() after queued mutations and get_last_error().",
+            "suggestion": "Document the contract for get_updated_html() after an HTML Processor abort: queued updates may still be returned, so callers that promise a complete-document transformation should check get_last_error() before returning modified HTML."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token()",
+            "problem": "Manual state tracking is documented, but the docs do not clearly tell readers when breadcrumbs are preferable to maintaining their own open-element stack.",
+            "suggestion": "Add guidance that ancestry and containment predicates should usually use get_breadcrumbs()/matches_breadcrumbs(), while next_token() state machines are better for token aggregation, direct-child counting, or rewrite streams."
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -8,7 +8,34 @@ from discoverability gaps.
 
 ## Current read
 
-Latest update: round 66 tested a combined scratch simplification on
+Latest update: round 67 isolated the processor-choice-only simplification on
+the same six-task subset as round 66. It removed only top-level roadmap/future
+prose and rewrote the HTML Processor opening so flat first/last/Nth matching
+tags and source-order attribute/class edits point to `WP_HTML_Tag_Processor`,
+while tree position, implied structure, parsed text, and normalized output
+point to `WP_HTML_Processor`. Bookmark sections and `set_bookmark()` examples
+were left unchanged. It did not win: **99.15** on the six-task subset versus
+**99.85** for the same round-56 weak-tier source-doc subset. Flat tasks were
+perfect, including `T10-last-h2` with all three subjects choosing
+`WP_HTML_Tag_Processor`, but traversal dropped: `N03` fell 99.70 -> 96.58 from
+one sequential filtered-search failure, and `T07` fell 99.40 -> 98.30 from
+lower-adherence traversal choices. Do not promote the processor-choice-only
+wording.
+
+Next action: pause the simplification/reduction loop under the protocol's
+signal-exhaustion rule. Rounds 62-67 tested broad internals pruning,
+method-local text deduplication, roadmap deletion, bookmark compression,
+combined processor-choice/bookmark simplification, and processor-choice-only
+overview pruning; every candidate damaged at least one current train concept at
+`gpt-5.4-mini` / `low` / `priority`. Treat the current source docs as the
+measured minimal set for this corpus/tier until new evidence identifies a safer
+removal or replacement. Do not promote source docblock reductions from rounds
+62-67. Resume only if the owner asks to change the corpus or model policy, run
+a paired no-edit variance/control round for a specific disputed scratch loss,
+or test a new evidence-backed documentation hypothesis that is not just another
+speculative pruning pass.
+
+Previous update: round 66 tested a combined scratch simplification on
 `T01-add-image-class`, `T02-link-targets`, `T10-last-h2`,
 `T11-strip-tracking-attributes`, `N03-first-list-count`, and
 `T07-nested-lists`. It removed 61 rendered lines net by deleting
@@ -22,15 +49,6 @@ processor-choice cue worked for flat edits: `T01`, `T02`, `T10`, `T11`, and
 `WP_HTML_Tag_Processor`. `N03` fell 99.70 -> 83.25 because one subject counted
 correctly but tried `set_attribute()` after scanning away from the list opener,
 without bookmarking and seeking back. Do not promote the combined variant.
-
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run a
-focused scratch A/B for processor choice only on the same six-task subset.
-Start from current rendered source docs, remove only roadmap/future prose and
-replace the top HTML Processor "more capable" wording with the concise
-decision rule that flat source-order attribute/class edits use
-`WP_HTML_Tag_Processor`; leave bookmark sections and `set_bookmark()` examples
-unchanged. Do not change source docblocks unless the scratch variant wins.
 
 Previous update: round 65 tested a focused scratch bookmark-contract
 simplification on `N03-first-list-count`, `T07-nested-lists`, and

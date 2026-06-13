@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan every tag in source order, `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes whose names start with that prefix, and `remove_attribute()` to delete them before returning `get_updated_html()`. This preserves similar attributes like `data-track` and `data-tracker` because the prefix match is exact for `data-track-` only.",
+  "confidence": 97
+}

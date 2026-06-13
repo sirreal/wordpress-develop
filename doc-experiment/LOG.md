@@ -2,6 +2,44 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 67 — processor-choice-only pruning still loses
+
+`round-67` isolated the promising part of round 66 as a scratch-only
+`shadow-doc-a/b` variant on the same six-task subset. Starting from current
+rendered source docs, it removed only top-level roadmap/future prose and
+rewrote the HTML Processor opening to make the processor-choice rule explicit:
+flat first/last/Nth matching tags and source-order attribute/class edits use
+`WP_HTML_Tag_Processor`; tree position, implied structure, parsed text, and
+normalized output use `WP_HTML_Processor`. It left bookmark sections and
+`set_bookmark()` examples unchanged. Source docblocks, corpus fixtures, runner
+policy, and harness behavior were unchanged.
+
+Numeric result: **99.15 on the six-task subset**, versus **99.85** for the
+same tasks in the comparable round-56 weak-tier source-doc baseline. The flat
+tasks were perfect: `T01`, `T02`, `T10`, and `T11` all scored **100.00**, and
+all `T10-last-h2` subjects chose `WP_HTML_Tag_Processor`. The variant still
+lost because traversal dropped: `N03-first-list-count` fell **99.70 -> 96.58**
+when one subject used consecutive filtered `next_tag( 'UL' )` then
+`next_tag( 'OL' )` calls as if they formed an OR search, and
+`T07-nested-lists` fell **99.40 -> 98.30** from lower-adherence manual
+state-machine and closer-visiting solutions.
+
+Interpretation: do not promote the round-67 source wording. It confirms that
+the current processor-choice cue can be tightened, but even this small
+top-level pruning did not preserve the structural traversal tasks at the
+selected weak tier. Together with rounds 62-66, the reduction directive has now
+produced repeated losses from broad internals pruning, method-local text
+deduplication, roadmap deletion, bookmark compression, and processor-choice
+overview pruning. The current source docs are the measured minimal set for this
+corpus/tier until new evidence identifies a safer removal or replacement.
+
+Next action: pause the simplification/reduction loop under the protocol's
+signal-exhaustion rule. Do not promote source docblock reductions from rounds
+62-67. Resume only if the owner asks to change the corpus or model policy, run
+a paired no-edit variance/control round for a specific disputed scratch loss,
+or test a new evidence-backed source documentation hypothesis that is not just
+another speculative pruning pass.
+
 ## Round 66 — processor-choice simplification fixes flat edits but regresses N03
 
 `round-66` tested a scratch-only `shadow-doc-a/b` variant on six train tasks:

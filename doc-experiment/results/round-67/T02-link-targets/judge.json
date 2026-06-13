@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor flow: construct directly, walk A tags with next_tag(), detect href presence with get_attribute() !== null, set target via set_attribute(), and return get_updated_html(). All called methods are documented; execution passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented and idiomatic Tag Processor solution. Correctly treats empty-string and valueless href as present by checking only for null, overwrites existing target, and relies on get_updated_html() for byte-preserving output. Execution passed 8/8 with no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented Tag Processor pattern as the reference. Processor choice, token walking, attribute presence check, mutation, and output retrieval all match the rendered docs. Execution passed 8/8 with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the exact concepts needed here: 'Which processor should I use?' directs flat source-order attribute edits to WP_HTML_Tag_Processor; 'Usage' and 'Finding tags' show direct construction and next_tag(); the get_attribute() docs distinguish null for absent attributes, empty string for present-empty attributes, and true for valueless attributes; set_attribute() documents overwriting and insertion behavior; get_updated_html() documents byte preservation for untouched input; and next_tag() documents case-insensitive tag matching plus ignoring tag-like text in comments/raw text. Near-misses were mostly presentation risks rather than observed failures: valueless attributes are described as 'boolean attributes', which can be confused with the HTML boolean-attribute list, and the initial Usage example mutates without immediately showing get_updated_html().",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md > Custom queries and get_attribute()",
+      "problem": "The docs use 'boolean attributes' for attributes written without a value. In HTML terminology, boolean attributes are a defined semantic subset, but this API behavior is syntactic: any present valueless attribute returns true.",
+      "suggestion": "Clarify that get_attribute() returns true for any attribute written without a value, even when that attribute is not an HTML boolean attribute; null alone means absent."
+    },
+    {
+      "location": "html-tag-processor.md > Usage",
+      "problem": "The quick three-step workflow stops at requesting mutations and the first example does not show how to retrieve the modified HTML, while get_updated_html() appears much later.",
+      "suggestion": "Add an explicit final step to read the result with get_updated_html(), and include that line in the first mutation example."
+    },
+    {
+      "location": "html-tag-processor.md > set_attribute()",
+      "problem": "Attribute order behavior is documented, but it is easy to miss for byte-exact transformations: new attributes are inserted after the tag name, while existing attributes keep their position when updated.",
+      "suggestion": "Add a compact before/after example showing one newly added generic attribute on a tag with existing attributes, and one existing attribute update that preserves its original position."
+    }
+  ]
+}

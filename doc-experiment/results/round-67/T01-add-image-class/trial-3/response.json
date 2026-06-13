@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly for `img` tags with case-insensitive tag-name matching, then called `add_class( 'wp-image' )` on each match and returned `get_updated_html()` so untouched bytes are preserved exactly as documented.",
+  "confidence": 98
+}
