@@ -159,13 +159,17 @@
  * walking tokens: append the current token's normalized serialization, skip
  * tokens to remove them, or emit extra markup around selected tokens. The
  * accumulated string is the rewrite; do not later call `normalize()` on the
- * original HTML unless the intention is to discard every change emitted by the
- * loop.
+ * original HTML or return the raw input unless the intention is to discard
+ * every change emitted by the loop.
  *
  * Example:
  *
  *     $processor = WP_HTML_Processor::create_fragment( $html );
- *     $output    = '';
+ *     if ( null === $processor ) {
+ *         return null;
+ *     }
+ *
+ *     $output = '';
  *
  *     while ( $processor->next_token() ) {
  *         if ( '#comment' === $processor->get_token_type() ) {
@@ -187,7 +191,10 @@
  * caller needs proof that the source ended cleanly, also reject when
  * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} is true. Always
  * reject or fall back when {@see WP_HTML_Processor::get_last_error} is
- * non-null, because the parser stopped at unsupported markup.
+ * non-null, because the parser stopped at unsupported markup. The fallback is
+ * the caller's contract: returning `null`, an empty string, or the original
+ * input are different policies. The original input preserves source bytes but
+ * is neither normalized nor the rewritten output.
  *
  * #### Breadcrumbs
  *
@@ -452,6 +459,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 *  - The only supported context is `<body>`, which is the default value.
 	 *  - The only supported document encoding is `UTF-8`, which is the default value.
+	 *
+	 * A `null` return means no processor was created. Check this before walking
+	 * tokens or building serialized output. If a processor is created, it may
+	 * still stop later when unsupported markup is encountered; detect that after
+	 * scanning with {@see WP_HTML_Processor::get_last_error}.
 	 *
 	 * @since 6.4.0
 	 * @since 6.6.0 Returns `static` instead of `self` so it can create subclass instances.
@@ -1621,6 +1633,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
 	 *
+	 * `normalize( $html )` normalizes the original input fragment. It is not a
+	 * way to finish or recover a token-by-token rewrite that has already emitted
+	 * changes with {@see WP_HTML_Processor::serialize_token}; calling it after
+	 * such a loop intentionally discards the accumulated output.
+	 *
 	 * Example:
 	 *
 	 *     echo WP_HTML_Processor::normalize( '<a href=#anchor v=5 href="/" enabled>One</a another v=5><!--' );
@@ -1758,7 +1775,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * or fall back if {@see WP_HTML_Processor::get_last_error} is non-null,
 	 * because the parser stopped at unsupported markup. Do not call
 	 * `normalize()` on the original HTML after emitting changes unless the
-	 * intention is to discard those changes.
+	 * intention is to discard those changes. Returning the original input also
+	 * discards the accumulated rewrite; it preserves source bytes, but is not
+	 * normalized output and does not contain emitted wrapper, skip, or
+	 * replacement changes.
 	 *
 	 * Serialization is NOT the way to retrieve a document after modifying
 	 * it with {@see WP_HTML_Tag_Processor::set_attribute},
