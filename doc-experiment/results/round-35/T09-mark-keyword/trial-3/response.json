@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then rewrites the normalized output token-by-token with `next_token()` and `serialize_token()`. Only ordinary `#text` tokens are considered, and their decoded text is read with `get_modifiable_text()`; when the case-sensitive keyword is present, that token\u2019s normalized serialization is wrapped in `<mark>`, which naturally excludes comments, attributes, split text across nodes, and special text-bearing elements like `script`, `style`, `title`, and `textarea` because those do not appear as ordinary `#text` child tokens.",
+  "confidence": 78
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(); all are documented in the supplied markdown. The solution is idiomatic: one structural pass, ancestor check via breadcrumbs excluding the current node, class update with add_class(), final output via get_updated_html(). It handles null factory creation and unsupported-parser aborts, but does not explicitly check paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used only documented/inherited APIs, including paused_at_incomplete_token(). Breadcrumb-based ancestor detection and get_updated_html() are appropriate. The extra pre-scan and second processor are unnecessary for this task, so the pattern is slightly less idiomatic than a single pass, but it remains defensible and handles incomplete/unsupported scans conservatively."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented APIs. The breadcrumb handling is clean: it removes the current node before testing ancestors, then applies add_class() and returns get_updated_html(). It handles create_fragment() failure and get_last_error(), with no attribute/text edge-case misuse. Like trial-1, it does not explicitly branch on paused_at_incomplete_token()."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed: all three trials passed 7/7 with no _doing_it_wrong records. The docs did well on the core decision: the Tag Processor page clearly says it has no tree awareness, while the HTML Processor page says to use it for structure, containment checks, breadcrumbs, and BODY fragments via create_fragment(). The Breadcrumbs section also gave enough information for candidates to infer that get_breadcrumbs() includes implicit HTML/BODY ancestors and the current element, and the add_class()/get_updated_html() docs supported byte-preserving class edits. The only near-miss was incomplete input policy: trial-1 and trial-3 check get_last_error() but not paused_at_incomplete_token(), while trial-2 over-applies a conservative complete-scan policy. A probe confirms get_updated_html() can still preserve a trailing incomplete token while returning queued earlier edits, so the docs leave some room for different caller policies here rather than a single obvious behavior.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock and Breadcrumbs overview",
+      "problem": "The examples imply, but the return contract does not state prominently enough, that breadcrumbs include the currently matched node as the final entry and ancestors before it, with implicit HTML/BODY entries for fragments.",
+      "suggestion": "Add an explicit return-contract sentence: the array is ordered root-to-current, includes the current matched element/token as the last item, and callers checking ancestors should ignore the final entry."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag(), WP_HTML_Tag_Processor::paused_at_incomplete_token(), and get_updated_html() docs",
+      "problem": "Incomplete-input guidance is spread across recipes and inherited Tag Processor docs, making it unclear when a mutating scan should fall back versus return queued edits that preserve incomplete trailing bytes.",
+      "suggestion": "Add a short policy note near get_updated_html() or next_tag(): queued edits may be returned even if the scan paused at an incomplete trailing token, but callers whose result depends on proving a complete scan should check paused_at_incomplete_token() and choose a fallback."
+    },
+    {
+      "location": "WP_HTML_Processor overview / structural-query examples",
+      "problem": "The docs show exact breadcrumb path queries, but do not include a compact general pattern for testing whether the current element is contained anywhere inside a particular ancestor type.",
+      "suggestion": "Add a general ancestor-membership example using get_breadcrumbs() with the current node excluded, framed around a neutral containment task rather than a specific solution."
+    }
+  ]
+}

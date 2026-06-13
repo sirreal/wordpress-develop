@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk over the parsed BODY fragment. It appends decoded text from ordinary `#text` tokens, and explicitly opts in to decoded opener text for `TITLE` and `TEXTAREA` via `get_modifiable_text()`, while excluding other special text-bearing elements like `SCRIPT` and `STYLE`. The final string is truncated to the requested number of UTF-8 code points with `mb_substr()` and a regex fallback.",
+  "confidence": 92
+}

@@ -146,12 +146,13 @@ kept N03 perfect. Treat the cursor/OR-search gap as resolved for now.
 
 The next diagnostic tested the user-suggested "generic recipes in the main
 class documentation" direction as a compact depth-bounded traversal card.
-Rounds 33/34 show that this is promotable after a held-out checkpoint:
+Rounds 33/34 showed that this was promotable after a held-out checkpoint:
 variant 99.08 vs control 97.34 on N03/N06/T06/T08, with N03 recovering from
 94.46 to 100.00 and T08 improving from 96.50 to 98.00. The remaining
 special-element over-inclusion signal did not disappear and should stay
-separate. Next action: run a checkpoint/regression sentinel on current source
-docs; if stable, promote the adapted depth/direct-child card as one source
+separate. Round 35 supplied the checkpoint: all 99.47 / train 99.50 /
+held-out 99.38, with all hidden cases passing and held-out above round 24.
+Next action: promote the adapted depth/direct-child card as one source
 docblock hypothesis.
 
 Historical round-17 judge gaps had mostly reduced to these shapes:
@@ -226,8 +227,9 @@ paired subset, 99.08 vs 97.34. It made subtree/direct-child checks more
 mechanical without source edits: N03 went from one incomplete-token functional
 miss in the control to 100.00 in the variant, T08 improved 96.50 to 98.00,
 N06 was effectively flat/slightly up, and T06 had only a -0.2 adherence dip.
-Promote only after the checkpoint cadence is satisfied, and keep the source
-wording concise and generic.
+Round 35 checkpoint satisfied the held-out gate: all 99.47 / held-out 99.38,
+with no hidden failures. Promote next, keeping the source wording concise and
+generic.
 
 Risk: medium. Avoid a table-specific solution. The invariant should be
 explained with generic "container and descendants" language, optionally backed

@@ -1,0 +1,71 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-35/T07-nested-lists/trial-2/candidate.php",
+  "function": "mark_nested_lists",
+  "passed": 7,
+  "total": 7,
+  "cases": [
+    {
+      "id": "simple-ol-inside-ul",
+      "status": "pass",
+      "expected": "<ul><li>One<ol class=\"nested-list\"><li>Nested</li></ol></li></ul>",
+      "actual": "<ul><li>One<ol class=\"nested-list\"><li>Nested</li></ol></li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "top-level-lists-untouched",
+      "status": "pass",
+      "expected": "<ol><li>Top</li></ol><ul><li>Also top</li></ul>",
+      "actual": "<ol><li>Top</li></ol><ul><li>Also top</li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "ul-inside-ol",
+      "status": "pass",
+      "expected": "<ol><li>One<ul class=\"nested-list\"><li>Nested</li></ul></li></ol>",
+      "actual": "<ol><li>One<ul class=\"nested-list\"><li>Nested</li></ul></li></ol>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "deep-descendant",
+      "status": "pass",
+      "expected": "<ul><li><div><section><ol class=\"nested-list\"><li>Deep</li></ol></section></div></li></ul>",
+      "actual": "<ul><li><div><section><ol class=\"nested-list\"><li>Deep</li></ol></section></div></li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "existing-class-preserved",
+      "status": "pass",
+      "expected": "<ul><li><ol class=\"steps nested-list\"><li>Nested</li></ol></li></ul>",
+      "actual": "<ul><li><ol class=\"steps nested-list\"><li>Nested</li></ol></li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multiple-nested-levels",
+      "status": "pass",
+      "expected": "<ul><li>A<ol class=\"nested-list\"><li>B<ul class=\"nested-list\"><li>C</li></ul></li></ol></li></ul>",
+      "actual": "<ul><li>A<ol class=\"nested-list\"><li>B<ul class=\"nested-list\"><li>C</li></ul></li></ol></li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "mixed-document",
+      "status": "pass",
+      "expected": "<p>intro</p><ul><li>A<ol class=\"nested-list\"><li>B</li></ol></li></ul><ol><li>C</li></ol>",
+      "actual": "<p>intro</p><ul><li>A<ol class=\"nested-list\"><li>B</li></ol></li></ul><ol><li>C</li></ol>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

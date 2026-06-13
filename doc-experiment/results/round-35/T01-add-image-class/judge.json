@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, next_tag('img'), add_class('wp-image'), and get_updated_html(); all are documented. This is the correct flat, byte-preserving class/attribute edit pattern. Lowercase tag query is valid because documented tag-name matching is ASCII case-insensitive."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct processor choice, no undocumented API calls, idiomatic forward scan with next_tag(), class mutation via add_class(), and output via get_updated_html(). Passed without _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. It relies on documented Tag Processor behavior for skipping non-tags such as comments, matching tag names case-insensitively, preserving existing classes/order, and leaving incomplete trailing markup untouched."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases. The docs did well on the critical decisions: the Tag Processor overview explicitly distinguishes flat byte-preserving edits from structural HTML Processor work; Usage documents direct construction with new WP_HTML_Tag_Processor($html); Finding tags documents next_tag('img') and case-insensitive tag matching; Modifying CSS classes documents add_class() preserving existing class order and appending the new class; get_updated_html() is clearly described as the way to retrieve queued edits while preserving untouched bytes. Near-misses: the successful candidates inferred, rather than directly cited, that text inside comments will not be matched as tags, and that an incomplete trailing tag simply will not be modified when next_tag() cannot match a complete token.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor > Finding tags / next_tag()",
+      "problem": "The docs explain matching criteria and case-insensitive tag names, but do not make the practical boundary explicit: next_tag() finds parsed HTML tag tokens, not tag-like text inside comments, text nodes, SCRIPT/STYLE text, or incomplete tokens.",
+      "suggestion": "Add a short contract sentence to next_tag(): it only matches complete tag tokens parsed by the processor; tag-looking text in comments/text/rawtext is not returned, and incomplete trailing syntax is not treated as a matched tag."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor > Modifying CSS classes for a found tag / add_class()",
+      "problem": "The add_class() section clearly covers preserving/appending existing classes, but the placement of a newly created class attribute is only inferable from broader attribute-update rules.",
+      "suggestion": "State that when add_class() creates a missing class attribute, it follows the normal attribute insertion/serialization rules while preserving all other untouched bytes."
+    },
+    {
+      "location": "Rendered method index for WP_HTML_Tag_Processor and WP_HTML_Processor",
+      "problem": "Private/internal methods are listed alongside public APIs. These trials did not misuse them, but exposing private methods in the same index increases the chance that documentation-only implementers call unsupported methods.",
+      "suggestion": "Separate public API methods from private/internal implementation methods, or visually mark private methods as non-callable implementation details in the rendered docs."
+    }
+  ]
+}

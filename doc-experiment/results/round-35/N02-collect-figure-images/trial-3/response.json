@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because containment inside `FIGURE` is a tree-aware question. It scans `IMG` tags in document order with `next_tag( 'IMG' )`, checks each tag\u2019s ancestor path via `get_breadcrumbs()` to confirm a `FIGURE` appears before the `IMG`, and reads the already-decoded `src` with `get_attribute()`, skipping missing or empty values.",
+  "confidence": 92
+}

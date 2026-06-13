@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because link text extraction is tree-aware. It performs a single `next_token()` walk, records each opening `A` tag whose `get_attribute( 'href' )` returns a string, accumulates only `#text` token contents with `get_modifiable_text()` while inside active links, and excludes missing or boolean `href` values; it also rejects incomplete or unsupported parses via `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 82
+}

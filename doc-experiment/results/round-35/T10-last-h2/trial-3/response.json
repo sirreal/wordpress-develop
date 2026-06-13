@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat scan of the markup, because the task only needs the last `H2` opener, not tree-aware structure. It repeatedly calls `next_tag( 'H2' )`, moves a single bookmark with `set_bookmark()` to remember the latest match, then `seek()`s back to that bookmarked tag, adds the class with `add_class()`, and returns the result via `get_updated_html()`.",
+  "confidence": 96
+}

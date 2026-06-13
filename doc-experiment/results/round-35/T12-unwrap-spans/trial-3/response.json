@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment with tree awareness, then walks every token with `next_token()` and rebuilds normalized HTML via `serialize_token()`, skipping both `SPAN` openers and closers so only their contents remain. If the processor aborts on unsupported markup, it falls back to `WP_HTML_Processor::normalize()` so the function still returns normalized HTML rather than a partial serialization.",
+  "confidence": 82
+}

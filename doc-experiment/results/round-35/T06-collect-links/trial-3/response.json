@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens with `next_token()`. On each `A` opener it reads `href` with `get_attribute()` and keeps only string-valued attributes, and while any tracked anchors are open it appends ordinary text-node content from `#text` tokens via `get_modifiable_text()`, so markup contributes nothing and character references are returned decoded by the API.",
+  "confidence": 90
+}

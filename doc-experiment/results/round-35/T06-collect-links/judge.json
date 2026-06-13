@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses `WP_HTML_Processor::create_fragment()` and only documented methods. The single-pass active-link stack matches the documented closer-driven token-walk pattern, and it handles string-only `href`, decoded text, and unclosed anchors. Minor penalty: the final `paused_at_incomplete_token()` / `get_last_error()` check discards all collected links on incomplete trailing syntax, which is stricter than the task/reference and overgeneralizes the clean-scan guidance."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Reference-shape solution: HTML Processor fragment parsing, `next_tag('A')`, `is_string(get_attribute('href'))`, depth-bounded `next_token()` with `>=`, `#text` guard, and `get_modifiable_text()` for decoded text. No undocumented API use or misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all called methods are documented. The single `next_token()` dispatch with an anchor stack follows the documented one-cursor pattern and relies on documented implicit/end-of-input closers. Slight penalty for less explicit tag-token guarding around `get_tag()` and for leaving unsupported/incomplete-input policy implicit, though this did not affect the frozen tests."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials: all passed 8/8 with no `_doing_it_wrong` records. The docs succeeded where this task was most likely to fail: the HTML-vs-Tag Processor guidance points readers to `WP_HTML_Processor` for collecting element text and walking subtrees; `get_attribute()` documents `string|true|null`, which led all trials to exclude missing and valueless `href`; `get_modifiable_text()` documents decoded `#text`; and `next_token()` / `get_current_depth()` explain virtual closers and depth-bounded subtree walks, which handled the unclosed-link case. The main near-miss was trial-1 interpreting clean-scan checks as a reason to reject the entire extraction on any incomplete trailing token, a policy distinction the docs mention but could make sharper for read-only extraction.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_attribute()` rendered method docs",
+      "problem": "The HTML Processor override shows `string|true|null` but does not repeat the Tag Processor note that returned string values are already character-reference decoded.",
+      "suggestion": "Duplicate or cross-link the decoded string-value contract directly in the HTML Processor `get_attribute()` docblock, including the `href=\"...?a&amp;b\"` style example."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` one-cursor guidance",
+      "problem": "The docs warn against nested token walks, while a safe and useful pattern for repeated subtree extraction is `next_tag($name)` followed by a depth-bounded `next_token()` inner walk.",
+      "suggestion": "Add a short note distinguishing unsafe nested `next_token()` outer loops from safe `next_tag()` plus bounded subtree scans, and state when the single-loop state-machine pattern is preferred."
+    },
+    {
+      "location": "`paused_at_incomplete_token()` and clean-scan recipe docs",
+      "problem": "The clean-scan examples can be read as requiring whole-result rejection for any incomplete trailing syntax, even for read-only extraction where previously visited tokens may still be usable.",
+      "suggestion": "Add policy guidance contrasting strict complete-input validation with best-effort read-only extraction: incomplete trailing syntax means an unvisited final token was omitted; callers decide whether to keep already collected data."
+    },
+    {
+      "location": "`WP_HTML_Processor::is_tag_closer()` / `get_tag()` docs",
+      "problem": "Closer-driven stack code relies on `next_token()` visiting explicit, implicit, virtual, and end-of-input closers and on `get_tag()` naming those closer tokens, but that contract is mostly implicit across examples.",
+      "suggestion": "State explicitly that on tag closer tokens, including virtual closers, `get_tag()` returns the closed tag name while depth and breadcrumbs already reflect the parent context."
+    }
+  ]
+}

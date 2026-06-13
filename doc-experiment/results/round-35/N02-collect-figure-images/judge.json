@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag('IMG'), get_breadcrumbs(), and get_attribute(), all documented. Processor choice is exactly right for structural containment. Attribute handling correctly skips null, true, and empty string values, and relies on documented decoded get_attribute() output. Passed 9/9."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct API surface as trial-1, with a slightly more precise ancestor check that excludes the current IMG breadcrumb. Fully idiomatic use of the HTML Processor and breadcrumbs for any-depth containment. Passed 9/9."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "All called methods are documented, including get_last_error(). The solution is structurally correct and handles src semantics well. Minor penalty: the final all-or-nothing get_last_error() check is conservative but not clearly required for this read-only collector and could discard valid earlier results if unsupported markup appears later. Passed 9/9."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs succeeded on the core decisions: the Tag Processor page explicitly says it has no tree awareness and points structural tasks to WP_HTML_Processor; the HTML Processor page documents create_fragment() for BODY fragments, next_tag() scanning, breadcrumbs, implied outer HTML/BODY nodes, and unsupported-markup behavior. The attribute docs also gave enough signal for null/true/empty-string filtering and decoded src values. Near-misses: candidates had to infer that an any-depth ancestor test should manually inspect get_breadcrumbs(), because breadcrumb queries and matches_breadcrumbs() describe direct chains with single-level wildcards, not descendant-anywhere matching. Also, the HTML Processor get_attribute() section itself omits the decoded-value sentence that appears in the Tag Processor section, so a subject focused on the chosen processor could miss that guarantee.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-35/html-processor.md#get_attribute",
+      "problem": "The HTML Processor method section documents string|true|null but does not repeat that string attribute values are already decoded, nor that present empty attributes can return ''.",
+      "suggestion": "Duplicate the Tag Processor get_attribute() decoding and empty-string wording here, or add an explicit inherited-behavior note with an attribute entity example."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-35/html-processor.md#Breadcrumbs and #get_breadcrumbs",
+      "problem": "Breadcrumb examples focus on exact nested paths and direct child-style matching. They do not show the general pattern for testing whether the current node has an ancestor anywhere above it, and get_breadcrumbs() includes the current node.",
+      "suggestion": "Add a short general note: use get_breadcrumbs() and inspect/slice the returned path for arbitrary ancestor containment; breadcrumb queries and matches_breadcrumbs() do not have a descendant-any-depth wildcard."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-35/html-processor.md#get_last_error",
+      "problem": "The docs explain unsupported parser aborts but do not clearly distinguish policies for read-only extraction: returning best-effort partial results versus rejecting/falling back when the full document was not parsed.",
+      "suggestion": "Add guidance that read-only collectors should choose a documented policy, checking get_last_error() when complete-document confidence is required and paused_at_incomplete_token() when incomplete trailing syntax matters."
+    }
+  ]
+}

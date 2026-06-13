@@ -2,6 +2,34 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 35 — checkpoint clears depth-card promotion gate
+
+**All 99.47 / train 99.50 / held-out 99.38 / core 99.41** under
+`checkpoint`, with subjects `gpt-5.4` / `medium` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This scored the current source docs after
+the round-32 `next_tag()` source edit and before promoting the round-34
+scratch traversal card.
+
+Outcome: stable. All 57 subject trials passed all hidden cases. Compared with
+the previous checkpoint, round 24, all-score rose 99.35 -> 99.47, train rose
+99.41 -> 99.50, and held-out rose 99.12 -> 99.38. Held-out scores were
+N01-remove-external-class 100.00, N02-collect-figure-images 99.80,
+N05-document-title 98.80, and H04-remove-empty-paragraphs 98.90. There is no
+held-out functional regression and no reason to revert the current source
+docs.
+
+The checkpoint also confirms the round-32 cursor edit held in the broader
+sentinel: N03-first-list-count was 100.00 and T07-nested-lists was 99.30. The
+lowest train task remains T08-table-extract at 98.10, with the same residual
+text-policy issue: subjects sometimes over-include SCRIPT/STYLE/TEXTAREA/TITLE
+opener-carried modifiable text when ordinary `#text` extraction was intended.
+That is separate from the depth/direct-child traversal card.
+
+Decision: the held-out gate is clear. Promote an adapted, concise version of
+the round-34 depth-bounded traversal/direct-child card into the
+`WP_HTML_Processor` class documentation as one source hypothesis, then run the
+docs-only guard, stage docs, and score it as the next normal source round.
+
 ## Rounds 33/34 — depth-bounded traversal scratch A/B wins
 
 `round-33` was the control rendered-doc round and `round-34` was a
