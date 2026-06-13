@@ -2,6 +2,44 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 54/55 — serialization rewrite fallback scratch A/B wins
+
+`round-54` was the control rendered-doc round and `round-55` was a
+scratch-only HTML Processor rendered-doc variant for
+`T09-mark-keyword`, `T12-unwrap-spans`, and the normalization control
+`N04-normalize-or-placeholder`. Both used `shadow-doc-a/b`, subjects
+`gpt-5.4-mini` / `low` / `priority`, and judge `gpt-5.5` / `xhigh` /
+`priority`. Source docblocks were unchanged.
+
+Variant: add a compact string-returning rewrite checklist near the
+class-level `serialize_token()` recipe and a method-local wrapper example.
+The key distinctions are: use `get_modifiable_text()` for decoded inspection,
+not for hand-escaped output; use `serialize_token()` to emit the current token;
+the accumulated `$output` is the rewrite; and `normalize( $html )` or raw input
+discard wrappers, skipped tokens, replacements, and other emitted changes.
+
+Numeric result: variant won, **99.53 vs 98.87**. Serialization rose 98.30 ->
+99.55. T09 improved 98.50 -> 99.60, and T12 improved 98.10 -> 99.50. N04
+moved 100.00 -> 99.50 because one variant trial used the lower-level
+`create_fragment()` + `serialize()` path rather than the direct `normalize()`
+helper, but all N04 hidden cases still passed.
+
+Transfer result: the variant eliminated the control's worst T09 pattern:
+decoded `get_modifiable_text()` plus `htmlspecialchars()` as a substitute for
+token serialization. It also reduced T12 fallback-policy penalties. The
+remaining near-miss is narrower: subjects may still use `normalize( $html )`
+or raw input as an explicit abandonment fallback after a parser error.
+
+Interpretation: promotable as an adapted source hypothesis. Keep it generic
+and compact. Promote the class-level checklist and method-local wrapper /
+anti-pattern examples, but avoid suggesting one universal fallback policy for
+all string-returning rewrites.
+
+Next action: commit rounds 54/55 results, then edit
+`src/wp-includes/html-api/class-wp-html-processor.php` to promote one adapted
+serialization rewrite fallback recipe. Run the docs-only guard, stage docs, and
+score the source hypothesis.
+
 ## Round 53 — mini/low calibration exhausts weak-tier ladder
 
 **Train 99.51 / core 99.43** under `weak-tier-calibration`, with subjects

@@ -276,6 +276,18 @@ after accumulating rewrite output. Next action: run a focused scratch
 control, testing a compact generic class-level recipe/card for rewrite output
 and explicit fallback policy. Do not edit source docs until that variant wins.
 
+Rounds 54/55 supplied that diagnostic. The scratch-only variant won 99.53 vs
+98.87, raised serialization from 98.30 to 99.55, moved T09 from 98.50 to
+99.60, and moved T12 from 98.10 to 99.50. N04 dipped from 100.00 to 99.50
+because one variant trial used `create_fragment()` + `serialize()` rather than
+the direct `normalize()` helper, but all N04 hidden cases still passed. The
+variant eliminated the worst control behavior of rebuilding a text token from
+decoded `get_modifiable_text()` plus `htmlspecialchars()`, and improved the
+fallback-policy transfer. Promote an adapted source edit in
+`WP_HTML_Processor`: a compact class-level string-rewrite checklist plus a
+method-local `serialize_token()` wrapper / anti-pattern example. Keep fallback
+wording as caller policy; do not prescribe one universal return value.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

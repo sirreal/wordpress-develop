@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Processor::normalize()` API to normalize the fragment as BODY-context HTML, and falls back to the exact placeholder when normalization is unavailable or returns `null` for unsupported input. I added a small existence check so the function degrades safely if the HTML API class is not loaded.",
+  "confidence": 97
+}

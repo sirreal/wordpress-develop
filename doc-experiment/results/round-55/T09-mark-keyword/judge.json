@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor for BODY-fragment parsing and normalized token serialization. All called HTML API methods are documented: create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token, get_last_error, normalize. The token loop follows the documented rewrite pattern and correctly uses decoded text only for matching. Minor issue: the create_fragment null fallback returns raw input, which is not normalized output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the documented HTML Processor token-rewrite pattern almost exactly: create_fragment, #text guard, get_modifiable_text for decoded matching, and serialize_token for normalized output. It avoids comments, attributes, and special-element opener text. Minor near-miss: on parser error it falls back to normalize(original) or raw input, which intentionally discards emitted wrappers; acceptable as an explicit fallback but risky for a rewrite contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same high-adherence approach as trial-2. Correct processor, no undocumented API calls, no _doing_it_wrong records, and idiomatic serialized token wrapping. The only reservation is the same parser-error fallback, which would discard partial rewrite output if unsupported markup appeared after already-emitted tokens."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there were no failed hidden cases to attribute to a misconception. The docs did especially well in three places: the processor-choice guidance says to use WP_HTML_Processor for normalized output and BODY-fragment parsing; the DOM-style text recipe warns that ordinary text means #text tokens only, not every token with modifiable text; and serialize_token documents the exact rewrite pattern of checking decoded text, then wrapping serialize_token output. The main near-miss is fallback policy. All candidates added get_last_error handling that falls back to normalize($html) or raw input. The rendered docs warn that normalize(original) discards emitted rewrites, but the surrounding fallback guidance still leaves enough room for models to choose that policy mechanically.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock / rewrite-while-serializing recipe",
+      "problem": "The docs warn against normalize($html) after a rewrite, but candidates still used normalize(original) as an error fallback after emitting wrapper output.",
+      "suggestion": "Separate pre-rewrite fallback examples from post-rewrite error handling. State that after any emitted rewrite, normalize($html) and raw input are abandonment policies, not recovery policies, and recommend naming that explicitly in code when chosen."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and WP_HTML_Tag_Processor::get_modifiable_text() docs",
+      "problem": "Special elements carrying text on opener tokens is subtle. The candidates handled it, but only because the rendered docs had strong prose around #text filtering.",
+      "suggestion": "Add a compact token table for TEXTAREA, TITLE, SCRIPT, STYLE, comments, and ordinary text showing token_type, token_name, get_modifiable_text(), and whether it is ordinary DOM text."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() / normalize() docs",
+      "problem": "String-returning callers may treat raw input as a harmless fallback when processor creation or normalization fails, even when the caller promised normalized output.",
+      "suggestion": "Clarify that raw input preserves bytes but does not satisfy a normalized-output contract. Suggest choosing an explicit contract fallback such as empty string, null for nullable APIs, or best-effort accumulated serialization."
+    }
+  ]
+}
