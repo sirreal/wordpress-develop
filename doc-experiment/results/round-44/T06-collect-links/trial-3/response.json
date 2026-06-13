@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because collecting an anchor\u2019s text content requires tree-aware parsing. It scans `A` tags in document order with `next_tag()`, keeps only anchors whose `href` is reported as a string by `get_attribute()`, then walks each anchor\u2019s subtree with `next_token()` while `get_current_depth()` stays inside that element, concatenating only `#text` tokens via `get_modifiable_text()`. It also rejects unsupported or truncated input by checking `get_last_error()` and `paused_at_incomplete_token()`.",
+  "confidence": 88
+}

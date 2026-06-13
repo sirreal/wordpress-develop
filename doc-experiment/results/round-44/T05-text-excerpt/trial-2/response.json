@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment safely, then walks tokens with `next_token()`. It appends decoded text from ordinary `#text` tokens plus decoded opener-carried text from `TITLE` and `TEXTAREA`, while naturally excluding `SCRIPT`, `STYLE`, comments, and other non-text tokens. Truncation is done by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8`, as documented.",
+  "confidence": 91
+}

@@ -2,6 +2,47 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 44/45 — text-policy decision table scratch A/B wins
+
+`round-44` was the control rendered-doc round and `round-45` was a
+scratch-only HTML Processor rendered-doc variant for five train tasks:
+`T03-first-h1-text`, `T05-text-excerpt`, `T06-collect-links`,
+`T08-table-extract`, and `N06-extract-toc`. Both used `shadow-doc-a/b`,
+subjects `gpt-5.4` / `medium` / `priority`, and judge `gpt-5.5` /
+`xhigh` / `priority`. Source docblocks were unchanged.
+
+Variant: add a compact "where text lives / extraction policy" table near the
+class-level DOM-style text recipe, plus short method-local reminders in
+`next_token()` and `get_modifiable_text()`: ordinary DOM-style text reads only
+visited `#text` tokens; special-element opener text is explicit opt-in for
+that element's own contents; TITLE/TEXTAREA are decoded while SCRIPT/STYLE are
+raw; and read-only extraction policy for partial scans is separate from
+mutation, normalization, and token-rewrite fail-closed policy.
+
+Numeric result: variant won, **99.56 vs 98.94** on the paired subset. All 30
+subject trials passed all hidden cases. T03 improved 99.10 -> 100.00, T05
+98.90 -> 99.90, T08 98.60 -> 99.50, and N06 98.70 -> 99.50. T06 dipped only
+99.40 -> 98.90, still with all trials passing all hidden cases.
+
+Transfer result: the variant eliminated the main special-element over-inclusion
+pattern in the paired tasks. Control T03 trial 3, T08 trials 1 and 3, and N06
+trial 2 still treated special-element opener text as ordinary subtree text.
+Variant T03, T08, and N06 trials all used ordinary `#text`-only extraction for
+those tasks. The remaining weak spot is read-only partial-scan policy: T06
+variant trial 2 still returned an empty result on `paused_at_incomplete_token()`
+even though all hidden cases passed.
+
+Interpretation: promotable after the checkpoint gate, but adapt carefully. The
+source edit should keep the compact decision-table shape and the method-local
+opt-in reminder. It should not over-expand the prose or imply that all
+read-only extractors should keep partial results; the contract remains caller
+policy.
+
+Next action: commit rounds 44/45 results separately, then run the required
+checkpoint/regression sentinel before promoting another source docblock edit.
+If held-out is stable, promote an adapted text-policy decision table as one
+source hypothesis.
+
 ## Round 43 — serialization fallback source edit scored neutral
 
 **Train 98.18 / core 97.89** under `scored-train`, with subjects

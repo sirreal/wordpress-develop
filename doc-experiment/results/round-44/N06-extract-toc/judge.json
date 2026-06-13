@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment for body-fragment structural parsing. Every HTML API method used is documented. The depth-bounded next_token subtree walk with a #text guard and get_modifiable_text follows the documented DOM-style text recipe. The is_tag_closer check after plain next_tag is redundant because next_tag skips closers by default, but harmless."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API calls. The single next_token loop with opener/closer state is a documented pattern and handles virtual closers, empty headings, and implied closes. The weak spot is appending get_modifiable_text from non-heading tag opener tokens inside a heading; docs say ordinary subtree text should be only #text tokens unless special-element contents are explicitly desired. This would include TEXTAREA/TITLE decoded text and SCRIPT/STYLE raw text beyond the reference policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Near-reference implementation: correct processor, all methods documented, depth-bounded next_token walk, #text-only accumulation, decoded text via get_modifiable_text, and null create_fragment handling. The final get_last_error fallback is documented and conservative, but it can discard already-collected headings on unsupported markup and does not separately consider paused_at_incomplete_token."
+    }
+  ],
+  "failure_analysis": "No failed frozen/hidden cases: all three trials passed all 7 cases. The docs did well in the key places: 'Which processor should I use?' steered subjects away from the Tag Processor for structural text extraction; 'Recipe: collect DOM-style text from a subtree', next_token(), and get_current_depth() gave the depth-bounded #text accumulation pattern; get_tag() returning uppercase handled source case; next_token() describing virtual/implied closers covered '<h2>One<h3>Two'; and get_modifiable_text() documenting decoded #text handled '&amp;'. Near-misses were Trial 2 over-applying the special-element modifiable-text passage despite the ordinary-text warning, and Trial 3 choosing an unsupported-markup fallback policy that is not clearly specified for read-only extraction tasks.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock",
+      "problem": "The docblock explains that special elements carry modifiable text on their opener, but readers can miss that this is not ordinary subtree text.",
+      "suggestion": "Add a warning and cross-reference: for DOM-style subtree extraction, guard on get_token_type() === '#text'; reading modifiable text from SCRIPT, STYLE, TITLE, or TEXTAREA openers is an explicit opt-in policy."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docblock, nested-loop guidance",
+      "problem": "The warning against nested next_token loops can seem to discourage the valid bounded-subtree walk shown elsewhere, while not spelling out the boundary between the two patterns.",
+      "suggestion": "Clarify when a bounded inner walk from a matched opener is safe versus when a single stateful loop is preferred, especially around whether the terminating token itself must be processed by the outer loop."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and create_fragment() docs",
+      "problem": "Unsupported-parser abort guidance is clearer for serialization and mutation than for read-only semantic extraction.",
+      "suggestion": "State that read-only scans may have partial results when get_last_error() becomes non-null, and callers must choose a contract-specific fallback such as partial results, null, empty result, or error."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock",
+      "problem": "The default tag_closers behavior is documented in the parameter table, but redundant is_tag_closer guards after plain next_tag suggest it is easy to overlook.",
+      "suggestion": "Add a short sentence after the signature: plain next_tag() visits opener tags only; request tag_closers => 'visit' when closer tokens are part of the algorithm."
+    }
+  ]
+}

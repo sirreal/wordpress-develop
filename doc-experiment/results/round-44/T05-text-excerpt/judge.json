@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Primary processor choice is correct: `WP_HTML_Processor::create_fragment()` plus `next_token()` for text-bearing tokens. All HTML API calls are documented and no `_doing_it_wrong` records appeared. Small penalty for the `WP_HTML_Tag_Processor` fallback after HTML Processor errors: it is documented, but the docs warn that Tag Processor token walking is lexical and not equivalent to DOM-style fragment text extraction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. Uses the documented HTML Processor fragment factory, a single `next_token()` walk, `#text` filtering, and explicit `TITLE`/`TEXTAREA` opener handling through decoded `get_modifiable_text()`. All called API methods are present in the rendered docs. Minor residual gap: no explicit post-walk unsupported-parser policy, though this task did not require rejecting unsupported input."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct documented API usage throughout: HTML Processor fragment parsing, token walking, special-element whitelist, decoded text, and `get_last_error()`. The conservative empty-string return on later parser error is a reasonable documented policy, but it is not clearly required by the task; it also collects the full text before truncating, which is less idiomatic for bounded excerpts but not an API misuse."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 10/10, with empty `doing_it_wrong` records. The docs did well at steering subjects to `WP_HTML_Processor::create_fragment()` for BODY fragments, `next_token()` instead of tag-only walking, `#text` checks before calling `get_modifiable_text()`, and the special rule that `TITLE` and `TEXTAREA` carry decoded text on opener tokens while `SCRIPT` and `STYLE` should not be included by default. The main near-miss was trial-1’s belief that a `WP_HTML_Tag_Processor` fallback applies the same token rules after an HTML Processor abort. That did not fail these tests, but it would change semantics for malformed or structurally significant HTML because the Tag Processor is lexical and lacks BODY-fragment parsing, implied elements, virtual closers, breadcrumbs, and tree order guarantees.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Recipe: collect DOM-style text from a subtree",
+      "problem": "The recipe explains ordinary text extraction and special-element opt-in well, but it does not explicitly state the fallback policy for read-only extractors when `get_last_error()` becomes non-null.",
+      "suggestion": "Add a short policy note: after an unsupported-parser abort, any accumulated read-only extraction is partial; callers should deliberately choose partial output, empty/null, original input, or a clearly lexical fallback."
+    },
+    {
+      "location": "html-tag-processor.md: Tokens and finer-grained processing",
+      "problem": "The docs say Tag Processor token walking is lexical, but the warning could be missed when users look for a fallback after HTML Processor unsupported markup.",
+      "suggestion": "Add an explicit warning that a Tag Processor fallback is not semantically equivalent to an HTML Processor text walk: it does not perform BODY-fragment parsing, implied closing, virtual closers, or tree-aware traversal."
+    },
+    {
+      "location": "html-processor.md: create_fragment() / HTML Support",
+      "problem": "`create_fragment()` null creation failure and later `get_last_error()` aborts are documented separately, but examples focus more on mutation/serialization than read-only extraction.",
+      "suggestion": "Add a general read-only walking note distinguishing factory failure from mid-walk abort, and explain that text/token results collected before an abort are only a caller-defined best-effort result."
+    }
+  ]
+}

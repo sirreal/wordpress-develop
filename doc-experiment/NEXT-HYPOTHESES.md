@@ -201,6 +201,15 @@ T09 99.10) but the raw-input fallback near-miss persisted. Keep the source
 edit under the revert rule, but do not immediately add more fallback-policy
 source prose without a fresh diagnostic.
 
+Rounds 44/45 revisited the text-policy transfer problem with a scratch-only
+decision-table variant. The variant won 99.56 vs 98.94 on T03/T05/T06/T08/N06,
+with all hidden cases passing. It eliminated the special-element opener-text
+over-inclusion pattern in T03, T08, and N06, while T06 dipped only 0.5 from an
+unchanged read-only partial-scan policy near-miss. Treat this as promotable
+after the checkpoint gate: run a checkpoint before editing source, then promote
+an adapted compact table / method-local opt-in reminder if held-out remains
+stable.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter

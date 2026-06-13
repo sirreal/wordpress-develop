@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used documented methods only: next_tag, next_token, get_current_depth, get_token_type, get_token_name, is_tag_closer, get_modifiable_text, and get_last_error. The single depth-bounded token walk is idiomatic and matches the docs' repeated-region pattern. Minor deduction: it opts into special-element modifiable text inside cells, which the docs say should not be included for ordinary subtree text unless explicitly requested."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and no undocumented API calls. The implementation closely follows the documented pattern: create a fragment processor, find TABLE, record depth, walk once with next_token(), track TR/TD/TH state, and read decoded #text via get_modifiable_text(). Minor deduction for the redundant manual EOF flush, since the docs explain that virtual closers make closer-driven flushing reliable, including for omitted closers."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor and only documented methods: create_fragment, next_tag, next_token, get_current_depth, get_token_type, get_tag, is_tag_closer, get_modifiable_text, and get_last_error. The traversal is idiomatic and depth-bounded. Minor deduction matches trial-1: it includes SCRIPT/STYLE/TEXTAREA/TITLE opener modifiable text even though the task asked for text nodes and the docs' ordinary subtree-text recipe says to collect #text tokens unless special-element content is explicitly part of the contract."
+    }
+  ],
+  "failure_analysis": "All three trials passed all frozen cases: simple tables, THEAD/TBODY structure, omitted row/cell closers, inline markup in cells, decoded entities, no-table, first-table-only, and empty cells. The docs did well in three places: the Tag Processor overview explicitly says to use the HTML Processor when structure, text extraction, or implied/missing closers matter; WP_HTML_Processor::next_token() documents synthesized table structure and the single-cursor/single-loop state-machine pattern; get_modifiable_text() documents decoded #text values, which explains the entity test success. The main near-miss is special-element text. Trial-1 and trial-3 treated special element opener payloads as cell text. A probe with <td>A<script>B</script>C</td><td><textarea>D</textarea></td> shows the reference returns AC and empty string, while those trials return ABC and D. The relevant docs exist under 'Recipe: collect DOM-style text from a subtree' and get_modifiable_text(), but the availability of modifiable text on SCRIPT/TEXTAREA/TITLE/STYLE still invited over-inclusion. Trial-2 also shows a smaller near-miss: it manually flushes any open row/cell after the walk, suggesting it did not fully trust the documented virtual closer behavior, though that did not affect the hidden cases.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The docs state the #text-only rule, but models still inferred that special-element modifiable text should be part of generic text extraction.",
+      "suggestion": "Add a compact generic example contrasting ordinary subtree text with special-element payloads, e.g. a DIV containing text, SCRIPT, TEXTAREA, and more text, and state that generic DOM-style text extraction should append only visited #text tokens unless the caller explicitly requests raw/RCDATA element payloads."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() docblock",
+      "problem": "The method name and broad return behavior can be mistaken for 'this token contributes text content' instead of 'this token has editable payload bytes/text'.",
+      "suggestion": "Strengthen the warning that non-empty modifiable text is not a text-node predicate. Explicitly say that SCRIPT/STYLE/TITLE/TEXTAREA opener payloads should not be included in generic subtree text just because get_modifiable_text() returns a string."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() or get_current_depth() docblock",
+      "problem": "The reliable virtual-closer behavior is documented, but redundant EOF flushing suggests uncertainty about whether omitted or end-of-input closers are visited.",
+      "suggestion": "Add one general repeated-region example with omitted closing tags showing opener events, virtual closer events, and closer-driven flushing, emphasizing that callers usually should not add a second EOF flush unless defining a special partial-input policy."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() / incomplete-token guidance",
+      "problem": "The docs mention unsupported markup and incomplete trailing syntax in several places, but the policy distinction for read-only extraction versus mutation/rewrite remains diffuse.",
+      "suggestion": "Add a short decision note: read-only extraction may choose best-effort partial results, while mutations or contracts requiring complete input should check paused_at_incomplete_token and get_last_error before returning transformed output."
+    }
+  ]
+}

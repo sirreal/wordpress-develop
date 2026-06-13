@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with browser-like table semantics, finds the first `TABLE` with `next_tag()`, then does a single `next_token()` subtree walk bounded by `get_current_depth()`. It collects row boundaries from `TR` open/close tokens, cell boundaries from `TD`/`TH` open/close tokens, and appends only `#text` token content via `get_modifiable_text()` so markup contributes nothing and character references are already decoded.",
+  "confidence": 89
+}

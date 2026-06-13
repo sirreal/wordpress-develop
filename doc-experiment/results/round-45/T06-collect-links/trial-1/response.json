@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on HTML structure and subtree text collection. It walks the fragment once with `next_token()`, starts a link record on each opening `A` whose `get_attribute( 'href' )` returns a string, appends decoded text only from `#text` tokens via `get_modifiable_text()`, and closes link scopes when `is_tag_closer()` reports the matching `A` end token.",
+  "confidence": 89
+}
