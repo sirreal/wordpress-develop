@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table handling, finds the first `TABLE` with `next_tag()`, then walks tokens with `next_token()` until leaving that table depth. It builds rows from `TR` open/close tokens, cells from `TD`/`TH`, appends decoded text from `#text` tokens via `get_modifiable_text()`, and also includes text carried on special element opening tags inside cells by calling `get_modifiable_text()` on non-closing tag tokens.",
+  "confidence": 89
+}

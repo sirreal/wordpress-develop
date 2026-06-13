@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Tag_Processor::next_token()` and concatenates only real `#text` tokens plus the modifiable text carried on `TITLE` and `TEXTAREA` element tokens. It uses `get_token_type()`, `get_token_name()`, and `get_modifiable_text()`, relying on the documented decoding behavior for text nodes and RCDATA content, and truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8`.",
+  "confidence": 89
+}

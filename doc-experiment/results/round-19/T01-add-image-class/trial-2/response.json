@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which the documentation recommends for byte-preserving attribute/class edits. The function linearly scans for `IMG` tags with `next_tag( 'img' )`, relying on the documented case-insensitive tag matching and the guarantee that comment contents are not matched as real tags, then appends `wp-image` with `add_class()` and returns the result via `get_updated_html()`.",
+  "confidence": 98
+}

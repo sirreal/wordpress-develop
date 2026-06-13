@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a linear scan of the input, since the task is purely position-based. It repeatedly calls `next_tag( 'h2' )`, moves a single bookmark with `set_bookmark()` to remember the last matching opener, then `seek()`s back to that bookmark, adds the class with `add_class()`, and returns the edited markup with `get_updated_html()`.",
+  "confidence": 95
+}

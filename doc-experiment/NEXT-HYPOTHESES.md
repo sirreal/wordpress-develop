@@ -33,9 +33,10 @@ against round 17 except as historical context.
 A focused citation-only probe after round 18 asked the current subject tier
 whether an HTML Processor virtual closer proves a truncated source region was
 complete, and which methods to check. All three probes answered correctly and
-cited the relevant rendered-doc headings. Treat the remaining N03 signal as a
-transfer/placement failure: the facts exist, but the docs do not put the guard
-beside the subtree-walk/mutation pattern where task solvers need it.
+cited the relevant rendered-doc headings. Round 19 promoted the resulting
+placement/transfer edit as a generic class-level recipe plus compact
+method-local guard notes. N03 moved from 85.07 to 100.00 with all three
+trials at 11/11 and 100 adherence, so this hypothesis is confirmed.
 
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
@@ -58,7 +59,7 @@ subagent passes. Treat them as hypotheses to test through no-edit baselines,
 discoverability probes, or scratch-rendered A/B variants before promoting any
 source docblock changes.
 
-### 0. Incomplete-token guard for HTML Processor region scans
+### 0. Incomplete-token guard for HTML Processor region scans — confirmed in round 19
 
 Core idea: connect the documented subtree-walk/depth-boundary pattern to the
 existing incomplete-token API. A depth drop or virtual closer proves that the
@@ -78,9 +79,11 @@ gap. All three N03 trials used the documented depth-bounded HTML Processor
 walk, passed ordinary omitted-end-tag and malformed-list cases, and failed
 only incomplete token/comment tails inside the scanned list.
 
-Probe result: direct citation-only discoverability passed 3/3, so the source
-edit should not add a long explanation. Prefer a compact guard sentence or
-post-loop snippet beside the existing depth-bounded walk/mutation examples.
+Round-19 result: source docs now include a generic "scan a region before
+editing its opener" recipe in the HTML Processor class docs plus compact notes
+near `next_token()` and `get_current_depth()`. N03 passed 11/11 in all three
+trials with 100 adherence. Do not keep spending source-edit budget here unless
+a weaker tier or future task exposes a new variant.
 
 Risk: low-medium. Keep it framed as a general scan-completion contract, not as
 a list-counting recipe. Best placement is near

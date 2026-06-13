@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walks every token with `next_token()`. For ordinary `#text` tokens only, it checks the decoded text from `get_modifiable_text()` with a case-sensitive `strpos()` match; matching text nodes are wrapped by concatenating `<mark>` around that token\u2019s normalized serialization from `serialize_token()`, while all other tokens are emitted unchanged through `serialize_token()`, yielding normalized HTML output.",
+  "confidence": 89
+}

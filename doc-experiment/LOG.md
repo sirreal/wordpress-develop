@@ -2,6 +2,34 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 19 — generic region-scan recipe lands
+
+**Train 99.59 / core 99.53** against the current train corpus with subject
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored the round-18 N03 hypothesis as a source docblock edit:
+add a class-level HTML Processor recipe for "scan a region before editing its
+opener," plus compact method-local guard notes in `next_token()` and
+`get_current_depth()`.
+
+Outcome: N03-first-list-count moved from 85.07 to 100.00. All three trials
+passed 11/11 hidden cases and received 100 adherence. The candidates used the
+documented pattern directly: bookmark the opener, walk the bounded region with
+`next_token()` and `get_current_depth()`, reject incomplete or unsupported
+scans with `paused_at_incomplete_token()` and `get_last_error()`, seek back,
+mutate with `set_attribute()`, and read with `get_updated_html()`.
+
+All 45 subject trials passed all hidden tests. Concept means: attributes
+100.00, classes 100.00, normalization 100.00, serialization 99.80, text
+98.77, traversal 99.60. Small adherence-only movement on T05/T06/T08 remains
+well under the revert threshold, and no previously passing task regressed
+functionally.
+
+Round-19 judge residuals are now lower-signal polish: the stale
+`next_token()` "do not use" since note, a direct-child predicate
+(`get_current_depth() === $parent_depth + 1`), read-only extraction policy
+for partial scans, and factory/serialization fallback clarity. The measured
+N03 failure is resolved.
+
 ## Round 18 — current-corpus weak-tier baseline scored
 
 **Train 98.73 / core 98.54** under the current corpus and current weak-tier

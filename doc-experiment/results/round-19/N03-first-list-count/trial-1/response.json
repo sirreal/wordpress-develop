@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It finds the first `UL` or `OL` with `next_tag()`, bookmarks that opener with `set_bookmark()`, scans forward with `next_token()` while the current depth stays within that list, counts direct `LI` child openers by checking `get_tag()`, `is_tag_closer()`, and `get_current_depth()`, then only if the scan finished cleanly (`paused_at_incomplete_token()` is false and `get_last_error()` is null) seeks back and adds `data-item-count` via `set_attribute()`, returning the result with `get_updated_html()`.",
+  "confidence": 90
+}
