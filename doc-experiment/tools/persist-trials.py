@@ -10,6 +10,7 @@ Prints a per-task pass summary.
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -111,6 +112,56 @@ def validate_no_existing_artifacts(results_dir: Path, trials: list[dict]) -> lis
     return errors
 
 
+def validate_execution_payload(execution: object, label: str) -> list[str]:
+    if not isinstance(execution, dict):
+        return [f"{label}: harness output must be an object"]
+
+    errors = []
+    passed = execution.get("passed")
+    total = execution.get("total")
+    if not isinstance(passed, int) or passed < 0:
+        errors.append(f"{label}: harness passed must be a non-negative integer")
+    if not isinstance(total, int) or total < 1:
+        errors.append(f"{label}: harness total must be a positive integer")
+    if isinstance(passed, int) and isinstance(total, int) and passed > total:
+        errors.append(f"{label}: harness passed exceeds total")
+    if not isinstance(execution.get("cases"), list):
+        errors.append(f"{label}: harness cases must be an array")
+    return errors
+
+
+def execute_candidate(task_id: str, trial: int, candidate_file: Path) -> dict:
+    label = f"{task_id}/trial-{trial}"
+    tests = EXPERIMENT_ROOT / "corpus" / task_id / "tests.json"
+    proc = subprocess.run(
+        [
+            "php",
+            str(EXPERIMENT_ROOT / "harness" / "run-tests.php"),
+            str(candidate_file),
+            str(tests),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    try:
+        execution = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        message = proc.stderr.strip() or proc.stdout.strip()
+        raise RuntimeError(f"{label}: harness produced invalid JSON: {exc}; {message}")
+
+    errors = validate_execution_payload(execution, label)
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+    return execution
+
+
+def cleanup_created_trial_dir(trial_dir: Path) -> None:
+    if trial_dir.exists():
+        shutil.rmtree(trial_dir)
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: persist-trials.py <results-dir> < trials.json", file=sys.stderr)
@@ -131,8 +182,18 @@ def main() -> int:
     summary = {}
     for trial in trials:
         task_id = trial["id"]
-        trial_dir = results_dir / task_id / f"trial-{trial['trial']}"
+        trial_number = trial["trial"]
+        trial_dir = results_dir / task_id / f"trial-{trial_number}"
+        candidate_file = trial_dir / "candidate.php"
         trial_dir.mkdir(parents=True, exist_ok=True)
+        candidate_file.write_text(trial["code"])
+
+        try:
+            execution = execute_candidate(task_id, trial_number, candidate_file)
+        except RuntimeError as exc:
+            cleanup_created_trial_dir(trial_dir)
+            print(f"persist-trials.py: {exc}", file=sys.stderr)
+            return 1
 
         (trial_dir / "response.json").write_text(
             json.dumps(
@@ -146,27 +207,17 @@ def main() -> int:
             + "\n"
         )
 
-        (trial_dir / "candidate.php").write_text(trial["code"])
-
-        tests = EXPERIMENT_ROOT / "corpus" / task_id / "tests.json"
-        proc = subprocess.run(
-            [
-                "php",
-                str(EXPERIMENT_ROOT / "harness" / "run-tests.php"),
-                str(trial_dir / "candidate.php"),
-                str(tests),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        (trial_dir / "execution.json").write_text(proc.stdout or "{}")
-        try:
-            execution = json.loads(proc.stdout)
-            summary.setdefault(task_id, []).append(
-                f"{execution['passed']}/{execution['total']}"
+        (trial_dir / "execution.json").write_text(
+            json.dumps(
+                execution,
+                indent=2,
+                ensure_ascii=False,
             )
-        except (json.JSONDecodeError, KeyError):
-            summary.setdefault(task_id, []).append("harness-error")
+            + "\n"
+        )
+        summary.setdefault(task_id, []).append(
+            f"{execution['passed']}/{execution['total']}"
+        )
 
     for task_id in sorted(summary):
         print(f"{task_id}: {' '.join(summary[task_id])}")

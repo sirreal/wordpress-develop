@@ -98,6 +98,9 @@ selection instead of using a train-split shortcut.
 `validate-round.py` lifecycle counts now require valid artifacts. Malformed
 trial files or judge verdicts no longer count toward `trials-complete` or
 `judged` just because the files are present.
+`persist-trials.py` now validates harness execution JSON before finalizing a
+trial artifact directory, and removes the just-created trial directory if the
+harness output is unusable.
 
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
