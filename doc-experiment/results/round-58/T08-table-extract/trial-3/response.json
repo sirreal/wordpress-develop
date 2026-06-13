@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for body-fragment parsing and `next_tag()`/`next_token()` with `get_current_depth()` to walk the first table structurally, which lets implied table elements like `TBODY` and `TR` be handled the way a browser would. Cell text is accumulated only from `#text` tokens via `get_modifiable_text()`, and rows/cells are flushed on `TR`, `TD`, and `TH` openers/closers.",
+  "confidence": 94
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag()` to find the first `UL` or `OL`, and `next_token()` with `get_current_depth()` to count only direct `LI` child openers at one level deeper than the list. I then used `set_bookmark()`, `seek()`, and `set_attribute()` to update the list opener, while rejecting incomplete or unsupported scans via `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 95
+}

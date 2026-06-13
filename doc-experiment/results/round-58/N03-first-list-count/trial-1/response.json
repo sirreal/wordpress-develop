@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, then walked tokens with next_tag() and next_token() to find the first UL/OL opener, count direct LI child openers at one depth below it, and only commit the edit after confirming the scan finished cleanly via paused_at_incomplete_token() and get_last_error(). The list opener is bookmarked with set_bookmark()/seek() so the data-item-count attribute can be applied only after the count is known.",
+  "confidence": 94
+}
