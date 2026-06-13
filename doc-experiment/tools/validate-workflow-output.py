@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Validate workflow output JSON before ingesting it into round results."""
+"""Validate workflow output JSON before ingesting it into round results.
+
+Trial workflow output must include a top-level subject_isolation attestation
+alongside its result array so scored artifacts record the enforced tool
+boundary.
+"""
 
 import argparse
 import json
@@ -18,13 +23,57 @@ def metadata(round_name: str) -> dict:
 
 
 def load_result(output_file: Path) -> list[dict]:
+    payload = load_payload(output_file)
+    return result_from_payload(payload)
+
+
+def load_payload(output_file: Path) -> dict:
     payload = json.loads(output_file.read_text())
     if not isinstance(payload, dict):
         raise ValueError("workflow output must be an object with a result array")
+    return payload
+
+
+def result_from_payload(payload: dict) -> list[dict]:
     result = payload.get("result")
     if not isinstance(result, list):
         raise ValueError("workflow output must contain a result array")
     return result
+
+
+def validate_subject_isolation(payload: dict) -> list[str]:
+    attestation = payload.get("subject_isolation")
+    if not isinstance(attestation, dict):
+        return ["subject_isolation must be an object"]
+
+    errors = []
+    if attestation.get("enforced") is not True:
+        errors.append("subject_isolation.enforced must be true")
+
+    agent_type = attestation.get("agent_type")
+    if not isinstance(agent_type, str) or not agent_type.strip():
+        errors.append("subject_isolation.agent_type must be a non-empty string")
+
+    allowed_tools = attestation.get("allowed_tools")
+    if not isinstance(allowed_tools, list):
+        errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
+    elif any(not isinstance(tool, str) for tool in allowed_tools):
+        errors.append("subject_isolation.allowed_tools entries must be strings")
+    elif sorted(allowed_tools) != ["Grep", "Read"]:
+        errors.append("subject_isolation.allowed_tools must be exactly Read and Grep")
+
+    if isinstance(agent_type, str) and agent_type.strip() != "docs-test-subject":
+        notes = attestation.get("equivalent_boundary_notes")
+        if not isinstance(notes, str) or not notes.strip():
+            errors.append(
+                "subject_isolation.equivalent_boundary_notes must explain non-standard agent type"
+            )
+
+    notes = attestation.get("notes")
+    if notes is not None and (not isinstance(notes, str) or not notes.strip()):
+        errors.append("subject_isolation.notes must be a non-empty string when present")
+
+    return errors
 
 
 def validate_coverage(
@@ -203,8 +252,13 @@ def main() -> int:
     args = parser.parse_args()
 
     meta = metadata(args.round)
-    entries = load_result(args.output_file)
-    errors = validate_trials(entries, meta) if args.phase == "trials" else validate_judges(entries, meta)
+    payload = load_payload(args.output_file)
+    entries = result_from_payload(payload)
+    errors = (
+        [*validate_subject_isolation(payload), *validate_trials(entries, meta)]
+        if args.phase == "trials"
+        else validate_judges(entries, meta)
+    )
 
     report = {
         "ok": not errors,

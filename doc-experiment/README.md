@@ -90,11 +90,12 @@ python3 render-docs-markdown.py \
   hand; it runs full round validation before emitting launch args, and can emit
   a full launch manifest.
 - `tools/validate-workflow-output.py` — preflights trials or judges workflow
-  JSON envelopes, round metadata coverage, and required payload shape before
-  ingestion writes files.
+  JSON envelopes, subject-isolation attestation, round metadata coverage, and
+  required payload shape before ingestion writes files.
 - `tools/stage-round.sh` — low-level docs-only staging command used by
   `prepare-round.py` and manual scratch variants.
 - `tools/persist-trials.py` / `tools/ingest-trials.py` — persist subject
-  outputs and execute them against hidden tests.
+  outputs, persist the runner isolation attestation, and execute candidates
+  against hidden tests.
 - `tools/ingest-judges.py` / `tools/aggregate-round.py` — persist judge
   verdicts and compute scored summaries.

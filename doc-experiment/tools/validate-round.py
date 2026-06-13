@@ -236,6 +236,54 @@ def validate_corpus_digests(metadata: dict | None) -> list[str]:
     return errors
 
 
+def validate_subject_isolation_attestation(attestation: dict, context: str) -> list[str]:
+    if not isinstance(attestation, dict):
+        return [f"{context}: subject isolation attestation must be an object"]
+
+    errors = []
+    if attestation.get("enforced") is not True:
+        errors.append(f"{context}: subject isolation enforced must be true")
+
+    agent_type = attestation.get("agent_type")
+    if not isinstance(agent_type, str) or not agent_type.strip():
+        errors.append(f"{context}: subject isolation agent_type must be a non-empty string")
+
+    allowed_tools = attestation.get("allowed_tools")
+    if not isinstance(allowed_tools, list):
+        errors.append(f"{context}: subject isolation allowed_tools must be exactly Read and Grep")
+    elif any(not isinstance(tool, str) for tool in allowed_tools):
+        errors.append(f"{context}: subject isolation allowed_tools entries must be strings")
+    elif sorted(allowed_tools) != ["Grep", "Read"]:
+        errors.append(f"{context}: subject isolation allowed_tools must be exactly Read and Grep")
+
+    if isinstance(agent_type, str) and agent_type.strip() != "docs-test-subject":
+        notes = attestation.get("equivalent_boundary_notes")
+        if not isinstance(notes, str) or not notes.strip():
+            errors.append(
+                f"{context}: subject isolation equivalent_boundary_notes must explain "
+                "non-standard agent type"
+            )
+
+    notes = attestation.get("notes")
+    if notes is not None and (not isinstance(notes, str) or not notes.strip()):
+        errors.append(f"{context}: subject isolation notes must be a non-empty string when present")
+
+    return errors
+
+
+def validate_subject_isolation_artifact(results_dir: Path) -> list[str]:
+    attestation_file = results_dir / "subject-isolation.json"
+    if not attestation_file.exists():
+        return ["subject-isolation.json is missing for present trial artifacts"]
+
+    try:
+        attestation = json.loads(attestation_file.read_text())
+    except json.JSONDecodeError as exc:
+        return [f"subject-isolation.json is invalid JSON: {exc}"]
+
+    return validate_subject_isolation_attestation(attestation, "subject-isolation.json")
+
+
 def validate_trial_artifacts(trial_dir: Path) -> list[str]:
     errors = []
     candidate_file = trial_dir / "candidate.php"
@@ -488,6 +536,8 @@ def validate_round(results_dir: Path) -> dict:
         errors.append("round-summary.json exists before all trials are judged")
     if has_trials and not trials_complete:
         warnings.append("some trial files are missing or incomplete")
+    if metadata and has_trials:
+        errors.extend(validate_subject_isolation_artifact(results_dir))
     if trials_complete and not judged:
         warnings.append("trials are complete but one or more judge.json files are missing")
     if judged and not scored:

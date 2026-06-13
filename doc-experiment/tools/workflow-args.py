@@ -80,6 +80,8 @@ def launch_manifest(metadata: dict) -> dict:
             "required_agent_type": "docs-test-subject",
             "allowed_tools": ["Read", "Grep"],
             "trusted_only_if_enforced": True,
+            "attestation_required_in_trials_output": True,
+            "attestation_output_key": "subject_isolation",
         },
         "scripts": {
             "trials": str(EXPERIMENT_ROOT / "tools" / "trials-workflow.js"),

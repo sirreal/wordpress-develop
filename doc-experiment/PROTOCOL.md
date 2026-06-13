@@ -169,6 +169,28 @@ When orchestrating via the Workflow tool, prefer `schema` structured
 output with fields `code` (string), `explanation` (string), `confidence`
 (integer 0-100) instead of free-text parsing.
 
+Trusted trials must also persist runner isolation evidence. The workflow output
+file ingested by `ingest-trials.py` must be an object with a `result` array and
+a `subject_isolation` attestation:
+
+```json
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "docs-test-subject",
+    "allowed_tools": ["Read", "Grep"],
+    "notes": "Runner enforced the docs-test-subject tool boundary."
+  },
+  "result": []
+}
+```
+
+If a runner uses an equivalent agent type, `agent_type` may differ, but
+`allowed_tools` must still be exactly `Read` and `Grep`, and
+`equivalent_boundary_notes` must explain the equivalent enforced boundary.
+`ingest-trials.py` persists this as `subject-isolation.json`; `validate-round.py`
+rejects trial artifacts that lack it.
+
 For the bundled workflow script, generate the task list and model policy from
 the round metadata:
 
@@ -213,9 +235,10 @@ task IDs, trial numbers, or structured-output fields do not match
 `explanation` strings plus integer `confidence` 0-100, and `code` must be a
 complete PHP file starting with `<?php`. Incomplete or malformed agent
 responses are rejected before result files are written; ingestion does not
-repair subject code. Malformed workflow envelopes, non-array `result` payloads,
-and non-object trial entries are rejected before ingestion reads or persists
-the payload. You can run the same
+repair subject code. Malformed workflow envelopes, missing or invalid
+`subject_isolation` attestations, non-array `result` payloads, and non-object
+trial entries are rejected before ingestion reads or persists the payload. You
+can run the same
 preflight without writing files:
 
 ```sh
@@ -359,6 +382,7 @@ applicable.
 
 ```
 doc-experiment/results/round-NN/
+  subject-isolation.json     # runner-enforced docs-test-subject boundary attestation
   <task-id>/
     trial-1/candidate.php
     trial-1/response.json    # explanation + confidence as returned

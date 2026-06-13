@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Ingests a trials-workflow output file: persists candidates, executes
-them against hidden tests, prints a compact pass summary.
+"""Ingests a trials-workflow output file: persists isolation evidence,
+candidates, hidden-test executions, and a compact pass summary.
 
 Usage: python3 ingest-trials.py <workflow-output-file> <round-NN>
 """
@@ -33,7 +33,9 @@ def main() -> int:
         print(validate.stderr, file=sys.stderr)
         return validate.returncode
 
-    trials = json.load(open(output_file))["result"]
+    payload = json.load(open(output_file))
+    trials = payload["result"]
+    subject_isolation = payload["subject_isolation"]
     results_dir.mkdir(parents=True, exist_ok=True)
 
     proc = subprocess.run(
@@ -46,6 +48,10 @@ def main() -> int:
     if proc.returncode != 0:
         print(proc.stderr, file=sys.stderr)
         return proc.returncode
+
+    (results_dir / "subject-isolation.json").write_text(
+        json.dumps(subject_isolation, indent=2, ensure_ascii=False) + "\n"
+    )
 
     # Compact failure summary: only imperfect trials.
     failures = []

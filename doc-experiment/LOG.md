@@ -128,6 +128,12 @@ instead of the old scratch-only wording. The legacy `--skip-scratch-check`
 spelling remains accepted but hidden, because the bypass now skips source,
 corpus, scratch, and artifact lifecycle checks.
 
+Trial workflow output must now include a `subject_isolation` attestation before
+ingestion. `ingest-trials.py` persists it as `subject-isolation.json`, and
+round validation rejects present trial artifacts without that file. This turns
+the docs-test-subject tool-boundary requirement from prompt/runbook prose into
+a persisted scoring precondition.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior
