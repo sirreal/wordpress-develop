@@ -87,8 +87,8 @@ python3 render-docs-markdown.py \
   scored summaries, and lists missing artifacts.
 - `tools/workflow-args.py` — emits trials or judges workflow JSON from
   `round-metadata.json` so model policy and task IDs are not transcribed by
-  hand; it checks scratch isolation and hashes before emitting launch args, and
-  can emit a full launch manifest.
+  hand; it runs full round validation before emitting launch args, and can emit
+  a full launch manifest.
 - `tools/validate-workflow-output.py` — preflights trials or judges workflow
   JSON envelopes, round metadata coverage, and required payload shape before
   ingestion writes files.

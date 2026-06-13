@@ -119,14 +119,21 @@ def main() -> int:
         help="Print one-line JSON for copy/paste into workflow runners",
     )
     parser.add_argument(
-        "--skip-scratch-check",
+        "--skip-round-check",
+        dest="skip_round_check",
         action="store_true",
         help="Emit metadata-derived args without verifying staged round artifacts",
+    )
+    parser.add_argument(
+        "--skip-scratch-check",
+        dest="skip_round_check",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
     metadata = load_metadata(args.round)
-    if not args.skip_scratch_check:
+    if not args.skip_round_check:
         verify_round(args.round)
     if args.phase == "trials":
         payload = trial_args(metadata)

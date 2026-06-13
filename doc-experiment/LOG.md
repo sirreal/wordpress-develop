@@ -123,6 +123,11 @@ current worktree in addition to the recorded preparation ref. Tooling-only
 commits after preparation can still proceed, but any live source docblock or
 PHP behavior drift blocks launch/scoring until the round is restaged.
 
+`workflow-args.py` now exposes the preflight bypass as `--skip-round-check`
+instead of the old scratch-only wording. The legacy `--skip-scratch-check`
+spelling remains accepted but hidden, because the bypass now skips source,
+corpus, scratch, and artifact lifecycle checks.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

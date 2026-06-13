@@ -180,6 +180,8 @@ This command verifies the staged scratch directory and recorded file hashes
 and runs the round preflight before emitting agent-launch arguments. If `/tmp`
 was cleaned, a staged file changed, or selected corpus inputs drifted, restage
 the round rather than launching subjects against mismatched docs or fixtures.
+The escape hatch is named `--skip-round-check` because it bypasses all staged
+round artifact checks, not only scratch isolation; use it only for diagnostics.
 To emit both trial and judge workflow inputs plus the ingest/validation command
 sequence as a single handoff object, run:
 
