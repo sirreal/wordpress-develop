@@ -83,6 +83,71 @@
  * and {@see WP_HTML_Processor::get_last_error} for unsupported markup before
  * applying the edit.
  *
+ * #### Recipe: collect DOM-style text from a subtree
+ *
+ * Text extraction is usually a tree-aware operation, so use the HTML
+ * Processor and walk the subtree. Append only ordinary `#text` tokens unless
+ * you intentionally want some other token type. Do not call
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text} on every token: comments,
+ * processing instructions, and special element tokens can also carry
+ * modifiable text, but they are not ordinary DOM text descendants.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( $processor->next_tag( 'ARTICLE' ) ) {
+ *         $article_depth = $processor->get_current_depth();
+ *         $text          = '';
+ *
+ *         while ( $processor->next_token() && $processor->get_current_depth() >= $article_depth ) {
+ *             if ( '#text' === $processor->get_token_type() ) {
+ *                 $text .= $processor->get_modifiable_text();
+ *             }
+ *         }
+ *     }
+ *
+ * Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do
+ * not expose their contents as child `#text` tokens. If a caller wants that
+ * text, read it from the element's own opening token with
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text}; otherwise the `#text`
+ * filter above skips it naturally.
+ *
+ * #### Recipe: rewrite while serializing tokens
+ *
+ * Use {@see WP_HTML_Processor::serialize_token} when output is built while
+ * walking tokens: append the current token's normalized serialization, skip
+ * tokens to remove them, or emit extra markup around selected tokens. The
+ * accumulated string is the rewrite; do not later call `normalize()` on the
+ * original HTML unless the intention is to discard every change emitted by the
+ * loop.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     $output    = '';
+ *
+ *     while ( $processor->next_token() ) {
+ *         if ( '#comment' === $processor->get_token_type() ) {
+ *             continue;
+ *         }
+ *
+ *         $output .= $processor->serialize_token();
+ *     }
+ *
+ *     if ( null !== $processor->get_last_error() ) {
+ *         return null;
+ *     }
+ *
+ *     return $output;
+ *
+ * Decide separately whether incomplete trailing syntax is acceptable. A
+ * token-by-token rewrite omits an incomplete token that was never visited,
+ * which is the right best-effort policy for some normalizing filters. If the
+ * caller needs proof that the source ended cleanly, also reject when
+ * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} is true. Always
+ * reject or fall back when {@see WP_HTML_Processor::get_last_error} is
+ * non-null, because the parser stopped at unsupported markup.
+ *
  * #### Breadcrumbs
  *
  * Breadcrumbs represent the stack of open elements from the root
@@ -1624,6 +1689,17 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Prefer `serialize()` when the whole document is wanted unchanged,
 	 * and `serialize_token()` inside a loop when tokens are dropped,
 	 * altered, or wrapped along the way.
+	 *
+	 * After a rewriting loop, return the accumulated output or reject it
+	 * according to the caller's policy. An incomplete trailing token was
+	 * never visited and is omitted from the accumulated serialization; this
+	 * may be acceptable for best-effort normalized output, but callers that
+	 * require complete input should also check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token}. Always reject
+	 * or fall back if {@see WP_HTML_Processor::get_last_error} is non-null,
+	 * because the parser stopped at unsupported markup. Do not call
+	 * `normalize()` on the original HTML after emitting changes unless the
+	 * intention is to discard those changes.
 	 *
 	 * Serialization is NOT the way to retrieve a document after modifying
 	 * it with {@see WP_HTML_Tag_Processor::set_attribute},
