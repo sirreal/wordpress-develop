@@ -2,6 +2,32 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 22 — current-docs medium calibration restored
+
+**Train 99.45 / core 99.36** under `weak-tier-calibration`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This was a no-edit calibration on the current committed docs after
+round 21, run because `audit-state.py` correctly reported that the current
+source docs no longer had a current-docs no-edit baseline at the default
+subject policy.
+
+Outcome: all 45 subject trials passed all hidden tests. Concept means:
+attributes 100.00, classes 100.00, normalization 100.00, serialization 99.45,
+text 98.43, traversal 99.50. The tier remains functionally saturated.
+
+The calibration confirms the main residual signal from round 21:
+T05-text-excerpt again scored 96.70 with all three trials passing 10/10 but
+adherence 90/88/89. Judges again identified the Tag Processor lexical token
+text example as competing with the processor-selection guidance that parsed
+BODY-fragment text content belongs on `WP_HTML_Processor::create_fragment()`.
+This is now present at both `gpt-5.4` / `low` and `gpt-5.4` / `medium`.
+
+Next action: a narrow Tag Processor source hypothesis is justified before
+more broad recipe prose. Clarify that the Tag Processor `next_token()` text
+example is lexical token processing, not parsed fragment text-content
+extraction, and point callers needing BODY-fragment semantics, implied closing
+behavior, tree order, or unsupported-markup policy to the HTML Processor.
+
 ## Round 21 — generic HTML Processor recipes are mixed
 
 **Train 98.97 / core 98.81** under `scored-train`, with subjects

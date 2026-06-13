@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task needs tree-aware traversal and subtree text collection. It finds each `A` opener with `next_tag('A')`, reads `href` with `get_attribute()` and keeps only string-valued attributes, then walks that anchor\u2019s subtree with `next_token()` bounded by `get_current_depth()`, concatenating decoded `#text` via `get_modifiable_text()` and also including the documented special-element text carried on `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` opening tokens.",
+  "confidence": 85
+}

@@ -55,6 +55,14 @@ walk for a BODY-fragment text-content task. Treat the next text hypothesis as
 processor-choice/discoverability work in the Tag Processor docs, not as more
 HTML Processor recipe prose.
 
+Round 22 restored the current-docs no-edit calibration at
+`gpt-5.4` / `medium` / `priority`. It scored 99.45 with all hidden tests
+passing and reproduced the same T05 signal: all three T05 trials chose
+`WP_HTML_Tag_Processor`, passed hidden tests, and lost adherence because the
+Tag Processor token-walk example competed with the HTML Processor
+text-content guidance. This makes the Tag Processor lexical-text boundary the
+best next source hypothesis.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -218,6 +226,8 @@ Evidence: T05 in both round 20 and round 21 passed functionally but selected
 `WP_HTML_Tag_Processor` in all three trials. Round-21's added HTML Processor
 text recipe did not change this; judges identified the Tag Processor
 "Tokens and finer-grained processing" example as the stronger entry point.
+Round 22 reproduced the same T05 behavior at `gpt-5.4` / `medium`, so the
+signal is no longer only low-effort noise.
 
 Risk: low-medium. Avoid saying the Tag Processor cannot read text; it can read
 lexical token text. The distinction is parsed fragment/DOM semantics versus

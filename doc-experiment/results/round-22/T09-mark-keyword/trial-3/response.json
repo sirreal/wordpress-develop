@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a token-by-token rewrite with `next_token()` plus `serialize_token()` so the result is normalized HTML. For each ordinary `#text` token, it checks the decoded text via `get_modifiable_text()` and wraps that token\u2019s normalized serialization in `<mark>` when the case-sensitive keyword substring is present; special text-bearing elements like `script`, `style`, `title`, and `textarea` are naturally excluded because their contents are not exposed as child `#text` tokens.",
+  "confidence": 81
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk so parsing stays tree-aware. On each `A` opener it reads `href` with `get_attribute()` and records only string-valued attributes, then concatenates decoded text from descendant `#text` tokens via `get_modifiable_text()` until the matching `A` closer is reached; if the fragment is incomplete or the processor aborts on unsupported markup, it returns an empty array rather than a partial result.",
+  "confidence": 86
+}

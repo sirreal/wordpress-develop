@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template so the output shape stays exactly `<figure><img ...><figcaption>...</figcaption></figure>`. The `img` already contains empty `src` and `alt` attributes, so `set_attribute()` updates them in place and preserves the required order, and the `figcaption` contains placeholder text so `next_token()` can find its `#text` node and replace it with `set_modifiable_text()`, letting the HTML API handle all escaping.",
+  "confidence": 96
+}

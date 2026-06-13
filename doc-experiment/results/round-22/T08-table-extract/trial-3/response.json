@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction is tree-aware and must follow browser-style table parsing, including implied structure like `TBODY`. It finds the first `TABLE` with `next_tag()`, records its depth with `get_current_depth()`, then makes a single `next_token()` pass through that subtree, starting and closing rows on `TR` tags, starting and closing cells on `TD`/`TH` tags, and appending decoded text from `#text` tokens via `get_modifiable_text()`; for special text-carrying elements inside a cell, it also reads their opener token\u2019s modifiable text.",
+  "confidence": 89
+}

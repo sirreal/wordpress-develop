@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` pass so it can safely respect document structure. When it sees an opening `H1` through `H6` tag via `get_token_type()`, `get_tag()`, and `is_tag_closer()`, it records that heading\u2019s depth with `get_current_depth()`, accumulates only descendant `#text` tokens with `get_modifiable_text()`, and finalizes the heading once the walk leaves that subtree.",
+  "confidence": 90
+}

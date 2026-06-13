@@ -1,0 +1,10 @@
+<?php
+function normalize_or_placeholder( string $html ): string {
+    $normalized = WP_HTML_Processor::normalize( $html );
+
+    if ( null === $normalized ) {
+        return '<p>Unsupported HTML</p>';
+    }
+
+    return $normalized;
+}

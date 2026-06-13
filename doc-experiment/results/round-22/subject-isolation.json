@@ -1,0 +1,19 @@
+{
+  "enforced": true,
+  "agent_type": "codex-cli-isolated-workdir",
+  "isolation_mode": "isolated-workdir",
+  "runner": "codex exec",
+  "input_delivery": "prompt-embedded-docs",
+  "sandbox_mode": "read-only",
+  "approval_policy": "never",
+  "project_rules_loaded": false,
+  "user_config_loaded": false,
+  "repo_available_to_subject": false,
+  "input_files": [
+    "html-processor.md",
+    "html-tag-processor.md",
+    "task.md"
+  ],
+  "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-22/codex-cli-trials",
+  "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+}

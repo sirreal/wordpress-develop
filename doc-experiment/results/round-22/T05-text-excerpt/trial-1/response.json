@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This scans the fragment with `WP_HTML_Tag_Processor::next_token()`, appending decoded text from ordinary `#text` tokens and, per the docs, from `TITLE` and `TEXTAREA` opening-tag tokens via `get_modifiable_text()`, while naturally excluding `SCRIPT`, `STYLE`, comments, and other non-text tokens. Truncation is applied by Unicode code points using `mb_strlen()`/`mb_substr()` with explicit `UTF-8`, with a regex fallback if `mbstring` is unavailable.",
+  "confidence": 92
+}

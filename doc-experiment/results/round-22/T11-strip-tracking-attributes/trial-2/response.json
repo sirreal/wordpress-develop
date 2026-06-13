@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for flat attribute editing: it scans each tag with `next_tag()`, gets only attribute names whose prefix matches `data-track-` via `get_attribute_names_with_prefix()`, removes those with `remove_attribute()`, and returns the preserved original HTML plus queued edits through `get_updated_html()`.",
+  "confidence": 98
+}

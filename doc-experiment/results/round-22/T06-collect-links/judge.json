@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for tree-aware link text extraction. Every called method is documented in the rendered files, including inherited paused_at_incomplete_token(). The depth-bounded next_token() walk, #text filter, get_modifiable_text(), and is_string() href check closely match documented patterns. Minor issue: it returns an empty result after any later incomplete token or parser error, which is conservative but can discard already collected completed links."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and no undocumented API usage or _doing_it_wrong records. It uses the documented depth-bounded subtree walk and correctly handles href string/true/null semantics and decoded ordinary #text. The near miss is intentionally adding SCRIPT, STYLE, TITLE, and TEXTAREA modifiable text to link text; the docs say those tokens can carry text, but the DOM-style recipe says to append only ordinary #text unless another token type is explicitly wanted. SCRIPT/STYLE text is raw, so this can violate the task's decoded-text expectation outside the frozen cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment() and a documented single next_token() traversal, which aligns with the docs' repeated-region guidance better than a nested walk for some cases. All methods are documented and no misuse was recorded. It handles valued href filtering and decoded #text well, including the unclosed-link case. Minor issue: like trial-1, it rejects the entire accumulated result if scanning ends at an incomplete trailing syntax token."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed: all three trials passed 8/8 with no _doing_it_wrong records. The docs did especially well on processor selection: the HTML Processor overview explicitly says to choose it for structure, collecting element text, and walking subtrees, and every subject did so. The get_attribute contract and examples were sufficient for all subjects to use is_string(), excluding absent and valueless href while accepting decoded string values. The next_token(), get_current_depth(), and get_modifiable_text() docs also successfully led subjects to concatenate decoded #text descendants and handle an unclosed A through virtual closing behavior. The main near-misses were outside the frozen cases: trial-1 and trial-3 interpreted paused_at_incomplete_token() as a reason to discard all accumulated read-only extraction results after a later incomplete token; a probe such as '<a href=\"/x\">ok</a><div' returns [] in those trials but returns the completed link in the reference. Trial-2 over-applied the special-element text guidance; for '<a href=\"/x\"><script>one &amp; two</script>tail</a>' it includes raw script text, while the reference-style ordinary #text extraction returns only 'tail'. These are documentation-policy ambiguities rather than missing method documentation.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock",
+      "problem": "The HTML Processor method page lacks the fuller inherited explanation that string values are decoded and that empty string is distinct from boolean true. Subjects had both docs and succeeded, but users should not need to cross-read the Tag Processor page for this common contract.",
+      "suggestion": "Mirror the inherited return-value semantics directly: null means absent or unavailable, true means present without a value, '' means present with an empty value, and string values are already decoded. Include the general idiom is_string( $processor->get_attribute( $name ) ) for callers requiring a valued attribute."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and WP_HTML_Processor::next_token()/get_current_depth()",
+      "problem": "The docs explain how to detect truncated syntax, but the policy guidance is tilted toward mutation or complete-input validation. Two candidates discarded all completed extraction results after a later incomplete token.",
+      "suggestion": "Add a general note distinguishing unclosed elements, which the HTML Processor represents structurally with virtual closers, from incomplete syntax tokens where scanning pauses. Clarify that read-only extractors may either keep already visited completed results or explicitly require complete-document validation, depending on caller policy."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and the WP_HTML_Processor DOM-style text recipe",
+      "problem": "The docs correctly describe special-element payloads, but one candidate treated that as part of ordinary text extraction. SCRIPT and STYLE payloads are returned raw, so including them can surprise callers expecting decoded text nodes.",
+      "suggestion": "Strengthen the contract: for ordinary DOM-style text extraction, collect only #text tokens by default. Include SCRIPT, STYLE, TITLE, and TEXTAREA token payloads only when the caller explicitly wants those element payloads, and note which of those are decoded versus raw."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() nested-loop guidance",
+      "problem": "The warning against nested token walks is broad. Candidates used both bounded inner walks and a single-loop stack, and the docs do not clearly separate acceptable independent subtree scans from nested loops that skip outer-loop events.",
+      "suggestion": "Clarify where the cursor sits after a bounded subtree scan exits, and document when to prefer a single-loop state machine versus an outer next_tag() search with a bounded depth scan for independent regions."
+    }
+  ]
+}
