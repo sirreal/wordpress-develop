@@ -254,6 +254,21 @@ For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and
 one-sentence rationale. Do not execute code or expose hidden tests.
 
+If the Workflow runner is unavailable, use the local Codex CLI probe fallback:
+
+```sh
+python3 doc-experiment/tools/run-codex-probes.py round-NN \
+  --question-id <stable-id> \
+  --question '<citation-only question>' \
+  --output doc-experiment/results/round-NN/probes/<stable-id>.json
+```
+
+The local fallback runs each probe subject from a private non-repo directory,
+embeds only the staged rendered docs and probe question in the prompt, ignores
+project rules and user config, uses a read-only sandbox, and sets approval
+policy `never`. Persist the probe output with the result artifacts and log
+whether the subject found the relevant local contract.
+
 ## 3. Execute
 
 For each trial, write the returned code to
