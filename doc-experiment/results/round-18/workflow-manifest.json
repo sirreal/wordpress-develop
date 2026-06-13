@@ -3,7 +3,7 @@
   "mode": "weak-tier-calibration",
   "workflow_runner": "Workflow tool environment with agent() and parallel() globals",
   "launch_provenance": {
-    "current_git_head": "47b215499f5e84f0a932031252da9b81d64f3258",
+    "current_git_head": "a3495aaebb7d62794e6ed24434a934e059cc22c1",
     "current_git_status_short": "",
     "round_metadata_git_head": "5d02b9163665c2146f985fce131bbbb0b3c3a899",
     "round_metadata_git_status_short": "",
@@ -19,6 +19,21 @@
       "Read",
       "Grep"
     ],
+    "accepted_isolation_modes": [
+      "read-grep-tool-boundary",
+      "isolated-workdir"
+    ],
+    "local_codex_fallback": {
+      "agent_type": "codex-cli-isolated-workdir",
+      "runner": "codex exec",
+      "sandbox_mode": "read-only",
+      "approval_policy": "never",
+      "input_files": [
+        "html-processor.md",
+        "html-tag-processor.md",
+        "task.md"
+      ]
+    },
     "trusted_only_if_enforced": true,
     "attestation_required_in_trials_output": true,
     "attestation_output_key": "subject_isolation",
@@ -87,6 +102,12 @@
       "python3 doc-experiment/tools/validate-corpus.py --task N03-first-list-count --task N04-normalize-or-placeholder --task N06-extract-toc --task T01-add-image-class --task T02-link-targets --task T03-first-h1-text --task T04-build-figure --task T05-text-excerpt --task T06-collect-links --task T07-nested-lists --task T08-table-extract --task T09-mark-keyword --task T10-last-h2 --task T11-strip-tracking-attributes --task T12-unwrap-spans",
       "python3 doc-experiment/tools/validate-round.py round-18",
       "python3 doc-experiment/tools/workflow-args.py manifest round-18"
+    ],
+    "local_codex_trials": [
+      "python3 doc-experiment/tools/run-codex-trials.py round-18 --output doc-experiment/results/round-18/codex-trials-output.json",
+      "python3 doc-experiment/tools/validate-workflow-output.py trials doc-experiment/results/round-18/codex-trials-output.json round-18",
+      "python3 doc-experiment/tools/ingest-trials.py doc-experiment/results/round-18/codex-trials-output.json round-18",
+      "python3 doc-experiment/tools/validate-round.py round-18 --require-trials-complete"
     ],
     "after_trials_workflow": [
       "python3 doc-experiment/tools/validate-workflow-output.py trials <trials-output.json> round-18",
