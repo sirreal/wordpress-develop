@@ -101,6 +101,9 @@ trial files or judge verdicts no longer count toward `trials-complete` or
 `persist-trials.py` now validates harness execution JSON before finalizing a
 trial artifact directory, and removes the just-created trial directory if the
 harness output is unusable.
+That cleanup now applies to the entire current ingest attempt, preventing a
+mid-batch harness failure from stranding earlier trial artifacts without a
+matching isolation attestation.
 
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be

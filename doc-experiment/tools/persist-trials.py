@@ -157,9 +157,10 @@ def execute_candidate(task_id: str, trial: int, candidate_file: Path) -> dict:
     return execution
 
 
-def cleanup_created_trial_dir(trial_dir: Path) -> None:
-    if trial_dir.exists():
-        shutil.rmtree(trial_dir)
+def cleanup_created_trial_dirs(trial_dirs: list[Path]) -> None:
+    for trial_dir in reversed(trial_dirs):
+        if trial_dir.exists():
+            shutil.rmtree(trial_dir)
 
 
 def main() -> int:
@@ -180,41 +181,49 @@ def main() -> int:
         return 1
 
     summary = {}
+    created_trial_dirs = []
     for trial in trials:
         task_id = trial["id"]
         trial_number = trial["trial"]
         trial_dir = results_dir / task_id / f"trial-{trial_number}"
         candidate_file = trial_dir / "candidate.php"
-        trial_dir.mkdir(parents=True, exist_ok=True)
-        candidate_file.write_text(trial["code"])
 
         try:
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            created_trial_dirs.append(trial_dir)
+            candidate_file.write_text(trial["code"])
             execution = execute_candidate(task_id, trial_number, candidate_file)
-        except RuntimeError as exc:
-            cleanup_created_trial_dir(trial_dir)
+        except (OSError, RuntimeError) as exc:
+            cleanup_created_trial_dirs(created_trial_dirs)
             print(f"persist-trials.py: {exc}", file=sys.stderr)
             return 1
 
-        (trial_dir / "response.json").write_text(
-            json.dumps(
-                {
-                    "ok": trial.get("ok", False),
-                    "explanation": trial.get("explanation"),
-                    "confidence": trial.get("confidence"),
-                },
-                indent=2,
+        try:
+            (trial_dir / "response.json").write_text(
+                json.dumps(
+                    {
+                        "ok": trial.get("ok", False),
+                        "explanation": trial.get("explanation"),
+                        "confidence": trial.get("confidence"),
+                    },
+                    indent=2,
+                )
+                + "\n"
             )
-            + "\n"
-        )
 
-        (trial_dir / "execution.json").write_text(
-            json.dumps(
-                execution,
-                indent=2,
-                ensure_ascii=False,
+            (trial_dir / "execution.json").write_text(
+                json.dumps(
+                    execution,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n"
             )
-            + "\n"
-        )
+        except OSError as exc:
+            cleanup_created_trial_dirs(created_trial_dirs)
+            print(f"persist-trials.py: {exc}", file=sys.stderr)
+            return 1
+
         summary.setdefault(task_id, []).append(
             f"{execution['passed']}/{execution['total']}"
         )
