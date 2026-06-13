@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_full_parser()` because the input is a complete HTML document, then walks tokens with `next_token()` until it finds the opening `TITLE` token. Per the documented API, `get_modifiable_text()` on a `TITLE` element returns its decoded text content, including the empty string for an existing empty `<title></title>`.",
+  "confidence": 94
+}

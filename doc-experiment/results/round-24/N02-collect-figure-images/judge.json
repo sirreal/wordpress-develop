@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Passed 9/9. Correctly chose WP_HTML_Processor::create_fragment() for structural containment. All API calls are documented: create_fragment, next_tag, get_tag, is_tag_closer, get_attribute. Uses documented tag_closers='visit' traversal and handles src null/true/empty-string semantics with is_string() and non-empty checks. Slightly less idiomatic than the breadcrumb-based pattern for ancestor containment, but still documented and robust for the tested fragment cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 9/9. This is very close to the reference approach: WP_HTML_Processor::create_fragment(), next_tag('IMG'), get_breadcrumbs() ancestor check, and get_attribute() with string/non-empty filtering. All methods are documented. The final get_last_error() guard is documented, but is a mildly over-conservative policy for a read-only collector because it would discard already-collected results if unsupported markup appeared after them."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 9/9. Same implementation shape as trial-2. Correct processor, documented methods only, idiomatic breadcrumb containment check, and correct handling of decoded src plus missing, valueless, and empty attributes. Same minor concern: the post-scan get_last_error() check may reflect uncertainty about partial data-extraction policy rather than a task requirement."
+    }
+  ],
+  "failure_analysis": "No trial failed any frozen hidden case; all passed 9/9 with no _doing_it_wrong records. The docs did well on the core points: the Tag Processor overview explicitly says it has no tree awareness and that get_breadcrumbs() belongs to WP_HTML_Processor; the HTML Processor overview and Breadcrumbs section show create_fragment(), next_tag(), and breadcrumb-based structural matching; get_attribute() documents null for missing attributes, true for boolean/valueless attributes, empty string for empty values, and decoded string values. Near-misses: trial-1 used manual FIGURE depth tracking with tag closers instead of the simpler breadcrumb ancestor check, suggesting the docs permit but do not strongly steer containment tasks toward breadcrumbs. Trials 2 and 3 added a get_last_error() fail-closed policy after a read-only scan; the docs repeatedly recommend rejecting on parser errors for mutation/serialization workflows, but they do not clearly distinguish that from partial read-only extraction policy.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor > Breadcrumbs / matches_breadcrumbs",
+      "problem": "The docs explain fixed breadcrumb paths and single-element wildcards, but do not directly state the recommended pattern for 'has ancestor X at any depth'.",
+      "suggestion": "Add a short contract/example saying that arbitrary-depth ancestor containment should inspect get_breadcrumbs(), while next_tag(['breadcrumbs' => ...]) and matches_breadcrumbs() match contiguous breadcrumb subpaths rather than a descendant combinator."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() tag_closers / is_tag_closer()",
+      "problem": "The docs document closer visitation, but a reader can reasonably choose manual depth counters for structural containment even when breadcrumbs are simpler and less error-prone.",
+      "suggestion": "Cross-link from tag_closers and is_tag_closer() to get_breadcrumbs()/get_current_depth(), clarifying that closers are mainly for bounded subtree walks and serialization-like scans, while current-token ancestor questions are usually best answered with breadcrumbs."
+    },
+    {
+      "location": "WP_HTML_Processor::get_attribute() inherited documentation",
+      "problem": "The HTML Processor page lists get_attribute(), but the clearest decoded-value explanation appears in the Tag Processor page. Users of WP_HTML_Processor may miss that inherited attribute values are already decoded.",
+      "suggestion": "Repeat or explicitly inherit the key get_attribute() contract on the HTML Processor page: missing returns null, valueless boolean attributes return true, empty values return '', and string values are already character-reference decoded."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() / unsupported markup guidance",
+      "problem": "The docs emphasize rejecting or falling back on get_last_error() for edits and serialization, but do not state what read-only data collectors should do with partial results gathered before an unsupported-parser abort.",
+      "suggestion": "Add guidance that read-only extraction may choose a policy: return partial results, return an error/sentinel, or fail closed. Clarify that get_last_error() is about unsupported parser aborts and is separate from ordinary unclosed body-fragment elements."
+    }
+  ]
+}

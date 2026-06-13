@@ -85,6 +85,16 @@ caller opt-in; and read-only text walks need a caller policy for
 discarding already collected text. Round-23 T03, N06, and T05 judge notes all
 pointed at this shape.
 
+Round 24 checkpoint stayed stable after the Tag Processor source edit:
+99.35 all / 99.41 train / 99.12 held-out, with every hidden test passing.
+T05 held at 99.80, so the processor-choice fix generalized through the
+checkpoint. The next diagnostic should be citation-only, not a direct source
+edit: ask whether the rendered docs already distinguish ordinary `#text`
+subtree extraction, special-element opener text as opt-in, and read-only
+fallback policy after `get_last_error()` or `paused_at_incomplete_token()`.
+Keep the T09/T12 serialization fallback and decoded-text reparse signal as a
+separate hypothesis.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -242,7 +252,42 @@ heading/subtree extraction, and may reject all read-only text collected before
 an unsupported parser abort. Promote a future source edit here only after a
 checkpoint or focused probe confirms this is still the best next train signal.
 
+Round-24 checkpoint result: held-out stayed stable and T05 held at 99.80.
+N06 still showed over-inclusion of special-element opener text in ordinary
+heading text, and N02 repeated the read-only `get_last_error()` partial-result
+policy concern. This is now ready for a citation-only probe focused on
+read-only text extraction policy.
+
 Risk: medium-low if phrased as a token model instead of a task recipe.
+
+### 3b. Read-only text extraction policy
+
+Core idea: separate three caller policies that the docs currently place near
+each other:
+
+- Ordinary subtree/DOM-style text: append only tokens where
+  `get_token_type() === '#text'`.
+- Special element opener text (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) is
+  modifiable text on the element token and must be an explicit opt-in.
+- After a read-only extraction walk, `get_last_error()` or
+  `paused_at_incomplete_token()` tells the caller the walk stopped early or the
+  input was incomplete; it does not by itself define whether to return
+  already-collected best-effort text, an empty result, or a failure sentinel.
+
+Evidence: round-23 T03/N06 over-included special-element opener text in
+ordinary heading/subtree extraction; round-23 T05 sometimes discarded collected
+text after an unsupported parser abort. Round-24 repeated the N06
+over-inclusion pattern and N02 repeated the read-only partial-result policy
+concern. All hidden tests still passed, so this needs a citation-only probe
+before source promotion.
+
+Next diagnostic: ask subjects to cite the rendered docs for a read-only
+fragment text extractor that collects ordinary subtree text, decides whether
+to include TITLE/TEXTAREA/SCRIPT/STYLE opener text, and states a caller policy
+for `get_last_error()` and `paused_at_incomplete_token()`.
+
+Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
+recipe. Phrase the edit, if promoted, as a token/policy matrix.
 
 ### 3a. Tag Processor lexical-text boundary — confirmed in round 23
 

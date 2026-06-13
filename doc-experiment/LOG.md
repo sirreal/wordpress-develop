@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 24 — checkpoint after lexical-text boundary edit
+
+**All 99.35 / train 99.41 / held-out 99.12 / core 99.28** under
+`checkpoint`, with subjects `gpt-5.4` / `medium` / `priority` and judge
+`gpt-5.5` / `xhigh` / `priority`. This was the held-out regression sentinel
+after the round-23 Tag Processor lexical-text boundary source edit.
+
+Outcome: stable. All 57 subject trials passed all hidden tests, including all
+four held-out tasks. Held-out scores were H04 98.70, N01 100.00, N02 99.00,
+and N05 98.80. There is no held-out functional regression and no reason to
+revert the source edit.
+
+The target train signal held: T05-text-excerpt scored 99.80 in the checkpoint
+with all three trials passing 10/10 and adherence 100/99/99. The Tag Processor
+lexical-token example is no longer pulling subjects away from
+`WP_HTML_Processor::create_fragment()` for parsed BODY-fragment text
+extraction.
+
+Residual train signal: the lowest task was T09-mark-keyword at 98.10 because
+one trial reparsed decoded `get_modifiable_text()` with
+`WP_HTML_Processor::normalize()` instead of wrapping `serialize_token()`.
+N06-extract-toc scored 98.30 because two trials over-included special-element
+opener modifiable text in ordinary heading text. These are separate candidate
+diagnostics: (1) decoded modifiable text is application text, not an HTML token
+to reparse during serialization, and (2) ordinary subtree text is `#text` by
+default, with special-element opener text as explicit caller opt-in.
+
+Next action: run a citation-only discoverability probe before any source edit.
+Prefer probing the HTML Processor read-only text policy first because it spans
+round-23 T03/N06/T05 and round-24 N06/N02 notes. Keep the
+`serialize_token()`/decoded-text reparse issue as a separate follow-up probe or
+scratch A/B candidate; do not merge the two hypotheses into one source edit.
+
 ## Round 23 — Tag Processor lexical-text boundary confirmed
 
 **Train 99.50 / core 99.42** under `scored-train`, with subjects

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because containment is a tree-aware question, then scans `IMG` tags in document order with `next_tag( 'IMG' )`, checks `get_breadcrumbs()` for a `FIGURE` ancestor, and reads `src` with `get_attribute()`, which the docs say already returns decoded attribute values. It skips missing, non-string, and empty `src` values, and returns an empty result if the HTML Processor reports unsupported markup via `get_last_error()`.",
+  "confidence": 88
+}

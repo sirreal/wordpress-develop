@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment structurally, then walks all tokens with `next_token()`, appending ordinary `#text` token text via `get_modifiable_text()` and also the decoded text carried on `TEXTAREA` and `TITLE` opening tags, as documented. It excludes `SCRIPT` and `STYLE` by never reading their element text, preserves whitespace exactly as reported by the processor, and truncates by Unicode code points with `mb_strlen()`/`mb_substr()` using explicit `UTF-8`.",
+  "confidence": 89
+}

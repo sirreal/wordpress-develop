@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans `IMG` tags in document order with `next_tag( 'IMG' )`, checks `get_breadcrumbs()` to ensure each image has a `FIGURE` ancestor at any depth, and reads the already-decoded `src` with `get_attribute()`, skipping missing, valueless, or empty `src` attributes.",
+  "confidence": 91
+}

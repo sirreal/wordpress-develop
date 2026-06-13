@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct WP_HTML_Tag_Processor for a flat class edit. All called methods are documented: constructor, next_tag(), set_bookmark(), seek(), add_class(), release_bookmark(), get_updated_html(). The single reused bookmark is the documented idiom for remembering the last match, and add_class() correctly preserves/appends existing classes. The found_h2 flag is redundant but harmless."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct processor and only documented APIs. The implementation follows the documented single-pass bookmark pattern, seeks back to the last H2, calls add_class(), releases the bookmark, and returns get_updated_html(). It handles no-match output without unnecessary rewriting and avoids manual class parsing."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference. Uses WP_HTML_Tag_Processor, next_tag('H2'), set_bookmark(), has_bookmark(), seek(), add_class(), release_bookmark(), and get_updated_html(), all present in the rendered docs. It cleanly applies the documented last-match bookmark idiom and class-update API."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The docs did well in the exact areas this task stresses: the Tag Processor guide says to use it for flat, position-based tag/class edits; next_tag() is documented as a forward scan with string shorthand queries; set_bookmark() explicitly says reusing the same bookmark name moves it and is the supported way to remember the last matching tag; add_class() documents creation/appending/no-duplicate behavior for class attributes; and get_updated_html() is clearly identified as the way to retrieve queued edits while preserving untouched bytes. The passed comment and existing-class cases show that subjects avoided regex/string matching and manual class rewriting. The only near-miss is lifecycle clarity: all trials release the bookmark before get_updated_html(), which is correct, but the release_bookmark() docs could state more explicitly that releasing a bookmark after queueing an edit does not cancel that queued edit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::release_bookmark()",
+      "problem": "The docs say releasing a bookmark frees overhead, but they do not explicitly separate bookmark lifetime from queued edit lifetime.",
+      "suggestion": "Add a sentence clarifying that after seeking and queueing an edit, release_bookmark() only removes the bookmark for future seeks; it does not undo queued updates, and get_updated_html() will still include them."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() / Finding tags",
+      "problem": "The query examples say next_tag() finds tags, but the nearby section could be more explicit that tag-looking text inside comments, text nodes, attributes, or special-element text is not returned as a tag match.",
+      "suggestion": "Add a short note that next_tag() matches parsed tag tokens only, not strings that merely look like markup inside non-tag tokens."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark()",
+      "problem": "The section contains the crucial last-match contract, but the example combines it with nested-list state and closer handling, which is more complex than the simplest flat-scan use case.",
+      "suggestion": "Add a minimal generic example showing a single literal bookmark name being reset on each matched tag, checked with has_bookmark(), sought once after the loop, edited, and released."
+    }
+  ]
+}

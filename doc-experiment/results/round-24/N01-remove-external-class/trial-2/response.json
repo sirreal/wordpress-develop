@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat tag/class edit, not a structural tree query. The function constructs the processor with the input HTML, repeatedly finds `A` tags whose `class` contains `external` via `next_tag()`, removes that class with `remove_class()`, and returns the final markup with `get_updated_html()`.",
+  "confidence": 97
+}
