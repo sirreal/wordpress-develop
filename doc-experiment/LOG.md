@@ -38,7 +38,7 @@ all string-returning rewrites.
 Next action: commit rounds 54/55 results, then edit
 `src/wp-includes/html-api/class-wp-html-processor.php` to promote one adapted
 serialization rewrite fallback recipe. Run the docs-only guard, stage docs, and
-score the source hypothesis.
+score the source hypothesis with `gpt-5.4-mini` / `low` / `priority`.
 
 ## Round 53 — mini/low calibration exhausts weak-tier ladder
 
