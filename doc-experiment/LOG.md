@@ -104,6 +104,9 @@ harness output is unusable.
 That cleanup now applies to the entire current ingest attempt, preventing a
 mid-batch harness failure from stranding earlier trial artifacts without a
 matching isolation attestation.
+Judge ingestion now similarly removes artifacts created by the current attempt
+if judge writing, post-write validation, aggregation, or summary persistence
+fails.
 
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be

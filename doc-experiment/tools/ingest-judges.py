@@ -10,6 +10,7 @@ held-out gaps are listed separately, marked DO-NOT-ACT.)
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -63,6 +64,15 @@ def validate_no_existing_artifacts(results_dir: Path, verdicts: list[dict]) -> l
     ]
 
 
+def cleanup_created_judge_artifacts(paths: list[Path]) -> None:
+    for path in reversed(paths):
+        if path.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+
 def main() -> int:
     output_file, round_name = sys.argv[1], sys.argv[2]
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
@@ -109,11 +119,17 @@ def main() -> int:
         print(validate_trials.stderr, file=sys.stderr)
         return validate_trials.returncode
 
+    created_artifacts = []
     for entry in verdicts:
         tid, v = entry["id"], entry["verdict"]
-        (results_dir / tid / "judge.json").write_text(
-            json.dumps(v, indent=2, ensure_ascii=False) + "\n"
-        )
+        judge_file = results_dir / tid / "judge.json"
+        created_artifacts.append(judge_file)
+        try:
+            judge_file.write_text(json.dumps(v, indent=2, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            cleanup_created_judge_artifacts(created_artifacts)
+            print(f"ingest-judges.py: {exc}", file=sys.stderr)
+            return 1
     print(f"{len(verdicts)} verdicts persisted")
 
     validate = subprocess.run(
@@ -127,6 +143,7 @@ def main() -> int:
         text=True,
     )
     if validate.returncode != 0:
+        cleanup_created_judge_artifacts(created_artifacts)
         print(validate.stdout, end="")
         print(validate.stderr, file=sys.stderr)
         return validate.returncode
@@ -137,10 +154,23 @@ def main() -> int:
         text=True,
     )
     if proc.returncode != 0:
+        cleanup_created_judge_artifacts(created_artifacts)
         print(proc.stderr, file=sys.stderr)
         return proc.returncode
-    summary = json.loads(proc.stdout)
-    (results_dir / "round-summary.json").write_text(proc.stdout)
+    try:
+        summary = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        cleanup_created_judge_artifacts(created_artifacts)
+        print(f"ingest-judges.py: aggregate output is invalid JSON: {exc}", file=sys.stderr)
+        return 1
+    summary_file = results_dir / "round-summary.json"
+    created_artifacts.append(summary_file)
+    try:
+        summary_file.write_text(proc.stdout)
+    except OSError as exc:
+        cleanup_created_judge_artifacts(created_artifacts)
+        print(f"ingest-judges.py: {exc}", file=sys.stderr)
+        return 1
 
     base_tasks = {}
     if baseline:

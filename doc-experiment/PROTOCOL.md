@@ -375,6 +375,8 @@ Trial and judge ingestion refuse to overwrite existing trial directories,
 must be retried after a failed or invalid runner output, first record the
 reconciliation in `LOG.md`, remove or quarantine the invalid artifacts
 deliberately, and then rerun ingestion.
+Judge ingestion removes artifacts it created in the current attempt if judge
+writing, post-write validation, aggregation, or summary writing fails.
 
 ```sh
 python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN
