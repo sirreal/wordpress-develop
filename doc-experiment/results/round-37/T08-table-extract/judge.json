@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right structural API: WP_HTML_Processor::create_fragment(), next_tag('TABLE'), and one depth-bounded next_token() walk. Every API call is present in the rendered docs, and execution recorded no _doing_it_wrong notices. The row/cell state machine follows the documented no-nested-loop pattern, uses virtual closers for omitted end tags, and reads decoded #text via get_modifiable_text(). Attribute null/true/'' semantics were not relevant."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used only documented methods. The main traversal is idiomatic: one cursor, depth-bound table subtree, state tracked for TR and TD/TH, decoded text from #text tokens, and clean checks for paused_at_incomplete_token() and get_last_error(). The only notable near-miss is opting into SCRIPT/STYLE/TEXTAREA/TITLE opener text inside cells; that behavior is documented, but the text-extraction recipe says ordinary subtree text should include only #text tokens unless the caller explicitly asks for special-element contents."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API calls. The single next_token() loop, get_current_depth() boundary, get_tag()/is_tag_closer() checks, and decoded #text collection are all documented patterns and handled the frozen cases. Like trial-2, it over-applies special-element opener text, which can include raw SCRIPT/STYLE content in a result that otherwise promises decoded text nodes. It checks get_last_error() but not paused_at_incomplete_token(), so it does not distinguish clean end-of-input from truncated trailing syntax."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial. The docs did well on the key behaviors these candidates needed: the processor-choice sections point structural text extraction to WP_HTML_Processor::create_fragment(); next_token() explains implied structure such as synthesized TBODY, virtual closers for omitted end tags, one shared cursor, and depth-bounded walks using >=; get_modifiable_text() states that #text content is already decoded. The main near-miss was special-element text: trials 2 and 3 included SCRIPT, STYLE, TEXTAREA, and TITLE opener text. That API is documented, but the 'Recipe: collect DOM-style text from a subtree' says to append ordinary #text tokens by default and opt into special opener text only when the caller contract requires it. A second near-miss is incomplete input policy: trial 3 accepts partial extraction after a truncated comment, while trials 1 and 2 reject when paused_at_incomplete_token() is true. The docs describe this as a caller policy signal, and the frozen tests did not require either behavior.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-37/html-processor.md, 'Recipe: collect DOM-style text from a subtree' and get_modifiable_text()",
+      "problem": "The docs warn not to include special-element opener text by default, but 'text content', 'ordinary subtree text', '#text', and 'modifiable text' remain easy to conflate. Trials 2 and 3 opted into SCRIPT/STYLE/TEXTAREA/TITLE content without a clearly special contract, which can mix raw SCRIPT/STYLE text into decoded text extraction.",
+      "suggestion": "Add a compact policy table contrasting ordinary #text descendants, special-element opener text, and all modifiable text, with one example showing decoded TITLE/TEXTAREA and raw SCRIPT/STYLE outcomes."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-37/html-processor.md, next_token() depth-bounded traversal examples",
+      "problem": "The single-loop state-machine guidance is strong, but the example covers one repeated element. Nested repeated records require tracking parent and child state and flushing each on its closer; models must generalize that pattern themselves.",
+      "suggestion": "Add a generic nested-record traversal recipe, for example groups/items, showing one cursor, no nested next_token() loops, depth anchoring from the matched container, and closer-driven child and parent flushes."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-37/html-processor.md next_token(); /tmp/html-api-docs-eval/round-37/html-tag-processor.md paused_at_incomplete_token()",
+      "problem": "Incomplete-token handling is mostly framed around mutation and serialization. For read-only extraction, candidates must infer whether virtual end-of-input closers justify a best-effort result or whether paused_at_incomplete_token() should reject the result.",
+      "suggestion": "State explicitly that paused_at_incomplete_token() is a caller-policy signal: virtual closers still allow read-only walks to finish structurally, but callers requiring complete source bytes should reject or fall back and document that choice."
+    }
+  ]
+}

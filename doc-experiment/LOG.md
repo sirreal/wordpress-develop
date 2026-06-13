@@ -2,6 +2,40 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 37/38 — method-local text policy scratch A/B loses
+
+`round-37` was the control rendered-doc round and `round-38` was a
+scratch-only HTML Processor rendered-doc variant for five train tasks:
+`T03-first-h1-text`, `T05-text-excerpt`, `N06-extract-toc`,
+`T08-table-extract`, and `T09-mark-keyword`. Both used `shadow-doc-a/b`,
+subjects `gpt-5.4` / `medium` / `priority`, and judge `gpt-5.5` /
+`xhigh` / `priority`. Source docblocks were unchanged.
+
+Variant: change the method-local `WP_HTML_Processor::next_token()` special
+elements paragraph from "important exception" framing to explicit
+caller-policy framing, and add a method-local `get_modifiable_text()` warning
+that the method is not a predicate for ordinary text. The intended target was
+the recurring over-inclusion of SCRIPT/STYLE/TEXTAREA/TITLE opener-carried
+text in ordinary subtree extraction.
+
+Numeric result: variant lost, **98.72 vs 99.18** on the paired subset. All
+30 subject trials passed all hidden cases, so the loss is adherence-only.
+T03 was flat at 98.80, but T05 fell 99.60 -> 98.60, N06 fell 98.90 ->
+98.80, T08 fell 98.70 -> 98.30, and T09 fell 99.90 -> 99.10. The variant did
+not eliminate the target pattern: variant T03 still had one trial including
+special-element opener text, and variant T08 still had two such trials.
+
+Interpretation: do not promote this wording. The method-local text-policy
+direction is not dead, but this particular phrasing adds noise and can pull
+models into broader fallback or special-element reasoning without fixing the
+transfer problem. Keep the existing source docs unchanged.
+
+Next action: run the separate normalized-output / `serialize_token()`
+fallback diagnostic as a citation-only probe before any source edit. Round-36
+and round-37/38 judges repeatedly show candidates improvising raw-input or
+`normalize( $html )` fallbacks after token-by-token rewrites, but that
+hypothesis has not had a fresh focused probe after the round-36 source state.
+
 ## Round 36 — depth-bounded traversal source edit confirmed
 
 **Train 99.65 / core 99.59** under `scored-train`, with subjects

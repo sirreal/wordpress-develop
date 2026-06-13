@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a full `next_token()` walk so text is collected in document order with HTML structure awareness. It appends decoded text from ordinary `#text` tokens and explicitly opts in to `TITLE` and `TEXTAREA` opener tokens via `get_modifiable_text()`, while naturally excluding `SCRIPT` and `STYLE`; truncation is then done by Unicode code point using a UTF-8 regex so multi-byte characters are never split.",
+  "confidence": 88
+}

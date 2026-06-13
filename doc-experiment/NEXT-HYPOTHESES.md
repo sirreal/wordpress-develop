@@ -161,6 +161,12 @@ special-element ordinary-text policy near `next_token()` /
 `get_modifiable_text()` and normalized-output fallback policy for
 `serialize_token()` rewriters.
 
+Rounds 37/38 tested a method-local text-policy scratch variant near
+`next_token()` and `get_modifiable_text()`. It lost 98.72 vs 99.18 on the
+paired subset and did not eliminate special-element opener over-inclusion.
+Do not promote that wording. The next best action is the separate
+normalized-output / `serialize_token()` fallback citation-only probe.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -446,6 +452,13 @@ still over-included special-element opener text, with judges pointing at the
 recipe. If this hypothesis is revisited, use a scratch A/B that rewrites that
 method-local paragraph to say "only if the caller's definition of text includes
 special-element contents" and points back to the ordinary subtree-text recipe.
+
+Follow-up scratch A/B result: rounds 37/38 tested that method-local rewrite
+plus a `get_modifiable_text()` warning. The variant lost 98.72 vs 99.18 and
+did not remove the target over-inclusion pattern. Do not promote this wording;
+any future text-policy attempt needs a different shape, likely a compact
+decision table or a task-independent token-category matrix, and should not be
+mixed with serialization fallback guidance.
 
 Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
 recipe. Phrase the edit, if promoted, as a token/policy matrix.

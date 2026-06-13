@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then walks the document once with `next_token()`. When an opening `H1`-`H6` tag is found via `get_tag()` and `is_tag_closer()`, it starts a current heading; while inside that heading it appends text from `#text` tokens using `get_token_type()` and `get_modifiable_text()`, and flushes the entry when the matching closing heading token is reached.",
+  "confidence": 86
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), used documented methods only, and followed the documented single next_token() depth-bounded state-machine pattern. Deduction: it also appends opener-carried SCRIPT/STYLE/TEXTAREA/TITLE modifiable text inside cells, despite the docs warning that ordinary subtree text should be #text tokens only unless the contract explicitly asks for special-element contents."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Best adherence: correct processor, no undocumented methods, single cursor walk, table-depth boundary, virtual closer handling, and decoded #text collection via get_modifiable_text(). Minor residual risk: it does not state or enforce a strict policy for unsupported/truncated input after the scan, though that was not required by the task and matches the reference's best-effort behavior."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor and documented API usage, with an idiomatic single-pass token walk bounded by current depth. Same semantic near-miss as trial-1: it opts into special-element opener text for SCRIPT/STYLE/TEXTAREA/TITLE, which the docs describe as separate from ordinary #text subtree extraction."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial: each execution report shows 8/8 passing and no _doing_it_wrong records. The docs appear to have done the important things well: they steer structural work away from WP_HTML_Tag_Processor and toward WP_HTML_Processor; create_fragment() is clearly positioned for BODY fragments; next_token() explains why text extraction needs a token walk; get_current_depth() documents the >= depth-bound pattern; and get_modifiable_text() explains decoded #text output, which prevented double-decoding of entities. The main near-miss is special text-bearing elements. Trials 1 and 3 included SCRIPT/STYLE/TEXTAREA/TITLE opener-carried text inside cells. A probe with <td>A<script>B</script>C</td> returns ABC for those trials but AC for the reference. This was not caused by a missing method doc: the rendered docs explicitly warn under 'Recipe: collect DOM-style text from a subtree', next_token(), and get_modifiable_text() that ordinary subtree text is #text only and special-element modifiable text must be opt-in. The remaining documentation weakness is that this distinction is easy to override when a task uses the phrase 'text content'.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: 'Recipe: collect DOM-style text from a subtree' and WP_HTML_Processor::next_token()",
+      "problem": "Two subjects still treated special-element opener modifiable text as part of ordinary subtree text, even though the warning exists.",
+      "suggestion": "Add a compact decision table: ordinary text descendants => visit only #text tokens; caller explicitly wants SCRIPT/STYLE/TEXTAREA/TITLE contents => whitelist opener tokens and note decoded-vs-raw behavior."
+    },
+    {
+      "location": "html-tag-processor.md / html-processor.md: WP_HTML_Tag_Processor::get_modifiable_text()",
+      "problem": "The method's availability on comments and special-element openers can be mistaken for semantic membership in an element's text result.",
+      "suggestion": "Add an admonition that non-empty modifiable text is not a predicate for DOM-style text inclusion, with a tiny contrasting example showing #text-only collection versus explicit special-element collection."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and WP_HTML_Tag_Processor::paused_at_incomplete_token() sections",
+      "problem": "Candidates did not consistently express an input-completeness policy; one checked get_last_error() only, while others checked neither.",
+      "suggestion": "Add a short 'After a bounded scan' note clarifying that get_last_error() detects unsupported-parser aborts, paused_at_incomplete_token() detects trailing incomplete syntax, and read-only extractors should choose explicitly between best-effort output and strict rejection."
+    }
+  ]
+}

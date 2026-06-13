@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag()` to find heading openers in document order, and a depth-bounded `next_token()` walk to collect each heading\u2019s descendant text. Ordinary text comes from `#text` tokens via `get_modifiable_text()`, and text-only special elements documented on the HTML Processor (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) are included from their opening-tag tokens.",
+  "confidence": 89
+}

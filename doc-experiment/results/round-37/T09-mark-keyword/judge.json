@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right API shape: `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type() === '#text'`, decoded `get_modifiable_text()`, and token-by-token normalized rewriting with `serialize_token()`. All HTML API calls are documented and execution recorded no `_doing_it_wrong`. Minor edge-policy concern: on factory failure or parser error it returns raw input HTML, which can violate a normalized-output contract."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented pattern closely. Correct processor, no undocumented HTML API calls, ordinary text-node guard avoids attributes/comments/special text-bearing elements, and `serialize_token()` is used idiomatically for the accumulated normalized rewrite."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same high-adherence implementation as trial 2. Correctly follows the HTML Processor token-walking and serialization docs, uses decoded text only from ordinary `#text` tokens, and avoids `get_updated_html()`/`normalize()` mistakes after building a rewritten output string."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials: all passed 8/8. The docs did well in the exact areas this task stresses. `html-tag-processor.md` under \"Which processor should I use?\" and `html-processor.md` under \"Supported elements\" direct normalized, structure-aware fragment work to `WP_HTML_Processor::create_fragment()`. `html-processor.md` under \"Recipe: collect DOM-style text from a subtree\" and `get_modifiable_text()` explain that ordinary DOM text means `#text` tokens and that modifiable text is decoded for `#text`, TITLE, and TEXTAREA but raw for SCRIPT/STYLE/comments. That prevented matching attributes, comments, and special text-bearing elements. `html-processor.md` under \"Recipe: rewrite while serializing tokens\" and `serialize_token()` gives the needed pattern: walk tokens, emit/skips/wraps selected token serializations, and return the accumulated string instead of calling `normalize()` afterward. The only near-miss is error policy: trial 1 falls back to raw HTML on `create_fragment()` null or `get_last_error()`, which the tests did not exercise but is questionable for callers promising normalized output.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md `create_fragment()` and `get_last_error()` docs",
+      "problem": "Factory failure and parse-time unsupported-markup failure are documented separately, but the distinction is easy to blur. Trial 1 chose a raw-input fallback for both, which can break normalized-output contracts.",
+      "suggestion": "State explicitly that factory `null` is for construction constraints such as unsupported context/encoding, while unsupported markup is reported later via `get_last_error()`. Add guidance that callers promising normalized output should not return raw input as a transparent fallback unless that is their explicit contract."
+    },
+    {
+      "location": "html-processor.md `serialize_token()` / \"Recipe: rewrite while serializing tokens\"",
+      "problem": "The docs say extra markup may be emitted around selected tokens, but the concrete example only removes tokens. The successful candidates inferred wrapping correctly, but this is the central non-obvious serialization pattern.",
+      "suggestion": "Add a generic wrapper-style example that emits caller-supplied markup before and after selected token serializations, emphasizing that the accumulated string is the rewritten normalized result and that `get_updated_html()` is for queued token mutations, not manual serialization loops."
+    },
+    {
+      "location": "html-processor.md `get_modifiable_text()`",
+      "problem": "The method intentionally covers ordinary text, comments, processing instructions, and special element opener text. The docs explain this, but the safe token guard is spread across multiple sections.",
+      "suggestion": "Add a compact decision table: ordinary DOM text -> require `get_token_type() === '#text'`; comments/PI -> opt in by token type; TITLE/TEXTAREA -> opt in by opener token and decoded text; SCRIPT/STYLE -> opt in by opener token and raw text."
+    },
+    {
+      "location": "html-processor.md `serialize_token()` incomplete-input discussion",
+      "problem": "Incomplete trailing syntax behavior is described abstractly. Candidates did not need to decide because hidden cases only used malformed-but-complete HTML such as omitted closers.",
+      "suggestion": "Add a small example showing that a trailing incomplete token is not visited and is omitted from accumulated `serialize_token()` output unless the caller checks `paused_at_incomplete_token()` and rejects or falls back."
+    }
+  ]
+}

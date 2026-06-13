@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the HTML with `WP_HTML_Processor::create_fragment()` and `next_token()`, appending only ordinary `#text` token text plus opener-carried text from `TITLE` and `TEXTAREA`, using `get_modifiable_text()` so character references are already decoded where HTML defines that. If the HTML Processor aborts on unsupported markup, it falls back to a lexical `WP_HTML_Tag_Processor` token scan with the same inclusion rules, then truncates the UTF-8 result to the requested number of Unicode code points.",
+  "confidence": 84
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Used the correct primary API: WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), is_tag_closer(), get_tag(), and get_modifiable_text(), all documented. Correctly whitelisted #text plus TITLE/TEXTAREA opener text and used UTF-8 codepoint truncation. Minor adherence loss: the fallback to WP_HTML_Tag_Processor is documented but discouraged for DOM-style fragment text extraction, because it loses HTML Processor tree semantics on unsupported input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Clean, documented HTML Processor token walk. Correctly chose create_fragment(), included only #text and whitelisted TITLE/TEXTAREA openers, excluded SCRIPT/STYLE by not broadly appending modifiable text, and truncated with UTF-8-aware APIs. Minor near-miss: it does not inspect get_last_error() after a scan, so unsupported markup would silently produce whatever text was seen before the abort."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Strongest documentation adherence. It uses only documented APIs, chooses WP_HTML_Processor::create_fragment(), walks tokens directly, distinguishes token type from token name, whitelists TITLE/TEXTAREA opener-carried decoded text, and rejects unsupported-parser aborts with get_last_error(). Only small gap is that it does not separately consider paused_at_incomplete_token(), though the task and reference did not require rejection of incomplete trailing syntax."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 hidden/frozen cases, with no _doing_it_wrong records. The docs worked well for the core challenge: the processor-selection guidance says to use the HTML Processor when collecting text content and handling implied or missing closing tags; next_token() documents that text may be split across multiple #text tokens and that malformed input still produces structural closers; get_modifiable_text() documents decoded UTF-8 text for #text, TITLE, and TEXTAREA, and raw text for SCRIPT/STYLE. Those passages led every trial to use create_fragment(), walk tokens, append #text, specially include TITLE/TEXTAREA opener text, and avoid double-decoding entities.\n\nNear-misses were policy-related rather than test failures. Trial 1 added a lexical Tag Processor fallback even though the Tag Processor docs explicitly say it is not parsed BODY-fragment text-content extraction. Trial 2 omitted get_last_error(), so an unsupported-parser abort would look like successful end-of-input. Trial 3 returned an empty string on get_last_error(), which is defensible but not clearly mandated for read-only extraction. None of the trials checked paused_at_incomplete_token(); probes confirmed incomplete trailing syntax can pause with get_last_error() still null, so the docs need to keep those states distinct for extraction code, not only for mutation or serialization code.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / WP_HTML_Processor::next_token() and the text-collection recipe",
+      "problem": "The docs explain subtree text and special-element text, but they do not present a compact general pattern for fragment-wide text-like extraction where ordinary #text is included and specific special-element opener text is opt-in.",
+      "suggestion": "Add a general decision table or short example showing how to choose token categories: #text for ordinary DOM text; TITLE/TEXTAREA opener text when the caller explicitly wants those decoded contents; SCRIPT/STYLE only when raw script/style text is explicitly desired."
+    },
+    {
+      "location": "html-processor.md / get_last_error(), next_token(), paused_at_incomplete_token references",
+      "problem": "Unsupported-parser aborts and incomplete trailing syntax are documented, but read-only extraction policy is unclear. Candidates made different choices: ignore errors, reject on get_last_error(), or fall back lexically.",
+      "suggestion": "State that next_token() returning false can mean normal end, unsupported abort, or paused incomplete input; document the separate checks and give general policy guidance for best-effort extraction versus complete-input-required extraction."
+    },
+    {
+      "location": "html-tag-processor.md / Tokens and finer-grained processing",
+      "problem": "The lexical text-scan example is close enough to DOM text extraction that a reader may copy it as a fallback, despite nearby warnings that Tag Processor does not apply BODY fragment parsing or implied-closing semantics.",
+      "suggestion": "Label the example as lexical-only in the heading or code comment, and cross-link to the HTML Processor text-walk recipe for parsed fragment text extraction."
+    },
+    {
+      "location": "html-processor.md / WP_HTML_Tag_Processor::get_modifiable_text inherited docs",
+      "problem": "The method correctly warns that modifiable text is broader than DOM text, but the contract is spread across paragraphs and can be missed when readers are solving extraction tasks.",
+      "suggestion": "Add a concise table listing token name/type, whether get_modifiable_text() returns decoded or raw text, and whether it should normally count as DOM text."
+    }
+  ]
+}

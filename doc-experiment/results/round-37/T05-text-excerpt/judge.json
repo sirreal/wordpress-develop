@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correctly used WP_HTML_Processor::create_fragment(), a single next_token() walk, #text filtering, and explicit TITLE/TEXTAREA opener handling via get_modifiable_text(). All called API methods are documented. Minor near-miss: returning empty on get_last_error() is stricter than the task specified for best-effort text extraction, but it follows documented unsupported-markup caution."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correct processor choice and documented token-walk pattern. Uses get_tag() for tag opener names, which is documented, and get_modifiable_text() only for ordinary text plus whitelisted TITLE/TEXTAREA. Regex truncation is outside the HTML API and functionally handled Unicode code points."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Clean use of WP_HTML_Processor, next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). No undocumented API usage or _doing_it_wrong records. Edge behavior for decoded text and special elements matches the docs."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases, and execution.json showed no _doing_it_wrong records. The docs worked well here: the 'Which processor should I use?' guidance points subjects away from the linear Tag Processor and toward WP_HTML_Processor for text extraction; 'Recipe: collect DOM-style text from a subtree' teaches #text-token filtering; next_token() documents that SCRIPT, STYLE, TITLE, and TEXTAREA do not expose #text child tokens; and get_modifiable_text() documents decoded UTF-8 text for #text, TEXTAREA, and TITLE while SCRIPT/STYLE are raw. The main near-miss is policy clarity around parser aborts and incomplete input: trial-1 added a get_last_error() rejection, which is documented for unsupported markup, but the docs discuss that mostly around rewrites/mutations rather than read-only extraction, so a subject could over-reject or under-specify best-effort extraction behavior.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and WP_HTML_Tag_Processor::get_modifiable_text() docs",
+      "problem": "The broad introductory sentence lists SCRIPT, STYLE, TEXTAREA, and other DATA-like sections, while TITLE is only clarified later. This is easy to miss even though TITLE is a key text-bearing special element.",
+      "suggestion": "List TITLE alongside TEXTAREA in the first contract sentence for tokens whose opener carries decoded modifiable text."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docs / text extraction recipe",
+      "problem": "The subtree recipe is strong, but the read-only policy for whole-fragment text walks is implicit rather than stated as a contract.",
+      "suggestion": "Add a general note: for DOM-style text extraction, walk tokens with WP_HTML_Processor; ordinary text is #text; special-element opener text must be explicitly opted into; comments, processing instructions, SCRIPT, and STYLE should not be included unless the caller asks for them."
+    },
+    {
+      "location": "Incomplete input and get_last_error guidance",
+      "problem": "The docs explain incomplete tokens and parser aborts mainly in mutation or serialization contexts, leaving read-only extractors to infer whether to return accumulated text, reject, or fall back.",
+      "suggestion": "Add a general read-only scan policy note distinguishing non-null get_last_error() from paused_at_incomplete_token(), and explain that callers should choose either best-effort accumulated results or strict rejection based on their contract."
+    },
+    {
+      "location": "get_tag() vs get_token_name() docs",
+      "problem": "Both methods are documented, but text-walk examples mix token names and tag names. Subjects can succeed either way, but the distinction is subtle when handling #text tokens and special element openers in one loop.",
+      "suggestion": "Add a short comparison note: use get_token_type() for broad token kind, get_token_name() for DOM-style node names including #text, and get_tag() only when the current token is a tag."
+    }
+  ]
+}

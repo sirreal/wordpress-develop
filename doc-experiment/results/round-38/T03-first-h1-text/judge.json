@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly used WP_HTML_Processor::create_fragment(), next_tag('H1'), depth-bounded next_token(), get_token_type() === '#text', and get_modifiable_text(). All called methods are documented. Minor deduction: the final get_last_error() guard is documented but slightly over-applies clean-scan guidance from mutation/rewrite contexts to a read-only extractor whose spec says null only means no H1."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This is essentially the canonical documented pattern: fragment parser, first H1 opener, record current depth, walk tokens while depth stays within the subtree, append only #text modifiable text. It handles nested markup, decoded entities, image-only headings, multiple H1s, deep nesting, and unclosed H1 input idiomatically."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8 and all called methods are documented. The core traversal is correct, but it adds SCRIPT, STYLE, TEXTAREA, and TITLE opener-carried modifiable text. The docs say to opt into those only when the caller explicitly wants special-element contents; for ordinary subtree text this is too broad. A probe on <h1>A<script>B</script><style>C</style><textarea>D</textarea><title>E</title>F</h1> returns ABCDEF, while the reference returns AF."
+    }
+  ],
+  "failure_analysis": "All trials passed every frozen hidden case. The docs were effective on the main contract: html-processor.md's 'Recipe: collect DOM-style text from a subtree' gives the exact shape needed, and html-tag-processor.md's 'Which processor should I use?' warns that the Tag Processor has no tree awareness. The get_modifiable_text() section clearly states that #text values are decoded, which prevented double-decoding in the entities case. The next_token() and get_current_depth() passages explain virtual closers, implied structure, and the >= recorded-depth boundary, which covered nested markup, deep nesting, first-of-two, image-only, and the unclosed-H1 case. Near-misses: trial 1 copied get_last_error() cleanup from clean mutation/rewrite patterns, although the extraction task did not ask to reject unsupported parser aborts. Trial 3 overgeneralized the special-elements passage: the docs mention opener-carried text for SCRIPT/STYLE/TEXTAREA/TITLE, but the relevant ordinary text recipe says to append only #text unless the caller explicitly opts into those token types.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock",
+      "problem": "The method-level text explains that special elements carry modifiable text, but a reader can overgeneralize that into ordinary subtree text extraction.",
+      "suggestion": "Repeat the opt-in warning in the docblock with a compact example showing ordinary #text extraction excluding SCRIPT/STYLE/TEXTAREA/TITLE opener text, and a separate example for callers that intentionally include special-element contents."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock and clean-scan recipe references",
+      "problem": "Clean-scan checks are easy to copy into read-only extraction tasks, changing a caller's not-found semantics into parser-error semantics.",
+      "suggestion": "Add guidance that get_last_error() is a policy check: use it when the caller requires a complete supported parse or before applying mutations, but read-only best-effort extraction may choose a different contract."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() / get_current_depth() docblocks",
+      "problem": "The subtree-boundary idiom is crucial and was learned here, but it is spread across overview recipes and method docs.",
+      "suggestion": "Include a short method-level subtree walk example that records opener depth and continues while current depth is >= that depth, explicitly noting that this also works for implied or virtual closers in malformed input."
+    }
+  ]
+}
