@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for tree-aware parsing of a BODY fragment, then walks the document once with `next_token()`. It starts collecting when it sees an `H1`-`H6` opening tag, appends heading text from `#text` tokens via `get_modifiable_text()`, includes text carried on special raw-text element tokens when they appear inside a heading, and finalizes each entry when the corresponding heading closer is visited with `is_tag_closer()`.",
+  "confidence": 88
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), walked tokens with next_token(), collected only #text plus TITLE/TEXTAREA opener text, and used get_modifiable_text() with UTF-8 mb_* truncation. All called HTML API methods are present in the rendered docs; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout. The implementation follows the documented token-walk pattern and correctly excludes SCRIPT/STYLE/comment modifiable text. Minor idiom issue: it always scans the full fragment before truncating, so it misses an easy early-exit opportunity for a length-limited excerpt, but this is not an API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API calls. It uses the documented #text plus whitelisted special-element opener pattern and decoded get_modifiable_text() output. Minor idiom issue: the in-loop limit check uses > rather than >=, so exact-limit cases keep scanning unnecessarily; final output remains correct."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 10/10 with no _doing_it_wrong or trigger_error records. The docs worked well here because the processor-choice guidance explicitly says to use WP_HTML_Processor, not WP_HTML_Tag_Processor, when collecting text content or relying on implied/malformed structure. The HTML Processor text-extraction recipe steered subjects toward next_token(), #text filtering, and get_modifiable_text(). The special-element passages were especially effective: they explain that TITLE and TEXTAREA carry decoded text on the opener token, while SCRIPT and STYLE carry raw non-DOM text that should not be included unless explicitly requested. The get_modifiable_text() docs also made decoded UTF-8 output and mb_* truncation clear enough for all trials to handle entities, accents, and emoji. Near misses: the subjects had to compose two separate passages, ordinary text extraction plus special-element opt-in, to solve a full-fragment text-content task; there is no compact read-only fragment text recipe. Also, the overview negative example checks get_modifiable_text() against null even though the method contract says it always returns string, which could teach a misleading guard in other tasks.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / Opt-in policy",
+      "problem": "The ordinary #text recipe and the TITLE/TEXTAREA special-element rule are adjacent but still separate. A reader must infer the full pattern for read-only fragment text content that includes selected special elements while excluding SCRIPT, STYLE, and comments.",
+      "suggestion": "Add a short general example for read-only text collection over a fragment: walk next_token(), append #text, optionally append whitelisted opener-token text for TITLE/TEXTAREA, and do not append every token with modifiable text."
+    },
+    {
+      "location": "html-processor.md, overview negative example under text extraction",
+      "problem": "The negative example uses `null !== $processor->get_modifiable_text()`, but the method documentation says get_modifiable_text() returns `string` and uses `''` for tokens without modifiable text.",
+      "suggestion": "Replace the null-check example with a token-type/name guard, or explicitly state that get_modifiable_text() is not a presence test because it never returns null."
+    },
+    {
+      "location": "html-processor.md, next_token() incomplete-input guidance",
+      "problem": "The docs clearly discuss incomplete input for mutations and token serialization, but the recommended policy for read-only extraction is less explicit: return best-effort text, reject on paused_at_incomplete_token(), or make it caller-defined.",
+      "suggestion": "Add a sentence to read-only token-walk examples saying incomplete trailing syntax is a caller policy decision, and name the checks to use when the result must require complete input: paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}

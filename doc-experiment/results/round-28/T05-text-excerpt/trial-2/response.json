@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, appending ordinary `#text` token content via `get_modifiable_text()`, plus the opener-token text for the two documented special text-bearing elements that should count here: `TITLE` and `TEXTAREA`. It ignores other modifiable-text tokens such as `SCRIPT`, `STYLE`, comments, and closers, and then truncates the final UTF-8 string by Unicode code points with `mb_strlen()`/`mb_substr()` using an explicit `UTF-8` encoding.",
+  "confidence": 92
+}

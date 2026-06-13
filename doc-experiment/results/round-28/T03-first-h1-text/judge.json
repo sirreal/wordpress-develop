@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware WP_HTML_Processor, all called methods are documented in the rendered docs, and the solution follows the documented depth-bounded next_token() subtree walk. It appends only #text tokens via get_modifiable_text(), preserving empty text content and decoded entities. Passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as the reference: create_fragment(), next_tag('H1'), record get_current_depth(), then next_token() while depth remains >= the opener depth. No undocumented calls. Handles nested markup, decoded text, absent H1, image-only H1, multiple H1s, and unclosed H1 as documented. Passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor for subtree text extraction and used only documented methods. The #text-only filtering avoids treating markup, comments, or special-token modifiable text as ordinary heading text. Passed 8/8 with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials; each trial passed all 8 frozen expectations, for 24/24 total case passes, and execution.json reported no _doing_it_wrong records. The rendered docs were strong for this task: the HTML Processor overview explicitly says to choose it when structure matters, including collecting an element's text; the 'Recipe: collect DOM-style text from a subtree' shows the exact pattern of create_fragment(), next_tag(), get_current_depth(), next_token(), #text filtering, and get_modifiable_text(); next_token() explains that malformed input still yields closing tokens for unclosed elements; get_current_depth() explains why the guard must be >= rather than >; and get_modifiable_text() states that #text results are decoded UTF-8. The only near-miss is that the empty-container behavior is easier to infer from the next_token() section than from the subtree text recipe itself, but all candidates inferred it correctly for image-only H1.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The recipe demonstrates accumulating ordinary #text tokens, but it does not explicitly state the result when the matched container has no ordinary text descendants.",
+      "suggestion": "Add a general note that a successful subtree text extraction can legitimately produce an empty string when the element exists but contains no ordinary #text descendants, such as an empty element or a container with only void/media elements."
+    },
+    {
+      "location": "html-processor.md, create_fragment() / HTML Support",
+      "problem": "create_fragment() documents a nullable return but gives little operational guidance for callers doing read-only extraction when creation fails or the processor later aborts on unsupported markup.",
+      "suggestion": "Clarify the general failure contract: create_fragment() may return null when the requested context or encoding is unsupported, and callers that must distinguish 'not found' from parser unsupported/truncated states should inspect get_last_error() and paused_at_incomplete_token() after walking."
+    }
+  ]
+}

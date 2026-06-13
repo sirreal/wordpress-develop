@@ -1,0 +1,133 @@
+{
+  "result": [
+    {
+      "id": "T03-first-h1-text",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct tree-aware WP_HTML_Processor, all called methods are documented in the rendered docs, and the solution follows the documented depth-bounded next_token() subtree walk. It appends only #text tokens via get_modifiable_text(), preserving empty text content and decoded entities. Passed 8/8 with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same API shape as the reference: create_fragment(), next_tag('H1'), record get_current_depth(), then next_token() while depth remains >= the opener depth. No undocumented calls. Handles nested markup, decoded text, absent H1, image-only H1, multiple H1s, and unclosed H1 as documented. Passed 8/8 with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor for subtree text extraction and used only documented methods. The #text-only filtering avoids treating markup, comments, or special-token modifiable text as ordinary heading text. Passed 8/8 with no _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "No hidden cases failed across the three trials; each trial passed all 8 frozen expectations, for 24/24 total case passes, and execution.json reported no _doing_it_wrong records. The rendered docs were strong for this task: the HTML Processor overview explicitly says to choose it when structure matters, including collecting an element's text; the 'Recipe: collect DOM-style text from a subtree' shows the exact pattern of create_fragment(), next_tag(), get_current_depth(), next_token(), #text filtering, and get_modifiable_text(); next_token() explains that malformed input still yields closing tokens for unclosed elements; get_current_depth() explains why the guard must be >= rather than >; and get_modifiable_text() states that #text results are decoded UTF-8. The only near-miss is that the empty-container behavior is easier to infer from the next_token() section than from the subtree text recipe itself, but all candidates inferred it correctly for image-only H1.",
+        "doc_gaps": [
+          {
+            "location": "html-processor.md, 'Recipe: collect DOM-style text from a subtree'",
+            "problem": "The recipe demonstrates accumulating ordinary #text tokens, but it does not explicitly state the result when the matched container has no ordinary text descendants.",
+            "suggestion": "Add a general note that a successful subtree text extraction can legitimately produce an empty string when the element exists but contains no ordinary #text descendants, such as an empty element or a container with only void/media elements."
+          },
+          {
+            "location": "html-processor.md, create_fragment() / HTML Support",
+            "problem": "create_fragment() documents a nullable return but gives little operational guidance for callers doing read-only extraction when creation fails or the processor later aborts on unsupported markup.",
+            "suggestion": "Clarify the general failure contract: create_fragment() may return null when the requested context or encoding is unsupported, and callers that must distinguish 'not found' from parser unsupported/truncated states should inspect get_last_error() and paused_at_incomplete_token() after walking."
+          }
+        ]
+      }
+    },
+    {
+      "id": "N06-extract-toc",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 95,
+            "hallucinated_methods": [],
+            "notes": "Uses WP_HTML_Processor::create_fragment(), walks tokens, identifies heading opener/closer tokens with documented get_token_name()/is_tag_closer(), and appends only documented #text get_modifiable_text(). Less directly idiomatic than the subtree-depth recipe because it maintains a single heading state instead of anchoring each heading on get_current_depth(), but this is still supported by the next_token() documentation stating closers, including virtual closers, are visited."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Correctly chooses the HTML Processor, uses documented next_token(), get_tag(), get_current_depth(), is_tag_closer(), get_token_type(), and get_modifiable_text(), and handles final virtual/EOF closure with state. It mirrors the documented depth-bound subtree idea, though implemented as one state-machine pass rather than the exact next_tag-then-inner-walk recipe."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Closest to the documented pattern: find heading openers with next_tag(), record depth, walk the subtree with next_token() while get_current_depth() >= opener depth, and append only #text get_modifiable_text(). All called API methods are documented. The final get_last_error() check is documented and conservative, though the task did not explicitly require rejecting unsupported-fragment partial results."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 7 frozen cases. The rendered docs did well on the exact concepts this task needs: the HTML Processor overview says to choose it for structure, collecting text, walking subtrees, and implied/virtual closing tags; create_fragment() says it is for body fragments; the DOM-style text recipe explicitly says to append only #text tokens and not every token with modifiable text; next_token() explains that implicit and end-of-input closers are visited; get_current_depth() explains the >= depth guard; get_modifiable_text() explains decoded #text output. Near-misses were mostly around cursor shape: trial-1 relied on closer-driven state rather than depth anchoring, and trial-2 used a top-of-loop depth-drop flush. Both are defensible because next_token() documents virtual closers, but the nested-loop/cursor warning could still be easy to misapply for repeated-region extraction. Trial-3 also exposed a policy ambiguity: get_last_error() is documented, but extraction docs do not state whether read-only extractors should return partial results, empty results, or a sentinel on unsupported markup or trailing incomplete tokens.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::next_token() / subtree text examples",
+            "problem": "The docs explain single-region text collection, but repeated-region extraction still requires callers to reason carefully about one shared cursor, boundary tokens, and virtual closers.",
+            "suggestion": "Add a general repeated-region extraction example using neutral elements, showing both closer-driven state and depth-bounded walking, with a note about when each shape is appropriate."
+          },
+          {
+            "location": "WP_HTML_Processor::get_current_depth()",
+            "problem": "The >= guard is documented, but the consequence for continuing after an inner bounded walk exits is subtle.",
+            "suggestion": "State explicitly that after a bounded subtree walk exits, the processor remains matched on the token that ended the walk; callers should account for that when continuing an outer scan."
+          },
+          {
+            "location": "WP_HTML_Processor::get_last_error() and paused_at_incomplete_token() guidance",
+            "problem": "The docs clearly mention mutation/rewrite policies, but read-only extraction policy for unsupported markup or truncated input is left to inference.",
+            "suggestion": "Add guidance for read-only extractors: document when partial extracted data is reliable, when unsupported-parser aborts invalidate remaining traversal, and how callers should choose between returning partial data, empty data, or an error sentinel."
+          },
+          {
+            "location": "WP_HTML_Processor overview / text extraction recipe",
+            "problem": "The recipe explains ordinary #text versus special-element modifiable text, but the distinction can be missed when extracting visible-ish text from arbitrary subtrees.",
+            "suggestion": "Add a compact table of token types and whether they count for ordinary DOM text, including comments, SCRIPT/STYLE/TITLE/TEXTAREA, and normal inline elements."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T05-text-excerpt",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor::create_fragment(), walked tokens with next_token(), collected only #text plus TITLE/TEXTAREA opener text, and used get_modifiable_text() with UTF-8 mb_* truncation. All called HTML API methods are present in the rendered docs; no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and documented methods throughout. The implementation follows the documented token-walk pattern and correctly excludes SCRIPT/STYLE/comment modifiable text. Minor idiom issue: it always scans the full fragment before truncating, so it misses an easy early-exit opportunity for a length-limited excerpt, but this is not an API misuse."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correct processor choice and no undocumented API calls. It uses the documented #text plus whitelisted special-element opener pattern and decoded get_modifiable_text() output. Minor idiom issue: the in-loop limit check uses > rather than >=, so exact-limit cases keep scanning unnecessarily; final output remains correct."
+          }
+        ],
+        "failure_analysis": "No hidden case failed in any trial: all three passed 10/10 with no _doing_it_wrong or trigger_error records. The docs worked well here because the processor-choice guidance explicitly says to use WP_HTML_Processor, not WP_HTML_Tag_Processor, when collecting text content or relying on implied/malformed structure. The HTML Processor text-extraction recipe steered subjects toward next_token(), #text filtering, and get_modifiable_text(). The special-element passages were especially effective: they explain that TITLE and TEXTAREA carry decoded text on the opener token, while SCRIPT and STYLE carry raw non-DOM text that should not be included unless explicitly requested. The get_modifiable_text() docs also made decoded UTF-8 output and mb_* truncation clear enough for all trials to handle entities, accents, and emoji. Near misses: the subjects had to compose two separate passages, ordinary text extraction plus special-element opt-in, to solve a full-fragment text-content task; there is no compact read-only fragment text recipe. Also, the overview negative example checks get_modifiable_text() against null even though the method contract says it always returns string, which could teach a misleading guard in other tasks.",
+        "doc_gaps": [
+          {
+            "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / Opt-in policy",
+            "problem": "The ordinary #text recipe and the TITLE/TEXTAREA special-element rule are adjacent but still separate. A reader must infer the full pattern for read-only fragment text content that includes selected special elements while excluding SCRIPT, STYLE, and comments.",
+            "suggestion": "Add a short general example for read-only text collection over a fragment: walk next_token(), append #text, optionally append whitelisted opener-token text for TITLE/TEXTAREA, and do not append every token with modifiable text."
+          },
+          {
+            "location": "html-processor.md, overview negative example under text extraction",
+            "problem": "The negative example uses `null !== $processor->get_modifiable_text()`, but the method documentation says get_modifiable_text() returns `string` and uses `''` for tokens without modifiable text.",
+            "suggestion": "Replace the null-check example with a token-type/name guard, or explicitly state that get_modifiable_text() is not a presence test because it never returns null."
+          },
+          {
+            "location": "html-processor.md, next_token() incomplete-input guidance",
+            "problem": "The docs clearly discuss incomplete input for mutations and token serialization, but the recommended policy for read-only extraction is less explicit: return best-effort text, reject on paused_at_incomplete_token(), or make it caller-defined.",
+            "suggestion": "Add a sentence to read-only token-walk examples saying incomplete trailing syntax is a caller policy decision, and name the checks to use when the result must require complete input: paused_at_incomplete_token() and get_last_error()."
+          }
+        ]
+      }
+    }
+  ]
+}

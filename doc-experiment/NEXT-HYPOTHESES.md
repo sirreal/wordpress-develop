@@ -114,6 +114,16 @@ with a negative example that makes the default exclusion rule dominant:
 ordinary heading/subtree text reads only `#text`; SCRIPT/STYLE/TITLE/TEXTAREA
 opener text is explicit opt-in, not automatically part of ordinary text.
 
+Round 27/28 tested that narrower scratch variant. It improved the paired
+subset from 99.27 to 99.50, moved N06 from 98.20 to 98.90, and eliminated the
+special-element over-inclusion pattern in both T03 and N06 while preserving
+T05's explicit TITLE/TEXTAREA inclusion behavior. This is promotable as an
+adapted source hypothesis: add default-first ordinary-text policy and
+explicit opt-in wording near the HTML Processor text recipe. Do not copy the
+scratch negative example's `null !== get_modifiable_text()` guard; teach
+token-type/name guards instead because `get_modifiable_text()` returns a
+string and is not a presence test.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -320,6 +330,14 @@ the target near-miss, with all three variant candidates still over-including
 special-element text. A promotable source edit needs sharper negative
 placement: ordinary `#text` is the default; special-element opener text is
 available for explicit caller contracts only.
+
+Follow-up scratch A/B result: round 28's default-first negative-example
+variant beat the fresh round-27 control (99.50 vs 99.27). The target behavior
+changed in the right direction: control T03/N06 still over-included
+special-element opener text, while variant T03/N06 used ordinary `#text` only;
+T05 still correctly opted into TITLE/TEXTAREA while excluding SCRIPT/STYLE.
+Promote an adapted source edit now. Keep it generic and avoid the scratch
+variant's misleading null-check negative example.
 
 Risk: medium. Avoid replacing the processor-choice win with a task-shaped text
 recipe. Phrase the edit, if promoted, as a token/policy matrix.

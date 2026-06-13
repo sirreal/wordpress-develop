@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment and walks tokens with `next_token()`, appending decoded text from ordinary `#text` tokens plus the element-carried text of `TITLE` and `TEXTAREA` via `get_modifiable_text()`, while naturally excluding `SCRIPT` and `STYLE`. The result is then truncated to the requested number of UTF-8 code points with `mb_substr()` when available, or a Unicode-safe `preg_split()` fallback.",
+  "confidence": 87
+}

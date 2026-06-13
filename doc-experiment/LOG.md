@@ -2,6 +2,44 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Rounds 27/28 — ordinary-text negative example scratch A/B
+
+`round-27` was a fresh control rendered-doc round and `round-28` was a
+scratch-only HTML Processor rendered-doc variant for the same three train
+tasks (`T03-first-h1-text`, `N06-extract-toc`, `T05-text-excerpt`). Both used
+`shadow-doc-a/b`, subjects `gpt-5.4` / `medium` / `priority`, and judge
+`gpt-5.5` / `xhigh` / `priority`. Source docblocks were unchanged.
+
+Variant: instead of the broad policy matrix from round 26, the scratch docs
+added a default-first policy under the HTML Processor DOM-style text recipe:
+ordinary subtree text is only reached `#text` tokens; special-element opener
+text is available through `get_modifiable_text()` only when the caller
+explicitly opts into those node types. The variant also included a negative
+example intended to discourage treating all modifiable text as ordinary text.
+
+Numeric result: the variant improved the paired subset from **99.27** to
+**99.50**. T03 moved from 99.60 to 100.00, N06 from 98.20 to 98.90, and T05
+from 100.00 to 99.60. All trials in both rounds passed all hidden tests.
+
+Interpretation: promotable after revising the scratch wording. The target
+failure improved cleanly: in the control, T03 trials 2/3 and N06 trials 2/3
+included SCRIPT/STYLE/TEXTAREA/TITLE opener text in ordinary heading text; in
+the variant, all three T03 implementations and all three N06 implementations
+used `#text` only for ordinary heading/subtree text. T05 still included
+TITLE/TEXTAREA and excluded SCRIPT/STYLE, so the stronger default rule did not
+erase the explicit opt-in path needed by callers that ask for those elements.
+
+Caveat before source promotion: the scratch negative example used
+`null !== $processor->get_modifiable_text()`, but `get_modifiable_text()`
+returns a string and should not be taught as a presence test. Promote the
+default-first/explicit-opt-in wording, plus a negative example based on
+calling `get_modifiable_text()` from an unguarded token loop, but do not copy
+the null-check code.
+
+Next action: commit these result artifacts, then promote the adapted generic
+recipe to the `WP_HTML_Processor` class documentation and score it as one
+source hypothesis.
+
 ## Rounds 25/26 — read-only text policy matrix scratch A/B
 
 `round-25` was the control rendered docs and `round-26` was a scratch-only

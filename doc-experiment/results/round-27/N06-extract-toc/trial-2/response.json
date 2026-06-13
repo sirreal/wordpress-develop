@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens in document order with `next_token()`. It starts a record on each heading opener (`H1` through `H6`), appends descendant text from `#text` tokens via `get_modifiable_text()`, also includes text carried on raw-text element tokens (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) when they appear inside a heading, and finalizes each entry when the matching heading closer is reached using `get_token_name()` and `is_tag_closer()`.",
+  "confidence": 89
+}
