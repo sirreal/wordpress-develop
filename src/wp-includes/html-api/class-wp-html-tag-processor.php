@@ -303,6 +303,17 @@
  * alternative form takes no argument and provides no built-in
  * query syntax.
  *
+ * This is lexical token processing: it reports each complete
+ * syntax token in source order and leaves structural questions to
+ * the caller. Use it for flat token filters or scans that intentionally
+ * work with individual tokens. It is not parsed fragment text-content
+ * extraction: this class does not apply BODY-fragment parsing, implied
+ * closing behavior, tree order, or the HTML Processor's
+ * unsupported-markup policy. For DOM-style text extraction from markup
+ * that belongs inside BODY, create a {@see WP_HTML_Processor} with
+ * {@see WP_HTML_Processor::create_fragment} and use an HTML Processor
+ * subtree text walk.
+ *
  * Example:
  *
  *      $title = '(untitled)';
