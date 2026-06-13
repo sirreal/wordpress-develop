@@ -64,6 +64,30 @@ def verify_round(round_name: str) -> None:
         raise RuntimeError(f"round preflight failed: {message}")
 
 
+def verify_corpus(metadata: dict) -> None:
+    task_ids = metadata.get("task_ids", [])
+    if not task_ids:
+        return
+
+    command = [
+        "python3",
+        str(EXPERIMENT_ROOT / "tools" / "validate-corpus.py"),
+    ]
+    for task_id in task_ids:
+        command.extend(["--task", task_id])
+
+    proc = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"corpus preflight failed: {message}")
+
+
 def trial_args(metadata: dict) -> dict:
     subject = metadata.get("subject") or {}
     return {
@@ -160,7 +184,10 @@ def main() -> int:
         "--skip-round-check",
         dest="skip_round_check",
         action="store_true",
-        help="Emit metadata-derived args without verifying staged round artifacts",
+        help=(
+            "Emit metadata-derived args without verifying staged round artifacts "
+            "or selected corpus references"
+        ),
     )
     parser.add_argument(
         "--skip-scratch-check",
@@ -173,6 +200,7 @@ def main() -> int:
     metadata = load_metadata(args.round)
     if not args.skip_round_check:
         verify_round(args.round)
+        verify_corpus(metadata)
     if args.phase == "trials":
         payload = trial_args(metadata)
     elif args.phase == "judges":

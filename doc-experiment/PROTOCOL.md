@@ -200,13 +200,15 @@ python3 doc-experiment/tools/workflow-args.py trials round-NN
 ```
 
 The bundled trials workflow passes `agent_type: docs-test-subject` to each
-subject `agent()` call. This command verifies the staged scratch directory and
-recorded file hashes and runs the round preflight before emitting agent-launch
-arguments. If `/tmp` was cleaned, a staged file changed, or selected corpus
-inputs drifted, restage the round rather than launching subjects against
-mismatched docs or fixtures.
+subject `agent()` call. This command verifies the staged scratch directory,
+recorded file hashes, selected corpus references, and round preflight before
+emitting agent-launch arguments. If `/tmp` was cleaned, a staged file changed,
+selected corpus inputs drifted, or a selected reference no longer passes its
+hidden tests, restage or reconcile the round rather than launching subjects
+against mismatched docs or fixtures.
 The escape hatch is named `--skip-round-check` because it bypasses all staged
-round artifact checks, not only scratch isolation; use it only for diagnostics.
+round artifact and selected-corpus checks, not only scratch isolation; use it
+only for diagnostics.
 To emit both trial and judge workflow inputs plus the ingest/validation command
 sequence as a single handoff object, run:
 
@@ -275,7 +277,8 @@ python3 doc-experiment/tools/workflow-args.py judges round-NN
 ```
 
 This performs the same scratch/hash preflight because judges must see the exact
-rendered docs that subjects saw.
+rendered docs that subjects saw, and it revalidates the selected corpus
+references before judge launch.
 
 The judge returns JSON:
 

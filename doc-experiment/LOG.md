@@ -89,6 +89,10 @@ Trial and judge ingestion now refuse to overwrite persisted artifacts. Existing
 trial files, `subject-isolation.json`, `judge.json`, or `round-summary.json`
 must be reconciled explicitly before a runner output can be ingested again.
 
+`workflow-args.py` now runs `validate-corpus.py` for the exact tasks selected
+in the round metadata before emitting trial, judge, or manifest payloads, so
+the launch handoff cannot skip reference-fixture validation accidentally.
+
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.
