@@ -54,7 +54,13 @@ SUBJECT_LADDER = [
 
 SATURATED_SCORE = 97.0
 DIAGNOSTIC_MODES = {"discoverability-probe", "shadow-doc-a/b"}
-PREPARABLE_MODES = {"checkpoint", "scored-train", "weak-tier-calibration"}
+PREPARABLE_MODES = {
+    "checkpoint",
+    "discoverability-probe",
+    "scored-train",
+    "shadow-doc-a/b",
+    "weak-tier-calibration",
+}
 
 
 def run_text(command: list[str]) -> str:
@@ -255,18 +261,22 @@ def expected_task_ids_for_mode(
     mode: str | None,
     train_ids: list[str],
     holdout_ids: list[str],
-) -> list[str]:
+) -> list[str] | None:
     if mode == "checkpoint":
         return sorted([*train_ids, *holdout_ids])
+    if mode in DIAGNOSTIC_MODES:
+        return None
     return train_ids
 
 
 def prepared_current_rounds(
-    expected_task_ids: list[str],
+    expected_task_ids: list[str] | None,
+    allowed_task_ids: list[str],
     subject_policy: dict,
     mode: str,
 ) -> list[dict]:
-    expected_task_set = set(expected_task_ids)
+    expected_task_set = set(expected_task_ids) if expected_task_ids is not None else None
+    allowed_task_set = set(allowed_task_ids)
     prepared = []
     for round_dir in sorted((EXPERIMENT_ROOT / "results").glob("round-*")):
         metadata_file = round_dir / "round-metadata.json"
@@ -281,7 +291,10 @@ def prepared_current_rounds(
             continue
         if metadata.get("judge") != CURRENT_JUDGE:
             continue
-        if set(metadata.get("task_ids", [])) != expected_task_set:
+        metadata_task_set = set(metadata.get("task_ids", []))
+        if expected_task_set is not None and metadata_task_set != expected_task_set:
+            continue
+        if expected_task_set is None and not metadata_task_set.issubset(allowed_task_set):
             continue
 
         report, errors = validate_round(round_dir.name)
@@ -465,6 +478,7 @@ def build_audit() -> dict:
     )
     prepared_rounds = prepared_current_rounds(
         expected_prepared_task_ids,
+        train_ids,
         active_subject,
         prepared_mode,
     )
@@ -616,7 +630,11 @@ def build_audit() -> dict:
             "current_no_edit_baselines": current_baselines,
             "prepared_current_round": latest_prepared,
             "prepared_mode": prepared_mode,
-            "prepared_task_count": len(expected_prepared_task_ids),
+            "prepared_task_count": (
+                len(expected_prepared_task_ids)
+                if expected_prepared_task_ids is not None
+                else None
+            ),
             "status_is_expected_round_artifacts": status_is_expected_round_artifacts,
             "changed_since_latest_summary_commit": changed_groups,
         },
