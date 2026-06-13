@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -88,6 +89,16 @@ def verify_corpus(metadata: dict) -> None:
         raise RuntimeError(f"corpus preflight failed: {message}")
 
 
+def corpus_validation_command(metadata: dict) -> str | None:
+    task_ids = metadata.get("task_ids", [])
+    if not task_ids:
+        return None
+    return (
+        "python3 doc-experiment/tools/validate-corpus.py "
+        + " ".join(f"--task {shlex.quote(task_id)}" for task_id in task_ids)
+    )
+
+
 def trial_args(metadata: dict) -> dict:
     subject = metadata.get("subject") or {}
     return {
@@ -117,6 +128,11 @@ def launch_manifest(metadata: dict) -> dict:
     round_name = metadata["round"]
     trials_script = EXPERIMENT_ROOT / "tools" / "trials-workflow.js"
     judges_script = EXPERIMENT_ROOT / "tools" / "judge-workflow.js"
+    preflight_commands = [
+        corpus_validation_command(metadata),
+        f"python3 doc-experiment/tools/validate-round.py {round_name}",
+        f"python3 doc-experiment/tools/workflow-args.py manifest {round_name}",
+    ]
     return {
         "round": round_name,
         "mode": metadata.get("mode"),
@@ -152,11 +168,7 @@ def launch_manifest(metadata: dict) -> dict:
             "judges": judge_args(metadata),
         },
         "commands": {
-            "preflight": [
-                f"python3 doc-experiment/tools/validate-corpus.py --split train",
-                f"python3 doc-experiment/tools/validate-round.py {round_name}",
-                f"python3 doc-experiment/tools/workflow-args.py manifest {round_name}",
-            ],
+            "preflight": [command for command in preflight_commands if command],
             "after_trials_workflow": [
                 f"python3 doc-experiment/tools/validate-workflow-output.py trials <trials-output.json> {round_name}",
                 f"python3 doc-experiment/tools/ingest-trials.py <trials-output.json> {round_name}",

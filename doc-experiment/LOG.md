@@ -92,6 +92,8 @@ must be reconciled explicitly before a runner output can be ingested again.
 `workflow-args.py` now runs `validate-corpus.py` for the exact tasks selected
 in the round metadata before emitting trial, judge, or manifest payloads, so
 the launch handoff cannot skip reference-fixture validation accidentally.
+The manifest's human-readable preflight command now mirrors that exact task
+selection instead of using a train-split shortcut.
 
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be

@@ -220,7 +220,9 @@ The manifest includes launch provenance: current git head/status, the prepared
 round metadata git head/status, and SHA-256 hashes for the bundled trial and
 judge workflow scripts. Persist the manifest or equivalent values with the
 external runner handoff so tooling-only commits can be distinguished from the
-staged rendered-doc/corpus state.
+staged rendered-doc/corpus state. Its preflight commands validate exactly the
+selected tasks recorded in round metadata; they are intentionally not split
+shortcuts such as `--split train`.
 
 For `discoverability-probe`, replace the implementation prompt with a
 question-answer prompt requiring: answer, cited markdown file/heading, and
