@@ -272,6 +272,12 @@ is under Tag Processor "Custom queries". The rendered HTML Processor
 `next_tag()` method section has neither a local cursor warning nor an
 HTML Processor first-of-several-tags idiom.
 
+Scratch A/B result: round 31's method-local `next_tag()` cursor card beat the
+fresh round-30 control (99.80 vs 99.30) on N03/T07. N03 remained perfect and
+T07 improved from 98.60 to 99.60, with all variant T07 trials using one
+forward scan rather than sequential filtered searches. Promote this as a
+source edit near `WP_HTML_Processor::next_tag()`.
+
 Risk: low-medium. Keep it generic and avoid a nested-list recipe; teach cursor
 state and first-of-several-tags search.
 

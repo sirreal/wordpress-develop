@@ -1,0 +1,71 @@
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-31/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  },
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n        if ( 'UL' !== $tag && 'OL' !== $tag ) {\n            continue;\n        }\n\n        if ( ! $processor->set_bookmark( 'first-list' ) ) {\n            return $html;\n        }\n\n        $list_depth = $processor->get_current_depth();\n        $count      = 0;\n\n        while ( $processor->next_token() ) {\n            if ( $processor->get_current_depth() < $list_depth ) {\n                break;\n            }\n\n            if (\n                'LI' === $processor->get_tag() &&\n                ! $processor->is_tag_closer() &&\n                $processor->get_current_depth() === $list_depth + 1\n            ) {\n                $count++;\n            }\n        }\n\n        $scan_finished_cleanly =\n            ! $processor->paused_at_incomplete_token() &&\n            null === $processor->get_last_error() &&\n            $processor->get_current_depth() < $list_depth;\n\n        if ( ! $scan_finished_cleanly ) {\n            $processor->release_bookmark( 'first-list' );\n            return $html;\n        }\n\n        if ( ! $processor->seek( 'first-list' ) ) {\n            $processor->release_bookmark( 'first-list' );\n            return $html;\n        }\n\n        $processor->set_attribute( 'data-item-count', (string) $count );\n        $processor->release_bookmark( 'first-list' );\n\n        return $processor->get_updated_html();\n    }\n\n    return $html;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because counting direct `LI` children is a tree-aware task. It scans forward with `next_tag()` to find the first `UL` or `OL`, stores a bookmark on that opener, walks that list’s subtree with `next_token()` and `get_current_depth()` to count only `LI` openers at exactly one level deeper than the list, verifies the scan completed cleanly with `paused_at_incomplete_token()` and `get_last_error()`, then `seek()`s back and writes the `data-item-count` via `set_attribute()` before returning `get_updated_html()`.",
+      "confidence": 91
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction add_first_list_item_count( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    $found_list = false;\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n        if ( 'UL' === $tag || 'OL' === $tag ) {\n            $found_list = true;\n            break;\n        }\n    }\n\n    if ( ! $found_list ) {\n        return $html;\n    }\n\n    if ( ! $processor->set_bookmark( 'first-list' ) ) {\n        return $html;\n    }\n\n    $list_depth = $processor->get_current_depth();\n    $count      = 0;\n\n    while ( $processor->next_token() && $processor->get_current_depth() >= $list_depth ) {\n        if (\n            'LI' === $processor->get_tag() &&\n            ! $processor->is_tag_closer() &&\n            $processor->get_current_depth() === $list_depth + 1\n        ) {\n            $count++;\n        }\n    }\n\n    $scan_finished_cleanly =\n        ! $processor->paused_at_incomplete_token() &&\n        null === $processor->get_last_error();\n\n    if ( ! $scan_finished_cleanly ) {\n        $processor->release_bookmark( 'first-list' );\n        return $html;\n    }\n\n    if ( ! $processor->seek( 'first-list' ) ) {\n        $processor->release_bookmark( 'first-list' );\n        return $html;\n    }\n\n    $processor->set_attribute( 'data-item-count', (string) $count );\n    $processor->release_bookmark( 'first-list' );\n\n    return $processor->get_updated_html();\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because counting direct `LI` children is structure-aware work. It scans forward with `next_tag()` to find the first `UL` or `OL`, bookmarks that opener with `set_bookmark()`, walks the subtree with `next_token()` using `get_current_depth()` to count only direct-child `LI` openers, rejects the change if `paused_at_incomplete_token()` or `get_last_error()` shows the list could not be fully scanned, then `seek()`s back and writes `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+      "confidence": 94
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\nfunction add_first_list_item_count( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    $found_list = false;\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n        if ( 'UL' === $tag || 'OL' === $tag ) {\n            $found_list = true;\n            break;\n        }\n    }\n\n    if ( ! $found_list ) {\n        return $html;\n    }\n\n    if ( ! $processor->set_bookmark( 'first-list' ) ) {\n        return $html;\n    }\n\n    $list_depth = $processor->get_current_depth();\n    $count      = 0;\n\n    while ( $processor->next_token() && $processor->get_current_depth() >= $list_depth ) {\n        if (\n            'LI' === $processor->get_tag() &&\n            ! $processor->is_tag_closer() &&\n            $processor->get_current_depth() === $list_depth + 1\n        ) {\n            $count++;\n        }\n    }\n\n    $scan_finished_cleanly =\n        ! $processor->paused_at_incomplete_token() &&\n        null === $processor->get_last_error();\n\n    if ( ! $scan_finished_cleanly ) {\n        $processor->release_bookmark( 'first-list' );\n        return $html;\n    }\n\n    if ( ! $processor->seek( 'first-list' ) ) {\n        $processor->release_bookmark( 'first-list' );\n        return $html;\n    }\n\n    $processor->set_attribute( 'data-item-count', (string) $count );\n    $updated_html = $processor->get_updated_html();\n    $processor->release_bookmark( 'first-list' );\n\n    return $updated_html;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because counting direct `LI` children requires tree awareness. It scans forward with `next_tag()` to find the first `UL` or `OL`, bookmarks that opener with `set_bookmark()`, walks its subtree with `next_token()` and `get_current_depth()` to count only `LI` openers at one level deeper, rejects truncated or unsupported scans via `paused_at_incomplete_token()` and `get_last_error()`, then seeks back and writes `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+      "confidence": 90
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n        if ( 'UL' !== $tag && 'OL' !== $tag ) {\n            continue;\n        }\n\n        $breadcrumbs = $processor->get_breadcrumbs();\n        $has_list_ancestor = false;\n        $last_index = count( $breadcrumbs ) - 1;\n\n        for ( $i = 0; $i < $last_index; $i++ ) {\n            if ( 'UL' === $breadcrumbs[ $i ] || 'OL' === $breadcrumbs[ $i ] ) {\n                $has_list_ancestor = true;\n                break;\n            }\n        }\n\n        if ( $has_list_ancestor ) {\n            $processor->add_class( 'nested-list' );\n        }\n    }\n\n    if ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n        return $html;\n    }\n\n    return $processor->get_updated_html();\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure. It scans forward with `next_tag()`, filters to `UL` and `OL`, inspects `get_breadcrumbs()` to see whether any ancestor in the current path is also `UL` or `OL`, and then applies `add_class( 'nested-list' )`. The final HTML comes from `get_updated_html()` so untouched bytes stay unchanged; if parsing aborts or ends on incomplete syntax, it falls back to the original input.",
+      "confidence": 88
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n\n        if ( 'UL' !== $tag && 'OL' !== $tag ) {\n            continue;\n        }\n\n        $breadcrumbs = $processor->get_breadcrumbs();\n        $is_nested   = false;\n\n        foreach ( $breadcrumbs as $index => $breadcrumb ) {\n            if ( $index === count( $breadcrumbs ) - 1 ) {\n                break;\n            }\n\n            if ( 'UL' === $breadcrumb || 'OL' === $breadcrumb ) {\n                $is_nested = true;\n                break;\n            }\n        }\n\n        if ( $is_nested ) {\n            $processor->add_class( 'nested-list' );\n        }\n    }\n\n    if ( null !== $processor->get_last_error() ) {\n        return $html;\n    }\n\n    return $processor->get_updated_html();\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because ancestor structure matters, then scans forward with `next_tag()`, checks each `UL` or `OL` opener’s `get_breadcrumbs()` for any earlier `UL` or `OL` ancestor, and applies `add_class( 'nested-list' )` only to those nested lists. The final HTML is returned with `get_updated_html()`, and if the HTML Processor aborts on unsupported markup via `get_last_error()`, the original fragment is returned unchanged.",
+      "confidence": 90
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return $html;\n    }\n\n    $open_list_depth = 0;\n\n    while ( $processor->next_tag( array( 'tag_closers' => 'visit' ) ) ) {\n        $tag = $processor->get_tag();\n\n        if ( 'UL' !== $tag && 'OL' !== $tag ) {\n            continue;\n        }\n\n        if ( $processor->is_tag_closer() ) {\n            if ( $open_list_depth > 0 ) {\n                $open_list_depth--;\n            }\n\n            continue;\n        }\n\n        if ( $open_list_depth > 0 ) {\n            $processor->add_class( 'nested-list' );\n        }\n\n        $open_list_depth++;\n    }\n\n    if ( null !== $processor->get_last_error() ) {\n        return $html;\n    }\n\n    return $processor->get_updated_html();\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure. It walks all tag openers and closers with `next_tag( array( 'tag_closers' => 'visit' ) )`, tracks the current nesting depth of `UL`/`OL` elements using `get_tag()` and `is_tag_closer()`, adds `nested-list` with `add_class()` only when another list is already open above, and returns the byte-preserving edited result with `get_updated_html()`.",
+      "confidence": 89
+    }
+  ]
+}

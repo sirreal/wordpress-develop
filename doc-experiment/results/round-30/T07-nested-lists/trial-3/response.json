@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure, not just flat tag scanning. It first does a read-only pass with `next_tag()`, `paused_at_incomplete_token()`, and `get_last_error()` so unsupported or truncated input is returned unchanged, then does a second pass, checking each `UL`/`OL` opener\u2019s `get_breadcrumbs()` and calling `add_class( 'nested-list' )` only when another `UL` or `OL` appears earlier in the breadcrumb trail; the final result comes from `get_updated_html()` for byte-preserving output outside the modified attributes.",
+  "confidence": 90
+}

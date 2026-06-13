@@ -54,6 +54,17 @@ sidecar doc-location check confirmed there is no local HTML Processor
 `next_tag()` warning and no HTML Processor first-of-several-tags idiom; the
 only OR-style idiom found is in the Tag Processor "Custom queries" section.
 
+Follow-up scratch A/B: rounds 30/31 tested a method-local
+`WP_HTML_Processor::next_tag()` card under `shadow-doc-a/b` on N03 and T07.
+The card stated that searches are cursor-relative, false does not reset the
+cursor, `tag_name` is one string or null, first-of-several tags should use one
+forward `next_tag()` scan plus `get_tag()` branching, and intentional rescans
+require a bookmark/seek or a new processor. Result: variant won cleanly,
+99.80 versus 99.30. N03 stayed 100.00 in both rounds, while T07 improved from
+98.60 to 99.60 and all variant T07 trials used a one-pass approach. This
+supports promoting the method-local cursor/OR-search card as a source
+hypothesis.
+
 ## Rounds 27/28 — ordinary-text negative example scratch A/B
 
 `round-27` was a fresh control rendered-doc round and `round-28` was a

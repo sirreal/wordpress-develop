@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the right structural processor and only documented APIs: create_fragment, next_tag, get_tag, get_breadcrumbs, add_class, get_last_error, paused_at_incomplete_token, and get_updated_html. The breadcrumb logic is canonical. Slight penalty for treating any parser error or incomplete trailing token as a reason to discard already-safe edits, which is broader than this direct opener mutation requires."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Best overall adherence. Correctly chose WP_HTML_Processor, used documented breadcrumb-based traversal, add_class for class merging, and get_updated_html for byte-preserving output. The only minor concern is the global get_last_error fallback, which would drop earlier valid edits if unsupported markup appears later."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "All API calls are documented and the final mutation logic is sound. The two-pass preflight is less idiomatic for this task: it scans the whole fragment first only to reject incomplete or aborted input, then rescans to edit. That conservative policy can discard valid edits to already-visited tags and is not required for a local class mutation."
+    }
+  ],
+  "failure_analysis": "All frozen hidden cases passed in all three trials, with no _doing_it_wrong records. The docs did well at steering subjects to WP_HTML_Processor rather than WP_HTML_Tag_Processor: the Tag Processor page explicitly says it has no tree awareness, while the HTML Processor page says to choose it when structure, containment, breadcrumbs, or implied tags matter. The get_breadcrumbs example also made it clear enough that breadcrumbs include implicit HTML/BODY and the current element, leading candidates to exclude the final breadcrumb before checking ancestors. add_class and get_updated_html were documented clearly enough to preserve existing classes and untouched bytes. The main near-miss was clean-input handling: trials 1 and 3 generalized the scan-before-edit recipe's paused_at_incomplete_token/get_last_error checks to all mutations. In probes with a valid nested list followed by a trailing incomplete tag, they returned the original HTML and dropped the valid class addition, while the reference still applied the edit. All trials also used get_last_error as a global fallback; that is defensible from the unsupported-markup warnings, but the docs do not clearly distinguish serialize/normalize failure from get_updated_html after queued lexical edits.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs docblock and Breadcrumbs guide",
+      "problem": "The docs imply, but do not emphasize, that the final breadcrumb is the currently matched node and ancestors are all preceding entries. This was understood here, but it is a common source of off-by-one ancestor checks.",
+      "suggestion": "Add an explicit contract sentence: get_breadcrumbs returns HTML, BODY, zero or more ancestors, then the current element; remove the last item when asking whether the current element has a given ancestor."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error and HTML Support unsupported-markup section",
+      "problem": "The docs warn that unsupported markup aborts processing and say output-producing methods such as serialize and normalize return null, but they do not state the recommended policy for get_updated_html after attribute/class edits already queued before the abort.",
+      "suggestion": "Document whether direct lexical edits made before an abort may be returned with get_updated_html, and contrast that with cases where callers should reject because the result depends on a complete structural scan."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token and HTML Processor scan recipes",
+      "problem": "The clean-scan warning is easy to overapply. Models treated unrelated trailing incomplete syntax as a reason to discard local edits to complete earlier tags.",
+      "suggestion": "Clarify that paused_at_incomplete_token reports unvisited trailing syntax after a drain; callers need a clean-input check only when their result depends on seeing the complete input or complete subtree."
+    },
+    {
+      "location": "HTML Processor Usage section",
+      "problem": "The examples cover breadcrumb queries, subtree scans with bookmarks, and token serialization, but there is no small example for the common pattern: mutate current tags based only on their ancestor breadcrumbs.",
+      "suggestion": "Add a generic ancestor-conditioned mutation recipe using next_tag, get_breadcrumbs, add_class, and get_updated_html, and note that bookmarks or serialize_token are only needed when scanning ahead or rewriting token streams."
+    }
+  ]
+}

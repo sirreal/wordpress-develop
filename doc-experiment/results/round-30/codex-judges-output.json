@@ -1,0 +1,100 @@
+{
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used `WP_HTML_Processor::create_fragment()` for a structure-sensitive task, then followed the documented bookmark, depth-bounded `next_token()`, clean-scan check, `seek()`, `set_attribute()`, and `get_updated_html()` pattern. Every API method called appears in the rendered docs, and execution recorded no `_doing_it_wrong` notices."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct HTML Processor and closely matched the documented 'scan a region before editing its opener' recipe. The depth guard, direct-child depth comparison, incomplete-token and parser-error checks, bookmark release, and `get_updated_html()` output path were all documented and idiomatic. No undocumented calls or misuse were recorded."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same documented pattern as trial 2: HTML Processor fragment parsing, first list bookmark, subtree walk bounded by `get_current_depth()`, direct-child `LI` counting, clean-scan rejection, seek back, attribute update, and updated HTML return. No hallucinated methods and no `_doing_it_wrong` records."
+          }
+        ],
+        "failure_analysis": "All trials passed all 11 frozen cases, so there were no failed hidden cases to attribute to documentation gaps. The docs did well in the exact areas this task needed: the HTML Processor overview says to choose `WP_HTML_Processor` when document structure matters; the 'Recipe: scan a region before editing its opener' heading gives the bookmark-walk-clean-check-seek-edit pattern; `next_token()` explains structural token walking and implicit/virtual closers; `get_current_depth()` explicitly teaches the `>=` subtree guard and warns against `>`; `paused_at_incomplete_token()` and `get_last_error()` explain truncation and unsupported-markup rejection; and `set_attribute()` plus `get_updated_html()` document overwrite semantics and how to retrieve patched markup. Near-misses were minor: the candidates had to infer the direct-child formula from depth semantics, and trial 1's extra `$closed` flag suggests some uncertainty about whether a depth-bounded walk will reliably reach the container boundary via virtual closers. Trials 2 and 3 also relied on strict `get_tag()` comparisons on all token types, which is valid because non-tag tokens return `null`, but the docs could make that scanning idiom more explicit.",
+        "doc_gaps": [
+          {
+            "location": "`WP_HTML_Processor::get_current_depth()` / `WP_HTML_Processor::next_token()` docs",
+            "problem": "The docs explain how to stay inside a subtree, but they do not explicitly state the general direct-child test: an opening element is a direct child when it is not a closer and its depth is exactly the container opener depth plus one.",
+            "suggestion": "Add a small general example for filtering or counting direct child elements of a container using recorded depth, without using this specific list-counting task."
+          },
+          {
+            "location": "Bounded-scan recipe and `paused_at_incomplete_token()` docs",
+            "problem": "The docs say to check truncation and parser errors after a scan, but the distinction between 'this subtree was scanned completely' and 'the entire input was scanned completely' is implicit.",
+            "suggestion": "Add a note that after a depth-bounded walk stops at the container's own closer, the clean-scan checks apply to what has been encountered; callers should drain to EOF only when their contract requires validating trailing markup too."
+          },
+          {
+            "location": "`WP_HTML_Processor::next_token()` virtual-closer discussion",
+            "problem": "The docs state that implicit and end-of-input closers are visited, but the practical consequence for region scans is easy to miss.",
+            "suggestion": "Add a generic malformed-but-parseable example showing that omitted end tags still produce structural closer events, while incomplete syntax still requires `paused_at_incomplete_token()` checking."
+          },
+          {
+            "location": "`WP_HTML_Processor::get_tag()` docs",
+            "problem": "Examples use `get_tag()` inside token walks, but the safe idiom for non-tag tokens is not highlighted near the method itself.",
+            "suggestion": "Clarify that `get_tag()` returns `null` on non-tag tokens, so strict string comparisons are safe, and mention that callers can additionally guard with `get_token_type() === '#tag'` when only tag tokens should be considered."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-nested-lists",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Used the right structural processor and only documented APIs: create_fragment, next_tag, get_tag, get_breadcrumbs, add_class, get_last_error, paused_at_incomplete_token, and get_updated_html. The breadcrumb logic is canonical. Slight penalty for treating any parser error or incomplete trailing token as a reason to discard already-safe edits, which is broader than this direct opener mutation requires."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Best overall adherence. Correctly chose WP_HTML_Processor, used documented breadcrumb-based traversal, add_class for class merging, and get_updated_html for byte-preserving output. The only minor concern is the global get_last_error fallback, which would drop earlier valid edits if unsupported markup appears later."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 93,
+            "hallucinated_methods": [],
+            "notes": "All API calls are documented and the final mutation logic is sound. The two-pass preflight is less idiomatic for this task: it scans the whole fragment first only to reject incomplete or aborted input, then rescans to edit. That conservative policy can discard valid edits to already-visited tags and is not required for a local class mutation."
+          }
+        ],
+        "failure_analysis": "All frozen hidden cases passed in all three trials, with no _doing_it_wrong records. The docs did well at steering subjects to WP_HTML_Processor rather than WP_HTML_Tag_Processor: the Tag Processor page explicitly says it has no tree awareness, while the HTML Processor page says to choose it when structure, containment, breadcrumbs, or implied tags matter. The get_breadcrumbs example also made it clear enough that breadcrumbs include implicit HTML/BODY and the current element, leading candidates to exclude the final breadcrumb before checking ancestors. add_class and get_updated_html were documented clearly enough to preserve existing classes and untouched bytes. The main near-miss was clean-input handling: trials 1 and 3 generalized the scan-before-edit recipe's paused_at_incomplete_token/get_last_error checks to all mutations. In probes with a valid nested list followed by a trailing incomplete tag, they returned the original HTML and dropped the valid class addition, while the reference still applied the edit. All trials also used get_last_error as a global fallback; that is defensible from the unsupported-markup warnings, but the docs do not clearly distinguish serialize/normalize failure from get_updated_html after queued lexical edits.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::get_breadcrumbs docblock and Breadcrumbs guide",
+            "problem": "The docs imply, but do not emphasize, that the final breadcrumb is the currently matched node and ancestors are all preceding entries. This was understood here, but it is a common source of off-by-one ancestor checks.",
+            "suggestion": "Add an explicit contract sentence: get_breadcrumbs returns HTML, BODY, zero or more ancestors, then the current element; remove the last item when asking whether the current element has a given ancestor."
+          },
+          {
+            "location": "WP_HTML_Processor::get_last_error and HTML Support unsupported-markup section",
+            "problem": "The docs warn that unsupported markup aborts processing and say output-producing methods such as serialize and normalize return null, but they do not state the recommended policy for get_updated_html after attribute/class edits already queued before the abort.",
+            "suggestion": "Document whether direct lexical edits made before an abort may be returned with get_updated_html, and contrast that with cases where callers should reject because the result depends on a complete structural scan."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token and HTML Processor scan recipes",
+            "problem": "The clean-scan warning is easy to overapply. Models treated unrelated trailing incomplete syntax as a reason to discard local edits to complete earlier tags.",
+            "suggestion": "Clarify that paused_at_incomplete_token reports unvisited trailing syntax after a drain; callers need a clean-input check only when their result depends on seeing the complete input or complete subtree."
+          },
+          {
+            "location": "HTML Processor Usage section",
+            "problem": "The examples cover breadcrumb queries, subtree scans with bookmarks, and token serialization, but there is no small example for the common pattern: mutate current tags based only on their ancestor breadcrumbs.",
+            "suggestion": "Add a generic ancestor-conditioned mutation recipe using next_tag, get_breadcrumbs, add_class, and get_updated_html, and note that bookmarks or serialize_token are only needed when scanning ahead or rewriting token streams."
+          }
+        ]
+      }
+    }
+  ]
+}
