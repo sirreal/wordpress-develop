@@ -297,10 +297,11 @@ It should report `judged` before aggregation. After aggregation, rerun it with
 `--require-scored`; it should report `scored` before the score is trusted.
 For metadata-backed rounds, validation also checks that staged scratch files
 still match the SHA-256 hashes recorded at preparation time and that recorded
-HTML API source digests match their recorded git ref. It also checks the
-current selected task prompts, references, and hidden tests against the corpus
-file digests recorded at preparation time. Trial artifacts are content-validated
-before a round can be considered trial-complete:
+HTML API source digests match both their recorded git ref and the current
+worktree. It also checks the current selected task prompts, references, and
+hidden tests against the corpus file digests recorded at preparation time.
+Trial artifacts are content-validated before a round can be considered
+trial-complete:
 `candidate.php` must be non-empty PHP, `response.json` must contain the
 subject explanation/confidence shape, and `execution.json` must contain the
 harness pass/total/cases shape. Persisted `judge.json` artifacts are

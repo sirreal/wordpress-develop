@@ -118,6 +118,11 @@ when it matches the current task set, subject tier, and judge tier, and when
 `validate-round.py` accepts the scored artifacts. A scored round with the wrong
 judge policy or invalid summary can no longer unblock source doc edits.
 
+Round validation now checks recorded HTML API source digests against the
+current worktree in addition to the recorded preparation ref. Tooling-only
+commits after preparation can still proceed, but any live source docblock or
+PHP behavior drift blocks launch/scoring until the round is restaged.
+
 ## Tooling hardening for current-corpus baseline
 
 Infrastructure-only follow-up, no source docblock edits and no PHP behavior

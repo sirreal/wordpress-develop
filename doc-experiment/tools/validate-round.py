@@ -104,57 +104,77 @@ def validate_source_digests(metadata: dict | None) -> list[str]:
         return []
 
     recorded = metadata["source_file_digests"]
-    ref = recorded.get("ref")
-    command = [
-        "php",
-        str(EXPERIMENT_ROOT / "tools" / "source-digests.php"),
-        "--json",
-    ]
-    if ref and ref != "working-tree":
-        command.extend(["--ref", ref])
-
-    proc = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        message = (proc.stderr or proc.stdout).strip()
-        return [f"source digest verification failed: {message}"]
-
-    actual = json.loads(proc.stdout)
     errors = []
-    if recorded.get("algorithm") != actual.get("algorithm"):
-        errors.append(
-            "source digest algorithm mismatch: "
-            f"expected {recorded.get('algorithm')}, got {actual.get('algorithm')}"
+
+    def read_source_digests(ref: str | None = None) -> tuple[dict | None, list[str]]:
+        command = [
+            "php",
+            str(EXPERIMENT_ROOT / "tools" / "source-digests.php"),
+            "--json",
+        ]
+        if ref and ref != "working-tree":
+            command.extend(["--ref", ref])
+
+        proc = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
         )
+        if proc.returncode != 0:
+            message = (proc.stderr or proc.stdout).strip()
+            return None, [f"source digest verification failed: {message}"]
+        return json.loads(proc.stdout), []
 
-    recorded_files = recorded.get("files", {})
-    actual_files = actual.get("files", {})
-    missing = sorted(set(recorded_files) - set(actual_files))
-    unexpected = sorted(set(actual_files) - set(recorded_files))
-    if missing:
-        errors.append("source digest missing files: " + ", ".join(missing))
-    if unexpected:
-        errors.append("source digest unexpected files: " + ", ".join(unexpected))
+    def compare_source_digests(actual: dict, context: str) -> list[str]:
+        comparison_errors = []
+        if recorded.get("algorithm") != actual.get("algorithm"):
+            comparison_errors.append(
+                f"{context} source digest algorithm mismatch: "
+                f"expected {recorded.get('algorithm')}, got {actual.get('algorithm')}"
+            )
 
-    for file, recorded_digests in sorted(recorded_files.items()):
-        actual_digests = actual_files.get(file)
-        if not actual_digests:
-            continue
-        for key in (
-            "source_sha256",
-            "php_without_comments_sha256",
-            "php_without_comments_token_count",
-        ):
-            if recorded_digests.get(key) != actual_digests.get(key):
-                errors.append(
-                    f"source digest mismatch for {file} {key}: "
-                    f"expected {recorded_digests.get(key)}, got {actual_digests.get(key)}"
-                )
+        recorded_files = recorded.get("files", {})
+        actual_files = actual.get("files", {})
+        missing = sorted(set(recorded_files) - set(actual_files))
+        unexpected = sorted(set(actual_files) - set(recorded_files))
+        if missing:
+            comparison_errors.append(
+                f"{context} source digest missing files: " + ", ".join(missing)
+            )
+        if unexpected:
+            comparison_errors.append(
+                f"{context} source digest unexpected files: " + ", ".join(unexpected)
+            )
+
+        for file, recorded_digests in sorted(recorded_files.items()):
+            actual_digests = actual_files.get(file)
+            if not actual_digests:
+                continue
+            for key in (
+                "source_sha256",
+                "php_without_comments_sha256",
+                "php_without_comments_token_count",
+            ):
+                if recorded_digests.get(key) != actual_digests.get(key):
+                    comparison_errors.append(
+                        f"{context} source digest mismatch for {file} {key}: "
+                        f"expected {recorded_digests.get(key)}, got {actual_digests.get(key)}"
+                    )
+        return comparison_errors
+
+    ref = recorded.get("ref")
+    if ref and ref != "working-tree":
+        ref_digests, ref_errors = read_source_digests(ref)
+        errors.extend(ref_errors)
+        if ref_digests:
+            errors.extend(compare_source_digests(ref_digests, f"recorded ref {ref}"))
+
+    current_digests, current_errors = read_source_digests()
+    errors.extend(current_errors)
+    if current_digests:
+        errors.extend(compare_source_digests(current_digests, "current worktree"))
     return errors
 
 

@@ -82,9 +82,9 @@ python3 render-docs-markdown.py \
   their hidden `tests.json` fixtures and reports harness signal warnings.
 - `tools/validate-round.py` — reports whether a round is prepared, partially
   trialed, trial-complete, judged, or scored, verifies recorded scratch hashes,
-  verifies recorded source and corpus digests, validates trial and judge
-  artifact contents, recomputes metadata-backed scored summaries, and lists
-  missing artifacts.
+  verifies recorded source and corpus digests against the current worktree,
+  validates trial and judge artifact contents, recomputes metadata-backed
+  scored summaries, and lists missing artifacts.
 - `tools/workflow-args.py` — emits trials or judges workflow JSON from
   `round-metadata.json` so model policy and task IDs are not transcribed by
   hand; it checks scratch isolation and hashes before emitting launch args, and
