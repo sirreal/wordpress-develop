@@ -2,6 +2,42 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 61 — citation probes find facts discoverable
+
+`round-61` staged current rendered source docs under `discoverability-probe`
+with subjects `gpt-5.4-mini` / `low` / `priority`. No source docblocks,
+scratch docs, corpus fixtures, or scoring harness behavior changed.
+
+Four citation-only probes ran against the method-local contracts surfaced by
+rounds 58-60:
+
+- `next-tag-boundary-detector`: 3/3 subjects answered that plain `next_tag()`
+  is not the subtree-boundary traversal and cited `next_token()`,
+  `get_current_depth()`, and `next_tag()` headings.
+- `bounded-region-completion-scope`: 3/3 subjects answered that the docs do
+  not require draining to EOF after a bounded region scan just to find unrelated
+  trailing malformed input. Subjects also noted that a more explicit
+  trailing-suffix sentence is missing.
+- `breadcrumbs-ancestor-check`: 3/3 subjects answered that breadcrumbs include
+  the current node and that breadcrumb queries are DOM path/sub-path checks, not
+  arbitrary ancestor-set checks. Subjects inferred slicing off the current node,
+  but noted the docs do not show that exact ancestor-only idiom.
+- `html-processor-factory-lifecycle`: 3/3 subjects answered that callers should
+  use `create_fragment()` or `create_full_parser()` and should not instantiate
+  `WP_HTML_Processor` directly. The docs do not spell out a runtime consequence
+  beyond the do-not-use constructor warning.
+
+Interpretation: do not promote a traversal or factory source edit from these
+signals. The facts are discoverable when weak subjects are asked directly, and
+two transfer-oriented traversal A/B variants already lost. The remaining gaps
+are placement/transfer or task-reasoning issues, not clear missing contracts.
+
+Next action: stop the traversal/factory diagnostic line unless a future trusted
+scored train round repeats one of these failures. Before any source docblock
+edit, re-analyze trusted full-round train evidence for a separate non-traversal
+hypothesis; if no non-held-out, non-noise train pattern remains, pause per the
+protocol's signal-exhaustion rule rather than adding speculative prose.
+
 ## Round 60 — bounded-loop scratch A/B also loses
 
 `round-60` was a second scratch-only HTML Processor rendered-doc variant for

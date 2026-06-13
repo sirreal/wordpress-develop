@@ -11,20 +11,20 @@ from discoverability gaps.
 Latest update: rounds 58/59 and 60 tested two weak-tier traversal-boundary
 scratch A/B variants against the round-58 control. Both lost: the compact
 closer card scored 90.74 vs 97.35, and the full bounded-loop/regional
-completion recipe scored 90.18 vs 97.35. Do not promote either traversal
-variant. Round 60 moved N03 only 93.66 -> 94.26 while causing a T08
-state-machine collapse, so more generic class-level traversal prose is not
-currently justified.
+completion recipe scored 90.18 vs 97.35. Round 61 then ran citation-only
+probes on current source docs for the remaining method-local contracts:
+plain `next_tag()` is not a subtree-boundary detector, bounded-region
+completion does not require EOF draining for unrelated suffix markup,
+breadcrumbs include the current node and breadcrumb queries are DOM sub-paths,
+and `WP_HTML_Processor` should be created through `create_fragment()` or
+`create_full_parser()`. All probes passed 3/3 at `gpt-5.4-mini` / `low`.
 
-Next action: prepare a `discoverability-probe` round on current source docs
-with subjects `gpt-5.4-mini` / `low` / `priority` and citation-only questions
-for the remaining method-local contracts: plain `next_tag()` is not a
-subtree-boundary detector unless closers are visited; completion checks after a
-bounded region scan should not force an EOF drain for unrelated suffix markup
-unless whole-document completeness is required; and breadcrumbs include the
-current node, so ancestor checks should slice it off. Treat `seek()` unknown
-bookmark behavior as a separate candidate unless it repeats outside the losing
-round-59 sample.
+Do not promote either traversal variant, and do not promote a constructor or
+breadcrumbs source edit from these probes alone. The facts are discoverable
+when asked directly, and the transfer-oriented A/B variants lost. Next action:
+re-analyze trusted full-round train evidence for a separate non-traversal
+hypothesis. If no non-held-out, non-noise train pattern remains, pause under
+the signal-exhaustion rule instead of adding speculative prose.
 
 Round 17 was a no-edit hold round on the previous active corpus and scored
 98.93 on train. After that hold round, several active tasks were intentionally

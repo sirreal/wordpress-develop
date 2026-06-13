@@ -1,0 +1,119 @@
+{
+  "round": "round-61",
+  "mode": "discoverability-probe",
+  "question_id": "next-tag-boundary-detector",
+  "question": "When scanning only the subtree or bounded region of the element currently matched by WP_HTML_Processor::next_tag(), can code use a plain next_tag() loop plus get_current_depth() to know when that element ends? If not, which documented traversal should be used and why? Cite the rendered documentation headings that support the answer.",
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-61/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "next-tag-boundary-detector",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "No. A plain `next_tag()` loop is not the documented way to bound a scan to the matched element’s subtree, and `get_current_depth()` is documented as a depth measure for a `next_token()` walk, not as a substitute for tree-aware traversal. Use `WP_HTML_Processor::next_token()` with a recorded opener depth and stop when `get_current_depth() < opener_depth`, or use breadcrumbs for the same boundary check. The docs also say `next_token()` does not stop when the element matched by an earlier `next_tag()` ends, so you must add an explicit depth or breadcrumb guard.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "### `next_token()`",
+            "support": "“Use this method instead of … next_tag when text and other non-tag content matters… at every visited token, `get_breadcrumbs` and `get_current_depth` describe where in the document tree that token lives.” “Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `get_current_depth()`",
+            "support": "“This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value.” “The `>=` comparison is what makes this loop correct…”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `next_tag()`",
+            "support": "“Searches start at the current cursor position and move forward. If `next_tag()` returns false, it did not find a later matching tag; it does not rewind the processor…” and the query contract only mentions tag closers, not subtree boundary tracking."
+          }
+        ],
+        "rationale": "The HTML Processor docs explicitly define subtree walks in terms of `next_token()` plus a stored opener depth or breadcrumbs, and they state that `next_token()` must be guarded because it does not stop at the end of an earlier `next_tag()` match.",
+        "confidence": 98
+      }
+    },
+    {
+      "id": "next-tag-boundary-detector",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "No. `WP_HTML_Tag_Processor::next_tag()` is a linear scan with no tree awareness, so it does not know when the matched element ends, and `get_current_depth()` is not part of this class. For a subtree or bounded-region walk, use `WP_HTML_Processor::next_token()` with a recorded opener depth and continue while `get_current_depth() >= $depth` (or use a breadcrumb guard). The docs say this is the reliable way to visit every token inside an element, and that `next_token()` does not stop when an earlier `next_tag()` match ends.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Which processor should I use?",
+            "support": "The Tag Processor scans a document linearly and has NO awareness of the document tree: it provides no nesting depth, no ancestor information, and no guarantee that every opener is paired with a closer. Methods like `get_current_depth()` and `get_breadcrumbs()` do not exist on this class."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_tag()",
+            "support": "Finds the next tag matching the $query. ... `next_tag()` will return `true` ... If it returns `false`, however, it failed to find the tag and moved the cursor to the end of the file."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Use this method instead of `WP_HTML_Processor::next_tag` when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure... Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_current_depth()",
+            "support": "This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value... The `>=` comparison is what makes this loop correct at any nesting depth."
+          }
+        ],
+        "rationale": "The Tag Processor docs explicitly deny tree awareness and depth, while the HTML Processor docs give the documented subtree-walk pattern: record opener depth and stop when `get_current_depth()` drops below it, or guard with breadcrumbs.",
+        "confidence": 99
+      }
+    },
+    {
+      "id": "next-tag-boundary-detector",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "No. A plain `next_tag()` loop does not tell you when the matched element’s subtree ends, and `next_tag()` itself only stops on tags. The documented traversal for bounded subtree scanning is `WP_HTML_Processor::next_token()` with a depth guard based on `get_current_depth()` recorded at the opener, continuing while the current depth is `>=` that opener depth. The docs also note that `next_token()` does not stop when an earlier `next_tag()` match ends; if you need a structural boundary, use a depth- or breadcrumb-bounded token walk instead.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“Use this method instead of … `next_tag` when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure” and “Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "“This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value.” It also says the boundary is structural and that `>=` is required."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_tag()`",
+            "support": "The query for `next_tag()` is tag-based: it “Finds the next tag matching the $query,” and its contract only describes visiting tags, not walking a subtree or detecting the end of the matched element."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Which processor should I use?",
+            "support": "The Tag Processor “has NO awareness of the document tree: it provides no nesting depth, no ancestor information,” while the HTML Processor is for situations where structure matters."
+          }
+        ],
+        "rationale": "The docs explicitly say `next_token()` must be depth- or breadcrumb-bounded to scan a subtree, and that unguarded `next_token()` does not stop at the end of a prior `next_tag()` match; `next_tag()` alone is only a tag search, not a structural traversal.",
+        "confidence": 98
+      }
+    }
+  ]
+}
