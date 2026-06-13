@@ -63,6 +63,14 @@ Tag Processor token-walk example competed with the HTML Processor
 text-content guidance. This makes the Tag Processor lexical-text boundary the
 best next source hypothesis.
 
+A round-22 citation-only probe confirmed that this is placement/transfer
+rather than a missing fact: all three `gpt-5.4` / `medium` subjects correctly
+selected `WP_HTML_Processor::create_fragment()` for parsed BODY-fragment
+text-content extraction when asked directly, and cited both the Tag Processor
+lexical sections and the HTML Processor text recipe. Promote only a short
+contrast near the Tag Processor text example, not another broad HTML Processor
+recipe.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -228,6 +236,11 @@ text recipe did not change this; judges identified the Tag Processor
 "Tokens and finer-grained processing" example as the stronger entry point.
 Round 22 reproduced the same T05 behavior at `gpt-5.4` / `medium`, so the
 signal is no longer only low-effort noise.
+
+Round-22 probe result: direct citation-only questioning passed 3/3 at
+`gpt-5.4` / `medium`. Subjects found the processor boundary when prompted,
+so the source hypothesis should improve transfer at the Tag Processor example
+itself rather than add more facts elsewhere.
 
 Risk: low-medium. Avoid saying the Tag Processor cannot read text; it can read
 lexical token text. The distinction is parsed fragment/DOM semantics versus

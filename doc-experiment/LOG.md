@@ -22,6 +22,18 @@ text example as competing with the processor-selection guidance that parsed
 BODY-fragment text content belongs on `WP_HTML_Processor::create_fragment()`.
 This is now present at both `gpt-5.4` / `low` and `gpt-5.4` / `medium`.
 
+Follow-up citation-only probe: `round-22-tag-vs-html-text-boundary` asked
+three `gpt-5.4` / `medium` subjects to choose between the Tag Processor
+`next_token()` text example and `WP_HTML_Processor::create_fragment()` for
+parsed BODY-fragment text-content extraction. All three chose
+`create_fragment()`, cited the Tag Processor "Which processor should I use?",
+"Tokens and finer-grained processing", and `get_modifiable_text()` sections,
+and cited the HTML Processor DOM-style text recipe, `create_fragment()`, and
+`next_token()` sections. Interpretation: the boundary facts are discoverable
+when asked directly. The remaining failure mode is transfer/placement: task
+agents enter through the Tag Processor text example and do not carry the
+processor-choice contrast into implementation.
+
 Next action: a narrow Tag Processor source hypothesis is justified before
 more broad recipe prose. Clarify that the Tag Processor `next_token()` text
 example is lexical token processing, not parsed fragment text-content
