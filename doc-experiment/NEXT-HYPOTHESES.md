@@ -144,15 +144,15 @@ confirmed it as a source edit. The method-local `WP_HTML_Processor::next_tag()`
 card raised train from 98.31 to 99.67, recovered T07 from 81.13 to 99.30, and
 kept N03 perfect. Treat the cursor/OR-search gap as resolved for now.
 
-The next action should be a checkpoint/regression sentinel before another
-source edit. If held-out stays stable, the best train-backed diagnostics are
-generic but still need an evidence gate before source promotion: a compact
-depth-boundary/direct-child recipe, a factory and token-serialization fallback
-contract, or a method-local text policy clarification around the remaining
-special-element over-inclusion signal. The user-suggested "generic recipes in
-the main class documentation" direction fits this diagnostic path, but should
-win a focused probe or scratch A/B before another broad class-level source
-edit.
+The next audited action is diagnostic, not a direct source edit. The best
+train-backed diagnostics are generic but still need an evidence gate before
+source promotion: a compact depth-boundary/direct-child recipe, a factory and
+token-serialization fallback contract, or a method-local text policy
+clarification around the remaining special-element over-inclusion signal. The
+user-suggested "generic recipes in the main class documentation" direction
+fits this path, but should win a focused probe or scratch A/B before another
+broad class-level source edit. If a diagnostic wins, check the held-out
+checkpoint cadence before promoting the next source edit.
 
 Historical round-17 judge gaps had mostly reduced to these shapes:
 

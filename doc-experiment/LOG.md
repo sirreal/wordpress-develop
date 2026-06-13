@@ -29,13 +29,12 @@ implementations. T09 and T12 were strong, but judges still noted inconsistent
 fallback policy for token-serialization helpers that promise normalized
 output.
 
-Decision: keep `19a49c1479`. Before another source docblock edit, run a
-checkpoint/regression sentinel because this source edit has only train scoring
-so far and held-out must stay protected. The suggested generic recipe
-direction remains plausible, but should be tested by checkpoint-supported
-train evidence, a discoverability probe, or a scratch rendered-doc A/B before
-source promotion; do not directly add broad class-level recipe prose from
-round-32 judge suggestions alone.
+Decision: keep `19a49c1479`. The suggested generic recipe direction remains
+plausible, but should be tested by a discoverability probe or scratch
+rendered-doc A/B before source promotion; do not directly add broad
+class-level recipe prose from round-32 judge suggestions alone. If such a
+diagnostic wins, check the held-out checkpoint cadence before promoting the
+next source docblock edit.
 
 ## Round 29 — ordinary subtree text policy source edit is mixed
 
