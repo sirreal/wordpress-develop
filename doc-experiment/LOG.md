@@ -85,6 +85,10 @@ round metadata provenance, plus SHA-256 hashes for the trial and judge workflow
 scripts. This avoids treating metadata's staged content ref as the workflow
 execution ref after tooling-only commits.
 
+Trial and judge ingestion now refuse to overwrite persisted artifacts. Existing
+trial files, `subject-isolation.json`, `judge.json`, or `round-summary.json`
+must be reconciled explicitly before a runner output can be ingested again.
+
 Tightened judge workflow preflight and schema hints so malformed judge verdicts
 cannot be persisted: trial notes, failure analysis, and doc-gap fields must be
 non-empty strings, and hallucinated method entries must be strings.

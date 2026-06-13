@@ -44,6 +44,13 @@ def main() -> int:
     trials = payload["result"]
     subject_isolation = payload["subject_isolation"]
     results_dir.mkdir(parents=True, exist_ok=True)
+    subject_isolation_file = results_dir / "subject-isolation.json"
+    if subject_isolation_file.exists():
+        print(
+            f"ingest-trials.py: refusing to overwrite {subject_isolation_file}",
+            file=sys.stderr,
+        )
+        return 1
 
     proc = subprocess.run(
         ["python3", str(EXPERIMENT_ROOT / "tools" / "persist-trials.py"), str(results_dir)],
@@ -56,7 +63,7 @@ def main() -> int:
         print(proc.stderr, file=sys.stderr)
         return proc.returncode
 
-    (results_dir / "subject-isolation.json").write_text(
+    subject_isolation_file.write_text(
         json.dumps(subject_isolation, indent=2, ensure_ascii=False) + "\n"
     )
 

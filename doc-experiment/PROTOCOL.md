@@ -357,6 +357,11 @@ missing trial executions, or mismatched task sets. For metadata-backed scored
 rounds, `validate-round.py --require-scored` recomputes the aggregate and
 rejects a `round-summary.json` that no longer matches the persisted trial
 executions, judge verdicts, metadata, and current corpus labels.
+Trial and judge ingestion refuse to overwrite existing trial directories,
+`subject-isolation.json`, `judge.json`, or `round-summary.json`. If an ingest
+must be retried after a failed or invalid runner output, first record the
+reconciliation in `LOG.md`, remove or quarantine the invalid artifacts
+deliberately, and then rerun ingestion.
 
 ```sh
 python3 doc-experiment/tools/aggregate-round.py doc-experiment/results/round-NN

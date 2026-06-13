@@ -42,6 +42,27 @@ def validate_verdicts(results_dir: Path, verdicts: list[dict]) -> list[str]:
     return errors
 
 
+def validate_no_existing_artifacts(results_dir: Path, verdicts: list[dict]) -> list[str]:
+    existing = []
+    summary_file = results_dir / "round-summary.json"
+    if summary_file.exists():
+        existing.append(str(summary_file))
+
+    for entry in verdicts:
+        task_id = entry.get("id")
+        judge_file = results_dir / str(task_id) / "judge.json"
+        if judge_file.exists():
+            existing.append(str(judge_file))
+
+    if not existing:
+        return []
+    return [
+        "refusing to overwrite existing judge artifacts: "
+        + ", ".join(existing[:12])
+        + (f", ... and {len(existing) - 12} more" if len(existing) > 12 else "")
+    ]
+
+
 def main() -> int:
     output_file, round_name = sys.argv[1], sys.argv[2]
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
@@ -64,7 +85,10 @@ def main() -> int:
         return validate_output.returncode
 
     verdicts = json.load(open(output_file))["result"]
-    errors = validate_verdicts(results_dir, verdicts)
+    errors = [
+        *validate_verdicts(results_dir, verdicts),
+        *validate_no_existing_artifacts(results_dir, verdicts),
+    ]
     if errors:
         for error in errors:
             print(f"ingest-judges.py: {error}", file=sys.stderr)

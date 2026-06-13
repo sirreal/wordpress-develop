@@ -94,6 +94,23 @@ def validate_against_metadata(results_dir: Path, trials: list[dict]) -> list[str
     return errors
 
 
+def validate_no_existing_artifacts(results_dir: Path, trials: list[dict]) -> list[str]:
+    errors = []
+    for entry in trials:
+        task_id = entry.get("id")
+        trial = entry.get("trial")
+        trial_dir = results_dir / str(task_id) / f"trial-{trial}"
+        if not trial_dir.exists():
+            continue
+        existing = [path.name for path in trial_dir.iterdir()]
+        if existing:
+            errors.append(
+                f"{task_id}/trial-{trial}: refusing to overwrite existing trial artifacts "
+                f"in {trial_dir}"
+            )
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: persist-trials.py <results-dir> < trials.json", file=sys.stderr)
@@ -104,6 +121,7 @@ def main() -> int:
     errors = [
         *validate_trial_payloads(trials),
         *validate_against_metadata(results_dir, trials),
+        *validate_no_existing_artifacts(results_dir, trials),
     ]
     if errors:
         for error in errors:
