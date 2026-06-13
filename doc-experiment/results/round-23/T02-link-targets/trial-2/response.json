@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, byte-preserving attribute edit pass: construct it with the input HTML, iterate all `A` tags via `next_tag( 'A' )`, detect whether `href` is present with `get_attribute( 'href' ) !== null` (which correctly treats empty-string and boolean attributes as present per the docs), overwrite or add `target` with `set_attribute( 'target', '_blank' )`, and return the result with `get_updated_html()`.",
+  "confidence": 96
+}

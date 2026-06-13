@@ -71,6 +71,20 @@ lexical sections and the HTML Processor text recipe. Promote only a short
 contrast near the Tag Processor text example, not another broad HTML Processor
 recipe.
 
+Round 23 confirmed that source hypothesis. The narrow Tag Processor placement
+edit moved T05 from 96.70 to 99.20, and all three subjects chose
+`WP_HTML_Processor::create_fragment()` for the parsed BODY-fragment text task.
+All hidden tests passed across the round, with train 99.50 / core 99.42.
+Treat the lexical-text boundary as resolved for now.
+
+The next text signal is the extraction policy boundary inside the HTML
+Processor docs: ordinary subtree text means `#text` tokens by default;
+TITLE/TEXTAREA/SCRIPT/STYLE opener-token modifiable text is an explicit
+caller opt-in; and read-only text walks need a caller policy for
+`get_last_error()` or `paused_at_incomplete_token()` rather than automatically
+discarding already collected text. Round-23 T03, N06, and T05 judge notes all
+pointed at this shape.
+
 Historical round-17 judge gaps had mostly reduced to these shapes:
 
 - The fact exists, but is too far from the method heading readers enter
@@ -221,9 +235,16 @@ Before adding more text recipes, clarify the Tag Processor text-walk example
 as lexical token processing and point BODY-fragment text-content callers to
 `WP_HTML_Processor::create_fragment()`.
 
+Round-23 result: the Tag Processor placement edit fixed the processor-choice
+part of this hypothesis for T05. The remaining text evidence is narrower:
+subjects can still over-include special element opener text in ordinary
+heading/subtree extraction, and may reject all read-only text collected before
+an unsupported parser abort. Promote a future source edit here only after a
+checkpoint or focused probe confirms this is still the best next train signal.
+
 Risk: medium-low if phrased as a token model instead of a task recipe.
 
-### 3a. Tag Processor lexical-text boundary
+### 3a. Tag Processor lexical-text boundary — confirmed in round 23
 
 Core idea: the Tag Processor docs contain a useful `next_token()` text example
 that is lexical, not parsed-tree textContent. Label it that way and
@@ -241,6 +262,11 @@ Round-22 probe result: direct citation-only questioning passed 3/3 at
 `gpt-5.4` / `medium`. Subjects found the processor boundary when prompted,
 so the source hypothesis should improve transfer at the Tag Processor example
 itself rather than add more facts elsewhere.
+
+Round-23 result: confirmed. T05 improved from 96.70 to 99.20, and all three
+subjects chose `WP_HTML_Processor::create_fragment()` for parsed fragment text
+extraction. Do not keep spending source-edit budget here unless a future tier
+or checkpoint exposes a new variant.
 
 Risk: low-medium. Avoid saying the Tag Processor cannot read text; it can read
 lexical token text. The distinction is parsed fragment/DOM semantics versus

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, position-based edit that preserves the original HTML bytes except for the changed tag. It scans forward with `next_tag( 'h2' )`, reuses a single bookmark via `set_bookmark()` to remember the last matched `H2`, seeks back to that bookmark with `seek()`, adds the `final-section` class with `add_class()`, and returns the modified document with `get_updated_html()`.",
+  "confidence": 97
+}

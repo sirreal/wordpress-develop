@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, emits the normalized serialization token-by-token with `serialize_token()`, and wraps only ordinary HTML `#text` tokens whose decoded text from `get_modifiable_text()` contains the case-sensitive keyword. Special text-bearing elements such as `script`, `style`, `title`, and `textarea` are skipped naturally because their contents are not exposed as child `#text` tokens by the documented API.",
+  "confidence": 87
+}

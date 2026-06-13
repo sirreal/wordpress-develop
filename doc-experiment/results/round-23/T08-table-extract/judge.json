@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path, all called methods are documented, and the implementation follows the documented single `next_token()` walk with a depth boundary and closer-driven row/cell flushing. It also uses decoded `get_modifiable_text()`. Minor reservation: it includes a broad special-element text list and does not check `paused_at_incomplete_token()`, though neither hurt the tested contract."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and only documented methods: `create_fragment`, `next_tag`, `next_token`, `get_current_depth`, `get_token_type`, `get_tag`, `is_tag_closer`, `get_modifiable_text`, and `get_last_error`. The traversal is idiomatic and matches the docs' one-cursor repeated-region pattern. Same minor incomplete-input reservation as trial-1."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API usage throughout. The depth-based closer checks reflect the documented rule that closers report parent depth, and the single token loop handles implied/virtual table structure. Slightly lower because it omits any `get_last_error()` or incomplete-token policy, leaving unsupported-parser abort behavior unspecified."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The rendered docs did well on the core hazards for this task: they clearly steer structural work to `WP_HTML_Processor`, explain that `next_token()` visits implied table structure such as synthesized `TBODY`, warn that there is only one cursor, document virtual closers for malformed/omitted end tags, and emphasize `get_current_depth() >= recorded_depth` for subtree walks. The `get_modifiable_text()` documentation also made entity decoding clear, preventing raw `&amp;` output. Near-misses were around policy rather than tested behavior: candidates improvised different handling for special raw-text/RCDATA elements inside cells, and incomplete/unsupported input handling varied. Those ambiguities did not affect the hidden cases, but they could produce inconsistent behavior on broader extraction tasks.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: `next_token()` and \"Recipe: collect DOM-style text from a subtree\"",
+      "problem": "The docs say to append ordinary `#text` tokens unless the caller intentionally wants special element text, but they do not define a clear policy distinction between DOM `textContent`, visible/user text, and special raw-text/RCDATA element contents. Candidates therefore made different special-element inclusion choices.",
+      "suggestion": "Add a general text-extraction policy note: define what a `#text`-only subtree walk includes, when to also read opening-token modifiable text for `SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`, and legacy raw-text elements, and how that differs from visible-text extraction."
+    },
+    {
+      "location": "html-tag-processor.md / html-processor.md: special element and `get_modifiable_text()` sections",
+      "problem": "The special-element lists are not perfectly harmonized across sections, including naming differences such as `NOFRAMES`/`NOFRAME` and varying mentions of `NOSCRIPT`, `IFRAME`, and `XMP`. This encourages partial or inconsistent copied lists.",
+      "suggestion": "Centralize or cross-reference one canonical list of tokens that can carry element-level modifiable text, with a short note for each on decoded versus raw return semantics and whether non-empty text is possible."
+    },
+    {
+      "location": "html-processor.md: `next_token()`, `get_current_depth()`, and `serialize_token()` incomplete-input notes",
+      "problem": "Incomplete and unsupported input guidance is present but scattered and mostly framed around mutation or serialization. For read-only extraction, it is unclear whether callers should return best-effort parsed output, reject, or treat `paused_at_incomplete_token()` differently from `get_last_error()`.",
+      "suggestion": "Add a compact decision table for read-only scans, mutations, and rewrites: omitted optional closers are handled structurally by virtual closers; `paused_at_incomplete_token()` means the byte stream ended mid-token; `get_last_error()` means parser support stopped; callers should choose and document best-effort versus reject behavior."
+    }
+  ]
+}

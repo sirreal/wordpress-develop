@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walks tags with `next_tag()`. For each `UL` or `OL`, it inspects `get_breadcrumbs()` and adds `nested-list` with `add_class()` only when an earlier breadcrumb is also `UL` or `OL`, then returns the byte-preserving edited result with `get_updated_html()`.",
+  "confidence": 86
+}

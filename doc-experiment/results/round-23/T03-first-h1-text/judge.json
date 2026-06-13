@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), found H1 with next_tag(), bounded a token walk by get_current_depth(), and used #text plus get_modifiable_text() for decoded text. All called methods are documented and execution recorded no _doing_it_wrong. Deduction: it also calls get_modifiable_text() on every opening #tag, which the text-extraction recipe warns against because special element tokens can carry non-ordinary text."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Strong API use: HTML Processor, depth-bounded next_token() walk, #text filtering, decoded get_modifiable_text(), and no undocumented calls. Deduction: it opts special elements SCRIPT/STYLE/TITLE/TEXTAREA into the H1 text result. That behavior is documented as possible, but the canonical pattern for this task collects ordinary #text tokens only."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented subtree-text recipe and the canonical implementation: create_fragment(), next_tag('H1'), record depth, walk with next_token() while depth >= opener depth, append only #text get_modifiable_text(). Handles no-H1, empty H1 content, decoded entities, nesting, and unclosed input without API misuse."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in execution.json: all three trials passed 8/8. The docs did well on the core path: the HTML Processor overview says to choose it for structure and collecting element text; the “collect DOM-style text from a subtree” recipe gives the exact create_fragment + next_tag + get_current_depth + next_token + #text + get_modifiable_text pattern; next_token/get_current_depth docs explain virtual closers, unclosed input, and why the loop guard must be >=; get_modifiable_text documents decoded #text output. The only near-miss is special element text. Trials 1 and 2 both inferred that SCRIPT/STYLE/TITLE/TEXTAREA opener modifiable text should be included inside the H1. A probe confirms the canonical/reference pattern returns only ordinary text for such input, while trials 1 and 2 would include special-element contents, with SCRIPT/STYLE raw text left undecoded. This likely comes from the special-element note being adjacent to the subtree-text recipe without a crisp decision rule for when “text content” means ordinary #text descendants versus all API modifiable text carriers.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, “Recipe: collect DOM-style text from a subtree” and WP_HTML_Processor::next_token() special-element note",
+      "problem": "The docs correctly say to append only #text tokens, then immediately explain how to read SCRIPT/STYLE/TITLE/TEXTAREA opener text. Models treated that opt-in note as part of general text-content extraction.",
+      "suggestion": "Add a short decision rule: ordinary DOM-style subtree text uses only #text tokens; special-element opener text is an explicit opt-in for callers that want raw/RCDATA contents, and it should not be mixed into generic text extraction by default."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / inherited WP_HTML_Processor method docs",
+      "problem": "Because get_modifiable_text() returns an empty string on tokens with no modifiable text, broad calls on every opening tag look harmless but silently include special-element token text when present.",
+      "suggestion": "State that ordinary container tags such as H1, DIV, SPAN, and EM do not own their child text. Recommend checking get_token_type() === '#text' first for subtree text, and checking named special-element openers only when deliberately including those contents."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() subtree-walk examples",
+      "problem": "The examples show the right loop, but the empty-subtree/null distinction is implicit. This task showed the docs were good enough, but a general text extraction contract would make the edge behavior harder to miss.",
+      "suggestion": "Add a compact checklist for subtree text extraction: return null only when the container is not found; initialize collected text to ''; empty elements therefore produce ''; use >= depth bounds; get_modifiable_text() on #text is already decoded UTF-8."
+    }
+  ]
+}

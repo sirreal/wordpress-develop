@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 23 — Tag Processor lexical-text boundary confirmed
+
+**Train 99.50 / core 99.42** under `scored-train`, with subjects
+`gpt-5.4` / `medium` / `priority` and judge `gpt-5.5` / `xhigh` /
+`priority`. This scored commit `f7c83bfb6b`: a narrow Tag Processor class-doc
+placement edit before the `next_token()` text example, labeling it as lexical
+token processing and pointing parsed BODY-fragment text extraction to
+`WP_HTML_Processor::create_fragment()` plus HTML Processor subtree text walks.
+
+Outcome: confirmed, with no functional regressions. All 45 subject trials
+passed all hidden tests. Round score moved from the comparable round-22
+current-docs medium baseline 99.45 to 99.50 (+0.05), and core moved from
+99.36 to 99.42 (+0.06). Concept means: attributes 99.87, classes 100.00,
+normalization 100.00, serialization 99.15, text 99.07, traversal 99.48.
+
+The target task moved strongly: T05-text-excerpt improved from 96.70 to 99.20.
+All three T05 trials now chose `WP_HTML_Processor::create_fragment()`, filtered
+ordinary `#text`, and handled TITLE/TEXTAREA opener text intentionally. This
+resolves the repeated round-20/21/22 failure where subjects copied the Tag
+Processor lexical token walk as if it were the parsed fragment text-content
+recipe.
+
+Residual signal is now different. T03 fell from 100.00 to 98.40 and N06 stayed
+at 99.00 because some subjects over-included special-element opener modifiable
+text in ordinary heading/subtree text. Judges also noted T05 trials 1 and 3
+used an all-or-nothing `get_last_error()` fallback for a read-only text walk,
+discarding text collected before an unsupported parser abort. These are not
+functional regressions in this round, but they sharpen the next text hypothesis:
+ordinary subtree text means `#text` tokens by default; special-element
+modifiable text and read-only abort fallback are explicit caller policies.
+
+Next action: commit the round-23 result artifacts, then run the required state
+audit. Because a source edit just landed and the post-refresh train loop has
+not run a held-out checkpoint recently, prefer a checkpoint/regression
+sentinel before another source edit unless the audit/protocol state says
+otherwise.
+
 ## Round 22 — current-docs medium calibration restored
 
 **Train 99.45 / core 99.36** under `weak-tier-calibration`, with subjects
