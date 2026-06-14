@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the document in source order, then collected only ordinary `#text` tokens that fall inside an open `A` element. The implementation relies on documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_attribute()`, `get_modifiable_text()`, and `get_current_depth()` to detect valid `href`-bearing anchors and concatenate decoded link text.",
+  "confidence": 89
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() because the input is a body fragment, then called serialize() to get the normalized HTML serialization. If fragment parsing or serialization fails, or the processor reports an error, the function returns the documented fallback HTML exactly as requested.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` to find the first heading and `next_token()` with `get_current_depth()` to walk its subtree. I only concatenate `#text` tokens via `get_modifiable_text()`, which is already decoded where HTML decodes text, and return `null` only if no `H1` is found.",
+  "confidence": 96
+}

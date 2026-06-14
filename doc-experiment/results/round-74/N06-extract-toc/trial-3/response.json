@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in order, collecting only `#text` tokens while inside an `H1`-`H6` element. Headings are finalized on their closing tags, so empty headings are preserved with an empty string.",
+  "confidence": 93
+}

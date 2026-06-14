@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses the expected WP_HTML_Tag_Processor, a literal template with pre-existing src/alt attributes, next_token() to reach the placeholder #text node, set_attribute(), set_modifiable_text(), and get_updated_html(). All called APIs are documented. Minor deduction only because set_modifiable_text() return value is not checked despite the docs saying to check it; the #text guard and fixed template make that harmless here."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "All APIs used are documented and execution raised no _doing_it_wrong notices. The implementation follows the template/placeholder/get_updated_html pattern and handles processor creation failure. Main deduction: it uses WP_HTML_Processor::create_fragment() for a fixed, flat template mutation where the docs and reference point to the lighter Tag Processor. The inherited set_modifiable_text()/get_updated_html usage is valid, but less directly documented on the HTML Processor page."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented API usage as trial 2, with slightly better fail-closed handling when the IMG tag is not found. It still chooses WP_HTML_Processor for a task better served by WP_HTML_Tag_Processor. Token walking, placeholder text replacement, automatic attribute/text encoding, and get_updated_html() are used idiomatically."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials; all passed 7/7 with no _doing_it_wrong records. The docs did well in the WP_HTML_Tag_Processor 'Building markup from a template' section: it directly teaches the successful pattern of starting from a literal template, predeclaring attributes to preserve order, including placeholder text, using set_attribute() for plain unescaped attribute values, using set_modifiable_text() for plain unescaped text, and returning get_updated_html(). The set_attribute() section also clearly explains automatic encoding and attribute placement, which prevented failures in quotes-in-alt and special-chars-in-url. The set_modifiable_text() section clearly says empty elements have no text token and includes a placeholder-text example, which prevented caption insertion failures for ampersands, angle brackets, and script-looking text. Near misses: trials 2 and 3 chose the HTML Processor, likely because the processor-choice docs say to use it when structure/text collection matters and because create_fragment() sounds natural for building fragments. Also, all trials ignored the documented instruction to check set_modifiable_text()'s return value, probably because the examples themselves do not check it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor overview, 'Which processor should I use?' and 'Building markup from a template'",
+      "problem": "The processor-choice guidance does not explicitly say that filling a known markup template with attributes and placeholder text is still a Tag Processor use case, even when the template has nested elements.",
+      "suggestion": "Add a decision-table row: 'Known template / fill attributes / replace placeholder text -> WP_HTML_Tag_Processor; unknown document structure, subtree text extraction, implied tags, or normalized serialization -> WP_HTML_Processor.'"
+    },
+    {
+      "location": "WP_HTML_Processor overview and method index",
+      "problem": "The page says HTML Processor builds on Tag Processor, but inherited mutation methods such as set_modifiable_text() and get_updated_html() are not consistently surfaced in the method index. This makes valid inherited calls look semi-undocumented.",
+      "suggestion": "Add an 'Inherited mutation APIs from WP_HTML_Tag_Processor' subsection listing set_attribute(), set_modifiable_text(), remove_attribute(), add_class(), remove_class(), and get_updated_html(), with a short note that serialize()/serialize_token() are for normalization/rewrite, not queued edits."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_token() docblock",
+      "problem": "The rendered docs still contain the stale sentence 'The Tag Processor currently only supports the tag token,' while other sections and examples rely on #text tokens.",
+      "suggestion": "Replace that sentence with current behavior: next_token() can visit tags, text, comments, doctypes, and related syntax tokens; callers should use get_token_type() to select #text before reading or writing text."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text() examples",
+      "problem": "The prose says 'Always check the return value,' but the nearby examples call set_modifiable_text() without checking it. The trials copied the unchecked style.",
+      "suggestion": "Update examples to either check the boolean result or explicitly explain when a #text guard plus fixed template makes failure unexpected, while still showing a production-safe fallback."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute() docblock",
+      "problem": "The boolean true/false behavior is documented, but the empty-string case is only implicit. Template-building tasks often depend on empty attributes preserving positions before later updates.",
+      "suggestion": "Add a compact example distinguishing set_attribute( 'alt', '' ) -> alt=\"\", set_attribute( 'alt', true ) -> alt, and set_attribute( 'alt', false ) -> removed, and cross-reference the attribute-order rule."
+    }
+  ]
+}

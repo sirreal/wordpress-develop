@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser to walk tokens in body context, appending only ordinary `#text` token text plus the opener-carried text from `TITLE` and `TEXTAREA`, while skipping comments, scripts, styles, and other non-text tokens. The result is truncated by Unicode code points using UTF-8-safe slicing before returning.",
+  "confidence": 92
+}

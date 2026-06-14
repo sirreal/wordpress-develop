@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in tree-aware mode, then walked tokens with `next_token()` and rebuilt the result with `serialize_token()`. Every `SPAN` opener and closer is skipped, so nested spans disappear while their contents remain, and the serialized output stays normalized.",
+  "confidence": 93
+}

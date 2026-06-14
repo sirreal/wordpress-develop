@@ -2,6 +2,49 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 74 — CSS-class example compression fails
+
+`round-74` tested item 7 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it compressed the Tag Processor `Modifying CSS classes
+for a found tag` example from multiple before/after mini-cases into one
+complete lifecycle example showing `new WP_HTML_Tag_Processor`, `next_tag()`,
+`add_class()`, `remove_class()`, and `get_updated_html()`. It preserved the
+safety prose and the warning that direct `set_attribute( 'class', ... )` or
+`remove_attribute( 'class' )` takes precedence over queued class helpers. The
+scratch edit removed 15 rendered lines from `html-tag-processor.md`. Source
+docblocks, corpus fixtures, runner policy, and harness behavior were
+unchanged.
+
+Numeric result: **97.91 train / 97.59 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The class task
+itself stayed perfect: `T01-add-image-class` scored **100.00** across all
+trials. The loss was concentrated in serialization: concept score **88.00**
+versus round 56's **99.35**, because `T12-unwrap-spans` fell **99.30 ->
+76.70**. One trial used the documented `WP_HTML_Processor` token APIs but
+implemented a skip-depth subtree deletion pattern, dropping SPAN descendants
+instead of skipping only SPAN opener/closer tokens. `T04-build-figure` also
+fell **100.00 -> 98.40** from two functionally passing trials that chose the
+HTML Processor for a fixed template-fill task, and `T10-last-h2` fell
+**100.00 -> 98.50** from one functionally passing HTML Processor
+processor-choice slip.
+
+Interpretation: do not promote the CSS-class example compression. It removed
+little rendered noise, preserved the direct class task, but coincided with a
+large existing serialization failure mode at the selected weak tier. The
+round-74 judge analysis again points to the need for any future
+serialization-rewrite refinement to distinguish wrapper removal from subtree
+deletion; that is not evidence for this class-example reduction.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 8, attribute-template example compression, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Preserve the load-bearing template
+facts: seed attributes in the literal template to control output order, use a
+placeholder text node before calling `set_modifiable_text()`, rely on the APIs
+to encode plain attribute/text values, and return `get_updated_html()`.
+
 ## Round 73 — unsupported-features compression fails
 
 `round-73` tested item 6 from the owner-requested reduction queue as a

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan the document linearly, bookmarking each `h2` opener as it was found so the bookmark ends up on the last one. Then I sought back to that bookmark, added the `final-section` class with `add_class()`, and returned `get_updated_html()`, leaving input unchanged when no `h2` is present or the bookmark cannot be revisited.",
+  "confidence": 95
+}

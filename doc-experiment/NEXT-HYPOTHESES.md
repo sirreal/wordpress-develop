@@ -55,9 +55,13 @@ Reduction queue:
    only 8 rendered lines. It failed badly, **97.08 train / 96.63 core** versus
    round 56's **99.61 / 99.55**, with `N03-first-list-count` falling
    **99.70 -> 65.40** from two bookmark/seek failures. Do not promote.
-7. CSS-class example compression: replace the multi-case class before/after
-   block with one complete lifecycle example showing construct, match,
-   `add_class()`/`remove_class()`, and `get_updated_html()`.
+7. Tested/rejected in round 74: CSS-class example compression replaced the
+   multi-case class before/after block with one complete lifecycle example
+   showing construct, match, `add_class()`/`remove_class()`, and
+   `get_updated_html()`, removing 15 rendered lines. It failed, **97.91 train /
+   97.59 core** versus round 56's **99.61 / 99.55**, with
+   `T12-unwrap-spans` falling **99.30 -> 76.70** from one subtree-deletion
+   rewrite. Do not promote.
 8. Attribute-template example compression: shorten the template-building
    section while preserving the two load-bearing facts: seed attributes to
    control order, and use placeholder text for `set_modifiable_text()`.
@@ -69,12 +73,33 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 7 as round 74 on the full train set. Round 73
+Test order continues with item 8 as round 75 on the full train set. Round 74
 failed badly, so continue to the next isolated reduction candidate:
-compressing the Tag Processor CSS-class example while preserving complete
-construct/match/mutate/output usage and the class-update precedence warning.
+compressing the Tag Processor attribute-template example while preserving
+complete construct/match/mutate/output usage, seeded attributes for output
+order, placeholder text for `set_modifiable_text()`, automatic encoding, and
+the final `get_updated_html()` call.
 
-Latest update: round 73 tested HTML Processor unsupported-features
+Latest update: round 74 tested Tag Processor CSS-class example compression as
+a full-train scratch ablation. It removed 15 rendered lines from
+`html-tag-processor.md` and preserved the direct class task, with
+`T01-add-image-class` staying at **100.00**, but failed overall:
+**97.91 train / 97.59 core** versus the comparable round-56 weak-tier
+source-doc baseline at **99.61 / 99.55**. The damage was concentrated in
+serialization: `T12-unwrap-spans` fell **99.30 -> 76.70** because one trial
+used a skip-depth subtree deletion pattern instead of skipping only SPAN
+opener/closer tokens. Do not promote the CSS-class example compression.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 8 as round 75: compress the Tag Processor `Building markup from a
+template` rendered example block while preserving seeded attributes in the
+literal template, placeholder text for `set_modifiable_text()`, automatic
+encoding of plain values, `set_attribute()` / `set_modifiable_text()` usage,
+and `get_updated_html()`. Do not change source docblocks unless a scratch
+variant wins cleanly and is confirmed through the normal source-doc flow.
+
+Previous update: round 73 tested HTML Processor unsupported-features
 compression as a full-train scratch ablation. It removed only 8 rendered lines
 from `html-processor.md` but failed badly: **97.08 train / 96.63 core** versus
 the comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**.
@@ -84,17 +109,6 @@ seek a bookmark that did not exist, or an internal-looking bookmark name.
 `T07-nested-lists` also fell **99.40 -> 96.50** from one functionally passing
 but low-adherence Tag Processor lexical-stack solution for an ancestry task.
 Do not promote the unsupported-features compression.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 7 as round 74: compress the Tag Processor `Modifying CSS classes for
-a found tag` rendered example block into one complete lifecycle example
-showing `new WP_HTML_Tag_Processor`, `next_tag()`, `add_class()`,
-`remove_class()`, and `get_updated_html()`, while preserving safety prose and
-the warning that direct `set_attribute( 'class', ... )` or
-`remove_attribute( 'class' )` takes precedence over queued class helpers. Do
-not change source docblocks unless a scratch variant wins cleanly and is
-confirmed through the normal source-doc flow.
 
 Previous update: round 72 tested Tag Processor design/limitations compression
 as a full-train scratch ablation. It removed only 12 rendered lines from

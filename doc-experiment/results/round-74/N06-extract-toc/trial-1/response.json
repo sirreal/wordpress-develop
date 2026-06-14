@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and `get_current_depth()` so heading text is collected structurally, including inline markup. For text extraction I used `get_token_type() === '#text'` together with `get_modifiable_text()`, and I ignored heading closer tokens via `is_tag_closer()` while flushing each heading when the walk leaves its depth.",
+  "confidence": 93
+}

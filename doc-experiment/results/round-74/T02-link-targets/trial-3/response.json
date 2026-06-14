@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, matched each `a` opener with `next_tag('a')`, checked for `href` using `get_attribute('href')` so empty-string and boolean hrefs count as present, then overwrote `target` with `set_attribute('target', '_blank')` and returned `get_updated_html()` to preserve untouched bytes exactly.",
+  "confidence": 97
+}

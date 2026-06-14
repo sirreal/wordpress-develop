@@ -1,0 +1,25 @@
+<?php
+
+if ( ! function_exists( 'strip_tracking_attributes' ) ) {
+	function strip_tracking_attributes( string $html ): string {
+		if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+			return $html;
+		}
+
+		$processor = new WP_HTML_Tag_Processor( $html );
+
+		while ( $processor->next_tag() ) {
+			$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );
+
+			if ( empty( $attribute_names ) ) {
+				continue;
+			}
+
+			foreach ( $attribute_names as $attribute_name ) {
+				$processor->remove_attribute( $attribute_name );
+			}
+		}
+
+		return $processor->get_updated_html();
+	}
+}
