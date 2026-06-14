@@ -18,9 +18,11 @@ source-doc flow.
 
 Reduction queue:
 
-1. Property-section-only ablation: remove rendered `Properties` sections from
-   both docs, but keep all overview and method docs. This isolates the least
-   task-facing part of the broad round-62 public-API-only ablation.
+1. Tested/rejected in round 68: property-section-only ablation removed
+   rendered `Properties` sections from both docs while keeping overview and
+   method docs. It cut 604 rendered lines but lost badly, **97.64 train /
+   97.28 core** versus round 56's **99.61 / 99.55**, with traversal dropping
+   to **93.69**. Do not promote.
 2. HTML Processor internal-step ablation: remove private parser step method
    details (`step_*`, insertion-mode helpers, adoption-agency helpers, virtual
    node helpers) while keeping public/inherited method docs.
@@ -51,11 +53,28 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order starts with item 1 as round 68 on the full train set because the
-blast radius is broad but the candidate should be low-risk and materially
-reduces rendered docs.
+Test order continues with item 2 as round 69 on the full train set because the
+round-68 broad property ablation lost and item 2 isolates HTML Processor
+internal implementation detail noise while preserving public and inherited
+method docs.
 
-Latest update: round 67 isolated the processor-choice-only simplification on
+Latest update: round 68 tested property-section removal as a full-train
+scratch ablation. It removed 604 rendered lines from the staged docs but did
+not win: **97.64 train / 97.28 core** versus the comparable round-56
+weak-tier source-doc baseline at **99.61 / 99.55**. The damage was
+concentrated in traversal, with `N03-first-list-count` falling **99.70 ->
+82.55** from an unset-bookmark `seek()` failure and `N06-extract-toc` falling
+**99.80 -> 87.80** from depth/rank confusion and ignored closer boundaries.
+Do not promote property-section removal.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 2 as round 69: remove HTML Processor private/internal parser-step
+method details from scratch rendered docs while keeping public/inherited
+method docs intact. Do not change source docblocks unless a scratch variant
+wins and is confirmed through the normal source-doc flow.
+
+Previous update: round 67 isolated the processor-choice-only simplification on
 the same six-task subset as round 66. It removed only top-level roadmap/future
 prose and rewrote the HTML Processor opening so flat first/last/Nth matching
 tags and source-order attribute/class edits point to `WP_HTML_Tag_Processor`,
@@ -69,20 +88,10 @@ one sequential filtered-search failure, and `T07` fell 99.40 -> 98.30 from
 lower-adherence traversal choices. Do not promote the processor-choice-only
 wording.
 
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, but
-pause the simplification/reduction loop under the protocol's signal-exhaustion
-rule. Rounds 62-67 tested broad internals pruning, method-local text
-deduplication, roadmap deletion, bookmark compression, combined
-processor-choice/bookmark simplification, and processor-choice-only overview
-pruning; every candidate damaged at least one current train concept at this
-tier. Treat the current source docs as the measured minimal set for this
-corpus/tier until new evidence identifies a safer removal or replacement. Do
-not promote source docblock reductions from rounds 62-67. Resume only if the
-owner asks to change the corpus or model policy, run a paired no-edit
-variance/control round for a specific disputed scratch loss, or test a new
-evidence-backed documentation hypothesis that is not just another speculative
-pruning pass.
+Previous next action: the loop was paused under the protocol's
+signal-exhaustion rule after rounds 62-67. The owner has since explicitly
+overridden that pause with a request to test 10 additional reduction ideas, so
+continue the scratch-only queue above.
 
 Previous update: round 66 tested a combined scratch simplification on
 `T01-add-image-class`, `T02-link-targets`, `T10-last-h2`,

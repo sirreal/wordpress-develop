@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then `next_token()` with `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` to collect heading opener/text pairs and flush each heading on its closing token. This keeps markup out of the text while preserving empty headings as empty strings.",
+  "confidence": 96
+}

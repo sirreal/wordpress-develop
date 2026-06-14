@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor and used documented create_fragment() plus serialize(). This is a valid documented normalization path, though less direct than the one-call normalize() API. It handled null processor/serialization results and unsupported markup fallback without undocumented WordPress API calls."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor and used only documented create_fragment(), serialize(), and get_last_error(). The explicit get_last_error() check matches the docs' unsupported-markup guidance, though it is redundant after serialize() has already returned null."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. This is the canonical documented pattern for the task: WP_HTML_Processor::normalize() on a BODY-context fragment, with null mapped to the fallback. No undocumented API usage or avoidable extra control flow."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The docs did the important things well: the normalize() section states that it normalizes a BODY-context HTML fragment and returns string|null; the HTML Support section says unsupported markup aborts processing and output methods such as serialize() and normalize() return null; the create_fragment() and serialize() sections document the lower-level equivalent path used by trials 1 and 2. The examples also cover the relevant behavior classes: omitted end tags, table insertion, attribute quoting, entity preservation, and incomplete trailing syntax being omitted. Near-misses: two of three subjects chose create_fragment()->serialize() instead of normalize(), suggesting the one-call API is available but not quite salient enough in the higher-level usage flow. Also, executions record trigger_error warnings on unsupported markup even when implementations pass by returning the fallback; the rendered docs emphasize null returns but do not clearly state this warning side effect.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / Overview > Usage and normalize()",
+      "problem": "The docs make normalize() available, but the early usage material foregrounds creating processors and walking/serializing them. This led most passing subjects to write a lower-level create_fragment()->serialize() solution for a whole-fragment normalization task.",
+      "suggestion": "Add a short decision note: for unchanged BODY-context fragment normalization, prefer WP_HTML_Processor::normalize($html); use create_fragment()->serialize() when a processor instance, non-default context, or full-document parser is needed."
+    },
+    {
+      "location": "html-processor.md / normalize() and serialize() return contracts",
+      "problem": "The return docs say null is returned when output cannot be produced, but they do not clearly mention that unsupported-parser serialization may also emit a user warning via wp_trigger_error. Passing trials and the canonical path recorded trigger_error entries for unsupported input.",
+      "suggestion": "Document whether normalize()/serialize() may emit warnings on parser abort before returning null, and give general guidance for callers that need a quiet fallback under custom error handling."
+    },
+    {
+      "location": "html-processor.md / HTML Support > Unsupported Features",
+      "problem": "The unsupported-markup section explains adoption/fostering generally and gives a concrete misnested-formatting example, but some adoption-agency failures involving anchors are not obvious from the current examples.",
+      "suggestion": "Add a general example category for unsupported adoption-agency cases such as nested anchor repairs that require non-streaming tree rewrites, and state that they surface as get_last_error() non-null with normalize()/serialize() returning null."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware fragment parsing, then walked tags with next_tag(), inspected ancestry with get_breadcrumbs(), and updated matching list openers with add_class() so only nested UL/OL elements receive the class while all untouched bytes are preserved by get_updated_html().",
+  "confidence": 95
+}

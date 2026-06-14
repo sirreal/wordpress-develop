@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize a BODY-context HTML fragment, and returned the required fallback HTML when it reports `null`, which the docs say happens when the fragment cannot be normalized. The function is a thin wrapper around that documented serializer-based normalization path.",
+  "confidence": 96
+}

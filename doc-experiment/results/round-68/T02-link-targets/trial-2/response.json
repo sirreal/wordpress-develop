@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly and update only `a` tag openers, checking `get_attribute( 'href' )` for presence so empty-string and boolean `href` values still count. For matched anchors, `set_attribute( 'target', '_blank' )` overwrites any existing target while preserving all untouched bytes via `get_updated_html()`.",
+  "confidence": 97
+}

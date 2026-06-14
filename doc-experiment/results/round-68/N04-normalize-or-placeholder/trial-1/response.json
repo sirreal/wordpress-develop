@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser and its `serialize()` normalizer, which is the API intended for normalized fragment output. The function creates a BODY-context fragment processor, returns the serialized normalized HTML when available, and falls back to the exact placeholder when creation or normalization fails.",
+  "confidence": 96
+}

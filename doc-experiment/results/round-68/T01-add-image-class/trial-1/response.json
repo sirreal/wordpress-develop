@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly for real `img` tags with ASCII case-insensitive matching, then called `add_class( 'wp-image' )` on each match. `get_updated_html()` returns the original bytes unchanged except for the queued class edits, so comments and all other markup are preserved byte-for-byte.",
+  "confidence": 98
+}

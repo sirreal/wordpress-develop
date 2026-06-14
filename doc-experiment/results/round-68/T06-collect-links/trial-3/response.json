@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with tree awareness, then walked tokens with next_token(). For each non-closer A opener, get_attribute('href') filters out missing and boolean href attributes, and a depth-bounded subtree walk collects only #text tokens via get_modifiable_text() so nested markup contributes no text while character references are already decoded.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then walked the document with `next_tag()` and `next_token()` so table structure is handled the way the HTML Processor documents, including implied `TBODY`/`TR` elements. Cell contents are collected from ordinary `#text` tokens via `get_modifiable_text()`, and the first `TABLE` subtree is converted into a row-by-row array.",
+  "confidence": 90
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan tags linearly and preserve untouched bytes exactly. For each matched `a` tag, `get_attribute( 'href' )` distinguishes absent `href` from present-but-empty or boolean `href`, and `set_attribute( 'target', '_blank' )` overwrites or inserts the target attribute while keeping the rest of the document unchanged.",
+  "confidence": 98
+}

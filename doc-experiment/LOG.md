@@ -2,6 +2,40 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 68 — property sections are not safe to remove
+
+`round-68` tested item 1 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it removed the rendered `Properties` sections from both
+HTML API docs while leaving overview and method sections unchanged. The
+scratch edit removed 604 rendered lines total: 477 from
+`html-tag-processor.md` and 127 from `html-processor.md`. Source docblocks,
+corpus fixtures, runner policy, and harness behavior were unchanged.
+
+Numeric result: **97.64 train / 97.28 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The loss was
+concentrated in traversal: concept score **93.69** versus round 56's
+**99.60**. `N03-first-list-count` fell **99.70 -> 82.55** because one trial
+used `seek( 'list-opener' )` without ever setting that bookmark, causing
+warnings and crashes before mutation. `N06-extract-toc` fell
+**99.80 -> 87.80** because one trial confused HTML tree depth with heading
+rank and ignored closer tokens as collection boundaries. Flat Tag Processor
+tasks remained strong, including `T10-last-h2` at **100.00**.
+
+Interpretation: do not promote property-section removal. Even though the
+removed material looked least task-facing, this full-train measurement did not
+preserve the weak-tier traversal tasks. The result reinforces that broad
+navigation/noise cuts can change which local contracts weak subjects notice,
+even when method detail sections remain present.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 2, the HTML Processor internal-step ablation, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Do not change source docblocks
+unless a scratch variant wins and is confirmed through the normal source-doc
+flow.
+
 ## Round 67 — processor-choice-only pruning still loses
 
 `round-67` isolated the promising part of round 66 as a scratch-only

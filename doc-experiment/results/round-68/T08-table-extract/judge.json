@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right API: WP_HTML_Processor::create_fragment(), next_tag('TABLE'), a single depth-bounded next_token() walk, get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). All called methods are documented in the rendered files, and execution recorded no _doing_it_wrong notices. Minor deduction only for not making an explicit get_last_error()/paused_at_incomplete_token policy, though the task did not require rejecting partial input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all API calls are documented: create_fragment(), next_tag(), get_current_depth(), next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The one-loop state machine follows the documented no-nested-token-loop pattern and handles decoded text correctly. Slight deduction for extra manual flushing on openers/loop end, which suggests less complete reliance on the documented virtual/implied closer behavior, but it is not API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor for tree-aware parsing, anchored the first TABLE by depth, walked tokens once, and collected only #text token modifiable text. get_token_name() is documented and acceptable after checking #tag, though get_tag() would be the more semantic tag-name accessor. No undocumented API calls or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 frozen cases, so there were no failed hidden cases to attribute to documentation failures. The docs worked well for this task: the processor-choice guidance explicitly says to use WP_HTML_Processor when structure, text collection, implied/missing closers, or browser-like parsing matter; create_fragment() is documented as the factory for BODY fragments; next_token() documents structural awareness, implied TABLE/TBODY/TR behavior, virtual closers, and the need to bound subtree walks by recorded depth; the DOM-style text recipe says to append only #text tokens and then call get_modifiable_text(); and get_modifiable_text() clearly states that character references in #text are already decoded. Near-misses were small: none of the trials made an explicit completion policy using get_last_error() or paused_at_incomplete_token(), and trial-2’s defensive flushing suggests the virtual-closer contract could be made more concrete in the method docs. Attribute null/true/empty-string semantics were not relevant to this task because no attributes were read or written.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock",
+      "problem": "The docs say virtual/implied closers are visited, but the exact observable contract is spread across prose and examples.",
+      "suggestion": "Add a compact invariant table for virtual and implied tokens: expected get_token_type(), get_token_name()/get_tag(), is_tag_closer(), get_current_depth(), and whether set_bookmark() can succeed."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() or subtree-walk recipe",
+      "problem": "Depth-bounded subtree walking is documented, but callers may still be unsure what happens to the first shallower token that terminates a while condition.",
+      "suggestion": "State explicitly that a next_token() call in the loop condition advances to the first token outside the subtree before the depth check fails, so callers that need to process that boundary token must structure the loop accordingly."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() and get_token_name() docblocks",
+      "problem": "Both can return uppercase tag names for tag tokens, but the practical choice between them is easy to miss.",
+      "suggestion": "Cross-reference the two methods and recommend get_tag() for element-state machines after confirming #tag, while reserving get_token_name() for generic token/node-name logic."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() / read-only extraction guidance",
+      "problem": "The docs mention get_last_error() and paused_at_incomplete_token(), but examples for read-only extraction do not consistently show choosing a completion policy.",
+      "suggestion": "Add a short reusable note showing three legitimate policies for extraction after a walk: return accumulated best-effort data, reject with an empty/null result, or require both no parser error and no incomplete trailing token."
+    }
+  ]
+}

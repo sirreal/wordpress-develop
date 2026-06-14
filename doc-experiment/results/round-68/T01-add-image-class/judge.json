@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat, byte-preserving class edit. All called APIs are documented: constructor, next_tag(array('tag_name'=>'img')), add_class(), and get_updated_html(). The next_tag loop plus add_class/get_updated_html is the idiomatic documented pattern; bookmarks, breadcrumbs, and serialize_token were appropriately not used."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API usage throughout. next_tag('img') is explicitly documented as equivalent to the array tag_name query and matching is documented as ASCII case-insensitive. add_class() handles absent and existing class attributes, and get_updated_html() preserves untouched bytes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct solution shape as trial-2. It relies only on documented Tag Processor behavior: linear token walking over real tags, case-insensitive tag matching, add_class() class semantics, and get_updated_html() for queued updates."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the trials; each passed 8/8 with no _doing_it_wrong records. The docs did well in four key places: the Tag Processor 'Which processor should I use?' guidance identifies flat attribute/class edits with byte-exact preservation as a Tag Processor job; the 'Finding tags' table shows both next_tag(array('tag_name'=>'img')) and next_tag('img'); the next_tag() method section explicitly says tag names are ASCII case-insensitive, comments/raw-text contents are not matched as tags, and incomplete trailing tags are not modified; and add_class()/get_updated_html() state that classes are appended without reordering existing classes and untouched bytes are preserved. The main near-miss is locality: the exact placement of a newly-created class attribute on a tag that already has other attributes is not stated in the add_class() method section itself, so a reader has to combine add_class(), get_updated_html(), and the broader attribute-ordering discussion.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The method explains creation/appending/no-duplicate behavior, but does not locally state where a newly-created class attribute is inserted relative to existing attributes or that unrelated attributes retain their original lexical bytes.",
+      "suggestion": "Add a method-local sentence or small generic example showing add_class() on a tag with existing non-class attributes, and cross-reference the general added-attribute ordering contract."
+    },
+    {
+      "location": "Tag Processor overview: 'Finding tags' / 'When matching fails'",
+      "problem": "The overview says next_tag() returning false moved the cursor to the end of the file, while the incomplete-token section says the processor can pause before an incomplete token. That distinction is important for callers handling truncated input.",
+      "suggestion": "Revise the false-return wording to say no complete matching tag was found and the cursor is either at end-of-input or paused before an incomplete token; point readers to paused_at_incomplete_token() to distinguish the cases."
+    }
+  ]
+}

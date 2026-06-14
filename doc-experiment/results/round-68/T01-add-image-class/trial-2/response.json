@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly and modify only real `img` tag openers, which preserves all untouched bytes exactly as documented. The loop calls `next_tag( 'img' )` with case-insensitive tag matching and `add_class( 'wp-image' )`, then returns `get_updated_html()` so existing attributes, ordering, comments, and non-target text remain unchanged.",
+  "confidence": 98
+}

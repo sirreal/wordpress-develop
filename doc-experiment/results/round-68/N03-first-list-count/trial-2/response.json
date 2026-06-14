@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment, `next_tag()` to find the first `UL` or `OL`, `get_current_depth()` plus `next_token()` to count only direct `LI` children at the next depth level, and then `set_bookmark()`, `seek()`, `set_attribute()`, and `get_updated_html()` to write the `data-item-count` attribute only after a clean scan completed.",
+  "confidence": 93
+}
