@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for byte-preserving attribute edits, scanning only real `img` tags with `next_tag( 'img' )` and appending the class via `add_class( 'wp-image' )`. `get_updated_html()` returns the original document with only those tag opener attribute updates applied, so comments and all untouched bytes remain unchanged.",
+  "confidence": 97
+}

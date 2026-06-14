@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment text extraction, used a single next_token() walk, gated ordinary text on get_token_type() === '#text', and explicitly opted into TITLE/TEXTAREA opener text via get_modifiable_text(). All HTML API methods used are documented. Minor deduction: it does not make an explicit incomplete/unsupported-input policy check, though best-effort read-only extraction is allowed by the docs."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses the documented HTML Processor fragment factory, null-checks creation, walks tokens in document order, reads decoded text only from #text plus whitelisted TITLE/TEXTAREA openers, and truncates UTF-8 text without byte slicing. No undocumented HTML API calls and no _doing_it_wrong records. Only slight gap is the lack of an explicit paused_at_incomplete_token()/get_last_error policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Most closely follows the documented token-type pattern: it requires #text for ordinary text, requires #tag and !is_tag_closer() before reading TITLE/TEXTAREA opener text, and all called HTML API methods, including get_tag(), are present in the rendered docs. No misuse records. Slight deduction only for not stating/checking a complete-input policy after scanning."
+    }
+  ],
+  "failure_analysis": "All three trials passed all hidden cases, so there are no failed hidden cases to attribute to a documentation misconception. The docs did well on the core hazards for this task: the HTML Processor overview says to choose WP_HTML_Processor for structure and collecting text; the \"Recipe: collect DOM-style text from a subtree\" warns that ordinary text is #text tokens only and that get_modifiable_text() is too broad as a predicate; the opt-in policy table says TITLE/TEXTAREA opener text is decoded while SCRIPT/STYLE opener text is raw and should not be included unless requested; next_token() explains that special elements produce no #text child tokens; and get_modifiable_text() states that returned #text/TITLE/TEXTAREA text is already decoded UTF-8. The only near-miss across solutions is incomplete or unsupported input: the candidates returned best-effort accumulated text without checking paused_at_incomplete_token() or get_last_error(). The rendered docs allow caller-defined policy for read-only extraction, but that policy choice is easy to skip unless the task explicitly asks for complete-source guarantees.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and WP_HTML_Tag_Processor::get_modifiable_text() docs",
+      "problem": "Special-element text behavior is documented, but the key facts are spread across recipe text, next_token(), and get_modifiable_text().",
+      "suggestion": "Add a compact table for SCRIPT, STYLE, TITLE, and TEXTAREA showing token_type/token_name, whether a child #text token is emitted, and whether get_modifiable_text() returns decoded or raw text."
+    },
+    {
+      "location": "HTML Processor text-extraction recipe",
+      "problem": "The recipe focuses on subtree extraction after matching an element, which can make whole-fragment extraction seem like it needs bookmarks, breadcrumbs, or depth bounds.",
+      "suggestion": "Add a short note that whole-fragment read-only extraction can be a single next_token() loop to end-of-input, while depth or breadcrumb bounds are needed only when extracting a selected subtree."
+    },
+    {
+      "location": "Read-only extraction guidance near get_last_error() / paused_at_incomplete_token()",
+      "problem": "The docs state that partial extraction policy is caller-defined, but the policy decision is not strongly surfaced as a checklist for extraction helpers.",
+      "suggestion": "Add a general checklist: decide whether truncated or unsupported input should return accumulated text, an empty value, null, or an error sentinel; if complete input is required, check paused_at_incomplete_token() and get_last_error() after the scan."
+    }
+  ]
+}

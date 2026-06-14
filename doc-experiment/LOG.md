@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 72 — Tag Processor design/limitations compression loses
+
+`round-72` tested item 5 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it compressed the Tag Processor `Design and limitations`,
+`Scripting Flag`, and `Text Encoding` sections into a shorter contract summary.
+The scratch edit preserved the linear/no-tree contract, the inability to pair
+openers with closers or return inner markup, the HTML Processor handoff, the
+disabled scripting flag/NOSCRIPT behavior, and the UTF-8/UTF-16 encoding facts.
+It removed 12 rendered lines from `html-tag-processor.md`. Source docblocks,
+corpus fixtures, runner policy, and harness behavior were unchanged.
+
+Numeric result: **98.74 train / 98.55 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The loss was
+concentrated in traversal: concept score **97.57** versus round 56's
+**99.60**. `N06-extract-toc` fell **99.80 -> 91.13** because one trial treated
+an inline descendant opener (`EM`/`SPAN`) as ending the current heading and
+returned truncated text. `T04-build-figure` fell **100.00 -> 97.00** on
+adherence because one functionally passing trial chose `WP_HTML_Processor` for
+a fixed template-fill job and called `new WP_HTML_Processor(...)` directly,
+triggering `_doing_it_wrong`. `T10-last-h2` also fell **100.00 -> 98.40** from
+one HTML Processor processor-choice slip on a flat class edit.
+
+Interpretation: do not promote the Tag Processor design/limitations
+compression. The compact wording removed little rendered noise and still
+correlated with weaker transfer on structural text extraction and processor
+choice. This result reinforces that even top-level limitation prose is
+load-bearing at the selected weak tier.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 6, HTML Processor unsupported-features compression, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Do not change source docblocks
+unless a variant wins cleanly and is confirmed through the normal source-doc
+flow.
+
 ## Round 71 — private method index row pruning fails
 
 `round-71` tested item 4 from the owner-requested reduction queue as a

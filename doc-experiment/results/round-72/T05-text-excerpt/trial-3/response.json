@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` and `next_token()` to walk the fragment in document order, appending only ordinary `#text` nodes plus decoded opener text from `TITLE` and `TEXTAREA`, which the documented HTML API says carry their content on the opening token. I then truncated the accumulated UTF-8 string by code points with `mb_strlen()`/`mb_substr()`, with a UTF-8 regex fallback if mbstring is unavailable.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` linear scan plus bookmarks: scan every `h2`, keep moving a single bookmark to the latest opener, then `seek()` back once at the end and `add_class('final-section')` on that last match. Finally, `get_updated_html()` returns the modified HTML unchanged when no `h2` was found.",
+  "confidence": 93
+}

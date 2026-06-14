@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose `WP_HTML_Processor::create_fragment()` for browser-like table structure, used only documented APIs, and followed the documented depth-bounded `next_token()` text-extraction pattern. Minor edge-policy gap: it does not check `paused_at_incomplete_token()`/`get_last_error()`, though the docs allow read-only extraction policy to decide this."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor and all WP HTML API calls are documented. The single token loop with depth and opener/closer state is idiomatic. Slightly less clean than the others because the final manual flush and unused `$cell_tag` suggest uncertainty about virtual closers, which the docs say are reliably visited; it also omits explicit incomplete/unsupported-input policy checks."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly used the HTML Processor, documented token/depth APIs, `#text` gating, decoded `get_modifiable_text()`, and closer-driven state. Like trial 1, the only small gap is no explicit post-scan check for incomplete input or parser aborts, which is a caller-policy choice for read-only extraction."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases: `simple`, `thead-tbody`, `omitted-closers`, `markup-in-cells`, `entities-in-cells`, `no-table`, `first-table-only`, and `empty-cells`. The docs did well in the exact areas this task needed: `Which processor should I use?` says to use the HTML Processor for structure, subtree text, and implied/missing closers; `Recipe: collect DOM-style text from a subtree` shows the create-fragment, record-depth, walk-tokens, append-only-`#text` pattern; `next_token()` explains virtual closers and warns against nested token loops for repeated regions; `get_current_depth()` explains why `>=` is the correct subtree guard; `get_modifiable_text()` states that `#text` content is already decoded. Near misses: none of the trials checked `paused_at_incomplete_token()` or `get_last_error()`, and trial 2 added a redundant end-of-loop flush, indicating mild uncertainty about how complete the virtual-closer stream is. These did not cause failures here.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` docs, after the one-cursor/repeated-region guidance",
+      "problem": "The docs explain single-loop state and virtual closers, but the repeated-region example is not also depth-bounded to a previously matched container. Subjects had to compose those two patterns themselves.",
+      "suggestion": "Add a general example for collecting repeated child-region text inside the first matched container using one depth-bounded `next_token()` loop and opener/closer state. Keep it generic, not task-specific."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_token_type()` / `get_token_name()` docs",
+      "problem": "Both `get_tag()` and `get_token_name()` are valid after confirming a tag token, and trials used both. The docs define the difference but do not give a concise dispatch rule for ordinary token walkers.",
+      "suggestion": "Add a short common-pattern note: use `get_token_type()` to classify `#text` vs `#tag`; after `#tag`, use `get_tag()` or `get_token_name()` for the uppercase element name; only call `get_modifiable_text()` for token types intentionally included."
+    },
+    {
+      "location": "Subtree text recipe completion-policy note",
+      "problem": "The docs mention `paused_at_incomplete_token()` and `get_last_error()`, but all trials omitted explicit checks. For read-only extraction this can be fine, but strict vs best-effort policy is easy to gloss over.",
+      "suggestion": "Add a small follow-up snippet showing two named policies: best-effort returns accumulated text, while strict complete-input extraction rejects when `paused_at_incomplete_token()` is true or `get_last_error()` is non-null."
+    }
+  ]
+}

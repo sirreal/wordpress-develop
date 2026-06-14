@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Used the right class and only documented APIs: create_fragment(), serialize(), get_last_error(), and inherited paused_at_incomplete_token(). The factory-plus-serialize path is documented, though less direct than normalize(). Main adherence loss: it treats paused_at_incomplete_token() as inability to normalize, so it would reject documented cases where normalization omits trailing incomplete syntax."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the right class and only documented APIs: create_fragment(), serialize(), and get_last_error(). This is a valid documented normalization path for a BODY fragment, though normalize() was the simpler task-shaped API. Redundant get_last_error() check after serialize(), but no misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same API pattern as trial-2: correct processor, documented methods only, valid serialize-immediately usage, and a harmless redundant error check. It follows the documented incomplete-trailing-syntax behavior by not treating paused_at_incomplete_token() as failure."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases: unclosed tags, table normalization, attribute quoting, entity preservation, two unsupported-misnesting fallbacks, and the empty fragment. The docs did well at steering subjects to WP_HTML_Processor for normalized output: the HTML Processor overview says to choose it for normalized serialization, create_fragment() documents BODY-context fragments, normalize()/serialize() list the relevant normalization effects, and the support section says unsupported markup makes output methods return null. The main near-miss was trial-1: outside the frozen suite, it would return the fallback for '<p>x<!--', while the documented normalize()/serialize() behavior is to omit incomplete trailing syntax and return '<p>x</p>'. That likely came from the recipes that recommend paused_at_incomplete_token() for complete-source mutation scans, without a strong enough contrast that normalization itself can still succeed on trailing incomplete syntax. The trigger_error records on unsupported markup are produced by serialize()/normalize() when returning null; they are not evidence of hallucinated API usage or _doing_it_wrong misuse.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() docblock and HTML Processor Usage section",
+      "problem": "The direct BODY-fragment normalization API is documented, but the surrounding usage narrative emphasizes creating a processor and then operating on it. All trials chose the longer create_fragment()+serialize() route.",
+      "suggestion": "Add a short general note that normalize() is the preferred entry point when the caller wants the normalized serialization of an unchanged BODY-context fragment, and that callers should use their own fallback when it returns null."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() / serialize() incomplete-syntax notes",
+      "problem": "The docs say incomplete trailing syntax is omitted, while nearby recipes tell mutation callers to reject paused_at_incomplete_token() when complete source bytes matter. Trial-1 conflated these policies.",
+      "suggestion": "State explicitly that paused_at_incomplete_token() is a validation-policy check, not part of the normalization success contract; only combine it with serialization when the caller specifically promises to reject truncated input."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() return/error behavior",
+      "problem": "serialize() returns null for unsupported parser aborts but also calls wp_trigger_error(). The rendered docs mention null but not the warning side effect.",
+      "suggestion": "Document that serialize(), and therefore normalize(), may emit a warning when serialization fails because parsing aborted, while still signaling failure via null/get_last_error()."
+    },
+    {
+      "location": "HTML Processor Method Index / inherited methods",
+      "problem": "HTML Processor examples call inherited Tag Processor methods such as paused_at_incomplete_token(), but the HTML Processor page does not make inherited-method availability and intended use easy to audit.",
+      "suggestion": "Add an inherited public methods section or cross-linked index for inherited Tag Processor APIs commonly used from WP_HTML_Processor, especially paused_at_incomplete_token() and get_updated_html()."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, relying on its documented case-insensitive `next_tag( 'img' )` matching and `add_class()` behavior. This preserves all untouched bytes exactly while appending `wp-image` to each real `IMG` tag and leaving comment text unmodified because the Tag Processor does not match tags inside comments.",
+  "confidence": 98
+}

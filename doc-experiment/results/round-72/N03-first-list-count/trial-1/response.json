@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, next_tag()/next_token() for structural scanning, get_current_depth() to bound the list subtree, and set_bookmark()/seek() plus set_attribute() to return to and edit the first list opener only after a clean scan. I also reject truncated or unsupported input with paused_at_incomplete_token() and get_last_error(), returning the original HTML unchanged in those cases.",
+  "confidence": 93
+}

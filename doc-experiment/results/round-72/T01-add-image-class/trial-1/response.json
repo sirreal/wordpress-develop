@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task is a flat, byte-preserving attribute edit: `next_tag( 'img' )` finds image openers case-insensitively, and `add_class( 'wp-image' )` appends the class without disturbing existing classes or unrelated bytes. `get_updated_html()` returns the original document with only the queued attribute edits applied.",
+  "confidence": 99
+}

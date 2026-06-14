@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML API template pattern with `WP_HTML_Processor` so the exact markup shape and attribute order are preserved, then filled `src` and `alt` with `set_attribute()` and replaced the placeholder figcaption text with `set_modifiable_text()`, which safely encodes unescaped input values.",
+  "confidence": 94
+}

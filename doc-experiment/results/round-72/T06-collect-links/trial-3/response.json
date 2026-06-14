@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with tree awareness, then next_tag() plus is_tag_closer() and get_attribute('href') to find only anchor openers with a string-valued href. For each match, I recorded the opener depth with get_current_depth() and walked forward with next_token(), concatenating only '#text' tokens via get_modifiable_text() until the anchor subtree ended.",
+  "confidence": 93
+}

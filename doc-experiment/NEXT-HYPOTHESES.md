@@ -44,10 +44,12 @@ Reduction queue:
    intact. It failed badly, **94.07 train / 93.15 core** versus round 56's
    **99.61 / 99.55**, with `N03-first-list-count` falling **99.70 -> 64.70**
    and `T12-unwrap-spans` falling **99.30 -> 53.30**. Do not promote.
-5. Design-and-limitations compression: replace the Tag Processor
-   `Design and limitations`, `Scripting Flag`, and `Text Encoding` prose with
-   a shorter contract summary that preserves the tree-awareness and UTF-8
-   facts.
+5. Tested/rejected in round 72: Tag Processor design/limitations compression
+   replaced the `Design and limitations`, `Scripting Flag`, and `Text
+   Encoding` sections with a shorter contract summary, removing only 12
+   rendered lines. It lost, **98.74 train / 98.55 core** versus round 56's
+   **99.61 / 99.55**, with `N06-extract-toc` falling **99.80 -> 91.13** from
+   one inline-descendant subtree-text failure. Do not promote.
 6. Unsupported-features compression: replace the long HTML Processor
    unsupported-feature list with a compact abort-policy summary and the
    current high-signal unsupported cases.
@@ -65,12 +67,33 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 5 as round 72 on the full train set. Round 71
-failed badly, so continue to the next isolated reduction candidate:
-compressing Tag Processor design/limitations prose while preserving the
-tree-awareness, NOSCRIPT, and encoding contracts.
+Test order continues with item 6 as round 73 on the full train set. Round 72
+lost, so continue to the next isolated reduction candidate: compressing HTML
+Processor unsupported-feature prose while preserving the abort policy and the
+current high-signal unsupported cases.
 
-Latest update: round 71 tested private/non-public method index row pruning as
+Latest update: round 72 tested Tag Processor design/limitations compression as
+a full-train scratch ablation. It removed only 12 rendered lines from
+`html-tag-processor.md` but did not win: **98.74 train / 98.55 core** versus
+the comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**.
+The damage was concentrated in traversal: `N06-extract-toc` fell **99.80 ->
+91.13** because one subject treated an inline descendant opener as ending the
+current heading text subtree. `T04-build-figure` also fell **100.00 -> 97.00**
+from one functionally passing trial that called `new WP_HTML_Processor(...)`
+directly, and `T10-last-h2` fell **100.00 -> 98.40** from an HTML Processor
+processor-choice slip. Do not promote the design/limitations compression.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 6 as round 73: compress the HTML Processor unsupported-features
+rendered prose while preserving the abort policy, `get_last_error()` /
+`get_unsupported_exception()` affordances, `normalize()` / `serialize()` null
+behavior, and high-signal unsupported cases such as foster parenting/table
+relocation and adoption-agency/misnested formatting limits. Do not change
+source docblocks unless a scratch variant wins cleanly and is confirmed
+through the normal source-doc flow.
+
+Previous update: round 71 tested private/non-public method index row pruning as
 a full-train scratch ablation. It removed only 58 rendered index rows while
 leaving all method detail sections visible, but failed badly: **94.07 train /
 93.15 core** versus the comparable round-56 weak-tier source-doc baseline at
@@ -78,13 +101,6 @@ leaving all method detail sections visible, but failed badly: **94.07 train /
 **99.70 -> 64.70**, from missing bookmark/seek-back patterns, and
 `T12-unwrap-spans`, **99.30 -> 53.30**, from subtree-pruning instead of
 boundary-token skipping. Do not promote private index-row pruning.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 5 as round 72: compress the Tag Processor `Design and limitations`,
-`Scripting Flag`, and `Text Encoding` rendered prose while preserving the
-load-bearing facts. Do not change source docblocks unless a scratch variant
-wins cleanly and is confirmed through the normal source-doc flow.
 
 Previous update: round 70 tested Tag Processor private parser/helper method
 detail removal as a full-train scratch ablation. It cut 460 rendered lines and

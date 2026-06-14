@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then `next_token()` plus `get_token_type()`/`get_modifiable_text()` to collect decoded text nodes, and explicitly included opener text for `TITLE` and `TEXTAREA` while excluding everything else like `SCRIPT` and `STYLE`. The result is truncated by Unicode code points with a UTF-8 regex split so multi-byte characters are never cut in half.",
+  "confidence": 88
+}
