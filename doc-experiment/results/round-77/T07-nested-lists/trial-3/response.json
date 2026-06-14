@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get tree-aware fragment parsing, then walked tags with `next_tag()` and checked each `UL`/`OL` opener\u2019s `get_breadcrumbs()` for any earlier `UL` or `OL` ancestor before adding the `nested-list` class with `add_class()`. The final HTML is returned with `get_updated_html()`, which preserves untouched bytes exactly.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser to get browser-style table structure, then walked tokens with next_token() so implied tbody/tr nodes and nested cell markup are handled naturally. The function records the first TABLE opener, collects only #text token content via get_modifiable_text() inside TH/TD cells, and flushes rows on TR closers, returning an empty array when no table is found.",
+  "confidence": 91
+}

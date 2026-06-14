@@ -8,13 +8,13 @@ from discoverability gaps.
 
 ## Current read
 
-Owner override after the round-67 pause: test 10 additional reduction and
+Owner override after the round-67 pause asked for 10 additional reduction and
 simplification ideas, each as a scratch-only `shadow-doc-a/b` variant before
-any source promotion. Keep the selected subject policy at `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`.
-Compare against the current weak-tier source-doc baseline, round 56. Promote
-nothing from these tests until a variant wins and is confirmed with the normal
-source-doc flow.
+any source promotion. That queue is now complete in rounds 68-77. Keep the
+selected subject policy at `gpt-5.4-mini` / `low` / `priority` with judge
+policy `gpt-5.5` / `xhigh` / `priority`. Compare against the current weak-tier
+source-doc baseline, round 56. Promote nothing from these tests until a variant
+wins and is confirmed with the normal source-doc flow.
 
 Reduction queue:
 
@@ -79,42 +79,44 @@ Reduction queue:
    `N06-extract-toc` falling **99.80 -> 78.50** from one generic PHP
    `preg_match()` mistake. The direct `T10-last-h2` bookmark task stayed
    **100.00**, but do not promote.
-10. Method-local inherited duplication compression: in `html-processor.md`,
-    replace inherited Tag Processor method detail bodies for flat class and
-    attribute helpers with concise cross-reference stubs, while leaving the Tag
-    Processor originals intact.
+10. Tested/rejected in round 77: method-local inherited duplication
+    compression replaced inherited flat Tag Processor helper bodies in
+    `html-processor.md` with concise cross-reference stubs while leaving the
+    Tag Processor originals intact and preserving headings/signatures/parameter
+    tables. It removed 68 rendered lines but failed, **97.88 train / 97.55
+    core** versus round 56's **99.61 / 99.55**, with traversal falling to
+    **94.27**. The targeted flat helper tasks stayed strong (`T01`, `T02`,
+    `T06`, and `T11` all **100.00**; `T04` **99.50**), but `N06-extract-toc`
+    fell **99.80 -> 78.40** from one generic `preg_match()` bug and
+    `N03-first-list-count` fell **99.70 -> 94.06** from one plain
+    `next_tag()` depth-boundary scan that skipped closers. Do not promote.
 
-Test order continues with item 10 as round 77 on the full train set. Round 76
-failed badly, so continue to the next isolated reduction candidate:
-compressing inherited Tag Processor flat helper method detail in
-`html-processor.md` while preserving headings, signatures, parameter/return
-tables, inherited availability, and cross-references to the Tag Processor
-originals.
+Queue result: the 10-candidate reduction pass is complete. Nine candidates
+lost against the comparable weak-tier source-doc baseline. Round 70 remains
+the only aggregate/core win, **99.67 train / 99.62 core**, but it is not a
+clean source-promotion candidate because `T10-last-h2` fell **100.00 ->
+98.20** and `T04-build-figure` fell **100.00 -> 99.30**. Do not promote any
+reduction from this queue without a fresh confirmation/control.
 
-Latest update: round 76 tested Tag Processor bookmark overview example
-deduplication as a full-train scratch ablation. It removed 21 rendered lines
-from `html-tag-processor.md` and preserved the direct bookmark task:
-`T10-last-h2` stayed at **100.00**, with all three trials using
-`WP_HTML_Tag_Processor` and the documented last-match bookmark idiom. It still
-failed overall: **96.98 train / 96.51 core** versus the comparable round-56
-weak-tier source-doc baseline at **99.61 / 99.55**. The damage was
-concentrated in traversal: `N03-first-list-count` fell **99.70 -> 82.15**
-because one trial called `seek( '1' )` without setting that bookmark, and
-`N06-extract-toc` fell **99.80 -> 78.50** because one trial used
-`preg_match(...) !== 2` and therefore accepted no headings. Do not promote the
-bookmark overview example removal.
+Latest update: round 77 tested inherited Tag Processor flat helper stubs in
+`html-processor.md` as a full-train scratch ablation. It removed 68 rendered
+lines and preserved the direct flat helper tasks, but failed overall:
+**97.88 train / 97.55 core** versus the comparable round-56 weak-tier
+source-doc baseline at **99.61 / 99.55**. The damage was concentrated in
+traversal: `N06-extract-toc` fell **99.80 -> 78.40** because one trial used
+`preg_match(...) !== 2`, and `N03-first-list-count` fell **99.70 -> 94.06**
+because one trial used plain `next_tag()` for a depth-boundary scan that
+needed `next_token()` or `tag_closers => 'visit'`. Do not promote the
+inherited helper stub compression.
 
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 10 as round 77: replace inherited Tag Processor flat attribute/class
-helper method bodies in `html-processor.md` with concise cross-reference
-stubs, leaving the Tag Processor originals intact and preserving each inherited
-helper's heading/signature/parameter/return tables. Target the flat helpers
-`get_attribute()`, `set_attribute()`, `remove_attribute()`,
-`get_attribute_names_with_prefix()`, `add_class()`, `remove_class()`,
-`has_class()`, and `class_list()`. Do not change source docblocks unless a
-scratch variant wins cleanly and is confirmed through the normal source-doc
-flow.
+Next action: classify as `state-reconciliation`. The owner-requested
+10-candidate reduction queue is complete and the reduction signal is mostly
+negative. Under the protocol's signal-exhaustion rule, do not make a source
+docblock reduction now. If reduction work continues, run a fresh
+confirmation/control of round 70's Tag Processor internal-parser-method
+ablation before any source promotion; otherwise pause reduction work and
+return to additive/clarifying hypotheses only when new train evidence justifies
+them.
 
 Previous update: round 75 tested Tag Processor attribute-template example
 compression as a full-train scratch ablation. It removed 4 rendered lines from

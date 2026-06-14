@@ -2,6 +2,48 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 77 — inherited helper stubs fail
+
+`round-77` tested item 10 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it compressed inherited Tag Processor helper method
+detail in `html-processor.md` for `get_attribute()`, `set_attribute()`,
+`remove_attribute()`, `get_attribute_names_with_prefix()`, `add_class()`,
+`remove_class()`, `has_class()`, and `class_list()`. Each section kept its
+heading, signature, parameter/return tables, and `@since` material, but
+replaced the inherited body with a concise cross-reference to the Tag Processor
+original. The scratch edit removed 68 rendered lines from
+`html-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **97.88 train / 97.55 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The targeted
+flat helper tasks held: `T01-add-image-class`, `T02-link-targets`,
+`T06-collect-links`, and `T11-strip-tracking-attributes` all scored
+**100.00**, and `T04-build-figure` stayed near-perfect at **99.50**. The round
+still failed overall because traversal fell to **94.27** versus round 56's
+**99.60**. `N06-extract-toc` fell **99.80 -> 78.40** after one trial used
+`preg_match(...) !== 2`, so no heading was accepted. `N03-first-list-count`
+fell **99.70 -> 94.06** after one trial used plain `next_tag()` for a
+depth-boundary scan; because closers are skipped by default, it scanned past
+the first list and treated later incomplete or unsupported markup as if the
+list-local scan had failed.
+
+Interpretation: do not promote the inherited helper stub compression. The
+targeted flat attribute/class contracts survived, but the full-train weak-tier
+round lost too much and repeated the broader traversal fragility seen across
+the reduction queue. This closes the 10-candidate scratch reduction pass:
+nine candidates lost, and round 70 is the only aggregate/core win, but it is
+not clean enough to promote without a confirmation/control because it caused
+small `T10-last-h2` and `T04-build-figure` regressions.
+
+Next action: classify as `state-reconciliation` with selected subject policy
+`gpt-5.4-mini` / `low` / `priority` and judge policy `gpt-5.5` / `xhigh` /
+`priority`. Do not make a source docblock edit. If reduction work continues,
+the only evidence-backed reduction candidate is a fresh confirmation/control
+of round 70's Tag Processor internal-parser-method ablation; otherwise pause
+under the signal-exhaustion rule.
+
 ## Round 76 — bookmark overview example deduplication fails
 
 `round-76` tested item 9 from the owner-requested reduction queue as a

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor (`WP_HTML_Processor::create_fragment`) for normalized fragment serialization, walked tokens with `next_token()`, restricted wrapping to `#text`, compared decoded text via `get_modifiable_text()`, and emitted wrappers around `serialize_token()`. All called HTML API methods are documented and no `_doing_it_wrong` records appeared. Minor edge-policy concern: on `get_last_error()` it returns the accumulated partial output, which is a chosen best-effort policy but not a strong fail-closed policy for unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same correct core pattern: HTML Processor, token walk, `#text` guard, decoded comparison, and `serialize_token()` wrapping. All API calls are documented and execution recorded no misuse. The only near-miss is the `get_last_error()` fallback to `normalize($html) ?? $html`, which intentionally discards any emitted wrappers and can return raw unnormalized input if normalization fails."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly follows the documented token-rewrite recipe and handles ordinary text versus special-element/comment text by checking `get_token_type() === '#text'` before reading `get_modifiable_text()`. No undocumented API usage or `_doing_it_wrong` records. Like trial-2, its unsupported-markup fallback can discard the rewrite and may return raw input."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, so there were no failed hidden cases to attribute to documentation gaps. The rendered docs appear to have supported this task very well: `Which processor should I use?` points normalized output and tree-aware text work to `WP_HTML_Processor`; `Recipe: collect DOM-style text from a subtree` warns that ordinary text is only `#text` tokens and excludes comments and special-element opener text; `get_modifiable_text()` states that `#text` and TITLE/TEXTAREA text are decoded; and `serialize_token()` shows the exact general token-rewrite pattern of comparing decoded text and wrapping the current token serialization. The only repeated near-miss was fallback handling after processor creation or parser error: subjects reached for `normalize($html) ?? $html`, which is documented but easy to overgeneralize. It is harmless for the supplied cases, but for unsupported markup it can discard accumulated wrappers or return unnormalized raw input, depending on the chosen contract.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` / “Recipe: rewrite while serializing tokens”",
+      "problem": "The docs correctly say `normalize($html)` starts over from the original input, but the nearby fallback examples can still be read as a generally safe cleanup step after a rewrite loop.",
+      "suggestion": "Label fallback examples by contract, e.g. “discard all rewrite changes and return normalized original if possible” versus “preserve best-effort emitted rewrite,” so callers choose intentionally after partial output has been built."
+    },
+    {
+      "location": "`WP_HTML_Processor::create_fragment()` return-value docs",
+      "problem": "The docs say `null` means no processor was created, but do not make the practical causes and recommended string-return fallback policies very concrete for default BODY fragments.",
+      "suggestion": "Add a short note describing when `create_fragment($html)` with the default context can return `null`, and give general fallback guidance for functions that promise normalized output versus functions that promise best-effort output."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_last_error()` and serialization docs",
+      "problem": "The unsupported-markup policy is documented, but the relationship between `get_last_error()`, `paused_at_incomplete_token()`, partial accumulated serialization, and normalized-output promises remains easy to blur.",
+      "suggestion": "Add a compact decision table for token-rewrite functions: unsupported parser error, incomplete trailing token, and processor creation failure, with recommended outcomes such as return `null`, return empty string, return partial serialization, or discard edits by normalizing the original."
+    }
+  ]
+}

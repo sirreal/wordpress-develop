@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, bookmark each `H2` opener as the scan advances, then `seek()` back to the last bookmark and `add_class( 'final-section' )` before returning `get_updated_html()`. This follows the documented Tag Processor APIs for flat, byte-preserving attribute edits and bookmarks.",
+  "confidence": 96
+}

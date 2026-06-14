@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment API to normalize the input with `WP_HTML_Processor::create_fragment()` and `serialize()`, and I return the exact fallback when processor creation fails or the parser reports an error via `get_last_error()`. This matches the documented behavior for normalized fragment serialization and unsupported HTML handling.",
+  "confidence": 96
+}

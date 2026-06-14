@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src`, `alt`, and a placeholder text node inside `figcaption`, so attribute order is preserved and the text can be safely replaced. The documented `set_attribute()` and `set_modifiable_text()` APIs handle the HTML encoding for unescaped input, and `get_updated_html()` returns the final fragment.",
+  "confidence": 93
+}

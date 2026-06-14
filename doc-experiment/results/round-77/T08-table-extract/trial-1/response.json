@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table handling, then walked tokens with `next_token()` and `get_current_depth()` to stay within the first table subtree. Cell text is accumulated only from `#text` tokens via `get_modifiable_text()`, and rows are finalized when the matching `TR` closer is reached.",
+  "confidence": 78
+}

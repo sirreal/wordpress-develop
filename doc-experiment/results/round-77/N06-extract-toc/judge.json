@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used only documented token APIs. The token-walking/state-machine approach aligns with the docs, including #text-only collection and get_modifiable_text() for decoded text. The implementation failed because it compared preg_match() to 2, so no heading tag ever matched; that is a PHP bug, not an HTML API hallucination."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice, all called methods are documented, and the depth-bounded #text collection follows the documented subtree text recipe closely. Minor deduction because it uses a nested next_token() loop for repeated heading extraction despite the docs preferring one explicit-state loop for repeated regions; for this task it still handles the boundary correctly."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor with a single explicit-state next_token() walk, documented token-type checks, depth checks, tag-closer handling, and get_modifiable_text(). This is the most idiomatic submission for the documented repeated-region guidance. No undocumented API usage or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "Trial 1 failed every positive case: basic-h1-h3, all-heading-levels, nested-text-and-entities, empty-heading, case-insensitive-source, and implied-heading-close. The shared misconception was not about the HTML API: the code used `2 !== preg_match( '/^H([1-6])$/', $tag )`, but preg_match() returns 1 for a successful match, not the number of matches plus captures. Therefore the heading state never opened and the result was always empty. The rendered docs were adequate for the API behavior involved: `get_tag()` says tag names are uppercase, `next_token()` says virtual closers are visited for implicit and end-of-input closes, the subtree text recipe says to append only `#text` tokens, and `get_modifiable_text()` says #text is decoded. The docs even include a finite tag-set pattern under `next_tag()` using `in_array( $processor->get_tag(), $wanted, true )`; the failure came from not following that simpler matching pattern.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() / token-walk examples",
+      "problem": "The finite tag-set matching idiom appears under `next_tag()`, but the token-walk and text-extraction sections do not restate it. A subject doing a token walk reached for a regex and introduced a non-API return-value bug.",
+      "suggestion": "Cross-link from `get_tag()` and the `next_token()` text-walk examples to the finite-set pattern: after confirming a tag opener, compare the uppercase `get_tag()` result with `in_array( $tag, $wanted, true )`."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region guidance",
+      "problem": "The docs warn against nested `next_token()` loops for repeated regions, while the subtree recipe demonstrates a bounded inner loop for one element. That distinction is subtle and can make otherwise good implementations look questionable.",
+      "suggestion": "Add a short contract note explaining when a bounded inner subtree walk is acceptable, what token position it leaves the cursor on, and why a single explicit-state loop is preferred for repeated extraction."
+    }
+  ]
+}

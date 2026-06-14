@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to get structural awareness, located the first `H1` with `next_tag()`, then walked its subtree with `next_token()` and the recorded depth so only descendant `#text` tokens were concatenated. `get_modifiable_text()` returns decoded text, so character references like `&amp;` come back as `&`, while markup is ignored by filtering to `#text` only.",
+  "confidence": 95
+}

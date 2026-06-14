@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full structural awareness, then walked tokens with `next_token()` and collected ordinary `#text` descendants for each heading opener. I relied on the documented HTML Processor token APIs (`get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_modifiable_text()`) so markup inside headings contributes text while tags do not, and empty headings still emit an entry with an empty string.",
+  "confidence": 92
+}

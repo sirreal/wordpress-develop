@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` APIs to walk the first table structurally, collect row and cell boundaries from `TR`/`TD`/`TH` tokens, and append decoded text only from `#text` tokens inside the active cell.",
+  "confidence": 90
+}
