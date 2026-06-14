@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only `H2` opening tags, remembered the last one with a bookmark, then sought back and added the `final-section` class. If no `H2` was found, the function returns the original HTML unchanged; otherwise it returns the processor\u2019s updated HTML via `get_updated_html()`.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens in document order with `next_token()`. For each opening `A` tag I read the decoded `href` via `get_attribute('href')`, skipped boolean or missing values, and collected only `#text` tokens inside that element using a depth-bounded walk with `get_current_depth()` and `get_modifiable_text()` so nested markup contributes nothing.",
+  "confidence": 92
+}

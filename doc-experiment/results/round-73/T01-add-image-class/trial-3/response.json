@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task is a flat, byte-preserving attribute edit on matching tags. The implementation scans with `next_tag( 'img' )`, relies on its ASCII case-insensitive tag matching and comment-safe linear scan, adds the class with `add_class( 'wp-image' )`, and returns the edited document via `get_updated_html()` so all untouched bytes are preserved exactly.",
+  "confidence": 98
+}

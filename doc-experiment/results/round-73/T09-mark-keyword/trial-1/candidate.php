@@ -1,0 +1,26 @@
+<?php
+
+function mark_keyword( string $html, string $keyword ): string {
+	$processor = WP_HTML_Processor::create_fragment( $html );
+
+	if ( ! $processor ) {
+		return WP_HTML_Processor::normalize( $html ) ?? $html;
+	}
+
+	$output = '';
+
+	while ( $processor->next_token() ) {
+		if ( '#text' === $processor->get_token_type() && '' !== $keyword && false !== strpos( $processor->get_modifiable_text(), $keyword ) ) {
+			$output .= '<mark>' . $processor->serialize_token() . '</mark>';
+			continue;
+		}
+
+		$output .= $processor->serialize_token();
+	}
+
+	if ( null !== $processor->get_last_error() ) {
+		return WP_HTML_Processor::normalize( $html ) ?? $html;
+	}
+
+	return $output;
+}

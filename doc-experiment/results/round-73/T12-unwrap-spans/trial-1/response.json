@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-fragment input, then walked tokens with `next_token()` and rebuilt normalized HTML by concatenating `serialize_token()` for every token except `SPAN` openers and closers. That removes spans at any nesting level while preserving and normalizing all remaining markup and text.",
+  "confidence": 91
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` for byte-preserving attribute edits and a small manual stack to track nested `UL`/`OL` ancestry while scanning tags with `next_tag( array( 'tag_closers' => 'visit' ) )`. When a list opener appears with at least one list already open, I add the documented `nested-list` class via `add_class()`, then return `get_updated_html()` so untouched bytes stay unchanged.",
+  "confidence": 91
+}

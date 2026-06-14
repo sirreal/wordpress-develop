@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct Tag Processor for a flat attribute-edit task. Every called API is documented: constructor, next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html(). The loop and output pattern are idiomatic, and the lowercase/case-insensitive prefix helper handles uppercase source attributes."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation pattern as the reference. No undocumented calls or _doing_it_wrong records. The null guard is redundant inside a successful next_tag() loop but harmless and consistent with the documented return type."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Tag_Processor over WP_HTML_Processor, used documented prefix enumeration plus remove_attribute(), and returned queued edits with get_updated_html(). No hallucinated API usage or edge-case misuse."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases, with no _doing_it_wrong records. The docs did well on the core decision points: the Tag Processor overview says to use it for flat attribute/class edits and byte-precise preservation, while the HTML Processor docs reserve that class for structural work. The get_attribute_names_with_prefix() section explicitly documents lowercase returned names and case-insensitive matching, which explains the uppercase-source-attribute pass. The get_updated_html() section clearly states it is the correct way to read back queued attribute removals and that untouched bytes are preserved. Near-miss: the candidates all checked for null from get_attribute_names_with_prefix() even though a successful next_tag() means a tag opener is matched; this suggests the return-state distinction was understood conservatively but could be sharper.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() docblock",
+      "problem": "The method docblock does not explicitly state whether attribute-name matching is ASCII case-insensitive, even though related attribute APIs do. Users may wonder whether lowercase names returned by get_attribute_names_with_prefix() can safely remove uppercase source attributes.",
+      "suggestion": "Add a sentence that removal matches attribute names case-insensitively in HTML and that names returned by get_attribute_names_with_prefix() are valid inputs to remove_attribute()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() returns section",
+      "problem": "It says null is returned when no tag opener is matched, but does not explicitly distinguish that from an empty array when a matched tag has no attributes with the prefix.",
+      "suggestion": "Clarify the three states: array of matching lowercase names, empty array for a matched tag with no matches, and null only when the processor is not currently matched on a tag opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor overview or attribute-modification guide",
+      "problem": "The docs show removing one known attribute, but not the general pattern for bulk operations over discovered attribute names.",
+      "suggestion": "Add a general example showing safe enumeration of attribute names followed by remove_attribute(), framed as a pattern for deleting a family of attributes rather than as this task’s solution."
+    }
+  ]
+}

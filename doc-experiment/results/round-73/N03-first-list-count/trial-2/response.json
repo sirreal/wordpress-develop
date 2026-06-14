@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment, `next_tag()` to find the first `UL`/`OL`, `set_bookmark()`/`seek()` to return to the opener after scanning, `next_token()` with `get_current_depth()` to count only direct `LI` children, and `set_attribute()` plus `get_updated_html()` to write the `data-item-count` attribute. If the scan was incomplete or the processor reported an error, the function falls back to the original HTML unchanged.",
+  "confidence": 94
+}

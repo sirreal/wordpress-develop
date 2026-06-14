@@ -50,9 +50,11 @@ Reduction queue:
    rendered lines. It lost, **98.74 train / 98.55 core** versus round 56's
    **99.61 / 99.55**, with `N06-extract-toc` falling **99.80 -> 91.13** from
    one inline-descendant subtree-text failure. Do not promote.
-6. Unsupported-features compression: replace the long HTML Processor
-   unsupported-feature list with a compact abort-policy summary and the
-   current high-signal unsupported cases.
+6. Tested/rejected in round 73: HTML Processor unsupported-features
+   compression consolidated the abort policy and unsupported cases, removing
+   only 8 rendered lines. It failed badly, **97.08 train / 96.63 core** versus
+   round 56's **99.61 / 99.55**, with `N03-first-list-count` falling
+   **99.70 -> 65.40** from two bookmark/seek failures. Do not promote.
 7. CSS-class example compression: replace the multi-case class before/after
    block with one complete lifecycle example showing construct, match,
    `add_class()`/`remove_class()`, and `get_updated_html()`.
@@ -67,13 +69,35 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 6 as round 73 on the full train set. Round 72
-lost, so continue to the next isolated reduction candidate: compressing HTML
-Processor unsupported-feature prose while preserving the abort policy and the
-current high-signal unsupported cases.
+Test order continues with item 7 as round 74 on the full train set. Round 73
+failed badly, so continue to the next isolated reduction candidate:
+compressing the Tag Processor CSS-class example while preserving complete
+construct/match/mutate/output usage and the class-update precedence warning.
 
-Latest update: round 72 tested Tag Processor design/limitations compression as
-a full-train scratch ablation. It removed only 12 rendered lines from
+Latest update: round 73 tested HTML Processor unsupported-features
+compression as a full-train scratch ablation. It removed only 8 rendered lines
+from `html-processor.md` but failed badly: **97.08 train / 96.63 core** versus
+the comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**.
+The damage was concentrated in traversal: `N03-first-list-count` fell **99.70
+-> 65.40** because two trials scanned away from the list opener and tried to
+seek a bookmark that did not exist, or an internal-looking bookmark name.
+`T07-nested-lists` also fell **99.40 -> 96.50** from one functionally passing
+but low-adherence Tag Processor lexical-stack solution for an ancestry task.
+Do not promote the unsupported-features compression.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 7 as round 74: compress the Tag Processor `Modifying CSS classes for
+a found tag` rendered example block into one complete lifecycle example
+showing `new WP_HTML_Tag_Processor`, `next_tag()`, `add_class()`,
+`remove_class()`, and `get_updated_html()`, while preserving safety prose and
+the warning that direct `set_attribute( 'class', ... )` or
+`remove_attribute( 'class' )` takes precedence over queued class helpers. Do
+not change source docblocks unless a scratch variant wins cleanly and is
+confirmed through the normal source-doc flow.
+
+Previous update: round 72 tested Tag Processor design/limitations compression
+as a full-train scratch ablation. It removed only 12 rendered lines from
 `html-tag-processor.md` but did not win: **98.74 train / 98.55 core** versus
 the comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**.
 The damage was concentrated in traversal: `N06-extract-toc` fell **99.80 ->
@@ -82,16 +106,6 @@ current heading text subtree. `T04-build-figure` also fell **100.00 -> 97.00**
 from one functionally passing trial that called `new WP_HTML_Processor(...)`
 directly, and `T10-last-h2` fell **100.00 -> 98.40** from an HTML Processor
 processor-choice slip. Do not promote the design/limitations compression.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 6 as round 73: compress the HTML Processor unsupported-features
-rendered prose while preserving the abort policy, `get_last_error()` /
-`get_unsupported_exception()` affordances, `normalize()` / `serialize()` null
-behavior, and high-signal unsupported cases such as foster parenting/table
-relocation and adoption-agency/misnested formatting limits. Do not change
-source docblocks unless a scratch variant wins cleanly and is confirmed
-through the normal source-doc flow.
 
 Previous update: round 71 tested private/non-public method index row pruning as
 a full-train scratch ablation. It removed only 58 rendered index rows while

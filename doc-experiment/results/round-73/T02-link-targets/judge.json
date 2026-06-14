@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct Tag Processor for a flat attribute rewrite. All calls are documented: constructor, `next_tag( array( 'tag_name' => 'a' ) )`, `get_attribute()`, `set_attribute()`, and `get_updated_html()`. It followed the documented presence check semantics by comparing to `null`, so empty and valueless `href` attributes are handled."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct Tag Processor and the documented `next_tag( 'a' )` shorthand. The implementation uses documented attribute APIs idiomatically and returns `get_updated_html()` to preserve untouched bytes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct API pattern as trial-2. No undocumented methods or `_doing_it_wrong` records. The `null === get_attribute()` guard correctly distinguishes absent attributes from empty-string and boolean attributes."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, with no `_doing_it_wrong` records. The docs did well in the key places: `Which processor should I use?` points flat byte-preserving attribute edits to `WP_HTML_Tag_Processor`; `Finding tags` documents both `next_tag( 'img' )` and `array( 'tag_name' => 'img' )`; the `get_attribute()` overview and method docs explain `null` versus empty string versus `true`; `set_attribute()` states existing attributes are overwritten and new attributes are inserted immediately after the tag name; and `get_updated_html()` states untouched bytes are preserved exactly. Near-miss: the correct presence idiom, `null !== get_attribute( ... )`, is inferable but not shown as a named pattern, so a less careful reader could still write a truthiness check and miss empty or valueless attributes.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docs",
+      "problem": "The return contract explains `null`, `\"\"`, and `true`, but does not explicitly name the common attribute-presence idiom.",
+      "suggestion": "Add a short example showing `null !== $processor->get_attribute( $name )` as the way to test whether an attribute is present, including empty-string and valueless/boolean attributes."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() docs",
+      "problem": "The docs show lowercase query examples, but the case-insensitive nature of HTML tag-name matching is not stated next to the query forms.",
+      "suggestion": "Add one sentence to the `next_tag()` query documentation that tag-name matching for HTML elements is ASCII case-insensitive, and that the string shorthand is equivalent to `array( 'tag_name' => ... )`."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute() docs",
+      "problem": "Attribute placement is documented, but the practical effect of adding one new attribute before existing attributes is easy to miss when exact output order matters.",
+      "suggestion": "Add a minimal generic example showing a single new attribute added to a tag with existing attributes, demonstrating that the new attribute is inserted immediately after the tag name while existing attributes keep their original bytes."
+    }
+  ]
+}

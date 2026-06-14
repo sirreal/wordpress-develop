@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 73 — unsupported-features compression fails
+
+`round-73` tested item 6 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it compressed the HTML Processor support/unsupported
+prose by consolidating the abort policy and unsupported cases while preserving
+the supported-markup claims for tables, SVG/MathML, templates, and full
+documents; the `get_last_error()` and `get_unsupported_exception()` affordances;
+`serialize()` / `normalize()` null behavior; extra `HTML` / `BODY` attribute
+limits; foster-parenting/table-relocation limits; and adoption-agency /
+misnested-formatting limits. The scratch edit removed 8 rendered lines from
+`html-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **97.08 train / 96.63 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The loss was
+again concentrated in traversal: concept score **92.06** versus round 56's
+**99.60**. `N03-first-list-count` fell **99.70 -> 65.40** because two trials
+scanned past the list opener and then tried to return with a bookmark that was
+never created, or with an internal-looking bookmark name (`1`) that is not a
+public handle. `T07-nested-lists` fell **99.40 -> 96.50** from one
+functionally passing but low-adherence trial that used the Tag Processor plus a
+manual lexical closer stack for an ancestry task.
+
+Interpretation: do not promote the unsupported-features compression. Although
+the edited prose was not directly about bookmarks, the reduction did not
+preserve the weak-tier traversal tasks and produced the same fragile
+bookmark/seek failure shape seen in other rejected reductions. It also removed
+only 8 rendered lines, so the risk/reward is poor.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 7, CSS-class example compression, as a scratch-only `shadow-doc-a/b`
+variant. Keep the same subject policy `gpt-5.4-mini` / `low` / `priority`,
+judge policy `gpt-5.5` / `xhigh` / `priority`, and compare against round 56.
+Do not change source docblocks unless a variant wins cleanly and is confirmed
+through the normal source-doc flow.
+
 ## Round 72 — Tag Processor design/limitations compression loses
 
 `round-72` tested item 5 from the owner-requested reduction queue as a

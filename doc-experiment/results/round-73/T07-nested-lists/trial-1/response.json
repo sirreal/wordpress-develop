@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with structural awareness, then walked tags with next_tag(), checked each UL/OL opener via get_tag() and get_breadcrumbs(), and added the class with add_class() only when an earlier UL/OL appeared in the breadcrumb stack. The final HTML comes from get_updated_html() so untouched bytes are preserved exactly.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and next_token() to walk the document in order, collecting text only from #text tokens while a heading opener is active and finalizing each entry when its matching heading closer is seen. This relies on the documented HTML Processor token walk, get_token_type(), get_token_name(), is_tag_closer(), get_modifiable_text(), and get_current_depth() APIs.",
+  "confidence": 91
+}
