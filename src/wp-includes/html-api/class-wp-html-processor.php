@@ -52,6 +52,11 @@
  * bookmark on the opener, walk forward with {@see WP_HTML_Processor::next_token},
  * then seek back and edit only if the scan finished cleanly.
  *
+ * Do not use plain {@see WP_HTML_Processor::next_tag} to detect the end of
+ * a region: by default it skips closers, including the closer that reports
+ * the first depth below the region. A tag-only region scan must visit closers
+ * with `tag_closers => 'visit'`; otherwise use `next_token()`.
+ *
  * Example:
  *
  *     $processor = WP_HTML_Processor::create_fragment( $html );
@@ -81,7 +86,10 @@
  * region were complete. If a mutation depends on a complete scan, check
  * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} for truncation
  * and {@see WP_HTML_Processor::get_last_error} for unsupported markup before
- * applying the edit.
+ * applying the edit. Interpret those checks at the boundary required by the
+ * caller's contract: a completed depth-bounded region can be edited without
+ * proving that unrelated later markup in the same fragment is also supported
+ * or complete, unless the function promises whole-input validation.
  *
  * #### Recipe: test subtree membership and direct children
  *
@@ -89,6 +97,22 @@
  * advancing. Later tokens belong to that container while their depth is
  * greater than or equal to the recorded depth. The first token reported at a
  * shallower depth means the walk has moved past the container.
+ *
+ * In break-condition form, test that shallower-depth boundary immediately
+ * after `next_token()` and before any `continue` filters for closers, token
+ * type, or child predicates:
+ *
+ *     while ( $processor->next_token() ) {
+ *         if ( $processor->get_current_depth() < $container_depth ) {
+ *             break;
+ *         }
+ *
+ *         if ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {
+ *             continue;
+ *         }
+ *
+ *         // The current token is an opener inside the container.
+ *     }
  *
  * To recognize a direct child element opener inside that subtree, require all
  * three checks:
