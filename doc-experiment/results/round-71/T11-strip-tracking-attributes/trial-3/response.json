@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan every tag in document order, then removed only attributes whose lowercase names match the documented `data-track-` prefix via `get_attribute_names_with_prefix()` and `remove_attribute()`. The result is returned with `get_updated_html()`, which preserves all untouched bytes exactly as documented.",
+  "confidence": 96
+}

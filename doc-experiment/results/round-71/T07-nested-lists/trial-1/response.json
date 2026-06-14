@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() while tracking open UL/OL elements in a stack. When an opening UL or OL was encountered with a non-empty stack, I added the documented class helper add_class('nested-list'); I returned the modified markup with get_updated_html() so untouched bytes are preserved exactly.",
+  "confidence": 88
+}

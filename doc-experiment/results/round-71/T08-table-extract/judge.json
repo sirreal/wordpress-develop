@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used documented methods only: next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The single depth-bounded token walk and #text-only collection match the rendered docs closely. Minor gap: it does not explicitly check get_last_error() or paused_at_incomplete_token(), though the docs leave best-effort read-only extraction as caller policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all HTML API calls are documented. It follows the documented one-cursor state-machine pattern, uses #text plus get_modifiable_text() for decoded text, and handles virtual table closers in the tested cases. Slightly less robust than trial-1 because it has no final flush after the bounded walk and no explicit unsupported/truncated-input policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor and documented token APIs. Scanning with next_token() until TABLE is less direct than next_tag('TABLE') but still valid, and the depth break plus final flush are idiomatic. The row_depth variable is unused, but not harmful. Like the others, it does not explicitly check get_last_error() or paused_at_incomplete_token()."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there were no failed hidden cases to attribute to documentation gaps. The docs appear to have worked well for this task: the processor-choice guidance says to use WP_HTML_Processor when structure, containment, subtree text, or implied tags matter; the next_token()/get_current_depth() sections explain depth-bounded subtree walks and warn against nested cursor loops; the text-extraction recipe says to append only #text tokens and then call get_modifiable_text(); and the get_modifiable_text() docs state that character references are already decoded. The omitted-closers case was also supported by the docs explaining implied structure, synthesized TBODY, virtual closers, and using >= against the recorded opener depth. The only near-miss is completeness policy: none of the candidates checked get_last_error() or paused_at_incomplete_token(), but the rendered docs describe that as a caller choice for read-only extraction rather than a mandatory step.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / get_current_depth() docs",
+      "problem": "The docs explain depth-bounded walks and single-cursor state machines, but the example is not framed as a reusable pattern for repeated parent/child extraction with accumulated state.",
+      "suggestion": "Add a small generic state-machine recipe for extracting repeated child regions from a matched subtree, emphasizing finalizing state on virtual closers and deciding what to do with any accumulated state when the walk exits."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and WP_HTML_Tag_Processor::paused_at_incomplete_token() cross-references",
+      "problem": "The docs say read-only callers must choose a policy for partial scans, but the end-of-scan decision point is easy to skip in extraction functions that otherwise look correct.",
+      "suggestion": "Add a concise post-walk checklist: after a bounded subtree scan, call get_last_error() for unsupported-parser aborts and paused_at_incomplete_token() for trailing incomplete syntax when the caller requires complete-source results; otherwise document that the function returns best-effort accumulated data."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() public docs",
+      "problem": "The importance and current limits of fragment context are clearer in deeper/internal documentation than in the public factory section.",
+      "suggestion": "Move or repeat the context guidance in create_fragment(): default BODY context is appropriate for body fragments, while context-sensitive child fragments such as standalone TR/TD require an appropriate fragment context when supported, otherwise they may not parse as browser children of that element."
+    }
+  ]
+}

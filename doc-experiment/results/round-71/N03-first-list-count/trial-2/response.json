@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then `next_tag()` to find the first `UL` or `OL` opener, `set_bookmark()`/`seek()` to return to it after scanning, `next_token()` plus `get_current_depth()` to count only direct `LI` child openers, and `set_attribute()`/`get_updated_html()` to write the `data-item-count` attribute. If the scan was incomplete or unsupported, the function returns the original HTML unchanged.",
+  "confidence": 93
+}

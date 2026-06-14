@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 80,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 and used only documented HTML API methods. Main penalty is processor choice: it selected WP_HTML_Processor and claimed the Tag Processor could not reliably find the last H2, although the rendered Tag Processor docs explicitly describe flat position-based work and bookmark reuse for the last matching tag. The tag walk, bookmark, seek, add_class, and get_updated_html pattern is otherwise documented."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Correctly used WP_HTML_Tag_Processor, next_tag, one literal bookmark updated on each match, seek, add_class, and get_updated_html. class_exists is a PHP builtin, not an undocumented HTML API call. Minor idiom gap: it tracks bookmark existence in a local variable rather than checking has_bookmark or the set_bookmark return, but with one literal bookmark this follows the documented pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. This is the canonical documented approach: Tag Processor, case-insensitive H2 query, repeated bookmark update, has_bookmark guard, seek, add_class, release_bookmark, and get_updated_html. No undocumented API use or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial; all three passed 6/6. The docs did especially well in WP_HTML_Tag_Processor > Bookmarks and set_bookmark(): they explicitly say re-setting the same bookmark name moves it and is the supported idiom for remembering the last matching tag. The add_class() and get_updated_html() sections also prevented common mistakes around preserving existing classes and returning queued mutations. The only near-miss was trial-1's explanation: it over-classified 'last H2' as document-structure work and reached for WP_HTML_Processor despite WP_HTML_Tag_Processor > Overview > Which processor should I use? saying flat, position-based tag/class edits belong to the Tag Processor. The HTML Processor docs also describe create_full_parser/create_fragment for document-vs-fragment parsing, which may have tempted a generic full-parser-then-fragment fallback even though this task did not need tree semantics.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor class overview, 'Which processor should I use?'",
+      "problem": "A subject still interpreted 'last matching element' as structural rather than flat positional work.",
+      "suggestion": "Add an explicit decision-table row for 'first, nth, or last occurrence of a tag/class regardless of ancestry' under Tag Processor, contrasted with 'inside/contains/direct child/text subtree' under HTML Processor."
+    },
+    {
+      "location": "WP_HTML_Processor::create_full_parser() and create_fragment() docblocks",
+      "problem": "The factory docs explain document-vs-fragment parsing but do not strongly warn that processor selection should not be based on input shape when the operation is only a byte-preserving attribute/class edit.",
+      "suggestion": "Add a note that simple tag attribute/class mutations over documents or fragments should normally use WP_HTML_Tag_Processor directly; use HTML Processor factories only when tree-aware parsing, normalized serialization, or subtree semantics are required."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / seek() docblocks",
+      "problem": "The rendered docs contain the right 'last X seen so far' guidance, but it is buried inside a longer bookmark section with a nested-list example.",
+      "suggestion": "Add a short minimal snippet or summary sentence near the method signature showing the general pattern: set one literal bookmark repeatedly during a scan, then seek once after the scan before applying a mutation."
+    }
+  ]
+}

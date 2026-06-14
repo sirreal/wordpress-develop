@@ -2,6 +2,39 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 71 — private method index row pruning fails
+
+`round-71` tested item 4 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it removed only private/protected rows from the rendered
+`## Method Index` tables in both docs, leaving every method detail section
+intact. The scratch edit removed 58 rendered index rows total: 16 from
+`html-tag-processor.md` and 42 from `html-processor.md`. Source docblocks,
+corpus fixtures, runner policy, and harness behavior were unchanged.
+
+Numeric result: **94.07 train / 93.15 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The loss was
+functional and severe. `N03-first-list-count` fell **99.70 -> 64.70** because
+two trials scanned away from the list opener and then failed to bookmark/seek
+back before mutating, or sought an unset bookmark. `T12-unwrap-spans` fell
+**99.30 -> 53.30** because two trials used depth counters to suppress SPAN
+descendants instead of skipping only SPAN boundary tokens. Concept scores
+dropped to **92.04 traversal** and **76.00 serialization**.
+
+Interpretation: do not promote private/non-public method index row pruning.
+Even though the actual method detail sections remained visible, the index-only
+navigation change correlated with large losses on existing train tasks. This
+variant is a clean rejection and should not be combined into source reductions
+without strong contrary evidence.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 5, the Tag Processor design/limitations compression, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Do not change source docblocks
+unless a variant wins cleanly and is confirmed through the normal source-doc
+flow.
+
 ## Round 70 — Tag Processor private helper pruning is promising but not clean
 
 `round-70` tested item 3 from the owner-requested reduction queue as a

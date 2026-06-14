@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token() and wrapped only ordinary #text tokens whose decoded text from get_modifiable_text() contains the keyword. I serialized each token with serialize_token() so the result stays normalized, and fell back to normalize() if parsing aborted.",
+  "confidence": 91
+}

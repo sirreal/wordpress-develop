@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment API to start from a literal figure template with placeholder attribute values and placeholder caption text, then updated the existing `img` attributes in place so their order stays `src` then `alt`, and replaced the figcaption text through `set_modifiable_text()`, which handles encoding for unescaped input.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` and concatenated `serialize_token()` for everything except `SPAN` tags. Because `serialize_token()` emits normalized HTML and skipping both span openers and closers preserves their contents, this unwraps nested spans while keeping the rest of the fragment normalized.",
+  "confidence": 87
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and rebuilt the output with `serialize_token()` so the remaining HTML stays normalized. A small span-depth counter skips both `<span>` openers and their matching closers, including nested spans, while leaving all non-span tokens serialized in place.",
+  "confidence": 87
+}

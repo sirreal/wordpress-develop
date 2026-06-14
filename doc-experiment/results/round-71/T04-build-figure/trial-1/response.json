@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template so the `img` attributes stay in the required `src`, then `alt` order, and `set_attribute()` handles HTML encoding for unescaped input. I filled the `figcaption` by replacing a placeholder text node with `set_modifiable_text()`, then returned the result with `get_updated_html()`.",
+  "confidence": 97
+}

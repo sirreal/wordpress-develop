@@ -39,9 +39,11 @@ Reduction queue:
    `T10-last-h2` fell **100.00 -> 98.20** from one HTML Processor
    processor-choice slip and `T04-build-figure` fell **100.00 -> 99.30**.
    Revisit only after the 10-candidate queue or with a confirmation/control.
-4. Private-method index row pruning: remove non-public method rows from the
-   method indexes only, leaving method detail sections intact, to test whether
-   index noise rather than details causes navigation cost.
+4. Tested/rejected in round 71: private-method index row pruning removed only
+   non-public rows from rendered method indexes, leaving method detail sections
+   intact. It failed badly, **94.07 train / 93.15 core** versus round 56's
+   **99.61 / 99.55**, with `N03-first-list-count` falling **99.70 -> 64.70**
+   and `T12-unwrap-spans` falling **99.30 -> 53.30**. Do not promote.
 5. Design-and-limitations compression: replace the Tag Processor
    `Design and limitations`, `Scripting Flag`, and `Text Encoding` prose with
    a shorter contract summary that preserves the tree-awareness and UTF-8
@@ -63,12 +65,28 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 4 as round 71 on the full train set. Round 70
-is promising but not a clean source-promotion result, and item 4 is a narrower
-navigation-noise test: remove private/non-public method rows from rendered
-method indexes only while leaving all method detail sections intact.
+Test order continues with item 5 as round 72 on the full train set. Round 71
+failed badly, so continue to the next isolated reduction candidate:
+compressing Tag Processor design/limitations prose while preserving the
+tree-awareness, NOSCRIPT, and encoding contracts.
 
-Latest update: round 70 tested Tag Processor private parser/helper method
+Latest update: round 71 tested private/non-public method index row pruning as
+a full-train scratch ablation. It removed only 58 rendered index rows while
+leaving all method detail sections visible, but failed badly: **94.07 train /
+93.15 core** versus the comparable round-56 weak-tier source-doc baseline at
+**99.61 / 99.55**. The damage was concentrated in `N03-first-list-count`,
+**99.70 -> 64.70**, from missing bookmark/seek-back patterns, and
+`T12-unwrap-spans`, **99.30 -> 53.30**, from subtree-pruning instead of
+boundary-token skipping. Do not promote private index-row pruning.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 5 as round 72: compress the Tag Processor `Design and limitations`,
+`Scripting Flag`, and `Text Encoding` rendered prose while preserving the
+load-bearing facts. Do not change source docblocks unless a scratch variant
+wins cleanly and is confirmed through the normal source-doc flow.
+
+Previous update: round 70 tested Tag Processor private parser/helper method
 detail removal as a full-train scratch ablation. It cut 460 rendered lines and
 scored **99.67 train / 99.62 core** versus the comparable round-56 weak-tier
 source-doc baseline at **99.61 / 99.55**, with all hidden cases passing.
@@ -77,13 +95,6 @@ However, it was not a clean source-promotion result: `T10-last-h2` fell
 source-order class edit, and `T04-build-figure` fell **100.00 -> 99.30** from
 adherence-only deductions. Keep round 70 as the best current reduction
 candidate, but do not promote from it alone.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 4 as round 71: remove private/non-public method index rows only from
-scratch rendered docs while leaving method detail sections intact. Do not
-change source docblocks unless a scratch variant wins cleanly and is confirmed
-through the normal source-doc flow.
 
 Previous update: round 69 tested HTML Processor non-public method-detail removal
 as a full-train scratch ablation. It removed 1,093 rendered lines from

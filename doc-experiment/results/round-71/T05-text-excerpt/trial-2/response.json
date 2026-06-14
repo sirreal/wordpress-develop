@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body-fragment HTML and walked tokens with next_token(), collecting only ordinary #text tokens plus TITLE/TEXTAREA opener text via get_modifiable_text(), which matches the documented extraction rules and excludes SCRIPT/STYLE contents. I then truncated the decoded UTF-8 text by code points with mb_strlen/mb_substr, with a Unicode-safe regex fallback if mbstring is unavailable.",
+  "confidence": 92
+}

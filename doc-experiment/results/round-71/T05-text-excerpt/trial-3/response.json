@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` and a token walk with `next_token()` to collect only ordinary `#text` tokens, plus the decoded opener text from `TITLE` and `TEXTAREA` via `get_modifiable_text()`, while ignoring script/style and other non-text tokens. The result is truncated by Unicode code points with `mb_strlen()`/`mb_substr()` when available.",
+  "confidence": 93
+}

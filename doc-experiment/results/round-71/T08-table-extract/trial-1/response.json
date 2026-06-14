@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, `next_tag()` to find the first `TABLE`, and `next_token()` plus `get_current_depth()` to walk just that table subtree. Cell text is collected from `#text` tokens with `get_modifiable_text()`, which already returns decoded text, and rows/cells are flushed on `TR`, `TD`, and `TH` openers/closers.",
+  "confidence": 92
+}
