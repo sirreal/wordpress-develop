@@ -143,7 +143,7 @@ class WP_HTML_Set_Inner_HTML_Fuzzer_PRNG {
  * Prints usage.
  */
 function wp_html_set_inner_html_fuzzer_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/set-inner-html.php [--iterations N] [--start-seed N] [--output-dir DIR] [--stop-on-failure] [--lexbor-oracle-bin PATH]\n";
+	echo "Usage: php tools/html-api-fuzz/set-inner-html.php [--iterations N] [--start-seed N] [--output-dir DIR] [--stop-on-failure] [--lexbor-oracle-bin PATH] [--coverage-details]\n";
 }
 
 /**
@@ -351,10 +351,8 @@ function wp_html_set_inner_html_fuzzer_html_elements(): array {
 		'pre',
 		'progress',
 		'q',
-		'rb',
 		'rp',
 		'rt',
-		'rtc',
 		'ruby',
 		's',
 		'samp',
@@ -425,6 +423,8 @@ function wp_html_set_inner_html_fuzzer_deprecated_html_elements(): array {
 		'noframes',
 		'param',
 		'plaintext',
+		'rb',
+		'rtc',
 		'shadow',
 		'spacer',
 		'strike',
@@ -703,10 +703,12 @@ function wp_html_set_inner_html_fuzzer_mathml_elements(): array {
 		'merror',
 		'mfenced',
 		'mfrac',
+		'mglyph',
 		'mi',
 		'min',
 		'minus',
 		'mlabeledtr',
+		'mlongdiv',
 		'mmultiscripts',
 		'mn',
 		'mo',
@@ -724,7 +726,6 @@ function wp_html_set_inner_html_fuzzer_mathml_elements(): array {
 		'mscarries',
 		'msgroup',
 		'msline',
-		'mslongdiv',
 		'mspace',
 		'msqrt',
 		'msrow',
@@ -737,7 +738,6 @@ function wp_html_set_inner_html_fuzzer_mathml_elements(): array {
 		'mtd',
 		'mtext',
 		'mtr',
-		'multiscripts',
 		'munder',
 		'munderover',
 		'naturalnumbers',
@@ -1955,6 +1955,45 @@ function wp_html_set_inner_html_fuzzer_coverage_summary(): array {
 }
 
 /**
+ * Returns exact coverage inventory details.
+ *
+ * @return array<string, mixed> Coverage details.
+ */
+function wp_html_set_inner_html_fuzzer_coverage_details(): array {
+	$custom_replacement_elements = array();
+	$custom_target_elements      = array();
+
+	for ( $i = 0; $i < 32; ++$i ) {
+		$custom_replacement_elements[] = wp_html_set_inner_html_fuzzer_custom_element_name(
+			new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'corpus-custom-' . $i )
+		);
+		$custom_target_elements[]      = wp_html_set_inner_html_fuzzer_custom_element_name(
+			new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'target-custom-' . $i )
+		);
+	}
+
+	return array(
+		'sources'              => array(
+			'htmlCurrent'   => 'https://html.spec.whatwg.org/multipage/indices.html#elements-3',
+			'htmlObsolete'  => 'https://html.spec.whatwg.org/multipage/obsolete.html',
+			'svg'           => 'https://svgwg.org/svg2-draft/eltindex.html',
+			'mathmlCore'    => 'https://www.w3.org/TR/mathml-core/#elements-and-attributes',
+			'mathml3RelaxNG' => 'https://www.w3.org/Math/RelaxNG/mathml3/',
+		),
+		'htmlElements'         => wp_html_set_inner_html_fuzzer_all_html_elements(),
+		'htmlCurrentElements'  => wp_html_set_inner_html_fuzzer_html_elements(),
+		'htmlDeprecatedElements' => wp_html_set_inner_html_fuzzer_deprecated_html_elements(),
+		'svgElements'          => wp_html_set_inner_html_fuzzer_svg_elements(),
+		'mathmlElements'       => wp_html_set_inner_html_fuzzer_mathml_elements(),
+		'customElementCorpus'  => $custom_replacement_elements,
+		'htmlTargetElements'   => wp_html_set_inner_html_fuzzer_all_html_elements(),
+		'svgTargetElements'    => wp_html_set_inner_html_fuzzer_svg_elements(),
+		'mathmlTargetElements' => wp_html_set_inner_html_fuzzer_mathml_elements(),
+		'customTargetCorpus'   => $custom_target_elements,
+	);
+}
+
+/**
  * Writes a failing case.
  *
  * @param string               $output_dir Output directory.
@@ -2118,6 +2157,17 @@ function wp_html_set_inner_html_fuzzer_run_case( array $case, ?string $lexbor_or
 $options = wp_html_set_inner_html_fuzzer_parse_options( $argv );
 if ( isset( $options['help'] ) || isset( $options['h'] ) ) {
 	wp_html_set_inner_html_fuzzer_usage();
+	exit( 0 );
+}
+
+if ( isset( $options['coverage-details'] ) ) {
+	echo json_encode(
+		array(
+			'summary' => wp_html_set_inner_html_fuzzer_coverage_summary(),
+			'details' => wp_html_set_inner_html_fuzzer_coverage_details(),
+		),
+		JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+	) . "\n";
 	exit( 0 );
 }
 
