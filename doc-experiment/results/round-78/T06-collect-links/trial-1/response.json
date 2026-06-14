@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in order. For each opening `A` tag, I read `href` with `get_attribute()` and only kept it when the API returned a string; while inside that anchor, I concatenated ordinary `#text` tokens via `get_modifiable_text()`, ignoring markup and other token types.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser for body-fragment normalization, then walked tokens with `next_token()` and concatenated `serialize_token()` while skipping any `SPAN` tag tokens so both span openers and closers are removed but their contents remain. The result is normalized serialization, with attributes quoted and text re-encoded by the processor.",
+  "confidence": 92
+}

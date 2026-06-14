@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and next_token() to walk the document in order. I appended decoded text from ordinary #text tokens and from TITLE/TEXTAREA opener tokens via get_modifiable_text(), then truncated the result to the requested number of Unicode code points with UTF-8-safe splitting.",
+  "confidence": 89
+}

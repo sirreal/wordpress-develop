@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan only A tag openers and inspect `href` with `get_attribute()`, which returns `null` only when the attribute is absent and `true` or an empty string when it is present. For matched links I overwrite `target` via `set_attribute()`, then return the byte-preserving result with `get_updated_html()`.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` so structural nesting is handled correctly. When I found the first opening `H1`, I recorded its depth with `get_current_depth()`, appended only `#text` tokens via `get_modifiable_text()`, and stopped once the walk left that subtree, which preserves nested text and decoded character references.",
+  "confidence": 92
+}

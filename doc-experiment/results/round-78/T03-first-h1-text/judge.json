@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor, not the Tag Processor, so it chose the tree-aware API needed for nested text and unclosed H1 handling. All called methods are documented in the rendered files: create_fragment, next_token, get_token_type, get_token_name, is_tag_closer, get_current_depth, and get_modifiable_text. Slightly less idiomatic than trials 2 and 3 because it manually token-scans for the H1 instead of using next_tag('H1'), but the pattern is still documented and correct."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented subtree text recipe closely: create a BODY fragment processor, find H1 with next_tag('H1'), record depth, walk next_token while depth stays in the subtree, append only #text tokens via get_modifiable_text. Handles decoded entities, nested markup, no H1, image-only H1, and incomplete H1 input without API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same as the canonical documented pattern: tree-aware processor, next_tag('H1'), depth-bounded token walk, #text guard, and get_modifiable_text for decoded text. No undocumented methods and no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases, so there are no failed-case misconceptions to attribute. The rendered docs did the important things well: Tag Processor > Which processor should I use? explicitly says text content, structure, and missing closing tags require WP_HTML_Processor; HTML Processor > Recipe: collect DOM-style text from a subtree gives the exact general pattern needed here; HTML Processor > next_token() warns that token walks continue to the end unless depth- or breadcrumb-bounded; HTML Processor > get_modifiable_text() warns not to use modifiable text as a predicate and to read only ordinary #text tokens for DOM-style text. The near-miss was trial-1 manually scanning tokens for H1, which is valid but shows that next_tag('H1') as the simpler first-step query could be made more prominent for common subtree extraction flows.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock / examples",
+      "problem": "The docs document string queries and mention that plain next_tag skips closers, but the common composition 'find element by tag, then perform a depth-bounded subtree walk' is mostly taught in overview recipes rather than directly near next_tag().",
+      "suggestion": "Add a short cross-reference from next_tag() to the subtree-walk recipe: after matching an opener with next_tag('TAG'), record get_current_depth() before calling next_token() to process descendants."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() docblock",
+      "problem": "The depth contract is documented, but callers must infer the reusable subtree boundary rule from examples.",
+      "suggestion": "State the general invariant directly: after matching an element opener, later tokens are inside that element while get_current_depth() is greater than or equal to the opener depth; the first shallower token is outside the subtree."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock",
+      "problem": "The rendered docs warn that get_modifiable_text() is not a predicate, but this rule is central enough that it should be hard to miss at method level.",
+      "suggestion": "Add a first-paragraph warning: for DOM-style text extraction, call this only after confirming get_token_type() === '#text'; special element opener text and comments are not ordinary descendant text unless explicitly requested."
+    }
+  ]
+}

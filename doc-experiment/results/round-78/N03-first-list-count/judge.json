@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for structural traversal, bookmarked the first list opener, walked tokens with a depth boundary before child checks, checked paused_at_incomplete_token() and get_last_error() after the bounded scan, sought back, set the attribute, and returned get_updated_html(). All HTML API calls are documented in the supplied markdown."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 87,
+      "hallucinated_methods": [],
+      "notes": "Chose the right processor and only used documented APIs. The main adherence issue is token-walk structure: the loop continues past non-tag tokens and tag closers before testing whether depth dropped below the list depth. That skips the list closer boundary and makes later incomplete or unsupported markup invalidate an already fully scanned list."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the HTML Processor, bookmarks, a bounded next_token() scan, depth-based direct-child detection, incomplete/error checks, seek(), set_attribute(), release_bookmark(), and get_updated_html(). The extra class_exists() guard is unnecessary in the harness but is not an HTML API hallucination."
+    }
+  ],
+  "failure_analysis": "Trial 2 failed incomplete-token-after-closed-list because it treated trailing incomplete markup after </ul> as a failed scan of the first list. The specific misconception was loop ordering: it filtered out closers with continue before checking get_current_depth() < $list_depth, so it missed the UL closer, kept scanning, then saw paused_at_incomplete_token(). The relevant docs did contain the rule under WP_HTML_Processor::next_token() ('does not stop when the element matched by an earlier next_tag() call ends') and get_current_depth() ('first token to report a depth less than N is the element's own closing token'), but the direct-child recipe showed only the child predicate and did not explicitly warn that subtree-exit checks must happen before closer/type filters.\n\nTrial 2 failed unsupported-after-closed-list for the same boundary misconception. It skipped the closed-list boundary, scanned into later unsupported <a><div><a> markup, observed get_last_error() === 'unsupported', and returned the original HTML. The docs' HTML Support/get_last_error sections explain that the processor aborts when unsupported markup is encountered, and the region-scan recipe says to check get_last_error() after the scan. The missing nuance is that for a mutation scoped to a bounded subtree, 'after the scan' means after the bounded subtree walk, not after draining the rest of the fragment.\n\nThe docs worked well overall on processor choice and safe mutation patterns: all trials used WP_HTML_Processor rather than the Tag Processor, all avoided undocumented methods, and two trials followed the bookmark/depth/incomplete/error/get_updated_html pattern successfully.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / Recipe: test subtree membership and direct children",
+      "problem": "The direct-child predicate can be copied into loops that continue on closers before checking the subtree boundary. This hides the fact that the container's own closer is often the boundary token.",
+      "suggestion": "Add a generic bounded-walk skeleton that checks for depth drop immediately after next_token() and before any get_token_type(), is_tag_closer(), or continue filters."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth()",
+      "problem": "The depth docs explain the < $depth boundary, but the warning is separated from the direct-child recipe and does not explicitly cover single-loop state machines with early continue statements.",
+      "suggestion": "Add a sentence: in break-condition form, perform the depth-drop test before filtering to openers or direct children, because closing tokens carry the boundary depth information."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() inherited usage in HTML Processor examples",
+      "problem": "The Tag Processor doc says to drain all tokens in a longer document before reading paused_at_incomplete_token(), which can mislead bounded-subtree mutations into scanning beyond their region.",
+      "suggestion": "Add a caveat cross-reference: for bounded HTML Processor subtree scans, drain only until the subtree boundary when the caller's contract is region-scoped; trailing incomplete syntax outside that region is a separate policy decision."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() / HTML Support",
+      "problem": "The docs say unsupported markup aborts processing when encountered, but do not make clear that a caller may intentionally stop before later unsupported markup if the required region was fully scanned.",
+      "suggestion": "Clarify that get_last_error() reports parser failure only after the cursor reaches unsupported markup, and that scoped edits may use get_updated_html() after a clean bounded scan without proving the rest of the document is supported."
+    }
+  ]
+}

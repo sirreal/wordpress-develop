@@ -1,0 +1,80 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-78/T01-add-image-class/trial-1/candidate.php",
+  "function": "add_image_class",
+  "passed": 8,
+  "total": 8,
+  "cases": [
+    {
+      "id": "simple",
+      "status": "pass",
+      "expected": "<p><img class=\"wp-image\" src=\"a.jpg\"></p>",
+      "actual": "<p><img class=\"wp-image\" src=\"a.jpg\"></p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multiple",
+      "status": "pass",
+      "expected": "<img class=\"wp-image\" src=\"a.jpg\"><div><img class=\"wp-image\" src=\"b.png\"></div>",
+      "actual": "<img class=\"wp-image\" src=\"a.jpg\"><div><img class=\"wp-image\" src=\"b.png\"></div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "existing-classes",
+      "status": "pass",
+      "expected": "<img class=\"photo large wp-image\" src=\"a.jpg\">",
+      "actual": "<img class=\"photo large wp-image\" src=\"a.jpg\">",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "uppercase-tag",
+      "status": "pass",
+      "expected": "<IMG class=\"wp-image\" SRC=\"a.jpg\">",
+      "actual": "<IMG class=\"wp-image\" SRC=\"a.jpg\">",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "inside-comment-ignored",
+      "status": "pass",
+      "expected": "<!-- <img src=\"x.jpg\"> --><img class=\"wp-image\" src=\"real.jpg\">",
+      "actual": "<!-- <img src=\"x.jpg\"> --><img class=\"wp-image\" src=\"real.jpg\">",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-images",
+      "status": "pass",
+      "expected": "<p>Nothing here.</p>",
+      "actual": "<p>Nothing here.</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unquoted-attributes",
+      "status": "pass",
+      "expected": "<img class=\"wp-image\" src=a.jpg width=10>",
+      "actual": "<img class=\"wp-image\" src=a.jpg width=10>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "incomplete-tag-at-end",
+      "status": "pass",
+      "expected": "<p>text</p><img src=\"a.jpg",
+      "actual": "<p>text</p><img src=\"a.jpg",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

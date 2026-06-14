@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan the document linearly for `h2` openers, remembered the last match with a bookmark, then sought back to that bookmark and added the `final-section` class before returning `get_updated_html()`. This stays within the documented tag-scanning, bookmarking, class-editing, and serialization APIs.",
+  "confidence": 96
+}

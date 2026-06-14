@@ -2,6 +2,51 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 78 — private helper pruning confirmation fails
+
+`round-78` tested a byte-identical confirmation/control of round 70's
+Tag Processor internal-parser-method ablation as a scratch-only
+`shadow-doc-a/b` full-train variant. Starting from current rendered source
+docs, it removed the same 16 selected private Tag Processor parser, raw-text,
+update-queue, script-content, query-parsing, and matching helper method detail
+sections from `html-tag-processor.md`, while leaving overview guidance,
+property sections, and public method sections unchanged. The staged
+`html-tag-processor.md` and `html-processor.md` hashes exactly matched round
+70's ablated rendered docs; the scratch edit removed 460 rendered lines from
+`html-tag-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **97.66 train / 97.30 core**, versus round 70's
+**99.67 train / 99.62 core** and the comparable current source-doc weak-tier
+round 56 at **99.61 train / 99.55 core**. The confirmation failed. The severe
+loss was serialization: concept score **88.40** versus round 56's **99.35**,
+with `T12-unwrap-spans` falling **99.30 -> 76.80** because one trial treated
+unwrapping as subtree pruning and skipped all contents inside each `SPAN`.
+`N03-first-list-count` fell **99.70 -> 94.46** because one trial checked
+closer/type filters before the depth-drop boundary and scanned past the first
+list into later incomplete/unsupported markup. `T10-last-h2` again showed the
+same near-regression as round 70, **100.00 -> 98.30**, from one subject using
+`WP_HTML_Processor` / `create_full_parser()` for a flat class edit.
+
+Interpretation: do not promote the Tag Processor private helper pruning as a
+standalone source reduction. The only reduction candidate that previously won
+aggregate/core did not reproduce; after rounds 68-78, no source docblock
+reduction is justified on its own. The failures are still useful evidence for
+general, compact documentation gaps: distinguish unwrapping from pruning in
+`serialize_token()` guidance, place subtree depth-boundary checks before
+token filters in bounded walks, and reinforce that flat byte-preserving
+attribute/class edits use `WP_HTML_Tag_Processor` even for documents or
+fragments.
+
+Next action: if continuing reduction work, run one scratch-only salvage
+variant before any source promotion: keep round 70's 460-line private helper
+pruning, but add only the minimal general clarifications needed for the
+measured `T12`, `N03`, and `T10` failure modes. Keep selected subject policy
+`gpt-5.4-mini` / `low` / `priority` and judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56 plus the failed confirmation in
+round 78. If that salvage variant fails, pause reduction under the
+signal-exhaustion rule.
+
 ## Round 77 — inherited helper stubs fail
 
 `round-77` tested item 10 from the owner-requested reduction queue as a

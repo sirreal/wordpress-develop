@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor so the scan can follow document structure and bookmarks can remember the last `H2` opener in one pass. The function tries `create_full_parser()` first, falls back to `create_fragment()`, scans with `next_tag()`, stores the last opener with `set_bookmark()`, then returns the edited HTML via `seek()`, `add_class()`, and `get_updated_html()`.",
+  "confidence": 87
+}
