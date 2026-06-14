@@ -8,6 +8,53 @@ from discoverability gaps.
 
 ## Current read
 
+Owner override after the round-67 pause: test 10 additional reduction and
+simplification ideas, each as a scratch-only `shadow-doc-a/b` variant before
+any source promotion. Keep the selected subject policy at `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`.
+Compare against the current weak-tier source-doc baseline, round 56. Promote
+nothing from these tests until a variant wins and is confirmed with the normal
+source-doc flow.
+
+Reduction queue:
+
+1. Property-section-only ablation: remove rendered `Properties` sections from
+   both docs, but keep all overview and method docs. This isolates the least
+   task-facing part of the broad round-62 public-API-only ablation.
+2. HTML Processor internal-step ablation: remove private parser step method
+   details (`step_*`, insertion-mode helpers, adoption-agency helpers, virtual
+   node helpers) while keeping public/inherited method docs.
+3. Tag Processor internal-parser-method ablation: remove private parser helper
+   method details (`parse_*`, `skip_*`, `apply_*`, sorting/enqueue helpers)
+   while keeping public methods and overview guidance.
+4. Private-method index row pruning: remove non-public method rows from the
+   method indexes only, leaving method detail sections intact, to test whether
+   index noise rather than details causes navigation cost.
+5. Design-and-limitations compression: replace the Tag Processor
+   `Design and limitations`, `Scripting Flag`, and `Text Encoding` prose with
+   a shorter contract summary that preserves the tree-awareness and UTF-8
+   facts.
+6. Unsupported-features compression: replace the long HTML Processor
+   unsupported-feature list with a compact abort-policy summary and the
+   current high-signal unsupported cases.
+7. CSS-class example compression: replace the multi-case class before/after
+   block with one complete lifecycle example showing construct, match,
+   `add_class()`/`remove_class()`, and `get_updated_html()`.
+8. Attribute-template example compression: shorten the template-building
+   section while preserving the two load-bearing facts: seed attributes to
+   control order, and use placeholder text for `set_modifiable_text()`.
+9. Bookmark overview/method deduplication without contract removal: keep the
+   current long `set_bookmark()` examples, but remove the shorter top-level
+   Tag Processor bookmark overview example to test duplicate placement only.
+10. Method-local inherited duplication compression: in `html-processor.md`,
+    replace inherited Tag Processor method detail bodies for flat class and
+    attribute helpers with concise cross-reference stubs, while leaving the Tag
+    Processor originals intact.
+
+Test order starts with item 1 as round 68 on the full train set because the
+blast radius is broad but the candidate should be low-risk and materially
+reduces rendered docs.
+
 Latest update: round 67 isolated the processor-choice-only simplification on
 the same six-task subset as round 66. It removed only top-level roadmap/future
 prose and rewrote the HTML Processor opening so flat first/last/Nth matching
