@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor for body-fragment normalization, walked tokens with next_token(), skipped SPAN tag tokens, and emitted normalized output with serialize_token(). All called APIs are documented and execution recorded no _doing_it_wrong misuse. Minor penalty: the get_last_error() fallback calls normalize($html) on the original input, which the docs warn discards token-level removals already emitted by the rewrite loop."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as trial-1: correct processor, documented methods only, idiomatic token-by-token serialization, and good handling of virtual closers/unclosed spans. Minor penalty for the fallback policy: normalize($html) after a rewrite loop would preserve normalization but discard removals if unsupported markup were encountered after skipped tokens."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical pattern: uses WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_tag(), and serialize_token(), all documented, with no misuse recorded. It correctly skips both span openers and closers and benefits from HTML Processor virtual closers. Minor penalty: returning raw input on processor creation failure or get_last_error() is not normalized and discards the accumulated rewrite."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases, so there are no failed hidden cases to attribute to a misconception. The rendered docs did well on the central task: the HTML Processor overview says to use it when structure or normalized output matters; create_fragment() explains body-fragment parsing and null checks; next_token() explains that the processor visits closers for every opener, including unclosed elements; and serialize_token() explicitly describes the token-rewrite pattern, including skipping tokens to remove wrappers and skipping closing tokens too. The SUP-removal example under serialize_token() was especially effective and general enough for subjects to transfer it to SPAN.\n\nThe main near-miss was fallback policy. Trials 1 and 2 used normalize($html) after detecting get_last_error(), while trial 3 returned raw input. Both choices are documented as possible policies, and the docs also warn that they discard accumulated rewrites. The task’s string return type gave subjects no obvious sentinel value, so they chose defensive fallbacks that would violate the rewrite contract on unsupported input even though no frozen case exercised that path.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / Recipe: rewrite while serializing tokens",
+      "problem": "Fallback guidance lists several possible policies, but models still chose normalize($html) or raw input for a token-removal rewrite where those fallbacks discard the rewrite.",
+      "suggestion": "Add explicit guidance for string-returning normalized rewrites: if skipped, wrapped, or replaced tokens are semantically required, normalize($html) and raw input are only acceptable when intentionally abandoning the rewrite; otherwise return the accumulated best-effort output, an empty string, null in a nullable API, or another documented failure sentinel."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() and serialize_token() examples",
+      "problem": "The useful idiom that a tag-name comparison matches both openers and closers is shown by example but not stated as a contract near get_tag().",
+      "suggestion": "State that get_tag() returns the element name for both opening and closing tag tokens and null for non-tag tokens; mention that a get_token_type() guard is optional when the goal is to skip both sides of a named element."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() incomplete-input discussion",
+      "problem": "The docs explain virtual closers and incomplete trailing syntax, but the distinction between an unclosed element and an incomplete token could be easier to apply in rewrite code.",
+      "suggestion": "Add a compact example contrasting an unclosed element that still produces virtual closing tokens with a truly incomplete trailing token that is never visited, and show how that affects serialize_token() output and paused_at_incomplete_token()."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment()",
+      "problem": "The docs require a null check but do not make clear how likely null is with the default BODY/UTF-8 path or what fallback best fits normalized rewrite functions.",
+      "suggestion": "Clarify the known null-return conditions for default fragment parsing and cross-link to the rewrite fallback guidance so defensive checks do not accidentally choose a policy that violates normalized rewrite contracts."
+    }
+  ]
+}

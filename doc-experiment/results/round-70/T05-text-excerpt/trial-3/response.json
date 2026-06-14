@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context and `next_token()` to walk tokens in document order, appending only ordinary `#text` tokens plus opener-carried text from `TITLE` and `TEXTAREA`, which the documented HTML API says should be read via `get_modifiable_text()`. The final string is truncated by Unicode code points with `mb_substr(..., 'UTF-8')` when available.",
+  "confidence": 92
+}

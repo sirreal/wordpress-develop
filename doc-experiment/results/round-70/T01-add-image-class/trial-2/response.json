@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly and match only real `img` tag openers with case-insensitive tag-name matching. For each matched tag, I called `add_class( 'wp-image' )`, then returned `get_updated_html()`, which preserves every untouched byte exactly and leaves tags in comments unmodified because `next_tag()` does not match text inside comments.",
+  "confidence": 98
+}

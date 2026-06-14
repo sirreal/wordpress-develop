@@ -30,9 +30,15 @@ Reduction queue:
    97.89 core** versus round 56's **99.61 / 99.55**, with serialization
    dropping to **87.85** and `T12-unwrap-spans` falling **99.30 -> 76.70**.
    Do not promote.
-3. Tag Processor internal-parser-method ablation: remove private parser helper
-   method details (`parse_*`, `skip_*`, `apply_*`, sorting/enqueue helpers)
-   while keeping public methods and overview guidance.
+3. Tested/promising but not promoted in round 70: Tag Processor
+   internal-parser-method ablation removed 460 rendered lines of selected
+   private helper method detail from `html-tag-processor.md`, keeping overview,
+   property sections, and public method docs. It beat aggregate/core,
+   **99.67 train / 99.62 core** versus round 56's **99.61 / 99.55**, with all
+   hidden cases passing, but it was not a clean promotion candidate because
+   `T10-last-h2` fell **100.00 -> 98.20** from one HTML Processor
+   processor-choice slip and `T04-build-figure` fell **100.00 -> 99.30**.
+   Revisit only after the 10-candidate queue or with a confirmation/control.
 4. Private-method index row pruning: remove non-public method rows from the
    method indexes only, leaving method detail sections intact, to test whether
    index noise rather than details causes navigation cost.
@@ -57,11 +63,29 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 3 as round 70 on the full train set because
-rounds 68 and 69 both lost. Item 3 isolates Tag Processor private parser
-helper detail noise while preserving public methods and overview guidance.
+Test order continues with item 4 as round 71 on the full train set. Round 70
+is promising but not a clean source-promotion result, and item 4 is a narrower
+navigation-noise test: remove private/non-public method rows from rendered
+method indexes only while leaving all method detail sections intact.
 
-Latest update: round 69 tested HTML Processor non-public method-detail removal
+Latest update: round 70 tested Tag Processor private parser/helper method
+detail removal as a full-train scratch ablation. It cut 460 rendered lines and
+scored **99.67 train / 99.62 core** versus the comparable round-56 weak-tier
+source-doc baseline at **99.61 / 99.55**, with all hidden cases passing.
+However, it was not a clean source-promotion result: `T10-last-h2` fell
+**100.00 -> 98.20** because one subject used `WP_HTML_Processor` for a flat
+source-order class edit, and `T04-build-figure` fell **100.00 -> 99.30** from
+adherence-only deductions. Keep round 70 as the best current reduction
+candidate, but do not promote from it alone.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 4 as round 71: remove private/non-public method index rows only from
+scratch rendered docs while leaving method detail sections intact. Do not
+change source docblocks unless a scratch variant wins cleanly and is confirmed
+through the normal source-doc flow.
+
+Previous update: round 69 tested HTML Processor non-public method-detail removal
 as a full-train scratch ablation. It removed 1,093 rendered lines from
 `html-processor.md` but did not win: **98.17 train / 97.89 core** versus the
 comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**. The
@@ -69,13 +93,6 @@ damage was concentrated in serialization, with `T12-unwrap-spans` falling
 **99.30 -> 76.70** because one trial used depth state to prune the whole SPAN
 subtree instead of skipping only SPAN boundary tokens. Do not promote this
 HTML Processor non-public method-detail ablation.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 3 as round 70: remove Tag Processor private parser/helper method
-details from scratch rendered docs while keeping public methods and overview
-guidance intact. Do not change source docblocks unless a scratch variant wins
-and is confirmed through the normal source-doc flow.
 
 Previous update: round 68 tested property-section removal as a full-train
 scratch ablation. It removed 604 rendered lines from the staged docs but did

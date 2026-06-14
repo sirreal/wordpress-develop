@@ -2,6 +2,43 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 70 — Tag Processor private helper pruning is promising but not clean
+
+`round-70` tested item 3 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it removed selected private Tag Processor parser,
+raw-text, update-queue, script-content, query-parsing, and matching helper
+method detail sections from `html-tag-processor.md`, while leaving overview
+guidance, property sections, and public method sections unchanged. The scratch
+edit removed 460 rendered lines from `html-tag-processor.md`. Source
+docblocks, corpus fixtures, runner policy, and harness behavior were
+unchanged.
+
+Numeric result: **99.67 train / 99.62 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. All 45 trials
+passed all hidden cases. Concept scores were mixed: serialization rose
+**99.35 -> 99.60** and text rose **99.17 -> 99.80**, while attributes fell
+**100.00 -> 99.77** and traversal fell **99.60 -> 99.44**. The clearest
+near-regression was `T10-last-h2`, **100.00 -> 98.20**, because one subject
+used `WP_HTML_Processor` for a flat source-order class edit. `T04-build-figure`
+also fell **100.00 -> 99.30** from adherence-only deductions.
+
+Interpretation: do not promote this source reduction yet. It is the first
+reduction scratch round in this phase to beat the weak-tier aggregate/core
+baseline, and it removed a meaningful amount of non-public detail. However,
+the protocol requires a shadow-doc variant to win without a clean regression,
+and the recurring `T10` processor-choice slip is enough to hold promotion.
+Keep this as the best current reduction candidate for possible confirmation or
+combination after the 10-candidate queue, but do not edit source docblocks from
+round 70 alone.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 4, private-method index row pruning, as a scratch-only `shadow-doc-a/b`
+variant. Keep the same subject policy `gpt-5.4-mini` / `low` / `priority`,
+judge policy `gpt-5.5` / `xhigh` / `priority`, and compare against round 56.
+Do not change source docblocks unless a variant wins cleanly and is confirmed
+through the normal source-doc flow.
+
 ## Round 69 — HTML Processor non-public method details still carry signal
 
 `round-69` tested item 2 from the owner-requested reduction queue as a

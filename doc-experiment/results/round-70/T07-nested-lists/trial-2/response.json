@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for tree-aware traversal, then walked tokens with next_token(), checking get_breadcrumbs() to detect whether a UL or OL had an ancestor UL or OL above it. Matching opener tags are updated with add_class(), and get_updated_html() returns the exact modified fragment with untouched bytes preserved.",
+  "confidence": 94
+}

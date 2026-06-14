@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so the fragment is parsed with tree awareness, then walked only opening tags with `next_tag()`. For each `UL` or `OL`, I checked `get_breadcrumbs()` for any earlier `UL`/`OL` ancestor and applied `add_class( 'nested-list' )`; `get_updated_html()` returns the byte-preserving result for untouched markup.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, matching `img` tags case-insensitively with `next_tag( 'img' )`, then called `add_class( 'wp-image' )` on each match. That preserves all untouched bytes exactly and appends the new class without removing or reordering existing classes, with the final result returned via `get_updated_html()`.",
+  "confidence": 98
+}

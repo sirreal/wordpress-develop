@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor bookmark flow to scan for every `h2`, remember the last opener with a stable bookmark, then `seek()` back once at the end and apply `add_class( 'final-section' )`. I return `get_updated_html()` so only the targeted tag changes and the rest of the markup stays byte-preserved.",
+  "confidence": 89
+}

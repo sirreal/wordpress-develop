@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for BODY-fragment parsing and next_token() with get_token_type(), get_current_depth(), get_tag(), is_tag_closer(), and get_modifiable_text() to walk the document structurally, collect only ordinary text nodes inside H1-H6 elements, and flush each heading when its closing token is reached or implied by parser structure.",
+  "confidence": 93
+}

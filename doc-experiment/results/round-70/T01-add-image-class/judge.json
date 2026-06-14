@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for a flat, byte-preserving class edit. All called APIs are documented: constructor, next_tag(array('tag_name'=>'img')), add_class(), and get_updated_html(). The query form, case-insensitive tag matching, class append semantics, and incomplete-token behavior are aligned with the rendered docs."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and the documented shorthand next_tag('img') form, then add_class() and get_updated_html(). This is the canonical documented pattern for finding tags, mutating classes, and preserving untouched bytes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong adherence as trial-2: correct Tag Processor choice, no undocumented methods, idiomatic linear token walking with next_tag(), safe class mutation with add_class(), and output via get_updated_html()."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden/frozen cases, so there are no failed cases to attribute to a misconception. The docs performed well on the main decision points: html-tag-processor.md > 'Which processor should I use?' explicitly directs flat byte-precise attribute/class edits to WP_HTML_Tag_Processor; 'Finding tags' documents both next_tag(array('tag_name'=>'img')) and next_tag('img'); next_tag() parameters state tag-name matching is ASCII case-insensitive; 'Modifying CSS classes' documents add_class() creating a class attribute and appending without removing or reordering existing classes; get_updated_html() documents byte-preserving output for queued updates. Near-misses: comment skipping is mostly implied by 'find tags' rather than stated as a contract; incomplete trailing syntax is documented under 'When matching fails' but not tied directly to mutation loops plus get_updated_html(); placement/quoting of newly added attributes is documented, but not close to add_class(), where readers need it for byte-level expectations.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md > Finding tags / next_tag() docblock",
+      "problem": "The docs imply but do not directly state that next_tag() only matches real HTML tag tokens and will not match tag-like text inside comments or text nodes.",
+      "suggestion": "Add a short contract note and example showing that '<img>' inside an HTML comment is not matched by next_tag('IMG'), while a following real IMG opener is matched."
+    },
+    {
+      "location": "html-tag-processor.md > add_class() docblock",
+      "problem": "add_class() explains creation/appending/no-duplicate behavior, but the placement and quoting of a newly created class attribute are documented elsewhere, making byte-level output expectations harder to find.",
+      "suggestion": "Extend add_class() with a general note that when it creates a missing class attribute, normal attribute-update serialization applies: the new attribute is inserted according to the processor's added-attribute ordering and serialized with double quotes, while untouched bytes remain unchanged."
+    },
+    {
+      "location": "html-tag-processor.md > When matching fails / get_updated_html() docblock",
+      "problem": "Incomplete-token behavior is documented as a reason next_tag() returns false, but the mutation-loop consequence is not stated explicitly.",
+      "suggestion": "Add a sentence that unvisited incomplete trailing syntax is not mutated, and get_updated_html() returns those untouched bytes as-is while still applying any earlier queued updates."
+    }
+  ]
+}
