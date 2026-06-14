@@ -143,7 +143,7 @@ class WP_HTML_Set_Inner_HTML_Fuzzer_PRNG {
  * Prints usage.
  */
 function wp_html_set_inner_html_fuzzer_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/set-inner-html.php [--iterations N] [--start-seed N] [--output-dir DIR] [--stop-on-failure]\n";
+	echo "Usage: php tools/html-api-fuzz/set-inner-html.php [--iterations N] [--start-seed N] [--output-dir DIR] [--stop-on-failure] [--lexbor-oracle-bin PATH]\n";
 }
 
 /**
@@ -215,6 +215,28 @@ function wp_html_set_inner_html_fuzzer_string_option( array $options, string $na
 }
 
 /**
+ * Returns the optional Lexbor oracle binary path.
+ *
+ * @param array<string, mixed> $options Options.
+ * @return string|null Binary path, or null when unavailable.
+ */
+function wp_html_set_inner_html_fuzzer_lexbor_oracle_bin( array $options ): ?string {
+	$root      = dirname( __DIR__, 2 );
+	$from_env  = getenv( 'HTML_API_FUZZ_LEXBOR_ORACLE' );
+	$candidate = wp_html_set_inner_html_fuzzer_string_option(
+		$options,
+		'lexbor-oracle-bin',
+		false !== $from_env && '' !== $from_env
+			? $from_env
+			: $root . '/tools/html-api-fuzz/oracles/lexbor/build/lexbor-tree-oracle'
+	);
+
+	return is_string( $candidate ) && is_file( $candidate ) && is_executable( $candidate )
+		? $candidate
+		: null;
+}
+
+/**
  * Loads the HTML API without bootstrapping WordPress.
  */
 function wp_html_set_inner_html_fuzzer_bootstrap(): void {
@@ -246,6 +268,740 @@ function wp_html_set_inner_html_fuzzer_bootstrap(): void {
 }
 
 /**
+ * Returns current HTML elements.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_html_elements(): array {
+	return array(
+		'a',
+		'abbr',
+		'address',
+		'area',
+		'article',
+		'aside',
+		'audio',
+		'b',
+		'base',
+		'bdi',
+		'bdo',
+		'blockquote',
+		'body',
+		'br',
+		'button',
+		'canvas',
+		'caption',
+		'cite',
+		'code',
+		'col',
+		'colgroup',
+		'data',
+		'datalist',
+		'dd',
+		'del',
+		'details',
+		'dfn',
+		'dialog',
+		'div',
+		'dl',
+		'dt',
+		'em',
+		'embed',
+		'fieldset',
+		'figcaption',
+		'figure',
+		'footer',
+		'form',
+		'h1',
+		'h2',
+		'h3',
+		'h4',
+		'h5',
+		'h6',
+		'head',
+		'header',
+		'hgroup',
+		'hr',
+		'html',
+		'i',
+		'iframe',
+		'img',
+		'input',
+		'ins',
+		'kbd',
+		'label',
+		'legend',
+		'li',
+		'link',
+		'main',
+		'map',
+		'mark',
+		'menu',
+		'meta',
+		'meter',
+		'nav',
+		'noscript',
+		'object',
+		'ol',
+		'optgroup',
+		'option',
+		'output',
+		'p',
+		'picture',
+		'pre',
+		'progress',
+		'q',
+		'rb',
+		'rp',
+		'rt',
+		'rtc',
+		'ruby',
+		's',
+		'samp',
+		'script',
+		'search',
+		'section',
+		'select',
+		'selectedcontent',
+		'slot',
+		'small',
+		'source',
+		'span',
+		'strong',
+		'style',
+		'sub',
+		'summary',
+		'sup',
+		'table',
+		'tbody',
+		'td',
+		'template',
+		'textarea',
+		'tfoot',
+		'th',
+		'thead',
+		'time',
+		'title',
+		'tr',
+		'track',
+		'u',
+		'ul',
+		'var',
+		'video',
+		'wbr',
+	);
+}
+
+/**
+ * Returns historical HTML elements that remain useful parser coverage.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_deprecated_html_elements(): array {
+	return array(
+		'acronym',
+		'applet',
+		'basefont',
+		'bgsound',
+		'big',
+		'blink',
+		'center',
+		'command',
+		'content',
+		'dir',
+		'font',
+		'frame',
+		'frameset',
+		'image',
+		'isindex',
+		'keygen',
+		'listing',
+		'marquee',
+		'menuitem',
+		'multicol',
+		'nextid',
+		'nobr',
+		'noembed',
+		'noframes',
+		'param',
+		'plaintext',
+		'shadow',
+		'spacer',
+		'strike',
+		'tt',
+		'xmp',
+	);
+}
+
+/**
+ * Returns HTML elements that do not have normal inner HTML.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_html_void_elements(): array {
+	return array(
+		'area',
+		'base',
+		'basefont',
+		'bgsound',
+		'br',
+		'col',
+		'command',
+		'embed',
+		'frame',
+		'hr',
+		'image',
+		'img',
+		'input',
+		'isindex',
+		'keygen',
+		'link',
+		'meta',
+		'param',
+		'source',
+		'track',
+		'wbr',
+	);
+}
+
+/**
+ * Returns SVG elements.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_svg_elements(): array {
+	return array(
+		'a',
+		'altGlyph',
+		'altGlyphDef',
+		'altGlyphItem',
+		'animate',
+		'animateColor',
+		'animateMotion',
+		'animateTransform',
+		'circle',
+		'clipPath',
+		'color-profile',
+		'cursor',
+		'defs',
+		'desc',
+		'discard',
+		'ellipse',
+		'feBlend',
+		'feColorMatrix',
+		'feComponentTransfer',
+		'feComposite',
+		'feConvolveMatrix',
+		'feDiffuseLighting',
+		'feDisplacementMap',
+		'feDistantLight',
+		'feDropShadow',
+		'feFlood',
+		'feFuncA',
+		'feFuncB',
+		'feFuncG',
+		'feFuncR',
+		'feGaussianBlur',
+		'feImage',
+		'feMerge',
+		'feMergeNode',
+		'feMorphology',
+		'feOffset',
+		'fePointLight',
+		'feSpecularLighting',
+		'feSpotLight',
+		'feTile',
+		'feTurbulence',
+		'filter',
+		'font',
+		'font-face',
+		'font-face-format',
+		'font-face-name',
+		'font-face-src',
+		'font-face-uri',
+		'foreignObject',
+		'g',
+		'glyph',
+		'glyphRef',
+		'hatch',
+		'hatchpath',
+		'hkern',
+		'image',
+		'line',
+		'linearGradient',
+		'marker',
+		'mask',
+		'metadata',
+		'mesh',
+		'meshgradient',
+		'meshpatch',
+		'meshrow',
+		'missing-glyph',
+		'mpath',
+		'path',
+		'pattern',
+		'polygon',
+		'polyline',
+		'radialGradient',
+		'rect',
+		'script',
+		'set',
+		'solidcolor',
+		'stop',
+		'style',
+		'svg',
+		'switch',
+		'symbol',
+		'text',
+		'textPath',
+		'title',
+		'tref',
+		'tspan',
+		'use',
+		'view',
+		'vkern',
+	);
+}
+
+/**
+ * Returns MathML elements from MathML Core and MathML 3.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_mathml_elements(): array {
+	return array(
+		'abs',
+		'and',
+		'annotation',
+		'annotation-xml',
+		'apply',
+		'approx',
+		'arccos',
+		'arccosh',
+		'arccot',
+		'arccoth',
+		'arccsc',
+		'arccsch',
+		'arcsec',
+		'arcsech',
+		'arcsin',
+		'arcsinh',
+		'arctan',
+		'arctanh',
+		'arg',
+		'bind',
+		'bvar',
+		'card',
+		'cartesianproduct',
+		'cbytes',
+		'ceiling',
+		'cerror',
+		'ci',
+		'cn',
+		'codomain',
+		'complexes',
+		'compose',
+		'condition',
+		'conjugate',
+		'cos',
+		'cosh',
+		'cot',
+		'coth',
+		'cs',
+		'csc',
+		'csch',
+		'csymbol',
+		'curl',
+		'declare',
+		'degree',
+		'determinant',
+		'diff',
+		'divergence',
+		'divide',
+		'domain',
+		'domainofapplication',
+		'emptyset',
+		'eq',
+		'equivalent',
+		'eulergamma',
+		'exists',
+		'exp',
+		'exponentiale',
+		'factorial',
+		'factorof',
+		'false',
+		'floor',
+		'fn',
+		'forall',
+		'gcd',
+		'geq',
+		'grad',
+		'gt',
+		'ident',
+		'image',
+		'imaginary',
+		'imaginaryi',
+		'implies',
+		'in',
+		'infinity',
+		'int',
+		'integers',
+		'intersect',
+		'interval',
+		'inverse',
+		'lambda',
+		'laplacian',
+		'lcm',
+		'leq',
+		'limit',
+		'list',
+		'ln',
+		'log',
+		'logbase',
+		'lowlimit',
+		'lt',
+		'maction',
+		'maligngroup',
+		'malignmark',
+		'math',
+		'matrix',
+		'matrixrow',
+		'max',
+		'mean',
+		'median',
+		'menclose',
+		'merror',
+		'mfenced',
+		'mfrac',
+		'mi',
+		'min',
+		'minus',
+		'mlabeledtr',
+		'mmultiscripts',
+		'mn',
+		'mo',
+		'mode',
+		'moment',
+		'momentabout',
+		'mover',
+		'mpadded',
+		'mphantom',
+		'mprescripts',
+		'mroot',
+		'mrow',
+		'ms',
+		'mscarry',
+		'mscarries',
+		'msgroup',
+		'msline',
+		'mslongdiv',
+		'mspace',
+		'msqrt',
+		'msrow',
+		'mstack',
+		'mstyle',
+		'msub',
+		'msubsup',
+		'msup',
+		'mtable',
+		'mtd',
+		'mtext',
+		'mtr',
+		'multiscripts',
+		'munder',
+		'munderover',
+		'naturalnumbers',
+		'neq',
+		'none',
+		'not',
+		'notanumber',
+		'notin',
+		'notsubset',
+		'notprsubset',
+		'or',
+		'otherwise',
+		'outerproduct',
+		'partialdiff',
+		'piece',
+		'piecewise',
+		'pi',
+		'plus',
+		'power',
+		'primes',
+		'product',
+		'prsubset',
+		'quotient',
+		'rationals',
+		'reals',
+		'real',
+		'reln',
+		'rem',
+		'root',
+		'scalarproduct',
+		'sdev',
+		'sec',
+		'sech',
+		'selector',
+		'semantics',
+		'sep',
+		'set',
+		'setdiff',
+		'share',
+		'sin',
+		'sinh',
+		'subset',
+		'sum',
+		'tan',
+		'tanh',
+		'tendsto',
+		'times',
+		'transpose',
+		'true',
+		'union',
+		'uplimit',
+		'variance',
+		'vector',
+		'vectorproduct',
+		'xor',
+	);
+}
+
+/**
+ * Returns all HTML element names the fuzzer should cover.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_all_html_elements(): array {
+	return array_values(
+		array_unique(
+			array_merge(
+				wp_html_set_inner_html_fuzzer_html_elements(),
+				wp_html_set_inner_html_fuzzer_deprecated_html_elements()
+			)
+		)
+	);
+}
+
+/**
+ * Returns a deterministic custom element name.
+ *
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @return string Custom element name.
+ */
+function wp_html_set_inner_html_fuzzer_custom_element_name( WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng ): string {
+	$prefix = $rng->choice( array( 'x', 'wp', 'codex', 'fuzz', 'html-api' ) );
+	$suffix = $rng->choice( array( 'alpha', 'beta', 'panel', 'card', 'thing', 'node' ) );
+	return "{$prefix}-{$suffix}-" . $rng->int( 0, 999 );
+}
+
+/**
+ * Returns randomized attributes.
+ *
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @param string                             $namespace Element namespace.
+ * @return string Attribute text.
+ */
+function wp_html_set_inner_html_fuzzer_attrs( WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng, string $namespace = 'html' ): string {
+	$attributes = array(
+		'id'               => 'fuzz-' . $rng->int( 0, 99 ),
+		'class'            => $rng->choice( array( 'alpha beta', 'one', 'two', 'targetish' ) ),
+		'data-fuzz'        => (string) $rng->int( 0, 999 ),
+		'title'            => $rng->choice( array( 'title', 'a &amp; b', '<not markup>' ) ),
+		'aria-label'       => 'label',
+		'hidden'           => null,
+		'xml:space'        => 'preserve',
+		'xlink:href'       => '#fuzz',
+		'encoding'         => $rng->choice( array( 'text/html', 'application/xhtml+xml', 'application/xml' ) ),
+		'xmlns'            => 'svg' === $namespace ? 'http://www.w3.org/2000/svg' : 'http://www.w3.org/1998/Math/MathML',
+	);
+
+	$out   = '';
+	$count = $rng->int( 0, 4 );
+	$keys  = array_keys( $attributes );
+	for ( $i = 0; $i < $count; ++$i ) {
+		$name  = $rng->choice( $keys );
+		$value = $attributes[ $name ];
+		if ( null === $value ) {
+			$out .= " {$name}";
+			continue;
+		}
+		$quote = $rng->choice( array( '"', "'" ) );
+		$out  .= " {$name}={$quote}{$value}{$quote}";
+	}
+
+	if ( $rng->chance( 8 ) ) {
+		$out .= ' data-fuzz data-fuzz="duplicate"';
+	}
+
+	return $out;
+}
+
+/**
+ * Renders one HTML element.
+ *
+ * @param string                             $tag Element name.
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @param string                             $content Element contents.
+ * @return string HTML.
+ */
+function wp_html_set_inner_html_fuzzer_render_html_element( string $tag, WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng, string $content = 'x' ): string {
+	$attrs = wp_html_set_inner_html_fuzzer_attrs( $rng, 'html' );
+	if ( in_array( $tag, wp_html_set_inner_html_fuzzer_html_void_elements(), true ) ) {
+		return "<{$tag}{$attrs}>";
+	}
+
+	if ( in_array( $tag, array( 'script', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext' ), true ) ) {
+		$content = 'style' === $tag ? 'a{color:red}' : '1 < 2 & 3';
+	}
+
+	if ( in_array( $tag, array( 'textarea', 'title' ), true ) ) {
+		$content = 'rcdata &amp; text';
+	}
+
+	return "<{$tag}{$attrs}>{$content}</{$tag}>";
+}
+
+/**
+ * Renders one SVG element inside an SVG container.
+ *
+ * @param string                             $tag Element name.
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @return string HTML.
+ */
+function wp_html_set_inner_html_fuzzer_render_svg_element( string $tag, WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng ): string {
+	$attrs   = wp_html_set_inner_html_fuzzer_attrs( $rng, 'svg' );
+	$content = in_array( $tag, array( 'script', 'style' ), true ) ? '1 < 2' : '<title>svg</title>';
+	return "<svg><{$tag}{$attrs}>{$content}</{$tag}></svg>";
+}
+
+/**
+ * Renders one MathML element inside a MathML container.
+ *
+ * @param string                             $tag Element name.
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @return string HTML.
+ */
+function wp_html_set_inner_html_fuzzer_render_mathml_element( string $tag, WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng ): string {
+	$attrs   = wp_html_set_inner_html_fuzzer_attrs( $rng, 'math' );
+	$content = 'annotation-xml' === $tag ? '<p>html integration</p>' : '<mi>x</mi>';
+	return "<math><{$tag}{$attrs}>{$content}</{$tag}></math>";
+}
+
+/**
+ * Returns HTML element tags suitable for structurally safe source interiors.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_safe_html_elements(): array {
+	return array_values(
+		array_diff(
+			wp_html_set_inner_html_fuzzer_all_html_elements(),
+			array(
+				'body',
+				'frame',
+				'frameset',
+				'head',
+				'html',
+				'plaintext',
+			)
+		)
+	);
+}
+
+/**
+ * Returns one random balanced tree.
+ *
+ * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
+ * @param int                                $depth Remaining depth.
+ * @param bool                               $allow_leaks Whether leak-prone syntax is allowed.
+ * @return string HTML.
+ */
+function wp_html_set_inner_html_fuzzer_tree( WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng, int $depth, bool $allow_leaks ): string {
+	if ( $depth <= 0 ) {
+		return $rng->choice( array( '', 'text', ' &amp; ', '<!--leaf-->' ) );
+	}
+
+	$count = $rng->int( 1, 4 );
+	$html  = '';
+	for ( $i = 0; $i < $count; ++$i ) {
+		$kind = $rng->choice(
+			$allow_leaks
+				? array( 'text', 'html', 'svg', 'math', 'custom', 'template', 'table', 'leak' )
+				: array( 'text', 'html', 'svg', 'math', 'custom', 'template', 'table' )
+		);
+
+		switch ( $kind ) {
+			case 'text':
+				$html .= $rng->choice( array( 'text', '0', "line\nbreak", '<!--comment-->', ' &amp; ' ) );
+				break;
+
+			case 'html':
+				$tags = $allow_leaks
+					? wp_html_set_inner_html_fuzzer_all_html_elements()
+					: wp_html_set_inner_html_fuzzer_safe_html_elements();
+				$tag  = $rng->choice( $tags );
+				$html .= wp_html_set_inner_html_fuzzer_render_html_element(
+					$tag,
+					$rng,
+					wp_html_set_inner_html_fuzzer_tree( $rng, $depth - 1, false )
+				);
+				break;
+
+			case 'svg':
+				$html .= wp_html_set_inner_html_fuzzer_render_svg_element(
+					$rng->choice( wp_html_set_inner_html_fuzzer_svg_elements() ),
+					$rng
+				);
+				break;
+
+			case 'math':
+				$html .= wp_html_set_inner_html_fuzzer_render_mathml_element(
+					$rng->choice( wp_html_set_inner_html_fuzzer_mathml_elements() ),
+					$rng
+				);
+				break;
+
+			case 'custom':
+				$tag   = wp_html_set_inner_html_fuzzer_custom_element_name( $rng );
+				$html .= "<{$tag}" . wp_html_set_inner_html_fuzzer_attrs( $rng ) . '>' .
+					wp_html_set_inner_html_fuzzer_tree( $rng, $depth - 1, false ) .
+					"</{$tag}>";
+				break;
+
+			case 'template':
+				$html .= '<template>' . wp_html_set_inner_html_fuzzer_tree( $rng, $depth - 1, $allow_leaks ) . '</template>';
+				break;
+
+			case 'table':
+				$html .= $rng->choice(
+					array(
+						'<table><caption>c</caption><tbody><tr><td>cell</td></tr></tbody></table>',
+						'<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table>',
+						'<table><td>c</table>',
+					)
+				);
+				break;
+
+			case 'leak':
+				$html .= $rng->choice(
+					array(
+						'</div><p>leak</p>',
+						'</section><span>leak</span>',
+						'<a>nested</a>',
+						'<b>unclosed',
+						'<body add-class>x',
+						'<html lang="en">x',
+						'<plaintext>tail',
+					)
+				);
+				break;
+		}
+	}
+
+	return $html;
+}
+
+/**
  * Returns a generated HTML fragment.
  *
  * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
@@ -260,14 +1016,30 @@ function wp_html_set_inner_html_fuzzer_fragment( WP_HTML_Set_Inner_HTML_Fuzzer_P
 			return $rng->choice( $texts );
 		},
 		'element'     => static function () use ( $rng ): string {
-			$tag = $rng->choice( array( 'div', 'span', 'p', 'section', 'main', 'button', 'em', 'strong', 'b', 'i', 'a' ) );
-			return "<{$tag}>" . $rng->choice( array( 'x', 'y', '<em>z</em>', '' ) ) . "</{$tag}>";
+			$tag = $rng->choice( wp_html_set_inner_html_fuzzer_all_html_elements() );
+			return wp_html_set_inner_html_fuzzer_render_html_element(
+				$tag,
+				$rng,
+				$rng->choice( array( 'x', 'y', '<em>z</em>', '' ) )
+			);
 		},
 		'omitted'     => static function () use ( $rng ): string {
 			return $rng->choice( array( '<p>one<p>two', '<ul><li>one<li>two</ul>', '<dl><dt>a<dd>b' ) );
 		},
 		'foreign'     => static function () use ( $rng ): string {
-			return $rng->choice( array( '<svg><title>t</title></svg>', '<svg><html lang="fr"></html></svg>', '<math><mi>x</mi></math>' ) );
+			return $rng->choice(
+				array(
+					wp_html_set_inner_html_fuzzer_render_svg_element(
+						$rng->choice( wp_html_set_inner_html_fuzzer_svg_elements() ),
+						$rng
+					),
+					'<svg><html lang="fr"></html></svg>',
+					wp_html_set_inner_html_fuzzer_render_mathml_element(
+						$rng->choice( wp_html_set_inner_html_fuzzer_mathml_elements() ),
+						$rng
+					),
+				)
+			);
 		},
 		'template'    => static function () use ( $rng ): string {
 			return $rng->choice( array( '<template><body add-class>t</template>', '<template></body><p>x</p></template>' ) );
@@ -276,15 +1048,23 @@ function wp_html_set_inner_html_fuzzer_fragment( WP_HTML_Set_Inner_HTML_Fuzzer_P
 			return $rng->choice( array( '<script>1 < 2</script>', '<style>a{color:red}</style>', '<textarea>x</textarea>' ) );
 		},
 		'leak'        => static function () use ( $rng ): string {
-			return $rng->choice( array( '</div><p>leak</p>', '</section><span>leak</span>', '<a>nested</a>', '<b>unclosed', '<body add-class>x', '<html lang="en">x' ) );
+			return $rng->choice( array( '</div><p>leak</p>', '</section><span>leak</span>', '<a>nested</a>', '<b>unclosed', '<body add-class>x', '<html lang="en">x', '<plaintext>tail' ) );
 		},
 		'table'       => static function () use ( $rng ): string {
 			return $rng->choice( array( '<table><tr><td>c</td></tr></table>', '<table><td>c</table>' ) );
+		},
+		'tree'        => static function () use ( $rng, $allow_leaks ): string {
+			return wp_html_set_inner_html_fuzzer_tree( $rng, 2, $allow_leaks );
+		},
+		'custom'      => static function () use ( $rng ): string {
+			$tag = wp_html_set_inner_html_fuzzer_custom_element_name( $rng );
+			return "<{$tag}" . wp_html_set_inner_html_fuzzer_attrs( $rng ) . '>custom</' . $tag . '>';
 		},
 	);
 
 	if ( ! $allow_leaks ) {
 		unset( $snippets['leak'] );
+		unset( $snippets['omitted'] );
 	}
 
 	$html  = '';
@@ -307,9 +1087,9 @@ function wp_html_set_inner_html_fuzzer_case( int $seed ): array {
 	$rng        = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( $seed );
 	$full       = $rng->chance( 35 );
 	$target_tag = $rng->choice( array( 'div', 'section', 'main', 'article' ) );
-	$prefix     = wp_html_set_inner_html_fuzzer_fragment( $rng, 3 );
-	$inner      = wp_html_set_inner_html_fuzzer_fragment( $rng, 4, false );
-	$suffix     = wp_html_set_inner_html_fuzzer_fragment( $rng, 3 );
+	$prefix     = wp_html_set_inner_html_fuzzer_tree( $rng, 2, false );
+	$inner      = wp_html_set_inner_html_fuzzer_tree( $rng, 3, false );
+	$suffix     = wp_html_set_inner_html_fuzzer_tree( $rng, 2, false );
 	$replace    = wp_html_set_inner_html_fuzzer_fragment( $rng, 5 );
 	$opener     = "<{$target_tag} data-fuzz-target=\"1\">";
 	$closer     = "</{$target_tag}>";
@@ -337,7 +1117,7 @@ function wp_html_set_inner_html_fuzzer_case( int $seed ): array {
  * @return array<int, array<string, string|bool|int|null>> Corpus cases.
  */
 function wp_html_set_inner_html_fuzzer_corpus_cases(): array {
-	return array(
+	$cases = array(
 		array(
 			'seed'        => 0,
 			'name'        => 'fragment-body-attribute-hoist',
@@ -439,6 +1219,69 @@ function wp_html_set_inner_html_fuzzer_corpus_cases(): array {
 			'expectSet'   => false,
 		),
 	);
+
+	foreach ( wp_html_set_inner_html_fuzzer_all_html_elements() as $tag ) {
+		$rng           = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'corpus-html-' . $tag );
+		$replacement   = wp_html_set_inner_html_fuzzer_render_html_element( $tag, $rng, '<span>html</span>' );
+		$cases[]       = array(
+			'seed'        => 0,
+			'name'        => 'coverage-html-' . $tag,
+			'full'        => false,
+			'targetTag'   => 'DIV',
+			'html'        => '<div data-fuzz-target="1">Old</div><span>After</span>',
+			'replacement' => $replacement,
+			'expected'    => '<div data-fuzz-target="1">' . $replacement . '</div><span>After</span>',
+			'expectSet'   => null,
+		);
+	}
+
+	foreach ( wp_html_set_inner_html_fuzzer_svg_elements() as $tag ) {
+		$rng           = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'corpus-svg-' . $tag );
+		$replacement   = wp_html_set_inner_html_fuzzer_render_svg_element( $tag, $rng );
+		$cases[]       = array(
+			'seed'        => 0,
+			'name'        => 'coverage-svg-' . strtolower( $tag ),
+			'full'        => false,
+			'targetTag'   => 'DIV',
+			'html'        => '<div data-fuzz-target="1">Old</div><span>After</span>',
+			'replacement' => $replacement,
+			'expected'    => '<div data-fuzz-target="1">' . $replacement . '</div><span>After</span>',
+			'expectSet'   => null,
+		);
+	}
+
+	foreach ( wp_html_set_inner_html_fuzzer_mathml_elements() as $tag ) {
+		$rng           = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'corpus-mathml-' . $tag );
+		$replacement   = wp_html_set_inner_html_fuzzer_render_mathml_element( $tag, $rng );
+		$cases[]       = array(
+			'seed'        => 0,
+			'name'        => 'coverage-mathml-' . $tag,
+			'full'        => false,
+			'targetTag'   => 'DIV',
+			'html'        => '<div data-fuzz-target="1">Old</div><span>After</span>',
+			'replacement' => $replacement,
+			'expected'    => '<div data-fuzz-target="1">' . $replacement . '</div><span>After</span>',
+			'expectSet'   => null,
+		);
+	}
+
+	for ( $i = 0; $i < 32; ++$i ) {
+		$rng           = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'corpus-custom-' . $i );
+		$tag           = wp_html_set_inner_html_fuzzer_custom_element_name( $rng );
+		$replacement   = "<{$tag}" . wp_html_set_inner_html_fuzzer_attrs( $rng ) . '>custom</' . $tag . '>';
+		$cases[]       = array(
+			'seed'        => 0,
+			'name'        => 'coverage-custom-' . $i . '-' . $tag,
+			'full'        => false,
+			'targetTag'   => 'DIV',
+			'html'        => '<div data-fuzz-target="1">Old</div><span>After</span>',
+			'replacement' => $replacement,
+			'expected'    => '<div data-fuzz-target="1">' . $replacement . '</div><span>After</span>',
+			'expectSet'   => null,
+		);
+	}
+
+	return $cases;
 }
 
 /**
@@ -553,6 +1396,182 @@ function wp_html_set_inner_html_fuzzer_outer_signature( string $html, bool $full
 }
 
 /**
+ * Renders a tree with the optional Lexbor oracle.
+ *
+ * @param string $html HTML.
+ * @param bool   $full Whether to parse a full document.
+ * @param string $lexbor_oracle_bin Oracle binary path.
+ * @return array<string, mixed> Oracle result.
+ */
+function wp_html_set_inner_html_fuzzer_lexbor_tree( string $html, bool $full, string $lexbor_oracle_bin ): array {
+	$input = tempnam( sys_get_temp_dir(), 'wp-html-set-inner-html-' );
+	if ( false === $input ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Could not create temporary oracle input.',
+		);
+	}
+
+	file_put_contents( $input, $html );
+	$mode    = $full ? 'full-document' : 'fragment-body';
+	$command = escapeshellarg( $lexbor_oracle_bin ) .
+		' --mode ' . escapeshellarg( $mode ) .
+		' --context body --max-nodes 10000 --input ' . escapeshellarg( $input );
+	$output  = array();
+	$status  = 0;
+	exec( $command, $output, $status );
+	@unlink( $input );
+
+	if ( 0 !== $status ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Lexbor oracle exited with status ' . $status,
+			'output' => implode( "\n", $output ),
+		);
+	}
+
+	$result = json_decode( implode( "\n", $output ), true );
+	if ( ! is_array( $result ) ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Lexbor oracle returned invalid JSON.',
+			'output' => implode( "\n", $output ),
+		);
+	}
+
+	return $result;
+}
+
+/**
+ * Counts the leading spaces in a rendered tree line.
+ *
+ * @param string $line Rendered tree line.
+ * @return int Leading spaces.
+ */
+function wp_html_set_inner_html_fuzzer_tree_indent( string $line ): int {
+	return strspn( $line, ' ' );
+}
+
+/**
+ * Returns an outside-target signature from an html5lib-style rendered tree.
+ *
+ * @param string $tree Rendered tree.
+ * @return string|null Signature, or null when the target marker is absent.
+ */
+function wp_html_set_inner_html_fuzzer_lexbor_outer_tree_signature( string $tree ): ?string {
+	$lines        = preg_split( "/\r\n|\n|\r/", trim( $tree ) );
+	$signature    = array();
+	$target_found = false;
+	$count        = count( $lines );
+
+	for ( $i = 0; $i < $count; ++$i ) {
+		$line = $lines[ $i ];
+		if ( ! preg_match( '/^(\s*)<[^>]+>$/', $line, $matches ) ) {
+			$signature[] = $line;
+			continue;
+		}
+
+		$indent      = strlen( $matches[1] );
+		$is_target   = false;
+		$lookahead_i = $i + 1;
+		while ( $lookahead_i < $count ) {
+			$lookahead        = $lines[ $lookahead_i ];
+			$lookahead_indent = wp_html_set_inner_html_fuzzer_tree_indent( $lookahead );
+			if ( $lookahead_indent <= $indent ) {
+				break;
+			}
+			if ( $lookahead_indent === $indent + 2 && preg_match( '/^\s*data-fuzz-target="1"$/', $lookahead ) ) {
+				$is_target = true;
+				break;
+			}
+			++$lookahead_i;
+		}
+
+		if ( ! $is_target ) {
+			$signature[] = $line;
+			continue;
+		}
+
+		$target_found = true;
+		$signature[]  = $line;
+		for ( $j = $i + 1; $j < $count; ++$j ) {
+			$child_line   = $lines[ $j ];
+			$child_indent = wp_html_set_inner_html_fuzzer_tree_indent( $child_line );
+			if ( $child_indent <= $indent ) {
+				$i = $j - 1;
+				break;
+			}
+			if ( $child_indent === $indent + 2 && preg_match( '/^\s*[^<"\s][^=]*=".*"$/', $child_line ) ) {
+				$signature[] = $child_line;
+			}
+			if ( $j === $count - 1 ) {
+				$i = $j;
+			}
+		}
+	}
+
+	return $target_found ? implode( "\n", $signature ) : null;
+}
+
+/**
+ * Checks accepted updates with the optional Lexbor oracle.
+ *
+ * @param string      $original          Original HTML.
+ * @param string      $updated           Updated HTML.
+ * @param bool        $full              Whether to parse a full document.
+ * @param string|null $lexbor_oracle_bin Optional Lexbor oracle binary.
+ * @return array<string, mixed> Check result.
+ */
+function wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree( string $original, string $updated, bool $full, ?string $lexbor_oracle_bin ): array {
+	if ( null === $lexbor_oracle_bin ) {
+		return array( 'status' => 'skipped' );
+	}
+
+	$original_tree = wp_html_set_inner_html_fuzzer_lexbor_tree( $original, $full, $lexbor_oracle_bin );
+	$updated_tree  = wp_html_set_inner_html_fuzzer_lexbor_tree( $updated, $full, $lexbor_oracle_bin );
+
+	if ( 'ok' !== ( $original_tree['status'] ?? null ) || 'ok' !== ( $updated_tree['status'] ?? null ) ) {
+		return array(
+			'status'       => 'skipped',
+			'originalTree' => $original_tree,
+			'updatedTree'  => $updated_tree,
+		);
+	}
+
+	$original_signature = wp_html_set_inner_html_fuzzer_lexbor_outer_tree_signature( (string) $original_tree['tree'] );
+	$updated_signature  = wp_html_set_inner_html_fuzzer_lexbor_outer_tree_signature( (string) $updated_tree['tree'] );
+	if ( null === $original_signature || null === $updated_signature ) {
+		return array(
+			'status'            => 'skipped',
+			'originalSignature' => $original_signature,
+			'updatedSignature'  => $updated_signature,
+		);
+	}
+
+	return array(
+		'status'            => $original_signature === $updated_signature ? 'ok' : 'changed',
+		'originalSignature' => $original_signature,
+		'updatedSignature'  => $updated_signature,
+		'originalOracle'    => $original_tree['oracle'] ?? null,
+		'updatedOracle'     => $updated_tree['oracle'] ?? null,
+	);
+}
+
+/**
+ * Returns a compact coverage inventory summary.
+ *
+ * @return array<string, int> Coverage counts.
+ */
+function wp_html_set_inner_html_fuzzer_coverage_summary(): array {
+	return array(
+		'htmlElements'        => count( wp_html_set_inner_html_fuzzer_all_html_elements() ),
+		'svgElements'         => count( wp_html_set_inner_html_fuzzer_svg_elements() ),
+		'mathmlElements'      => count( wp_html_set_inner_html_fuzzer_mathml_elements() ),
+		'customElementCorpus' => 32,
+	);
+}
+
+/**
  * Writes a failing case.
  *
  * @param string               $output_dir Output directory.
@@ -576,10 +1595,11 @@ function wp_html_set_inner_html_fuzzer_write_failure( string $output_dir, array 
 /**
  * Runs one fuzz case.
  *
- * @param array<string, string|bool|int|null> $case Case.
+ * @param array<string, string|bool|int|null> $case              Case.
+ * @param string|null                         $lexbor_oracle_bin Optional Lexbor oracle binary.
  * @return array<string, mixed> Result.
  */
-function wp_html_set_inner_html_fuzzer_run_case( array $case ): array {
+function wp_html_set_inner_html_fuzzer_run_case( array $case, ?string $lexbor_oracle_bin = null ): array {
 	$processor = wp_html_set_inner_html_fuzzer_create_processor( $case['html'], $case['full'] );
 	if ( null === $processor || ! wp_html_set_inner_html_fuzzer_seek_target( $processor ) ) {
 		return array(
@@ -677,6 +1697,21 @@ function wp_html_set_inner_html_fuzzer_run_case( array $case ): array {
 		);
 	}
 
+	$lexbor_check = wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree(
+		$case['html'],
+		$updated,
+		$case['full'],
+		$lexbor_oracle_bin
+	);
+	if ( 'changed' === $lexbor_check['status'] ) {
+		return array(
+			'ok'          => false,
+			'failure'     => 'accepted-update-changed-lexbor-outside-tree',
+			'lexborCheck' => $lexbor_check,
+			'updated'     => $updated,
+		);
+	}
+
 	return array(
 		'ok'     => true,
 		'status' => 'accepted',
@@ -693,6 +1728,7 @@ $iterations      = wp_html_set_inner_html_fuzzer_int_option( $options, 'iteratio
 $start_seed      = wp_html_set_inner_html_fuzzer_int_option( $options, 'start-seed', 1 );
 $stop_on_failure = isset( $options['stop-on-failure'] );
 $output_dir      = wp_html_set_inner_html_fuzzer_string_option( $options, 'output-dir', dirname( __DIR__, 2 ) . '/artifacts/html-api-fuzz/set-inner-html' );
+$lexbor_oracle_bin = wp_html_set_inner_html_fuzzer_lexbor_oracle_bin( $options );
 
 wp_html_set_inner_html_fuzzer_bootstrap();
 
@@ -706,7 +1742,7 @@ $counts = array(
 );
 
 foreach ( wp_html_set_inner_html_fuzzer_corpus_cases() as $case ) {
-	$result = wp_html_set_inner_html_fuzzer_run_case( $case );
+	$result = wp_html_set_inner_html_fuzzer_run_case( $case, $lexbor_oracle_bin );
 	++$counts['corpus'];
 
 	if ( ! $result['ok'] ) {
@@ -726,6 +1762,7 @@ foreach ( wp_html_set_inner_html_fuzzer_corpus_cases() as $case ) {
 					'iterations' => $iterations,
 					'counts'     => $counts,
 					'outputDir'  => $output_dir,
+					'coverage'   => wp_html_set_inner_html_fuzzer_coverage_summary(),
 				),
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			) . "\n";
@@ -737,7 +1774,7 @@ foreach ( wp_html_set_inner_html_fuzzer_corpus_cases() as $case ) {
 for ( $i = 0; $i < $iterations; ++$i ) {
 	$seed   = $start_seed + $i;
 	$case   = wp_html_set_inner_html_fuzzer_case( $seed );
-	$result = wp_html_set_inner_html_fuzzer_run_case( $case );
+	$result = wp_html_set_inner_html_fuzzer_run_case( $case, $lexbor_oracle_bin );
 
 	if ( ! $result['ok'] ) {
 		++$counts['failures'];
@@ -768,6 +1805,8 @@ echo json_encode(
 		'iterations' => $iterations,
 		'counts'     => $counts,
 		'outputDir'  => $output_dir,
+		'coverage'   => wp_html_set_inner_html_fuzzer_coverage_summary(),
+		'lexborOracle' => null === $lexbor_oracle_bin ? null : $lexbor_oracle_bin,
 	),
 	JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 ) . "\n";
