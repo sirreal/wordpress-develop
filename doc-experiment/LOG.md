@@ -2,6 +2,46 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 76 — bookmark overview example deduplication fails
+
+`round-76` tested item 9 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it removed only the shorter top-level Tag Processor
+`Bookmarks` overview example block using `$total_todos`, `list-start`, and
+`list-end`. It preserved the `Bookmarks` heading and overview prose, all
+method-local `set_bookmark()`, `release_bookmark()`, `has_bookmark()`, and
+`seek()` sections, and the longer `set_bookmark()` last-match examples. The
+scratch edit removed 21 rendered lines from `html-tag-processor.md`. Source
+docblocks, corpus fixtures, runner policy, and harness behavior were
+unchanged.
+
+Numeric result: **96.98 train / 96.51 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The direct
+bookmark task stayed perfect: `T10-last-h2` scored **100.00** and all trials
+used the documented Tag Processor last-match bookmark idiom. The full round
+still failed badly in traversal: concept score **91.71** versus round 56's
+**99.60**. `N03-first-list-count` fell **99.70 -> 82.15** because one trial
+called `seek( '1' )` without setting that bookmark, apparently confusing
+private/internal bookmark-counter material or match offsets with public
+bookmark names. `N06-extract-toc` fell **99.80 -> 78.50** because one trial
+used `preg_match(...) !== 2`, so no heading was accepted.
+
+Interpretation: do not promote the bookmark overview example removal. The
+deduplication did preserve the direct last-`H2` bookmark task, but the
+full-train round lost too much and repeated the unsafe bookmark/seek failure.
+The round also reinforces a backlog pattern: private bookmark-counter detail
+and weak `seek()` precondition wording can mislead subjects, but fixing that
+would be an additive/clarifying source hypothesis, not this reduction.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 10, method-local inherited helper duplication compression in
+`html-processor.md`, as a scratch-only `shadow-doc-a/b` variant. Keep the same
+subject policy `gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` /
+`xhigh` / `priority`, and compare against round 56. Replace only inherited
+flat attribute/class helper bodies with concise cross-reference stubs while
+leaving the Tag Processor originals and headings/signatures/parameter tables
+intact.
+
 ## Round 75 — attribute-template compression fails
 
 `round-75` tested item 8 from the owner-requested reduction queue as a

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented Tag Processor constructor, next_tag('img'), add_class(), and get_updated_html(). Correctly chose the flat attribute/class-edit API, used the documented all-matches loop, and relied on documented class and incomplete-token behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical API pattern as the reference: WP_HTML_Tag_Processor, next_tag('img'), add_class('wp-image'), get_updated_html(). No _doing_it_wrong records and no undocumented calls."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern. The explanation accurately cites case-insensitive tag matching, real-token matching rather than comments, class appending, and byte-preserving output."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there were no failure-causing misconceptions in this round. The rendered docs did the important things well: the Tag Processor overview's 'Which processor should I use?' section explicitly recommends WP_HTML_Tag_Processor for flat class/attribute edits with byte-precise preservation; the Usage section says direct construction is the only Tag Processor construction path; next_tag() documents case-insensitive tag-name matching, skipping tag-like text in comments/raw text, and not matching incomplete trailing tags; add_class() documents appending without removing or reordering existing classes; get_updated_html() documents returning untouched bytes exactly with queued edits applied. The only near-miss is that the simplest Usage example uses if for one match, while this task needs a while loop; however, the nearby custom-query examples and next_tag() semantics were clear enough that all subjects used while correctly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor class docs, Usage / Finding tags",
+      "problem": "The introductory mutation example shows a single if-based edit before later examples introduce repeated scanning. Less capable readers could copy the first shape and update only the first match.",
+      "suggestion": "Add a general 'apply an edit to every matching tag' idiom using a neutral tag/class variable with while ( $processor->next_tag( $tag_name ) ) and get_updated_html(), without using this task's image-specific details."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() docblock",
+      "problem": "The preservation contract is strong, but it does not explicitly connect queued edits with a later pause at incomplete trailing syntax.",
+      "suggestion": "Add a sentence that queued edits before an incomplete trailing token are still returned by get_updated_html(), and the incomplete bytes remain untouched unless caller policy rejects truncated input."
+    },
+    {
+      "location": "WP_HTML_Processor::add_class() inherited method docs",
+      "problem": "The HTML Processor method entry is much thinner than the Tag Processor's add_class() contract, so readers who land there may miss append/no-duplicate/no-reorder semantics.",
+      "suggestion": "Link directly back to WP_HTML_Tag_Processor::add_class() or repeat the inherited class-update semantics in the subclass docblock."
+    }
+  ]
+}

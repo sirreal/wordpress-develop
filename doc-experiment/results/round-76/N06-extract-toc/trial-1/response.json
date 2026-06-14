@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with HTML-structure awareness, then walked tokens with `next_token()`, collecting ordinary `#text` nodes via `get_modifiable_text()` while tracking heading openers and their depth with `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_current_depth()` so nested markup inside headings contributes text but tags do not.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parser to scan the fragment structurally, record the first UL/OL opener, count only LI opening tags at one depth below that list, and then apply `set_attribute()` on the first list opener before returning `get_updated_html()`. I also reject truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()`, and fall back to the original HTML when the first list is missing or cannot be fully scanned.",
+  "confidence": 83
+}

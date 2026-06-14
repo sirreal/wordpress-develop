@@ -1,0 +1,137 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-76/N06-extract-toc/trial-1/candidate.php",
+  "function": "extract_toc",
+  "passed": 1,
+  "total": 7,
+  "cases": [
+    {
+      "id": "basic-h1-h3",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 1,
+          "text": "Intro"
+        },
+        {
+          "level": 3,
+          "text": "Details here"
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "all-heading-levels",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 1,
+          "text": "Title"
+        },
+        {
+          "level": 2,
+          "text": "Section"
+        },
+        {
+          "level": 3,
+          "text": "Subsection"
+        },
+        {
+          "level": 4,
+          "text": "Minor"
+        },
+        {
+          "level": 5,
+          "text": "Small"
+        },
+        {
+          "level": 6,
+          "text": "Tiny"
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "nested-text-and-entities",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 2,
+          "text": "A B & C"
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "empty-heading",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 2,
+          "text": ""
+        },
+        {
+          "level": 3,
+          "text": ""
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "case-insensitive-source",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 1,
+          "text": "Upper"
+        },
+        {
+          "level": 6,
+          "text": "Lower"
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "implied-heading-close",
+      "status": "fail",
+      "expected": [
+        {
+          "level": 2,
+          "text": "One"
+        },
+        {
+          "level": 3,
+          "text": "Two"
+        }
+      ],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-matches",
+      "status": "pass",
+      "expected": [],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

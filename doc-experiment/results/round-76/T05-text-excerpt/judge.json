@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk. All HTML API methods used are documented, and execution recorded no `_doing_it_wrong`. Minor idiom issue: it used `get_tag()` during a token walk after only filtering text/closers, so comments or other non-tag tokens rely on `get_tag()` returning null. `get_token_name()` with an explicit `#tag` guard would match the documented special-element pattern more closely."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. It chose the HTML Processor, walked tokens once, collected only `#text` plus explicitly whitelisted `TITLE`/`TEXTAREA` opener text, used `get_token_name()` after a `#tag` check, and used decoded UTF-8 from `get_modifiable_text()` with multibyte-safe truncation. No undocumented HTML API calls and no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and documented APIs, with no `_doing_it_wrong`. The implementation follows the token-walking text recipe and handles decoded text and special elements correctly. Small idiom deduction for using `get_tag()` rather than `get_token_name()` in a token-oriented loop; unlike trial 1 it does guard `#tag`, so the risk is mostly clarity rather than behavior."
+    }
+  ],
+  "failure_analysis": "All trials passed all 10 hidden cases, so there were no failed hidden cases to attribute to a misconception. The docs did well on the important decision points: `WP_HTML_Processor` is presented as the right choice for structural/text work on BODY fragments; the Tag Processor docs explicitly warn that lexical token processing is not DOM-style fragment text extraction; `next_token()` explains that text may be split across tokens and that malformed input still produces structural closing tokens; and `get_modifiable_text()` clearly says `#text`, `TITLE`, and `TEXTAREA` return decoded UTF-8 while `SCRIPT` and `STYLE` are raw special-element text that should not be included unless explicitly requested. The near-misses were API-shape issues, not functional failures: two trials used `get_tag()` where the clearest documented token-walk pattern uses `get_token_name()`, and none checked `paused_at_incomplete_token()` or `get_last_error()` after scanning, relying on the function contract's implicit best-effort behavior for incomplete input.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_tag()` / `WP_HTML_Processor::get_token_name()` docs",
+      "problem": "The docs document both methods, but the distinction for `next_token()` loops is easy to blur. Models copied a working `get_tag()` pattern for special elements even though token-oriented examples generally use `get_token_name()`.",
+      "suggestion": "Add a short cross-reference: in `next_token()` loops, use `get_token_type()` to classify tokens and `get_token_name()` to branch on tag names or static token names; reserve `get_tag()` for code that has already established it is matched on a tag."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor` section “Tokens and finer-grained processing”",
+      "problem": "This section warns that Tag Processor token processing is lexical, but the nearby example still demonstrates collecting text and `TITLE` content. That example could pull readers toward the wrong processor for fragment text-content tasks.",
+      "suggestion": "Preface the example as lexical-only and add a stronger pointer to the HTML Processor text-walk recipe for parsed fragment text. When matching special element text in examples, include the opener-only guard with `! is_tag_closer()`."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` completion-policy notes",
+      "problem": "The docs mention `paused_at_incomplete_token()` and `get_last_error()`, but the policy boundary is scattered across recipes. Readers can reasonably skip it when writing read-only extraction functions.",
+      "suggestion": "Add a compact post-loop checklist near `next_token()`: after a read-only walk, decide whether partial output is acceptable; if complete-source semantics are required, reject or fall back when `paused_at_incomplete_token()` is true or `get_last_error()` is non-null."
+    }
+  ]
+}

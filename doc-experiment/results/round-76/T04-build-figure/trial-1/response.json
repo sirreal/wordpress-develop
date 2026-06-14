@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template so the `img` attributes stay in the required `src`, then `alt` order, and the HTML API performs all encoding for both attribute values and the figcaption text via `set_attribute()` and `set_modifiable_text()`. The final fragment is returned with `get_updated_html()`, preserving the exact shape requested.",
+  "confidence": 96
+}

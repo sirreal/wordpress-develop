@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the body fragment token-by-token, reading `get_attribute( 'href' )` for `A` openers and `get_modifiable_text()` only from `#text` tokens, which gives decoded text content. The function filters out boolean or missing `href` values by requiring a string, and returns collected links in document order.",
+  "confidence": 87
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for flat, position-based tag editing. All calls are documented: constructor, next_tag(string), set_bookmark, seek, add_class, release_bookmark, and get_updated_html. The implementation follows the documented single-pass bookmark idiom for remembering the last match, preserves existing classes through add_class(), ignores comment text via next_tag(), and handles no-match input unchanged."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. next_tag(array('tag_name' => 'h2')) is documented, as are set_bookmark, seek, add_class, release_bookmark, and get_updated_html. The code uses the intended bookmark-rewrite pattern and relies on add_class() for existing-class handling. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation shape as trial-2. It uses the Tag Processor, documented array query form for next_tag(), documented bookmark APIs, add_class(), release_bookmark(), and get_updated_html(). The traversal and bookmark use are idiomatic, and the hidden edge cases around comments, no headings, and existing class attributes are handled by documented API behavior."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well in the exact areas this task required: the Tag Processor 'Which processor should I use?' section identifies flat position-based tag edits as Tag Processor work; 'Finding tags' documents both string and array next_tag() query forms; the next_tag() method docs state tag-name matching is ASCII case-insensitive and tag-like text in comments is never matched; the set_bookmark() docs explicitly describe the common 'last matching tag' pattern by re-setting the same bookmark on each match; add_class() documents creating or appending the class attribute without removing existing classes; and get_updated_html() is documented as the output path for queued edits. Near-misses were minor: all trials used release_bookmark() before get_updated_html(), which works, but release_bookmark() does not explicitly say that releasing navigation state does not affect queued edits. The implementations also do not inspect paused_at_incomplete_token(), but for this task the documented behavior is acceptable: incomplete trailing tags are not matched, and prior complete H2 tags can still be bookmarked, sought, and modified.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::release_bookmark()",
+      "problem": "The docblock explains that releasing a bookmark frees overhead, but does not explicitly distinguish bookmark navigation state from queued document edits.",
+      "suggestion": "Add a sentence that releasing a bookmark does not undo, flush, or affect updates already enqueued on a token; callers should still use get_updated_html() to retrieve edits."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::seek()",
+      "problem": "The docblock mentions a maximum seek limit but gives little practical guidance on when seeking to a bookmark is valid after a scan reaches false/end or pauses on incomplete input.",
+      "suggestion": "Document the normal post-scan use case: after next_tag()/next_token() returns false, callers may still seek to an existing bookmark unless a documented failure condition applies, such as a missing bookmark or seek limit."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() parameter docs",
+      "problem": "The overview table clearly shows the string shorthand, but the method-level parameter description is dense and does not plainly restate that next_tag('img') is shorthand for array('tag_name' => 'img').",
+      "suggestion": "Add a short method-level sentence with that equivalence and the case-insensitive matching rule so generated API references remain self-contained."
+    }
+  ]
+}

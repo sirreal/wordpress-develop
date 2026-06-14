@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` to find the first heading and `get_current_depth()` plus `next_token()` to walk only that subtree. While walking, I appended only `#text` tokens via `get_modifiable_text()`, which already returns decoded text for ordinary text nodes, and returned `null` only when no `H1` was found.",
+  "confidence": 96
+}

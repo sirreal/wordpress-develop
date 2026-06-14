@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to walk the fragment in BODY context, `next_token()` to visit openers and closers in document order, and `add_class()`/`get_updated_html()` to make a byte-preserving attribute edit only on nested `UL`/`OL` openers. A simple open-list depth counter tracks whether the current list has a `UL` or `OL` ancestor above it.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` so heading text is collected from `#text` descendants only. For each `H1` through `H6` opener, I recorded the current depth and accumulated `get_modifiable_text()` until the walk left that subtree, preserving document order and including empty headings.",
+  "confidence": 95
+}

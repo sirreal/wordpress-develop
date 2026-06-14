@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context and `next_token()` to walk the document in order. I only collected ordinary `#text` tokens via `get_modifiable_text()` while inside an open `H1`-`H6`, and I finalized each entry when the matching heading closer was seen, preserving headings with empty text.",
+  "confidence": 92
+}
