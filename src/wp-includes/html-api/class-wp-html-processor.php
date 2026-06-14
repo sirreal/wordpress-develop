@@ -5843,6 +5843,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->get_updated_html();
 
 		$target_token = $this->current_element->token;
+		if ( null !== $target_token->integration_node_type ) {
+			return false;
+		}
+
 		if ( ! isset( $target_token->bookmark_name, $this->bookmarks[ $target_token->bookmark_name ] ) ) {
 			return false;
 		}

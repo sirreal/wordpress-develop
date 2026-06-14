@@ -465,6 +465,36 @@ function wp_html_set_inner_html_fuzzer_html_void_elements(): array {
 }
 
 /**
+ * Returns HTML elements the processor treats as void elements.
+ *
+ * This mirrors WP_HTML_Processor::is_void().
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_processor_void_elements(): array {
+	return array(
+		'area',
+		'base',
+		'basefont',
+		'bgsound',
+		'br',
+		'col',
+		'embed',
+		'frame',
+		'hr',
+		'img',
+		'input',
+		'keygen',
+		'link',
+		'meta',
+		'param',
+		'source',
+		'track',
+		'wbr',
+	);
+}
+
+/**
  * Returns SVG elements.
  *
  * @return string[] Element names.
@@ -795,6 +825,228 @@ function wp_html_set_inner_html_fuzzer_custom_element_name( WP_HTML_Set_Inner_HT
 }
 
 /**
+ * Returns HTML elements that are atomic for inner HTML updates.
+ *
+ * These elements either never have an end tag, or their contents are handled
+ * as text-like data rather than parsed HTML children.
+ *
+ * @return string[] Element names.
+ */
+function wp_html_set_inner_html_fuzzer_atomic_html_elements(): array {
+	return array_values(
+		array_unique(
+			array_merge(
+				wp_html_set_inner_html_fuzzer_processor_void_elements(),
+				array(
+					'iframe',
+					'noembed',
+					'noframes',
+					'script',
+					'style',
+					'textarea',
+					'title',
+					'xmp',
+				)
+			)
+		)
+	);
+}
+
+/**
+ * Returns context-aware target markup for one HTML element.
+ *
+ * @param string $tag         Element name.
+ * @param string $inner       Original inner HTML.
+ * @param string $replacement Replacement inner HTML.
+ * @return array{full: bool, targetTag: string, html: string, replacement: string, expected: string, expectSet: bool|null} Target case.
+ */
+function wp_html_set_inner_html_fuzzer_html_target_markup( string $tag, string $inner, string $replacement ): array {
+	$target_tag = strtoupper( $tag );
+
+	if ( in_array( $tag, wp_html_set_inner_html_fuzzer_atomic_html_elements(), true ) ) {
+		$html = in_array( $tag, wp_html_set_inner_html_fuzzer_processor_void_elements(), true )
+			? "<{$tag} data-fuzz-target=\"1\"><span>After</span>"
+			: "<{$tag} data-fuzz-target=\"1\">{$inner}</{$tag}><span>After</span>";
+
+		return array(
+			'full'      => false,
+			'targetTag' => $target_tag,
+			'html'      => $html,
+			'replacement' => $replacement,
+			'expected'  => $html,
+			'expectSet' => false,
+		);
+	}
+
+	$full = false;
+	switch ( $tag ) {
+		case 'html':
+			$full     = true;
+			$html     = '<!DOCTYPE html><html data-fuzz-target="1"><head><title>Old</title></head><body>' . $inner . '</body></html>';
+			$expected = '<!DOCTYPE html><html data-fuzz-target="1">' . $replacement . '</html>';
+			break;
+
+		case 'head':
+			$full     = true;
+			$html     = '<!DOCTYPE html><html><head data-fuzz-target="1"><title>' . $inner . '</title></head><body>After</body></html>';
+			$expected = '<!DOCTYPE html><html><head data-fuzz-target="1">' . $replacement . '</head><body>After</body></html>';
+			break;
+
+		case 'body':
+			$full     = true;
+			$html     = '<!DOCTYPE html><html><body data-fuzz-target="1">' . $inner . '</body></html>';
+			$expected = '<!DOCTYPE html><html><body data-fuzz-target="1">' . $replacement . '</body></html>';
+			break;
+
+		case 'frameset':
+			$full        = true;
+			$replacement = '<frame src="about:blank">';
+			$html        = '<!DOCTYPE html><html><frameset data-fuzz-target="1"><frame src="about:blank"></frameset></html>';
+			$expected    = '<!DOCTYPE html><html><frameset data-fuzz-target="1">' . $replacement . '</frameset></html>';
+			break;
+
+		case 'table':
+			$replacement = '<tbody><tr><td>target</td></tr></tbody>';
+			$html        = '<table data-fuzz-target="1"><tbody><tr><td>' . $inner . '</td></tr></tbody></table><span>After</span>';
+			$expected    = '<table data-fuzz-target="1">' . $replacement . '</table><span>After</span>';
+			break;
+
+		case 'caption':
+			$html     = '<table><caption data-fuzz-target="1">' . $inner . '</caption><tbody><tr><td>After</td></tr></tbody></table><span>After</span>';
+			$expected = '<table><caption data-fuzz-target="1">' . $replacement . '</caption><tbody><tr><td>After</td></tr></tbody></table><span>After</span>';
+			break;
+
+		case 'colgroup':
+			$replacement = '<col span="1">';
+			$html        = '<table><colgroup data-fuzz-target="1"><col></colgroup><tbody><tr><td>After</td></tr></tbody></table><span>After</span>';
+			$expected    = '<table><colgroup data-fuzz-target="1">' . $replacement . '</colgroup><tbody><tr><td>After</td></tr></tbody></table><span>After</span>';
+			break;
+
+		case 'thead':
+		case 'tbody':
+		case 'tfoot':
+			$replacement = '<tr><td>target</td></tr>';
+			$html        = '<table><' . $tag . ' data-fuzz-target="1"><tr><td>' . $inner . '</td></tr></' . $tag . '></table><span>After</span>';
+			$expected    = '<table><' . $tag . ' data-fuzz-target="1">' . $replacement . '</' . $tag . '></table><span>After</span>';
+			break;
+
+		case 'tr':
+			$replacement = '<td>target</td>';
+			$html        = '<table><tbody><tr data-fuzz-target="1"><td>' . $inner . '</td></tr></tbody></table><span>After</span>';
+			$expected    = '<table><tbody><tr data-fuzz-target="1">' . $replacement . '</tr></tbody></table><span>After</span>';
+			break;
+
+		case 'td':
+		case 'th':
+			$html     = '<table><tbody><tr><' . $tag . ' data-fuzz-target="1">' . $inner . '</' . $tag . '></tr></tbody></table><span>After</span>';
+			$expected = '<table><tbody><tr><' . $tag . ' data-fuzz-target="1">' . $replacement . '</' . $tag . '></tr></tbody></table><span>After</span>';
+			break;
+
+		case 'select':
+			$replacement = '<option>target</option>';
+			$html        = '<select data-fuzz-target="1"><option>' . $inner . '</option></select><span>After</span>';
+			$expected    = '<select data-fuzz-target="1">' . $replacement . '</select><span>After</span>';
+			break;
+
+		case 'optgroup':
+			$replacement = '<option>target</option>';
+			$html        = '<select><optgroup data-fuzz-target="1"><option>' . $inner . '</option></optgroup></select><span>After</span>';
+			$expected    = '<select><optgroup data-fuzz-target="1">' . $replacement . '</optgroup></select><span>After</span>';
+			break;
+
+		case 'option':
+			$replacement = 'target';
+			$html        = '<select><option data-fuzz-target="1">' . $inner . '</option></select><span>After</span>';
+			$expected    = '<select><option data-fuzz-target="1">' . $replacement . '</option></select><span>After</span>';
+			break;
+
+		case 'ul':
+		case 'ol':
+		case 'menu':
+			$replacement = '<li>target</li>';
+			$html        = '<' . $tag . ' data-fuzz-target="1"><li>' . $inner . '</li></' . $tag . '><span>After</span>';
+			$expected    = '<' . $tag . ' data-fuzz-target="1">' . $replacement . '</' . $tag . '><span>After</span>';
+			break;
+
+		case 'dl':
+			$replacement = '<dt>target</dt><dd>value</dd>';
+			$html        = '<dl data-fuzz-target="1"><dt>' . $inner . '</dt><dd>value</dd></dl><span>After</span>';
+			$expected    = '<dl data-fuzz-target="1">' . $replacement . '</dl><span>After</span>';
+			break;
+
+		case 'ruby':
+			$replacement = '<rb>base</rb><rt>target</rt>';
+			$html        = '<ruby data-fuzz-target="1"><rb>' . $inner . '</rb><rt>old</rt></ruby><span>After</span>';
+			$expected    = '<ruby data-fuzz-target="1">' . $replacement . '</ruby><span>After</span>';
+			break;
+
+		case 'rtc':
+			$replacement = '<rt>target</rt>';
+			$html        = '<ruby><rb>base</rb><rtc data-fuzz-target="1"><rt>' . $inner . '</rt></rtc></ruby><span>After</span>';
+			$expected    = '<ruby><rb>base</rb><rtc data-fuzz-target="1">' . $replacement . '</rtc></ruby><span>After</span>';
+			break;
+
+		default:
+			$html     = "<{$tag} data-fuzz-target=\"1\">{$inner}</{$tag}><span>After</span>";
+			$expected = "<{$tag} data-fuzz-target=\"1\">{$replacement}</{$tag}><span>After</span>";
+			break;
+	}
+
+	return array(
+		'full'      => $full,
+		'targetTag' => $target_tag,
+		'html'      => $html,
+		'replacement' => $replacement,
+		'expected'  => $expected,
+		'expectSet' => null,
+	);
+}
+
+/**
+ * Returns target markup for one SVG element.
+ *
+ * @param string $tag         Element name.
+ * @param string $inner       Original inner HTML.
+ * @param string $replacement Replacement inner HTML.
+ * @return array{full: bool, targetTag: string, html: string, replacement: string, expected: string, expectSet: bool|null} Target case.
+ */
+function wp_html_set_inner_html_fuzzer_svg_target_markup( string $tag, string $inner, string $replacement ): array {
+	$target  = "<{$tag} data-fuzz-target=\"1\">{$inner}</{$tag}>";
+	$updated = "<{$tag} data-fuzz-target=\"1\">{$replacement}</{$tag}>";
+
+	return array(
+		'full'      => false,
+		'targetTag' => strtoupper( $tag ),
+		'html'      => '<svg>' . $target . '</svg><span>After</span>',
+		'replacement' => $replacement,
+		'expected'  => '<svg>' . $updated . '</svg><span>After</span>',
+		'expectSet' => null,
+	);
+}
+
+/**
+ * Returns target markup for one MathML element.
+ *
+ * @param string $tag         Element name.
+ * @param string $inner       Original inner HTML.
+ * @param string $replacement Replacement inner HTML.
+ * @return array{full: bool, targetTag: string, html: string, replacement: string, expected: string, expectSet: bool|null} Target case.
+ */
+function wp_html_set_inner_html_fuzzer_mathml_target_markup( string $tag, string $inner, string $replacement ): array {
+	$target  = "<{$tag} data-fuzz-target=\"1\">{$inner}</{$tag}>";
+	$updated = "<{$tag} data-fuzz-target=\"1\">{$replacement}</{$tag}>";
+
+	return array(
+		'full'      => false,
+		'targetTag' => strtoupper( $tag ),
+		'html'      => '<math>' . $target . '</math><span>After</span>',
+		'replacement' => $replacement,
+		'expected'  => '<math>' . $updated . '</math><span>After</span>',
+		'expectSet' => null,
+	);
+}
+
+/**
  * Returns randomized attributes.
  *
  * @param WP_HTML_Set_Inner_HTML_Fuzzer_PRNG $rng PRNG.
@@ -1084,7 +1336,58 @@ function wp_html_set_inner_html_fuzzer_fragment( WP_HTML_Set_Inner_HTML_Fuzzer_P
  * @return array<string, string|bool|int> Case data.
  */
 function wp_html_set_inner_html_fuzzer_case( int $seed ): array {
-	$rng        = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( $seed );
+	$rng = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( $seed );
+
+	if ( $rng->chance( 35 ) ) {
+		$inner       = 'Old';
+		$replacement = wp_html_set_inner_html_fuzzer_fragment( $rng, 5 );
+		$kind        = $rng->choice( array( 'html', 'html', 'svg', 'math', 'custom' ) );
+
+		switch ( $kind ) {
+			case 'svg':
+				$target_case = wp_html_set_inner_html_fuzzer_svg_target_markup(
+					$rng->choice( wp_html_set_inner_html_fuzzer_svg_elements() ),
+					$inner,
+					$replacement
+				);
+				break;
+
+			case 'math':
+				$target_case = wp_html_set_inner_html_fuzzer_mathml_target_markup(
+					$rng->choice( wp_html_set_inner_html_fuzzer_mathml_elements() ),
+					$inner,
+					$replacement
+				);
+				break;
+
+			case 'custom':
+				$target_case = wp_html_set_inner_html_fuzzer_html_target_markup(
+					wp_html_set_inner_html_fuzzer_custom_element_name( $rng ),
+					$inner,
+					$replacement
+				);
+				break;
+
+			case 'html':
+			default:
+				$target_case = wp_html_set_inner_html_fuzzer_html_target_markup(
+					$rng->choice( wp_html_set_inner_html_fuzzer_all_html_elements() ),
+					$inner,
+					$replacement
+				);
+				break;
+		}
+
+		return array(
+			'seed'        => $seed,
+			'full'        => $target_case['full'],
+			'targetTag'   => $target_case['targetTag'],
+			'html'        => $target_case['html'],
+			'replacement' => $target_case['replacement'],
+			'expected'    => $target_case['expected'],
+		);
+	}
+
 	$full       = $rng->chance( 35 );
 	$target_tag = $rng->choice( array( 'div', 'section', 'main', 'article' ) );
 	$prefix     = wp_html_set_inner_html_fuzzer_tree( $rng, 2, false );
@@ -1278,6 +1581,80 @@ function wp_html_set_inner_html_fuzzer_corpus_cases(): array {
 			'replacement' => $replacement,
 			'expected'    => '<div data-fuzz-target="1">' . $replacement . '</div><span>After</span>',
 			'expectSet'   => null,
+		);
+	}
+
+	foreach ( wp_html_set_inner_html_fuzzer_all_html_elements() as $tag ) {
+		$target_case = wp_html_set_inner_html_fuzzer_html_target_markup(
+			$tag,
+			'Old',
+			'<span>target</span>'
+		);
+
+		$cases[] = array(
+			'seed'        => 0,
+			'name'        => 'target-html-' . $tag,
+			'full'        => $target_case['full'],
+			'targetTag'   => $target_case['targetTag'],
+			'html'        => $target_case['html'],
+			'replacement' => $target_case['replacement'],
+			'expected'    => $target_case['expected'],
+			'expectSet'   => $target_case['expectSet'],
+		);
+	}
+
+	foreach ( wp_html_set_inner_html_fuzzer_svg_elements() as $tag ) {
+		$target_case = wp_html_set_inner_html_fuzzer_svg_target_markup(
+			$tag,
+			'<title>Old</title>',
+			'<title>target</title>'
+		);
+
+		$cases[] = array(
+			'seed'        => 0,
+			'name'        => 'target-svg-' . strtolower( $tag ),
+			'full'        => $target_case['full'],
+			'targetTag'   => $target_case['targetTag'],
+			'html'        => $target_case['html'],
+			'replacement' => $target_case['replacement'],
+			'expected'    => $target_case['expected'],
+			'expectSet'   => $target_case['expectSet'],
+		);
+	}
+
+	foreach ( wp_html_set_inner_html_fuzzer_mathml_elements() as $tag ) {
+		$target_case = wp_html_set_inner_html_fuzzer_mathml_target_markup(
+			$tag,
+			'<mi>Old</mi>',
+			'<mi>target</mi>'
+		);
+
+		$cases[] = array(
+			'seed'        => 0,
+			'name'        => 'target-mathml-' . $tag,
+			'full'        => $target_case['full'],
+			'targetTag'   => $target_case['targetTag'],
+			'html'        => $target_case['html'],
+			'replacement' => $target_case['replacement'],
+			'expected'    => $target_case['expected'],
+			'expectSet'   => $target_case['expectSet'],
+		);
+	}
+
+	for ( $i = 0; $i < 32; ++$i ) {
+		$rng           = new WP_HTML_Set_Inner_HTML_Fuzzer_PRNG( 'target-custom-' . $i );
+		$tag           = wp_html_set_inner_html_fuzzer_custom_element_name( $rng );
+		$replacement   = '<span>target</span>';
+		$target_case   = wp_html_set_inner_html_fuzzer_html_target_markup( $tag, 'Old', $replacement );
+		$cases[]       = array(
+			'seed'        => 0,
+			'name'        => 'target-custom-' . $i . '-' . $tag,
+			'full'        => $target_case['full'],
+			'targetTag'   => $target_case['targetTag'],
+			'html'        => $target_case['html'],
+			'replacement' => $target_case['replacement'],
+			'expected'    => $target_case['expected'],
+			'expectSet'   => $target_case['expectSet'],
 		);
 	}
 
@@ -1570,6 +1947,10 @@ function wp_html_set_inner_html_fuzzer_coverage_summary(): array {
 		'svgElements'         => count( wp_html_set_inner_html_fuzzer_svg_elements() ),
 		'mathmlElements'      => count( wp_html_set_inner_html_fuzzer_mathml_elements() ),
 		'customElementCorpus' => 32,
+		'htmlTargetElements'  => count( wp_html_set_inner_html_fuzzer_all_html_elements() ),
+		'svgTargetElements'   => count( wp_html_set_inner_html_fuzzer_svg_elements() ),
+		'mathmlTargetElements' => count( wp_html_set_inner_html_fuzzer_mathml_elements() ),
+		'customTargetCorpus'  => 32,
 	);
 }
 
@@ -1769,23 +2150,24 @@ foreach ( wp_html_set_inner_html_fuzzer_corpus_cases() as $case ) {
 			'seed'   => $case['seed'],
 			'case'   => $case,
 			'result' => $result,
-		);
-		wp_html_set_inner_html_fuzzer_write_failure( $output_dir, $failure );
-		fwrite( STDERR, 'Failure in corpus case ' . $case['name'] . ': ' . $result['failure'] . "\n" );
-		if ( $stop_on_failure ) {
-			echo json_encode(
-				array(
-					'ok'         => false,
-					'startSeed'  => $start_seed,
-					'iterations' => $iterations,
-					'counts'     => $counts,
-					'outputDir'  => $output_dir,
-					'coverage'   => wp_html_set_inner_html_fuzzer_coverage_summary(),
-				),
-				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
-			) . "\n";
-			exit( 1 );
-		}
+	);
+	wp_html_set_inner_html_fuzzer_write_failure( $output_dir, $failure );
+	fwrite( STDERR, 'Failure in corpus case ' . $case['name'] . ': ' . $result['failure'] . "\n" );
+	if ( $stop_on_failure ) {
+		echo json_encode(
+			array(
+				'ok'         => false,
+				'startSeed'  => $start_seed,
+				'iterations' => $iterations,
+				'counts'     => $counts,
+				'outputDir'  => $output_dir,
+				'coverage'   => wp_html_set_inner_html_fuzzer_coverage_summary(),
+			),
+			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+		) . "\n";
+		exit( 1 );
+	}
+	continue;
 	}
 
 	$status = $result['status'];

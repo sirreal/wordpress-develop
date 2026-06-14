@@ -134,10 +134,15 @@ class Tests_HtmlApi_WpHtmlProcessorSetInnerHtml extends WP_UnitTestCase {
 	 */
 	public static function data_set_inner_html_rejects_atomic_elements(): array {
 		return array(
-			'SCRIPT'   => array( '<script>old</script>', 'SCRIPT' ),
-			'STYLE'    => array( '<style>old</style>', 'STYLE' ),
-			'TEXTAREA' => array( '<textarea>old</textarea>', 'TEXTAREA' ),
-			'IMG'      => array( '<img alt="old">', 'IMG' ),
+			'SCRIPT'                            => array( '<script>old</script>', 'SCRIPT' ),
+			'STYLE'                             => array( '<style>old</style>', 'STYLE' ),
+			'TEXTAREA'                          => array( '<textarea>old</textarea>', 'TEXTAREA' ),
+			'IMG'                               => array( '<img alt="old">', 'IMG' ),
+			'SVG TITLE integration'             => array( '<svg><title>old</title></svg>', 'TITLE' ),
+			'SVG DESC integration'              => array( '<svg><desc>old</desc></svg>', 'DESC' ),
+			'SVG FOREIGNOBJECT integration'     => array( '<svg><foreignObject><p>old</p></foreignObject></svg>', 'FOREIGNOBJECT' ),
+			'MathML MI integration'             => array( '<math><mi>old</mi></math>', 'MI' ),
+			'MathML ANNOTATION-XML integration' => array( '<math><annotation-xml encoding="text/html"><p>old</p></annotation-xml></math>', 'ANNOTATION-XML' ),
 		);
 	}
 
