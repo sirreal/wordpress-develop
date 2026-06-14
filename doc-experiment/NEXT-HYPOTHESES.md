@@ -103,39 +103,34 @@ to **100.00** and `T12-unwrap-spans` to **98.90**, but still failed:
 **99.16 train / 99.04 core**, with `N03-first-list-count` at **94.16**. Do not
 promote any tested reduction.
 
-Latest update: round 80 scored the source docblock clarification from
-`7953a2be25` as a normal full-train source hypothesis. The result was
-**98.82 train / 98.64 core**, below the historical comparable weak-tier
-source-doc baseline from round 56 (**99.61 / 99.55**) but not a revert-rule
-failure: the aggregate drop was under 2 points and no task regressed across
-all trials. The source clarification should be kept for now but not treated as
-a confirmed win.
+Latest update: round 81 tested that method-local follow-up as a scratch-only
+full-train `shadow-doc-a/b` variant. Source docblocks were unchanged. The
+variant added 18 rendered lines to `html-processor.md` beside
+`WP_HTML_Processor::next_token()` and `get_current_depth()`: a compact
+break-before-filter loop and an explicit warning that a container's own closer
+may be the first depth-below-boundary token.
 
-The target task, `N03-first-list-count`, remained the main failure at
-**94.56**. Two trials followed the intended `next_token()` depth-boundary
-shape and passed **11/11** with adherence **100**. One trial passed **9/11**
-because it filtered out closers before checking the depth drop, missed the
-first list's own closer, scanned into unrelated trailing incomplete or
-unsupported markup, and rejected the completed region-local edit. The judge
-found the relevant facts in the docs but said the strongest warning lives in
-an overview recipe rather than beside the `next_token()` cursor-walking
-contract.
+Result: **96.46 train / 95.92 core**, a clear loss against the current
+source-doc round-80 baseline (**98.82 / 98.64**). The target task improved:
+`N03-first-list-count` rose from **94.56** to **99.70**, with all three trials
+passing **11/11** and following the boundary-before-filter shape. The variant
+still failed overall because it damaged other tasks: `T04-build-figure` fell
+to **73.07** when one trial copied a tag-only `next_token()` guard and made
+the later `#text` branch unreachable, and `N06-extract-toc` fell to **80.93**
+when one trial built heading entries but never appended `#text` /
+`get_modifiable_text()` content.
 
-`T10-last-h2` also fell to **95.40** on adherence only: all hidden cases
-passed, but two trials chose `WP_HTML_Processor` / `create_full_parser()` for a
-flat first/last matching-tag class edit. The judge again recommended a compact
-Tag Processor recipe and an explicit statement that document-order first/last
-matching-tag scans are flat work unless the query depends on ancestors, depth,
-implied tags, subtree text, or normalized serialization.
+Do not promote the round-81 method-local wording. It confirms that the N03
+boundary placement can help, but the rendered example overemphasizes a
+tag-only guard that weaker models transplant into mixed tag/text loops. This
+is a cross-task damage signal, not a source-promotion signal.
 
-Next action: classify as `documentation-edit` only after committing the
-round-80 result artifacts. Keep the selected subject policy at
+Next action: classify as `state-reconciliation` / stop for owner review under
+the signal-exhaustion rule. Keep the selected subject policy at
 `gpt-5.4-mini` / `low` / `priority` and judge policy at `gpt-5.5` / `xhigh` /
-`priority`. The next source hypothesis should be narrow and method-local: put
-the break-before-filter rule directly in `WP_HTML_Processor::next_token()` and
-the "the container's own closer may be the boundary token" warning directly in
-`get_current_depth()`. Keep source reduction paused under the signal-exhaustion
-rule; no tested reduction from rounds 68-79 is promotable.
+`priority`. Keep source reduction paused; no tested reduction from rounds
+68-79 is promotable, and the round-81 boundary-warning scratch variant is not
+promotable.
 
 Previous update: round 75 tested Tag Processor attribute-template example
 compression as a full-train scratch ablation. It removed 4 rendered lines from

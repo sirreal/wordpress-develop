@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor` API. `create_fragment()` and `serialize()` are both documented, and the fresh-processor serialization pattern is valid. Slightly less direct than the documented `WP_HTML_Processor::normalize()` helper for BODY-context fragments, but still idiomatic and handles `null` versus empty-string output correctly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct processor, documented methods only, strict `null` fallback handling, and no `_doing_it_wrong` records. The only minor miss is bypassing the simpler `normalize()` helper."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all called methods are documented: `create_fragment()`, `serialize()`, and `get_last_error()`. The post-`serialize()` `get_last_error()` check is redundant because `serialize()` already returns `null` on parser failure, but it is not hallucinated or harmful."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases, so there were no failed hidden cases to attribute to documentation gaps. The docs did well in several places: the HTML Processor overview says to choose `WP_HTML_Processor` for normalizing markup; `normalize()` documents BODY-fragment normalization and `string|null`; `serialize()` documents normalized serialization from a fresh processor; `create_fragment()` documents BODY-context fragments and a possible `null` return; and the HTML Support section explains unsupported markup aborts and output methods return `null`. Near-misses: every trial chose the lower-level `create_fragment()->serialize()` route instead of the direct `WP_HTML_Processor::normalize()` helper, suggesting the direct helper was discoverable but not salient enough. Also, unsupported cases recorded `wp_trigger_error` entries from `serialize()`; the rendered docs emphasize `null` returns but do not clearly state that serialization failure can also trigger a warning side effect.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, `normalize()` section and Overview/Usage",
+      "problem": "The direct BODY-fragment normalization helper exists, but all trials used the lower-level factory plus instance serialization path.",
+      "suggestion": "Add a short, general recipe that says: for unchanged BODY-fragment normalization, prefer `WP_HTML_Processor::normalize( $html )`; use `create_fragment()` plus `serialize()` when a specific context, full parser, or processor instance is needed."
+    },
+    {
+      "location": "html-processor.md, `serialize()` return/failure documentation",
+      "problem": "The docs say `serialize()` returns `null` when unable to serialize, but do not mention the warning side effect on parser-error or already-started processor states.",
+      "suggestion": "Document that `serialize()` may call `wp_trigger_error()` when serialization is impossible, and distinguish this from the normal `null` fallback contract."
+    },
+    {
+      "location": "html-processor.md, `create_fragment()` Current HTML Support",
+      "problem": "The docs say `null` means no processor was created, but the boundary between factory failure and later parser abort is easy to blur.",
+      "suggestion": "State the concrete factory-failure conditions, and clarify that unsupported markup in the input is usually detected during scanning/serialization via `get_last_error()`, not necessarily during `create_fragment()`."
+    },
+    {
+      "location": "html-processor.md, Unsupported Features",
+      "problem": "The unsupported-feature explanation names adoption/fostering generally, but lacks concrete examples of common markup shapes that cause a parser abort.",
+      "suggestion": "Add small, general examples of unsupported tree-construction cases and show the observable contract: output-producing methods return `null`, and processor instances expose `get_last_error()`/`get_unsupported_exception()`."
+    }
+  ]
+}

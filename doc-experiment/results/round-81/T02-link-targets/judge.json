@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat attribute edit, walked with next_tag('a'), used strict null comparison on get_attribute('href') so empty and valueless hrefs count as present, set target with set_attribute(), and returned get_updated_html(). All called APIs are documented and execution passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented API pattern as the reference. The extra declare(strict_types=1) is outside the HTML API surface and did not affect adherence. It chose the right processor, used documented methods only, handled href presence semantics correctly, and passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and idiomatic documented flow: construct WP_HTML_Tag_Processor, scan only A openers with next_tag(), test href presence via null !== get_attribute(), overwrite target with set_attribute(), and read updates with get_updated_html(). Passed 8/8 with no undocumented API usage or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No trial failed any hidden case. The rendered docs were strong for this task: the Tag Processor overview says to use it for flat attribute/class edits and byte-precise preservation, while the HTML Processor docs explicitly reserve structure-aware work for containment, subtrees, and normalization. The Tag Processor usage section shows direct construction and next_tag()/set_attribute(), get_attribute() documents null for absent attributes plus empty string and true for present attributes, set_attribute() documents overwriting existing attributes and new-attribute placement, next_tag() documents case-insensitive tag matching and ignoring tag-like text in comments/raw text, and get_updated_html() documents byte preservation. Near-misses: the winning strict presence check relies on synthesizing the overview's empty-string/boolean note with the get_attribute() method return contract; and attribute name case-insensitivity for get_attribute()/set_attribute() is not surfaced as clearly as tag-name case-insensitivity, even though the uppercase-HREF case depends on it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docblock",
+      "problem": "The method documents string|true|null and gives true/null examples, but the clearest empty-string presence case appears earlier in prose. Readers can miss that truthiness is wrong for attribute presence checks.",
+      "suggestion": "Add an explicit presence-check note: use `null !== $processor->get_attribute( $name )`; `''` and `true` both mean the attribute is present, while `null` means absent or no matched opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() and ::set_attribute() docblocks",
+      "problem": "Tag-name matching is explicitly described as ASCII case-insensitive, but attribute-name lookup/update case-insensitivity is not equally prominent at the method contracts. This matters for source-preserving edits on markup with uppercase or mixed-case attributes.",
+      "suggestion": "State directly that HTML attribute names are matched ASCII case-insensitively for lookup and updates, while untouched attributes retain their original source casing in get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor usage / Modifying HTML attributes section",
+      "problem": "The docs contain all pieces of the common conditional attribute rewrite pattern, but they are split across construction, finding tags, get_attribute(), set_attribute(), and get_updated_html().",
+      "suggestion": "Add a generic complete recipe for conditional attribute edits: scan matching openers, test an attribute with a strict null check, call set_attribute()/remove_attribute(), and return get_updated_html(), without using serialization or the HTML Processor for byte-preserving flat edits."
+    }
+  ]
+}

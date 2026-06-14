@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment API to walk the fragment token-by-token, checking only ordinary `#text` tokens with `get_token_type()` and `get_modifiable_text()`, then emitting normalized token HTML with `serialize_token()` and wrapping matching text nodes in `<mark>`. This preserves normalized serialization while avoiding wrapping text inside special elements or across node boundaries.",
+  "confidence": 94
+}

@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware WP_HTML_Processor::create_fragment() path. All API calls are documented in the rendered HTML Processor docs, and execution recorded no _doing_it_wrong entries. The implementation follows the documented single-cursor next_token() state-machine pattern, records depth, reads only #text tokens with get_modifiable_text(), and handles decoded text, empty headings, source case, and implied closers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 79,
+      "hallucinated_methods": [],
+      "notes": "Chose the correct processor and only called documented methods; no _doing_it_wrong entries. The structural walk is mostly idiomatic: one next_token() loop, opener detection, depth tracking, and empty-region flushing. The major adherence failure is omitting the documented #text/get_modifiable_text() accumulation step, so it finds headings but never extracts their text."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag(), a depth-bounded next_token() subtree walk, get_token_type() === '#text', and get_modifiable_text() exactly in line with the rendered text-extraction recipe. All methods are documented and no _doing_it_wrong records appeared. The extra is_tag_closer() guard after plain next_tag() is unnecessary because closers are skipped by default, but it is harmless."
+    }
+  ],
+  "failure_analysis": "Only trial-2 failed hidden cases. basic-h1-h3 and all-heading-levels failed because the candidate initialized a heading text accumulator but never appended any #text token content. The relevant docs are html-processor.md, “Recipe: collect DOM-style text from a subtree” and the next_token() method docs, which explicitly show checking get_token_type() === '#text' and appending get_modifiable_text(). nested-text-and-entities failed for the same omission; the docs also state under get_modifiable_text() that #text content is decoded, so &amp; would have been handled if the documented read step had been used. case-insensitive-source did not fail because of case handling: get_tag() is documented as returning uppercase tag names and the candidate used that correctly; the text omission again caused empty output. implied-heading-close likewise shows no misunderstanding of implied closers, because the heading entries were created; the missing text append caused the empty strings. The docs’ “Supported markup” section says headings can close other headings, and next_token() says virtual/implied closers are visited, which the candidate’s structure mostly used correctly.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Recipe: collect DOM-style text from a subtree",
+      "problem": "The single-element ARTICLE example is correct, but repeated-region extraction requires readers to combine it with the later one-cursor state-machine guidance. A subject preserved opener/depth state but dropped the actual text accumulation step.",
+      "suggestion": "Add a short generic checklist for repeated subtree text extraction: initialize on opener, append only when the current token is #text, flush on closer or depth drop, and preserve empty regions."
+    },
+    {
+      "location": "html-processor.md > next_token()",
+      "problem": "The warning about nested next_token() loops and the text-extraction recipe can feel separate, so implementers may focus on structural boundary handling and miss the payload-read branch.",
+      "suggestion": "Place a compact state-machine text extraction example near the one-cursor warning, for repeated elements such as list terms or cells, showing the #text/get_modifiable_text() branch as the only place text enters the accumulator."
+    }
+  ]
+}

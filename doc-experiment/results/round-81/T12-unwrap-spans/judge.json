@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_tag(), and serialize_token(), all documented. This is the intended processor and token-rewrite pattern for normalized output while skipping both SPAN openers and closers. Minor edge-policy issue: if create_fragment() returned null, it returns raw input, which is neither normalized nor unwrapped."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "All called methods are documented: create_fragment(), next_token(), get_tag(), serialize_token(), get_last_error(), and normalize(). The main loop is idiomatic and passed all cases. The fallback to normalize($html) or raw input after a rewrite is a near-miss: the docs warn that this restarts from the original bytes and discards skipped-token changes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Same API usage profile as trial-2, with no hallucinated methods and correct HTML Processor selection. The token loop is sound. The normalize/raw-input fallback on parser creation or last-error failure is documented but mismatched to an unwrap contract because it can reintroduce removed spans or return unnormalized source."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: simple, nested-spans, normalized passthrough, attributes-discarded, adjacent-spans, block content inside span, and unclosed-span all passed. The docs did well by clearly steering normalized structural work to WP_HTML_Processor, documenting create_fragment() for BODY fragments, explaining that next_token() visits tag closers including virtual closers for unclosed elements, and giving a serialize_token() rewrite recipe that says skipped tokens remove markup while preserving contents. The closest near-miss was trials 2 and 3 treating normalize($html) as a generic recovery path; the docs already warn against this, but the candidates still framed it as a safe documented fallback.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / serialize_token() and Recipe: rewrite while serializing tokens",
+      "problem": "The docs warn that normalize($html) discards emitted rewrite changes, but candidates still used it as an error fallback for a mutation-style function.",
+      "suggestion": "Add a short fallback decision note: normalize($html) is only appropriate when the caller explicitly accepts abandoning all token-loop changes; rewrite contracts should usually return the accumulated output, null/empty fail-closed output, or a documented error sentinel."
+    },
+    {
+      "location": "html-processor.md / get_tag()",
+      "problem": "The unwrap pattern relies on get_tag() matching both opener and closer tokens and returning null for non-tag tokens, but that behavior is only implicit across examples.",
+      "suggestion": "State explicitly that during next_token() walks, get_tag() returns the tag name for both opening and closing tag tokens, and null for text/comment/etc.; this makes tag-wrapper removal patterns easier to reason about."
+    },
+    {
+      "location": "html-processor.md / create_fragment()",
+      "problem": "The null-return branch is documented, but examples do not strongly connect fallback choice to normalized-output or rewrite-output contracts.",
+      "suggestion": "For string-returning normalization/rewrite examples, show a type-compatible fail-closed fallback and note that returning raw input violates contracts that promise normalized or rewritten HTML."
+    },
+    {
+      "location": "html-processor.md / next_token() and serialize_token() incomplete-input guidance",
+      "problem": "The distinction between an unclosed element that receives a virtual closer and an incomplete trailing syntax token that is omitted is easy to miss.",
+      "suggestion": "Add a compact example contrasting `<p><span>x` with a truly incomplete trailing token such as `<p>x <`, showing next_token()/serialize_token() output and when paused_at_incomplete_token() should affect caller policy."
+    }
+  ]
+}

@@ -2,6 +2,50 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 81 — method-local boundary warning scratch A/B loses
+
+`round-81` tested the round-80 follow-up as a scratch-only `shadow-doc-a/b`
+full-train variant. Source docblocks were unchanged. The staged
+`html-processor.md` added 18 rendered lines beside the
+`WP_HTML_Processor::next_token()` and `get_current_depth()` method entries:
+a small break-before-filter loop and an explicit warning that a container's own
+closer may be the first depth-below-boundary token, so code must check the
+depth drop before skipping closers. `html-tag-processor.md`, corpus fixtures,
+runner policy, and harness behavior were unchanged.
+
+Numeric result: **96.46 train / 95.92 core**, versus the current source-doc
+round-80 baseline at **98.82 train / 98.64 core**. The target task improved:
+`N03-first-list-count` rose from **94.56** to **99.70**, with all three trials
+passing **11/11** and all following the boundary-before-filter shape. The
+variant still failed badly because two other tasks regressed:
+`T04-build-figure` fell to **73.07** when one trial copied a tag-only
+`next_token()` guard and made its later `#text` branch unreachable, leaving the
+FIGCAPTION placeholder unchanged in all cases. `N06-extract-toc` fell to
+**80.93** when one trial built heading entries but omitted the documented
+`#text` / `get_modifiable_text()` accumulation branch.
+
+Judge-run hygiene: the first local judge runner completed 14/15 per-task
+verdicts but hung before `T01-add-image-class` produced a final message or
+combined output file. I terminated only the stuck round-81 parent and T01
+`codex exec` child, retried the missing T01 judge as a single-task run, and
+combined the 14 preserved `codex-last-message.json` verdicts with the T01
+retry. The combined `codex-judges-output.json` validated before ingestion, and
+the recovery is recorded in `round-metadata.json`.
+
+Interpretation: do not promote this scratch wording. It proves the N03
+boundary-before-filter placement can work, but the rendered method-local
+example overemphasizes a tag-only guard that weaker models transplant into
+mixed tag/text loops. This is exactly the kind of cross-task damage the
+reduction/refinement directive is meant to catch. The safe next move is not a
+source edit from this variant.
+
+Next action: classify as `state-reconciliation` / stop for owner review under
+the signal-exhaustion rule. Keep the selected subject policy at
+`gpt-5.4-mini` / `low` / `priority` and judge policy at `gpt-5.5` / `xhigh` /
+`priority`. Do not promote any source documentation reduction from rounds
+68-79, do not promote the round-81 method-local boundary-warning variant, and
+do not substitute tooling work for the paused documentation decision.
+
 ## Round 80 — bounded-subtree scan clarification only partially helps
 
 `round-80` scored the source docblock clarification committed in

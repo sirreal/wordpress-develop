@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment for a body fragment, scanned for the first UL/OL in document order, used a bookmark plus next_token/get_current_depth to count direct LI openers, checked paused_at_incomplete_token and get_last_error before mutating, sought back, set_attribute with a string count, released the bookmark, and returned get_updated_html. All processor methods used are present in the rendered docs; execution passed 11/11 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same correct structural approach as the reference: HTML Processor, token walk bounded by depth, direct-child opener checks, bookmark/seek, set_attribute, get_updated_html, and incomplete/unsupported guards. Minor idiom issue: early returns after scan failure or seek failure do not release the bookmark, though the function exits immediately so this is not behaviorally significant. All API calls are documented; execution passed 11/11 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose the HTML Processor and followed the documented subtree-scan and bookmark pattern. It also releases the bookmark on failure paths and handles incomplete/unsupported scans. Minor issues: it checks is_tag_closer after plain next_tag even though the docs say plain next_tag skips closers, and it leaves an unused scan_finished_cleanly variable. All API calls are documented; execution passed 11/11 with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three executions passed 11/11 and produced no _doing_it_wrong records. The docs worked well in the exact areas this task stresses. The WP_HTML_Tag_Processor overview says the Tag Processor has no tree awareness and points structure-sensitive work to WP_HTML_Processor; all trials chose WP_HTML_Processor::create_fragment. The WP_HTML_Processor recipe \"scan a region before editing its opener\" directly teaches bookmark opener, walk forward with next_token, check paused_at_incomplete_token/get_last_error, seek back, then mutate. The recipe \"test subtree membership and direct children\" plus get_current_depth documentation explains the depth boundary, direct-child opener predicate, and why closers must not be counted; this prevented nested-list and omitted-closer mistakes. The next_tag documentation says tag_name is not a list of alternatives and shows scanning any tag then branching on get_tag; all trials followed that for first UL-or-OL ordering. The incomplete/unsupported guidance was also effective: candidates failed closed when the first list scan itself was incomplete or unsupported, but did not require unrelated markup after a closed list to be clean. Near misses were small: one trial did not release a bookmark on immediate-return paths, and one carried redundant closer/unused-variable code, but neither indicates a material documentation failure.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor method index and inherited mutation-output docs",
+      "problem": "get_updated_html is inherited from WP_HTML_Tag_Processor and is not prominent in the HTML Processor method index, even though it is the correct output API after set_attribute on an HTML Processor. A reader could plausibly reach for serialize or normalize after mutating.",
+      "suggestion": "Add an inherited-mutation note or method-index subsection for HTML Processor: after set_attribute, remove_attribute, add_class, remove_class, or set_modifiable_text, read the result with get_updated_html; serialize/normalize are normalization APIs and are not the mutation-output path after scanning."
+    },
+    {
+      "location": "WP_HTML_Processor::set_bookmark() documentation",
+      "problem": "The detailed bookmark example in the HTML Processor docs uses WP_HTML_Tag_Processor and a flat tag-closer scan. For structure-sensitive edits, that example is less aligned with the Processor-specific contract taught elsewhere.",
+      "suggestion": "Add or replace with a Processor-specific bookmark example that records an opener, walks a bounded subtree with next_token and get_current_depth, checks paused_at_incomplete_token and get_last_error according to the caller contract, seeks back, mutates, and releases the bookmark."
+    },
+    {
+      "location": "WP_HTML_Processor recipe: scan a region before editing its opener",
+      "problem": "The docs state that callers should interpret incomplete/unsupported checks at the required boundary, but the distinction between bounded-region cleanliness and whole-input cleanliness is easy to miss.",
+      "suggestion": "Add a short policy table contrasting bounded-element mutations with whole-document validation: for bounded mutations, stop at the region boundary and reject only if the bounded scan paused or errored; for whole-document contracts, continue scanning and require the whole input to finish cleanly."
+    },
+    {
+      "location": "WP_HTML_Processor recipe: test subtree membership and direct children",
+      "problem": "The direct-child predicate is documented, but there is no complete generic counter pattern showing the full placement of the depth-drop break before token-type and closer filters.",
+      "suggestion": "Add a generic snippet for counting direct child element openers of a container, using placeholder tag names rather than a task-specific list example, and emphasize that the boundary check must run immediately after next_token."
+    }
+  ]
+}

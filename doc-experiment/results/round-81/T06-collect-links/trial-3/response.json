@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then walked tokens with `next_token()`, reading `get_attribute('href')` from `A` openers and `get_modifiable_text()` only from `#text` tokens. A simple stack accumulates text for each valid link and emits each result when its `A` closer is reached.",
+  "confidence": 91
+}

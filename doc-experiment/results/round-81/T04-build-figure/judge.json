@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the Tag Processor, which the docs explicitly recommend for flat edits and template filling. All called methods are documented, and the implementation follows the documented template pattern: predeclare attributes to preserve order, include placeholder text, replace the #text token with set_modifiable_text(), then return get_updated_html()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), which is valid but heavier than the documented best fit for this static template task. API usage is documented across the two files, including inherited mutation behavior. The token walk and get_updated_html() usage are idiomatic and it handles encoding and attribute order correctly."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 70,
+      "hallucinated_methods": [],
+      "notes": "All API methods exist and the processor choice is valid though not ideal. The token-walking pattern is flawed: the loop continues on every non-#tag token before checking for #text, so set_modifiable_text() is unreachable. Attribute handling is fine, but caption text handling and its edge cases are not actually performed."
+    }
+  ],
+  "failure_analysis": "Trial 3 failed all hidden cases: simple, ampersand-in-caption, quotes-in-alt, special-chars-in-url, angle-brackets-in-caption, unicode, and html-in-caption-not-parsed. The common misconception was treating a tag-only next_token() guard as a generic loop precondition. Its first branch skips any token whose get_token_type() is not #tag, so the later #text branch can never run and the figcaption placeholder remains '.'. The docs do contain the correct pattern in html-tag-processor.md under 'Building markup from a template' and 'set_modifiable_text()': include placeholder text, walk to a #text token, and call set_modifiable_text() with the unescaped string. They also document in get_token_type() that #tag and #text are distinct token types. The likely documentation hazard is in html-processor.md under 'Recipe: test subtree membership and direct children' and next_token(), where the prominent `if ( '#tag' !== ... ) continue;` pattern is correct for tag-only scans but easy to transplant into mixed tag/text mutation loops. The first two trials show the strong parts of the docs: set_attribute() encoding, attribute-order preservation by updating existing attributes, placeholder text for set_modifiable_text(), and get_updated_html() were clear enough to produce exact output for all special-character cases. No failures were caused by hallucinated methods or _doing_it_wrong misuse.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > next_token() / Recipe: test subtree membership and direct children",
+      "problem": "The tag-only `continue` guard is prominent, but the docs do not explicitly warn that this shape intentionally discards #text tokens and must not wrap later text handling in the same loop body.",
+      "suggestion": "Add a short note after the tag-only example: use this guard only for opener/element scans; for loops that need both tags and text, dispatch by token type with separate #text and #tag branches before any catch-all continue."
+    },
+    {
+      "location": "html-processor.md > Method Index / inherited mutation methods",
+      "problem": "Public inherited methods used for mutations, especially set_modifiable_text() and get_updated_html(), are not listed as HTML Processor methods; they are only cross-referenced indirectly.",
+      "suggestion": "Add an 'Inherited from WP_HTML_Tag_Processor' subsection listing mutation/readback methods available on WP_HTML_Processor and link to their Tag Processor contracts."
+    },
+    {
+      "location": "html-processor.md > Which processor should I use / HTML Support",
+      "problem": "The Tag Processor's 'Building markup from a template' recipe is the clearest guidance for constructing a known fragment, but the HTML Processor docs do not point readers back to that recipe when structure is not needed.",
+      "suggestion": "Add a cross-reference saying that known-shape fragment construction with attribute/text replacement should usually use the Tag Processor template-building recipe unless structural parsing is required."
+    }
+  ]
+}

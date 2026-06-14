@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for BODY-fragment parsing, then walked tokens in document order with `next_tag()` and `next_token()`. For each `H1` through `H6` opener, I recorded its depth with `get_current_depth()` and collected only `#text` tokens from that subtree via `get_modifiable_text()`, stopping when the walk moved above the heading.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() because the task depends on nested structure, then scanned for the first UL or OL opener, walked tokens with next_token() to count direct LI children at one depth below the list opener, and used a bookmark plus seek() to return to the list element and set data-item-count. I also rejected the edit and returned the original HTML if the scan ended with paused_at_incomplete_token() or get_last_error() indicating incomplete or unsupported input.",
+  "confidence": 91
+}

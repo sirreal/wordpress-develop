@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token() and wrapped only ordinary #text tokens whose decoded text contains the keyword. Serialization is done token-by-token with serialize_token() so the output stays normalized, while special elements like script, style, textarea, and title are naturally excluded because their contents are not exposed as #text tokens. I also fall back to WP_HTML_Processor::normalize() if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 93
+}
