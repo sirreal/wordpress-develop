@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` fragment serializer, which is defined for HTML fragments in `body` context and returns `null` when normalization cannot be completed. The function falls back to the exact required placeholder HTML when normalization is unavailable or fails.",
+  "confidence": 96
+}

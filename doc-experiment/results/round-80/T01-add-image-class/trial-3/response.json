@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only real HTML tags, which automatically skips tag-like text inside comments and preserves untouched bytes exactly. For each case-insensitive `IMG` tag found with `next_tag( 'img' )`, I called `add_class( 'wp-image' )`, then returned `get_updated_html()` so only the class attribute edits are emitted.",
+  "confidence": 98
+}

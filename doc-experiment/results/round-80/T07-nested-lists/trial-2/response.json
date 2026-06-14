@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to walk the fragment with structural awareness, then relied on `next_token()`, `get_token_type()`, `is_tag_closer()`, `get_tag()`, and `get_breadcrumbs()` to identify opener tags whose ancestor chain already contains a `UL` or `OL`. For those nested list openers, I applied `add_class( 'nested-list' )` and returned `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 92
+}

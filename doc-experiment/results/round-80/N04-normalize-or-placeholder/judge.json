@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor` and only documented methods: `create_fragment()`, `serialize()`, and `get_last_error()`. The approach is documented and passes all cases, though `WP_HTML_Processor::normalize()` was the more direct API for a BODY-context fragment normalization task."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and documented normalization path via `create_fragment()` plus `serialize()`. It distinguishes `null` from an empty string correctly. The defensive `class_exists()` / `method_exists()` checks are unnecessary in this environment but not HTML API hallucinations."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the exact documented API for the task: `WP_HTML_Processor::normalize()`, then returned the fallback only on `null`. This cleanly follows the documented BODY-fragment contract and preserves empty-string output."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases. The docs did well on the key decision points: the HTML Processor overview says to use `WP_HTML_Processor` for producing normalized output; `normalize()` says it normalizes BODY-context fragments, lists normalization effects such as quoted attributes and omitted tags, and returns `string|null`; `serialize()` documents the equivalent processor-based path; and the supported-elements section explains that unsupported markup makes output-producing methods return `null`. These passages were enough for every subject to handle unclosed tags, table insertion, attribute quoting, entity preservation, unsupported misnesting, and the empty fragment. The main near-miss is that two trials chose `create_fragment()` plus `serialize()` instead of the simpler `normalize()`. That is still documented and correct, but less direct. Execution also recorded `WP_HTML_Processor::serialize` warnings for unsupported inputs even in the `normalize()` implementation path; the rendered docs emphasize the `null` return but do not clearly call out the warning side effect.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock / examples",
+      "problem": "The docs describe the return value but do not include a compact fallback example that demonstrates strict `null` handling while preserving valid empty-string output.",
+      "suggestion": "Add a general example like assigning `$normalized = WP_HTML_Processor::normalize( $html );` and using `null === $normalized` for fallback, explicitly noting that `''` is a valid normalized result."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` and `WP_HTML_Processor::serialize()` return/error documentation",
+      "problem": "The docs say unsupported input returns `null`, but execution shows these paths can also emit a warning from serialization on unsupported markup.",
+      "suggestion": "Document whether `normalize()` / `serialize()` may raise a PHP warning in addition to returning `null`, and state the recommended caller policy when warnings are captured by tests or application error handlers."
+    },
+    {
+      "location": "Processor choice guidance near `normalize()` / `serialize()`",
+      "problem": "The docs allow both `normalize()` and `create_fragment()->serialize()` for BODY fragments, but the simpler API is easy to miss among the broader processor workflow.",
+      "suggestion": "Add a short guidance sentence: use `normalize()` for whole BODY-context fragment normalization when no token walking or custom context is needed; use `create_fragment()` plus `serialize()` when a non-default context, full parser, or explicit processor instance is required."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-context fragment, then walked tokens with `next_token()` and collected decoded text from ordinary `#text` tokens plus `TITLE` and `TEXTAREA` opener tokens via `get_modifiable_text()`, which matches the documented HTML Processor text-extraction behavior. I truncated the final UTF-8 text with `mb_strlen()` and `mb_substr()` so the result is limited by Unicode code points without splitting multibyte characters.",
+  "confidence": 91
+}

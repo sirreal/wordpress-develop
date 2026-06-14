@@ -103,27 +103,39 @@ to **100.00** and `T12-unwrap-spans` to **98.90**, but still failed:
 **99.16 train / 99.04 core**, with `N03-first-list-count` at **94.16**. Do not
 promote any tested reduction.
 
-Latest update: round 79 tested the salvage variant requested by round 78's
-state: round-70 private helper pruning plus minimal general clarifications for
-flat-edit processor choice, bounded-subtree boundary ordering, and unwrap
-versus prune. Net rendered-doc change was **-440 lines**. The result improved
-over round 78 but did not preserve the round-56 baseline: **99.16 / 99.04**
-versus **99.61 / 99.55**. The persistent failure is `N03`: one trial still used
-plain opener-only `next_tag()` for a region scan, missed the closing boundary,
-and treated later incomplete/unsupported markup as invalidating the completed
-list scan.
+Latest update: round 80 scored the source docblock clarification from
+`7953a2be25` as a normal full-train source hypothesis. The result was
+**98.82 train / 98.64 core**, below the historical comparable weak-tier
+source-doc baseline from round 56 (**99.61 / 99.55**) but not a revert-rule
+failure: the aggregate drop was under 2 points and no task regressed across
+all trials. The source clarification should be kept for now but not treated as
+a confirmed win.
 
-Next action: classify as `state-reconciliation` with selected subject policy
-`gpt-5.4-mini` / `low` / `priority` and judge policy `gpt-5.5` / `xhigh` /
-`priority`. Pause source documentation reduction under the signal-exhaustion
-rule. Do not make a source docblock reduction from rounds 68-79. If continuing
-the broader documentation goal outside the reduction directive, the next
-evidence-backed hypothesis is an additive/clarifying `N03` bounded-subtree
-scan contract: opener-only `next_tag()` cannot detect subtree boundaries;
-bounded scans should use `next_token()` or `next_tag( array( 'tag_closers' =>
-'visit' ) )`, stop at the first depth drop, and interpret
-`paused_at_incomplete_token()` / `get_last_error()` at the intended region
-boundary.
+The target task, `N03-first-list-count`, remained the main failure at
+**94.56**. Two trials followed the intended `next_token()` depth-boundary
+shape and passed **11/11** with adherence **100**. One trial passed **9/11**
+because it filtered out closers before checking the depth drop, missed the
+first list's own closer, scanned into unrelated trailing incomplete or
+unsupported markup, and rejected the completed region-local edit. The judge
+found the relevant facts in the docs but said the strongest warning lives in
+an overview recipe rather than beside the `next_token()` cursor-walking
+contract.
+
+`T10-last-h2` also fell to **95.40** on adherence only: all hidden cases
+passed, but two trials chose `WP_HTML_Processor` / `create_full_parser()` for a
+flat first/last matching-tag class edit. The judge again recommended a compact
+Tag Processor recipe and an explicit statement that document-order first/last
+matching-tag scans are flat work unless the query depends on ancestors, depth,
+implied tags, subtree text, or normalized serialization.
+
+Next action: classify as `documentation-edit` only after committing the
+round-80 result artifacts. Keep the selected subject policy at
+`gpt-5.4-mini` / `low` / `priority` and judge policy at `gpt-5.5` / `xhigh` /
+`priority`. The next source hypothesis should be narrow and method-local: put
+the break-before-filter rule directly in `WP_HTML_Processor::next_token()` and
+the "the container's own closer may be the boundary token" warning directly in
+`get_current_depth()`. Keep source reduction paused under the signal-exhaustion
+rule; no tested reduction from rounds 68-79 is promotable.
 
 Previous update: round 75 tested Tag Processor attribute-template example
 compression as a full-train scratch ablation. It removed 4 rendered lines from

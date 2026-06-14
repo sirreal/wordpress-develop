@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on list structure and direct-child counting, which the Tag Processor cannot do. The function scans tokens from `WP_HTML_Processor::create_fragment()`, records the first `UL`/`OL` opener depth, counts direct `LI` openers at one level deeper, rejects incomplete or unsupported parses via `paused_at_incomplete_token()` and `get_last_error()`, then seeks back to the bookmarked opener and sets `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 91
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, walked all tag openers with next_tag(), used documented get_attribute_names_with_prefix('data-track-'), removed each returned name with remove_attribute(), and returned get_updated_html(). All called HTML API methods are documented and execution recorded no _doing_it_wrong notices."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong API usage as trial-1. The processor choice matches the docs' guidance for flat attribute edits, and the null return from get_attribute_names_with_prefix() is handled before iteration."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented HTML API usage as trial-1/trial-2. The extra class_exists() guard is a PHP built-in rather than a hallucinated HTML API method; it is unnecessary in the harness but does not misuse the documented API."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases: single-link, multiple-tags, multiple-matching-attributes, similar-prefixes-kept, uppercase-source-attribute, comments-untouched, and no-matches. The docs did the important things well: the 'Which processor should I use?' section points flat attribute/class edits to WP_HTML_Tag_Processor; 'Usage' and next_tag() document the direct constructor and linear tag walking; next_tag() explicitly says tag-like text inside comments/raw text is not matched; get_attribute_names_with_prefix() documents lowercase returned names and ASCII case-insensitive matching, including an uppercase DATA-* example; remove_attribute() and the attribute-modification overview show removal as a normal operation; get_updated_html() clearly says it is the retrieval API after queued mutations and preserves untouched bytes. Near-misses: get_attribute_names_with_prefix() does not explicitly distinguish empty array for 'matched tag, no matching attributes' from null for 'not on a tag opener', and remove_attribute()'s own method docblock is terse about case-insensitive attribute names even though this matters when using lowercased names returned by the prefix helper.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() docblock",
+      "problem": "The return contract says array|null but does not explicitly state that a matched tag with no matching attributes returns an empty array, while null means no tag opener is currently matched.",
+      "suggestion": "Add a return-contract sentence and example covering both cases: empty array for no matches on the current opener; null only when the processor is not matched on a tag opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() docblock",
+      "problem": "The method documents case-insensitive matching and lowercased results, but does not state that those returned names are suitable for subsequent mutation calls.",
+      "suggestion": "Add a cross-reference note that returned lowercase names can be passed directly to set_attribute() or remove_attribute(), including when the source attribute used different casing."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() docblock",
+      "problem": "The method-specific text only says 'Remove an attribute' and 'Whether an attribute was removed'; the richer safe-no-op behavior appears elsewhere in prose, making the contract easy to miss from the method entry alone.",
+      "suggestion": "Expand the docblock to say removal is case-insensitive for HTML attributes, calling it for a missing attribute is a no-op, and get_updated_html() is the normal way to retrieve queued removals."
+    }
+  ]
+}

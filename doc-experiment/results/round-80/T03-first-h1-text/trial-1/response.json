@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'H1' )` to find the first heading, then `get_current_depth()` and a `next_token()` walk to collect only `#text` tokens inside that subtree via `get_modifiable_text()`, which already returns decoded text. The function returns `null` when no `H1` exists or when the processor aborts on unsupported or incomplete input.",
+  "confidence": 93
+}

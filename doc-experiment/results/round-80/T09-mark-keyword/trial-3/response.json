@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded plaintext from `get_modifiable_text()` for a case-sensitive substring match and wrapped the normalized token serialization from `serialize_token()` in `<mark>`, leaving non-text and special-element content untouched.",
+  "confidence": 90
+}

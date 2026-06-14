@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full structural awareness, then walked tokens with `next_token()`, collecting only `#text` tokens that appear while inside a heading. Heading openers set the current level and accumulator, and matching heading closers flush an entry into the output array.",
+  "confidence": 92
+}

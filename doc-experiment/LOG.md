@@ -2,6 +2,55 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 80 — bounded-subtree scan clarification only partially helps
+
+`round-80` scored the source docblock clarification committed in
+`7953a2be25` against the full train set. This was not a reduction round: after
+rounds 68-79 exhausted the scratch reduction queue, the source hypothesis was
+the broader-goal clarification recorded in the backlog for `N03`: opener-only
+`next_tag()` cannot detect a subtree boundary; bounded region scans must use
+`next_token()` or visit tag closers; the first depth drop must be checked
+before token/closer filters; and completion/error checks should be interpreted
+at the caller's intended region boundary.
+
+Numeric result: **98.82 train / 98.64 core**, with traversal at **97.59**.
+This is below the historical comparable weak-tier source-doc baseline from
+round 56, **99.61 train / 99.55 core**, but it does not trip the revert rule
+because the aggregate drop is under 2 points and no previously passing task
+regressed across all trials. The target task remained the main failure:
+`N03-first-list-count` scored **94.56**. Two trials used the intended
+`next_token()` depth-boundary shape and passed **11/11** with adherence
+**100**. One trial passed **9/11** with adherence **88** because it filtered
+out closers before checking `get_current_depth() < $list_depth`, missed the
+first list's own closer, scanned into unrelated trailing incomplete or
+unsupported markup, and returned the original HTML.
+
+The main non-target low task was `T10-last-h2`, **95.40**. All trials passed
+the hidden cases, but two chose `WP_HTML_Processor` / `create_full_parser()`
+for a flat document-order class edit. The judge noted that the docs already
+say flat byte-preserving first/last matching-tag edits are Tag Processor work,
+but the "document order" phrasing still led subjects to over-select the HTML
+Processor.
+
+Interpretation: keep the source clarification for now because it is
+qualitatively correct and the revert rule is not met, but do not treat it as a
+confirmed win. The evidence says the necessary N03 facts are present in the
+overview recipe but still too easy to miss from the actual cursor contract.
+The next source hypothesis, if the broader goal continues, should be narrow
+and method-local: put the break-before-filter rule directly in
+`WP_HTML_Processor::next_token()` and the "the container's own closer may be
+the boundary token" warning directly in `get_current_depth()`. Separately,
+`T10` remains a candidate for a small flat first/last matching-tag recipe near
+the Tag Processor overview, but it should be a separate hypothesis.
+
+Next action: commit the round-80 result artifacts separately from the source
+docblock hypothesis. Keep the selected subject policy at `gpt-5.4-mini` /
+`low` / `priority` and judge policy at `gpt-5.5` / `xhigh` / `priority`.
+Then classify the next substantive action as `documentation-edit` only if
+proceeding with one narrow method-local clarification; do not resume source
+documentation reduction unless new evidence beats the round-56 baseline without
+damaging traversal.
+
 ## Round 79 — salvage reduction improves but still fails
 
 `round-79` tested the one remaining defensible reduction salvage as a

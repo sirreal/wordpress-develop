@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses `WP_HTML_Tag_Processor` for byte-preserving attribute edits, scans for every `img` tag with `next_tag( 'img' )`, and calls `add_class( 'wp-image' )` on each match. That documented API preserves existing classes and leaves all untouched bytes exactly as they were, including tags matched case-insensitively and tags inside comments being ignored automatically.",
+  "confidence": 98
+}

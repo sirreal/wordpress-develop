@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor to scan the document linearly, bookmark each encountered H2 opener as the latest match, then seek back to that bookmark and add the `final-section` class before returning `get_updated_html()`. I try `create_full_parser()` first for full documents and fall back to `create_fragment()` for fragments, using only documented HTML Processor APIs.",
+  "confidence": 84
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag()` to locate the first `UL` or `OL` opener, and then `next_token()` with `get_current_depth()`/`get_token_type()`/`is_tag_closer()` to count only direct `LI` children. If the scan is incomplete or the processor reports an error, the function returns the original HTML unchanged; otherwise it seeks back to a bookmark on the first list and applies `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 86
+}

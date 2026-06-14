@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'A' )` to visit anchor openers in document order, `get_attribute( 'href' )` to include only links with a string-valued href, and a depth-bounded `next_token()` walk with `get_current_depth()`, `get_token_type()`, and `get_modifiable_text()` to collect only descendant text nodes with decoded character references.",
+  "confidence": 93
+}

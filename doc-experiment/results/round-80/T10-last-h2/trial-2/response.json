@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on document order across the whole input, not just flat tag scanning. The function scans all H2 openers with `next_tag()`, remembers the last one via a bookmark, then `seek()`s back and applies `add_class( 'final-section' )` before returning `get_updated_html()`; if no H2 is found, it returns the original HTML unchanged.",
+  "confidence": 91
+}

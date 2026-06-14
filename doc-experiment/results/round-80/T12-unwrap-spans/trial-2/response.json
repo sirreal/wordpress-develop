@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked the document token by token with `next_token()` and rebuilt normalized output with `serialize_token()`, skipping every `SPAN` opener and closer so only their contents remain. This relies on the documented HTML Processor serialization behavior for normalization and tree-aware token walking.",
+  "confidence": 96
+}
