@@ -202,6 +202,11 @@ class Tests_HtmlApi_WpHtmlProcessorSetInnerHtml extends WP_UnitTestCase {
 				'DIV',
 				'<b>New',
 			),
+			'active formatting reconstructs before textarea outside' => array(
+				'<section>Old</section><textarea>After</textarea>',
+				'SECTION',
+				'<b>New',
+			),
 			'BODY attributes can be hoisted outside'    => array(
 				'<main>Old</main><span>After</span>',
 				'MAIN',

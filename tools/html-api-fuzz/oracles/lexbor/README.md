@@ -35,6 +35,13 @@ When present, the oracle parses the original and updated HTML after an accepted
 element. A changed outside tree is a fuzzer failure: it indicates a replacement
 that should have been rejected by the HTML API.
 
+The oracle also self-checks each Lexbor parse by serializing the parsed tree,
+parsing that serialization again in the same mode, and comparing the rendered
+tree bytes. The fuzzer records this as `originalSelfCheck` and
+`updatedSelfCheck` in Lexbor failure details. The self-check is diagnostic
+metadata; the original-vs-updated outside-tree comparison remains the oracle
+signal.
+
 The binary records the resolved Lexbor commit in its JSON metadata, even when
 building from a moving ref such as `master`.
 
@@ -61,7 +68,7 @@ tools/html-api-fuzz/oracles/lexbor/build/lexbor-tree-oracle \
   --input /path/to/input.bin
 ```
 
-The oracle returns JSON with `status`, `oracle` metadata, `tree`,
+The oracle returns JSON with `status`, `oracle` metadata, `selfCheck`, `tree`,
 `treeBase64`, and `nodeCount`. The `treeBase64` field is the exact
 html5lib-style tree bytes consumed by the PHP adapter; `tree` is the same tree
 as a JSON-safe display string. Neither field is serialized HTML.

@@ -5405,10 +5405,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$processor->record_nonvisitable_token_events = $reject_html_body_attr_hoisting;
 
-		$signature    = array();
-		$target_token = null;
-		$inside       = false;
-		$found_target = false;
+		$signature                         = array();
+		$target_token                      = null;
+		$target_active_formatting_elements = null;
+		$inside                            = false;
+		$found_target                      = false;
 
 		while ( true ) {
 			$has_token = $processor->next_token();
@@ -5434,10 +5435,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			if ( ! $inside && $processor->is_at_source_span( $target_bookmark ) ) {
-				$target_token = $processor->current_element->token;
-				$inside       = true;
-				$found_target = true;
-				$signature[]  = $processor->get_current_token_signature();
+				$target_token                      = $processor->current_element->token;
+				$target_active_formatting_elements = $processor->get_active_formatting_elements_signature(
+					$target_token,
+					in_array(
+						$target_token->node_name,
+						array( 'APPLET', 'CAPTION', 'MARQUEE', 'OBJECT', 'TD', 'TEMPLATE', 'TH' ),
+						true
+					)
+				);
+				$inside                            = true;
+				$found_target                      = true;
+				$signature[]                       = $processor->get_current_token_signature();
 				continue;
 			}
 
@@ -5447,6 +5456,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					WP_HTML_Stack_Event::POP === $processor->current_element->operation &&
 					$target_token === $processor->current_element->token
 				) {
+					if ( $target_active_formatting_elements !== $processor->get_active_formatting_elements_signature() ) {
+						return null;
+					}
 					$inside      = false;
 					$signature[] = $processor->get_current_token_signature();
 				}
@@ -5522,6 +5534,42 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			'breadcrumbs' => $this->get_breadcrumbs(),
 			'html'        => $this->serialize_token(),
 		);
+	}
+
+	/**
+	 * Returns a parser-state signature for active formatting elements.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Token|null $target_token       Optional target token to omit from the signature.
+	 * @param bool               $omit_target_marker Whether to omit a parser marker introduced by the target.
+	 * @return array<int, array<string, string|null>> Active formatting elements signature.
+	 */
+	private function get_active_formatting_elements_signature(
+		?WP_HTML_Token $target_token = null,
+		bool $omit_target_marker = false
+	): array {
+		$signature = array();
+
+		foreach ( $this->state->active_formatting_elements->walk_down() as $item ) {
+			if ( null !== $target_token && $item->bookmark_name === $target_token->bookmark_name ) {
+				continue;
+			}
+
+			$signature[] = array(
+				'bookmark_name'         => $item->bookmark_name,
+				'node_name'             => $item->node_name,
+				'namespace'             => $item->namespace,
+				'integration_node_type' => $item->integration_node_type,
+			);
+		}
+
+		$last_index = count( $signature ) - 1;
+		if ( $omit_target_marker && $last_index >= 0 && 'marker' === $signature[ $last_index ]['node_name'] ) {
+			array_pop( $signature );
+		}
+
+		return $signature;
 	}
 
 	/**

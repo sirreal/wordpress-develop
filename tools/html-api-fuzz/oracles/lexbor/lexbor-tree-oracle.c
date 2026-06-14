@@ -16,6 +16,7 @@
 #include <lexbor/dom/interfaces/character_data.h>
 #include <lexbor/dom/interfaces/document_type.h>
 #include <lexbor/html/html.h>
+#include <lexbor/html/serialize.h>
 #include <lexbor/ns/const.h>
 
 #ifndef HTML_API_FUZZ_LEXBOR_COMMIT
@@ -48,6 +49,8 @@ typedef struct {
 	buffer_t tree;
 	size_t node_count;
 	size_t max_nodes;
+	bool self_check_performed;
+	bool self_check_stable;
 } render_ctx_t;
 
 typedef struct {
@@ -79,6 +82,7 @@ static bool render_attributes(render_ctx_t *ctx, lxb_dom_element_t *element, int
 static void destroy_attr_records(attr_record_t *records, size_t count);
 static void render_node(render_ctx_t *ctx, lxb_dom_node_t *node, int indent_level);
 static void render_children(render_ctx_t *ctx, lxb_dom_node_t *first, int indent_level);
+static lxb_status_t serialize_buffer_cb(const lxb_char_t *data, size_t len, void *ctx);
 static bool read_file(const char *path, lxb_char_t **data, size_t *len, const char **message);
 static bool parse_size(const char *value, size_t *out);
 static bool parse_args(int argc, char **argv, cli_options_t *options, const char **message);
@@ -87,6 +91,12 @@ static void print_version(void);
 static void print_result(render_ctx_t *ctx);
 static void print_cli_error(const char *message);
 static bool context_to_tag(const char *context, lxb_tag_id_t *tag_id, lxb_ns_id_t *ns_id);
+static void init_render_ctx(render_ctx_t *ctx, size_t max_nodes);
+static void destroy_render_ctx(render_ctx_t *ctx);
+static bool tree_buffers_equal(buffer_t *a, buffer_t *b);
+static bool render_and_serialize_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, buffer_t *serialized);
+static bool render_and_serialize_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, const char *context, buffer_t *serialized);
+static void self_check_rendered_tree(render_ctx_t *ctx, buffer_t *serialized, const char *context);
 static void render_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len);
 static void render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, const char *context);
 
@@ -815,6 +825,16 @@ render_children(render_ctx_t *ctx, lxb_dom_node_t *first, int indent_level)
 	}
 }
 
+static lxb_status_t
+serialize_buffer_cb(const lxb_char_t *data, size_t len, void *ctx)
+{
+	buffer_t *buf = (buffer_t *) ctx;
+
+	return buffer_append_mem(buf, (const char *) data, len)
+		? LXB_STATUS_OK
+		: LXB_STATUS_ERROR_MEMORY_ALLOCATION;
+}
+
 static bool
 read_file(const char *path, lxb_char_t **data, size_t *len, const char **message)
 {
@@ -983,6 +1003,11 @@ print_result(render_ctx_t *ctx)
 	buffer_append_cstr(&json, ",\n    \"lexborVersion\": ");
 	append_json_string(&json, LXB_HTML_VERSION_STRING, strlen(LXB_HTML_VERSION_STRING));
 	buffer_append_cstr(&json, "\n  }");
+	buffer_append_cstr(&json, ",\n  \"selfCheck\": {\n    \"roundTripStable\": ");
+	buffer_append_cstr(&json, ctx->self_check_performed && ctx->self_check_stable ? "true" : "false");
+	buffer_append_cstr(&json, ",\n    \"performed\": ");
+	buffer_append_cstr(&json, ctx->self_check_performed ? "true" : "false");
+	buffer_append_cstr(&json, "\n  }");
 
 	if (ctx->status == ORACLE_OK) {
 		if (ctx->tree.length == 0) {
@@ -1041,14 +1066,12 @@ print_cli_error(const char *message)
 {
 	render_ctx_t ctx;
 
+	init_render_ctx(&ctx, 0);
 	ctx.status = ORACLE_ERROR;
 	ctx.failure_class = "oracle-cli-error";
 	ctx.message = message;
-	ctx.node_count = 0;
-	ctx.max_nodes = 0;
-	buffer_init(&ctx.tree);
 	print_result(&ctx);
-	buffer_destroy(&ctx.tree);
+	destroy_render_ctx(&ctx);
 }
 
 static bool
@@ -1100,7 +1123,32 @@ context_to_tag(const char *context, lxb_tag_id_t *tag_id, lxb_ns_id_t *ns_id)
 }
 
 static void
-render_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len)
+init_render_ctx(render_ctx_t *ctx, size_t max_nodes)
+{
+	buffer_init(&ctx->tree);
+	ctx->status = ORACLE_OK;
+	ctx->failure_class = NULL;
+	ctx->message = NULL;
+	ctx->node_count = 0;
+	ctx->max_nodes = max_nodes;
+	ctx->self_check_performed = false;
+	ctx->self_check_stable = false;
+}
+
+static void
+destroy_render_ctx(render_ctx_t *ctx)
+{
+	buffer_destroy(&ctx->tree);
+}
+
+static bool
+tree_buffers_equal(buffer_t *a, buffer_t *b)
+{
+	return a->length == b->length && 0 == memcmp(a->data, b->data, a->length);
+}
+
+static bool
+render_and_serialize_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, buffer_t *serialized)
 {
 	lxb_status_t status;
 	lxb_html_document_t *document = lxb_html_document_create();
@@ -1109,7 +1157,7 @@ render_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_le
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-renderer-error";
 		ctx->message = "Could not create Lexbor document.";
-		return;
+		return false;
 	}
 
 	status = lxb_html_document_parse(document, input, input_len);
@@ -1118,15 +1166,30 @@ render_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_le
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-parse-error";
 		ctx->message = "Lexbor could not parse the input.";
-		return;
+		return false;
 	}
 
 	render_children(ctx, lxb_dom_interface_node(document)->first_child, 0);
+	if (ctx->status == ORACLE_OK && serialized != NULL) {
+		status = lxb_html_serialize_deep_cb(
+			lxb_dom_interface_node(document),
+			serialize_buffer_cb,
+			serialized
+		);
+		if (status != LXB_STATUS_OK || serialized->failed) {
+			ctx->status = ORACLE_ERROR;
+			ctx->failure_class = "oracle-renderer-error";
+			ctx->message = "Could not serialize the parsed tree.";
+		}
+	}
+
 	lxb_html_document_destroy(document);
+
+	return ctx->status == ORACLE_OK;
 }
 
-static void
-render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, const char *context)
+static bool
+render_and_serialize_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, const char *context, buffer_t *serialized)
 {
 	lxb_status_t status;
 	lxb_html_parser_t *parser = NULL;
@@ -1139,7 +1202,7 @@ render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, co
 		ctx->status = ORACLE_UNSUPPORTED;
 		ctx->failure_class = "oracle-unsupported";
 		ctx->message = "Unsupported fragment context.";
-		return;
+		return false;
 	}
 
 	parser = lxb_html_parser_create();
@@ -1147,7 +1210,7 @@ render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, co
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-renderer-error";
 		ctx->message = "Could not create Lexbor parser.";
-		return;
+		return false;
 	}
 
 	status = lxb_html_parser_init(parser);
@@ -1156,7 +1219,7 @@ render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, co
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-renderer-error";
 		ctx->message = "Could not initialize Lexbor parser.";
-		return;
+		return false;
 	}
 
 	document = lxb_html_document_create();
@@ -1165,7 +1228,7 @@ render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, co
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-renderer-error";
 		ctx->message = "Could not create Lexbor document.";
-		return;
+		return false;
 	}
 
 	fragment = lxb_html_parse_fragment_by_tag_id(parser, document, tag_id, ns_id, input, input_len);
@@ -1175,12 +1238,69 @@ render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, co
 		ctx->status = ORACLE_ERROR;
 		ctx->failure_class = "oracle-parse-error";
 		ctx->message = "Lexbor could not parse the fragment.";
-		return;
+		return false;
 	}
 
 	render_children(ctx, fragment->first_child, 0);
+	if (ctx->status == ORACLE_OK && serialized != NULL) {
+		status = lxb_html_serialize_deep_cb(fragment, serialize_buffer_cb, serialized);
+		if (status != LXB_STATUS_OK || serialized->failed) {
+			ctx->status = ORACLE_ERROR;
+			ctx->failure_class = "oracle-renderer-error";
+			ctx->message = "Could not serialize the parsed tree.";
+		}
+	}
+
 	lxb_html_document_destroy(document);
 	lxb_html_parser_destroy(parser);
+
+	return ctx->status == ORACLE_OK;
+}
+
+static void
+self_check_rendered_tree(render_ctx_t *ctx, buffer_t *serialized, const char *context)
+{
+	render_ctx_t check;
+
+	if (ctx->status != ORACLE_OK) {
+		return;
+	}
+
+	init_render_ctx(&check, ctx->max_nodes);
+	if (context == NULL) {
+		render_and_serialize_full_document(&check, (const lxb_char_t *) serialized->data, serialized->length, NULL);
+	} else {
+		render_and_serialize_fragment(&check, (const lxb_char_t *) serialized->data, serialized->length, context, NULL);
+	}
+
+	ctx->self_check_performed = true;
+	ctx->self_check_stable = check.status == ORACLE_OK && tree_buffers_equal(&ctx->tree, &check.tree);
+
+	destroy_render_ctx(&check);
+}
+
+static void
+render_full_document(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len)
+{
+	buffer_t serialized;
+
+	buffer_init(&serialized);
+	if (render_and_serialize_full_document(ctx, input, input_len, &serialized)) {
+		self_check_rendered_tree(ctx, &serialized, NULL);
+	}
+	buffer_destroy(&serialized);
+}
+
+static void
+render_fragment(render_ctx_t *ctx, const lxb_char_t *input, size_t input_len, const char *context)
+{
+	buffer_t serialized;
+
+	buffer_init(&serialized);
+	if (render_and_serialize_fragment(ctx, input, input_len, context, &serialized)) {
+		self_check_rendered_tree(ctx, &serialized, context);
+	}
+	buffer_destroy(&serialized);
 }
 
 int
@@ -1207,19 +1327,14 @@ main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	buffer_init(&ctx.tree);
-	ctx.status = ORACLE_OK;
-	ctx.failure_class = NULL;
-	ctx.message = NULL;
-	ctx.node_count = 0;
-	ctx.max_nodes = options.max_nodes;
+	init_render_ctx(&ctx, options.max_nodes);
 
 	if (!read_file(options.input_path, &input, &input_len, &message)) {
 		ctx.status = ORACLE_ERROR;
 		ctx.failure_class = "oracle-cli-error";
 		ctx.message = message;
 		print_result(&ctx);
-		buffer_destroy(&ctx.tree);
+		destroy_render_ctx(&ctx);
 		return EXIT_FAILURE;
 	}
 
@@ -1237,7 +1352,7 @@ main(int argc, char **argv)
 
 	print_result(&ctx);
 	free(input);
-	buffer_destroy(&ctx.tree);
+	destroy_render_ctx(&ctx);
 
 	return ctx.status == ORACLE_OK || ctx.status == ORACLE_UNSUPPORTED ? EXIT_SUCCESS : EXIT_FAILURE;
 }

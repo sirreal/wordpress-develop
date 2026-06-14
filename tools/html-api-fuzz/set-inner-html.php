@@ -1554,6 +1554,8 @@ function wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree( string $origin
 		'updatedSignature'  => $updated_signature,
 		'originalOracle'    => $original_tree['oracle'] ?? null,
 		'updatedOracle'     => $updated_tree['oracle'] ?? null,
+		'originalSelfCheck' => $original_tree['selfCheck'] ?? null,
+		'updatedSelfCheck'  => $updated_tree['selfCheck'] ?? null,
 	);
 }
 
