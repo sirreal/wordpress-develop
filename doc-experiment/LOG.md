@@ -2,6 +2,40 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 69 — HTML Processor non-public method details still carry signal
+
+`round-69` tested item 2 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it removed `html-processor.md` method detail sections
+under `## Methods` whose rendered signature was `private` or `protected`,
+while leaving the HTML Processor property sections and all public/inherited
+method sections intact. The scratch edit removed 1,093 rendered lines from
+`html-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **98.17 train / 97.89 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The loss was
+concentrated in serialization: concept score **87.85** versus round 56's
+**99.35**. `T12-unwrap-spans` fell **99.30 -> 76.70** because one trial
+treated wrapper removal as depth-based subtree pruning, dropping SPAN
+descendants instead of skipping only the SPAN opener/closer tokens.
+Traversal stayed near baseline (`N03` **99.70**, `N06` **99.60**,
+`T08` **99.70**), and flat Tag Processor tasks remained stable.
+
+Interpretation: do not promote this HTML Processor non-public method-detail
+ablation. Even though the removed sections are not public API, the broad
+removal did not preserve the token-rewrite task at the selected weak tier. The
+measured loss also argues against treating internal method detail removal as a
+safe simplification without a narrower confirmation test.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 3, the Tag Processor internal-parser-method ablation, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Do not change source docblocks
+unless a scratch variant wins and is confirmed through the normal source-doc
+flow.
+
 ## Round 68 — property sections are not safe to remove
 
 `round-68` tested item 1 from the owner-requested reduction queue as a

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for BODY-fragment normalization, walked tokens with next_token(), skipped SPAN tag tokens via get_tag(), and emitted serialize_token(). All called APIs are documented and no _doing_it_wrong records appeared. Minor risk: the get_last_error() fallback normalizes the original input, which would discard the rewrite if unsupported markup were encountered."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and clean documented token-serialization pattern: create_fragment(), next_token(), get_tag(), serialize_token(). All APIs are documented and tests show no misuse. Minor omissions: raw-input fallback if processor creation fails, and no get_last_error() policy after a rewrite loop."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 75,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct processor and only documented methods, with no _doing_it_wrong records. The failure is conceptual: it tracks SPAN depth and suppresses all tokens while inside a SPAN, which prunes the subtree instead of unwrapping boundary tag tokens. The docs' serialize_token() example shows skipping matching tag tokens while continuing to serialize descendants."
+    }
+  ],
+  "failure_analysis": "Failed cases all come from trial-3. simple, attributes-discarded, adjacent-spans, span-with-block-content, and nested-spans fail because the candidate read “remove the element” as “remove the entire subtree”; its skip_span_depth gate drops text, IMG, EM, and nested SPAN contents. The relevant documentation is WP_HTML_Processor::serialize_token(), especially the “Remove every SUP element but keep its contents” example and the “rewrite while serializing tokens” recipe. Those passages were sufficient for trials 1 and 2, but the phrase “skip tokens to remove them” plus “Closing tokens of skipped elements must be skipped too” can still be misread as requiring a depth-based subtree skip. unclosed-span fails for the same reason: the processor normalizes the unclosed SPAN by visiting its text and virtual closers, but trial-3 suppresses the text while skip_span_depth is nonzero. The current_depth/is_tag_closer docs explain virtual closer and depth behavior, but the serialization docs do not explicitly warn that wrapper removal should keep serializing descendants even when the matching close tag has not yet been seen.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock and “Recipe: rewrite while serializing tokens”",
+      "problem": "The docs show a wrapper-removal example, but they do not explicitly distinguish omitting boundary tokens from pruning a whole subtree. A reader can over-apply depth state and drop descendants.",
+      "suggestion": "Add a short contract note: token rewrite loops operate on the current token only; to remove a wrapper, skip only the matching opener and closer tokens and continue serializing child tokens. To remove an element and all descendants, use a separate depth/breadcrumb-bounded subtree-pruning pattern."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() / subtree-walk guidance",
+      "problem": "Depth and breadcrumb examples are strong for subtree scans, but there is little guidance on when that state is inappropriate for flat token filters.",
+      "suggestion": "Add a cross-reference from subtree-walk examples to serialization rewrites: use depth/breadcrumb guards when the result depends on containment, but use a simple token predicate when every non-matching token should remain in output."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() fallback guidance for serialization rewrites",
+      "problem": "Trials near-missed fallback behavior: normalizing the original input after a partial rewrite discards skipped or inserted tokens, and returning raw input is not normalized.",
+      "suggestion": "Make fallback policy examples more explicit: reject with null/empty string, return accumulated best-effort output, or normalize the original only when the caller explicitly accepts losing all rewrite changes."
+    }
+  ]
+}

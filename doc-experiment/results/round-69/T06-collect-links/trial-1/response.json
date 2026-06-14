@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order, tracking anchor openers and closers by depth. For each `<a>` opener with a string `href` from `get_attribute()`, I accumulated only `#text` tokens via `get_modifiable_text()` until the matching closer, then emitted the decoded `href` and concatenated text.",
+  "confidence": 96
+}

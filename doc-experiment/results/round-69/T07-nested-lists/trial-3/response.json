@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware traversal, then inspected each UL/OL opener with get_tag() and get_breadcrumbs() to detect whether any ancestor above it was also UL or OL. For matches, I added the class with add_class() and returned the preserved document via get_updated_html().",
+  "confidence": 97
+}

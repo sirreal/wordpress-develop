@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to parse the BODY fragment, then walked tokens with `next_token()` and `get_current_depth()` so each heading opener could collect only descendant `#text` tokens until its closing token was reached. The heading text comes from `get_modifiable_text()`, which the docs specify returns decoded plaintext for ordinary text nodes.",
+  "confidence": 96
+}

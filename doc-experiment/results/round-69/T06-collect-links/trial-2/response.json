@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structure awareness, then walked tokens with `next_token()` and collected only `#text` tokens inside each open `A` element. `get_attribute('href')` provides the decoded attribute value, and `get_current_depth()` lets the function know when the current anchor scope ends so entries are emitted in document order.",
+  "confidence": 94
+}

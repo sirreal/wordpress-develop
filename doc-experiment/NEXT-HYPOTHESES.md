@@ -23,9 +23,13 @@ Reduction queue:
    method docs. It cut 604 rendered lines but lost badly, **97.64 train /
    97.28 core** versus round 56's **99.61 / 99.55**, with traversal dropping
    to **93.69**. Do not promote.
-2. HTML Processor internal-step ablation: remove private parser step method
-   details (`step_*`, insertion-mode helpers, adoption-agency helpers, virtual
-   node helpers) while keeping public/inherited method docs.
+2. Tested/rejected in round 69: HTML Processor non-public method detail
+   ablation removed 1,093 rendered lines from `html-processor.md` under
+   `## Methods` whose signatures were `private` or `protected`, while keeping
+   property sections and public/inherited methods. It lost, **98.17 train /
+   97.89 core** versus round 56's **99.61 / 99.55**, with serialization
+   dropping to **87.85** and `T12-unwrap-spans` falling **99.30 -> 76.70**.
+   Do not promote.
 3. Tag Processor internal-parser-method ablation: remove private parser helper
    method details (`parse_*`, `skip_*`, `apply_*`, sorting/enqueue helpers)
    while keeping public methods and overview guidance.
@@ -53,12 +57,27 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 2 as round 69 on the full train set because the
-round-68 broad property ablation lost and item 2 isolates HTML Processor
-internal implementation detail noise while preserving public and inherited
-method docs.
+Test order continues with item 3 as round 70 on the full train set because
+rounds 68 and 69 both lost. Item 3 isolates Tag Processor private parser
+helper detail noise while preserving public methods and overview guidance.
 
-Latest update: round 68 tested property-section removal as a full-train
+Latest update: round 69 tested HTML Processor non-public method-detail removal
+as a full-train scratch ablation. It removed 1,093 rendered lines from
+`html-processor.md` but did not win: **98.17 train / 97.89 core** versus the
+comparable round-56 weak-tier source-doc baseline at **99.61 / 99.55**. The
+damage was concentrated in serialization, with `T12-unwrap-spans` falling
+**99.30 -> 76.70** because one trial used depth state to prune the whole SPAN
+subtree instead of skipping only SPAN boundary tokens. Do not promote this
+HTML Processor non-public method-detail ablation.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 3 as round 70: remove Tag Processor private parser/helper method
+details from scratch rendered docs while keeping public methods and overview
+guidance intact. Do not change source docblocks unless a scratch variant wins
+and is confirmed through the normal source-doc flow.
+
+Previous update: round 68 tested property-section removal as a full-train
 scratch ablation. It removed 604 rendered lines from the staged docs but did
 not win: **97.64 train / 97.28 core** versus the comparable round-56
 weak-tier source-doc baseline at **99.61 / 99.55**. The damage was
@@ -66,13 +85,6 @@ concentrated in traversal, with `N03-first-list-count` falling **99.70 ->
 82.55** from an unset-bookmark `seek()` failure and `N06-extract-toc` falling
 **99.80 -> 87.80** from depth/rank confusion and ignored closer boundaries.
 Do not promote property-section removal.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 2 as round 69: remove HTML Processor private/internal parser-step
-method details from scratch rendered docs while keeping public/inherited
-method docs intact. Do not change source docblocks unless a scratch variant
-wins and is confirmed through the normal source-doc flow.
 
 Previous update: round 67 isolated the processor-choice-only simplification on
 the same six-task subset as round 66. It removed only top-level roadmap/future

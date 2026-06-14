@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built a literal figure template and used the documented HTML API to fill it in place, so the `img` attributes stay in the required `src` then `alt` order and all values are encoded safely by `set_attribute()` and `set_modifiable_text()`. The implementation relies on `WP_HTML_Tag_Processor::__construct()`, `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()`.",
+  "confidence": 92
+}

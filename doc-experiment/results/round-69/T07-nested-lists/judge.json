@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly used WP_HTML_Processor::create_fragment(), next_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). The redundant next_tag(array('tag_name' => null)) and count($breadcrumbs) guard suggest mild uncertainty about breadcrumb shape, but all API use was documented and valid."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor and all called methods are documented, including next_token(), get_token_type(), is_tag_closer(), and get_current_depth(). The manual list-depth stack is supported by the documented token-walk model, but is less direct than using breadcrumbs for an ancestor predicate, and the stored depth values are unused."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Closely follows the documented structural traversal pattern: create_fragment(), next_tag(), get_breadcrumbs(), add_class(), get_updated_html(), with a documented get_last_error() fallback. No misuse or undocumented API calls found."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case and no execution.json file recorded _doing_it_wrong notices. The docs did well on the core requirements: the WP_HTML_Processor overview explicitly says to choose it when document structure, containment, nesting depth, or breadcrumbs matter; create_fragment() is documented for BODY fragments and nullable construction; get_breadcrumbs() documents the implicit HTML/BODY entries and current-node stack; next_tag() documents opener-only default traversal; add_class() documents class appending/preservation; and get_updated_html() is documented as the byte-preserving way to retrieve queued edits. Near-misses: trial-1 added an arbitrary breadcrumb-count guard, implying the breadcrumbs section could better show ancestor-only checks independent of absolute depth. Trial-2 built a parallel stack even though breadcrumbs already answer the ancestor question, likely because next_token()/get_current_depth() examples emphasize explicit state but do not clearly say when breadcrumbs are the simpler contract.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / get_breadcrumbs()",
+      "problem": "The docs explain that breadcrumbs include implicit HTML/BODY and the current node, but they do not show the common ancestor-only predicate directly.",
+      "suggestion": "Add a general example showing `$ancestors = array_slice( $processor->get_breadcrumbs(), 0, -1 );` before checking whether any ancestor matches a tag name. Emphasize avoiding absolute depth checks when the question is ancestor membership."
+    },
+    {
+      "location": "html-processor.md / next_token() and get_current_depth()",
+      "problem": "The token-walk examples encourage explicit state, but do not distinguish simple ancestry queries from aggregate state machines. This can lead callers to maintain a redundant stack that may be harder to reason about than breadcrumbs.",
+      "suggestion": "Add guidance that `get_breadcrumbs()` is preferred for simple 'is this token inside X?' checks, while custom state is for counts, accumulated text, or cross-token summaries not represented by the parser state."
+    },
+    {
+      "location": "html-processor.md / class overview or mutation workflow",
+      "problem": "The complete recipe for structure-aware mutation is spread across create_fragment(), breadcrumbs, add_class(), and inherited get_updated_html() documentation.",
+      "suggestion": "Add a short generalized pattern for 'modify a matched opener based on structural context, then return get_updated_html()' without using a task-specific tag pair. Cross-link breadcrumbs and get_updated_html from that pattern."
+    },
+    {
+      "location": "html-processor.md / get_last_error() and inherited get_updated_html()",
+      "problem": "Abort/truncation guidance is clearer for serialization than for queued attribute/class mutations on WP_HTML_Processor. Candidates that omit get_last_error() still pass ordinary cases, but the intended fallback policy after parser abort is not centralized.",
+      "suggestion": "Add a note near get_last_error() or the mutation workflow stating how callers should treat queued mutations when `get_last_error()` is non-null, and when `paused_at_incomplete_token()` should influence whether to return modified HTML or a fallback."
+    }
+  ]
+}

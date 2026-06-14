@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), token walking, get_attribute(), get_token_type(), get_token_name(), is_tag_closer(), get_current_depth(), and get_modifiable_text(), all present in the rendered docs. It chose the structural processor, filtered href with is_string(), and relied on decoded attribute/text APIs. Minor deduction: the state machine emits links on A closers rather than explicitly finalizing any still-open anchor after the loop, so its incomplete-input handling is less direct even though the frozen unclosed case passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best match to the documented guidance. It used WP_HTML_Processor for BODY-fragment structure, a single next_token() loop with explicit state for repeated regions, get_current_depth() to detect subtree exit, is_string() for href semantics, and get_modifiable_text() only for #text tokens. No undocumented calls or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. It follows the subtree text recipe almost exactly: next_tag('A'), string-only get_attribute('href'), depth-bounded next_token(), #text filtering, and get_modifiable_text(). Tiny deduction only because the docs caution that repeated regions usually prefer a single token loop over nested walks; for this anchor-collection task the pattern is still sound and passed all cases."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 frozen cases and no execution.json contained _doing_it_wrong or trigger_error records. The docs did well on the key contracts this task depends on: the HTML Processor overview clearly says to choose WP_HTML_Processor when document structure, containment, and text extraction matter; create_fragment() is shown as the BODY-fragment factory; next_token() documents depth-bounded subtree walking; get_attribute() documents string|true|null plus decoded string values; and get_modifiable_text() documents decoded text for #text tokens and warns not to treat it as a text-node predicate. Near-misses were mostly traversal-shape risks, not actual failures: trial-1 depended on closer visitation to flush a link, and trial-3 used a nested token walk for repeated anchors despite the docs' general warning that one cursor can make nested loops skip boundaries in some repeated-region tasks.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / subtree text extraction recipe",
+      "problem": "The docs give both a depth-bounded inner-loop recipe and a warning that repeated regions should prefer one token loop, but they do not clearly distinguish when the inner-loop pattern is safe versus when it can skip later regions.",
+      "suggestion": "Add a short rule of thumb: use a depth-bounded inner loop for one already-selected subtree, but for collecting many sibling/recurring regions prefer one next_token() loop with state unless the outer cursor intentionally resumes after the subtree boundary."
+    },
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() and incomplete input discussion",
+      "problem": "Candidates can infer that implied or virtual closing tags may be visited, but the docs do not make the EOF/incomplete-fragment finalization contract prominent for collectors that accumulate state until a closer.",
+      "suggestion": "Document whether next_token() visits virtual/implied closers for unclosed elements in fragments, and recommend either depth-exit detection or explicit end-of-loop finalization when accumulating data for an open element."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() / inherited HTML Processor method docs",
+      "problem": "The attribute value contract is documented, but the empty-string case is more visible in the Tag Processor overview than in the method contract itself, while tasks often need to distinguish missing, boolean, empty, and string-valued attributes.",
+      "suggestion": "In the get_attribute() method section, include a compact table for absent => null, valueless/boolean => true, empty quoted value => '', and normal value => decoded string."
+    }
+  ]
+}

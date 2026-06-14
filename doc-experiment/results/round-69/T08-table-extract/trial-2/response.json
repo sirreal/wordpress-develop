@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked the parsed token stream with `next_tag()` and `next_token()` so browser-like table structure and implied elements are handled. Text is collected only from `#text` tokens via `get_modifiable_text()`, and table boundaries are tracked with `get_current_depth()` and `is_tag_closer()` so rows and cells are finalized in document order.",
+  "confidence": 92
+}
