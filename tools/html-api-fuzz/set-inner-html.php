@@ -1712,6 +1712,20 @@ function wp_html_set_inner_html_fuzzer_run_case( array $case, ?string $lexbor_or
 		);
 	}
 
+	if ( 'ok' === $lexbor_check['status'] ) {
+		return array(
+			'ok'     => true,
+			'status' => 'accepted-lexbor-checked',
+		);
+	}
+
+	if ( 'skipped' === $lexbor_check['status'] && null !== $lexbor_oracle_bin ) {
+		return array(
+			'ok'     => true,
+			'status' => 'accepted-lexbor-skipped',
+		);
+	}
+
 	return array(
 		'ok'     => true,
 		'status' => 'accepted',
@@ -1735,6 +1749,8 @@ wp_html_set_inner_html_fuzzer_bootstrap();
 $counts = array(
 	'corpus'                                => 0,
 	'accepted'                              => 0,
+	'accepted-lexbor-checked'               => 0,
+	'accepted-lexbor-skipped'               => 0,
 	'accepted-original-signature-unsupported' => 0,
 	'rejected'                              => 0,
 	'unsupported-original'                  => 0,
@@ -1769,6 +1785,12 @@ foreach ( wp_html_set_inner_html_fuzzer_corpus_cases() as $case ) {
 			exit( 1 );
 		}
 	}
+
+	$status = $result['status'];
+	if ( ! isset( $counts[ $status ] ) ) {
+		$counts[ $status ] = 0;
+	}
+	++$counts[ $status ];
 }
 
 for ( $i = 0; $i < $iterations; ++$i ) {
