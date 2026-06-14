@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path for body-fragment, structure-aware text extraction. All called methods are documented. Followed the documented subtree token-walk pattern with depth guarding, `#text` filtering, and decoded `get_modifiable_text()`. Minor redundancy: `is_tag_closer()` after plain `next_tag('H1')`, even though the docs say plain `next_tag()` skips closers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as trial-1: correct processor, documented calls only, idiomatic depth-bounded `next_token()` walk, and correct decoded text handling. Minor redundancy: unnecessary closer guard after `next_tag('H1')`."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Cleanly matched the documented pattern: create a body fragment processor, find the first `H1`, record its depth, walk tokens until depth drops below that value, and append only decoded `#text` token contents. No undocumented or unnecessary API usage."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed all 8 cases. The rendered docs did well for this task because they explicitly steer structure-sensitive text extraction to `WP_HTML_Processor` rather than `WP_HTML_Tag_Processor`, especially under `Which processor should I use?`, `Supported elements`, and `Recipe: collect DOM-style text from a subtree`. The `next_token()` and `get_current_depth()` sections explain the exact general pattern needed here: record the opener depth, keep walking while the current depth remains inside the subtree, and use `>=`/`<` rather than a brittle absolute depth. That supports nested markup and unclosed elements. The `get_modifiable_text()` section also clearly says `#text` values are already decoded and that the method is not itself a predicate for ordinary text, which prevented comment/special-element overcollection and double-decoding. The only near-miss was that trials 1 and 2 added an unnecessary `is_tag_closer()` guard after `next_tag('H1')`; this did not break anything, but it suggests the opener-only default for plain `next_tag()` may still be less salient than the subtree text recipe.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_tag()` docblock / rendered `html-processor.md` `next_tag()` section",
+      "problem": "The default opener-only behavior is documented in the `tag_closers` parameter text, but two successful trials still added a redundant `is_tag_closer()` guard after plain `next_tag('H1')`.",
+      "suggestion": "Add a short narrative sentence near the top of the method docs: `next_tag( 'H1' )` matches opening H1 tags only; request `tag_closers => 'visit'` when closing tags must be visited."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_tag()` docblock signature documentation",
+      "problem": "The signature accepts `array|string|null`, but the string shorthand is not defined as directly as the array keys. Readers have to infer its intended simple-tag-matching use from examples.",
+      "suggestion": "Document the string form explicitly before the array-key list, including that it uses the same default closer-skipping behavior as an array query."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parsing and subtree-aware token walk to find the first TABLE and then collect ordinary `#text` tokens inside `TR`, `TD`, and `TH` elements, relying on `get_current_depth()`, `next_tag()`, `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` as documented. This preserves browser-like table structure, including implied table elements, while returning rows of decoded cell text.",
+  "confidence": 92
+}

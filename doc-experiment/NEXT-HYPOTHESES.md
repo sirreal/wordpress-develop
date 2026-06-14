@@ -62,9 +62,14 @@ Reduction queue:
    97.59 core** versus round 56's **99.61 / 99.55**, with
    `T12-unwrap-spans` falling **99.30 -> 76.70** from one subtree-deletion
    rewrite. Do not promote.
-8. Attribute-template example compression: shorten the template-building
-   section while preserving the two load-bearing facts: seed attributes to
-   control order, and use placeholder text for `set_modifiable_text()`.
+8. Tested/rejected in round 75: attribute-template example compression
+   shortened the template-building section while preserving seeded attributes
+   for output order, placeholder text for `set_modifiable_text()`, plain-value
+   encoding, and `get_updated_html()`, removing 4 rendered lines. It failed,
+   **97.15 train / 96.72 core** versus round 56's **99.61 / 99.55**, with
+   `N03-first-list-count` falling **99.70 -> 64.40** from two unset-bookmark
+   `seek()` crashes. The target `T04-build-figure` task stayed **100.00**, but
+   do not promote.
 9. Bookmark overview/method deduplication without contract removal: keep the
    current long `set_bookmark()` examples, but remove the shorter top-level
    Tag Processor bookmark overview example to test duplicate placement only.
@@ -73,14 +78,33 @@ Reduction queue:
     attribute helpers with concise cross-reference stubs, while leaving the Tag
     Processor originals intact.
 
-Test order continues with item 8 as round 75 on the full train set. Round 74
+Test order continues with item 9 as round 76 on the full train set. Round 75
 failed badly, so continue to the next isolated reduction candidate:
-compressing the Tag Processor attribute-template example while preserving
-complete construct/match/mutate/output usage, seeded attributes for output
-order, placeholder text for `set_modifiable_text()`, automatic encoding, and
-the final `get_updated_html()` call.
+deduplicating bookmark guidance by removing only the shorter top-level Tag
+Processor bookmark overview example while preserving method-local bookmark
+contracts, the longer `set_bookmark()` examples, literal bookmark names,
+release guidance, and the existing-bookmark precondition for any `seek()`
+usage.
 
-Latest update: round 74 tested Tag Processor CSS-class example compression as
+Latest update: round 75 tested Tag Processor attribute-template example
+compression as a full-train scratch ablation. It removed 4 rendered lines from
+`html-tag-processor.md` and preserved the direct template-building task:
+`T04-build-figure` stayed at **100.00**, with all three subjects choosing
+`WP_HTML_Tag_Processor`. It still failed overall: **97.15 train / 96.72 core**
+versus the comparable round-56 weak-tier source-doc baseline at **99.61 /
+99.55**. The damage was concentrated in traversal:
+`N03-first-list-count` fell **99.70 -> 64.40** because two trials called
+`seek()` on bookmark names that had never been set, causing crashes on seven
+hidden cases. Do not promote the attribute-template compression.
+
+Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
+`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
+run item 9 as round 76: remove the shorter top-level Tag Processor Bookmarks
+overview example only, leaving the method-local `set_bookmark()` and `seek()`
+details intact. Do not change source docblocks unless a scratch variant wins
+cleanly and is confirmed through the normal source-doc flow.
+
+Previous update: round 74 tested Tag Processor CSS-class example compression as
 a full-train scratch ablation. It removed 15 rendered lines from
 `html-tag-processor.md` and preserved the direct class task, with
 `T01-add-image-class` staying at **100.00**, but failed overall:
@@ -89,15 +113,6 @@ source-doc baseline at **99.61 / 99.55**. The damage was concentrated in
 serialization: `T12-unwrap-spans` fell **99.30 -> 76.70** because one trial
 used a skip-depth subtree deletion pattern instead of skipping only SPAN
 opener/closer tokens. Do not promote the CSS-class example compression.
-
-Next action: keep the selected subject policy recorded as `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and
-run item 8 as round 75: compress the Tag Processor `Building markup from a
-template` rendered example block while preserving seeded attributes in the
-literal template, placeholder text for `set_modifiable_text()`, automatic
-encoding of plain values, `set_attribute()` / `set_modifiable_text()` usage,
-and `get_updated_html()`. Do not change source docblocks unless a scratch
-variant wins cleanly and is confirmed through the normal source-doc flow.
 
 Previous update: round 73 tested HTML Processor unsupported-features
 compression as a full-train scratch ablation. It removed only 8 rendered lines

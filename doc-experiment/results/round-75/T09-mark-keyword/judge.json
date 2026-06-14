@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` processor, walked with `next_token()`, matched only `#text`, used decoded `get_modifiable_text()`, and emitted wrappers around `serialize_token()`. All called API methods are documented. Minor adherence issue: on `get_last_error()` it falls back to `normalize($html)`, which the `serialize_token()` docs warn discards loop-emitted rewrites."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best adherence of the set. Correct processor, documented methods only, idiomatic token walk, decoded-text comparison, and token serialization. Its parser-error fallback preserves accumulated output when any exists. Only small weakness is returning raw `$html` if processor creation fails or no output was emitted, which would not satisfy a normalized-output contract if that branch were reachable."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same strong core pattern as trial-1: correct HTML Processor, documented APIs only, `#text` guard, decoded comparison, and `serialize_token()` wrapping. The same minor issue applies: falling back to `normalize($html)` after an error would intentionally discard emitted `<mark>` wrappers, a behavior called out as an anti-pattern for token rewrites."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 cases, with no `_doing_it_wrong` records. The docs did well in the exact areas this task needed: `Which processor should I use?` points normalized, structure-aware output toward `WP_HTML_Processor`; `Recipe: collect DOM-style text from a subtree` says ordinary text is only `#text` tokens and warns against treating all modifiable text as DOM text; `get_modifiable_text()` states text is already decoded for `#text`; and `serialize_token()` includes the correct general wrapping pattern: compare decoded text, then wrap the normalized serialized token. The main near-miss was fallback policy. Trials 1 and 3 used `normalize($html)` after a rewrite loop on parser error, even though the `serialize_token()` and `normalize()` docs say this restarts from the original bytes and discards emitted changes. The tests did not exercise unsupported-parser aborts, so this remained a documentation-adherence concern rather than a functional failure.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_last_error()` and `WP_HTML_Processor::serialize_token()` docs",
+      "problem": "Rewrite fallback policy is documented, but still easy to apply inconsistently. Two trials used `normalize($html)` after building wrapper output, which is an all-or-nothing fallback that discards partial rewrites.",
+      "suggestion": "Add a compact decision table for token-rewrite failure policies: return accumulated best-effort output, return `null`/empty, return original input, or normalize original input. State explicitly which policies preserve emitted rewrites and which discard them."
+    },
+    {
+      "location": "`WP_HTML_Processor::create_fragment()` docs",
+      "problem": "The docs say a `null` return means no processor was created, but do not make practical causes and recommended string-return fallbacks very concrete for default BODY fragments.",
+      "suggestion": "Document when `create_fragment($html)` with default context can return `null`, and advise callers to choose a contract-specific fallback before any token walk, especially for functions promising normalized output."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docs for special text-bearing elements",
+      "problem": "The docs explain that SCRIPT/STYLE/TITLE/TEXTAREA content is carried on the opener token, but the serialization consequence is less visible. A rewrite author may not realize serializing that opener emits the element’s contained text too.",
+      "suggestion": "Add a general token-kind table showing what `serialize_token()` emits for ordinary `#text`, normal tag openers/closers, virtual closers, comments, and special text-bearing element openers."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get browser-like table structure handling, then walked tokens with `next_tag()` and `next_token()` so implied `TBODY`/`TR` structure is respected. Cell text is collected only from `#text` tokens via `get_modifiable_text()`, and the walk stops when it leaves the table subtree using `get_current_depth()` and `is_tag_closer()`.",
+  "confidence": 78
+}

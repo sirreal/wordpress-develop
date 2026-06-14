@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for a BODY fragment and used a single next_token() walk. All HTML API calls are documented: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), is_tag_closer(), and get_tag(). It follows the documented text policy by appending #text tokens and opt-in TITLE/TEXTAREA opener text, while excluding SCRIPT/STYLE. Minor edge-policy gap: it does not inspect get_last_error() or paused_at_incomplete_token() after scanning."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented APIs throughout: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), get_token_name(), and is_tag_closer(). PHP builtins such as class_exists(), function_exists(), mb_strlen(), and preg_match_all() are not HTML API hallucinations. It uses the documented special-element opener pattern for TITLE/TEXTAREA and UTF-8 code-point truncation. Minor issues: unnecessary class_exists() defensive branch and no explicit post-scan unsupported/incomplete-input policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented token-walking pattern. It reads ordinary #text and whitelisted TITLE/TEXTAREA opener text via get_modifiable_text(), uses get_token_name() and is_tag_closer() appropriately, and avoids raw SCRIPT/STYLE text. Regex code-point slicing is outside the HTML API and works for the tested UTF-8 text. Minor edge-policy gap: no get_last_error() or paused_at_incomplete_token() check after the walk."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; each execution passed 10/10. The docs did well at steering subjects to the HTML Processor rather than the Tag Processor: the Tag Processor docs explicitly warn that lexical token processing is not parsed BODY-fragment text extraction, and the HTML Processor docs say create_fragment() is for BODY fragments. The most important successful passages were the HTML Processor text-extraction recipe, the next_token() note that text may be split across multiple #text tokens, and the get_modifiable_text() contract saying #text/TITLE/TEXTAREA are decoded while SCRIPT/STYLE are raw special-element text. Those passages explain the passes for entity decoding, interelement whitespace, malformed nesting, and special title/textarea handling. The main near-miss is incomplete or unsupported input policy: all candidates returned accumulated text without checking paused_at_incomplete_token() or get_last_error(). The docs allow caller-chosen policy for read-only extraction, so this is not a correctness failure here, but it shows that the completion-policy guidance is less salient than the token-reading guidance.",
+  "doc_gaps": [
+    {
+      "location": "src/wp-includes/html-api/class-wp-html-processor.php class overview, lines 19-30; rendered heading: WP_HTML_Processor > Overview",
+      "problem": "The overview still says the processor will eventually support reading and changing inner content, while later sections document read-only text extraction with next_token() and get_modifiable_text(). This can make supported read-only text walks look unofficial or future-only.",
+      "suggestion": "Split the statement: say structured innerHTML mutation is future work, but read-only text extraction is supported today through token walking. Cross-link to the DOM-style text recipe."
+    },
+    {
+      "location": "src/wp-includes/html-api/class-wp-html-processor.php get_modifiable_text() docblock, lines 6052-6084",
+      "problem": "The opening description emphasizes every token that can carry modifiable text, including SCRIPT/STYLE/comments, before the ordinary-DOM-text warning. Readers doing extraction may overgeneralize to appending get_modifiable_text() for every token.",
+      "suggestion": "Move or duplicate the token policy near the top as a compact table: ordinary #text is DOM text and decoded; TITLE/TEXTAREA opener text is decoded but opt-in; SCRIPT/STYLE opener text is raw and not ordinary DOM text; comments/PI are modifiable but not DOM text."
+    },
+    {
+      "location": "src/wp-includes/html-api/class-wp-html-tag-processor.php Tokens and finer-grained processing example, lines 317-336",
+      "problem": "The lexical Tag Processor example collects #text and TITLE text but does not show construction or an opener guard for TITLE. Even with the preceding warning, it is copyable in a way that can blur lexical scanning and parsed fragment extraction.",
+      "suggestion": "Label the snippet as lexical-only, show the processor construction, and add an explicit ! is_tag_closer() check for special-element text. Add a nearby cross-reference to the HTML Processor recipe for parsed BODY-fragment text extraction."
+    },
+    {
+      "location": "src/wp-includes/html-api/class-wp-html-processor.php next_token() and text-extraction docs, lines 1079-1086 and 164-168",
+      "problem": "The docs correctly say incomplete-input behavior is a caller policy, but examples mostly demonstrate the walk and not the post-walk policy decision. Subjects consistently omitted the checks.",
+      "suggestion": "Add a short reusable completion-policy checklist for read-only extraction: best-effort may return accumulated text; complete-source callers should reject or fall back when paused_at_incomplete_token() is true or get_last_error() is non-null."
+    },
+    {
+      "location": "src/wp-includes/html-api/class-wp-html-processor.php get_tag() docblock; rendered heading: get_tag()",
+      "problem": "The get_tag() example in the HTML Processor docs instantiates WP_HTML_Tag_Processor, which is technically related but confusing in a section documenting the HTML Processor API.",
+      "suggestion": "Change the example to use WP_HTML_Processor::create_fragment() so readers see the same construction pattern used elsewhere in the HTML Processor docs."
+    }
+  ]
+}

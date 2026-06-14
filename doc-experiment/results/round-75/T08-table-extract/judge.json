@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_tag(), next_token(), depth bounding, tag closer checks, and decoded #text extraction. All API calls are documented and no _doing_it_wrong records appeared. Main adherence issue: it used nested next_token() loops even though the docs explicitly warn that one shared cursor makes nested walks fragile for repeated regions."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Strong adherence: correct HTML Processor choice, documented methods only, single depth-bounded token loop, and decoded text collected only from #text tokens. It relies on the read-only extraction policy of returning accumulated results rather than explicitly checking paused_at_incomplete_token() or get_last_error(), which is acceptable here but not fully explicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best API usage: correct processor, documented methods only, a single stateful token loop, closer-driven flushing, decoded #text extraction, and natural handling of virtual closers and empty cells. Only minor gap is the lack of an explicit incomplete/unsupported-input policy, though the docs allow caller policy for read-only extraction."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The docs succeeded at the key decision points: the HTML Processor overview says to choose it when structure matters; the Tag Processor docs warn that lexical token scans are not parsed fragment text extraction; WP_HTML_Processor::next_token() explains virtual closers, synthesized table structure such as TBODY, and the single-cursor model; get_current_depth() explains the >= depth-bound idiom; get_modifiable_text() explains decoded #text extraction and why not to read every modifiable-text token. The only near-miss was trial-1's nested cursor loop, a misconception the docs warn about but did not fully eliminate for two-level repeated extraction shapes.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, WP_HTML_Processor::next_token()",
+      "problem": "The section warns against nested next_token() loops, but the example only shows one repeated region. Trial-1 still used an inner token loop for hierarchical repeated data.",
+      "suggestion": "Add a general hierarchical extraction example using one token loop with outer and inner state variables, and closer-driven flushing for both levels. Keep it generic, such as groups/items or sections/paragraphs, rather than solving this task."
+    },
+    {
+      "location": "html-processor.md, WP_HTML_Processor::get_current_depth() and is_tag_closer()",
+      "problem": "The docs explain that an element's own closer reports the parent depth, but the cleanup implication for depth-bounded loops is easy to miss.",
+      "suggestion": "Add a short invariant: with a guard like depth >= opener_depth, the matched element's own closing token is the first token that fails the guard and the loop body will not run for it; any pending state must be flushed on child closers or after the loop according to caller policy."
+    },
+    {
+      "location": "html-processor.md, text extraction guidance near get_modifiable_text()",
+      "problem": "The decoded-text guidance is strong, but the incomplete-input policy is split across several sections, so candidates tend to leave it implicit.",
+      "suggestion": "Add one compact read-only extraction policy note: accumulated #text is valid if best-effort partial extraction is acceptable; callers requiring complete input should check paused_at_incomplete_token() and get_last_error() after the bounded walk."
+    }
+  ]
+}

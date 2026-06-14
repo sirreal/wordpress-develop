@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), token walking, #text filtering, get_modifiable_text(), get_tag(), and is_tag_closer(); all are documented. The single-pass state machine is consistent with the documented closer-driven pattern and handles decoded text, empty headings, implicit heading closes, and incomplete trailing syntax. Minor idiom gap: it does not anchor heading membership with depth/breadcrumbs and has a redundant flush on a new heading opener, suggesting partial uncertainty about virtual closers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and only used documented APIs. The closer-driven single-pass approach is explicitly supported by the next_token() docs and passed all frozen cases, including implicit/end-of-input heading closers. Minor issues: response.json claims get_current_depth() was used when the code does not call it, and the implementation has no final flush or explicit get_last_error policy, so it can drop an in-progress heading if the processor aborts on unsupported markup before reporting a closer."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Closest to the documented subtree-walk recipe: HTML Processor fragment parser, token walking, get_current_depth() boundary, #text-only collection, and get_modifiable_text() for decoded text. All called APIs are documented, and the >= depth logic matches the docs' warning about child closers reporting the ancestor depth."
+    }
+  ],
+  "failure_analysis": "All three trials passed all seven frozen cases and produced no _doing_it_wrong records. The docs worked well on the important decisions: they strongly distinguished WP_HTML_Processor from WP_HTML_Tag_Processor for structural text extraction, documented create_fragment() for body fragments, documented get_tag() as uppercase, warned to collect only #text tokens for ordinary DOM-style text, and explained that next_token() reports implicit and end-of-input closers. Those passages directly prevented likely failures in the entity, empty-heading, uppercase-source, and implied-heading-close cases. The main near-miss was trial-2's reliance on a matching closer without a final flush or abort policy; this was fine for the frozen malformed-heading case because the processor emits virtual closers, but it can lose already-collected text if unsupported markup causes get_last_error() before a heading closer. Another near-miss is conceptual rather than functional: trial-1's redundant flush on a new heading opener suggests the virtual-closer behavior was understood enough to pass, but not fully trusted.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / read-only extraction examples",
+      "problem": "The docs explain that read-only callers choose a policy for incomplete or unsupported scans, but examples do not show what to do with an already-open accumulation when next_token() returns false before a closer because of get_last_error().",
+      "suggestion": "Add a small general note or example showing two valid policies for an in-progress read-only extraction: flush accumulated text as best effort, or discard/fail if get_last_error() or paused_at_incomplete_token() violates the caller contract."
+    },
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() and get_tag() docs",
+      "problem": "The closer behavior is documented, but the contract for virtual/implied closers and what get_tag() reports on those closers is easy to miss when writing closer-driven state machines.",
+      "suggestion": "State explicitly that HTML Processor closer tokens include implicit/end-of-input closers and that get_tag() on those closer tokens identifies the element being closed, normalized by parser semantics."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() example",
+      "problem": "The HTML Processor get_tag() section uses a WP_HTML_Tag_Processor construction example, which weakens the distinction the overview otherwise makes between lexical and structural processors.",
+      "suggestion": "Use a WP_HTML_Processor::create_fragment() example in the HTML Processor method docs, ideally including an implicit close case to reinforce parser-normalized tag reporting."
+    }
+  ]
+}

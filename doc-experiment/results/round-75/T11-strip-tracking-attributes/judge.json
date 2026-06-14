@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for a flat attribute rewrite. All called HTML API methods are present in the rendered docs: constructor, next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html(). The loop and final get_updated_html() match the documented pattern; null from get_attribute_names_with_prefix() is handled."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented, idiomatic solution as the reference. Correct processor choice, no _doing_it_wrong records, no undocumented HTML API calls, and good use of the prefix helper to preserve data-track and data-tracker while removing data-track-* attributes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "The HTML API usage is documented and correct. The extra class_exists() guard is a PHP built-in, not a hallucinated HTML API method, but it is a slightly non-idiomatic defensive branch because the docs/task context assumes WP_HTML_Tag_Processor is available and silent no-op fallback could mask integration errors."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial; all three passed 7/7 with no _doing_it_wrong records. The rendered docs supported this task well: the Tag Processor overview explicitly says to use it for flat attribute/class edits and byte-preserving changes; next_tag() documents that only real tags match, so comments and raw text are left alone; get_attribute_names_with_prefix() documents lowercase returned names and case-insensitive matching; get_updated_html() documents that queued attribute removals are read back while untouched bytes are preserved. The only near-misses were explanatory: get_attribute_names_with_prefix() says null means no matched opener, but does not explicitly contrast that with an empty array for a matched tag with no matching attributes; remove_attribute() is sparse at method level and relies on earlier overview text for no-op behavior; trial 3's guard suggests the surrounding task/docs could be clearer that the HTML API class is available in the execution environment.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() docblock",
+      "problem": "The return contract says array|null and explains null when no tag opener is matched, but it does not explicitly state what happens on a matched tag with zero matching attributes.",
+      "suggestion": "Add a sentence and example showing that a matched opener with no attributes matching the prefix returns an empty array, while null means there is no current matched tag opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() docblock",
+      "problem": "The method-level documentation only says it removes an attribute and returns whether one was removed; the no-op behavior for absent attributes is described earlier in prose, not in the method contract itself.",
+      "suggestion": "Add method-level text that removing a missing attribute is safe and has no effect, and clarify whether name matching is ASCII case-insensitive for HTML attributes."
+    },
+    {
+      "location": "Tag Processor usage/construction docs",
+      "problem": "The docs clearly show direct construction, but they do not explicitly state the expected runtime assumption for examples: WordPress has loaded the HTML API classes before user code calls them.",
+      "suggestion": "Add a short note near the constructor usage that examples assume the HTML API classes are loaded by WordPress; callers in standalone scripts must bootstrap WordPress or include the API before constructing processors."
+    }
+  ]
+}

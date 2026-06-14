@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a template HTML fragment with the target attribute order already present on the `img` tag, then updated `src` and `alt` in place with `WP_HTML_Tag_Processor::set_attribute()` and replaced the placeholder figcaption text with `WP_HTML_Tag_Processor::set_modifiable_text()`. This relies on the documented behavior that these APIs accept plain strings and encode them safely, and that `get_updated_html()` returns the edited fragment.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parser and token serialization APIs: `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_token()` to walk every token in source order, `get_token_name()` to identify SPAN openers and closers, and `serialize_token()` to emit the normalized serialization for everything else. Skipping every `SPAN` token removes the wrapper while leaving its contents in place.",
+  "confidence": 90
+}

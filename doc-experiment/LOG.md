@@ -2,6 +2,48 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 75 — attribute-template compression fails
+
+`round-75` tested item 8 from the owner-requested reduction queue as a
+scratch-only `shadow-doc-a/b` full-train variant. Starting from current
+rendered source docs, it compressed the Tag Processor `Building markup from a
+template` section by replacing two explicit rule bullets and a multi-line
+output comment with a compact paragraph plus one complete example. The scratch
+edit preserved seeded template attributes for output order, the fact that
+newly added attributes sort by name rather than call order, placeholder text
+for `set_modifiable_text()`, automatic encoding of plain attribute/text
+values, `set_attribute()` / `set_modifiable_text()`, and
+`get_updated_html()`. It removed 4 rendered lines from
+`html-tag-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **97.15 train / 96.72 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. The target
+template task stayed perfect: `T04-build-figure` scored **100.00** across all
+trials, and all three subjects chose `WP_HTML_Tag_Processor`. The loss was
+concentrated in traversal: concept score **92.36** versus round 56's
+**99.60**, because `N03-first-list-count` fell **99.70 -> 64.40**. Two trials
+called `seek()` with bookmark names that had never been created (`1` and
+`nonexistent-bookmark`), producing warnings and crashes on seven hidden cases.
+
+Interpretation: do not promote the attribute-template compression. It did
+preserve the directly targeted template-building behavior, but the full-train
+round did not preserve the selected weak-tier benchmark and reproduced the
+same unsafe bookmark/seek pattern seen in other rejected reductions. The judge
+again flagged a real documentation backlog item: `seek()` / bookmark examples
+should make the existing-bookmark precondition explicit. That may justify a
+future source hypothesis, but it does not justify this reduction.
+
+Next action: continue the owner-requested 10-candidate reduction queue with
+item 9, bookmark overview/method deduplication, as a scratch-only
+`shadow-doc-a/b` variant. Keep the same subject policy
+`gpt-5.4-mini` / `low` / `priority`, judge policy `gpt-5.5` / `xhigh` /
+`priority`, and compare against round 56. Remove only the shorter top-level
+Tag Processor bookmark overview example; preserve method-level bookmark
+contracts, the long `set_bookmark()` last-match examples, literal bookmark
+names, release guidance, and the distinction between setting a bookmark before
+`seek()` versus probing with unset names.
+
 ## Round 74 — CSS-class example compression fails
 
 `round-74` tested item 7 from the owner-requested reduction queue as a
