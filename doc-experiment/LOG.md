@@ -2,6 +2,47 @@
 
 Hypothesis → outcome narrative, one entry per round. Newest first.
 
+## Round 79 — salvage reduction improves but still fails
+
+`round-79` tested the one remaining defensible reduction salvage as a
+scratch-only `shadow-doc-a/b` full-train variant. It kept round 70's
+Tag Processor private-helper pruning, removing the same 460 rendered lines
+from `html-tag-processor.md`, and added only minimal general HTML Processor
+clarifications for the round-78 failure modes: prefer the Tag Processor for
+flat byte-preserving edits in documents or fragments; check subtree depth
+boundaries before token/closer filters; and distinguish unwrapping wrapper
+tokens from pruning entire subtrees. Net rendered-doc change was **-440
+lines**: **-460** in `html-tag-processor.md`, **+20** in
+`html-processor.md`. Source docblocks, corpus fixtures, runner policy, and
+harness behavior were unchanged.
+
+Numeric result: **99.16 train / 99.04 core**, versus the comparable current
+source-doc weak-tier round 56 at **99.61 train / 99.55 core**. This recovered
+the round-78 target failures but did not beat the baseline cleanly. `T10-last-h2`
+recovered to **100.00**, with all subjects choosing `WP_HTML_Tag_Processor`.
+`T12-unwrap-spans` recovered from **76.80** in round 78 to **98.90**, with all
+hidden cases passing. The remaining blocker was `N03-first-list-count`,
+**99.70 -> 94.16**: one trial still used opener-only `next_tag()` to scan the
+list subtree, missed the list boundary because closers were skipped, and then
+let later incomplete/unsupported markup invalidate a completed region-local
+scan.
+
+Interpretation: do not promote the salvage reduction. It shows that compact
+clarifications can repair the `T10` and `T12` failures, but the reduction still
+does not preserve the weak-tier baseline and still regresses a high-commonness
+core traversal task. Per the state recorded after round 78, this failed salvage
+exhausts the reduction path. Further work on the `N03` bounded-region mistake
+should be considered an additive/clarifying documentation hypothesis, not a
+justification for more pruning.
+
+Next action: classify as `state-reconciliation` with selected subject policy
+`gpt-5.4-mini` / `low` / `priority` and judge policy `gpt-5.5` / `xhigh` /
+`priority`. Pause source documentation reduction under the signal-exhaustion
+rule. Do not make a source docblock reduction. If the goal continues outside
+the reduction directive, choose a separate evidence-backed clarification
+hypothesis for the recurring `N03` bounded-subtree scan failure and test it as
+its own source or scratch hypothesis.
+
 ## Round 78 — private helper pruning confirmation fails
 
 `round-78` tested a byte-identical confirmation/control of round 70's

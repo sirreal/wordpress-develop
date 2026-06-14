@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` while tracking the current heading by depth from `get_current_depth()`. Heading text is accumulated only from `#text` tokens via `get_modifiable_text()`, which preserves nested markup as plain text and includes empty headings as empty strings.",
+  "confidence": 92
+}

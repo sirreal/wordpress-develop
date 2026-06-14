@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment structurally, `next_tag()` to find the first `UL` or `OL`, then a depth-bounded `next_token()` walk with `get_current_depth()`, `get_token_type()`, `get_tag()`, and `is_tag_closer()` to count only direct `LI` child openers. I only apply `set_attribute()` after the scan finishes cleanly, and I return the original HTML unchanged if the scan is incomplete or the processor reports an error.",
+  "confidence": 95
+}

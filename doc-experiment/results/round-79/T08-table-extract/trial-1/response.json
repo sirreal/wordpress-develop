@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context and `next_token()` to walk the first table structurally. Text is collected only from `#text` tokens via `get_modifiable_text()`, while `get_tag()`, `get_token_type()`, `is_tag_closer()`, and `get_current_depth()` are used to delimit the first TABLE subtree and assemble TR/TD/TH rows.",
+  "confidence": 89
+}

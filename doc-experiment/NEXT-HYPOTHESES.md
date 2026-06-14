@@ -10,13 +10,13 @@ from discoverability gaps.
 
 Owner override after the round-67 pause asked for 10 additional reduction and
 simplification ideas, each as a scratch-only `shadow-doc-a/b` variant before
-any source promotion. That queue is complete in rounds 68-77, and round 78
+any source promotion. That queue is complete in rounds 68-77; round 78
 confirmed that the only aggregate/core winner, round 70, is not reproducible as
-a standalone reduction. Keep the selected subject policy at `gpt-5.4-mini` /
-`low` / `priority` with judge policy `gpt-5.5` / `xhigh` / `priority`. Compare
-against the current weak-tier source-doc baseline, round 56. Promote nothing
-from these tests until a variant wins and is confirmed with the normal
-source-doc flow.
+a standalone reduction; and round 79 tested the only justified salvage
+variant. Keep the selected subject policy at `gpt-5.4-mini` / `low` /
+`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`. Compare against
+the current weak-tier source-doc baseline, round 56. No tested reduction is
+currently promotable.
 
 Reduction queue:
 
@@ -93,34 +93,37 @@ Reduction queue:
     `N03-first-list-count` fell **99.70 -> 94.06** from one plain
     `next_tag()` depth-boundary scan that skipped closers. Do not promote.
 
-Queue result: the 10-candidate reduction pass plus round-70 confirmation is
-complete. Nine candidates lost against the comparable weak-tier source-doc
-baseline. Round 70 was the only aggregate/core win, **99.67 train / 99.62
-core**, but round 78 repeated the exact rendered-doc ablation and failed badly,
-**97.66 train / 97.30 core**, with `T12-unwrap-spans` at **76.80** and
-`N03-first-list-count` at **94.46**. Do not promote any tested reduction as a
-standalone source docblock change.
+Queue result: the 10-candidate reduction pass, round-70 confirmation, and one
+salvage attempt are complete. Nine candidates lost against the comparable
+weak-tier source-doc baseline. Round 70 was the only aggregate/core win,
+**99.67 train / 99.62 core**, but round 78 repeated the exact rendered-doc
+ablation and failed badly, **97.66 train / 97.30 core**. Round 79 added compact
+clarifications while keeping the 460-line pruning and recovered `T10-last-h2`
+to **100.00** and `T12-unwrap-spans` to **98.90**, but still failed:
+**99.16 train / 99.04 core**, with `N03-first-list-count` at **94.16**. Do not
+promote any tested reduction.
 
-Latest update: round 78 confirmed round 70's Tag Processor private helper
-pruning as a byte-identical full-train scratch ablation. It removed the same
-460 rendered lines from `html-tag-processor.md` and preserved current source,
-corpus, subject, judge, and runner policy. The confirmation failed:
-**97.66 train / 97.30 core** versus round 56 at **99.61 / 99.55**. Damage was
-concentrated in `T12-unwrap-spans`, where one trial pruned entire `SPAN`
-subtrees instead of skipping only opener/closer tokens, and `N03-first-list-count`,
-where one trial tested closer/type filters before the depth-boundary check and
-scanned into later invalid markup. `T10-last-h2` again had one lower-adherence
-HTML Processor solution for a flat class edit.
+Latest update: round 79 tested the salvage variant requested by round 78's
+state: round-70 private helper pruning plus minimal general clarifications for
+flat-edit processor choice, bounded-subtree boundary ordering, and unwrap
+versus prune. Net rendered-doc change was **-440 lines**. The result improved
+over round 78 but did not preserve the round-56 baseline: **99.16 / 99.04**
+versus **99.61 / 99.55**. The persistent failure is `N03`: one trial still used
+plain opener-only `next_tag()` for a region scan, missed the closing boundary,
+and treated later incomplete/unsupported markup as invalidating the completed
+list scan.
 
-Next action: keep the selected subject policy at `gpt-5.4-mini` / `low` /
-`priority` with judge policy `gpt-5.5` / `xhigh` / `priority`, and run one
-scratch-only salvage variant before any source promotion. The salvage variant
-may keep round 70's 460-line private helper pruning only if it adds minimal,
-general clarifications for the measured failure modes: unwrap versus prune in
-`serialize_token()` guidance, boundary-before-filter ordering in bounded
-subtree walks, and Tag Processor preference for flat byte-preserving
-attribute/class edits on documents or fragments. If this salvage variant does
-not beat round 56 cleanly, pause reduction under the signal-exhaustion rule.
+Next action: classify as `state-reconciliation` with selected subject policy
+`gpt-5.4-mini` / `low` / `priority` and judge policy `gpt-5.5` / `xhigh` /
+`priority`. Pause source documentation reduction under the signal-exhaustion
+rule. Do not make a source docblock reduction from rounds 68-79. If continuing
+the broader documentation goal outside the reduction directive, the next
+evidence-backed hypothesis is an additive/clarifying `N03` bounded-subtree
+scan contract: opener-only `next_tag()` cannot detect subtree boundaries;
+bounded scans should use `next_token()` or `next_tag( array( 'tag_closers' =>
+'visit' ) )`, stop at the first depth drop, and interpret
+`paused_at_incomplete_token()` / `get_last_error()` at the intended region
+boundary.
 
 Previous update: round 75 tested Tag Processor attribute-template example
 compression as a full-train scratch ablation. It removed 4 rendered lines from

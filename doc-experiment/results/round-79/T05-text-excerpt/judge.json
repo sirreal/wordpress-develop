@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path and only documented HTML API methods: `next_token`, `get_token_type`, `get_modifiable_text`, `get_token_name`, and `is_tag_closer`. Token filtering matched the docs: ordinary `#text` plus explicit TITLE/TEXTAREA opener text, excluding SCRIPT/STYLE. Minor deductions: no explicit `get_last_error()` / `paused_at_incomplete_token()` policy, and the `substr()` fallback would split UTF-8 if `mb_substr()` were unavailable."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. Correct processor choice, all HTML API calls are documented, and the `#tag` / opener guard before reading TITLE/TEXTAREA text follows the documented special-element pattern closely. Unicode fallback is also codepoint-aware. Only small deduction is the lack of an explicit incomplete-input or unsupported-markup policy after scanning."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods only. The token walk correctly reads decoded `#text` and whitelisted TITLE/TEXTAREA opener text while leaving raw SCRIPT/STYLE contents out. Minor deductions: no explicit parser-stop/truncation policy, and if Unicode splitting unexpectedly failed it would return untruncated text."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed: all three trials passed 10/10 and recorded no `_doing_it_wrong` misuse. The docs did well in the Tag Processor overview warning that parsed fragment text extraction belongs to `WP_HTML_Processor`, in `WP_HTML_Processor::create_fragment()` for BODY-fragment construction, in `next_token()` / the text-collection recipe for walking text tokens in document order including malformed/implied structure, and in `get_modifiable_text()` for decoded `#text` plus TITLE/TEXTAREA opener text versus raw SCRIPT/STYLE text. Near misses were outside the frozen failures: candidates generally did not make an explicit policy choice for incomplete input or unsupported-parser aborts, and trial-1 used a byte-slicing fallback if mbstring were missing.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / `WP_HTML_Processor::next_token()` and read-only text recipes",
+      "problem": "The docs show subtree text extraction after first matching a container, but do not explicitly call out the whole-fragment read-only walk pattern. Subjects inferred it correctly here, but it is a general point of confusion.",
+      "suggestion": "Add a short note that after `create_fragment( $html )`, calling `next_token()` in a single loop visits the whole BODY-context fragment; no initial `next_tag()` is needed when the caller's region is the entire fragment."
+    },
+    {
+      "location": "html-processor.md / `WP_HTML_Processor::get_modifiable_text()` special-element section",
+      "problem": "The docs say TITLE/TEXTAREA text is carried by the opener token, but the incomplete-input consequence is implicit: if the special-element token is incomplete, there may be no opener-carried text to read.",
+      "suggestion": "State that special-element modifiable text is available only when the complete opener-through-close token is matched, and direct callers to check `paused_at_incomplete_token()` when truncated special-element contents matter."
+    },
+    {
+      "location": "html-processor.md / `WP_HTML_Processor::get_modifiable_text()` UTF-8 slicing note",
+      "problem": "The docs recommend `mb_substr(..., 'UTF-8')`, but do not explicitly warn against byte-oriented fallbacks such as `substr()` for codepoint-limited text.",
+      "suggestion": "Add a sentence that UTF-8 text limits must use Unicode-aware length/slice operations such as `mb_strlen`/`mb_substr` with explicit encoding or an equivalent Unicode splitter; byte string functions can split a character."
+    },
+    {
+      "location": "html-processor.md / rendered Method Index",
+      "problem": "Private/internal methods appear in the same large index as public methods. This did not cause a failure in these trials, but it increases the chance that subjects treat internals as documented callable API.",
+      "suggestion": "Separate public API methods from private/internal implementation entries, or collapse internals behind a clearly labeled section that says they are not supported for external callers."
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single next_token() walk, depth bounding, tag closer state, and get_modifiable_text() only on #text tokens. All HTML API methods called are present in the rendered docs; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference shape: create_fragment(), next_tag('TABLE'), depth-bounded next_token() walk, closer-driven row/cell flushing, and decoded text extraction from #text tokens. All called HTML API methods are documented; no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose the HTML Processor, bounded the walk to the first table subtree, used token type and closer checks, and relied on documented virtual closers for omitted/end-of-input cell and row closers. All called HTML API methods are documented; no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The docs did well on the key concepts: create_fragment() for BODY fragments; HTML Processor instead of Tag Processor when structure matters; next_token() for text-aware traversal; get_current_depth() for subtree boundaries; virtual/implied closing tokens for malformed or omitted table markup; and get_modifiable_text() as decoded text only after checking for #text tokens. The main near-miss was not a failure: candidates did not explicitly inspect get_last_error() or paused_at_incomplete_token(), but the docs frame that as a caller policy for read-only extraction, and the task did not require rejecting partial input.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / rendered `next_token()` section",
+      "problem": "The docs mention synthesized TBODY and virtual closers, but a table-specific token trace is still left for readers to infer.",
+      "suggestion": "Add a compact traversal trace for a small malformed table such as `<table><tr><td>x<td>y`, showing synthesized wrappers, virtual closers, token names, and relative depths. Present it as a general parser contract, not as a table extraction algorithm."
+    },
+    {
+      "location": "WP_HTML_Processor rendered docs for inherited token-name/tag helpers",
+      "problem": "Some inherited method examples in the processor page still show `new WP_HTML_Tag_Processor`, which can blur whether `get_tag()`, `get_token_name()`, and `get_token_type()` are intended during HTML Processor structural walks.",
+      "suggestion": "Add or adjust examples in the HTML Processor rendering so these helpers are shown in a `WP_HTML_Processor::create_fragment()` + `next_token()` loop, including virtual/implied tokens."
+    }
+  ]
+}
