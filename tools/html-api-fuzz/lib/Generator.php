@@ -300,6 +300,7 @@ class Generator {
 			'select'          => 2,
 			'foreign'         => 5,
 			'adoption'        => 2,
+			'reconstruction'  => 0,
 			'list-chain'      => 1,
 			'special-closers' => 1,
 			'weird-tag'       => 0,
@@ -330,8 +331,9 @@ class Generator {
 			$weights['charref'] = 12;
 			$weights['weird-tag'] = 8;
 		} elseif ( 'formatting-adoption' === $this->profile ) {
-			$weights['element'] = 40;
+			$weights['element'] = 35;
 			$weights['adoption'] = 20;
+			$weights['reconstruction'] = 30;
 		} elseif ( 'incomplete-malformed' === $this->profile ) {
 			$weights['bogus'] = 25;
 			$weights['element'] = 28;
@@ -365,6 +367,8 @@ class Generator {
 				return $this->foreign( $depth - 1 );
 			case 'adoption':
 				return $this->adoption_pattern( $depth - 1 );
+			case 'reconstruction':
+				return $this->active_formatting_reconstruction_pattern( $depth - 1 );
 			case 'list-chain':
 				return $this->auto_closing_chain( $depth - 1 );
 			case 'special-closers':
@@ -486,7 +490,6 @@ class Generator {
 		$t1 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
 		$t2 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
 		$t3 = $this->terminal_ascii( $this->rng->int( 1, 6 ) );
-		$inner = $depth > 0 ? $this->node( max( 0, $depth - 1 ), 'body' ) : $t3;
 
 		switch ( $this->rng->int( 1, 6 ) ) {
 			case 1:
@@ -496,6 +499,7 @@ class Generator {
 			case 2:
 				// Formatting element spanning a block: <b><p>...</b>...</p>
 				$this->mark_feature( 'adoption:block-boundary' );
+				$inner = $depth > 0 ? $this->node( max( 0, $depth - 1 ), 'body' ) : $t3;
 				return "<{$f1}>{$t1}<{$block}>{$t2}</{$f1}>{$inner}</{$block}>";
 			case 3:
 				// Reconstruction across sibling blocks: <p><b>x</p><p>y</p>
@@ -515,6 +519,105 @@ class Generator {
 				$this->mark_feature( 'adoption:repeated-closers' );
 				return "<{$f1}><{$f2}>{$t1}</{$f1}>{$t2}</{$f1}>{$t3}</{$f2}>";
 		}
+	}
+
+	/**
+	 * Active-formatting reconstruction stress where the same formatting tag and
+	 * attribute signature appears four or more times before a block boundary.
+	 */
+	private function active_formatting_reconstruction_pattern( int $depth ): string {
+		$this->mark_feature( 'active-formatting-reconstruction-pattern' );
+
+		switch ( $this->rng->int( 1, 5 ) ) {
+			case 1:
+				$this->mark_feature( 'active-formatting:four-plus-same-tag' );
+				$this->mark_feature( 'active-formatting:same-tag-empty-attrs' );
+				return $this->reconstructing_block_pair(
+					$this->formatting_cluster(
+						$this->formatting_tag_name(),
+						array_fill( 0, $this->rng->int( 4, 8 ), '' )
+					),
+					$depth
+				);
+
+			case 2:
+				$this->mark_feature( 'active-formatting:four-plus-same-tag' );
+				$this->mark_feature( 'active-formatting:same-tag-distinct-attrs' );
+				$tag   = $this->formatting_tag_name();
+				$count = $this->rng->int( 4, 8 );
+				$attrs = array();
+				for ( $i = 0; $i < $count; ++$i ) {
+					$attrs[] = ' data-af="' . $i . '"';
+				}
+				return $this->reconstructing_block_pair( $this->formatting_cluster( $tag, $attrs ), $depth );
+
+			case 3:
+				$this->mark_feature( 'active-formatting:four-plus-same-tag' );
+				$this->mark_feature( 'active-formatting:four-plus-same-signature' );
+				$this->mark_feature( 'active-formatting:same-tag-matching-attrs' );
+				$tag   = $this->formatting_tag_name();
+				$attrs = $this->formatting_attribute_signature();
+				return $this->reconstructing_block_pair(
+					$this->formatting_cluster(
+						$tag,
+						array_fill( 0, $this->rng->int( 4, 8 ), $attrs )
+					),
+					$depth
+				);
+
+			case 4:
+				$this->mark_feature( 'active-formatting:four-plus-same-signature' );
+				$this->mark_feature( 'active-formatting:mixed-formatting' );
+				$attrs = $this->formatting_attribute_signature();
+				$t1    = $this->terminal_ascii( $this->rng->int( 1, 4 ) );
+				$t2    = $this->terminal_ascii( $this->rng->int( 1, 4 ) );
+				$t3    = $this->terminal_ascii( $this->rng->int( 1, 4 ) );
+				return '<p><em><i' . $attrs . '><strong><i' . $attrs . '>' . $t1 . '</em><i' . $attrs . '><strong><i' . $attrs . '>' . $t2 . '</p><p>' . $t3 . '</p>';
+
+			default:
+				$this->mark_feature( 'active-formatting:four-plus-same-signature' );
+				$this->mark_feature( 'active-formatting:marker-boundary' );
+				$outer_tag     = $this->formatting_tag_name();
+				$outer_attrs   = $this->formatting_attribute_signature();
+				$outer_cluster = $this->formatting_cluster( $outer_tag, array_fill( 0, $this->rng->int( 4, 7 ), $outer_attrs ) );
+				$inner_tag     = $this->formatting_tag_name();
+				$inner_attrs   = $this->formatting_attribute_signature();
+				$inner_cluster = $this->formatting_cluster( $inner_tag, array_fill( 0, $this->rng->int( 4, 7 ), $inner_attrs ) );
+				return '<p>' . $outer_cluster . $this->terminal_ascii( 2 ) . '</p><table><tr><td>' . $this->terminal_ascii( 2 ) . '<p>' . $inner_cluster . $this->terminal_ascii( 2 ) . '</p><p>' . $this->terminal_ascii( 2 ) . '</p></td></tr></table><p>' . $this->terminal_ascii( 2 ) . '</p>';
+		}
+	}
+
+	private function formatting_tag_name(): string {
+		return $this->rng->choice( array( 'b', 'big', 'code', 'em', 'font', 'i', 's', 'small', 'strike', 'strong', 'tt', 'u' ) );
+	}
+
+	private function formatting_attribute_signature(): string {
+		return $this->rng->choice(
+			array(
+				' a b',
+				' class="af" data-x="1"',
+				' data-a="x" data-b="y"',
+				' title="same" data-af',
+			)
+		);
+	}
+
+	private function formatting_cluster( string $tag, array $attrs ): string {
+		$out = '';
+		foreach ( $attrs as $attr ) {
+			$out .= '<' . $tag . $attr . '>';
+		}
+		return $out;
+	}
+
+	private function reconstructing_block_pair( string $cluster, int $depth ): string {
+		$t1    = $this->terminal_ascii( $this->rng->int( 1, 4 ) );
+		$t2    = $this->terminal_ascii( $this->rng->int( 1, 4 ) );
+		$inner = $depth > 0 && $this->rng->chance( 35 )
+			? $this->node( max( 0, $depth - 1 ), 'body' )
+			: $t2;
+
+		return '<p>' . $cluster . $t1 . '</p><p>' . $inner . '</p>';
 	}
 
 	/**

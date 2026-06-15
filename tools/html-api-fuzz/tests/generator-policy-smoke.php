@@ -39,6 +39,68 @@ function html_api_fuzz_smoke_expect_invalid_argument( callable $callback, string
 	html_api_fuzz_smoke_fail( $message );
 }
 
+function html_api_fuzz_smoke_has_active_formatting_shape( string $input, string $feature ): bool {
+	$formatting_tags = array( 'b', 'big', 'code', 'em', 'font', 'i', 's', 'small', 'strike', 'strong', 'tt', 'u' );
+	$attr_signatures = array( ' a b', ' class="af" data-x="1"', ' data-a="x" data-b="y"', ' title="same" data-af' );
+
+	switch ( $feature ) {
+		case 'active-formatting:same-tag-empty-attrs':
+			foreach ( $formatting_tags as $tag ) {
+				if ( false !== strpos( $input, '<p>' . str_repeat( '<' . $tag . '>', 4 ) ) ) {
+					return true;
+				}
+			}
+			return false;
+
+		case 'active-formatting:same-tag-distinct-attrs':
+			foreach ( $formatting_tags as $tag ) {
+				if ( false !== strpos( $input, '<p><' . $tag . ' data-af="0"><' . $tag . ' data-af="1"><' . $tag . ' data-af="2"><' . $tag . ' data-af="3">' ) ) {
+					return true;
+				}
+			}
+			return false;
+
+		case 'active-formatting:same-tag-matching-attrs':
+			foreach ( $formatting_tags as $tag ) {
+				foreach ( $attr_signatures as $attrs ) {
+					if ( false !== strpos( $input, '<p>' . str_repeat( '<' . $tag . $attrs . '>', 4 ) ) ) {
+						return true;
+					}
+				}
+			}
+			return false;
+
+		case 'active-formatting:mixed-formatting':
+			foreach ( $attr_signatures as $attrs ) {
+				$quoted_attrs = preg_quote( $attrs, '~' );
+				if ( 1 === preg_match( '~<p><em><i' . $quoted_attrs . '><strong><i' . $quoted_attrs . '>[^<>]*</em><i' . $quoted_attrs . '><strong><i' . $quoted_attrs . '>[^<>]*</p><p>~', $input ) ) {
+					return true;
+				}
+			}
+			return false;
+
+		case 'active-formatting:marker-boundary':
+			foreach ( $formatting_tags as $outer_tag ) {
+				foreach ( $attr_signatures as $outer_attrs ) {
+					$outer_cluster = preg_quote( str_repeat( '<' . $outer_tag . $outer_attrs . '>', 4 ), '~' );
+					$outer_extra   = preg_quote( '<' . $outer_tag . $outer_attrs . '>', '~' );
+					foreach ( $formatting_tags as $inner_tag ) {
+						foreach ( $attr_signatures as $inner_attrs ) {
+							$inner_cluster = preg_quote( str_repeat( '<' . $inner_tag . $inner_attrs . '>', 4 ), '~' );
+							$inner_extra   = preg_quote( '<' . $inner_tag . $inner_attrs . '>', '~' );
+							if ( 1 === preg_match( '~<p>' . $outer_cluster . '(?:' . $outer_extra . ')*[^<>]*</p><table><tr><td>[^<>]*<p>' . $inner_cluster . '(?:' . $inner_extra . ')*[^<>]*</p><p>[^<>]*</p></td></tr></table><p>[^<>]*</p>~', $input ) ) {
+								return true;
+							}
+						}
+					}
+				}
+			}
+			return false;
+	}
+
+	return false;
+}
+
 function html_api_fuzz_smoke_dom_drops_bare_xlink_local_name_after_xlink(): bool {
 	if ( ! class_exists( 'Dom\\HTMLDocument' ) ) {
 		return false;
@@ -211,6 +273,14 @@ $required_generator_features = array(
 	'adoption:misnested-closers',
 	'adoption:reconstruction',
 	'adoption:noahs-ark',
+	'active-formatting-reconstruction-pattern',
+	'active-formatting:four-plus-same-tag',
+	'active-formatting:four-plus-same-signature',
+	'active-formatting:same-tag-empty-attrs',
+	'active-formatting:same-tag-distinct-attrs',
+	'active-formatting:same-tag-matching-attrs',
+	'active-formatting:mixed-formatting',
+	'active-formatting:marker-boundary',
 	'auto-closing-chain',
 	'special-closers',
 	'foreign:breakout',
@@ -243,6 +313,35 @@ foreach ( array( 'attributes-entities', 'rawtext-rcdata', 'text-fragment', 'inco
 html_api_fuzz_smoke_assert( $all_generator_features_found, 'generated samples should cover all required generator features before exhausting the smoke seed budget.' );
 foreach ( $found_generator_features as $feature => $found ) {
 	html_api_fuzz_smoke_assert( $found, "generated samples should cover {$feature}." );
+}
+
+$required_active_formatting_shapes = array(
+	'active-formatting:same-tag-empty-attrs',
+	'active-formatting:same-tag-distinct-attrs',
+	'active-formatting:same-tag-matching-attrs',
+	'active-formatting:mixed-formatting',
+	'active-formatting:marker-boundary',
+);
+$found_active_formatting_shapes = array_fill_keys( $required_active_formatting_shapes, false );
+for ( $seed = 1; $seed <= 512; ++$seed ) {
+	$generated = \HtmlApiFuzz\Generator::generate( $seed, 'formatting-adoption', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'mostly-valid', null );
+	html_api_fuzz_smoke_assert( html_api_fuzz_smoke_valid_utf8( $generated['input'] ), "formatting-adoption/{$seed} active-formatting shape sample should produce valid UTF-8 bytes." );
+	foreach ( $required_active_formatting_shapes as $feature ) {
+		if ( ! in_array( $feature, $generated['parameters']['features'], true ) ) {
+			continue;
+		}
+		html_api_fuzz_smoke_assert(
+			html_api_fuzz_smoke_has_active_formatting_shape( $generated['input'], $feature ),
+			"generated samples that record {$feature} should emit the corresponding active-formatting byte shape."
+		);
+		$found_active_formatting_shapes[ $feature ] = true;
+	}
+	if ( ! in_array( false, $found_active_formatting_shapes, true ) ) {
+		break;
+	}
+}
+foreach ( $found_active_formatting_shapes as $feature => $found ) {
+	html_api_fuzz_smoke_assert( $found, "formatting-adoption generation should emit {$feature} byte shapes." );
 }
 
 $required_comment_forms = array(
