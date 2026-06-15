@@ -330,7 +330,10 @@ The generator uses a structural HTML grammar with weighted profiles:
 - `formatting-adoption` (random formatting elements plus explicit
   adoption-agency shapes: misnested closers, block-boundary formatting,
   reconstruction across siblings, nested anchors, Noah's Ark overflow,
-  repeated closers)
+  repeated closers, and four-plus active-formatting reconstruction clusters
+  covering same tag/no attributes, same tag/distinct attributes, same
+  tag/matching attributes, mixed interleavings, and table-cell marker
+  isolation/clearing)
 - `attributes-entities`
 - `comments-doctype-bogus`
 - `deep-nesting`
