@@ -91,16 +91,18 @@ produces the same document, the same selector, and the same verdict.
      Skipped for ASTs containing invalid UTF-8 (reachable only from
      chaos/mutated inputs), which the renderer cannot round-trip.
    - lexbor differential (third, independent oracle; requires the harness —
-     see below): on full-document cases whose selector parsed, a canonical
-     re-render of the verified AST is matched by liblexbor and compared,
-     as a multiset of fids, against the reference matcher. Quirks documents
+     see below): on full-document cases whose selector parsed, the exact
+     selector bytes accepted by WP are matched by liblexbor and compared, as a
+     multiset of fids, against the reference matcher. Quirks documents
      participate only when the startup probe confirms lexbor's class/#id
      folding behavior in both no-quirks and quirks mode. Gated on WP and
      lexbor building the same element tree (fid/tag/ancestry), so it tests
      the selector layer, not tree construction. Verdicts:
-     `lexbor-divergence` (lexbor ≠ reference) is a fuzzer-oracle problem;
-     `match-mismatch-html` with no accompanying divergence means reference
-     == lexbor ≠ WP — a high-confidence WP finding.
+     `lexbor-parse-reject` and `lexbor-divergence` (lexbor ≠ reference) are
+     lexbor/fuzzer-oracle problems, with `wpFinding: false` in their details;
+     `match-mismatch-html` with no accompanying `lexbor-parse-reject` or
+     `lexbor-divergence` means reference == lexbor ≠ WP — a high-confidence WP
+     finding.
    - Repeating a case yields a byte-identical result digest (determinism).
      Note the digest covers the WP-under-test surface (selector, html,
      parse-nullness, ASTs, failure invariants) but **not** the lexbor
@@ -114,17 +116,19 @@ liblexbor from upstream `master`; the build script prints the exact commit).
 The worker auto-detects the binary at `tools/css-selector-fuzz/lexbor/harness`
 and reports per-batch tallies, persisted to `state.json` under `lexbor`:
 
-- `compared` — the differential ran and matched fid-multisets.
+- `compared` — the differential ran to a selector verdict; parser rejects are
+  recorded as `lexbor-parse-reject`, and successful parses either match
+  fid-multisets or record `lexbor-divergence`.
 - `tree-gated` — WP and lexbor built different trees; differential skipped.
-- `skipped-quirks` / `skipped-utf8` — quirks document while lexbor class/#id
-  case behavior is not trusted / non-UTF-8 AST.
+- `skipped-quirks` — quirks document while lexbor class/#id case behavior is
+  not trusted.
 - `n/a` — the differential does not apply (unparseable selector, fragment, no
   captured tree).
 - `unavailable` / `error` — the harness was missing or died. The runner prints
   a loud warning if these appear after the harness had run, so a third oracle
   that dies mid-run cannot hide behind a green run.
 
-Known lexbor issues compensated for when present:
+Known lexbor issues and handling:
 
 - [#368](https://github.com/lexbor/lexbor/issues/368):
   class and `#id` selectors match ASCII case-insensitively even in
@@ -138,9 +142,13 @@ Known lexbor issues compensated for when present:
 - lexbor rejects uppercase `I`/`S` attribute-selector modifiers, and its
   non-ASCII ident-codepoint table omits U+00B7 and U+00C0–U+00F6 (it
   starts at U+00F8), rejecting e.g. `.Über` while accepting `.über`.
-  Both sidestepped by the canonical re-render (lowercase modifiers, all
-  non-ASCII hex-escaped); both are candidate upstream reports, not WP
+  These can now surface as `lexbor-parse-reject` because lexbor receives the
+  original selector input; they are candidate upstream reports, not WP
   findings.
+- lexbor's invalid-UTF-8 selector decoding differs from WP's
+  maximal-subpart scrub. These cases can surface as parser rejects or
+  divergences, and remain lexbor/fuzzer-oracle noise unless independently
+  confirmed against WP.
 - `lxb_selectors_find` reports a node once per matching selector-list
   branch; `LXB_SELECTORS_OPT_MATCH_FIRST` dedupes.
 - lexbor matches `[x~=""]` against whitespace-only attribute values
