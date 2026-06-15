@@ -14,6 +14,13 @@
 > (`CSS selector:` commits `aed6cfb4aa` / `989e18da8a` / `0a87b20178`), each
 > with PHPUnit regression tests. A post-fix 5000-seed run is clean.
 >
+> **Current lexbor differential behavior (2026-06-15):** lexbor now receives
+> the exact selector bytes accepted by WP, not a canonical re-render of the
+> parsed AST. `lexbor-parse-reject` remains classified as lexbor/fuzzer-oracle
+> noise, never as a WP finding by itself. Historical notes below that say
+> canonical re-rendering sidestepped lexbor parser bugs describe the earlier
+> differential behavior.
+>
 > **Fuzzer-side follow-up hardening implemented (2026-06-12):**
 > `tests/self-check.php` now allowlists known core parse-bug signatures in its
 > fixed seed-window parse-expectation loop, while unknown mismatches still fail.
@@ -58,10 +65,12 @@
 > truncations (`[`, `[a=`, `[a~`, `[a=b, div`) stay invalid. Verified
 > against Chromium form-by-form, including an exhaustive per-byte
 > truncation table in review. lexbor rejects all EOF-truncated forms
-> (drafted as `lexbor/UPSTREAM-ISSUES.md` issue 4); the differential is
-> unaffected because it compares canonical re-renders. Fuzzer gained an
-> `eof-truncated` edge-escape kind and the invalid corpus was reshuffled
-> along the new validity boundary; COVERAGE.md regenerated.
+> (drafted as `lexbor/UPSTREAM-ISSUES.md` issue 4). Historical note: the
+> differential was unaffected at the time because it compared canonical
+> re-renders; current behavior feeds lexbor the original selector bytes, so
+> these are expected `lexbor-parse-reject` noise, not WP findings. Fuzzer
+> gained an `eof-truncated` edge-escape kind and the invalid corpus was
+> reshuffled along the new validity boundary; COVERAGE.md regenerated.
 >
 > **Invalid-UTF-8 input policy — IMPLEMENTED as scrub (2026-06-11):**
 > selector strings are UTF-8 text; `normalize_selector_input()` now decodes
@@ -166,10 +175,12 @@
 > but NOT per the WHATWG maximal-subpart rule — one U+FFFD per byte for
 > truncated sequences (`E2 8C` → 2, spec 1) and one per whole sequence for
 > UTF-8-encoded surrogate halves (`ED A0 80` → 1, spec 3) — drafted as
-> `lexbor/UPSTREAM-ISSUES.md` issue 6. The differential is unaffected and
-> stays live for the bucket: it feeds lexbor the canonical re-render of
-> the post-scrub AST (escaped, pure ASCII), the same mechanism that
-> sidesteps lexbor's other byte-level parsing bugs. Doc-side observation:
+> `lexbor/UPSTREAM-ISSUES.md` issue 6. Historical note: the differential
+> used to stay live for the bucket by feeding lexbor the canonical re-render
+> of the post-scrub AST (escaped, pure ASCII), the same mechanism that
+> sidestepped lexbor's other byte-level parsing bugs. Current behavior feeds
+> lexbor the original selector bytes, so these known decoding differences
+> surface as lexbor/fuzzer-oracle noise. Doc-side observation:
 > lexbor keeps raw invalid bytes in the DOM unchanged (same stance as the
 > Tag Processor), so raw doc bytes match nothing in either engine. The
 > handoff's optional metamorphic relation `parse(s) === parse(scrub(s))`

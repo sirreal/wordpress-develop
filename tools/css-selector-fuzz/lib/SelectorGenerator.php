@@ -90,11 +90,9 @@ class SelectorGenerator {
 	 * Renders a canonical complex-list AST deterministically with minimal
 	 * escaping: single spaces around combinators, `, ` between branches,
 	 * double-quoted attribute values, lowercase `i`/`s` modifiers, and all
-	 * non-ASCII codepoints hex-escaped. Used to hand a semantically-identical
-	 * selector to external engines: lexbor rejects some byte-level forms WP
-	 * correctly accepts ( uppercase I/S attribute modifiers; raw non-ASCII
-	 * ident codepoints in U+00B7, U+00C0-U+00F6 — its non-ASCII ident table
-	 * starts at U+00F8 ). Escaping sidesteps codepoint classification.
+	 * non-ASCII codepoints hex-escaped. Useful when a deterministic
+	 * semantically-identical selector string is needed from an already parsed
+	 * AST.
 	 */
 	public static function render_canonical( array $list_ast ): string {
 		$branches = array();

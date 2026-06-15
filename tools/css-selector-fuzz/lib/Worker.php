@@ -821,12 +821,15 @@ class Worker {
 	 *                          ( or an un-compensated lexbor bug ) — never a
 	 *                          WP verdict on its own.
 	 *  - 'lexbor-parse-reject' lexbor refused a selector WP accepted.
-	 *  - match-mismatch-html with NO lexbor-divergence on the same case
-	 *                          means reference == lexbor != WP: a
-	 *                          high-confidence WP finding.
+	 *                          This is lexbor/fuzzer-oracle noise — never a
+	 *                          WP verdict on its own.
+	 *  - match-mismatch-html with NO lexbor-divergence and NO
+	 *                          lexbor-parse-reject on the same case means
+	 *                          reference == lexbor != WP: a high-confidence
+	 *                          WP finding.
 	 *
 	 * @return string Tally state:
-	 *   unavailable|skipped-quirks|skipped-utf8|error|tree-gated|compared.
+	 *   unavailable|skipped-quirks|error|tree-gated|compared.
 	 */
 	private static function check_lexbor_differential( array $complex_ast, string $selector_string, array $document, array $rows, bool $quirks, array $expected, callable $record ): string {
 		if ( ! LexborOracle::available() ) {
@@ -837,22 +840,11 @@ class Worker {
 		}
 
 		/*
-		 * lexbor receives a canonical re-render of the (already verified)
-		 * AST rather than the original byte form: the differential targets
-		 * matching semantics, while byte-level parsing (escapes, whitespace,
-		 * modifier case — lexbor e.g. rejects uppercase I/S modifiers) is
-		 * covered by the AST round-trip and metamorphic invariants. ASTs
-		 * containing invalid UTF-8 cannot be re-rendered; since
-		 * from_selectors() scrubs input to U+FFFD before parsing, none should
-		 * exist and this skip is defensive ( a nonzero skipped-utf8 tally
-		 * indicates a normalization bypass ).
+		 * Feed lexbor the exact selector bytes WP parsed. This intentionally
+		 * keeps parser-level lexbor rejections visible as lexbor/fuzzer-oracle
+		 * noise rather than canonicalizing them away.
 		 */
-		if ( ! ast_strings_are_utf8( $complex_ast ) ) {
-			return 'skipped-utf8';
-		}
-		$canonical = SelectorGenerator::render_canonical( $complex_ast );
-
-		$lex = LexborOracle::query( $document['html'], $canonical );
+		$lex = LexborOracle::query( $document['html'], $selector_string );
 		if ( null === $lex ) {
 			return 'error';
 		}
@@ -861,8 +853,11 @@ class Worker {
 			$record(
 				'lexbor-parse-reject',
 				array(
-					'note'      => 'lexbor rejected the canonical form of a selector the WP parser accepted',
-					'canonical' => printable_bytes( $canonical ),
+					'classification' => 'lexbor/fuzzer-oracle',
+					'wpFinding'      => false,
+					'lexborError'    => $lex['error'],
+					'note'           => 'lexbor rejected the same selector input that WP accepted',
+					'selector'       => printable_bytes( $selector_string ),
 				)
 			);
 			return 'compared';
@@ -905,9 +900,11 @@ class Worker {
 			$record(
 				'lexbor-divergence',
 				array(
-					'reference' => $expected_for_lexbor,
-					'lexbor'    => $lex_matches,
-					'issue368'  => LexborOracle::has_issue_368(),
+					'classification' => 'lexbor/fuzzer-oracle',
+					'wpFinding'      => false,
+					'reference'      => $expected_for_lexbor,
+					'lexbor'         => $lex_matches,
+					'issue368'       => LexborOracle::has_issue_368(),
 				)
 			);
 		}
