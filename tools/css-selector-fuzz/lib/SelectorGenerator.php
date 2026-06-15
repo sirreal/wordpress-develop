@@ -1229,9 +1229,16 @@ class SelectorGenerator {
 		$reversed = array_reverse( $complex['context'] );
 		foreach ( $reversed as $pair ) {
 			list( $type, $combinator ) = $pair;
-			$out .= '*' === $type ? '*' : $this->render_ident( $type );
+			$rendered_type = '*' === $type ? '*' : $this->render_ident( $type );
+			$out          .= $rendered_type;
 			if ( '>' === $combinator ) {
-				$out .= $this->maybe_ws( 50 ) . '>' . $this->maybe_ws( 50 );
+				$before = $this->maybe_ws( 50 );
+				// Avoid the CDC token `-->` when a raw `--` type selector is
+				// followed immediately by a child combinator.
+				if ( '' === $before && '--' === $rendered_type ) {
+					$before = ' ';
+				}
+				$out .= $before . '>' . $this->maybe_ws( 50 );
 			} else {
 				$out .= $this->ws();
 			}

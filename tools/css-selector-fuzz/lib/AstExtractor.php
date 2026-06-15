@@ -135,7 +135,9 @@ class AstExtractor {
 
 	private static function get_private( $object, string $property, string $declaring_class ) {
 		$reflection = new \ReflectionProperty( $declaring_class, $property );
-		$reflection->setAccessible( true );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$reflection->setAccessible( true );
+		}
 		$value = $reflection->getValue( $object );
 		if ( ! is_array( $value ) ) {
 			throw new \UnexpectedValueException( "Property {$property} is not an array." );
