@@ -149,11 +149,131 @@ for ( $seed = 1; $seed <= 400; $seed++ ) {
 			);
 		}
 	}
+
+	if ( null !== $selector['ast'] && null !== $complex ) {
+		check(
+			$selector['ast'] === \CssSelectorFuzz\AstExtractor::from_complex_list( $complex ),
+			"Seed {$seed} ({$selector['bucket']}): complex AST round-trips for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
+		);
+	}
+	if ( null !== $selector['ast'] && null !== $compound ) {
+		check(
+			$selector['ast'] === \CssSelectorFuzz\AstExtractor::from_compound_list( $compound ),
+			"Seed {$seed} ({$selector['bucket']}): compound AST round-trips for: " . \CssSelectorFuzz\printable_bytes( $selector['selector'] )
+		);
+	}
 }
 
 check( count( $by_bucket ) >= 5, 'Bucket variety: saw ' . count( $by_bucket ) . ' buckets.' );
 if ( array() !== $allowed_parse_mismatches ) {
 	fwrite( STDERR, 'Allowed known core parse bug signatures: ' . \CssSelectorFuzz\json_encode_safe( $allowed_parse_mismatches ) . "\n" );
+}
+
+// --- Selector renderer token-boundary regressions -------------------------
+// These pin places where adjacent rendered tokens can accidentally form a
+// different token stream. In particular, a raw `--` type selector followed by
+// a child combinator must not render as `-->`, which CSS tokenization treats
+// as CDC.
+
+$renderer_boundary_asts = array(
+	'cdc-child-combinator'        => array(
+		array(
+			'context' => array(
+				array( '--', '>' ),
+			),
+			'self'    => array(
+				'type' => 'a',
+				'subs' => null,
+			),
+		),
+	),
+	'cdc-nested-child-combinator' => array(
+		array(
+			'context' => array(
+				array( 'b', '>' ),
+				array( '--', '>' ),
+			),
+			'self'    => array(
+				'type' => 'a',
+				'subs' => null,
+			),
+		),
+	),
+	'cdc-selector-list-branch'    => array(
+		array(
+			'context' => array(
+				array( '--', '>' ),
+			),
+			'self'    => array(
+				'type' => 'a',
+				'subs' => null,
+			),
+		),
+		array(
+			'context' => array(),
+			'self'    => array(
+				'type' => '--',
+				'subs' => array(
+					array(
+						'kind' => 'class',
+						'name' => 'x',
+					),
+					array(
+						'kind' => 'id',
+						'name' => '--',
+					),
+				),
+			),
+		),
+	),
+	'attribute-ident-modifier-i'  => array(
+		array(
+			'context' => array(),
+			'self'    => array(
+				'type' => null,
+				'subs' => array(
+					array(
+						'kind'     => 'attr',
+						'name'     => 'x',
+						'matcher'  => 'exact',
+						'value'    => 'i',
+						'modifier' => 'case-insensitive',
+					),
+				),
+			),
+		),
+	),
+	'attribute-ident-modifier-s'  => array(
+		array(
+			'context' => array(),
+			'self'    => array(
+				'type' => null,
+				'subs' => array(
+					array(
+						'kind'     => 'attr',
+						'name'     => 'x',
+						'matcher'  => 'exact',
+						'value'    => 's',
+						'modifier' => 'case-sensitive',
+					),
+				),
+			),
+		),
+	),
+);
+
+foreach ( $renderer_boundary_asts as $name => $ast ) {
+	for ( $seed = 1; $seed <= 75; $seed++ ) {
+		$selector = SelectorGenerator::render( new Prng( (string) $seed, "self-check-renderer-boundary-{$name}" ), $ast );
+		$complex  = WP_CSS_Complex_Selector_List::from_selectors( $selector );
+		check( null !== $complex, "Renderer boundary {$name} seed {$seed}: parse for " . \CssSelectorFuzz\printable_bytes( $selector ) );
+		if ( null !== $complex ) {
+			check(
+				$ast === \CssSelectorFuzz\AstExtractor::from_complex_list( $complex ),
+				"Renderer boundary {$name} seed {$seed}: AST round-trips for " . \CssSelectorFuzz\printable_bytes( $selector )
+			);
+		}
+	}
 }
 
 // --- Document generator: randomized class NUL injection --------------------
