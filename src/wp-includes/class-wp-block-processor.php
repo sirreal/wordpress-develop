@@ -500,6 +500,18 @@ class WP_Block_Processor {
 	private $was_void = false;
 
 	/**
+	 * Whether delimiter searches should inspect the current token before scanning ahead.
+	 *
+	 * Extraction stops on the token following a top-level block, but callers walking
+	 * with next_block() still need to visit that token on the next iteration.
+	 *
+	 * @since 6.9.0
+	 *
+	 * @var bool
+	 */
+	private $reprocess_current_token = false;
+
+	/**
 	 * For every open block, in hierarchical order, this stores the byte offset
 	 * into the source text where the block type starts, including for HTML spans.
 	 *
@@ -680,6 +692,18 @@ class WP_Block_Processor {
 	 * @return bool Whether a block delimiter was matched.
 	 */
 	public function next_delimiter( ?string $block_name = null ): bool {
+		if ( $this->reprocess_current_token ) {
+			$this->reprocess_current_token = false;
+
+			if ( ! isset( $block_name ) ) {
+				if ( ! $this->is_html() ) {
+					return true;
+				}
+			} elseif ( $this->is_block_type( $block_name ) ) {
+				return true;
+			}
+		}
+
 		if ( ! isset( $block_name ) ) {
 			while ( $this->next_token() ) {
 				if ( ! $this->is_html() ) {
@@ -737,6 +761,8 @@ class WP_Block_Processor {
 		if ( $this->last_error || self::COMPLETE === $this->state || self::INCOMPLETE_INPUT === $this->state ) {
 			return false;
 		}
+
+		$this->reprocess_current_token = false;
 
 		// Void tokens automatically pop off the stack of open blocks.
 		if ( $this->was_void ) {
@@ -1275,37 +1301,73 @@ class WP_Block_Processor {
 			'innerContent' => array(),
 		);
 
-		$depth = $this->get_depth();
+		$delimiter_type = $this->get_delimiter_type();
+		$depth          = $this->get_depth();
 		while ( $this->next_token() && $this->get_depth() > $depth ) {
-			if ( $this->is_html() ) {
-				$chunk                   = $this->get_html_content();
-				$block['innerHTML']     .= $chunk;
-				$block['innerContent'][] = $chunk;
-				continue;
-			}
+			while ( $this->get_depth() > $depth ) {
+				if ( $this->is_html() ) {
+					$chunk                   = $this->get_html_content();
+					$block['innerHTML']     .= $chunk;
+					$block['innerContent'][] = $chunk;
+					break;
+				}
 
-			/**
-			 * Inner blocks.
-			 *
-			 * @todo This is a decent place to call {@link \render_block()}
-			 * @todo Use iteration instead of recursion, or at least refactor to tail-call form.
-			 */
-			if ( $this->opens_block() ) {
-				$inner_block             = $this->extract_full_block_and_advance();
-				$block['innerBlocks'][]  = $inner_block;
-				$block['innerContent'][] = null;
-			}
+				/**
+				 * Inner blocks.
+				 *
+				 * @todo This is a decent place to call {@link \render_block()}
+				 * @todo Use iteration instead of recursion, or at least refactor to tail-call form.
+				 */
+				if ( $this->opens_block() ) {
+					$inner_block_span        = $this->get_span();
+					$inner_block             = $this->extract_full_block_and_advance();
+					$block['innerBlocks'][]  = $inner_block;
+					$block['innerContent'][] = null;
+					if ( self::COMPLETE === $this->state || self::INCOMPLETE_INPUT === $this->state || null !== $this->last_error ) {
+						break;
+					}
 
-			/*
-			 * Because the parser has advanced past the closing block token, it
-			 * may be matched on an HTML span. This needs to be processed before
-			 * moving on to the next token at the start of the next loop iteration.
-			 */
-			if ( $this->is_html() ) {
-				$chunk                   = $this->get_html_content();
-				$block['innerHTML']     .= $chunk;
-				$block['innerContent'][] = $chunk;
+					$current_span = $this->get_span();
+					if (
+						null === $inner_block_span ||
+						null === $current_span ||
+						(
+							$inner_block_span->start === $current_span->start &&
+							$inner_block_span->length === $current_span->length
+						)
+					) {
+						break;
+					}
+
+					continue;
+				}
+
+				break;
 			}
+		}
+
+		if (
+			self::OPENER === $delimiter_type &&
+			$depth > 1 &&
+			self::COMPLETE !== $this->state &&
+			self::INCOMPLETE_INPUT !== $this->state &&
+			null === $this->last_error &&
+			(
+				array() === $block['innerContent'] ||
+				null === $block['innerContent'][ count( $block['innerContent'] ) - 1 ]
+			)
+		) {
+			$block['innerContent'][] = '';
+		}
+
+		if (
+			$depth <= 1 &&
+			(
+				self::HTML_SPAN === $this->state ||
+				( self::MATCHED === $this->state && self::CLOSER !== $this->get_delimiter_type() )
+			)
+		) {
+			$this->reprocess_current_token = true;
 		}
 
 		return $block;
@@ -1447,6 +1509,10 @@ class WP_Block_Processor {
 	 * @return bool Whether this delimiter represents a block of the given type.
 	 */
 	public function is_block_type( string $block_type ): bool {
+		if ( self::MATCHED !== $this->state && self::HTML_SPAN !== $this->state ) {
+			return false;
+		}
+
 		if ( '*' === $block_type ) {
 			return true;
 		}
@@ -1579,6 +1645,10 @@ class WP_Block_Processor {
 	 *              opens a block of one of the given block types, if provided.
 	 */
 	public function opens_block( string ...$block_type ): bool {
+		if ( self::MATCHED !== $this->state && self::HTML_SPAN !== $this->state ) {
+			return false;
+		}
+
 		// HTML spans only open implicit freeform content at the top level.
 		if ( self::HTML_SPAN === $this->state && 1 !== count( $this->open_blocks_at ) ) {
 			return false;

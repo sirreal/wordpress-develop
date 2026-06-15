@@ -49,6 +49,91 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
+	 * @ticket 61401
+	 *
+	 * @dataProvider data_zero_string_inner_html
+	 *
+	 * @param string $html     Block markup.
+	 * @param array  $expected Expected parsed blocks.
+	 */
+	public function test_preserves_zero_string_inner_html( $html, $expected ) {
+		$this->assertSame( $expected, parse_blocks( $html ) );
+	}
+
+	/**
+	 * @ticket 61401
+	 */
+	public function test_collapses_malformed_nested_eof_blocks_into_parent() {
+		$html = '<!-- wp:outer --><!-- wp:inner {"x":"<script>alert(1)</script>","y":"--><img src=x onerror=alert(1)><!--"} -->';
+
+		$this->assertSame(
+			array(
+				array(
+					'blockName'    => 'core/outer',
+					'attrs'        => array(),
+					'innerBlocks'  => array(
+						array(
+							'blockName'    => 'core/inner',
+							'attrs'        => array(
+								'x' => '<script>alert(1)</script>',
+								'y' => '--><img src=x onerror=alert(1)><!--',
+							),
+							'innerBlocks'  => array(),
+							'innerHTML'    => '',
+							'innerContent' => array(),
+						),
+					),
+					'innerHTML'    => '',
+					'innerContent' => array( null ),
+				),
+			),
+			parse_blocks( $html )
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_zero_string_inner_html() {
+		return array(
+			'top-level block'          => array(
+				'<!-- wp:heading -->0<!-- /wp:heading -->',
+				array(
+					array(
+						'blockName'    => 'core/heading',
+						'attrs'        => array(),
+						'innerBlocks'  => array(),
+						'innerHTML'    => '0',
+						'innerContent' => array( '0' ),
+					),
+				),
+			),
+			'before nested void block' => array(
+				'<!-- wp:group -->0<!-- wp:paragraph /--><!-- /wp:group -->',
+				array(
+					array(
+						'blockName'    => 'core/group',
+						'attrs'        => array(),
+						'innerBlocks'  => array(
+							array(
+								'blockName'    => 'core/paragraph',
+								'attrs'        => array(),
+								'innerBlocks'  => array(),
+								'innerHTML'    => '',
+								'innerContent' => array(),
+							),
+						),
+						'innerHTML'    => '0',
+						'innerContent' => array( '0', null ),
+					),
+				),
+			),
+		);
+	}
+
+	/**
 	 * @ticket 45109
 	 */
 	public function data_parsing_test_filenames() {

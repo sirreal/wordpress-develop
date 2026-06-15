@@ -119,13 +119,29 @@ class WP_Block_Parser {
 				}
 
 				/*
-				 * for the nested case where it's more difficult we'll
-				 * have to assume that multiple closers are missing
-				 * and so we'll collapse the whole stack piecewise
+				 * For the nested case where it's more difficult we'll
+				 * have to assume that multiple closers are missing and
+				 * collapse the stack into a tree at the end of the document.
 				 */
-				while ( 0 < count( $this->stack ) ) {
-					$this->add_block_from_stack();
+				$end_offset = strlen( $this->document );
+				while ( 1 < count( $this->stack ) ) {
+					$stack_top = array_pop( $this->stack );
+					$html      = substr( $this->document, $stack_top->prev_offset, $end_offset - $stack_top->prev_offset );
+
+					if ( '' !== $html ) {
+						$stack_top->block->innerHTML     .= $html;
+						$stack_top->block->innerContent[] = $html;
+					}
+
+					$this->add_inner_block(
+						$stack_top->block,
+						$stack_top->token_start,
+						$stack_top->token_length,
+						$end_offset
+					);
 				}
+
+				$this->add_block_from_stack( $end_offset );
 				return false;
 
 			case 'void-block':
@@ -346,7 +362,7 @@ class WP_Block_Parser {
 		$parent->block->innerBlocks[] = (array) $block;
 		$html                         = substr( $this->document, $parent->prev_offset, $token_start - $parent->prev_offset );
 
-		if ( ! empty( $html ) ) {
+		if ( '' !== $html ) {
 			$parent->block->innerHTML     .= $html;
 			$parent->block->innerContent[] = $html;
 		}
@@ -370,7 +386,7 @@ class WP_Block_Parser {
 			? substr( $this->document, $prev_offset, $end_offset - $prev_offset )
 			: substr( $this->document, $prev_offset );
 
-		if ( ! empty( $html ) ) {
+		if ( '' !== $html ) {
 			$stack_top->block->innerHTML     .= $html;
 			$stack_top->block->innerContent[] = $html;
 		}

@@ -553,6 +553,29 @@ class Tests_Blocks_BlockProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Verifies that block helpers do not report stale matches after scanning.
+	 *
+	 * @ticket 61401
+	 */
+	public function test_reports_no_block_match_after_scanning() {
+		$processor = new WP_Block_Processor( '<!-- wp:any/content -->' );
+
+		while ( $processor->next_token() ) {
+			continue;
+		}
+
+		$this->assertFalse(
+			$processor->opens_block(),
+			'Should not have reported a stale opening block after scanning.'
+		);
+
+		$this->assertFalse(
+			$processor->is_block_type( '*' ),
+			'Should not have reported a stale wildcard block match after scanning.'
+		);
+	}
+
+	/**
 	 * Verifies that `get_delimiter_type()` returns `null` after encountering an error.
 	 *
 	 * @ticket 61401
@@ -1321,6 +1344,73 @@ HTML
 	}
 
 	/**
+	 * Ensures malformed nested input is still bounded and non-fatal.
+	 *
+	 * @ticket 64537
+	 */
+	public function test_extracts_malformed_nested_eof_without_looping() {
+		$html      = '<!-- wp:outer --><!-- wp:inner -->';
+		$processor = new WP_Block_Processor( $html );
+
+		$this->assertTrue(
+			$processor->next_block( '*' ),
+			'Should have found the opening outer block.'
+		);
+
+		$block = $processor->extract_full_block_and_advance();
+
+		$this->assertSame(
+			'core/outer',
+			$block['blockName'],
+			'Should have extracted the outer block without recursing indefinitely.'
+		);
+
+		$this->assertCount(
+			1,
+			$block['innerBlocks'],
+			'Should have extracted the malformed nested opener once.'
+		);
+
+		$this->assertSame(
+			parse_blocks( $html ),
+			array( $block ),
+			'Should have extracted the same malformed EOF shape as parse_blocks().'
+		);
+
+		$this->assertFalse(
+			$processor->next_block( '*' ),
+			'Should have completed after the malformed nested EOF extraction.'
+		);
+	}
+
+	/**
+	 * Ensures direct delimiter scans do not replay a consumed top-level closer.
+	 *
+	 * @ticket 64537
+	 */
+	public function test_next_delimiter_after_extracting_top_level_block_advances_past_own_closer() {
+		$processor = new WP_Block_Processor( '<!-- wp:group --><!-- /wp:group --><!-- wp:second /-->' );
+
+		$this->assertTrue(
+			$processor->next_block( '*' ),
+			'Should have found the opening group block.'
+		);
+
+		$processor->extract_full_block_and_advance();
+
+		$this->assertTrue(
+			$processor->next_delimiter(),
+			'Should have found the following delimiter.'
+		);
+
+		$this->assertSame(
+			'core/second',
+			$processor->get_block_type(),
+			'Should have advanced to the sibling delimiter, not replayed the consumed group closer.'
+		);
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return Generator
@@ -1342,17 +1432,22 @@ HTML
 			'<!-- wp:group --><!-- wp:void /--><!-- /wp:group -->',
 		);
 
-		/*
-		 * @todo There is a hidden bug in here, which is possibly a problem in
-		 *       the default parser. There are HTML spans of newlines between
-		 *       these block delimiters, and without them, the parse doesn’t
-		 *       match `parse_blocks()`. However, `parse_blocks()` is inconsistent
-		 *       in its behavior. Whereas it produces an empty text chunk here,
-		 *       in the case of a void inner block it produces none. The test is
-		 *       being adjusted to step around this issue so that it can be resolved
-		 *       separately, and until it’s clear if there is an implementation issue
-		 *       with `parse_blocks()` itself.
-		 */
+		yield 'Adjacent top-level void blocks' => array(
+			'<!-- wp:first /--><!-- wp:second /-->',
+		);
+
+		yield 'Top-level freeform between void blocks' => array(
+			'<!-- wp:first /-->0<!-- wp:second /-->',
+		);
+
+		yield 'Group with adjacent void inners' => array(
+			'<!-- wp:group --><!-- wp:first /--><!-- wp:second /--><!-- /wp:group -->',
+		);
+
+		yield 'Empty columns without delimiter whitespace' => array(
+			'<!-- wp:columns --><!-- wp:column --><!-- /wp:column --><!-- /wp:columns -->',
+		);
+
 		yield 'Empty columns' => array(
 			<<<HTML
 			<!-- wp:columns -->
