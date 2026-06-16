@@ -1,8 +1,8 @@
 # Lexbor Source Oracle
 
 This directory contains a standalone oracle binary used by the
-`set_inner_html` fuzzer to self-check accepted updates against a source-built
-Lexbor checkout.
+`set_inner_html` fuzzer to self-check accepted and rejected updates against a
+source-built Lexbor checkout.
 
 Build upstream `master`:
 
@@ -30,10 +30,12 @@ php tools/html-api-fuzz/set-inner-html.php \
 Pass `--lexbor-oracle-bin PATH` or set `HTML_API_FUZZ_LEXBOR_ORACLE` when the
 binary is not at the default build path above.
 
-When present, the oracle parses the original and updated HTML after an accepted
-`set_inner_html()` call and compares the rendered tree outside the target
-element. A changed outside tree is a fuzzer failure: it indicates a replacement
-that should have been rejected by the HTML API.
+When present, the oracle parses the original and candidate-updated HTML and
+compares the rendered tree outside the target element. For accepted
+`set_inner_html()` calls, a changed outside tree is a fuzzer failure: it
+indicates a replacement that should have been rejected by the HTML API. For
+rejected calls, a preserved outside tree is a fuzzer failure: it indicates a
+replacement that should have been accepted by the HTML API.
 
 The oracle also self-checks each Lexbor parse by serializing the parsed tree,
 parsing that serialization again in the same mode, and comparing the rendered

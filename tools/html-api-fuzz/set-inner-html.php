@@ -1820,6 +1820,53 @@ function wp_html_set_inner_html_fuzzer_lexbor_tree( string $html, bool $full, st
 }
 
 /**
+ * Renders a fragment as a full document with the Lexbor oracle.
+ *
+ * This exposes ignored HTML/BODY start tags whose attributes mutate the
+ * document roots, which are outside a BODY-context fragment's child list.
+ *
+ * @param string $html HTML fragment.
+ * @param string $lexbor_oracle_bin Oracle binary path.
+ * @return array<string, mixed> Oracle result.
+ */
+function wp_html_set_inner_html_fuzzer_lexbor_fragment_document_tree( string $html, string $lexbor_oracle_bin ): array {
+	$input = tempnam( sys_get_temp_dir(), 'wp-html-set-inner-html-' );
+	if ( false === $input ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Could not create temporary oracle input.',
+		);
+	}
+
+	file_put_contents( $input, $html );
+	$command = escapeshellarg( $lexbor_oracle_bin ) .
+		' --mode full-document --max-nodes 10000 --input ' . escapeshellarg( $input );
+	$output  = array();
+	$status  = 0;
+	exec( $command, $output, $status );
+	@unlink( $input );
+
+	if ( 0 !== $status ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Lexbor oracle exited with status ' . $status,
+			'output' => implode( "\n", $output ),
+		);
+	}
+
+	$result = json_decode( implode( "\n", $output ), true );
+	if ( ! is_array( $result ) ) {
+		return array(
+			'status' => 'error',
+			'error'  => 'Lexbor oracle returned invalid JSON.',
+			'output' => implode( "\n", $output ),
+		);
+	}
+
+	return $result;
+}
+
+/**
  * Counts the leading spaces in a rendered tree line.
  *
  * @param string $line Rendered tree line.
@@ -1891,6 +1938,49 @@ function wp_html_set_inner_html_fuzzer_lexbor_outer_tree_signature( string $tree
 }
 
 /**
+ * Returns a signature of document-root attributes from a rendered tree.
+ *
+ * @param string $tree Rendered tree from a full-document parse.
+ * @return string|null Root attribute signature, or null when roots are absent.
+ */
+function wp_html_set_inner_html_fuzzer_lexbor_document_root_attribute_signature( string $tree ): ?string {
+	$lines          = preg_split( "/\r\n|\n|\r/", trim( $tree ) );
+	$signature      = array();
+	$current_tag    = null;
+	$current_indent = null;
+	$found_html     = false;
+	$found_body     = false;
+
+	foreach ( $lines as $line ) {
+		if ( preg_match( '/^(\s*)<(html|body)>$/i', $line, $matches ) ) {
+			$current_indent = strlen( $matches[1] );
+			$current_tag    = strtolower( $matches[2] );
+			$signature[]    = '<' . $current_tag . '>';
+			$found_html     = $found_html || 'html' === $current_tag;
+			$found_body     = $found_body || 'body' === $current_tag;
+			continue;
+		}
+
+		if ( null === $current_tag ) {
+			continue;
+		}
+
+		$indent = wp_html_set_inner_html_fuzzer_tree_indent( $line );
+		if ( $indent <= $current_indent ) {
+			$current_tag    = null;
+			$current_indent = null;
+			continue;
+		}
+
+		if ( $indent === $current_indent + 2 && preg_match( '/^\s*[^<"\s][^=]*=".*"$/', $line ) ) {
+			$signature[] = $line;
+		}
+	}
+
+	return $found_html && $found_body ? implode( "\n", $signature ) : null;
+}
+
+/**
  * Checks accepted updates with the optional Lexbor oracle.
  *
  * @param string      $original          Original HTML.
@@ -1925,7 +2015,7 @@ function wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree( string $origin
 		);
 	}
 
-	return array(
+	$result = array(
 		'status'            => $original_signature === $updated_signature ? 'ok' : 'changed',
 		'originalSignature' => $original_signature,
 		'updatedSignature'  => $updated_signature,
@@ -1934,6 +2024,42 @@ function wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree( string $origin
 		'originalSelfCheck' => $original_tree['selfCheck'] ?? null,
 		'updatedSelfCheck'  => $updated_tree['selfCheck'] ?? null,
 	);
+
+	if ( $full || 'changed' === $result['status'] ) {
+		return $result;
+	}
+
+	if ( ! preg_match( '/<\/?(?:html|body)\b/i', $original . $updated ) ) {
+		return $result;
+	}
+
+	$original_document_tree = wp_html_set_inner_html_fuzzer_lexbor_fragment_document_tree( $original, $lexbor_oracle_bin );
+	$updated_document_tree  = wp_html_set_inner_html_fuzzer_lexbor_fragment_document_tree( $updated, $lexbor_oracle_bin );
+
+	if ( 'ok' !== ( $original_document_tree['status'] ?? null ) || 'ok' !== ( $updated_document_tree['status'] ?? null ) ) {
+		$result['fragmentDocumentRootCheck'] = array(
+			'status'       => 'skipped',
+			'originalTree' => $original_document_tree,
+			'updatedTree'  => $updated_document_tree,
+		);
+
+		return $result;
+	}
+
+	$original_root_signature = wp_html_set_inner_html_fuzzer_lexbor_document_root_attribute_signature( (string) $original_document_tree['tree'] );
+	$updated_root_signature  = wp_html_set_inner_html_fuzzer_lexbor_document_root_attribute_signature( (string) $updated_document_tree['tree'] );
+	$result['fragmentDocumentRootCheck'] = array(
+		'status'            => $original_root_signature === $updated_root_signature ? 'ok' : 'changed',
+		'originalSignature' => $original_root_signature,
+		'updatedSignature'  => $updated_root_signature,
+	);
+
+	if ( null !== $original_root_signature && null !== $updated_root_signature && $original_root_signature !== $updated_root_signature ) {
+		$result['status']    = 'changed';
+		$result['changedBy'] = 'fragment-document-root-attributes';
+	}
+
+	return $result;
 }
 
 /**
@@ -2078,6 +2204,37 @@ function wp_html_set_inner_html_fuzzer_run_case( array $case, ?string $lexbor_or
 			);
 		}
 
+		$lexbor_check = wp_html_set_inner_html_fuzzer_check_lexbor_outside_tree(
+			$case['html'],
+			$case['expected'],
+			$case['full'],
+			$lexbor_oracle_bin
+		);
+		if ( 'ok' === $lexbor_check['status'] ) {
+			return array(
+				'ok'          => false,
+				'failure'     => 'rejected-update-preserved-lexbor-outside-tree',
+				'lexborCheck' => $lexbor_check,
+				'candidate'   => $case['expected'],
+			);
+		}
+
+		if ( 'changed' === $lexbor_check['status'] ) {
+			return array(
+				'ok'     => true,
+				'status' => 'rejected-lexbor-checked',
+			);
+		}
+
+		if ( 'skipped' === $lexbor_check['status'] && null !== $lexbor_oracle_bin ) {
+			return array(
+				'ok'          => false,
+				'failure'     => 'rejected-update-lexbor-check-skipped',
+				'lexborCheck' => $lexbor_check,
+				'candidate'   => $case['expected'],
+			);
+		}
+
 		return array(
 			'ok'     => true,
 			'status' => 'rejected',
@@ -2186,6 +2343,7 @@ $counts = array(
 	'accepted-lexbor-skipped'               => 0,
 	'accepted-original-signature-unsupported' => 0,
 	'rejected'                              => 0,
+	'rejected-lexbor-checked'               => 0,
 	'unsupported-original'                  => 0,
 	'failures'                              => 0,
 );
