@@ -544,15 +544,27 @@ class WP_HTML_Tag_Processor {
 	 * One of 'html', 'svg', or 'math'.
 	 *
 	 * Several parsing rules change based on whether the parser
-	 * is inside foreign content, including whether CDATA sections
-	 * are allowed and whether a self-closing flag indicates that
-	 * an element has no content.
+	 * is inside foreign content, including whether a self-closing
+	 * flag indicates that an element has no content.
 	 *
 	 * @since 6.7.0
 	 *
 	 * @var string
 	 */
 	private $parsing_namespace = 'html';
+
+	/**
+	 * Indicates the current node's namespace for CDATA section detection.
+	 *
+	 * HTML integration points follow HTML tokenization for start tags and
+	 * character tokens, but CDATA sections are allowed based on the adjusted
+	 * current node's actual namespace.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string
+	 */
+	private $cdata_parsing_namespace = 'html';
 
 	/**
 	 * What kind of syntax token became an HTML comment.
@@ -860,7 +872,26 @@ class WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->parsing_namespace = $new_namespace;
+		$this->parsing_namespace       = $new_namespace;
+		$this->cdata_parsing_namespace = $new_namespace;
+		return true;
+	}
+
+	/**
+	 * Switches the namespace context used for detecting CDATA sections.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $new_namespace One of 'html', 'svg', or 'math' indicating whether
+	 *                              the adjusted current node can contain CDATA sections.
+	 * @return bool Whether the namespace was valid and changed.
+	 */
+	protected function change_cdata_parsing_namespace( string $new_namespace ): bool {
+		if ( ! in_array( $new_namespace, array( 'html', 'math', 'svg' ), true ) ) {
+			return false;
+		}
+
+		$this->cdata_parsing_namespace = $new_namespace;
 		return true;
 	}
 
@@ -1172,7 +1203,13 @@ class WP_HTML_Tag_Processor {
 	 *     }
 	 *     // Outputs: "free <egg> lang-en "
 	 *
+	 * Class names from the input document already carry the tokenizer's
+	 * U+FFFD replacement of NULL bytes through `get_attribute()`; values
+	 * supplied through the API are returned verbatim, as `Element.classList`
+	 * does in the DOM.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 No longer replaces NULL bytes in API-supplied class values.
 	 *
 	 * @return Generator<int, non-empty-string>
 	 */
@@ -1206,7 +1243,7 @@ class WP_HTML_Tag_Processor {
 				return;
 			}
 
-			$name = str_replace( "\x00", "\u{FFFD}", substr( $class, $at, $length ) );
+			$name = substr( $class, $at, $length );
 			if ( $is_quirks ) {
 				$name = strtolower( $name );
 			}
@@ -1914,7 +1951,7 @@ class WP_HTML_Tag_Processor {
 				}
 
 				if (
-					'html' !== $this->parsing_namespace &&
+					'html' !== $this->cdata_parsing_namespace &&
 					strlen( $html ) > $at + 8 &&
 					'[' === $html[ $at + 2 ] &&
 					'C' === $html[ $at + 3 ] &&
@@ -2228,9 +2265,16 @@ class WP_HTML_Tag_Processor {
 		 * > case-insensitive match for each other.
 		 *     - HTML 5 spec
 		 *
+		 * The tokenizer would have replaced U+0000 NULL bytes in attribute
+		 * names with U+FFFD, so names which differ only by those bytes are
+		 * duplicates. The replacement applies to the comparable name — a
+		 * comparison artifact — while the raw span in the document remains
+		 * untouched.
+		 *
 		 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
+		 * @see https://html.spec.whatwg.org/#attribute-name-state
 		 */
-		$comparable_name = strtolower( $attribute_name );
+		$comparable_name = strtolower( str_replace( "\x00", "\u{FFFD}", $attribute_name ) );
 
 		// If an attribute is listed many times, only use the first declaration and ignore the rest.
 		if ( ! isset( $this->attributes[ $comparable_name ] ) ) {
@@ -2290,6 +2334,7 @@ class WP_HTML_Tag_Processor {
 		 * need to be flushed to raw lexical updates.
 		 */
 		$this->class_name_updates_to_attributes_updates();
+		$this->rewrite_br_tag_closer();
 
 		/*
 		 * Purge updates if there are too many. The actual count isn't
@@ -2356,13 +2401,7 @@ class WP_HTML_Tag_Processor {
 		}
 
 		if ( false === $existing_class && isset( $this->attributes['class'] ) ) {
-			$existing_class = WP_HTML_Decoder::decode_attribute(
-				substr(
-					$this->html,
-					$this->attributes['class']->value_starts_at,
-					$this->attributes['class']->value_length
-				)
-			);
+			$existing_class = $this->get_decoded_source_attribute_value( $this->attributes['class'] );
 		}
 
 		if ( false === $existing_class ) {
@@ -2496,6 +2535,64 @@ class WP_HTML_Tag_Processor {
 		} else {
 			$this->remove_attribute( 'class' );
 		}
+	}
+
+	/**
+	 * Rewrites BR end tag tokens with enqueued attribute updates as tag openers.
+	 *
+	 * According to the HTML specification `</br attr>` is treated as a BR element
+	 * with no attributes. When adding attributes to such a token, the existing
+	 * attribute-like text must be discarded before new attributes can appear.
+	 *
+	 * @since 6.9.0
+	 * @ignore
+	 */
+	private function rewrite_br_tag_closer(): void {
+		if (
+			self::STATE_MATCHED_TAG !== $this->parser_state ||
+			! $this->is_closing_tag ||
+			'BR' !== $this->get_tag()
+		) {
+			return;
+		}
+
+		$attribute_updates = array();
+		foreach ( $this->lexical_updates as $name => $update ) {
+			if ( is_int( $name ) ) {
+				continue;
+			}
+
+			$attribute_updates[] = $update;
+			unset( $this->lexical_updates[ $name ] );
+		}
+
+		if ( 0 === count( $attribute_updates ) ) {
+			return;
+		}
+
+		usort( $attribute_updates, array( self::class, 'sort_start_ascending' ) );
+
+		$updated_attributes = '';
+		foreach ( $attribute_updates as $update ) {
+			$updated_attributes .= $update->text;
+		}
+
+		/*
+		 * Keep the original token start and tag-name bytes intact so bookmarks
+		 * remain anchored and source tag-name casing is preserved.
+		 */
+		$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+			$this->token_starts_at + 1,
+			1,
+			''
+		);
+
+		$attribute_like_text_starts_at = $this->tag_name_starts_at + $this->tag_name_length;
+		$this->lexical_updates[]       = new WP_HTML_Text_Replacement(
+			$attribute_like_text_starts_at,
+			$this->token_starts_at + $this->token_length - 1 - $attribute_like_text_starts_at,
+			$updated_attributes
+		);
 	}
 
 	/**
@@ -2768,6 +2865,11 @@ class WP_HTML_Tag_Processor {
 	 *     $p->get_attribute( 'class' ) === null;
 	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 Applies input-stream preprocessing: newlines in the source value
+	 *              are normalized and NULL bytes are replaced with U+FFFD, as
+	 *              browsers do before decoding character references. Attributes
+	 *              whose source name contains a NULL byte are addressed by the
+	 *              name with U+FFFD in its place, as in the DOM.
 	 *
 	 * @param string $name Name of attribute whose value is requested.
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
@@ -2790,7 +2892,7 @@ class WP_HTML_Tag_Processor {
 		 * attribute values. If any exist, those enqueued class changes must first be flushed out
 		 * into an attribute value update.
 		 */
-		if ( 'class' === $name ) {
+		if ( 'class' === $comparable ) {
 			$this->class_name_updates_to_attributes_updates();
 		}
 
@@ -2821,9 +2923,58 @@ class WP_HTML_Tag_Processor {
 			return true;
 		}
 
+		return $this->get_decoded_source_attribute_value( $attribute );
+	}
+
+	/**
+	 * Returns the decoded value of an attribute found in the input document.
+	 *
+	 * The Tag Processor defers the HTML input-stream preprocessing and the
+	 * tokenizer's replacements while scanning; they must be applied when
+	 * reading a value out of the document: newlines are normalized before
+	 * character references decode, and U+0000 NULL bytes are replaced
+	 * with U+FFFD. The replacements operate on bytes; NULL bytes inside
+	 * invalid UTF-8 sequences are replaced individually where a browser,
+	 * decoding the byte stream into characters first, may differ.
+	 *
+	 * @see https://html.spec.whatwg.org/#preprocessing-the-input-stream
+	 * @see https://html.spec.whatwg.org/#attribute-value-(double-quoted)-state
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Attribute_Token $attribute Attribute token from the input document.
+	 * @return string Decoded attribute value.
+	 */
+	private function get_decoded_source_attribute_value( WP_HTML_Attribute_Token $attribute ): string {
 		$raw_value = substr( $this->html, $attribute->value_starts_at, $attribute->value_length );
 
-		return WP_HTML_Decoder::decode_attribute( $raw_value );
+		/*
+		 * Newline normalization is part of preprocessing the input stream
+		 * and precedes character reference decoding: `&#13;` decodes into
+		 * a carriage return which must be preserved. The check avoids
+		 * scanning the value again when it contains no carriage return;
+		 * most values contain none.
+		 */
+		if ( false !== strpos( $raw_value, "\r" ) ) {
+			$raw_value = str_replace( "\r\n", "\n", $raw_value );
+			$raw_value = str_replace( "\r", "\n", $raw_value );
+		}
+
+		$decoded_value = WP_HTML_Decoder::decode_attribute( $raw_value );
+
+		/*
+		 * The tokenizer replaces U+0000 NULL bytes as it consumes input:
+		 * character references see the raw NULL byte — an unambiguous
+		 * follower for references without a terminating semicolon — and
+		 * no character reference decodes into NULL, so the replacement
+		 * applies equivalently after decoding, where it cannot disturb
+		 * how references parse.
+		 */
+		if ( false !== strpos( $decoded_value, "\x00" ) ) {
+			$decoded_value = str_replace( "\x00", "\u{FFFD}", $decoded_value );
+		}
+
+		return $decoded_value;
 	}
 
 	/**
@@ -2846,6 +2997,10 @@ class WP_HTML_Tag_Processor {
 	 *     $p->get_attribute_names_with_prefix( 'data-' ) === null;
 	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 NULL bytes in source attribute names are returned as U+FFFD,
+	 *              matching the tokenizer replacement browsers apply. The prefix
+	 *              is matched verbatim against these replaced names; a prefix
+	 *              containing a NULL byte matches nothing.
 	 *
 	 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
 	 *
@@ -2855,7 +3010,7 @@ class WP_HTML_Tag_Processor {
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return null;
 		}
@@ -2895,6 +3050,8 @@ class WP_HTML_Tag_Processor {
 	 *     $p->get_tag() === null;
 	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 NULL bytes in the source tag name are returned as U+FFFD,
+	 *              matching the tokenizer replacement browsers apply.
 	 *
 	 * @return string|null Name of currently matched tag in input HTML, or `null` if none found.
 	 */
@@ -2903,7 +3060,15 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		$tag_name = substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
+		/*
+		 * The tokenizer would have replaced U+0000 NULL bytes in the tag
+		 * name with U+FFFD; this is deferred to this read boundary. The
+		 * replacement never applies to internal identification, which
+		 * compares raw bytes (`scr\x00ipt` is not SCRIPT in browsers either).
+		 *
+		 * @see https://html.spec.whatwg.org/#tag-name-state
+		 */
+		$tag_name = str_replace( "\x00", "\u{FFFD}", substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
 
 		if ( self::STATE_MATCHED_TAG === $this->parser_state ) {
 			return strtoupper( $tag_name );
@@ -2924,6 +3089,8 @@ class WP_HTML_Tag_Processor {
 	 * account the current parsing context, whether HTML, SVG, or MathML.
 	 *
 	 * @since 6.7.0
+	 * @since 7.1.0 NULL bytes in source tag names are returned as U+FFFD,
+	 *              matching the tokenizer replacement browsers apply.
 	 *
 	 * @return string|null Name of current tag name.
 	 */
@@ -3340,7 +3507,34 @@ class WP_HTML_Tag_Processor {
 		 *     <figure />
 		 *             ^ this appears one character before the end of the closing ">".
 		 */
-		return '/' === $this->html[ $this->token_starts_at + $this->token_length - 2 ];
+		$self_closing_flag_at = $this->token_starts_at + $this->token_length - 2;
+		if ( '/' !== $this->html[ $self_closing_flag_at ] ) {
+			return false;
+		}
+
+		foreach ( $this->attributes as $attribute ) {
+			$attribute_ends_at = $attribute->start + $attribute->length;
+			if (
+				$self_closing_flag_at >= $attribute->start &&
+				$self_closing_flag_at < $attribute_ends_at
+			) {
+				return false;
+			}
+		}
+
+		foreach ( $this->duplicate_attributes ?? array() as $duplicate_attributes ) {
+			foreach ( $duplicate_attributes as $attribute ) {
+				$attribute_ends_at = $attribute->start + $attribute->length;
+				if (
+					$self_closing_flag_at >= $attribute->start &&
+					$self_closing_flag_at < $attribute_ends_at
+				) {
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -3428,6 +3622,8 @@ class WP_HTML_Tag_Processor {
 	 * of the document without matching a token.
 	 *
 	 * @since 6.5.0
+	 * @since 7.1.0 NULL bytes in source tag names are returned as U+FFFD,
+	 *              matching the tokenizer replacement browsers apply.
 	 *
 	 * @return string|null Name of the matched token.
 	 */
@@ -3784,6 +3980,12 @@ class WP_HTML_Tag_Processor {
 	 *
 	 *     // Renders as “Eggs &amp; Milk” in a browser, encoded as `<p>Eggs &amp;amp; Milk</p>`.
 	 *     $processor->set_modifiable_text( 'Eggs &amp; Milk' );
+	 *
+	 * Note: unlike attribute values set through `set_attribute()`, which read
+	 * back verbatim, text set through this method currently reads back through
+	 * `get_modifiable_text()` with newlines normalized and NULL bytes handled
+	 * as if the text had come from the input document. In the DOM, API-supplied
+	 * text round-trips verbatim; this asymmetry is a known limitation.
 	 *
 	 * @since 6.7.0
 	 * @since 6.9.0 Escapes all character references instead of trying to avoid double-escaping.
@@ -4319,7 +4521,7 @@ class WP_HTML_Tag_Processor {
 	public function set_attribute( $name, $value ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4470,7 +4672,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_attribute( $name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4548,7 +4750,7 @@ class WP_HTML_Tag_Processor {
 	public function add_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4590,7 +4792,7 @@ class WP_HTML_Tag_Processor {
 	public function remove_class( $class_name ): bool {
 		if (
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
-			$this->is_closing_tag
+			$this->is_tag_closer()
 		) {
 			return false;
 		}
@@ -4664,6 +4866,7 @@ class WP_HTML_Tag_Processor {
 		 * 1. Apply the enqueued edits and update all the pointers to reflect those changes.
 		 */
 		$this->class_name_updates_to_attributes_updates();
+		$this->rewrite_br_tag_closer();
 		$before_current_tag += $this->apply_attributes_updates( $before_current_tag );
 
 		/*
@@ -4768,19 +4971,42 @@ class WP_HTML_Tag_Processor {
 	 * @return bool Whether the given tag and its attribute match the search criteria.
 	 */
 	private function matches(): bool {
-		if ( $this->is_closing_tag && ! $this->stop_on_tag_closers ) {
+		if ( $this->is_tag_closer() && ! $this->stop_on_tag_closers ) {
 			return false;
 		}
 
 		// Does the tag name match the requested tag name in a case-insensitive manner?
-		if (
-			isset( $this->sought_tag_name ) &&
-			(
-				strlen( $this->sought_tag_name ) !== $this->tag_name_length ||
-				0 !== substr_compare( $this->html, $this->sought_tag_name, $this->tag_name_starts_at, $this->tag_name_length, true )
-			)
-		) {
-			return false;
+		if ( isset( $this->sought_tag_name ) ) {
+			$tag_name_matches = (
+				strlen( $this->sought_tag_name ) === $this->tag_name_length &&
+				0 === substr_compare( $this->html, $this->sought_tag_name, $this->tag_name_starts_at, $this->tag_name_length, true )
+			);
+
+			/*
+			 * Names are matched in the same alphabet `get_tag()` exposes,
+			 * where U+0000 NULL bytes appear as U+FFFD: a sought name
+			 * containing U+FFFD matches source names with NULL bytes in
+			 * its place, and a sought name containing a NULL byte matches
+			 * nothing, since no exposed name contains one. The byte
+			 * comparison above already agrees for names without NULL
+			 * bytes, so this only resolves the rare disagreements.
+			 */
+			if ( $tag_name_matches ) {
+				$tag_name_matches = false === strpos( $this->sought_tag_name, "\x00" );
+			} elseif ( false !== strpos( $this->sought_tag_name, "\u{FFFD}" ) ) {
+				$raw_name = substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length );
+				if ( false !== strpos( $raw_name, "\x00" ) ) {
+					$exposed_name     = str_replace( "\x00", "\u{FFFD}", $raw_name );
+					$tag_name_matches = (
+						strlen( $this->sought_tag_name ) === strlen( $exposed_name ) &&
+						0 === substr_compare( $exposed_name, $this->sought_tag_name, 0, strlen( $exposed_name ), true )
+					);
+				}
+			}
+
+			if ( ! $tag_name_matches ) {
+				return false;
+			}
 		}
 
 		if ( null !== $this->sought_class_name && ! $this->has_class( $this->sought_class_name ) ) {

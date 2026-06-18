@@ -406,6 +406,66 @@ class Tests_HtmlApi_WpHtmlProcessorSemanticRules extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Verifies that when the adoption agency algorithm finds no matching
+	 * active formatting element, it acts like "any other end tag".
+	 *
+	 * @covers WP_HTML_Processor::step_in_body
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_in_body_adoption_agency_falls_back_to_any_other_end_tag
+	 *
+	 * @param string $formatting_tag_name Formatting tag name with no active formatting element.
+	 */
+	public function test_in_body_adoption_agency_falls_back_to_any_other_end_tag( string $formatting_tag_name ) {
+		$processor = WP_HTML_Processor::create_fragment( "<div><span></{$formatting_tag_name}><code target></code></span></div>" );
+
+		$processor->next_tag( 'SPAN' );
+		$this->assertSame( 'SPAN', $processor->get_tag(), "Expected to start test on SPAN element but found {$processor->get_tag()} instead." );
+		$this->assertSame( array( 'HTML', 'BODY', 'DIV', 'SPAN' ), $processor->get_breadcrumbs(), 'Failed to produce expected DOM nesting.' );
+
+		$this->assertTrue( $processor->next_tag( 'CODE' ), "Failed to ignore unexpected {$formatting_tag_name} closer and advance to CODE opener." );
+		$this->assertSame( 'CODE', $processor->get_tag(), "Expected to find CODE element, but found {$processor->get_tag()} instead." );
+		$this->assertSame( array( 'HTML', 'BODY', 'DIV', 'SPAN', 'CODE' ), $processor->get_breadcrumbs(), 'Failed to keep SPAN open after unexpected formatting closer.' );
+	}
+
+	/**
+	 * Verifies that the adoption agency fallback preserves the "any other end tag"
+	 * step result when the ignored token is followed by EOF.
+	 *
+	 * @covers WP_HTML_Processor::step_in_body
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_in_body_adoption_agency_falls_back_to_any_other_end_tag
+	 *
+	 * @param string $formatting_tag_name Formatting tag name with no active formatting element.
+	 */
+	public function test_in_body_adoption_agency_fallback_preserves_any_other_end_tag_step_result( string $formatting_tag_name ) {
+		$ordinary_processor = WP_HTML_Processor::create_fragment( '<span></x>' );
+		$this->assertTrue( $ordinary_processor->step(), 'Failed to find the SPAN opener before an ordinary unexpected end tag.' );
+		$this->assertSame( 'SPAN', $ordinary_processor->get_tag(), "Expected to start test on SPAN element but found {$ordinary_processor->get_tag()} instead." );
+		$this->assertFalse( $ordinary_processor->step(), 'Expected ordinary unexpected end tag followed by EOF to return false.' );
+
+		$formatting_processor = WP_HTML_Processor::create_fragment( "<span></{$formatting_tag_name}>" );
+		$this->assertTrue( $formatting_processor->step(), 'Failed to find the SPAN opener before an unexpected formatting end tag.' );
+		$this->assertSame( 'SPAN', $formatting_processor->get_tag(), "Expected to start test on SPAN element but found {$formatting_processor->get_tag()} instead." );
+		$this->assertFalse( $formatting_processor->step(), 'Expected unexpected formatting end tag followed by EOF to return false.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_in_body_adoption_agency_falls_back_to_any_other_end_tag() {
+		return array(
+			'Unexpected A end tag' => array( 'a' ),
+			'Unexpected B end tag' => array( 'b' ),
+		);
+	}
+
+	/**
 	 * Ensures that closing `</br>` tags are appropriately treated as opening tags with no attributes.
 	 *
 	 * > An end tag whose tag name is "br"
@@ -422,7 +482,39 @@ class Tests_HtmlApi_WpHtmlProcessorSemanticRules extends WP_UnitTestCase {
 
 		$this->assertTrue( $processor->next_tag(), 'Failed to find the expected opening BR tag.' );
 		$this->assertFalse( $processor->is_tag_closer(), 'Should have treated the tag as an opening tag.' );
-		$this->assertNull( $processor->get_attribute_names_with_prefix( '' ), 'Should have ignored any attributes on the tag.' );
+		$this->assertSame( array(), $processor->get_attribute_names_with_prefix( '' ), 'Should have returned an empty array of attribute names.' );
+	}
+
+	/**
+	 * Ensures that closing `</br>` tags can be rewritten with added attributes
+	 * through the full HTML Processor, while ignoring source attribute-like text.
+	 *
+	 * @covers WP_HTML_Processor::step_in_body
+	 * @covers WP_HTML_Processor::set_attribute
+	 * @covers WP_HTML_Processor::add_class
+	 *
+	 * @ticket 63891
+	 */
+	public function test_can_add_attributes_to_br_end_tag() {
+		$processor = WP_HTML_Processor::create_fragment( '</br id="ignored" class="ignored"><span>' );
+
+		$this->assertTrue( $processor->next_tag( 'BR' ), 'Failed to find the expected BR tag.' );
+		$this->assertNull( $processor->get_attribute( 'id' ), 'Should not have read attribute-like text as source attributes.' );
+		$this->assertNull( $processor->get_attribute( 'class' ), 'Should not have read attribute-like text as source attributes.' );
+
+		$this->assertTrue( $processor->set_attribute( 'data-test-id', '14' ), 'Failed to set an attribute on the BR tag.' );
+		$this->assertTrue( $processor->set_attribute( 'hidden', true ), 'Failed to set a boolean attribute on the BR tag.' );
+		$this->assertTrue( $processor->add_class( 'new-class' ), 'Failed to add a class to the BR tag.' );
+
+		$this->assertSame( '14', $processor->get_attribute( 'data-test-id' ), 'Should have read the pending attribute value.' );
+		$this->assertTrue( $processor->get_attribute( 'hidden' ), 'Should have read the pending boolean attribute value.' );
+		$this->assertSame( 'new-class', $processor->get_attribute( 'class' ), 'Should have read the pending class value.' );
+
+		$this->assertSame(
+			'<br class="new-class" data-test-id="14" hidden><span>',
+			$processor->get_updated_html(),
+			'Should have rewritten the BR end tag as an opener with only the new attributes.'
+		);
 	}
 
 	/*******************************************************************

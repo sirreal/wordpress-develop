@@ -257,11 +257,153 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * Ensures that XMP contents are not escaped, as they are not parsed like text nodes are.
+	 *
+	 * XMP contents are parsed as raw text: character references are never decoded.
+	 * Escaping the contents would change the document, e.g. a "<" would be replaced
+	 * by the literal text "&lt;" after serializing and re-parsing.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_xmp_contents_are_not_escaped() {
+		$this->assertSame(
+			"<xmp>1 < 2 &amp; apples > or\u{FFFD}anges</xmp>",
+			WP_HTML_Processor::normalize( "<xmp>1 < 2 &amp; apples > or\x00anges</xmp>" ),
+			'Should have preserved text inside an XMP element, except for replacing NULL bytes.'
+		);
+	}
+
+	/**
+	 * Ensures that the contents of IFRAME, NOEMBED, and NOFRAMES elements are
+	 * preserved when serializing.
+	 *
+	 * These elements contain raw text which is part of the parsed document.
+	 * Dropping it would change the document's contents across a serialize and
+	 * re-parse cycle.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_rawtext_elements_with_contents
+	 *
+	 * @param string $html Normalized HTML containing a rawtext element with contents.
+	 */
+	public function test_rawtext_element_contents_are_preserved_when_normalizing( string $html ) {
+		$this->assertSame(
+			$html,
+			WP_HTML_Processor::normalize( $html ),
+			'Should have preserved the rawtext element contents.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_rawtext_elements_with_contents() {
+		return array(
+			'IFRAME with following text'       => array( '<iframe>x</iframe>y' ),
+			'NOEMBED with following text'      => array( '<noembed>x</noembed>y' ),
+			'NOFRAMES with following text'     => array( '<section><noframes>x</noframes>y</section>' ),
+			'NOFRAMES before comment'          => array( '<section><noframes>x</noframes><!----></section>' ),
+			'IFRAME with markup-like contents' => array( '<iframe><div>inert</div></iframe>' ),
+			'NOEMBED with character reference' => array( '<noembed>&amp;</noembed>' ),
+			'IFRAME in foreign content'        => array( '<svg><iframe>1 &lt; 2</iframe></svg>' ),
+		);
+	}
+
+	/**
+	 * Ensures that the contents of IFRAME, NOEMBED, and NOFRAMES elements are
+	 * preserved when serializing full documents, including NOFRAMES elements
+	 * in the HEAD or after a FRAMESET.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_full_documents_with_rawtext_elements
+	 *
+	 * @param string $html     Input HTML document.
+	 * @param string $expected Expected serialization of the full document.
+	 */
+	public function test_rawtext_element_contents_are_preserved_in_full_documents( string $html, string $expected ) {
+		$processor = WP_HTML_Processor::create_full_parser( $html );
+
+		$this->assertSame(
+			$expected,
+			$processor->serialize(),
+			'Should have preserved the rawtext element contents.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_full_documents_with_rawtext_elements() {
+		return array(
+			'IFRAME in BODY'          => array(
+				'<iframe>x</iframe>y',
+				'<html><head></head><body><iframe>x</iframe>y</body></html>',
+			),
+			'NOEMBED in BODY'         => array(
+				'a<noembed>x</noembed>',
+				'<html><head></head><body>a<noembed>x</noembed></body></html>',
+			),
+			'NOFRAMES in BODY'        => array(
+				'a<noframes>x</noframes>',
+				'<html><head></head><body>a<noframes>x</noframes></body></html>',
+			),
+			'NOFRAMES in HEAD'        => array(
+				'<head><noframes>x</noframes></head>z',
+				'<html><head><noframes>x</noframes></head><body>z</body></html>',
+			),
+			'NOFRAMES in FRAMESET'    => array(
+				'<html><frameset><noframes>x</noframes>',
+				'<html><head></head><frameset><noframes>x</noframes></frameset></html>',
+			),
+			'IFRAME before a comment' => array(
+				'<h3><div><small><dd><iframe>x</iframe><!---->',
+				'<html><head></head><body><h3><div><small><dd><iframe>x</iframe><!----></dd></small></div></h3></body></html>',
+			),
+		);
+	}
+
 	public function test_unexpected_closing_tags_are_removed() {
 		$this->assertSame(
 			WP_HTML_Processor::normalize( 'one</div>two</span>three' ),
 			'onetwothree',
 			'Should have removed unexpected closing tags.'
+		);
+	}
+
+	/**
+	 * Ensures that unexpected closing formatting tags are ignored.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_unexpected_closing_formatting_tags
+	 *
+	 * @param string $html     HTML containing an unexpected closing formatting tag.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_unexpected_closing_formatting_tags_are_ignored( string $html, string $expected ) {
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $html ),
+			'Should have ignored unexpected closing formatting tags.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_unexpected_closing_formatting_tags() {
+		return array(
+			'Unexpected A end tag' => array( 'one</a>two', 'onetwo' ),
+			'Unexpected B end tag' => array( 'one</b>two', 'onetwo' ),
 		);
 	}
 
@@ -404,6 +546,10 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 			'Foreign content text' => array( "<svg>one\x00two</svg>", "<svg>one\u{FFFD}two</svg>" ),
 			'SCRIPT content'       => array( "<script>alert(\x00)</script>", "<script>alert(\u{FFFD})</script>" ),
 			'STYLE content'        => array( "<style>\x00 {}</style>", "<style>\u{FFFD} {}</style>" ),
+			'IFRAME content'       => array( "<iframe>a\x00b</iframe>", "<iframe>a\u{FFFD}b</iframe>" ),
+			'NOEMBED content'      => array( "<noembed>a\x00b</noembed>", "<noembed>a\u{FFFD}b</noembed>" ),
+			'NOFRAMES content'     => array( "<noframes>a\x00b</noframes>", "<noframes>a\u{FFFD}b</noframes>" ),
+			'XMP content'          => array( "<xmp>a\x00b</xmp>", "<xmp>a\u{FFFD}b</xmp>" ),
 			'Comment text'         => array( "<!-- \x00 -->", "<!-- \u{FFFD} -->" ),
 		);
 	}
@@ -420,6 +566,129 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 		$this->assertSame(
 			"{$doctype_output}<html><head></head><body>👌</body></html>",
 			$processor->serialize()
+		);
+	}
+
+	/**
+	 * Ensures full document serialization is idempotent when the body is implied after head content.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_full_document_serialize_includes_implied_body_after_head_at_eof
+	 *
+	 * @param string $input               Full document input ending after HEAD content with no explicit BODY.
+	 * @param string $expected_serialized Expected serialization with the implied empty BODY element.
+	 */
+	public function test_full_document_serialize_includes_implied_body_after_head_at_eof( string $input, string $expected_serialized ) {
+		$processor  = WP_HTML_Processor::create_full_parser( $input );
+		$serialized = $processor->serialize();
+
+		$this->assertSame(
+			$expected_serialized,
+			$serialized,
+			'Should have serialized the implied empty BODY element before HTML closes.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( $serialized );
+
+		$this->assertSame(
+			$serialized,
+			$processor->serialize(),
+			'Should have produced idempotent full document serialization.'
+		);
+
+		$processor  = WP_HTML_Processor::create_full_parser( $input );
+		$tag_events = array();
+		while ( $processor->next_token() ) {
+			if ( '#tag' !== $processor->get_token_type() ) {
+				continue;
+			}
+
+			$tag_events[] = array( $processor->is_tag_closer() ? '-' : '+', $processor->get_tag() );
+		}
+
+		$this->assertSame(
+			array(
+				array( '+', 'BODY' ),
+				array( '-', 'BODY' ),
+				array( '-', 'HTML' ),
+			),
+			array_slice( $tag_events, -3 ),
+			'Should visit the implied empty BODY element before closing HTML.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_full_document_serialize_includes_implied_body_after_head_at_eof() {
+		return array(
+			'Closed HEAD at EOF'                 => array(
+				'<!DOCTYPE html><html><head><title>x</title></head>',
+				'<!DOCTYPE html><html><head><title>x</title></head><body></body></html>',
+			),
+			'Unclosed TEMPLATE in HEAD'          => array(
+				'<!DOCTYPE html><html><head><template>x',
+				'<!DOCTYPE html><html><head><template>x</template></head><body></body></html>',
+			),
+			'Unclosed table in TEMPLATE in HEAD' => array(
+				'<html><title>x</title><template><table><tr><td>x',
+				'<html><head><title>x</title><template><table><tbody><tr><td>x</td></tr></tbody></table></template></head><body></body></html>',
+			),
+			'Ignored BODY in TEMPLATE at EOF'    => array(
+				'<template><body>',
+				'<html><head><template></template></head><body></body></html>',
+			),
+			'Ignored BODY closer in NOSCRIPT'    => array(
+				'<noscript></body>',
+				'<html><head><noscript></noscript></head><body></body></html>',
+			),
+		);
+	}
+
+	/**
+	 * Ensures table insertion modes still close open elements at EOF.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_normalize_closes_tables_at_eof
+	 *
+	 * @param string $input    Fragment input ending in a table insertion mode.
+	 * @param string $expected Expected normalized fragment.
+	 */
+	public function test_normalize_closes_tables_at_eof( string $input, string $expected ) {
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $input ),
+			'Should have closed open table elements at EOF.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_normalize_closes_tables_at_eof() {
+		return array(
+			'Open TABLE' => array(
+				'<table>',
+				'<table></table>',
+			),
+			'Open TBODY' => array(
+				'<table><tbody>',
+				'<table><tbody></tbody></table>',
+			),
+			'Open TR'    => array(
+				'<table><tr>',
+				'<table><tbody><tr></tr></tbody></table>',
+			),
+			'Open TD'    => array(
+				'<table><tr><td>x',
+				'<table><tbody><tr><td>x</td></tr></tbody></table>',
+			),
 		);
 	}
 
@@ -461,6 +730,88 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 		$this->assertEqualHTML( $expected, $normalized );
 		$normalized_twice = WP_HTML_Processor::normalize( $normalized );
 		$this->assertEqualHTML( $expected, $normalized_twice );
+	}
+
+	/**
+	 * Ensures that the special leading newline rule applies only in the HTML namespace.
+	 *
+	 * @ticket 64607
+	 *
+	 * @dataProvider data_provider_special_leading_newline_namespace_serialization
+	 *
+	 * @param string $input    HTML input containing a PRE, LISTING, or TEXTAREA element.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_special_leading_newline_rule_depends_on_namespace( string $input, string $expected ) {
+		$normalized = WP_HTML_Processor::normalize( $input );
+		$this->assertSame(
+			$expected,
+			$normalized,
+			'Should serialize special leading newlines according to the element namespace.'
+		);
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $normalized ),
+			'Normalizing already-normalized special leading newlines should not change them.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_special_leading_newline_namespace_serialization() {
+		return array(
+			'MathML TEXTAREA'                            => array(
+				'<math><textarea>X</textarea></math>',
+				'<math><textarea>X</textarea></math>',
+			),
+			'MathML TEXTAREA with leading newline'       => array(
+				"<math><textarea>\nX</textarea></math>",
+				"<math><textarea>\nX</textarea></math>",
+			),
+			'SVG TEXTAREA'                               => array(
+				'<svg><textarea>X</textarea></svg>',
+				'<svg><textarea>X</textarea></svg>',
+			),
+			'SVG TEXTAREA with leading newline'          => array(
+				"<svg><textarea>\nX</textarea></svg>",
+				"<svg><textarea>\nX</textarea></svg>",
+			),
+			'HTML TEXTAREA inside SVG HTML integration point' => array(
+				'<svg><foreignObject><textarea>X</textarea></foreignObject></svg>',
+				"<svg><foreignObject><textarea>\nX</textarea></foreignObject></svg>",
+			),
+			'HTML TEXTAREA with leading newline inside SVG HTML integration point' => array(
+				"<svg><foreignObject><textarea>\n\nX</textarea></foreignObject></svg>",
+				"<svg><foreignObject><textarea>\n\nX</textarea></foreignObject></svg>",
+			),
+			'HTML TEXTAREA inside MathML text integration point' => array(
+				'<math><mtext><textarea>X</textarea></mtext></math>',
+				"<math><mtext><textarea>\nX</textarea></mtext></math>",
+			),
+			'HTML TEXTAREA with leading newline inside MathML text integration point' => array(
+				"<math><mtext><textarea>\n\nX</textarea></mtext></math>",
+				"<math><mtext><textarea>\n\nX</textarea></mtext></math>",
+			),
+			'HTML TEXTAREA inside MathML HTML integration point' => array(
+				'<math><annotation-xml encoding="text/html"><textarea>X</textarea></annotation-xml></math>',
+				"<math><annotation-xml encoding=\"text/html\"><textarea>\nX</textarea></annotation-xml></math>",
+			),
+			'HTML TEXTAREA with leading newline inside MathML HTML integration point' => array(
+				"<math><annotation-xml encoding=\"text/html\"><textarea>\n\nX</textarea></annotation-xml></math>",
+				"<math><annotation-xml encoding=\"text/html\"><textarea>\n\nX</textarea></annotation-xml></math>",
+			),
+			'HTML PRE after exiting SVG foreign content' => array(
+				'<svg><pre>X</pre></svg>',
+				"<svg></svg><pre>\nX</pre>",
+			),
+			'HTML LISTING after exiting MathML foreign content' => array(
+				'<math><listing>X</listing></math>',
+				"<math></math><listing>\nX</listing>",
+			),
+		);
 	}
 
 	/**
@@ -616,6 +967,7 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 			'FORM with SVG TITLE text edge'             => array( "<form ><svg ><title \"'></form><form>" ),
 			'FORM with TABLE and SCRIPT'                => array( '<form id><table te"><script></script><td srce" ID/></form><form claslicate">' ),
 			'FORM with TABLE CAPTION'                   => array( '<form><table><caption></form><form >' ),
+			'XMP rawtext with entity-looking text'      => array( '<xmp>apples > oranges &amp; <</xmp>' ),
 			'Short malformed G attribute C'             => array( '<g c/=>' ),
 			'Short malformed G attribute S'             => array( '<g s/=>' ),
 			'Duplicate SRC boundary'                    => array( '<g src=""g src="">' ),
@@ -630,6 +982,161 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 			'NULL byte in SVG child tag'                => array( "<svg><l\x00 '>" ),
 			'NULL byte before slash in SVG child tag'   => array( "<svg><l\x00/r>" ),
 		);
+	}
+
+	/**
+	 * Ensures that decoded carriage returns are serialized as character references.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_decoded_carriage_returns
+	 *
+	 * @param string $input    HTML input containing a decoded carriage return.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_normalize_serializes_decoded_carriage_returns_as_character_references( string $input, string $expected ) {
+		$normalized = WP_HTML_Processor::normalize( $input );
+
+		$this->assertSame( $expected, $normalized, 'Should have serialized the carriage return as a character reference.' );
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $normalized ),
+			'Normalizing already-normalized HTML should not change the serialized carriage return.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_decoded_carriage_returns() {
+		return array(
+			'Regular text'    => array( '<p>a&#13;b</p>', '<p>a&#13;b</p>' ),
+			'Regular text with non-canonical character reference' => array( '<p>a&#x0D;b</p>', '<p>a&#13;b</p>' ),
+			'RCDATA title'    => array( '<title>a&#13;b</title>', '<title>a&#13;b</title>' ),
+			'RCDATA textarea with leading-newline preservation' => array( '<textarea>a&#13;b</textarea>', "<textarea>\na&#13;b</textarea>" ),
+			'Attribute value' => array( '<p title="a&#13;b"></p>', '<p title="a&#13;b"></p>' ),
+			'Table text'      => array( '<table><tr><td>x&#13;</td></tr></table>', '<table><tbody><tr><td>x&#13;</td></tr></tbody></table>' ),
+			'Template text'   => array( '<template><p>a&#13;b</p></template>', '<template><p>a&#13;b</p></template>' ),
+		);
+	}
+
+	/**
+	 * Ensures that raw carriage returns in attribute values are serialized as line feeds.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_raw_attribute_carriage_returns
+	 *
+	 * @param string $input    HTML input containing raw carriage returns.
+	 * @param string $expected Expected normalized output.
+	 */
+	public function test_normalize_serializes_raw_attribute_carriage_returns_as_line_feeds( string $input, string $expected ) {
+		$normalized = WP_HTML_Processor::normalize( $input );
+
+		$this->assertSame( $expected, $normalized, 'Should have serialized raw attribute carriage returns as line feeds.' );
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $normalized ),
+			'Normalizing already-normalized HTML should not change raw attribute newlines.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_raw_attribute_carriage_returns() {
+		return array(
+			'Raw carriage return' => array( "<p title=\"a\rb\"></p>", "<p title=\"a\nb\"></p>" ),
+			'Raw CRLF pair'       => array( "<p title=\"a\r\nb\"></p>", "<p title=\"a\nb\"></p>" ),
+		);
+	}
+
+	/**
+	 * Ensures that raw carriage returns are normalized before class updates are serialized.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_serialize_token_normalizes_raw_class_carriage_returns_before_class_updates() {
+		$processor = WP_HTML_Processor::create_fragment( "<p class=\"a\rb\"></p>" );
+
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Should find the P element.' );
+
+		$processor->add_class( 'c' );
+
+		$serialized = $processor->serialize_token();
+		$this->assertSame(
+			"<p class=\"a\nb c\">",
+			$serialized,
+			'Should have serialized raw class carriage returns as line feeds before adding classes.'
+		);
+
+		$reparsed = WP_HTML_Processor::create_fragment( $serialized );
+		$this->assertTrue( $reparsed->next_tag( 'P' ), 'Should find the reparsed P element.' );
+		$this->assertSame( "a\nb c", $reparsed->get_attribute( 'class' ), 'The serialized class should parse back to the same value.' );
+	}
+
+	/**
+	 * Ensures rawtext element contents serialize without escaping:
+	 * character references do not decode inside SCRIPT and STYLE, so
+	 * escaping their contents or emitting `&#13;` there would corrupt them.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_rawtext_contents
+	 *
+	 * @param string $html HTML whose rawtext contents must serialize unchanged.
+	 */
+	public function test_normalize_preserves_rawtext_contents( string $html ) {
+		$this->assertSame(
+			$html,
+			WP_HTML_Processor::normalize( $html ),
+			'Should have serialized the rawtext contents unchanged.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_rawtext_contents() {
+		return array(
+			'SCRIPT with character references' => array( '<script>a&#13;&amp;b</script>' ),
+			'STYLE with character references'  => array( '<style>a&#13;&amp;b</style>' ),
+		);
+	}
+
+	/**
+	 * Ensures NULL bytes in attribute values set through the API serialize
+	 * as U+FFFD so that serialized output parses back to the same value.
+	 *
+	 * Browsers serialize the raw NULL byte in innerHTML, which does not
+	 * round-trip: re-parsing replaces it with U+FFFD. Serializing U+FFFD
+	 * directly is a benign deviation which keeps output idempotent, like
+	 * serializing decoded carriage returns as &#13;.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_serialize_token_replaces_null_bytes_in_enqueued_attribute_values() {
+		$processor = WP_HTML_Processor::create_fragment( '<p title="x"></p>' );
+
+		$this->assertTrue( $processor->next_tag( 'P' ), 'Should find the P element.' );
+		$this->assertTrue( $processor->set_attribute( 'title', "a\x00b" ), 'Should have set the attribute.' );
+
+		$serialized = $processor->serialize_token();
+		$this->assertSame(
+			"<p title=\"a\u{FFFD}b\">",
+			$serialized,
+			'Should have serialized the NULL byte as U+FFFD.'
+		);
+
+		$reparsed = WP_HTML_Processor::create_fragment( $serialized );
+		$this->assertTrue( $reparsed->next_tag( 'P' ), 'Should find the reparsed P element.' );
+		$this->assertSame( "a\u{FFFD}b", $reparsed->get_attribute( 'title' ), 'The serialized title should parse back to the same value.' );
 	}
 
 	/**

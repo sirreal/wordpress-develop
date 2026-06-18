@@ -62,6 +62,84 @@ class Tests_HtmlApi_WpHtmlDecoder extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that numeric character references for U+0000 decode to U+FFFD
+	 * while raw NULL bytes pass through the decoder untransformed.
+	 *
+	 * The tokenizer, not the decoder, is responsible for replacing raw NULL
+	 * bytes; in the Tag Processor that responsibility falls on the methods
+	 * which read values out of the input document.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_null_code_points
+	 *
+	 * @param string $raw_value     Raw attribute value.
+	 * @param string $decoded_value The expected decoded attribute value.
+	 */
+	public function test_null_code_points_in_attribute_values( string $raw_value, string $decoded_value ) {
+		$this->assertSame(
+			$decoded_value,
+			WP_HTML_Decoder::decode_attribute( $raw_value ),
+			'Improperly decoded raw attribute value.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_null_code_points() {
+		return array(
+			'Decimal zero'                 => array( 'a&#0;b', "a\u{FFFD}b" ),
+			'Hexadecimal zero'             => array( 'a&#x0;b', "a\u{FFFD}b" ),
+			'Multiple zeros'               => array( 'a&#0000;b', "a\u{FFFD}b" ),
+			'Raw NULL byte passes through' => array( "a\x00b", "a\x00b" ),
+		);
+	}
+
+	/**
+	 * Ensures that the ambiguous-follower check for character references
+	 * lacking a terminating semicolon treats only ASCII alphanumerics and
+	 * the equals sign as ambiguous, regardless of the process locale.
+	 *
+	 * `ctype_alnum()` classifies bytes 0x80 and above as alphanumeric under
+	 * UTF-8 locales, wrongly suppressing decodes whose follower is a
+	 * non-ASCII byte, such as U+FFFD produced by NULL-byte replacement.
+	 *
+	 * @ticket 65372
+	 *
+	 * @see https://html.spec.whatwg.org/#named-character-reference-state
+	 *
+	 * @dataProvider data_semicolon_less_references_with_followers
+	 *
+	 * @param string $raw_value     Raw attribute value.
+	 * @param string $decoded_value The expected decoded attribute value.
+	 */
+	public function test_semicolon_less_reference_followers( string $raw_value, string $decoded_value ) {
+		$this->assertSame(
+			$decoded_value,
+			WP_HTML_Decoder::decode_attribute( $raw_value ),
+			'Improperly decoded raw attribute value.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_semicolon_less_references_with_followers() {
+		return array(
+			'U+FFFD follower decodes'            => array( "x&amp\u{FFFD};y", "x&\u{FFFD};y" ),
+			'Non-ASCII follower decodes'         => array( "x&amp\u{E9}y", "x&\u{E9}y" ),
+			'ASCII letter follower is ambiguous' => array( 'x&ampzy', 'x&ampzy' ),
+			'ASCII digit follower is ambiguous'  => array( 'x&amp1y', 'x&amp1y' ),
+			'Equals sign follower is ambiguous'  => array( 'x&amp=y', 'x&amp=y' ),
+		);
+	}
+
+	/**
 	 * Ensures proper detection of attribute prefixes ignoring ASCII case.
 	 *
 	 * @ticket 61072

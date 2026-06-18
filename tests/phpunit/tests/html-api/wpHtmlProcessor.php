@@ -584,6 +584,38 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures a trailing slash in an unquoted attribute value does not close foreign content.
+	 *
+	 * @ticket 61576
+	 */
+	public function test_trailing_slash_in_unquoted_attribute_value_does_not_self_close_foreign_content() {
+		$processor = WP_HTML_Processor::create_fragment( '<math><mi disabled=abc/>text</math>' );
+
+		$this->assertTrue( $processor->next_tag( 'MI' ), 'Could not find MI tag: check test setup.' );
+		$this->assertSame(
+			'abc/',
+			$processor->get_attribute( 'disabled' ),
+			'Trailing slash in unquoted attribute value should belong to the attribute value.'
+		);
+		$this->assertFalse(
+			$processor->has_self_closing_flag(),
+			'Trailing slash in unquoted attribute value should not be interpreted as a self-closing flag.'
+		);
+		$this->assertTrue(
+			$processor->expects_closer(),
+			'MI with a trailing slash in an unquoted attribute value should still expect a closer.'
+		);
+
+		$this->assertTrue( $processor->next_token(), 'Could not find text following MI tag: check test setup.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the text node following the MI tag.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'MATH', 'MI', '#text' ),
+			$processor->get_breadcrumbs(),
+			'Text following the MI tag should remain inside the MI element.'
+		);
+	}
+
+	/**
 	 * Ensures that expects_closer works for void-like elements in foreign content.
 	 *
 	 * For example, `<svg><input>text` creates an `svg:input` that contains a text node.
@@ -852,6 +884,51 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that CDATA sections remain available inside SVG HTML integration points.
+	 *
+	 * @ticket 61576
+	 */
+	public function test_cdata_sections_in_svg_html_integration_points() {
+		$processor = WP_HTML_Processor::create_fragment(
+			'<svg><foreignObject><![CDATA[foo]]></foreignObject></svg>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( 'foreignObject' ),
+			'Failed to find "foreignObject" under test: check test setup.'
+		);
+
+		$this->assertSame(
+			'svg',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the "foreignObject" element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_token(),
+			'Failed to find expected CDATA section.'
+		);
+
+		$this->assertSame(
+			'#cdata-section',
+			$processor->get_token_name(),
+			"Should have found a CDATA section but found {$processor->get_token_name()} instead."
+		);
+
+		$this->assertSame(
+			'svg',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the CDATA section.'
+		);
+
+		$this->assertSame(
+			'foo',
+			$processor->get_modifiable_text(),
+			'Found incorrect CDATA content.'
+		);
+	}
+
+	/**
 	 * Ensures that the processor correctly adjusts the namespace
 	 * for elements inside MathML integration points.
 	 *
@@ -908,6 +985,51 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 			'html',
 			$processor->get_namespace(),
 			'Found the wrong namespace for the transformed "IMAGE"/"IMG" element.'
+		);
+	}
+
+	/**
+	 * Ensures that CDATA sections remain available inside MathML HTML integration points.
+	 *
+	 * @ticket 61576
+	 */
+	public function test_cdata_sections_in_mathml_html_integration_points() {
+		$processor = WP_HTML_Processor::create_fragment(
+			'<math><annotation-xml encoding="text/html"><![CDATA[x]]></annotation-xml></math>'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag( 'ANNOTATION-XML' ),
+			'Failed to find "annotation-xml" under test: check test setup.'
+		);
+
+		$this->assertSame(
+			'math',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the "annotation-xml" element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_token(),
+			'Failed to find expected CDATA section.'
+		);
+
+		$this->assertSame(
+			'#cdata-section',
+			$processor->get_token_name(),
+			"Should have found a CDATA section but found {$processor->get_token_name()} instead."
+		);
+
+		$this->assertSame(
+			'math',
+			$processor->get_namespace(),
+			'Found the wrong namespace for the CDATA section.'
+		);
+
+		$this->assertSame(
+			'x',
+			$processor->get_modifiable_text(),
+			'Found incorrect CDATA content.'
 		);
 	}
 
