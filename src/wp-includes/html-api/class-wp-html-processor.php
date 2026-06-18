@@ -2853,7 +2853,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 							break 2;
 
 						case 'A':
-							$this->run_adoption_agency_algorithm();
+							$adoption_agency_result = $this->run_adoption_agency_algorithm();
+							if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
+								$this->in_body_any_other_end_tag();
+							}
 							$this->state->active_formatting_elements->remove_node( $item );
 							$this->state->stack_of_open_elements->remove_node( $item );
 							break 2;
@@ -2894,7 +2897,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				if ( $this->state->stack_of_open_elements->has_element_in_scope( 'NOBR' ) ) {
 					// Parse error.
-					$this->run_adoption_agency_algorithm();
+					$adoption_agency_result = $this->run_adoption_agency_algorithm();
+					if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
+						$this->in_body_any_other_end_tag();
+					}
 					$this->reconstruct_active_formatting_elements();
 				}
 
@@ -2920,7 +2926,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '-STRONG':
 			case '-TT':
 			case '-U':
-				$this->run_adoption_agency_algorithm();
+				$adoption_agency_result = $this->run_adoption_agency_algorithm();
+				if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
+					$this->in_body_any_other_end_tag();
+				}
 				return true;
 
 			/*
@@ -3256,38 +3265,53 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			/*
 			 * > Any other end tag
 			 */
-
-			/*
-			 * Find the corresponding tag opener in the stack of open elements, if
-			 * it exists before reaching a special element, which provides a kind
-			 * of boundary in the stack. For example, a `</custom-tag>` should not
-			 * close anything beyond its containing `P` or `DIV` element.
-			 */
-			foreach ( $this->state->stack_of_open_elements->walk_up() as $node ) {
-				if ( 'html' === $node->namespace && $token_name === $node->node_name ) {
-					break;
-				}
-
-				if ( self::is_special( $node ) ) {
-					// This is a parse error, ignore the token.
-					return $this->step();
-				}
-			}
-
-			$this->generate_implied_end_tags( $token_name );
-			if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
-				// @todo Record parse error: this error doesn't impact parsing.
-			}
-
-			foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
-				$this->state->stack_of_open_elements->pop();
-				if ( $node === $item ) {
-					return true;
-				}
-			}
+			return $this->in_body_any_other_end_tag();
 		}
 
 		$this->bail( 'Should not have been able to reach end of IN BODY processing. Check HTML API code.' );
+		// This unnecessary return prevents tools from inaccurately reporting type errors.
+		return false;
+	}
+
+	/**
+	 * In body insertion mode's "any other end tag" logic can be invoked from different places
+	 * and may require additional processing.
+	 *
+	 * @return bool Whether an element was found.
+	 */
+	private function in_body_any_other_end_tag(): bool {
+		$token_name = $this->get_token_name();
+
+		/*
+		 * Find the corresponding tag opener in the stack of open elements, if
+		 * it exists before reaching a special element, which provides a kind
+		 * of boundary in the stack. For example, a `</custom-tag>` should not
+		 * close anything beyond its containing `P` or `DIV` element.
+		 */
+		foreach ( $this->state->stack_of_open_elements->walk_up() as $node ) {
+			if ( 'html' === $node->namespace && $token_name === $node->node_name ) {
+				break;
+			}
+
+			if ( self::is_special( $node ) ) {
+				// This is a parse error, ignore the token.
+				return $this->step();
+			}
+		}
+
+		$this->generate_implied_end_tags( $token_name );
+		if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
+			// @todo Record parse error: this error doesn't impact parsing.
+		}
+
+		foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
+			$this->state->stack_of_open_elements->pop();
+			if ( $node === $item ) {
+				return true;
+			}
+		}
+
+		$this->bail( 'Should not have been able to reach end of IN BODY "any other end tag" processing. Check HTML API code.' );
 		// This unnecessary return prevents tools from inaccurately reporting type errors.
 		return false;
 	}
@@ -6223,8 +6247,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
 	 *
 	 * @see https://html.spec.whatwg.org/#adoption-agency-algorithm
+	 *
+	 * @return 'act-as-any-other-end-tag'|null Return `'act-as-any-other-end-tag'` to "act as described in the 'any other end tag' entry above."
 	 */
-	private function run_adoption_agency_algorithm(): void {
+	private function run_adoption_agency_algorithm(): ?string {
 		$budget       = 1000;
 		$subject      = $this->get_tag();
 		$current_node = $this->state->stack_of_open_elements->current_node();
@@ -6236,13 +6262,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			! $this->state->active_formatting_elements->contains_node( $current_node )
 		) {
 			$this->state->stack_of_open_elements->pop();
-			return;
+			return null;
 		}
 
 		$outer_loop_counter = 0;
 		while ( $budget-- > 0 ) {
 			if ( $outer_loop_counter++ >= 8 ) {
-				return;
+				return null;
 			}
 
 			/*
@@ -6265,18 +6291,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
 			if ( null === $formatting_element ) {
-				$this->bail( 'Cannot run adoption agency when "any other end tag" is required.' );
+				return 'act-as-any-other-end-tag';
 			}
 
 			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
 			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
 				$this->state->active_formatting_elements->remove_node( $formatting_element );
-				return;
+				return null;
 			}
 
 			// > If formatting element is in the stack of open elements, but the element is not in scope, then this is a parse error; return.
 			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
-				return;
+				return null;
 			}
 
 			/*
@@ -6312,7 +6338,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 					if ( $formatting_element->bookmark_name === $item->bookmark_name ) {
 						$this->state->active_formatting_elements->remove_node( $formatting_element );
-						return;
+						return null;
 					}
 				}
 			}
