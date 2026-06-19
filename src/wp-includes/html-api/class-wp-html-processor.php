@@ -3256,38 +3256,55 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			/*
 			 * > Any other end tag
 			 */
-
-			/*
-			 * Find the corresponding tag opener in the stack of open elements, if
-			 * it exists before reaching a special element, which provides a kind
-			 * of boundary in the stack. For example, a `</custom-tag>` should not
-			 * close anything beyond its containing `P` or `DIV` element.
-			 */
-			foreach ( $this->state->stack_of_open_elements->walk_up() as $node ) {
-				if ( 'html' === $node->namespace && $token_name === $node->node_name ) {
-					break;
-				}
-
-				if ( self::is_special( $node ) ) {
-					// This is a parse error, ignore the token.
-					return $this->step();
-				}
-			}
-
-			$this->generate_implied_end_tags( $token_name );
-			if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
-				// @todo Record parse error: this error doesn't impact parsing.
-			}
-
-			foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
-				$this->state->stack_of_open_elements->pop();
-				if ( $node === $item ) {
-					return true;
-				}
-			}
+			return $this->in_body_any_other_end_tag();
 		}
 
 		$this->bail( 'Should not have been able to reach end of IN BODY processing. Check HTML API code.' );
+		// This unnecessary return prevents tools from inaccurately reporting type errors.
+		return false;
+	}
+
+	/**
+	 * In body insertion mode's "any other end tag" logic can be invoked from different places
+	 * and may require additional processing.
+	 *
+	 * @param $should_step bool Set to `false` to prevent advancing the parser in case the token
+	 *                          is ignored.
+	 * @return bool Whether an element was found.
+	 */
+	private function in_body_any_other_end_tag( bool $should_step = true ): bool {
+		$token_name = $this->get_token_name();
+
+		/*
+		 * Find the corresponding tag opener in the stack of open elements, if
+		 * it exists before reaching a special element, which provides a kind
+		 * of boundary in the stack. For example, a `</custom-tag>` should not
+		 * close anything beyond its containing `P` or `DIV` element.
+		 */
+		foreach ( $this->state->stack_of_open_elements->walk_up() as $node ) {
+			if ( 'html' === $node->namespace && $token_name === $node->node_name ) {
+				break;
+			}
+
+			if ( self::is_special( $node ) ) {
+				// This is a parse error, ignore the token.
+				return $should_step ? $this->step() : false;
+			}
+		}
+
+		$this->generate_implied_end_tags( $token_name );
+		if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
+			// @todo Record parse error: this error doesn't impact parsing.
+		}
+
+		foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
+			$this->state->stack_of_open_elements->pop();
+			if ( $node === $item ) {
+				return true;
+			}
+		}
+
+		$this->bail( 'Should not have been able to reach end of IN BODY "any other end tag" processing. Check HTML API code.' );
 		// This unnecessary return prevents tools from inaccurately reporting type errors.
 		return false;
 	}
@@ -6265,7 +6282,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
 			if ( null === $formatting_element ) {
-				$this->bail( 'Cannot run adoption agency when "any other end tag" is required.' );
+				/*
+				 * The Adoption Agency Algorithm is not responsible for advancing the parser state,
+				 * so `in_body_any_other_end_tag` is invoked with `$should_step = false` argument.
+				 * This algorithm will return to the context that called it, which is responsible
+				 * for advancing the parser.
+				 */
+				$this->in_body_any_other_end_tag( false );
+				return;
 			}
 
 			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
