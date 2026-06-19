@@ -2853,10 +2853,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 							break 2;
 
 						case 'A':
-							$adoption_agency_result = $this->run_adoption_agency_algorithm();
-							if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
-								$this->in_body_any_other_end_tag();
-							}
+							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
 							$this->state->stack_of_open_elements->remove_node( $item );
 							break 2;
@@ -2897,10 +2894,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				if ( $this->state->stack_of_open_elements->has_element_in_scope( 'NOBR' ) ) {
 					// Parse error.
-					$adoption_agency_result = $this->run_adoption_agency_algorithm();
-					if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
-						$this->in_body_any_other_end_tag();
-					}
+					$this->run_adoption_agency_algorithm();
 					$this->reconstruct_active_formatting_elements();
 				}
 
@@ -2926,10 +2920,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '-STRONG':
 			case '-TT':
 			case '-U':
-				$adoption_agency_result = $this->run_adoption_agency_algorithm();
-				if ( 'act-as-any-other-end-tag' === $adoption_agency_result ) {
-					$this->in_body_any_other_end_tag();
-				}
+				$this->run_adoption_agency_algorithm();
 				return true;
 
 			/*
@@ -6247,10 +6238,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
 	 *
 	 * @see https://html.spec.whatwg.org/#adoption-agency-algorithm
-	 *
-	 * @return 'act-as-any-other-end-tag'|null Return `'act-as-any-other-end-tag'` to "act as described in the 'any other end tag' entry above."
 	 */
-	private function run_adoption_agency_algorithm(): ?string {
+	private function run_adoption_agency_algorithm(): void {
 		$budget       = 1000;
 		$subject      = $this->get_tag();
 		$current_node = $this->state->stack_of_open_elements->current_node();
@@ -6262,13 +6251,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			! $this->state->active_formatting_elements->contains_node( $current_node )
 		) {
 			$this->state->stack_of_open_elements->pop();
-			return null;
+			return;
 		}
 
 		$outer_loop_counter = 0;
 		while ( $budget-- > 0 ) {
 			if ( $outer_loop_counter++ >= 8 ) {
-				return null;
+				return;
 			}
 
 			/*
@@ -6291,18 +6280,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
 			if ( null === $formatting_element ) {
-				return 'act-as-any-other-end-tag';
+				$this->in_body_any_other_end_tag();
+				return;
 			}
 
 			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
 			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
 				$this->state->active_formatting_elements->remove_node( $formatting_element );
-				return null;
+				return;
 			}
 
 			// > If formatting element is in the stack of open elements, but the element is not in scope, then this is a parse error; return.
 			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
-				return null;
+				return;
 			}
 
 			/*
@@ -6338,7 +6328,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 					if ( $formatting_element->bookmark_name === $item->bookmark_name ) {
 						$this->state->active_formatting_elements->remove_node( $formatting_element );
-						return null;
+						return;
 					}
 				}
 			}
