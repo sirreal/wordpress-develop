@@ -69,6 +69,10 @@ function build_visual_html_tree( string $html, ?string $fragment_context ): stri
 		$token_type = $processor->get_token_type();
 		$is_closer  = $processor->is_tag_closer();
 
+		if ( '#presumptuous-tag' === $token_type ) {
+			continue;
+		}
+
 		if ( $was_text && '#text' !== $token_name ) {
 			if ( '' !== $text_node ) {
 				$output .= "{$text_node}\"\n";
@@ -281,11 +285,16 @@ function build_visual_html_tree( string $html, ?string $fragment_context ): stri
 		}
 	}
 
-	if ( null !== $processor->get_unsupported_exception() ) {
-		throw $processor->get_unsupported_exception();
+	$unsupported_exception = $processor->get_unsupported_exception();
+	$ignored_presumptuous_tag_exception = null !== $unsupported_exception
+		&& '#presumptuous-tag' === $unsupported_exception->token_name
+		&& '</>' === $unsupported_exception->token
+		&& 'Content outside of HTML is unsupported.' === $unsupported_exception->getMessage();
+	if ( null !== $unsupported_exception && ! $ignored_presumptuous_tag_exception ) {
+		throw $unsupported_exception;
 	}
 
-	if ( null !== $processor->get_last_error() ) {
+	if ( ! $ignored_presumptuous_tag_exception && null !== $processor->get_last_error() ) {
 		throw new Exception( "Parser error: {$processor->get_last_error()}" );
 	}
 
