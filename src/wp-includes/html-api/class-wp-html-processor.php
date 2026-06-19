@@ -3268,9 +3268,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * In body insertion mode's "any other end tag" logic can be invoked from different places
 	 * and may require additional processing.
 	 *
+	 * @param $should_step bool Set to `false` to prevent advancing the parser in case the token
+	 *                          is ignored.
 	 * @return bool Whether an element was found.
 	 */
-	private function in_body_any_other_end_tag(): bool {
+	private function in_body_any_other_end_tag( bool $should_step = true ): bool {
 		$token_name = $this->get_token_name();
 
 		/*
@@ -3286,7 +3288,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			if ( self::is_special( $node ) ) {
 				// This is a parse error, ignore the token.
-				return $this->step();
+				return $should_step ? $this->step() : false;
 			}
 		}
 
@@ -6280,7 +6282,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
 			if ( null === $formatting_element ) {
-				$this->in_body_any_other_end_tag();
+				/*
+				 * The Adoption Agency Algorithm is not responsible for advancing the parser state,
+				 * so `in_body_any_other_end_tag` is invoked with `$should_step = false` argument.
+				 * This algorithm will return to the context that called it, which is responsible
+				 * for advancing the parser.
+				 */
+				$this->in_body_any_other_end_tag( false );
 				return;
 			}
 
