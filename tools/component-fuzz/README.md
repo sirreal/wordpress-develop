@@ -20,7 +20,8 @@ network requests, or a configured site.
 - `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
   unscheduling and rescheduling contracts.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
-  punycode views, invalid UTF-8, malformed address structure.
+  WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
+  malformed address structure, and boundary lengths.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
