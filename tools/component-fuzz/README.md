@@ -42,8 +42,8 @@ network requests, or a configured site.
   parsing, proxy decisions, redirect safety, URL validation, and relative URL
   resolution without live network requests.
 - `images`: image constraint and resize math, metadata dimension lookup,
-  responsive `srcset`/`sizes` generation, image tag attribute insertion, and
-  loading optimization attributes.
+  responsive `srcset`/`sizes` generation, attachment image helpers, image tag
+  attribute insertion, and loading optimization attributes.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,

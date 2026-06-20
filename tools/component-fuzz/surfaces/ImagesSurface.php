@@ -32,6 +32,7 @@ final class ImagesSurface {
 			$rows[] = self::check_srcset_and_sizes( $ctx );
 			$rows[] = self::check_image_tag_attributes( $ctx );
 			$rows[] = self::check_loading_optimization_attributes( $ctx );
+			$rows[] = self::check_attachment_helpers( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -54,8 +55,14 @@ final class ImagesSurface {
 				'wp_calculate_image_sizes',
 				'wp_calculate_image_srcset',
 				'wp_constrain_dimensions',
+				'wp_get_attachment_image',
+				'wp_get_attachment_image_sizes',
+				'wp_get_attachment_image_src',
+				'wp_get_attachment_image_srcset',
+				'wp_get_attachment_image_url',
 				'wp_get_loading_optimization_attributes',
 				'wp_image_add_srcset_and_sizes',
+				'wp_image_file_matches_image_meta',
 				'wp_image_src_get_dimensions',
 			) as $function
 		) {
@@ -289,12 +296,117 @@ final class ImagesSurface {
 		);
 	}
 
+	private static function check_attachment_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$attachment_id = 100000 + $ctx->iteration();
+		$meta          = self::image_meta( $ctx );
+		$src           = 'http://example.test/wp-content/uploads/2026/06/photo-600x400.jpg';
+		$full_src      = 'http://example.test/wp-content/uploads/2026/06/photo.jpg';
+
+		if ( class_exists( '\WP_Query' ) && ! isset( $GLOBALS['wp_query'] ) ) {
+			$GLOBALS['wp_query'] = new \WP_Query();
+		}
+
+		$source_filter = static function ( $image, int $id, $size ) use ( $attachment_id, $src, $full_src ) {
+			if ( $attachment_id !== $id ) {
+				return $image;
+			}
+
+			if ( 'medium' === $size ) {
+				return array( $src, 600, 400, true );
+			}
+
+			if ( 'full' === $size ) {
+				return array( $full_src, 1200, 800, false );
+			}
+
+			if ( is_array( $size ) ) {
+				return array( $src, (int) $size[0], (int) $size[1], true );
+			}
+
+			return $image;
+		};
+		$auto_sizes_filter = static fn() => false;
+
+		\add_filter( 'wp_get_attachment_image_src', $source_filter, 10, 3 );
+		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		try {
+			$image_src = \wp_get_attachment_image_src( $attachment_id, 'medium' );
+			$image_url = \wp_get_attachment_image_url( $attachment_id, 'medium' );
+			$srcset    = \wp_get_attachment_image_srcset( $attachment_id, 'medium', $meta );
+			$sizes     = \wp_get_attachment_image_sizes( $attachment_id, 'medium', $meta );
+			$html      = \wp_get_attachment_image(
+				$attachment_id,
+				'medium',
+				false,
+				array(
+					'alt'        => 'Fuzz <Alt>',
+					'loading'    => false,
+					'decoding'   => 'sync',
+					'data-extra' => 'raw " value',
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_get_attachment_image_src', $source_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		}
+
+		$full_match      = \wp_image_file_matches_image_meta( $full_src . '?ver=1', $meta, $attachment_id );
+		$thumbnail_match = \wp_image_file_matches_image_meta( '/var/www/wp-content/uploads/2026/06/photo-300x200.jpg', $meta, $attachment_id );
+		$original_match  = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/photo-original.jpg', $meta, $attachment_id );
+		$missing_match   = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/other.jpg', $meta, $attachment_id );
+
+		self::collect_failure(
+			$failures,
+			array( $src, 600, 400, true ) === $image_src
+				&& $src === $image_url
+				&& is_string( $srcset )
+				&& str_contains( $srcset, 'photo-300x200.jpg 300w' )
+				&& str_contains( $srcset, 'photo-600x400.jpg 600w' )
+				&& str_contains( $srcset, 'photo.jpg 1200w' )
+				&& '(max-width: 600px) 100vw, 600px' === $sizes
+				&& is_string( $html )
+				&& str_starts_with( $html, '<img ' )
+				&& str_contains( $html, 'src="' . esc_attr( $src ) . '"' )
+				&& str_contains( $html, 'width="600"' )
+				&& str_contains( $html, 'height="400"' )
+				&& str_contains( $html, 'alt="Fuzz &lt;Alt&gt;"' )
+				&& str_contains( $html, 'decoding="sync"' )
+				&& str_contains( $html, 'data-extra="raw &quot; value"' )
+				&& ! str_contains( $html, ' loading=' )
+				&& true === $full_match
+				&& true === $thumbnail_match
+				&& true === $original_match
+				&& false === $missing_match,
+			'wp_get_attachment_image helpers and image-meta matching agree',
+			array(
+				'imageSrc'       => $image_src,
+				'imageUrl'       => $image_url,
+				'srcset'         => $srcset,
+				'sizes'          => $sizes,
+				'html'           => self::describe_string( $html ),
+				'fullMatch'      => $full_match,
+				'thumbnailMatch' => $thumbnail_match,
+				'originalMatch'  => $original_match,
+				'missingMatch'   => $missing_match,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'images.attachment.helpers-meta-agreement',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function image_meta( \ComponentFuzz\FuzzContext $ctx ): array {
 		unset( $ctx );
 		return array(
 			'width'  => 1200,
 			'height' => 800,
 			'file'   => '2026/06/photo.jpg',
+			'original_image' => 'photo-original.jpg',
 			'sizes'  => array(
 				'thumbnail' => array(
 					'file'      => 'photo-300x200.jpg',
