@@ -180,6 +180,9 @@ final class WpBootstrap {
 			'wp-includes/rest-api.php',
 			'wp-includes/class-phpass.php',
 			'wp-includes/pluggable.php',
+			'wp-admin/includes/file.php',
+			'wp-admin/includes/class-wp-filesystem-base.php',
+			'wp-admin/includes/class-wp-filesystem-direct.php',
 		);
 
 		foreach ( $files as $file ) {

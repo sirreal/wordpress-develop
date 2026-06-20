@@ -21,6 +21,8 @@ network requests, or a configured site.
   unscheduling and rescheduling contracts.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   punycode views, invalid UTF-8, malformed address structure.
+- `filesystem`: path normalization and joining, file validation classes,
+  filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
