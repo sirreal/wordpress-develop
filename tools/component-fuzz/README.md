@@ -13,6 +13,8 @@ network requests, or a configured site.
 
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
+- `blocks`: block type, style, pattern, bindings, and supports registries,
+  including dynamic block attribute preparation and wrapper attribute merging.
 - `capabilities`: role registry mutations, numeric and explicit capability
   grants, role filters, `WP_User` role/direct cap aggregation, and cheap
   `map_meta_cap()` mappings.
