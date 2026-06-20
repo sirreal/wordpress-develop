@@ -559,8 +559,8 @@ final class StateSurface {
 		$key1    = self::key( $ctx, 'prime-one' );
 		$key2    = self::key( $ctx, 'prime-two' );
 		$missing = self::key( $ctx, 'prime-missing' );
-		$value1  = self::wrapped_value( 'prime-one', self::value( $ctx->fork( 'prime-one' ) ) );
-		$value2  = self::wrapped_value( 'prime-two', self::value( $ctx->fork( 'prime-two' ) ) );
+		$value1  = self::wrapped_value( 'prime-one', array( 'stable' => 'one', 'truthy' => 1 ) );
+		$value2  = self::wrapped_value( 'prime-two', array( 'stable' => 'two', 'truthy' => true ) );
 
 		add_option( $key1, $value1, '', false );
 		add_option( $key2, $value2, '', false );
