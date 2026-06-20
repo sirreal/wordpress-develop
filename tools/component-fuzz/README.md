@@ -24,6 +24,9 @@ network requests, or a configured site.
   malformed address structure, and boundary lengths.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
+- `http`: synthetic HTTP response arrays, response objects, header/cookie
+  parsing, proxy decisions, redirect safety, URL validation, and relative URL
+  resolution without live network requests.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,

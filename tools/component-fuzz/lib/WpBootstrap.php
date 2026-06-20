@@ -126,6 +126,8 @@ final class WpBootstrap {
 			'wp-includes/script-loader.php',
 			'wp-includes/class-wp-script-modules.php',
 			'wp-includes/script-modules.php',
+			'wp-includes/class-wp-http-cookie.php',
+			'wp-includes/class-wp-http-proxy.php',
 			'wp-includes/class-wp-http.php',
 			'wp-includes/formatting.php',
 			'wp-includes/pomo/mo.php',
