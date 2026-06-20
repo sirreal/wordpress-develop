@@ -25,6 +25,8 @@ network requests, or a configured site.
   nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, protocol filtering, safe CSS, attribute parsing,
   no-HTML filtering, strict/custom policy monotonicity.
+- `l10n`: translation fallbacks, escaped translation helpers, plural selection,
+  textdomain load/unload state, locale determination, localized numbers/dates.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
 - `network-media`: URL parsing/sanitization/validation, path normalization,

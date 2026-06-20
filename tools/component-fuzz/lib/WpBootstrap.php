@@ -9,8 +9,6 @@ final class WpBootstrap {
 			return;
 		}
 
-		require_once __DIR__ . '/wp-stubs.php';
-
 		$root = repo_root();
 		$src  = $root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
 
@@ -22,6 +20,9 @@ final class WpBootstrap {
 		}
 		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
 			define( 'WP_CONTENT_DIR', ABSPATH . 'wp-content' );
+		}
+		if ( ! defined( 'WP_LANG_DIR' ) ) {
+			define( 'WP_LANG_DIR', WP_CONTENT_DIR . '/languages' );
 		}
 		if ( ! defined( 'WP_CONTENT_URL' ) ) {
 			define( 'WP_CONTENT_URL', 'http://example.test/wp-content' );
@@ -123,6 +124,16 @@ final class WpBootstrap {
 			'wp-includes/script-modules.php',
 			'wp-includes/class-wp-http.php',
 			'wp-includes/formatting.php',
+			'wp-includes/pomo/mo.php',
+			'wp-includes/l10n/class-wp-translation-controller.php',
+			'wp-includes/l10n/class-wp-translations.php',
+			'wp-includes/l10n/class-wp-translation-file.php',
+			'wp-includes/l10n/class-wp-translation-file-mo.php',
+			'wp-includes/l10n/class-wp-translation-file-php.php',
+			'wp-includes/l10n.php',
+			'wp-includes/class-wp-textdomain-registry.php',
+			'wp-includes/class-wp-locale.php',
+			'wp-includes/class-wp-locale-switcher.php',
 			'wp-includes/http.php',
 			'wp-includes/class-wp-token-map.php',
 			'wp-includes/html-api/html5-named-character-references.php',
@@ -174,8 +185,19 @@ final class WpBootstrap {
 			}
 		}
 
+		require_once __DIR__ . '/wp-stubs.php';
+
 		if ( function_exists( 'wp_cache_init' ) && ! isset( $GLOBALS['wp_object_cache'] ) ) {
 			wp_cache_init();
+		}
+
+		if ( class_exists( 'WP_Textdomain_Registry' ) && ! isset( $GLOBALS['wp_textdomain_registry'] ) ) {
+			$GLOBALS['wp_textdomain_registry'] = new \WP_Textdomain_Registry();
+			$GLOBALS['wp_textdomain_registry']->init();
+		}
+
+		if ( class_exists( 'WP_Locale' ) && ! isset( $GLOBALS['wp_locale'] ) ) {
+			$GLOBALS['wp_locale'] = new \WP_Locale();
 		}
 
 		self::$loaded = true;
