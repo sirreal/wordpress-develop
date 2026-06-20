@@ -90,7 +90,7 @@ final class SurfaceRunner {
 	}
 
 	private function run_surface_case( string $class, FuzzContext $ctx ): array {
-		$previous = set_error_handler(
+		set_error_handler(
 			static function ( int $severity, string $message, string $file, int $line ): bool {
 				if ( error_reporting() & $severity ) {
 					throw new \ErrorException( $message, 0, $severity, $file, $line );
@@ -107,9 +107,6 @@ final class SurfaceRunner {
 			);
 		} finally {
 			restore_error_handler();
-			if ( null !== $previous ) {
-				set_error_handler( $previous );
-			}
 		}
 
 		if ( ! is_array( $rows ) ) {
@@ -256,18 +253,23 @@ final class SurfaceRunner {
 			}
 		}
 
-		foreach ( array_merge( $result['skips'] ?? array(), $result['skipped'] ?? array() ) as $skip ) {
-			$rows[] = array(
-				'ok'        => true,
-				'status'    => 'skipped',
-				'surface'   => $surface,
-				'invariant' => is_array( $skip ) ? (string) ( $skip['name'] ?? $surface . '.skip' ) : (string) $skip,
-				'seed'      => $seed,
-				'iteration' => $ctx->iteration(),
-				'data'      => array(
-					'reason' => is_array( $skip ) ? ( $skip['reason'] ?? $skip ) : $skip,
-				),
-			);
+		foreach ( array( 'skips', 'skipped' ) as $skip_key ) {
+			foreach ( $result[ $skip_key ] ?? array() as $name => $skip ) {
+				$invariant = is_array( $skip ) ? (string) ( $skip['name'] ?? $surface . '.skip' ) : ( is_string( $name ) ? $name : (string) $skip );
+				$reason    = is_array( $skip ) ? ( $skip['reason'] ?? $skip ) : $skip;
+
+				$rows[] = array(
+					'ok'        => true,
+					'status'    => 'skipped',
+					'surface'   => $surface,
+					'invariant' => $invariant,
+					'seed'      => $seed,
+					'iteration' => $ctx->iteration(),
+					'data'      => array(
+						'reason' => $reason,
+					),
+				);
+			}
 		}
 
 		return $rows;

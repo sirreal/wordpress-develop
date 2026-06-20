@@ -97,7 +97,12 @@ final class FuzzContext {
 				$this->identifier( 3, 12 ) . '.test',
 			)
 		);
-		$path   = '/' . implode( '/', array_map( fn() => rawurlencode( $this->text( 0, 10 ) ), range( 1, $this->int( 0, 3 ) ) ) );
+		$segments = array();
+		$count    = $this->int( 0, 3 );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$segments[] = rawurlencode( $this->text( 0, 10 ) );
+		}
+		$path   = '/' . implode( '/', $segments );
 		$query  = $this->bool() ? '?q=' . rawurlencode( $this->text( 0, 16 ) ) : '';
 		$prefix = '' === $scheme ? '' : $scheme . ':';
 
@@ -134,7 +139,8 @@ final class FuzzContext {
 
 			$tag = $this->choice( $tags );
 			$out .= '<' . $tag;
-			foreach ( range( 1, $this->int( 0, 4 ) ) as $_ ) {
+			$attribute_count = $this->int( 0, 4 );
+			for ( $j = 0; $j < $attribute_count; $j++ ) {
 				$name  = $this->choice( array( 'href', 'src', 'style', 'class', 'id', 'onclick', 'data-x', $this->identifier( 1, 10 ) ) );
 				$value = 'href' === $name || 'src' === $name ? $this->url() : $this->text( 0, 24 );
 				$out  .= ' ' . $name . '="' . str_replace( '"', '&quot;', $value ) . '"';
@@ -176,14 +182,16 @@ final class FuzzContext {
 		}
 		if ( 'array' === $type ) {
 			$out = array();
-			foreach ( range( 1, $this->int( 0, 4 ) ) as $_ ) {
+			$count = $this->int( 0, 4 );
+			for ( $i = 0; $i < $count; $i++ ) {
 				$out[] = $this->jsonValue( $depth + 1 );
 			}
 			return $out;
 		}
 
 		$out = array();
-		foreach ( range( 1, $this->int( 0, 4 ) ) as $_ ) {
+		$count = $this->int( 0, 4 );
+		for ( $i = 0; $i < $count; $i++ ) {
 			$out[ $this->identifier( 1, 8 ) ] = $this->jsonValue( $depth + 1 );
 		}
 		return $out;

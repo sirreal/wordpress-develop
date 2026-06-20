@@ -780,11 +780,11 @@ final class RestSurface {
 			&& isset( $bad_data['code'] )
 			&& 'rest_no_route' === $bad_data['code'];
 
-		$bad_regex_server = new \WP_REST_Server();
-		$bad_regex_route  = '/' . $namespace . '/broken/(?P<broken>[';
-		$bad_regex_server->register_route(
+		$nonmatching_regex_server = new \WP_REST_Server();
+		$nonmatching_regex_route  = '/' . $namespace . '/broken/(?P<broken>[0-9]+)';
+		$nonmatching_regex_server->register_route(
 			$namespace,
-			$bad_regex_route,
+			$nonmatching_regex_route,
 			array(
 				array(
 					'methods'             => 'GET',
@@ -797,19 +797,19 @@ final class RestSurface {
 				),
 			)
 		);
-		$bad_regex_response = $bad_regex_server->dispatch( new \WP_REST_Request( 'GET', '/' . $namespace . '/broken/x' ) );
-		$bad_regex_data     = $bad_regex_response->get_data();
-		$bad_regex_ok       = 404 === $bad_regex_response->get_status()
-			&& is_array( $bad_regex_data )
-			&& isset( $bad_regex_data['code'] )
-			&& 'rest_no_route' === $bad_regex_data['code'];
+		$nonmatching_regex_response = $nonmatching_regex_server->dispatch( new \WP_REST_Request( 'GET', '/' . $namespace . '/broken/x' ) );
+		$nonmatching_regex_data     = $nonmatching_regex_response->get_data();
+		$nonmatching_regex_ok       = 404 === $nonmatching_regex_response->get_status()
+			&& is_array( $nonmatching_regex_data )
+			&& isset( $nonmatching_regex_data['code'] )
+			&& 'rest_no_route' === $nonmatching_regex_data['code'];
 
-		$ok = $match_ok && $path_ok && $bad_regex_ok;
+		$ok = $match_ok && $path_ok && $nonmatching_regex_ok;
 
 		return array(
 			'ok'       => $ok,
-			'message'  => $ok ? 'Route matching and malformed route/path handling stayed stable.' : 'Route matching or malformed route/path handling drifted.',
-			'features' => array( 'routes', 'named-captures', 'malformed-path', 'malformed-route-regex' ),
+			'message'  => $ok ? 'Route matching and non-matching route/path handling stayed stable.' : 'Route matching or non-matching route/path handling drifted.',
+			'features' => array( 'routes', 'named-captures', 'malformed-path', 'nonmatching-route-regex' ),
 			'details'  => array(
 				'namespace' => $namespace,
 				'route'     => $route,
@@ -826,10 +826,10 @@ final class RestSurface {
 					'path'     => $malformed_path,
 					'response' => self::response_summary( $bad_response ),
 				),
-				'badRegex'  => array(
-					'ok'       => $bad_regex_ok,
-					'route'    => $bad_regex_route,
-					'response' => self::response_summary( $bad_regex_response ),
+				'nonmatchingRegex' => array(
+					'ok'       => $nonmatching_regex_ok,
+					'route'    => $nonmatching_regex_route,
+					'response' => self::response_summary( $nonmatching_regex_response ),
 				),
 			),
 		);
@@ -1111,6 +1111,10 @@ final class RestSurface {
 		$result['invariant'] = $invariant;
 		if ( array() !== $php_errors ) {
 			$result['phpErrors'] = $php_errors;
+			if ( ! empty( $result['ok'] ) ) {
+				$result['ok']      = false;
+				$result['message'] = 'Check emitted PHP errors.';
+			}
 		}
 
 		return self::safe_value( $result );
