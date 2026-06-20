@@ -35,6 +35,8 @@ network requests, or a configured site.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, entity normalization, colors, sizes,
   time strings, UTF-8 helpers, and accent removal.
+- `html-api`: HTML tag and tree processor updates, normalization idempotence,
+  breadcrumbs, token walking, and modifiable text escaping.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie
   parsing, proxy decisions, redirect safety, URL validation, and relative URL
   resolution without live network requests.

@@ -33,6 +33,7 @@ $required_functions = array(
 );
 
 $required_classes = array(
+	'WP_HTML_Processor',
 	'WP_HTML_Tag_Processor',
 	'WP_Block_Parser',
 	'WP_REST_Request',
@@ -85,4 +86,3 @@ if ( ! wp_check_password( 'component-fuzz', $hash ) ) {
 }
 
 fwrite( STDOUT, "component-fuzz bootstrap smoke passed\n" );
-
