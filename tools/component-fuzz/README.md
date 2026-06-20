@@ -50,6 +50,9 @@ network requests, or a configured site.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.
+- `security`: salts and HMACs, nonce generation/verification, nonce URLs and
+  hidden fields, admin/ajax referer paths, synthetic auth cookies and session
+  tokens, redirect sanitization, and safe redirect filters.
 - `state`: object cache groups and multi-operations, option and transient APIs
   backed by the no-DB stub, filters, serialization, JSON, and value helpers.
 - `style`: style engine serialization, CSS declaration filtering, theme.json

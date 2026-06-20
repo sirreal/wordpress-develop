@@ -42,6 +42,39 @@ final class WpBootstrap {
 		if ( ! defined( 'COOKIEHASH' ) ) {
 			define( 'COOKIEHASH', 'component_fuzz' );
 		}
+		if ( ! defined( 'USER_COOKIE' ) ) {
+			define( 'USER_COOKIE', 'wordpressuser_' . COOKIEHASH );
+		}
+		if ( ! defined( 'PASS_COOKIE' ) ) {
+			define( 'PASS_COOKIE', 'wordpresspass_' . COOKIEHASH );
+		}
+		if ( ! defined( 'AUTH_COOKIE' ) ) {
+			define( 'AUTH_COOKIE', 'wordpress_' . COOKIEHASH );
+		}
+		if ( ! defined( 'SECURE_AUTH_COOKIE' ) ) {
+			define( 'SECURE_AUTH_COOKIE', 'wordpress_sec_' . COOKIEHASH );
+		}
+		if ( ! defined( 'LOGGED_IN_COOKIE' ) ) {
+			define( 'LOGGED_IN_COOKIE', 'wordpress_logged_in_' . COOKIEHASH );
+		}
+		if ( ! defined( 'TEST_COOKIE' ) ) {
+			define( 'TEST_COOKIE', 'wordpress_test_cookie' );
+		}
+		if ( ! defined( 'COOKIEPATH' ) ) {
+			define( 'COOKIEPATH', '/' );
+		}
+		if ( ! defined( 'SITECOOKIEPATH' ) ) {
+			define( 'SITECOOKIEPATH', '/' );
+		}
+		if ( ! defined( 'ADMIN_COOKIE_PATH' ) ) {
+			define( 'ADMIN_COOKIE_PATH', SITECOOKIEPATH . 'wp-admin' );
+		}
+		if ( ! defined( 'PLUGINS_COOKIE_PATH' ) ) {
+			define( 'PLUGINS_COOKIE_PATH', '/wp-content/plugins' );
+		}
+		if ( ! defined( 'COOKIE_DOMAIN' ) ) {
+			define( 'COOKIE_DOMAIN', '' );
+		}
 		if ( ! defined( 'OBJECT' ) ) {
 			define( 'OBJECT', 'OBJECT' );
 		}
@@ -66,6 +99,9 @@ final class WpBootstrap {
 		if ( ! defined( 'NONCE_KEY' ) ) {
 			define( 'NONCE_KEY', 'component-fuzz-nonce-key' );
 		}
+		if ( ! defined( 'SECRET_KEY' ) ) {
+			define( 'SECRET_KEY', 'component-fuzz-secret-key' );
+		}
 		if ( ! defined( 'AUTH_SALT' ) ) {
 			define( 'AUTH_SALT', 'component-fuzz-auth-salt' );
 		}
@@ -77,6 +113,9 @@ final class WpBootstrap {
 		}
 		if ( ! defined( 'NONCE_SALT' ) ) {
 			define( 'NONCE_SALT', 'component-fuzz-nonce-salt' );
+		}
+		if ( ! defined( 'SECRET_SALT' ) ) {
+			define( 'SECRET_SALT', 'component-fuzz-secret-salt' );
 		}
 		if ( ! defined( 'WP_DEBUG' ) ) {
 			define( 'WP_DEBUG', false );
@@ -217,6 +256,8 @@ final class WpBootstrap {
 			'wp-includes/meta.php',
 			'wp-includes/class-wp-post.php',
 			'wp-includes/capabilities.php',
+			'wp-includes/class-wp-roles.php',
+			'wp-includes/class-wp-role.php',
 			'wp-includes/class-wp-user.php',
 			'wp-includes/class-wp-comment.php',
 			'wp-includes/post.php',
@@ -240,6 +281,8 @@ final class WpBootstrap {
 			'wp-includes/rest-api/class-wp-rest-server.php',
 			'wp-includes/rest-api.php',
 			'wp-includes/class-phpass.php',
+			'wp-includes/class-wp-session-tokens.php',
+			'wp-includes/class-wp-user-meta-session-tokens.php',
 			'wp-includes/pluggable.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',
