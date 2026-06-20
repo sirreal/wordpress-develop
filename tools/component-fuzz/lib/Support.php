@@ -28,7 +28,7 @@ function ensure_dir( string $dir ): void {
 }
 
 function write_json_file( string $path, array $data ): void {
-	$json = json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+	$json = json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
 	if ( false === $json ) {
 		throw new \RuntimeException( 'Could not encode JSON: ' . json_last_error_msg() );
 	}
@@ -36,7 +36,7 @@ function write_json_file( string $path, array $data ): void {
 }
 
 function append_ndjson( string $path, array $data ): void {
-	$json = json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+	$json = json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
 	if ( false === $json ) {
 		throw new \RuntimeException( 'Could not encode NDJSON row: ' . json_last_error_msg() );
 	}
@@ -61,7 +61,7 @@ function preview_value( $value, int $limit = 180 ) {
 	}
 
 	if ( is_array( $value ) ) {
-		$json = json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		$json = json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
 		return false === $json ? '[array]' : preview_value( $json, $limit );
 	}
 
@@ -129,4 +129,3 @@ function option_bool( array $options, string $key, bool $default = false ): bool
 
 	return in_array( strtolower( (string) $value ), array( '1', 'true', 'yes', 'on' ), true );
 }
-

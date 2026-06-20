@@ -13,6 +13,8 @@ network requests, or a configured site.
 
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
+- `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
+  unscheduling and rescheduling contracts.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   punycode views, invalid UTF-8, malformed address structure.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
