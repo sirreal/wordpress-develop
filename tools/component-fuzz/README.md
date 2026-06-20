@@ -41,6 +41,8 @@ network requests, or a configured site.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.
+- `state`: object cache groups and multi-operations, option and transient APIs
+  backed by the no-DB stub, filters, serialization, JSON, and value helpers.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. Skips are recorded in `results.ndjson` with a reason and
