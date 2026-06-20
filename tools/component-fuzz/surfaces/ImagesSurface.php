@@ -120,7 +120,7 @@ final class ImagesSurface {
 				if ( false === $result ) {
 					self::collect_failure(
 						$failures,
-						self::resize_expected_false( $case ),
+						self::resize_expected_false( $case, $crop ),
 						"image_resize_dimensions false only for upscale/impossible case {$index}",
 						array(
 							'case' => $case,
@@ -358,7 +358,7 @@ final class ImagesSurface {
 		return $cases;
 	}
 
-	private static function resize_expected_false( array $case ): bool {
+	private static function resize_expected_false( array $case, $crop ): bool {
 		if ( $case['origW'] <= 0 || $case['origH'] <= 0 ) {
 			return true;
 		}
@@ -367,15 +367,50 @@ final class ImagesSurface {
 			return true;
 		}
 
-		if ( $case['destW'] <= 0 ) {
-			return $case['destH'] > $case['origH'];
+		if ( $case['destW'] <= 0 && $case['destH'] > $case['origH'] ) {
+			return true;
 		}
 
-		if ( $case['destH'] <= 0 ) {
-			return $case['destW'] > $case['origW'];
+		if ( $case['destH'] <= 0 && $case['destW'] > $case['origW'] ) {
+			return true;
 		}
 
-		return $case['destW'] > $case['origW'] && $case['destH'] > $case['origH'];
+		if ( $case['destW'] > $case['origW'] && $case['destH'] > $case['origH'] ) {
+			return true;
+		}
+
+		list( $new_w, $new_h ) = self::resize_target_dimensions( $case, $crop );
+		return self::fuzzy_number_match( $new_w, $case['origW'] )
+			&& self::fuzzy_number_match( $new_h, $case['origH'] );
+	}
+
+	private static function resize_target_dimensions( array $case, $crop ): array {
+		if ( $crop ) {
+			$aspect_ratio = $case['origW'] / $case['origH'];
+			$new_w        = min( $case['destW'], $case['origW'] );
+			$new_h        = min( $case['destH'], $case['origH'] );
+
+			if ( ! $new_w ) {
+				$new_w = (int) round( $new_h * $aspect_ratio );
+			}
+
+			if ( ! $new_h ) {
+				$new_h = (int) round( $new_w / $aspect_ratio );
+			}
+
+			return array( (int) $new_w, (int) $new_h );
+		}
+
+		$dimensions = \wp_constrain_dimensions( $case['origW'], $case['origH'], $case['destW'], $case['destH'] );
+		return array( (int) $dimensions[0], (int) $dimensions[1] );
+	}
+
+	private static function fuzzy_number_match( $expected, $actual ): bool {
+		if ( function_exists( 'wp_fuzzy_number_match' ) ) {
+			return \wp_fuzzy_number_match( $expected, $actual );
+		}
+
+		return abs( (float) $expected - (float) $actual ) <= 1;
 	}
 
 	private static function parse_srcset_widths( string $srcset ): array {

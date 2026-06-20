@@ -360,6 +360,9 @@ final class BlocksSurface {
 				&& str_contains( $wrapper, 'class="' )
 				&& str_contains( $wrapper, 'extra-class' )
 				&& str_contains( $wrapper, 'has-cfz-support-' . $case['token'] )
+				&& str_contains( $wrapper, 'style="' )
+				&& str_contains( $wrapper, 'border-width:' . $case['borderWidth'] . 'px' )
+				&& str_contains( $wrapper, 'color: red' )
 				&& str_contains( $wrapper, 'id="explicit-id"' )
 				&& str_contains( $wrapper, 'aria-label="Explicit label"' )
 				&& str_contains( $wrapper, 'data-cfz="' . esc_attr( $case['token'] ) . '"' )
@@ -505,6 +508,7 @@ final class BlocksSurface {
 			'globals'                => self::snapshot_globals( array( 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter' ) ),
 			'blockRegistry'          => $block_registry,
 			'blockTypes'             => $block_registry instanceof \WP_Block_Type_Registry ? self::get_object_property( $block_registry, 'registered_block_types' ) : null,
+			'blockTypeAttributes'    => $block_registry instanceof \WP_Block_Type_Registry ? self::snapshot_block_type_attributes( $block_registry ) : array(),
 			'styleRegistry'          => $style_registry,
 			'blockStyles'            => $style_registry instanceof \WP_Block_Styles_Registry ? self::get_object_property( $style_registry, 'registered_block_styles' ) : null,
 			'patternRegistry'        => $pattern_registry,
@@ -521,6 +525,7 @@ final class BlocksSurface {
 	private static function restore_state( array $snapshot ): void {
 		self::restore_globals( $snapshot['globals'] );
 		self::restore_singleton( 'WP_Block_Type_Registry', 'registered_block_types', $snapshot['blockRegistry'], $snapshot['blockTypes'] );
+		self::restore_block_type_attributes( $snapshot['blockTypeAttributes'] );
 		self::restore_singleton( 'WP_Block_Styles_Registry', 'registered_block_styles', $snapshot['styleRegistry'], $snapshot['blockStyles'] );
 		self::restore_singleton( 'WP_Block_Bindings_Registry', 'sources', $snapshot['bindingRegistry'], $snapshot['bindingSources'] );
 
@@ -539,6 +544,28 @@ final class BlocksSurface {
 			self::set_static_property( 'WP_Block_Supports', 'instance', null );
 		}
 		self::set_static_property( 'WP_Block_Supports', 'block_to_render', $snapshot['blockSupportRenderItem'] );
+	}
+
+	private static function snapshot_block_type_attributes( \WP_Block_Type_Registry $registry ): array {
+		$attributes = array();
+		foreach ( $registry->get_all_registered() as $name => $block_type ) {
+			if ( $block_type instanceof \WP_Block_Type ) {
+				$attributes[ $name ] = array(
+					'blockType'  => $block_type,
+					'attributes' => self::clone_value( $block_type->attributes ),
+				);
+			}
+		}
+
+		return $attributes;
+	}
+
+	private static function restore_block_type_attributes( array $attributes ): void {
+		foreach ( $attributes as $entry ) {
+			if ( isset( $entry['blockType'] ) && $entry['blockType'] instanceof \WP_Block_Type ) {
+				$entry['blockType']->attributes = $entry['attributes'];
+			}
+		}
 	}
 
 	private static function restore_singleton( string $class, string $property, $instance, $value ): void {
@@ -595,6 +622,18 @@ final class BlocksSurface {
 	private static function set_object_property( object $object, string $property, $value ): void {
 		$reflection = new \ReflectionProperty( $object, $property );
 		$reflection->setValue( $object, $value );
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
 	}
 
 	private static function describe_throwable( \Throwable $e ): array {
