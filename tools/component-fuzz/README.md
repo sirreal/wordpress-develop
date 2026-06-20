@@ -22,6 +22,9 @@ network requests, or a configured site.
   type partitioning, comment classes, email links, and comment cookies.
 - `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
   unscheduling and rescheduling contracts.
+- `discovery`: robots meta directives, sitemap provider registration, sitemap
+  URL/index expansion, escaped sitemap XML rendering, and sitemap max-URL
+  filters without DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
   malformed address structure, and boundary lengths.
