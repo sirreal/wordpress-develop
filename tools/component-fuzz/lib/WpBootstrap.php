@@ -82,6 +82,7 @@ final class WpBootstrap {
 			'wp-includes/compat.php',
 			'wp-includes/compat-utf8.php',
 			'wp-includes/utf8.php',
+			'wp-includes/class-wp-email-address.php',
 			'wp-includes/class-wp-error.php',
 			'wp-includes/class-wp-http-response.php',
 			'wp-includes/plugin.php',
