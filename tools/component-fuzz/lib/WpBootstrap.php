@@ -169,6 +169,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-block-parser-frame.php',
 			'wp-includes/class-wp-block-parser.php',
 			'wp-includes/blocks.php',
+			'wp-includes/class-wp-taxonomy.php',
+			'wp-includes/class-wp-term.php',
 			'wp-includes/class-wp-theme.php',
 			'wp-includes/theme.php',
 			'wp-includes/class-wp-theme-json-schema.php',
