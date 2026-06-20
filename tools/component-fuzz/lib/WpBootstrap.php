@@ -108,6 +108,30 @@ final class WpBootstrap {
 		if ( ! defined( 'YEAR_IN_SECONDS' ) ) {
 			define( 'YEAR_IN_SECONDS', 365 * DAY_IN_SECONDS );
 		}
+		if ( ! defined( 'KB_IN_BYTES' ) ) {
+			define( 'KB_IN_BYTES', 1024 );
+		}
+		if ( ! defined( 'MB_IN_BYTES' ) ) {
+			define( 'MB_IN_BYTES', 1024 * KB_IN_BYTES );
+		}
+		if ( ! defined( 'GB_IN_BYTES' ) ) {
+			define( 'GB_IN_BYTES', 1024 * MB_IN_BYTES );
+		}
+		if ( ! defined( 'TB_IN_BYTES' ) ) {
+			define( 'TB_IN_BYTES', 1024 * GB_IN_BYTES );
+		}
+		if ( ! defined( 'PB_IN_BYTES' ) ) {
+			define( 'PB_IN_BYTES', 1024 * TB_IN_BYTES );
+		}
+		if ( ! defined( 'EB_IN_BYTES' ) ) {
+			define( 'EB_IN_BYTES', 1024 * PB_IN_BYTES );
+		}
+		if ( ! defined( 'ZB_IN_BYTES' ) ) {
+			define( 'ZB_IN_BYTES', 1024 * EB_IN_BYTES );
+		}
+		if ( ! defined( 'YB_IN_BYTES' ) ) {
+			define( 'YB_IN_BYTES', 1024 * ZB_IN_BYTES );
+		}
 		if ( ! defined( 'WP_CRON_LOCK_TIMEOUT' ) ) {
 			define( 'WP_CRON_LOCK_TIMEOUT', MINUTE_IN_SECONDS );
 		}

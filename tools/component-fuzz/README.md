@@ -24,6 +24,9 @@ network requests, or a configured site.
   malformed address structure, and boundary lengths.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
+- `formatting`: escaping helpers, text sanitizers, whitespace normalization,
+  autop/shortcode cleanup, clickable text, entity normalization, colors, sizes,
+  time strings, UTF-8 helpers, and accent removal.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie
   parsing, proxy decisions, redirect safety, URL validation, and relative URL
   resolution without live network requests.
