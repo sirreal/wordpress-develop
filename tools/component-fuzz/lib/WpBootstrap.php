@@ -87,6 +87,9 @@ final class WpBootstrap {
 		if ( ! defined( 'WP_DEBUG_LOG' ) ) {
 			define( 'WP_DEBUG_LOG', false );
 		}
+		if ( ! defined( 'WP_DEVELOPMENT_MODE' ) ) {
+			define( 'WP_DEVELOPMENT_MODE', '' );
+		}
 		if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 			define( 'MINUTE_IN_SECONDS', 60 );
 		}
@@ -166,8 +169,26 @@ final class WpBootstrap {
 			'wp-includes/class-wp-block-parser-frame.php',
 			'wp-includes/class-wp-block-parser.php',
 			'wp-includes/blocks.php',
+			'wp-includes/class-wp-theme.php',
+			'wp-includes/theme.php',
+			'wp-includes/class-wp-theme-json-schema.php',
+			'wp-includes/class-wp-theme-json-data.php',
+			'wp-includes/class-wp-theme-json.php',
+			'wp-includes/class-wp-theme-json-resolver.php',
+			'wp-includes/global-styles-and-settings.php',
+			'wp-includes/style-engine.php',
+			'wp-includes/style-engine/class-wp-style-engine.php',
+			'wp-includes/style-engine/class-wp-style-engine-css-declarations.php',
+			'wp-includes/style-engine/class-wp-style-engine-css-rule.php',
+			'wp-includes/style-engine/class-wp-style-engine-css-rules-store.php',
+			'wp-includes/style-engine/class-wp-style-engine-processor.php',
+			'wp-includes/block-supports/utils.php',
+			'wp-includes/block-supports/typography.php',
+			'wp-includes/block-supports/layout.php',
+			'wp-includes/block-supports/block-style-variations.php',
 			'wp-includes/taxonomy.php',
 			'wp-includes/class-wp-post.php',
+			'wp-includes/capabilities.php',
 			'wp-includes/class-wp-user.php',
 			'wp-includes/class-wp-comment.php',
 			'wp-includes/post.php',

@@ -46,6 +46,9 @@ network requests, or a configured site.
   `url_to_postid()` paths.
 - `state`: object cache groups and multi-operations, option and transient APIs
   backed by the no-DB stub, filters, serialization, JSON, and value helpers.
+- `style`: style engine serialization, CSS declaration filtering, theme.json
+  schema/data merging, block style variation declarations, selectors, presets,
+  custom properties, and no-DB global style guards.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. Skips are recorded in `results.ndjson` with a reason and
