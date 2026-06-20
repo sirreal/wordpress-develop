@@ -228,6 +228,7 @@ final class WpBootstrap {
 			'wp-includes/media.php',
 			'wp-includes/class-wp-block-type.php',
 			'wp-includes/class-wp-block-type-registry.php',
+			'wp-includes/class-wp-block-pattern-categories-registry.php',
 			'wp-includes/class-wp-block-styles-registry.php',
 			'wp-includes/class-wp-block-patterns-registry.php',
 			'wp-includes/class-wp-block-metadata-registry.php',

@@ -26,6 +26,7 @@ final class BlocksSurface {
 			return array(
 				self::check_block_type_registry( $ctx ),
 				self::check_style_pattern_binding_registries( $ctx ),
+				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_supports( $ctx ),
 			);
 		} catch ( \Throwable $e ) {
@@ -48,6 +49,7 @@ final class BlocksSurface {
 			array(
 				'WP_Block_Bindings_Registry',
 				'WP_Block_Bindings_Source',
+				'WP_Block_Pattern_Categories_Registry',
 				'WP_Block_Patterns_Registry',
 				'WP_Block_Styles_Registry',
 				'WP_Block_Supports',
@@ -69,6 +71,7 @@ final class BlocksSurface {
 				'register_block_bindings_source',
 				'register_block_style',
 				'register_block_type',
+				'register_block_type_from_metadata',
 				'unregister_block_bindings_source',
 				'unregister_block_style',
 				'unregister_block_type',
@@ -282,6 +285,97 @@ final class BlocksSurface {
 		);
 	}
 
+	private static function check_metadata_and_pattern_categories( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures          = array();
+		$category_registry = \WP_Block_Pattern_Categories_Registry::get_instance();
+
+		foreach ( self::metadata_cases( $ctx->fork( 'metadata' ) ) as $index => $case ) {
+			$dir = self::write_metadata_block_files( $case );
+			try {
+				$block      = \register_block_type_from_metadata( $dir );
+				$prepared   = $block instanceof \WP_Block_Type
+					? $block->prepare_attributes_for_render( array( 'message' => array( 'invalid' ) ) )
+					: array();
+				$variations = $block instanceof \WP_Block_Type ? $block->get_variations() : array();
+
+				self::collect_failure(
+					$failures,
+					$block instanceof \WP_Block_Type
+						&& $case['name'] === $block->name
+						&& 3 === $block->api_version
+						&& $case['title'] === $block->title
+						&& $case['message'] === $prepared['message']
+						&& array( 'core/paragraph', 'core/image' ) === $block->allowed_blocks
+						&& array( 'postId', 'componentFuzz/context' ) === $block->uses_context
+						&& array( 'componentFuzz/message' => 'message' ) === $block->provides_context
+						&& array( 'core/post-content' => 'after' ) === $block->block_hooks
+						&& isset( $block->selectors['root'] )
+						&& is_array( $block->styles )
+						&& 1 === count( $block->styles )
+						&& is_array( $variations )
+						&& isset( $variations[0]['name'], $variations[0]['attributes']['message'] )
+						&& $case['variationName'] === $variations[0]['name']
+						&& $case['message'] === $variations[0]['attributes']['message'],
+					"register_block_type_from_metadata maps block.json fields case {$index}",
+					array(
+						'case'       => $case,
+						'prepared'   => $prepared,
+						'variations' => $variations,
+					)
+				);
+
+				if ( $block instanceof \WP_Block_Type ) {
+					\unregister_block_type( $case['name'] );
+				}
+			} finally {
+				self::remove_directory( $dir );
+			}
+
+			$category_registered = $category_registry->register(
+				$case['categoryName'],
+				array(
+					'label'       => $case['categoryLabel'],
+					'description' => $case['categoryDescription'],
+				)
+			);
+			$category            = $category_registry->get_registered( $case['categoryName'] );
+			$all_categories      = $category_registry->get_all_registered();
+			$category_removed    = $category_registry->unregister( $case['categoryName'] );
+			$category_names      = array();
+			foreach ( $all_categories as $entry ) {
+				if ( isset( $entry['name'] ) ) {
+					$category_names[] = $entry['name'];
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				true === $category_registered
+					&& is_array( $category )
+					&& $case['categoryName'] === $category['name']
+					&& $case['categoryLabel'] === $category['label']
+					&& in_array( $case['categoryName'], $category_names, true )
+					&& true === $category_removed
+					&& ! $category_registry->is_registered( $case['categoryName'] ),
+				"WP_Block_Pattern_Categories_Registry lifecycle case {$index}",
+				array(
+					'case'     => $case,
+					'category' => $category,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'blocks.metadata.pattern-categories',
+			array() === $failures,
+			array(
+				'cases'    => self::CASES,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_block_supports( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures     = array();
 		$supports_api = \WP_Block_Supports::get_instance();
@@ -465,6 +559,115 @@ final class BlocksSurface {
 		return $cases;
 	}
 
+	private static function metadata_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+		for ( $i = 0; $i < self::CASES; ++$i ) {
+			$case           = $ctx->fork( 'metadata-' . $i );
+			$name           = 'component-fuzz/' . self::slug( $case, 'metadata-block' );
+			$variation_name = self::slug( $case, 'variation' );
+			$cases[]        = array(
+				'name'                => $name,
+				'title'               => 'Metadata Block ' . $case->int( 1, 999 ),
+				'message'             => 'message-' . self::slug( $case, 'message' ),
+				'variationName'       => $variation_name,
+				'categoryName'        => 'component-fuzz-' . self::slug( $case, 'category' ),
+				'categoryLabel'       => 'Category ' . $case->int( 1, 999 ),
+				'categoryDescription' => 'Generated pattern category fuzz case.',
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function write_metadata_block_files( array $case ): string {
+		$dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'component-fuzz-blocks-' . getmypid() . '-' . substr( sha1( $case['name'] ), 0, 12 );
+		if ( is_dir( $dir ) ) {
+			self::remove_directory( $dir );
+		}
+		if ( ! mkdir( $dir, 0700, true ) && ! is_dir( $dir ) ) {
+			throw new \RuntimeException( 'Failed to create metadata block directory.' );
+		}
+
+		$metadata = array(
+			'apiVersion'      => 3,
+			'name'            => $case['name'],
+			'title'           => $case['title'],
+			'category'        => 'widgets',
+			'description'     => 'Generated metadata block fuzz case.',
+			'attributes'      => array(
+				'message' => array(
+					'type'    => 'string',
+					'default' => $case['message'],
+				),
+			),
+			'usesContext'     => array( 'postId', 'componentFuzz/context' ),
+			'providesContext' => array(
+				'componentFuzz/message' => 'message',
+			),
+			'selectors'       => array(
+				'root' => '.wp-block-component-fuzz-metadata',
+			),
+			'supports'        => array(
+				'align'     => array( 'wide', 'full' ),
+				'className' => true,
+			),
+			'styles'          => array(
+				array(
+					'name'  => 'plain',
+					'label' => 'Plain',
+				),
+			),
+			'variations'      => 'variations.php',
+			'allowedBlocks'   => array( 'core/paragraph', 'core/image' ),
+			'blockHooks'      => array(
+				'core/post-content' => 'after',
+			),
+		);
+
+		$block_json = json_encode( $metadata, JSON_UNESCAPED_SLASHES );
+		if ( ! is_string( $block_json ) || false === file_put_contents( $dir . DIRECTORY_SEPARATOR . 'block.json', $block_json ) ) {
+			throw new \RuntimeException( 'Failed to write block.json.' );
+		}
+
+		$variation = '<?php return ' . var_export(
+			array(
+				array(
+					'name'       => $case['variationName'],
+					'title'      => 'Generated variation',
+					'attributes' => array(
+						'message' => $case['message'],
+					),
+					'isDefault'  => true,
+				),
+			),
+			true
+		) . ';';
+		if ( false === file_put_contents( $dir . DIRECTORY_SEPARATOR . 'variations.php', $variation ) ) {
+			throw new \RuntimeException( 'Failed to write variations.php.' );
+		}
+
+		return $dir;
+	}
+
+	private static function remove_directory( string $dir ): void {
+		if ( ! is_dir( $dir ) ) {
+			return;
+		}
+
+		foreach ( scandir( $dir ) ?: array() as $entry ) {
+			if ( '.' === $entry || '..' === $entry ) {
+				continue;
+			}
+			$path = $dir . DIRECTORY_SEPARATOR . $entry;
+			if ( is_dir( $path ) ) {
+				self::remove_directory( $path );
+			} else {
+				@unlink( $path );
+			}
+		}
+		@rmdir( $dir );
+	}
+
 	private static function support_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		return array(
 			'blockName'     => 'component-fuzz/' . self::slug( $ctx, 'support-block' ),
@@ -501,6 +704,7 @@ final class BlocksSurface {
 		$block_registry   = self::get_static_property( 'WP_Block_Type_Registry', 'instance' );
 		$style_registry   = self::get_static_property( 'WP_Block_Styles_Registry', 'instance' );
 		$pattern_registry = self::get_static_property( 'WP_Block_Patterns_Registry', 'instance' );
+		$category_registry = self::get_static_property( 'WP_Block_Pattern_Categories_Registry', 'instance' );
 		$binding_registry = self::get_static_property( 'WP_Block_Bindings_Registry', 'instance' );
 		$supports         = self::get_static_property( 'WP_Block_Supports', 'instance' );
 
@@ -514,6 +718,9 @@ final class BlocksSurface {
 			'patternRegistry'        => $pattern_registry,
 			'patterns'               => $pattern_registry instanceof \WP_Block_Patterns_Registry ? self::get_object_property( $pattern_registry, 'registered_patterns' ) : null,
 			'patternsOutsideInit'    => $pattern_registry instanceof \WP_Block_Patterns_Registry ? self::get_object_property( $pattern_registry, 'registered_patterns_outside_init' ) : null,
+			'categoryRegistry'       => $category_registry,
+			'patternCategories'      => $category_registry instanceof \WP_Block_Pattern_Categories_Registry ? self::get_object_property( $category_registry, 'registered_categories' ) : null,
+			'categoriesOutsideInit'  => $category_registry instanceof \WP_Block_Pattern_Categories_Registry ? self::get_object_property( $category_registry, 'registered_categories_outside_init' ) : null,
 			'bindingRegistry'        => $binding_registry,
 			'bindingSources'         => $binding_registry instanceof \WP_Block_Bindings_Registry ? self::get_object_property( $binding_registry, 'sources' ) : null,
 			'supports'               => $supports,
@@ -535,6 +742,14 @@ final class BlocksSurface {
 			self::set_static_property( 'WP_Block_Patterns_Registry', 'instance', $snapshot['patternRegistry'] );
 		} else {
 			self::set_static_property( 'WP_Block_Patterns_Registry', 'instance', null );
+		}
+
+		if ( $snapshot['categoryRegistry'] instanceof \WP_Block_Pattern_Categories_Registry ) {
+			self::set_object_property( $snapshot['categoryRegistry'], 'registered_categories', $snapshot['patternCategories'] );
+			self::set_object_property( $snapshot['categoryRegistry'], 'registered_categories_outside_init', $snapshot['categoriesOutsideInit'] );
+			self::set_static_property( 'WP_Block_Pattern_Categories_Registry', 'instance', $snapshot['categoryRegistry'] );
+		} else {
+			self::set_static_property( 'WP_Block_Pattern_Categories_Registry', 'instance', null );
 		}
 
 		if ( $snapshot['supports'] instanceof \WP_Block_Supports ) {
