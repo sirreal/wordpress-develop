@@ -30,16 +30,28 @@ $required_functions = array(
 	'wp_generate_password',
 	'wp_hash_password',
 	'wp_check_password',
+	'wp_interactivity_process_directives',
+	'wp_interactivity_state',
+	'wp_interactivity_config',
+	'wp_interactivity_data_wp_context',
+	'wp_register_ability',
+	'wp_get_abilities',
 );
 
 $required_classes = array(
 	'WP_HTML_Processor',
 	'WP_HTML_Tag_Processor',
+	'WP_Interactivity_API',
+	'WP_Interactivity_API_Directives_Processor',
 	'WP_Block_Parser',
 	'WP_REST_Request',
 	'WP_REST_Server',
 	'WP_REST_Response',
 	'WP_Date_Query',
+	'WP_Ability',
+	'WP_Abilities_Registry',
+	'WP_Ability_Category',
+	'WP_Ability_Categories_Registry',
 );
 
 $missing = array();
@@ -82,6 +94,14 @@ if ( 1 !== count( $blocks ) || 'core/paragraph' !== $blocks[0]['blockName'] ) {
 $hash = wp_hash_password( 'component-fuzz' );
 if ( ! wp_check_password( 'component-fuzz', $hash ) ) {
 	fwrite( STDERR, "Password hash smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$interactivity = new WP_Interactivity_API();
+$interactivity->state( 'component-fuzz', array( 'text' => 'ok' ) );
+$processed = $interactivity->process_directives( '<div data-wp-interactive="component-fuzz"><span data-wp-text="state.text">x</span></div>' );
+if ( ! str_contains( $processed, '>ok</span>' ) ) {
+	fwrite( STDERR, "Interactivity smoke invariant failed: {$processed}\n" );
 	exit( 1 );
 }
 

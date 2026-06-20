@@ -11,6 +11,9 @@ network requests, or a configured site.
 
 ## Surfaces
 
+- `abilities`: Abilities API category and ability registry lifecycles,
+  action-gated registration, metadata/default preparation, filtered discovery,
+  schema validation, permission checks, execution, and unregister behavior.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
 - `blocks`: block type metadata, variations, hooks, style, pattern/category,
@@ -46,6 +49,9 @@ network requests, or a configured site.
   attribute insertion, and loading optimization attributes.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
+- `interactivity`: server-side directive processing for context, bind, class,
+  style, text, and each directives, unsupported/unbalanced HTML fallbacks,
+  derived context/element helpers, and state/config merge serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
   nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, protocol filtering, safe CSS, attribute parsing,
