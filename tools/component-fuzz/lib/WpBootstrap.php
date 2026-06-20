@@ -78,6 +78,15 @@ final class WpBootstrap {
 		if ( ! defined( 'NONCE_SALT' ) ) {
 			define( 'NONCE_SALT', 'component-fuzz-nonce-salt' );
 		}
+		if ( ! defined( 'WP_DEBUG' ) ) {
+			define( 'WP_DEBUG', false );
+		}
+		if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) {
+			define( 'WP_DEBUG_DISPLAY', false );
+		}
+		if ( ! defined( 'WP_DEBUG_LOG' ) ) {
+			define( 'WP_DEBUG_LOG', false );
+		}
 		if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 			define( 'MINUTE_IN_SECONDS', 60 );
 		}
@@ -114,13 +123,8 @@ final class WpBootstrap {
 			'wp-includes/option.php',
 			'wp-includes/cron.php',
 			'wp-includes/class-wp-list-util.php',
-			'wp-includes/class-wp-dependency.php',
-			'wp-includes/class-wp-dependencies.php',
-			'wp-includes/class-wp-scripts.php',
-			'wp-includes/class-wp-styles.php',
+			'wp-includes/script-loader.php',
 			'wp-includes/class-wp-script-modules.php',
-			'wp-includes/functions.wp-scripts.php',
-			'wp-includes/functions.wp-styles.php',
 			'wp-includes/script-modules.php',
 			'wp-includes/class-wp-http.php',
 			'wp-includes/formatting.php',
