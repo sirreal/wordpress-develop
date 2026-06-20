@@ -39,6 +39,9 @@ network requests, or a configured site.
   excerpts, balanced tags, URL extraction, embed helpers.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling.
+- `query`: no-DB query builder APIs, including meta/tax/date query tree
+  sanitization, SQL fragment generation, relation normalization, query-var
+  parsing, and deterministic global restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
