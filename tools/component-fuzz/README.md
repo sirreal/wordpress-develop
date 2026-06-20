@@ -45,6 +45,9 @@ network requests, or a configured site.
   excerpts, balanced tags, URL extraction, embed helpers.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling.
+- `post-types`: post type and post status registry defaults, support feature
+  registration, capability generation, query/archive normalization, unregister
+  cleanup, and status filtering.
 - `query`: no-DB query builder APIs, including meta/tax/date query tree
   sanitization, SQL fragment generation, relation normalization, query-var
   parsing, and deterministic global restoration.

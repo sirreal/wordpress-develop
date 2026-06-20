@@ -260,6 +260,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-role.php',
 			'wp-includes/class-wp-user.php',
 			'wp-includes/class-wp-comment.php',
+			'wp-includes/class-wp-post-type.php',
 			'wp-includes/post.php',
 			'wp-includes/post-template.php',
 			'wp-includes/user.php',
