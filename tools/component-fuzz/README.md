@@ -38,6 +38,9 @@ network requests, or a configured site.
   filename sanitization, filetype checks, unique filenames, sideload handling.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior.
+- `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
+  query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
+  `url_to_postid()` paths.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. Skips are recorded in `results.ndjson` with a reason and
