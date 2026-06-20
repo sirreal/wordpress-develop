@@ -266,6 +266,9 @@ final class WpBootstrap {
 			'wp-includes/user.php',
 			'wp-includes/comment.php',
 			'wp-includes/comment-template.php',
+			'wp-includes/class-wp-widget.php',
+			'wp-includes/class-wp-widget-factory.php',
+			'wp-includes/widgets.php',
 			'wp-includes/class-wp-meta-query.php',
 			'wp-includes/class-wp-tax-query.php',
 			'wp-includes/class-wp-date-query.php',
@@ -317,6 +320,10 @@ final class WpBootstrap {
 
 		if ( class_exists( 'WP_Locale' ) && ! isset( $GLOBALS['wp_locale'] ) ) {
 			$GLOBALS['wp_locale'] = new \WP_Locale();
+		}
+
+		if ( class_exists( 'WP_Widget_Factory' ) && ! isset( $GLOBALS['wp_widget_factory'] ) ) {
+			$GLOBALS['wp_widget_factory'] = new \WP_Widget_Factory();
 		}
 
 		self::$loaded = true;

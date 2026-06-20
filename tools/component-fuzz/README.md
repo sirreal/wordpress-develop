@@ -70,6 +70,9 @@ network requests, or a configured site.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
   registry query consistency, argument normalization, labels, term
   sanitization, synthetic `WP_Term` behavior, and cheap term-link paths.
+- `widgets`: classic sidebar registry lifecycle, widget factory instance
+  registration, widget ID parsing, sidebar assignment moves/removals, and
+  render callback wrapper output.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. Skips are recorded in `results.ndjson` with a reason and
