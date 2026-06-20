@@ -13,6 +13,9 @@ network requests, or a configured site.
 
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
+- `capabilities`: role registry mutations, numeric and explicit capability
+  grants, role filters, `WP_User` role/direct cap aggregation, and cheap
+  `map_meta_cap()` mappings.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
