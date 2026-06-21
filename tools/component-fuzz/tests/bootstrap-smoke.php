@@ -34,6 +34,7 @@ $required_functions = array(
 	'wp_interactivity_state',
 	'wp_interactivity_config',
 	'wp_interactivity_data_wp_context',
+	'get_self_link',
 	'wp_register_ability',
 	'wp_get_abilities',
 );
@@ -102,6 +103,20 @@ $interactivity->state( 'component-fuzz', array( 'text' => 'ok' ) );
 $processed = $interactivity->process_directives( '<div data-wp-interactive="component-fuzz"><span data-wp-text="state.text">x</span></div>' );
 if ( ! str_contains( $processed, '>ok</span>' ) ) {
 	fwrite( STDERR, "Interactivity smoke invariant failed: {$processed}\n" );
+	exit( 1 );
+}
+
+$_SERVER['REQUEST_URI'] = '/component-fuzz/router-smoke?x=1';
+$router = new WP_Interactivity_API();
+$GLOBALS['wp_interactivity'] = $router;
+$router_region = wp_interactivity_process_directives( '<main data-wp-interactive="core/router" data-wp-router-region>body</main>' );
+$router_state  = wp_interactivity_state( 'core/router' );
+if (
+	! str_contains( $router_region, 'data-wp-router-region' )
+	|| 'http://example.test/component-fuzz/router-smoke?x=1' !== ( $router_state['url'] ?? null )
+	|| false === has_action( 'wp_footer', array( $router, 'print_router_markup' ) )
+) {
+	fwrite( STDERR, "Interactivity router smoke invariant failed: {$router_region}\n" );
 	exit( 1 );
 }
 

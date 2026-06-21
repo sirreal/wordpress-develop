@@ -445,12 +445,12 @@ final class AbilitiesSurface {
 		$default  = 'default-' . self::slug_piece( $ctx->fork( 'execute-default' ), 10 );
 		$token    = 'token-' . self::slug_piece( $ctx->fork( 'execute-token' ), 8 );
 		$calls    = array(
-			'invoked'     => 0,
-			'before'      => 0,
-			'after'       => 0,
-			'execute'     => 0,
-			'permissions' => 0,
-			'inputs'      => array(),
+			'invoked'          => array(),
+			'before'           => array(),
+			'after'            => array(),
+			'executeCallbacks' => array(),
+			'permissions'      => array(),
+			'inputs'           => array(),
 		);
 		$names    = array(
 			'echo'        => self::ability_name( $ctx->fork( 'execute-echo' ), 'echo' ),
@@ -471,12 +471,12 @@ final class AbilitiesSurface {
 					'Echo string.',
 					$category['slug'],
 					static function ( string $value ) use ( &$calls ): string {
-						++$calls['execute'];
+						$calls['executeCallbacks'][] = 'echo';
 						$calls['inputs'][] = $value;
 						return 'out:' . $value;
 					},
 					static function ( string $value ) use ( &$calls ): bool {
-						++$calls['permissions'];
+						$calls['permissions'][] = 'echo';
 						$calls['inputs'][] = 'perm:' . $value;
 						return true;
 					},
@@ -499,8 +499,14 @@ final class AbilitiesSurface {
 				self::ability_args(
 					'Deny string.',
 					$category['slug'],
-					static fn( string $value ): string => 'denied:' . $value,
-					static fn( string $value ): bool => false,
+					static function ( string $value ) use ( &$calls ): string {
+						$calls['executeCallbacks'][] = 'deny';
+						return 'denied:' . $value;
+					},
+					static function ( string $value ) use ( &$calls ): bool {
+						$calls['permissions'][] = 'deny';
+						return false;
+					},
 					array( 'type' => 'string' ),
 					array( 'type' => 'string' )
 				)
@@ -511,8 +517,14 @@ final class AbilitiesSurface {
 				self::ability_args(
 					'Bad output.',
 					$category['slug'],
-					static fn( string $value ): string => 'not-an-integer-' . $value,
-					static fn(): bool => true,
+					static function ( string $value ) use ( &$calls ): string {
+						$calls['executeCallbacks'][] = 'bad-output';
+						return 'not-an-integer-' . $value;
+					},
+					static function () use ( &$calls ): bool {
+						$calls['permissions'][] = 'bad-output';
+						return true;
+					},
 					array( 'type' => 'string' ),
 					array( 'type' => 'integer' )
 				)
@@ -523,8 +535,14 @@ final class AbilitiesSurface {
 				self::ability_args(
 					'No schema.',
 					$category['slug'],
-					static fn(): string => 'no-args',
-					static fn(): bool => true
+					static function () use ( &$calls ): string {
+						$calls['executeCallbacks'][] = 'no-schema';
+						return 'no-args';
+					},
+					static function () use ( &$calls ): bool {
+						$calls['permissions'][] = 'no-schema';
+						return true;
+					}
 				)
 			);
 
@@ -534,10 +552,13 @@ final class AbilitiesSurface {
 					'Short circuit.',
 					$category['slug'],
 					static function () use ( &$calls ): string {
-						++$calls['execute'];
+						$calls['executeCallbacks'][] = 'short';
 						return 'should-not-run';
 					},
-					static fn(): bool => true
+					static function () use ( &$calls ): bool {
+						$calls['permissions'][] = 'short';
+						return true;
+					}
 				)
 			);
 
@@ -546,8 +567,14 @@ final class AbilitiesSurface {
 				self::ability_args(
 					'Custom ability class.',
 					$category['slug'],
-					static fn(): string => 'custom',
-					static fn(): bool => true,
+					static function () use ( &$calls ): string {
+						$calls['executeCallbacks'][] = 'custom';
+						return 'custom';
+					},
+					static function () use ( &$calls ): bool {
+						$calls['permissions'][] = 'custom';
+						return true;
+					},
 					array(),
 					array(),
 					array(),
@@ -562,18 +589,21 @@ final class AbilitiesSurface {
 		\remove_action( 'wp_abilities_api_categories_init', $category_action );
 
 		$invoked = static function ( string $name ) use ( $names, &$calls ): void {
-			if ( in_array( $name, $names, true ) ) {
-				++$calls['invoked'];
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['invoked'][] = $key;
 			}
 		};
 		$before  = static function ( string $name ) use ( $names, &$calls ): void {
-			if ( in_array( $name, $names, true ) ) {
-				++$calls['before'];
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['before'][] = $key;
 			}
 		};
 		$after   = static function ( string $name ) use ( $names, &$calls ): void {
-			if ( in_array( $name, $names, true ) ) {
-				++$calls['after'];
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['after'][] = $key;
 			}
 		};
 		$normalizer = static function ( $value, string $name ) use ( $names, $token ) {
@@ -665,11 +695,11 @@ final class AbilitiesSurface {
 
 		self::collect_failure(
 			$failures,
-			$calls['invoked'] >= 5
-				&& $calls['before'] >= 2
-				&& $calls['after'] >= 2
-				&& $calls['execute'] >= 1
-				&& $calls['permissions'] >= 1
+			array( 'echo', 'deny', 'bad-output', 'no-schema', 'short', 'custom' ) === $calls['invoked']
+				&& array( 'echo', 'bad-output', 'no-schema', 'custom' ) === $calls['before']
+				&& array( 'echo', 'no-schema', 'custom' ) === $calls['after']
+				&& array( 'echo', 'bad-output', 'no-schema', 'custom' ) === $calls['executeCallbacks']
+				&& array( 'echo', 'deny', 'bad-output', 'no-schema', 'custom' ) === $calls['permissions']
 				&& in_array( $input . ':' . $token, $calls['inputs'], true ),
 			'ability execution actions fire only around non-short-circuited valid execution paths',
 			array( 'calls' => $calls )

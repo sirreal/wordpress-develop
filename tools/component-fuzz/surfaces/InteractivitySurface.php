@@ -31,6 +31,7 @@ final class InteractivitySurface {
 			$rows[] = self::check_state_config_helpers( $ctx, $case );
 			$rows[] = self::check_directive_processing( $ctx, $case );
 			$rows[] = self::check_context_and_element_helpers( $ctx, $case );
+			$rows[] = self::check_router_region( $ctx, $case );
 			$rows[] = self::check_unbalanced_and_unsupported_fallbacks( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -74,8 +75,15 @@ final class InteractivitySurface {
 				'wp_interactivity_get_context',
 				'wp_interactivity_get_element',
 				'wp_json_encode',
+				'get_self_link',
 				'esc_attr',
 				'esc_html',
+				'has_action',
+				'do_action',
+				'wp_add_inline_style',
+				'wp_enqueue_style',
+				'wp_register_style',
+				'wp_styles',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -294,6 +302,53 @@ final class InteractivitySurface {
 		);
 	}
 
+	private static function check_router_region( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$api         = self::install_fresh_api();
+		$request_uri = '/component-fuzz/router/' . rawurlencode( $case['routerToken'] ) . '?view=' . rawurlencode( $case['uniqueId'] );
+
+		$_SERVER['REQUEST_URI'] = $request_uri;
+
+		$html      = '<main data-case="router" data-wp-interactive="core/router" data-wp-router-region>body</main>';
+		$processed = \wp_interactivity_process_directives( $html );
+		$state     = \wp_interactivity_state( 'core/router' );
+		$styles    = \wp_styles();
+		$priority  = \has_action( 'wp_footer', array( $api, 'print_router_markup' ) );
+
+		ob_start();
+		\do_action( 'wp_footer' );
+		$footer = (string) ob_get_clean();
+
+		$router_style = $styles->registered['wp-interactivity-router-animations'] ?? null;
+		$inline_css   = is_object( $router_style ) ? ( $router_style->extra['after'] ?? array() ) : array();
+		$expected_url = 'http://example.test' . $request_uri;
+
+		$ok = $processed === $html
+			&& $expected_url === ( $state['url'] ?? null )
+			&& false !== $priority
+			&& in_array( 'wp-interactivity-router-animations', $styles->queue, true )
+			&& is_object( $router_style )
+			&& array() !== $inline_css
+			&& str_contains( implode( "\n", $inline_css ), 'wp-interactivity-router-loading-bar' )
+			&& str_contains( $footer, 'wp-interactivity-router-loading-bar' )
+			&& str_contains( $footer, 'core/router/private' );
+
+		return self::result(
+			$ctx,
+			'interactivity.router-region.self-link-style-and-footer',
+			$ok,
+			array(
+				'requestUri'  => $request_uri,
+				'expectedUrl' => $expected_url,
+				'state'       => $state,
+				'processed'   => self::preview( $processed ),
+				'styleQueue'  => $styles->queue,
+				'inlineCss'   => $inline_css,
+				'priority'    => $priority,
+				'footer'      => self::preview( $footer ),
+			)
+		);
+	}
+
 	private static function check_unbalanced_and_unsupported_fallbacks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::install_fresh_api();
 		\wp_interactivity_state(
@@ -410,6 +465,7 @@ final class InteractivitySurface {
 			'initialMargin'        => $case->int( 1, 9 ) . 'px',
 			'initialBorderColor'   => '#abcdef',
 			'fallbackText'         => 'Fallback <' . $token . '> & text',
+			'routerToken'          => 'router-' . $token,
 			'derivedPlain'         => 'plain-' . $token,
 			'stateKept'            => 'kept-' . $token,
 			'stateReplacement'     => 'replaced-' . $token,
@@ -521,6 +577,7 @@ final class InteractivitySurface {
 			'wp_current_filter' => self::snapshot_global( 'wp_current_filter' ),
 			'wp_styles'         => self::snapshot_global( 'wp_styles' ),
 			'wp_scripts'        => self::snapshot_global( 'wp_scripts' ),
+			'_SERVER'           => self::snapshot_global( '_SERVER' ),
 		);
 	}
 

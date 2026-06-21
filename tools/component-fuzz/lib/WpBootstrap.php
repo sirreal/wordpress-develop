@@ -12,6 +12,13 @@ final class WpBootstrap {
 		$root = repo_root();
 		$src  = $root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
 
+		if ( ! isset( $_SERVER['REQUEST_URI'] ) ) {
+			$_SERVER['REQUEST_URI'] = '/component-fuzz/';
+		}
+		if ( ! isset( $_SERVER['HTTP_HOST'] ) ) {
+			$_SERVER['HTTP_HOST'] = 'example.test';
+		}
+
 		if ( ! defined( 'ABSPATH' ) ) {
 			define( 'ABSPATH', $src );
 		}
@@ -294,6 +301,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-matchesmapregex.php',
 			'wp-includes/rewrite.php',
 			'wp-includes/link-template.php',
+			'wp-includes/feed.php',
 			'wp-includes/robots-template.php',
 			'wp-includes/sitemaps/class-wp-sitemaps-provider.php',
 			'wp-includes/sitemaps/class-wp-sitemaps-registry.php',
@@ -327,6 +335,18 @@ final class WpBootstrap {
 		}
 
 		require_once __DIR__ . '/wp-stubs.php';
+
+		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_options(
+				array_merge(
+					array(
+						'home'    => 'http://example.test',
+						'siteurl' => 'http://example.test',
+					),
+					$GLOBALS['wpdb']->component_fuzz_get_options()
+				)
+			);
+		}
 
 		if ( function_exists( 'wp_cache_init' ) && ! isset( $GLOBALS['wp_object_cache'] ) ) {
 			wp_cache_init();
