@@ -34,6 +34,9 @@ network requests, or a configured site.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
   malformed address structure, and boundary lengths.
+- `fonts`: font-face CSS serialization and validation, font directory filters,
+  Font Library collection registration/JSON loading, and font utility
+  sanitization for family lists, face slugs, schemas, and MIME maps.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,

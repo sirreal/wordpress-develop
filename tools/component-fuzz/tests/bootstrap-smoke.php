@@ -37,6 +37,9 @@ $required_functions = array(
 	'get_self_link',
 	'wp_register_ability',
 	'wp_get_abilities',
+	'wp_print_font_faces',
+	'wp_register_font_collection',
+	'wp_get_font_dir',
 );
 
 $required_classes = array(
@@ -53,6 +56,10 @@ $required_classes = array(
 	'WP_Abilities_Registry',
 	'WP_Ability_Category',
 	'WP_Ability_Categories_Registry',
+	'WP_Font_Face',
+	'WP_Font_Library',
+	'WP_Font_Collection',
+	'WP_Font_Utils',
 );
 
 $missing = array();
@@ -117,6 +124,29 @@ if (
 	|| false === has_action( 'wp_footer', array( $router, 'print_router_markup' ) )
 ) {
 	fwrite( STDERR, "Interactivity router smoke invariant failed: {$router_region}\n" );
+	exit( 1 );
+}
+
+$font_dir = wp_get_font_dir();
+if ( ! str_ends_with( $font_dir['basedir'], '/uploads/fonts' ) || ! str_ends_with( $font_dir['baseurl'], '/uploads/fonts' ) ) {
+	fwrite( STDERR, 'Font dir smoke invariant failed: ' . wp_json_encode( $font_dir ) . "\n" );
+	exit( 1 );
+}
+
+ob_start();
+wp_print_font_faces(
+	array(
+		array(
+			array(
+				'font-family' => 'Component Fuzz Smoke',
+				'src'         => 'https://example.test/fonts/component-fuzz-smoke.woff2',
+			),
+		),
+	)
+);
+$font_css = (string) ob_get_clean();
+if ( ! str_contains( $font_css, '@font-face{' ) || ! str_contains( $font_css, 'Component Fuzz Smoke' ) ) {
+	fwrite( STDERR, "Font face smoke invariant failed: {$font_css}\n" );
 	exit( 1 );
 }
 
