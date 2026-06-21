@@ -7,7 +7,7 @@ namespace ComponentFuzz\Surfaces;
 final class FontsSurface {
 	public const NAME = 'fonts';
 
-	private const FONT_FACE_CASES = 8;
+	private const FONT_FACE_CASES = 10;
 	private const COLLECTION_CASES = 5;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -125,6 +125,7 @@ final class FontsSurface {
 
 		foreach ( $cases as $index => $case ) {
 			$block = $blocks[ $index ] ?? '';
+			$declaration_properties = self::font_face_declaration_properties( $block );
 
 			self::collect_failure(
 				$failures,
@@ -176,6 +177,17 @@ final class FontsSurface {
 					)
 				);
 			}
+
+			self::collect_failure(
+				$failures,
+				! in_array( 'color', $declaration_properties, true ),
+				"CSS delimiter payloads stay inside font-face declaration values case {$index}",
+				array(
+					'case'        => $case['label'],
+					'block'       => $block,
+					'declarations' => $declaration_properties,
+				)
+			);
 		}
 
 		self::collect_failure(
@@ -312,6 +324,8 @@ final class FontsSurface {
 			return $font_dir;
 		};
 
+		$base_upload = \wp_upload_dir( null, false, false );
+
 		\add_filter( 'pre_option_siteurl', $siteurl_filter, 0 );
 		\add_filter( 'pre_option_upload_path', $empty_filter, 0 );
 		\add_filter( 'pre_option_upload_url_path', $empty_filter, 0 );
@@ -319,7 +333,6 @@ final class FontsSurface {
 		\add_filter( 'font_dir', $font_dir_filter, 10 );
 
 		try {
-			\wp_upload_dir( null, false, true );
 			$font_dir = \wp_get_font_dir();
 		} finally {
 			\remove_filter( 'font_dir', $font_dir_filter, 10 );
@@ -327,11 +340,10 @@ final class FontsSurface {
 			\remove_filter( 'pre_option_upload_url_path', $empty_filter, 0 );
 			\remove_filter( 'pre_option_upload_path', $empty_filter, 0 );
 			\remove_filter( 'pre_option_siteurl', $siteurl_filter, 0 );
-			\wp_upload_dir( null, false, true );
 		}
 
-		$expected_base_dir = WP_CONTENT_DIR . '/uploads/fonts' . $suffix;
-		$expected_base_url = WP_CONTENT_URL . '/uploads/fonts' . $suffix;
+		$expected_base_dir = untrailingslashit( $base_upload['basedir'] ) . '/fonts' . $suffix;
+		$expected_base_url = untrailingslashit( $base_upload['baseurl'] ) . '/fonts' . $suffix;
 
 		self::collect_failure(
 			$failures,
@@ -733,6 +745,15 @@ final class FontsSurface {
 				$face['src'] = $sources[0];
 			}
 
+			if ( 8 === $i ) {
+				$family              = 'Component Fuzz "' . $token . ';color:red;/*';
+				$face['font-family'] = $family;
+			}
+
+			if ( 9 === $i ) {
+				$face['src'] = array( 'https://example.test/fonts/' . $token . "');color:red;/*.woff2" );
+			}
+
 			$expected_display = in_array( $display, array( 'auto', 'block', 'fallback', 'swap', 'optional' ), true ) ? $display : 'fallback';
 			$expected_family  = null === $family ? null : self::expected_font_family( $family );
 
@@ -798,7 +819,7 @@ final class FontsSurface {
 
 		$parts = array();
 		foreach ( $data_sources as $source ) {
-			$parts[] = 'url(' . $source . ')';
+			$parts[] = "url('" . self::escape_css_string( $source, "'" ) . "')";
 		}
 
 		foreach (
@@ -811,7 +832,7 @@ final class FontsSurface {
 			) as $extension => $format
 		) {
 			if ( isset( $by_extension[ $extension ] ) ) {
-				$parts[] = "url('{$by_extension[ $extension ]}') format('{$format}')";
+				$parts[] = "url('" . self::escape_css_string( $by_extension[ $extension ], "'" ) . "') format('{$format}')";
 			}
 		}
 
@@ -819,15 +840,41 @@ final class FontsSurface {
 	}
 
 	private static function expected_font_family( string $font_family ): string {
-		if (
-			str_contains( $font_family, ' ' )
-			&& ! str_contains( $font_family, '"' )
-			&& ! str_contains( $font_family, "'" )
-		) {
-			return '"' . $font_family . '"';
+		if ( self::font_family_needs_quotes( $font_family ) ) {
+			return '"' . self::escape_css_string( $font_family, '"' ) . '"';
 		}
 
 		return $font_family;
+	}
+
+	private static function font_family_needs_quotes( string $font_family ): bool {
+		if (
+			str_contains( $font_family, ';' )
+			|| str_contains( $font_family, '{' )
+			|| str_contains( $font_family, '}' )
+			|| str_contains( $font_family, '/*' )
+			|| str_contains( $font_family, '*/' )
+			|| preg_match( '/[\x00-\x1F\x7F]/', $font_family )
+		) {
+			return true;
+		}
+
+		return str_contains( $font_family, ' ' )
+			&& ! str_contains( $font_family, '"' )
+			&& ! str_contains( $font_family, "'" );
+	}
+
+	private static function escape_css_string( string $value, string $quote ): string {
+		$value = str_replace( '\\', '\\\\', $value );
+		$value = str_replace( $quote, '\\' . $quote, $value );
+
+		return preg_replace_callback(
+			'/[\x00-\x1F\x7F]/',
+			static function ( array $matches ): string {
+				return '\\' . strtoupper( dechex( ord( $matches[0] ) ) ) . ' ';
+			},
+			$value
+		);
 	}
 
 	private static function valid_sentinel_face( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -993,6 +1040,59 @@ final class FontsSurface {
 
 	private static function has_declaration( string $block, string $property, string $value ): bool {
 		return str_contains( $block, $property . ':' . $value . ';' );
+	}
+
+	private static function font_face_declaration_properties( string $block ): array {
+		$properties = array();
+		$start      = 0;
+		$quote      = null;
+		$escaped    = false;
+		$depth      = 0;
+		$length     = strlen( $block );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$char = $block[ $i ];
+
+			if ( null !== $quote ) {
+				if ( $escaped ) {
+					$escaped = false;
+				} elseif ( '\\' === $char ) {
+					$escaped = true;
+				} elseif ( $quote === $char ) {
+					$quote = null;
+				}
+				continue;
+			}
+
+			if ( '"' === $char || "'" === $char ) {
+				$quote = $char;
+				continue;
+			}
+
+			if ( '(' === $char ) {
+				++$depth;
+				continue;
+			}
+
+			if ( ')' === $char && $depth > 0 ) {
+				--$depth;
+				continue;
+			}
+
+			if ( ';' === $char && 0 === $depth ) {
+				$declaration = substr( $block, $start, $i - $start );
+				$colon       = strpos( $declaration, ':' );
+				if ( false !== $colon ) {
+					$property = trim( substr( $declaration, 0, $colon ) );
+					if ( '' !== $property ) {
+						$properties[] = strtolower( $property );
+					}
+				}
+				$start = $i + 1;
+			}
+		}
+
+		return $properties;
 	}
 
 	private static function font_face_blocks( string $output ): array {
