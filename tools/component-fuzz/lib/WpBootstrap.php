@@ -82,6 +82,9 @@ final class WpBootstrap {
 		if ( ! defined( 'COOKIE_DOMAIN' ) ) {
 			define( 'COOKIE_DOMAIN', '' );
 		}
+		if ( ! defined( 'RECOVERY_MODE_COOKIE' ) ) {
+			define( 'RECOVERY_MODE_COOKIE', 'wordpress_rec_' . COOKIEHASH );
+		}
 		if ( ! defined( 'OBJECT' ) ) {
 			define( 'OBJECT', 'OBJECT' );
 		}
@@ -355,6 +358,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-user-meta-session-tokens.php',
 			'wp-includes/class-wp-plugin-dependencies.php',
 			'wp-includes/pluggable.php',
+			'wp-includes/class-wp-application-passwords.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',

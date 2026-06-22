@@ -28,8 +28,11 @@ $required_functions = array(
 	'sanitize_email',
 	'is_email',
 	'wp_generate_password',
+	'wp_fast_hash',
+	'wp_verify_fast_hash',
 	'wp_hash_password',
 	'wp_check_password',
+	'wp_recovery_mode',
 	'wp_interactivity_process_directives',
 	'wp_interactivity_state',
 	'wp_interactivity_config',
@@ -72,6 +75,11 @@ $required_classes = array(
 	'WP_Speculation_Rules',
 	'WordPress\AiClient\AiClient',
 	'Walker_Nav_Menu',
+	'WP_Application_Passwords',
+	'WP_Recovery_Mode_Key_Service',
+	'WP_Recovery_Mode_Cookie_Service',
+	'WP_Recovery_Mode',
+	'WP_Paused_Extensions_Storage',
 );
 
 $missing = array();
@@ -121,6 +129,22 @@ if ( 1 !== count( $blocks ) || 'core/paragraph' !== $blocks[0]['blockName'] ) {
 $hash = wp_hash_password( 'component-fuzz' );
 if ( ! wp_check_password( 'component-fuzz', $hash ) ) {
 	fwrite( STDERR, "Password hash smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$app_hash = WP_Application_Passwords::hash_password( 'component-fuzz-app' );
+if (
+	'abcd ef12' !== WP_Application_Passwords::chunk_password( 'abcd-ef!!12' )
+	|| ! str_starts_with( $app_hash, '$generic$' )
+	|| ! WP_Application_Passwords::check_password( 'component-fuzz-app', $app_hash )
+	|| WP_Application_Passwords::check_password( 'wrong-component-fuzz-app', $app_hash )
+) {
+	fwrite( STDERR, "Application password smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+if ( ! defined( 'RECOVERY_MODE_COOKIE' ) || ! ( wp_recovery_mode() instanceof WP_Recovery_Mode ) ) {
+	fwrite( STDERR, "Recovery mode smoke invariant failed.\n" );
 	exit( 1 );
 }
 

@@ -14,6 +14,9 @@ network requests, or a configured site.
 - `abilities`: Abilities API category and ability registry lifecycles,
   action-gated registration, metadata/default preparation, filtered discovery,
   schema validation, permission checks, execution, and unregister behavior.
+- `account-security`: no-DB account recovery and security APIs, including
+  application password lifecycle/hash behavior, recovery key/cookie validation,
+  and paused extension storage transitions.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, prompt builder
   ability integration, cache and event adapters, and deterministic in-memory
