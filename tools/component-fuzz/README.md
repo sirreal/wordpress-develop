@@ -38,6 +38,10 @@ network requests, or a configured site.
   type partitioning, comment classes, email links, and comment cookies.
 - `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
   unscheduling and rescheduling contracts.
+- `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
+  setting sanitize/validate/post value flows, multidimensional option previewing,
+  container/control JSON exports, active callbacks, and selective refresh partial
+  registration/rendering without changeset persistence.
 - `discovery`: robots meta directives, sitemap provider registration, sitemap
   URL/index expansion, escaped sitemap XML rendering, and sitemap max-URL
   filters without DB-backed providers.
@@ -119,8 +123,10 @@ network requests, or a configured site.
   login behavior without publishing, media, pingback, or option side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
-rendering side effects. Skips are recorded in `results.ndjson` with a reason and
-do not mask failures or PHP errors.
+rendering side effects. The Customizer surface intentionally avoids changeset
+save/publish, nav-menu persistence, widget persistence, and real post/option
+storage beyond the existing no-DB option stub. Skips are recorded in
+`results.ndjson` with a reason and do not mask failures or PHP errors.
 
 ## Commands
 

@@ -105,6 +105,13 @@ $required_classes = array(
 	'IXR_Server',
 	'IXR_Value',
 	'wp_xmlrpc_server',
+	'WP_Customize_Manager',
+	'WP_Customize_Setting',
+	'WP_Customize_Control',
+	'WP_Customize_Section',
+	'WP_Customize_Panel',
+	'WP_Customize_Selective_Refresh',
+	'WP_Customize_Partial',
 );
 
 $missing = array();
@@ -190,6 +197,52 @@ if (
 	|| ! str_contains( $admin_bar_html, "href='https://example.test/component-fuzz/admin-bar-smoke'" )
 ) {
 	fwrite( STDERR, "Admin bar render smoke invariant failed: {$admin_bar_html}\n" );
+	exit( 1 );
+}
+
+$customizer_components = static function () {
+	return array();
+};
+add_filter( 'customize_loaded_components', $customizer_components, 1000 );
+$customizer = new WP_Customize_Manager(
+	array(
+		'changeset_uuid'     => wp_generate_uuid4(),
+		'settings_previewed' => false,
+	)
+);
+remove_filter( 'customize_loaded_components', $customizer_components, 1000 );
+foreach ( array( '_changeset_data', '_post_values' ) as $customizer_cache_property ) {
+	$customizer_cache_reflection = new ReflectionProperty( WP_Customize_Manager::class, $customizer_cache_property );
+	if ( PHP_VERSION_ID < 80100 ) {
+		$customizer_cache_reflection->setAccessible( true );
+	}
+	$customizer_cache_reflection->setValue( $customizer, array() );
+}
+$customizer_setting = $customizer->add_setting(
+	'component_fuzz_smoke',
+	array(
+		'type'              => 'component_fuzz_smoke',
+		'default'           => 'fallback',
+		'sanitize_callback' => static function ( $value ) {
+			return 'smoke:' . sanitize_key( $value );
+		},
+	)
+);
+$customizer->set_post_value( 'component_fuzz_smoke', 'Custom Value!' );
+$customizer_caps = static function ( array $allcaps ) {
+	$allcaps['customize']          = true;
+	$allcaps['edit_theme_options'] = true;
+	return $allcaps;
+};
+add_filter( 'user_has_cap', $customizer_caps, 10, 4 );
+$customizer_post_value = $customizer_setting->post_value();
+remove_filter( 'user_has_cap', $customizer_caps, 10 );
+if (
+	! ( $customizer->selective_refresh instanceof WP_Customize_Selective_Refresh )
+	|| $customizer_setting !== $customizer->get_setting( 'component_fuzz_smoke' )
+	|| 'smoke:customvalue' !== $customizer_post_value
+) {
+	fwrite( STDERR, "Customizer smoke invariant failed.\n" );
 	exit( 1 );
 }
 
