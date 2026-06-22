@@ -72,6 +72,9 @@ network requests, or a configured site.
   output, depth pruning, and filtered no-DB `wp_nav_menu()` rendering.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling.
+- `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
+  validation, no-DB plugin dependency metadata, theme headers, parent/child
+  relationships, active theme file helpers, screenshots, and broken theme errors.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
   cleanup, and status filtering.
