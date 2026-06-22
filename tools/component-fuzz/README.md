@@ -17,6 +17,9 @@ network requests, or a configured site.
 - `account-security`: no-DB account recovery and security APIs, including
   application password lifecycle/hash behavior, recovery key/cookie validation,
   and paused extension storage transitions.
+- `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
+  group/container behavior, render escaping/raw HTML contracts, and
+  `show_admin_bar()` filter/global restoration.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, prompt builder
   ability integration, cache and event adapters, and deterministic in-memory

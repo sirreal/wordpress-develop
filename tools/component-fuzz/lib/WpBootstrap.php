@@ -18,6 +18,15 @@ final class WpBootstrap {
 		if ( ! isset( $_SERVER['HTTP_HOST'] ) ) {
 			$_SERVER['HTTP_HOST'] = 'example.test';
 		}
+		if ( ! isset( $_SERVER['PHP_SELF'] ) ) {
+			$_SERVER['PHP_SELF'] = '/index.php';
+		}
+		if ( ! isset( $_SERVER['SERVER_SOFTWARE'] ) ) {
+			$_SERVER['SERVER_SOFTWARE'] = 'ComponentFuzz';
+		}
+		if ( ! isset( $_SERVER['HTTP_USER_AGENT'] ) ) {
+			$_SERVER['HTTP_USER_AGENT'] = 'ComponentFuzz';
+		}
 
 		if ( ! defined( 'ABSPATH' ) ) {
 			define( 'ABSPATH', $src );
@@ -194,6 +203,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-http-response.php',
 			'wp-includes/plugin.php',
 			'wp-includes/load.php',
+			'wp-includes/vars.php',
 			'wp-includes/functions.php',
 			'wp-includes/cache.php',
 			'wp-includes/cache-compat.php',
@@ -365,6 +375,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-plugin-dependencies.php',
 			'wp-includes/pluggable.php',
 			'wp-includes/class-wp-application-passwords.php',
+			'wp-includes/class-wp-admin-bar.php',
+			'wp-includes/admin-bar.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',

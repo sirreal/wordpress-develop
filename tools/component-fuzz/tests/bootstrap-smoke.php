@@ -53,6 +53,9 @@ $required_functions = array(
 	'wp_oembed_ensure_format',
 	'wp_embed_defaults',
 	'feed_content_type',
+	'show_admin_bar',
+	'is_admin_bar_showing',
+	'wp_admin_bar_render',
 );
 
 $required_classes = array(
@@ -85,6 +88,7 @@ $required_classes = array(
 	'WP_Paused_Extensions_Storage',
 	'WP_Embed',
 	'WP_oEmbed',
+	'WP_Admin_Bar',
 );
 
 $missing = array();
@@ -150,6 +154,26 @@ if (
 
 if ( ! defined( 'RECOVERY_MODE_COOKIE' ) || ! ( wp_recovery_mode() instanceof WP_Recovery_Mode ) ) {
 	fwrite( STDERR, "Recovery mode smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$admin_bar = new WP_Admin_Bar();
+$admin_bar->add_node(
+	array(
+		'id'    => 'component-fuzz-smoke',
+		'title' => 'Smoke <strong>Admin Bar</strong>',
+		'href'  => 'https://example.test/component-fuzz/admin-bar-smoke',
+	)
+);
+ob_start();
+$admin_bar->render();
+$admin_bar_html = (string) ob_get_clean();
+if (
+	! str_contains( $admin_bar_html, 'id="wpadminbar"' )
+	|| ! str_contains( $admin_bar_html, "id='wp-admin-bar-component-fuzz-smoke'" )
+	|| ! str_contains( $admin_bar_html, "href='https://example.test/component-fuzz/admin-bar-smoke'" )
+) {
+	fwrite( STDERR, "Admin bar render smoke invariant failed: {$admin_bar_html}\n" );
 	exit( 1 );
 }
 
