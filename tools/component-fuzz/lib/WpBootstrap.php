@@ -394,6 +394,7 @@ final class WpBootstrap {
 			'wp-includes/customize/class-wp-customize-partial.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/plugin.php',
+			'wp-admin/includes/class-wp-privacy-policy-content.php',
 			'wp-admin/includes/privacy-tools.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',
 			'wp-admin/includes/class-wp-filesystem-direct.php',

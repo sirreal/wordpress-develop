@@ -93,8 +93,9 @@ network requests, or a configured site.
   cleanup, and status filtering.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, action descriptions, request-key hash
-  validation, export group HTML escaping, and exporter/eraser processor shape
-  contracts without mail, network, or export file writes.
+  validation, export group HTML escaping, exporter/eraser processor shape
+  contracts, anonymization helpers, and privacy policy suggestion/default text
+  without mail, network, or export file writes.
 - `query`: no-DB query builder APIs, including meta/tax/date query tree
   sanitization, SQL fragment generation, relation normalization, query-var
   parsing, and deterministic global restoration.

@@ -52,6 +52,8 @@ final class PrivacySurface {
 			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
 			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
+			$rows[] = self::check_anonymization_helpers( $ctx->fork( 'anonymization' ) );
+			$rows[] = self::check_policy_content_helpers( $ctx->fork( 'policy-content' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -180,6 +182,9 @@ final class PrivacySurface {
 				'wp_privacy_generate_personal_data_export_group_html',
 				'wp_privacy_process_personal_data_erasure_page',
 				'wp_privacy_process_personal_data_export_page',
+				'wp_privacy_anonymize_data',
+				'wp_privacy_anonymize_ip',
+				'wp_add_privacy_policy_content',
 				'wp_user_request_action_description',
 				'wp_validate_user_request_key',
 				'wp_verify_fast_hash',
@@ -188,6 +193,10 @@ final class PrivacySurface {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		if ( ! class_exists( 'WP_Privacy_Policy_Content' ) ) {
+			$missing[] = 'class WP_Privacy_Policy_Content';
 		}
 
 		return $missing;
@@ -894,6 +903,222 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_anonymization_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$ip_cases = array(
+			array(
+				'label'    => 'empty',
+				'input'    => '',
+				'expected' => '0.0.0.0',
+			),
+			array(
+				'label'    => 'ipv4',
+				'input'    => '203.0.113.' . $ctx->int( 1, 254 ),
+				'expected' => '203.0.113.0',
+			),
+			array(
+				'label'    => 'ipv4-port',
+				'input'    => '198.51.100.' . $ctx->int( 1, 254 ) . ':' . $ctx->int( 1024, 9999 ),
+				'expected' => '198.51.100.0',
+			),
+			array(
+				'label'    => 'ipv6',
+				'input'    => '[2001:db8:abcd:12::' . dechex( $ctx->int( 1, 4095 ) ) . ']:' . $ctx->int( 1024, 9999 ),
+				'expected' => '2001:db8:abcd:12::',
+			),
+			array(
+				'label'    => 'ipv4-mapped-ipv6',
+				'input'    => '::ffff:192.0.2.' . $ctx->int( 1, 254 ),
+				'expected' => '::ffff:192.0.2.0',
+			),
+			array(
+				'label'    => 'malformed-ipv6-bracket',
+				'input'    => '[2001:db8::1',
+				'expected' => '::',
+			),
+			array(
+				'label'    => 'not-an-ip',
+				'input'    => 'not an ip ' . self::random_string( $ctx->fork( 'not-ip' ), 8 ),
+				'expected' => '0.0.0.0',
+			),
+		);
+
+		foreach ( $ip_cases as $case ) {
+			$actual = \wp_privacy_anonymize_ip( $case['input'] );
+			if ( $case['expected'] !== $actual ) {
+				self::record_failure(
+					$failures,
+					'anonymize-ip.case',
+					$case,
+					array(
+						'expected' => $case['expected'],
+						'actual'   => $actual,
+					)
+				);
+			}
+		}
+
+		$data_cases = array(
+			'email'    => array( 'input' => 'person+' . $ctx->identifier( 3, 8 ) . '@example.test', 'expected' => 'deleted@site.invalid' ),
+			'url'      => array( 'input' => 'https://example.test/path?x=<tag>', 'expected' => 'https://site.invalid' ),
+			'ip'       => array( 'input' => '203.0.113.44', 'expected' => '203.0.113.0' ),
+			'date'     => array( 'input' => '2026-06-22 11:12:13', 'expected' => '0000-00-00 00:00:00' ),
+			'text'     => array( 'input' => '<script>alert(1)</script>', 'expected' => '[deleted]' ),
+			'longtext' => array( 'input' => str_repeat( 'content ', 4 ), 'expected' => 'This content was deleted by the author.' ),
+			'unknown'  => array( 'input' => 'keep me?', 'expected' => '' ),
+		);
+
+		foreach ( $data_cases as $type => $case ) {
+			$actual = \wp_privacy_anonymize_data( $type, $case['input'] );
+			if ( $case['expected'] !== $actual ) {
+				self::record_failure(
+					$failures,
+					'anonymize-data.default-type',
+					array( 'label' => $type ),
+					array(
+						'input'    => self::describe_string( $case['input'] ),
+						'expected' => self::describe_string( $case['expected'] ),
+						'actual'   => self::describe_string( (string) $actual ),
+					)
+				);
+			}
+		}
+
+		$filter_calls = array();
+		$filter       = static function ( string $anonymous, string $type, string $data ) use ( &$filter_calls ): string {
+			$filter_calls[] = array(
+				'anonymous' => $anonymous,
+				'type'      => $type,
+				'data'      => $data,
+			);
+
+			if ( 'component-custom' !== $type ) {
+				return $anonymous;
+			}
+
+			return 'filtered:' . sha1( $data );
+		};
+
+		\add_filter( 'wp_privacy_anonymize_data', $filter, 10, 3 );
+		try {
+			$filtered = \wp_privacy_anonymize_data( 'component-custom', self::random_string( $ctx->fork( 'custom' ), 18 ) );
+			$email    = \wp_privacy_anonymize_data( 'email', 'person@example.test' );
+		} finally {
+			\remove_filter( 'wp_privacy_anonymize_data', $filter, 10 );
+		}
+
+		if (
+			! str_starts_with( $filtered, 'filtered:' )
+			|| 'deleted@site.invalid' !== $email
+			|| 2 !== count( $filter_calls )
+			|| 'component-custom' !== $filter_calls[0]['type']
+			|| 'email' !== $filter_calls[1]['type']
+			|| false !== \has_filter( 'wp_privacy_anonymize_data', $filter )
+		) {
+			self::record_failure(
+				$failures,
+				'anonymize-data.filter-locality',
+				array( 'label' => 'filter' ),
+				array(
+					'filtered'    => self::describe_string( (string) $filtered ),
+					'email'       => self::describe_string( (string) $email ),
+					'filterCalls' => self::describe_value( $filter_calls ),
+					'hasFilter'   => \has_filter( 'wp_privacy_anonymize_data', $filter ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.anonymization.ip-data-and-filter-contracts',
+			array() === $failures,
+			array(
+				'ipCases'   => count( $ip_cases ),
+				'dataTypes' => array_keys( $data_cases ),
+				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_policy_content_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		self::set_policy_content_state( array() );
+		$plugin_name = 'Component <Privacy> & "' . $ctx->identifier( 3, 8 );
+		$policy_text = '<p>Collects <strong>settings</strong> & emails.</p><script>alert(1)</script>';
+		$other_name  = 'Other Plugin ' . $ctx->identifier( 3, 8 );
+		$other_text  = '<p>Stores anonymous telemetry only.</p>';
+
+		self::with_admin_init_context(
+			static function () use ( $plugin_name, $policy_text, $other_name, $other_text ): void {
+				\wp_add_privacy_policy_content( '', $policy_text );
+				\wp_add_privacy_policy_content( $plugin_name, '' );
+				\wp_add_privacy_policy_content( $plugin_name, $policy_text );
+				\wp_add_privacy_policy_content( $plugin_name, $policy_text );
+				\wp_add_privacy_policy_content( $other_name, $other_text );
+			}
+		);
+
+		$suggested = \WP_Privacy_Policy_Content::get_suggested_policy_text();
+		self::collect_failure(
+			$failures,
+			2 === count( $suggested )
+				&& $plugin_name === ( $suggested[0]['plugin_name'] ?? null )
+				&& $policy_text === ( $suggested[0]['policy_text'] ?? null )
+				&& isset( $suggested[0]['added'], $suggested[1]['added'] )
+				&& $suggested[0]['added'] <= time()
+				&& $other_name === ( $suggested[1]['plugin_name'] ?? null )
+				&& $other_text === ( $suggested[1]['policy_text'] ?? null ),
+			'wp_add_privacy_policy_content ignores empty entries, deduplicates exact suggestions, and preserves raw suggested text',
+			array( 'suggested' => self::describe_value( $suggested ) )
+		);
+
+		$default_blocks      = \WP_Privacy_Policy_Content::get_default_content( false, true );
+		$default_classic     = \WP_Privacy_Policy_Content::get_default_content( false, false );
+		$description_classic = \WP_Privacy_Policy_Content::get_default_content( true, false );
+		self::collect_failure(
+			$failures,
+			is_string( $default_blocks )
+				&& is_string( $default_classic )
+				&& is_string( $description_classic )
+				&& str_contains( $default_blocks, '<!-- wp:heading -->' )
+				&& str_contains( $default_blocks, '<!-- wp:paragraph -->' )
+				&& false === strpos( $default_classic, '<!-- wp:' )
+				&& str_contains( $default_classic, 'http://example.test' )
+				&& str_contains( $description_classic, 'privacy-policy-tutorial' ),
+			'default privacy policy content switches block/classic/tutorial formats deterministically',
+			array(
+				'blocks'      => self::describe_string( $default_blocks ),
+				'classic'     => self::describe_string( $default_classic ),
+				'description' => self::describe_string( $description_classic ),
+			)
+		);
+
+		self::set_policy_content_state( array() );
+		self::with_admin_init_context(
+			static function (): void {
+				\WP_Privacy_Policy_Content::add_suggested_content();
+			}
+		);
+		$core_suggested = \WP_Privacy_Policy_Content::get_suggested_policy_text();
+		self::collect_failure(
+			$failures,
+			1 === count( $core_suggested )
+				&& 'WordPress' === ( $core_suggested[0]['plugin_name'] ?? null )
+				&& ! empty( $core_suggested[0]['policy_text'] )
+				&& false === strpos( $core_suggested[0]['policy_text'], '<!-- wp:' ),
+			'add_suggested_content registers classic WordPress default text through the public wrapper',
+			array( 'coreSuggested' => self::describe_value( $core_suggested ) )
+		);
+
+		return self::row(
+			$ctx,
+			'privacy.policy-content.registration-and-defaults',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function request_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$base_time = 1700000000 + $ctx->int( 0, 100000 );
 		$cases     = array(
@@ -1204,6 +1429,39 @@ final class PrivacySurface {
 		self::$erased_actions      = array();
 	}
 
+	private static function with_admin_init_context( callable $callback ): void {
+		$had_current_screen = array_key_exists( 'current_screen', $GLOBALS );
+		$current_screen     = $GLOBALS['current_screen'] ?? null;
+		$had_wp_actions     = array_key_exists( 'wp_actions', $GLOBALS );
+		$wp_actions         = $GLOBALS['wp_actions'] ?? null;
+
+		$GLOBALS['current_screen'] = new class() {
+			public function in_admin(): bool {
+				return true;
+			}
+		};
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['admin_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['admin_init'] ?? 0 ) );
+
+		try {
+			$callback();
+		} finally {
+			if ( $had_current_screen ) {
+				$GLOBALS['current_screen'] = $current_screen;
+			} else {
+				unset( $GLOBALS['current_screen'] );
+			}
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $wp_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+		}
+	}
+
 	private static function call( callable $callback ): array {
 		try {
 			return array(
@@ -1465,11 +1723,13 @@ final class PrivacySurface {
 			'_COOKIE'  => $_COOKIE,
 			'_SERVER'  => $_SERVER,
 			'globals'  => array(),
+			'policyContent' => self::get_policy_content_state(),
 		);
 
 		foreach (
 			array(
 				'post',
+				'current_screen',
 				'pagenow',
 				'wp_actions',
 				'wp_current_filter',
@@ -1501,6 +1761,26 @@ final class PrivacySurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+
+		self::set_policy_content_state( $snapshot['policyContent'] );
+	}
+
+	private static function get_policy_content_state(): array {
+		$reflection = new \ReflectionProperty( \WP_Privacy_Policy_Content::class, 'policy_content' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$reflection->setAccessible( true );
+		}
+
+		$value = $reflection->getValue();
+		return is_array( $value ) ? $value : array();
+	}
+
+	private static function set_policy_content_state( array $value ): void {
+		$reflection = new \ReflectionProperty( \WP_Privacy_Policy_Content::class, 'policy_content' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$reflection->setAccessible( true );
+		}
+		$reflection->setValue( null, $value );
 	}
 
 	private static function clone_value( $value ) {
