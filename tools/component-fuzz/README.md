@@ -14,6 +14,10 @@ network requests, or a configured site.
 - `abilities`: Abilities API category and ability registry lifecycles,
   action-gated registration, metadata/default preparation, filtered discovery,
   schema validation, permission checks, execution, and unregister behavior.
+- `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
+  round-trips, enum strictness, provider registry isolation, prompt builder
+  ability integration, cache and event adapters, and deterministic in-memory
+  generation without network calls.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
 - `blocks`: block type metadata, variations, hooks, style, pattern/category,
