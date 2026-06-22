@@ -41,9 +41,9 @@ class Tests_Formatting_SanitizeEmail extends WP_UnitTestCase {
 	 */
 	public function data_sanitized_email_pairs() {
 		return array(
-			'shorter than 6 characters'        => array( 'a@b', '' ),
+			'shorter than 6 characters'        => array( 'a@b', 'a@b' ),
 			'contains no @'                    => array( 'ab', '' ),
-			'just a TLD'                       => array( 'abc@com', '' ),
+			'just a TLD'                       => array( 'abc@com', 'abc@com' ),
 			'plain'                            => array( 'abc@example.com', 'abc@example.com' ),
 			'unicode domain'                   => array( 'abc@grå.org', 'abc@grå.org' ),
 			'unicode local part'               => array( 'grå@example.com', 'grå@example.com' ),

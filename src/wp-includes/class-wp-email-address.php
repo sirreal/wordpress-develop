@@ -17,9 +17,9 @@
  *
  * Example:
  *
- *     $email = WP_Email_Address::from_string( 'wordpress@wordpress.org' );
- *     'wordpress'     === $email->get_local_part();
- *     'wordpress.org' === $email->get_domain();
+ *     $email = WP_Email_Address::from_string( 'user@example.org' );
+ *     'user'        === $email->get_local_part();
+ *     'example.org' === $email->get_domain();
  *
  * @see self::from_string()        to parse and validate a provided email address.
  * @see self::get_localpart()      for the local part or mailbox of the address.
@@ -288,17 +288,25 @@ final class WP_Email_Address {
 			}
 		}
 
-		// The domain must contain at least one dot.
-		if ( ! str_contains( $ascii_domain, '.' ) ) {
-			/** This filter is documented in wp-includes/formatting.php */
-			if ( ! apply_filters( 'is_email', false, $input, 'domain_no_periods' ) ) {
-				return null;
-			}
-		}
-
 		// Validate the domain against the allowed structure.
 		if ( 1 !== preg_match( $domain_pattern, $decoded_domain ) ) {
 			return null;
+		}
+
+		if ( $allow_unicode && function_exists( 'idn_to_ascii' ) ) {
+			$encoded_labels = array();
+			foreach ( explode( '.', $decoded_domain ) as $label ) {
+				$encoded_label = preg_match( '/[\x80-\xff]/', $label )
+					? idn_to_ascii( $label, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 )
+					: $label;
+
+				if ( false === $encoded_label || strlen( $encoded_label ) > 63 ) {
+					return null;
+				}
+
+				$encoded_labels[] = $encoded_label;
+			}
+			$ascii_domain = implode( '.', $encoded_labels );
 		}
 
 		return new self( $localpart, $ascii_domain, $decoded_domain );

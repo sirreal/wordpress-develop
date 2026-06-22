@@ -122,21 +122,35 @@ class Tests_WpEmailAddress extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Tests that an is_email filter returning true rescues a domain_no_periods failure.
+	 * Tests that WHATWG-valid single-label domains are accepted.
 	 *
 	 * @ticket 31992
 	 *
 	 * @covers WP_Email_Address::from_string
 	 */
-	public function test_domain_no_periods_filter_can_rescue() {
-		$filter = static function ( $value, $email, $context ) {
-			return 'domain_no_periods' === $context ? true : $value;
-		};
-		add_filter( 'is_email', $filter, 10, 3 );
-		// Single-label domain is used for intranet mail servers.
+	public function test_single_label_domain_is_valid() {
 		$result = WP_Email_Address::from_string( 'user@mailserver', 'ascii' );
-		remove_filter( 'is_email', $filter, 10 );
 		$this->assertInstanceOf( WP_Email_Address::class, $result );
+	}
+
+	/**
+	 * Tests that Unicode domains expose punycoded ASCII views.
+	 *
+	 * @ticket 31992
+	 *
+	 * @covers WP_Email_Address::from_string
+	 * @covers WP_Email_Address::get_ascii_domain
+	 * @covers WP_Email_Address::get_ascii_address
+	 */
+	public function test_unicode_domain_ascii_view_is_punycoded() {
+		if ( ! function_exists( 'idn_to_ascii' ) ) {
+			$this->markTestSkipped( 'idn_to_ascii() is unavailable.' );
+		}
+
+		$result = WP_Email_Address::from_string( 'mail@bücher.de', 'unicode' );
+		$this->assertInstanceOf( WP_Email_Address::class, $result );
+		$this->assertSame( 'xn--bcher-kva.de', $result->get_ascii_domain() );
+		$this->assertSame( 'mail@xn--bcher-kva.de', $result->get_ascii_address() );
 	}
 
 	/**
@@ -151,8 +165,8 @@ class Tests_WpEmailAddress extends WP_UnitTestCase {
 			return 'local_invalid_chars' === $context ? true : $value;
 		};
 		add_filter( 'is_email', $filter, 10, 3 );
-		// Local part rescued, but domain has no dot — should still be rejected.
-		$result = WP_Email_Address::from_string( '"quoted"@nodots' );
+		// Local part rescued, but domain structure is invalid.
+		$result = WP_Email_Address::from_string( '"quoted"@bad_domain' );
 		remove_filter( 'is_email', $filter, 10 );
 		$this->assertNull( $result );
 	}
@@ -182,9 +196,6 @@ class Tests_WpEmailAddress extends WP_UnitTestCase {
 			'null byte'                     => array( "user\x00name@example.com" ),
 			'very invalid UTF8'             => array( "\x80\x20ouch@example.com" ),
 			'overlong encoding of space'    => array( "us\xC0\xA0er@example.com" ),
-
-			// Domain without a dot is not a routable internet domain.
-			'domain without a dot'          => array( 'com@com' ),
 		);
 	}
 
@@ -235,6 +246,8 @@ class Tests_WpEmailAddress extends WP_UnitTestCase {
 			'hyphen in domain label'      => array( 'user@my-domain.com' ),
 			'digits in domain'            => array( 'user@123.example.com' ),
 			'short but valid'             => array( 'a@l.is' ),
+			'single-label domain'         => array( 'a@b' ),
+			'long single-label domain'    => array( 'first.last@example' ),
 			'special chars in local part' => array( 'a.!#$%*+/=?^_{|}~-@example.com' ),
 			'local part is all digits'    => array( '1234567890@example.com' ),
 			'long local part'             => array( 'abcdefghijklmnopqrstuvwxyz0123456789@example.com' ),

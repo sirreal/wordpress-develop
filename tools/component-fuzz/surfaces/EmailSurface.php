@@ -5,6 +5,9 @@ final class EmailSurface {
 	public const NAME = 'email';
 
 	private const GENERATED_CASES = 28;
+	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
+		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
+		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
@@ -24,10 +27,13 @@ final class EmailSurface {
 		try {
 			$cases = self::cases( $ctx );
 
+			$rows = array_merge( $rows, self::check_utf8mb4_filter_gate( $ctx ) );
+
 			self::install_email_filters( 'unicode' );
 			$rows[] = self::check_unicode_filters( $ctx );
 			$rows = array_merge( $rows, self::check_direct_filter_callbacks( $ctx ) );
 			$rows = array_merge( $rows, self::check_whatwg_examples( $ctx ) );
+			$rows = array_merge( $rows, self::check_whatwg_ascii_oracle( $ctx ) );
 			$rows = array_merge( $rows, self::check_sanitizer_recovery( $ctx ) );
 
 			foreach ( $cases as $case_index => $case ) {
@@ -110,6 +116,86 @@ final class EmailSurface {
 				'isFilter'      => \has_filter( 'is_email', 'wp_is_unicode_email' ),
 				'sanitizeFilter' => \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ),
 			)
+		);
+	}
+
+	private static function check_utf8mb4_filter_gate( \ComponentFuzz\FuzzContext $ctx ): array {
+		$unicode  = "jos\u{00E9}@gr\u{00E5}.org";
+		$ascii    = 'user@example.com';
+		$charsets = array(
+			array( 'charset' => 'utf8mb4', 'unicode' => true ),
+			array( 'charset' => 'utf8', 'unicode' => false ),
+			array( 'charset' => 'latin1', 'unicode' => false ),
+			array( 'charset' => '', 'unicode' => false ),
+		);
+		$failures = array();
+		$observed = array();
+
+		foreach ( $charsets as $case ) {
+			self::install_email_filters_for_db_charset( $case['charset'] );
+
+			$is_unicode       = self::call( static fn() => \is_email( $unicode ) );
+			$sanitize_unicode = self::call( static fn() => \sanitize_email( $unicode ) );
+			$is_ascii         = self::call( static fn() => \is_email( $ascii ) );
+			$sanitize_ascii   = self::call( static fn() => \sanitize_email( $ascii ) );
+			$unicode_filter   = \has_filter( 'is_email', 'wp_is_unicode_email' );
+			$unicode_sanitize = \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' );
+			$ascii_filter     = \has_filter( 'is_email', 'wp_is_ascii_email' );
+			$ascii_sanitize   = \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' );
+
+			$expected_unicode          = $case['unicode'] ? $unicode : false;
+			$expected_sanitize_unicode = $case['unicode'] ? $unicode : '';
+			$expected_unicode_filter   = $case['unicode'] ? 10 : false;
+			$expected_ascii_filter     = $case['unicode'] ? false : 10;
+			$ok                        = ! $is_unicode['threw']
+				&& ! $sanitize_unicode['threw']
+				&& ! $is_ascii['threw']
+				&& ! $sanitize_ascii['threw']
+				&& $expected_unicode === $is_unicode['value']
+				&& $expected_sanitize_unicode === $sanitize_unicode['value']
+				&& $ascii === $is_ascii['value']
+				&& $ascii === $sanitize_ascii['value']
+				&& $expected_unicode_filter === $unicode_filter
+				&& $expected_unicode_filter === $unicode_sanitize
+				&& $expected_ascii_filter === $ascii_filter
+				&& $expected_ascii_filter === $ascii_sanitize;
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'charset'         => $case['charset'],
+					'expectsUnicode'  => $case['unicode'],
+					'isUnicode'       => self::describe_call( $is_unicode ),
+					'sanitizeUnicode' => self::describe_call( $sanitize_unicode ),
+					'isAscii'         => self::describe_call( $is_ascii ),
+					'sanitizeAscii'   => self::describe_call( $sanitize_ascii ),
+					'unicodeFilter'   => $unicode_filter,
+					'unicodeSanitize' => $unicode_sanitize,
+					'asciiFilter'     => $ascii_filter,
+					'asciiSanitize'   => $ascii_sanitize,
+				);
+			}
+
+			$observed[] = array(
+				'charset'          => $case['charset'],
+				'unicodeEnabled'   => $case['unicode'],
+				'isEmailFilter'    => false !== $unicode_filter ? 'unicode' : 'ascii',
+				'sanitizeFilter'   => false !== $unicode_sanitize ? 'unicode' : 'ascii',
+				'unicodeAccepted'  => ! $is_unicode['threw'] && false !== $is_unicode['value'],
+				'unicodeSanitized' => ! $sanitize_unicode['threw'] && '' !== $sanitize_unicode['value'],
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.default-filters.utf8mb4-gate',
+				array() === $failures,
+				array(
+					'unicode' => self::describe_string( $unicode ),
+					'ascii'    => self::describe_string( $ascii ),
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
 		);
 	}
 
@@ -213,6 +299,7 @@ final class EmailSurface {
 	private static function check_whatwg_examples( \ComponentFuzz\FuzzContext $ctx ): array {
 		$valid = array(
 			array( 'label' => 'ascii-atext-local', 'input' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com' ),
+			array( 'label' => 'single-label-domain', 'input' => 'a@b' ),
 			array( 'label' => 'consecutive-local-dots', 'input' => 'first..last@example.com' ),
 			array( 'label' => 'subdomain-hyphen', 'input' => 'user@sub-domain.example' ),
 			array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" ),
@@ -293,6 +380,66 @@ final class EmailSurface {
 					'validCount'   => count( $valid ),
 					'invalidCount' => count( $invalid ),
 					'failures'     => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_whatwg_ascii_oracle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array( 'label' => 'single-label-domain', 'input' => 'a@b' ),
+			array( 'label' => 'single-label-domain-long-local', 'input' => 'first.last@example' ),
+			array( 'label' => 'consecutive-local-dots', 'input' => 'first..last@example.com' ),
+			array( 'label' => 'leading-local-dot', 'input' => '.start@example.com' ),
+			array( 'label' => 'trailing-local-dot', 'input' => 'end.@example.com' ),
+			array( 'label' => 'subdomain-hyphen', 'input' => 'user@sub-domain.example' ),
+			array( 'label' => 'quoted-local', 'input' => '"quoted"@example.com' ),
+			array( 'label' => 'comment-local', 'input' => 'user(comment)@example.com' ),
+			array( 'label' => 'domain-underscore', 'input' => 'user@example_corp.com' ),
+			array( 'label' => 'leading-domain-hyphen', 'input' => 'user@-example.com' ),
+			array( 'label' => 'trailing-domain-hyphen', 'input' => 'user@example-.com' ),
+			array( 'label' => 'domain-literal', 'input' => 'user@[127.0.0.1]' ),
+			array( 'label' => 'line-break-local', 'input' => "line\nbreak@example.com" ),
+		);
+		$failures = array();
+
+		foreach ( $cases as $case ) {
+			$expected_valid     = 1 === preg_match( self::WHATWG_ASCII_EMAIL_REGEX, $case['input'] );
+			$parsed             = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+			$is_email           = self::call( static fn() => \is_email( $case['input'] ) );
+			$sanitized          = self::call( static fn() => \sanitize_email( $case['input'] ) );
+			$expected_is_email  = $expected_valid ? $case['input'] : false;
+			$expected_sanitized = $expected_valid ? $case['input'] : '';
+			$actual_valid       = $parsed['value'] instanceof \WP_Email_Address;
+
+			if (
+				$parsed['threw'] ||
+				$is_email['threw'] ||
+				$sanitized['threw'] ||
+				$expected_valid !== $actual_valid ||
+				$expected_is_email !== $is_email['value'] ||
+				$expected_sanitized !== $sanitized['value']
+			) {
+				$failures[] = array(
+					'label'            => $case['label'],
+					'input'            => self::describe_string( $case['input'] ),
+					'expectedValid'    => $expected_valid,
+					'actualValid'      => $actual_valid,
+					'parsed'           => self::describe_call( $parsed ),
+					'isEmail'          => self::describe_call( $is_email ),
+					'sanitizeEmail'    => self::describe_call( $sanitized ),
+					'whatwgAsciiRegex' => self::WHATWG_ASCII_EMAIL_REGEX,
+				);
+			}
+		}
+
+		return array(
+			$ctx->result(
+				'email.whatwg-ascii.oracle-agreement',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'failures'  => $failures,
 				)
 			),
 		);
@@ -648,6 +795,9 @@ final class EmailSurface {
 			'jose@' . $domain,
 			"jos\u{00E9}@" . $domain,
 			"jose\u{0301}@" . $domain,
+			"josejose@gr\u{00E5}.org",
+			"jos\u{00E9}jos\u{00E9}@gr\u{00E5}.org",
+			"jose\u{0301}jose\u{0301}@gr\u{00E5}.org",
 		);
 		$sanitized = array();
 		$locals    = array();
@@ -773,8 +923,11 @@ final class EmailSurface {
 			$raw_ok = ! $raw_parse['threw']
 				&& ! $raw_roundtrip['threw']
 				&& $raw_email instanceof \WP_Email_Address
+				&& $encoded_domain === $raw_email->get_ascii_domain()
 				&& $sample['domain'] === $raw_email->get_unicode_domain()
+				&& 'mail@' . $encoded_domain === $raw_email->get_ascii_address()
 				&& $unicode_input === $raw_email->get_unicode_address()
+				&& self::is_ascii( $raw_email->get_ascii_address() )
 				&& $raw_roundtrip['value'] instanceof \WP_Email_Address
 				&& $unicode_input === $raw_roundtrip['value']->get_unicode_address();
 
@@ -1000,6 +1153,10 @@ final class EmailSurface {
 		\add_filter( 'sanitize_email', 'wp_sanitize_unicode_email', 10, 3 );
 	}
 
+	private static function install_email_filters_for_db_charset( string $charset ): void {
+		self::install_email_filters( 'utf8mb4' === $charset ? 'unicode' : 'ascii' );
+	}
+
 	private static function cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$has_idn = function_exists( 'idn_to_utf8' );
 		$cases   = array(
@@ -1029,7 +1186,7 @@ final class EmailSurface {
 			self::case( 'missing-at', 'not-an-address.example.com', array( 'malformedAt' ), false, '', false, '' ),
 			self::case( 'empty-local', '@example.com', array( 'malformedAt' ), false, '', false, '' ),
 			self::case( 'empty-domain', 'user@', array( 'malformedDomain' ), false, '', false, '' ),
-			self::case( 'no-domain-period', 'a@b', array( 'malformedDomain' ), false, '', false, '' ),
+			self::case( 'no-domain-period', 'a@b', array( 'ascii', 'valid', 'whatwgSingleLabelDomain' ), 'a@b', 'a@b', 'a@b', 'a@b' ),
 			self::case( 'empty-domain-label', 'name@domain..com', array( 'malformedDomain' ), false, '', false, '' ),
 			self::case( 'leading-domain-dot', 'name@.example.com', array( 'malformedDomain' ), false, '', false, '' ),
 			self::case( 'leading-domain-hyphen', 'name@-example.com', array( 'malformedDomain' ), false, '', false, '' ),
@@ -1144,7 +1301,7 @@ final class EmailSurface {
 			array( 'value' => str_repeat( 'a', 64 ) . '.com', 'traits' => array( 'boundaryLength', 'malformedDomain' ) ),
 			array( 'value' => str_repeat( "\u{00E5}", 31 ) . 'a.com', 'traits' => array( 'unicodeAddress', 'boundaryLength' ) ),
 			array( 'value' => str_repeat( "\u{00E5}", 32 ) . '.com', 'traits' => array( 'unicodeAddress', 'boundaryLength', 'malformedDomain' ) ),
-			array( 'value' => 'localhost', 'traits' => array( 'malformedDomain' ) ),
+			array( 'value' => 'localhost', 'traits' => array( 'whatwgSingleLabelDomain' ) ),
 			array( 'value' => "bad\x80.test", 'traits' => array( 'invalidUtf8', 'unicodeAddress' ) ),
 			array( 'value' => "bad\xE2\x82.test", 'traits' => array( 'invalidUtf8', 'unicodeAddress' ) ),
 		);
