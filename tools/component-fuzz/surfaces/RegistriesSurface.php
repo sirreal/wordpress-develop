@@ -120,6 +120,7 @@ final class RegistriesSurface {
 					&& $registry->is_registered( $case['id'] )
 					&& \wp_is_connector_registered( $case['id'] )
 					&& isset( $all[ $case['id'] ] )
+					&& $registered[ $case['id'] ] === $all[ $case['id'] ]
 					&& $case['args']['name'] === $registered[ $case['id'] ]['name']
 					&& $case['args']['type'] === $registered[ $case['id'] ]['type']
 					&& $case['expectedDescription'] === $registered[ $case['id'] ]['description']
@@ -133,6 +134,16 @@ final class RegistriesSurface {
 				)
 			);
 		}
+
+		self::collect_failure(
+			$failures,
+			$registered === \wp_get_connectors(),
+			'public connector aggregate returns the complete normalized registry',
+			array(
+				'expectedKeys' => array_keys( $registered ),
+				'actualKeys'   => array_keys( \wp_get_connectors() ),
+			)
+		);
 
 		$before_invalid  = $registry->get_all_registered();
 		$duplicate       = self::capture_doing_it_wrong(
@@ -384,7 +395,8 @@ final class RegistriesSurface {
 
 			$safe_svg     = '<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 24 24"><path fill="currentColor" d="M0 0h24v24H0z"/></svg>';
 			$unsafe_svg   = '<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 24 24" onload="alert(1)"><path d="M1 1h2v2z" onclick="bad()"/><script>alert(1)</script></svg>';
-			$sanitized    = $sanitize->invoke( $registry, $unsafe_svg );
+			$safe_sanitized = $sanitize->invoke( $registry, $safe_svg );
+			$sanitized      = $sanitize->invoke( $registry, $unsafe_svg );
 			$content_id   = self::icon_name( $ctx->fork( 'content' ), 'content' );
 			$registered   = $register->invoke(
 				$registry,
@@ -394,24 +406,41 @@ final class RegistriesSurface {
 					'content' => $safe_svg,
 				)
 			);
-			$content_icon = $registry->get_registered_icon( $content_id );
+			$content_icon         = $registry->get_registered_icon( $content_id );
+			$unsafe_content_id    = self::icon_name( $ctx->fork( 'unsafe-content' ), 'unsafe-content' );
+			$unsafe_registered    = $register->invoke(
+				$registry,
+				$unsafe_content_id,
+				array(
+					'label'   => 'Fuzz unsafe content icon',
+					'content' => $unsafe_svg,
+				)
+			);
+			$unsafe_content_icon = $registry->get_registered_icon( $unsafe_content_id );
 
 			self::collect_failure(
 				$failures,
 				true === $registered
+					&& true === $unsafe_registered
 					&& is_array( $content_icon )
+					&& is_array( $unsafe_content_icon )
 					&& $content_id === $content_icon['name']
-					&& $safe_svg === $content_icon['content']
+					&& $safe_sanitized === $content_icon['content']
 					&& '' !== $sanitized
 					&& str_contains( $sanitized, '<svg' )
 					&& ! str_contains( $sanitized, '<script' )
 					&& ! str_contains( $sanitized, 'onload' )
-					&& ! str_contains( $sanitized, 'onclick' ),
-				'protected icon registration accepts SVG content and sanitizer strips unsafe SVG markup',
+					&& ! str_contains( $sanitized, 'onclick' )
+					&& $unsafe_content_id === $unsafe_content_icon['name']
+					&& $sanitized === $unsafe_content_icon['content'],
+				'protected icon registration stores sanitized SVG content',
 				array(
-					'contentId' => $content_id,
-					'sanitized' => $sanitized,
-					'icon'      => self::describe_value( $content_icon ),
+					'contentId'       => $content_id,
+					'unsafeContentId' => $unsafe_content_id,
+					'safeSanitized'   => $safe_sanitized,
+					'sanitized'       => $sanitized,
+					'icon'            => self::describe_value( $content_icon ),
+					'unsafeIcon'      => self::describe_value( $unsafe_content_icon ),
 				)
 			);
 

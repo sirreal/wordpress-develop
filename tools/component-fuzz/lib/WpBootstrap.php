@@ -233,6 +233,14 @@ final class WpBootstrap {
 			'wp-includes/interactivity-api/class-wp-interactivity-api.php',
 			'wp-includes/interactivity-api/interactivity-api.php',
 			'wp-includes/kses.php',
+			'wp-includes/php-ai-client/autoload.php',
+			'wp-includes/ai-client/adapters/class-wp-ai-client-http-client.php',
+			'wp-includes/ai-client/adapters/class-wp-ai-client-cache.php',
+			'wp-includes/ai-client/adapters/class-wp-ai-client-discovery-strategy.php',
+			'wp-includes/ai-client/adapters/class-wp-ai-client-event-dispatcher.php',
+			'wp-includes/ai-client/class-wp-ai-client-ability-function-resolver.php',
+			'wp-includes/ai-client/class-wp-ai-client-prompt-builder.php',
+			'wp-includes/ai-client.php',
 			'wp-includes/class-wp-connector-registry.php',
 			'wp-includes/connectors.php',
 			'wp-includes/class-wp-icons-registry.php',
@@ -373,6 +381,19 @@ final class WpBootstrap {
 
 		if ( class_exists( 'WP_Widget_Factory' ) && ! isset( $GLOBALS['wp_widget_factory'] ) ) {
 			$GLOBALS['wp_widget_factory'] = new \WP_Widget_Factory();
+		}
+
+		if ( class_exists( 'WP_AI_Client_Discovery_Strategy' ) ) {
+			\WP_AI_Client_Discovery_Strategy::init();
+		}
+
+		if ( class_exists( 'WordPress\AiClient\AiClient' ) ) {
+			if ( class_exists( 'WP_AI_Client_Cache' ) ) {
+				\WordPress\AiClient\AiClient::setCache( new \WP_AI_Client_Cache() );
+			}
+			if ( class_exists( 'WP_AI_Client_Event_Dispatcher' ) ) {
+				\WordPress\AiClient\AiClient::setEventDispatcher( new \WP_AI_Client_Event_Dispatcher() );
+			}
 		}
 
 		self::$loaded = true;

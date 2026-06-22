@@ -84,6 +84,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		public $usermeta = 'wp_usermeta';
 		public $commentmeta = 'wp_commentmeta';
 		public $prefix = 'wp_';
+		public $charset = 'utf8mb4';
 
 		private $component_fuzz_options = array();
 

@@ -154,6 +154,21 @@ class Tests_WpEmailAddress extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that Unicode domains are rejected when ToASCII is unavailable.
+	 *
+	 * @ticket 31992
+	 *
+	 * @covers WP_Email_Address::from_string
+	 */
+	public function test_unicode_domain_is_rejected_without_toascii_support() {
+		if ( function_exists( 'idn_to_ascii' ) ) {
+			$this->markTestSkipped( 'idn_to_ascii() is available.' );
+		}
+
+		$this->assertNull( WP_Email_Address::from_string( 'mail@bücher.de', 'unicode' ) );
+	}
+
+	/**
 	 * Tests that rescuing local_invalid_chars does not bypass later checks.
 	 *
 	 * @ticket 31992

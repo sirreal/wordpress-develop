@@ -131,58 +131,67 @@ final class EmailSurface {
 		$failures = array();
 		$observed = array();
 
-		foreach ( $charsets as $case ) {
-			self::install_email_filters_for_db_charset( $case['charset'] );
+		$hook_snapshot = self::snapshot_hook_globals();
+		$wpdb_snapshot = self::snapshot_wpdb_charset();
 
-			$is_unicode       = self::call( static fn() => \is_email( $unicode ) );
-			$sanitize_unicode = self::call( static fn() => \sanitize_email( $unicode ) );
-			$is_ascii         = self::call( static fn() => \is_email( $ascii ) );
-			$sanitize_ascii   = self::call( static fn() => \sanitize_email( $ascii ) );
-			$unicode_filter   = \has_filter( 'is_email', 'wp_is_unicode_email' );
-			$unicode_sanitize = \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' );
-			$ascii_filter     = \has_filter( 'is_email', 'wp_is_ascii_email' );
-			$ascii_sanitize   = \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' );
+		try {
+			foreach ( $charsets as $case ) {
+				self::restore_hook_globals( $hook_snapshot );
+				self::install_email_filters_from_default_filters( $case['charset'] );
 
-			$expected_unicode          = $case['unicode'] ? $unicode : false;
-			$expected_sanitize_unicode = $case['unicode'] ? $unicode : '';
-			$expected_unicode_filter   = $case['unicode'] ? 10 : false;
-			$expected_ascii_filter     = $case['unicode'] ? false : 10;
-			$ok                        = ! $is_unicode['threw']
-				&& ! $sanitize_unicode['threw']
-				&& ! $is_ascii['threw']
-				&& ! $sanitize_ascii['threw']
-				&& $expected_unicode === $is_unicode['value']
-				&& $expected_sanitize_unicode === $sanitize_unicode['value']
-				&& $ascii === $is_ascii['value']
-				&& $ascii === $sanitize_ascii['value']
-				&& $expected_unicode_filter === $unicode_filter
-				&& $expected_unicode_filter === $unicode_sanitize
-				&& $expected_ascii_filter === $ascii_filter
-				&& $expected_ascii_filter === $ascii_sanitize;
+				$is_unicode       = self::call( static fn() => \is_email( $unicode ) );
+				$sanitize_unicode = self::call( static fn() => \sanitize_email( $unicode ) );
+				$is_ascii         = self::call( static fn() => \is_email( $ascii ) );
+				$sanitize_ascii   = self::call( static fn() => \sanitize_email( $ascii ) );
+				$unicode_filter   = \has_filter( 'is_email', 'wp_is_unicode_email' );
+				$unicode_sanitize = \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' );
+				$ascii_filter     = \has_filter( 'is_email', 'wp_is_ascii_email' );
+				$ascii_sanitize   = \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' );
 
-			if ( ! $ok ) {
-				$failures[] = array(
-					'charset'         => $case['charset'],
-					'expectsUnicode'  => $case['unicode'],
-					'isUnicode'       => self::describe_call( $is_unicode ),
-					'sanitizeUnicode' => self::describe_call( $sanitize_unicode ),
-					'isAscii'         => self::describe_call( $is_ascii ),
-					'sanitizeAscii'   => self::describe_call( $sanitize_ascii ),
-					'unicodeFilter'   => $unicode_filter,
-					'unicodeSanitize' => $unicode_sanitize,
-					'asciiFilter'     => $ascii_filter,
-					'asciiSanitize'   => $ascii_sanitize,
+				$expected_unicode          = $case['unicode'] ? $unicode : false;
+				$expected_sanitize_unicode = $case['unicode'] ? $unicode : '';
+				$expected_unicode_filter   = $case['unicode'] ? 10 : false;
+				$expected_ascii_filter     = $case['unicode'] ? false : 10;
+				$ok                        = ! $is_unicode['threw']
+					&& ! $sanitize_unicode['threw']
+					&& ! $is_ascii['threw']
+					&& ! $sanitize_ascii['threw']
+					&& $expected_unicode === $is_unicode['value']
+					&& $expected_sanitize_unicode === $sanitize_unicode['value']
+					&& $ascii === $is_ascii['value']
+					&& $ascii === $sanitize_ascii['value']
+					&& $expected_unicode_filter === $unicode_filter
+					&& $expected_unicode_filter === $unicode_sanitize
+					&& $expected_ascii_filter === $ascii_filter
+					&& $expected_ascii_filter === $ascii_sanitize;
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'charset'         => $case['charset'],
+						'expectsUnicode'  => $case['unicode'],
+						'isUnicode'       => self::describe_call( $is_unicode ),
+						'sanitizeUnicode' => self::describe_call( $sanitize_unicode ),
+						'isAscii'         => self::describe_call( $is_ascii ),
+						'sanitizeAscii'   => self::describe_call( $sanitize_ascii ),
+						'unicodeFilter'   => $unicode_filter,
+						'unicodeSanitize' => $unicode_sanitize,
+						'asciiFilter'     => $ascii_filter,
+						'asciiSanitize'   => $ascii_sanitize,
+					);
+				}
+
+				$observed[] = array(
+					'charset'          => $case['charset'],
+					'unicodeEnabled'   => $case['unicode'],
+					'isEmailFilter'    => false !== $unicode_filter ? 'unicode' : 'ascii',
+					'sanitizeFilter'   => false !== $unicode_sanitize ? 'unicode' : 'ascii',
+					'unicodeAccepted'  => ! $is_unicode['threw'] && false !== $is_unicode['value'],
+					'unicodeSanitized' => ! $sanitize_unicode['threw'] && '' !== $sanitize_unicode['value'],
 				);
 			}
-
-			$observed[] = array(
-				'charset'          => $case['charset'],
-				'unicodeEnabled'   => $case['unicode'],
-				'isEmailFilter'    => false !== $unicode_filter ? 'unicode' : 'ascii',
-				'sanitizeFilter'   => false !== $unicode_sanitize ? 'unicode' : 'ascii',
-				'unicodeAccepted'  => ! $is_unicode['threw'] && false !== $is_unicode['value'],
-				'unicodeSanitized' => ! $sanitize_unicode['threw'] && '' !== $sanitize_unicode['value'],
-			);
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::restore_wpdb_charset( $wpdb_snapshot );
 		}
 
 		return array(
@@ -1102,6 +1111,10 @@ final class EmailSurface {
 			return false;
 		}
 
+		if ( ! self::is_ascii( $email->get_ascii_domain() ) ) {
+			return false;
+		}
+
 		foreach ( explode( '.', $email->get_ascii_domain() ) as $label ) {
 			if ( '' === $label || strlen( $label ) > 63 ) {
 				return false;
@@ -1153,8 +1166,16 @@ final class EmailSurface {
 		\add_filter( 'sanitize_email', 'wp_sanitize_unicode_email', 10, 3 );
 	}
 
-	private static function install_email_filters_for_db_charset( string $charset ): void {
-		self::install_email_filters( 'utf8mb4' === $charset ? 'unicode' : 'ascii' );
+	private static function install_email_filters_from_default_filters( string $charset ): void {
+		$default_filters = \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'wp-includes' . DIRECTORY_SEPARATOR . 'default-filters.php';
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) ) {
+			$GLOBALS['wpdb'] = new \stdClass();
+		}
+
+		$GLOBALS['wpdb']->charset = $charset;
+		$wpdb                    = $GLOBALS['wpdb'];
+		require $default_filters;
 	}
 
 	private static function cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1503,6 +1524,29 @@ final class EmailSurface {
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
+		}
+	}
+
+	private static function snapshot_wpdb_charset(): array {
+		return array(
+			'hasWpdb'     => isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ),
+			'hasCharset'  => isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'charset' ),
+			'charset'     => isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'charset' ) ? $GLOBALS['wpdb']->charset : null,
+			'originalWpdb' => isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null,
+		);
+	}
+
+	private static function restore_wpdb_charset( array $snapshot ): void {
+		if ( ! $snapshot['hasWpdb'] ) {
+			unset( $GLOBALS['wpdb'] );
+			return;
+		}
+
+		$GLOBALS['wpdb'] = $snapshot['originalWpdb'];
+		if ( $snapshot['hasCharset'] ) {
+			$GLOBALS['wpdb']->charset = $snapshot['charset'];
+		} elseif ( is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'charset' ) ) {
+			unset( $GLOBALS['wpdb']->charset );
 		}
 	}
 

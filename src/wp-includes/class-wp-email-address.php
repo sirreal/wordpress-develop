@@ -293,10 +293,14 @@ final class WP_Email_Address {
 			return null;
 		}
 
-		if ( $allow_unicode && function_exists( 'idn_to_ascii' ) ) {
+		if ( $allow_unicode && 1 === preg_match( '/[\x80-\xff]/', $decoded_domain ) ) {
+			if ( ! function_exists( 'idn_to_ascii' ) ) {
+				return null;
+			}
+
 			$encoded_labels = array();
 			foreach ( explode( '.', $decoded_domain ) as $label ) {
-				$encoded_label = preg_match( '/[\x80-\xff]/', $label )
+				$encoded_label = 1 === preg_match( '/[\x80-\xff]/', $label )
 					? idn_to_ascii( $label, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 )
 					: $label;
 

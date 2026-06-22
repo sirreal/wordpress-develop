@@ -87,6 +87,32 @@ class Tests_Icons_WpIconsRegistry extends WP_UnitTestCase {
 		$this->assertFalse( $result2 );
 	}
 
+	/**
+	 * Should sanitize inline SVG content when registering an icon.
+	 *
+	 * @ticket 64847
+	 *
+	 * @covers WP_Icons_Registry::get_registered_icon
+	 */
+	public function test_register_sanitizes_inline_content() {
+		$name     = 'test-plugin/unsafe-content';
+		$settings = array(
+			'label'   => 'Icon',
+			'content' => '<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 24 24" onload="alert(1)"><path d="M1 1h2v2z" onclick="bad()"/><script>alert(1)</script></svg>',
+		);
+
+		$result = $this->register( $name, $settings );
+		$icon   = $this->registry->get_registered_icon( $name );
+
+		$this->assertTrue( $result );
+		$this->assertIsArray( $icon );
+		$this->assertStringContainsString( '<svg', $icon['content'] );
+		$this->assertStringContainsString( 'M1 1h2v2z', $icon['content'] );
+		$this->assertStringNotContainsString( '<script', $icon['content'] );
+		$this->assertStringNotContainsString( 'onload', $icon['content'] );
+		$this->assertStringNotContainsString( 'onclick', $icon['content'] );
+	}
+
 
 	/**
 	 * Should fail to register icon with invalid names.

@@ -3614,7 +3614,7 @@ function is_email( $email, $deprecated = false ) {
 	 * Filters whether an email address is valid.
 	 *
 	 * This filter is evaluated under several different contexts, such as
-	 * 'local_invalid_chars', 'domain_no_periods', or no specific context.
+	 * 'local_invalid_chars' or no specific context.
 	 * Filters registered on this hook perform the actual validation; the
 	 * default filter is registered in default-filters.php.
 	 *

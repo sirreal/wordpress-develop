@@ -40,6 +40,10 @@ $required_functions = array(
 	'wp_print_font_faces',
 	'wp_register_font_collection',
 	'wp_get_font_dir',
+	'wp_supports_ai',
+	'wp_is_connector_registered',
+	'wp_get_connector',
+	'wp_get_connectors',
 );
 
 $required_classes = array(
@@ -60,6 +64,10 @@ $required_classes = array(
 	'WP_Font_Library',
 	'WP_Font_Collection',
 	'WP_Font_Utils',
+	'WP_Connector_Registry',
+	'WP_Icons_Registry',
+	'WP_Speculation_Rules',
+	'WordPress\AiClient\AiClient',
 );
 
 $missing = array();
@@ -76,6 +84,13 @@ foreach ( $required_classes as $class ) {
 
 if ( $missing ) {
 	fwrite( STDERR, "Missing bootstrap symbols:\n- " . implode( "\n- ", $missing ) . "\n" );
+	exit( 1 );
+}
+
+try {
+	do_action( 'init' );
+} catch ( Throwable $e ) {
+	fwrite( STDERR, 'Bootstrap init smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage() . "\n" );
 	exit( 1 );
 }
 
