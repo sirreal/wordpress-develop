@@ -103,6 +103,16 @@ $required_functions = array(
 	'get_bookmark',
 	'get_bookmark_field',
 	'wp_list_bookmarks',
+	'get_core_updates',
+	'get_plugin_updates',
+	'get_theme_updates',
+	'wp_get_update_data',
+	'wp_is_using_https',
+	'wp_is_home_url_using_https',
+	'wp_is_site_url_using_https',
+	'wp_should_replace_insecure_home_url',
+	'wp_replace_insecure_home_url',
+	'wp_get_https_detection_errors',
 );
 
 $required_classes = array(
@@ -154,6 +164,7 @@ $required_classes = array(
 	'WP_Customize_Selective_Refresh',
 	'WP_Customize_Partial',
 	'WP_Privacy_Policy_Content',
+	'WP_Site_Health',
 	'WP_Query',
 	'WP_Rewrite',
 	'WP_Post',

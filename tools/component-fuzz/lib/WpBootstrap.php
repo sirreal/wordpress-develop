@@ -231,6 +231,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-locale.php',
 			'wp-includes/class-wp-locale-switcher.php',
 			'wp-includes/http.php',
+			'wp-includes/https-detection.php',
+			'wp-includes/https-migration.php',
 			'wp-includes/class-wp-token-map.php',
 			'wp-includes/html-api/html5-named-character-references.php',
 			'wp-includes/html-api/class-wp-html-attribute-token.php',
@@ -381,6 +383,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-plugin-dependencies.php',
 			'wp-includes/pluggable.php',
 			'wp-includes/class-wp-application-passwords.php',
+			'wp-includes/update.php',
 			'wp-includes/class-IXR.php',
 			'wp-includes/class-wp-xmlrpc-server.php',
 			'wp-includes/class-wp-admin-bar.php',
@@ -394,6 +397,8 @@ final class WpBootstrap {
 			'wp-includes/customize/class-wp-customize-partial.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/plugin.php',
+			'wp-admin/includes/update.php',
+			'wp-admin/includes/class-wp-site-health.php',
 			'wp-admin/includes/class-wp-privacy-policy-content.php',
 			'wp-admin/includes/privacy-tools.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',
@@ -405,6 +410,10 @@ final class WpBootstrap {
 			if ( file_exists( $path ) ) {
 				require_once $path;
 			}
+		}
+
+		if ( function_exists( 'remove_action' ) ) {
+			remove_action( 'init', 'wp_schedule_update_checks' );
 		}
 
 		require_once __DIR__ . '/wp-stubs.php';

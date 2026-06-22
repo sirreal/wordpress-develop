@@ -107,6 +107,11 @@ network requests, or a configured site.
 - `security`: salts and HMACs, nonce generation/verification, nonce URLs and
   hidden fields, admin/ajax referer paths, synthetic auth cookies and session
   tokens, redirect sanitization, and safe redirect filters.
+- `site-health`: no-DB Site Health/update/HTTPS helper coverage, including
+  generated update transients and dismissed core update options, aggregate
+  update counts/titles, HTTPS option booleans, migration replacement, HTTPS
+  detection short-circuits, and selected direct `WP_Site_Health` tests without
+  remote requests.
 - `state`: object cache groups and multi-operations, option and transient APIs
   backed by the no-DB stub, filters, serialization, JSON, and value helpers.
 - `style`: style engine serialization, CSS declaration filtering, theme.json
@@ -133,7 +138,9 @@ network requests, or a configured site.
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Customizer surface intentionally avoids changeset
 save/publish, nav-menu persistence, widget persistence, and real post/option
-storage beyond the existing no-DB option stub. Skips are recorded in
+storage beyond the existing no-DB option stub. The Site Health surface avoids
+loopback, WordPress.org, REST availability, update download, mail, cron, and
+filesystem-writing checks unless they are fully short-circuited. Skips are recorded in
 `results.ndjson` with a reason and do not mask failures or PHP errors.
 
 ## Commands
