@@ -128,6 +128,15 @@ $required_functions = array(
 	'get_bookmark',
 	'get_bookmark_field',
 	'wp_list_bookmarks',
+	'wp_get_image_editor',
+	'wp_image_editor_supports',
+	'wp_get_image_editor_output_format',
+	'image_make_intermediate_size',
+	'wp_create_image_subsizes',
+	'wp_generate_attachment_metadata',
+	'wp_get_attachment_metadata',
+	'wp_update_attachment_metadata',
+	'get_attached_file',
 	'get_core_updates',
 	'get_plugin_updates',
 	'get_theme_updates',
@@ -196,6 +205,9 @@ $required_classes = array(
 	'WP_Query',
 	'WP_Rewrite',
 	'WP_Post',
+	'WP_Image_Editor',
+	'WP_Image_Editor_GD',
+	'WP_Image_Editor_Imagick',
 );
 
 $missing = array();
@@ -517,6 +529,26 @@ if (
 	exit( 1 );
 }
 
+$default_image_output_format = wp_get_image_editor_output_format( '/tmp/component-fuzz-smoke.heic', 'image/heic' );
+$image_output_format_filter  = static function ( array $formats, string $filename, string $mime_type ): array {
+	if ( 'image/jpeg' === $mime_type && str_contains( $filename, 'component-fuzz-smoke' ) ) {
+		$formats['image/jpeg'] = 'image/webp';
+	}
+
+	return $formats;
+};
+add_filter( 'image_editor_output_format', $image_output_format_filter, 10, 3 );
+$filtered_image_output_format = wp_get_image_editor_output_format( '/tmp/component-fuzz-smoke.jpg', 'image/jpeg' );
+remove_filter( 'image_editor_output_format', $image_output_format_filter, 10 );
+if (
+	'image/jpeg' !== ( $default_image_output_format['image/heic'] ?? null )
+	|| 'image/webp' !== ( $filtered_image_output_format['image/jpeg'] ?? null )
+	|| ! is_bool( wp_image_editor_supports( array( 'mime_type' => 'image/jpeg' ) ) )
+) {
+	fwrite( STDERR, "Image editor output/support smoke invariant failed.\n" );
+	exit( 1 );
+}
+
 $font_dir = wp_get_font_dir();
 if ( ! str_ends_with( $font_dir['basedir'], '/uploads/fonts' ) || ! str_ends_with( $font_dir['baseurl'], '/uploads/fonts' ) ) {
 	fwrite( STDERR, 'Font dir smoke invariant failed: ' . wp_json_encode( $font_dir ) . "\n" );
@@ -577,6 +609,67 @@ if ( false === has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload
 $lazyloader->reset_queue( 'comment' );
 if ( false !== has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload_meta_callback' ) ) ) {
 	fwrite( STDERR, "Metadata lazyloader reset smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$attachment_smoke_id       = 90904;
+$attachment_smoke_relative = '2026/06/component-fuzz-smoke.jpg';
+$attachment_smoke_meta     = array(
+	'width'          => 64,
+	'height'         => 48,
+	'file'           => $attachment_smoke_relative,
+	'original_image' => 'component-fuzz-smoke-original.jpg',
+	'sizes'          => array(
+		'thumbnail' => array(
+			'file'      => 'component-fuzz-smoke-32x24.jpg',
+			'width'     => 32,
+			'height'    => 24,
+			'mime-type' => 'image/jpeg',
+		),
+	),
+);
+$attachment_smoke_uploads  = static function ( array $uploads ): array {
+	$uploads['basedir'] = sys_get_temp_dir() . '/component-fuzz-smoke-uploads';
+	$uploads['baseurl'] = 'http://example.test/component-fuzz-smoke-uploads';
+	$uploads['path']    = $uploads['basedir'];
+	$uploads['url']     = $uploads['baseurl'];
+	$uploads['subdir']  = '';
+	$uploads['error']   = false;
+	return $uploads;
+};
+wp_cache_set(
+	$attachment_smoke_id,
+	(object) array(
+		'ID'             => $attachment_smoke_id,
+		'post_type'      => 'attachment',
+		'post_mime_type' => 'image/jpeg',
+		'post_title'     => 'component-fuzz-smoke',
+		'post_status'    => 'inherit',
+		'filter'         => 'raw',
+	),
+	'posts'
+);
+wp_cache_set(
+	$attachment_smoke_id,
+	array(
+		'_wp_attached_file'       => array( $attachment_smoke_relative ),
+		'_wp_attachment_metadata' => array( $attachment_smoke_meta ),
+	),
+	'post_meta'
+);
+add_filter( 'upload_dir', $attachment_smoke_uploads );
+$attachment_smoke_file     = get_attached_file( $attachment_smoke_id, true );
+$attachment_smoke_read     = wp_get_attachment_metadata( $attachment_smoke_id, true );
+$attachment_smoke_is_image = wp_attachment_is_image( $attachment_smoke_id );
+remove_filter( 'upload_dir', $attachment_smoke_uploads );
+wp_cache_delete( $attachment_smoke_id, 'posts' );
+wp_cache_delete( $attachment_smoke_id, 'post_meta' );
+if (
+	! str_ends_with( $attachment_smoke_file, '/2026/06/component-fuzz-smoke.jpg' )
+	|| $attachment_smoke_read !== $attachment_smoke_meta
+	|| ! $attachment_smoke_is_image
+) {
+	fwrite( STDERR, "Attachment metadata smoke invariant failed.\n" );
 	exit( 1 );
 }
 

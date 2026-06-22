@@ -86,6 +86,10 @@ network requests, or a configured site.
   textdomain load/unload state, locale determination, localized numbers/dates.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
+- `media-editor`: no-DB media image editor coverage for editor selection,
+  GD/Imagick availability, output format filters, resize/save metadata,
+  intermediate and generated sub-sizes, and cache/filter-backed attachment
+  metadata helpers with temp-file cleanup.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
   CRUD short-circuits, and lazyloader queue/reset behavior.
@@ -153,7 +157,10 @@ block templates surface short-circuits template CPT queries through
 guarded skip while still asserting that file enumeration remains confined. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
-existing no-DB option stub. The Site Health surface avoids loopback,
+existing no-DB option stub. The `media-editor` surface short-circuits attachment
+metadata updates and intentionally avoids media paths that insert attachments,
+create cover-image attachments, process audio/video thumbnails, or otherwise
+require real postmeta writes. The Site Health surface avoids loopback,
 WordPress.org, REST availability, update download, mail, cron, and
 filesystem-writing checks unless they are fully short-circuited. Skips are
 recorded in `results.ndjson` with a reason and do not mask failures or PHP

@@ -148,6 +148,12 @@ final class WpBootstrap {
 		if ( ! defined( 'WP_DEVELOPMENT_MODE' ) ) {
 			define( 'WP_DEVELOPMENT_MODE', '' );
 		}
+		if ( ! defined( 'WP_MEMORY_LIMIT' ) ) {
+			define( 'WP_MEMORY_LIMIT', '256M' );
+		}
+		if ( ! defined( 'WP_MAX_MEMORY_LIMIT' ) ) {
+			define( 'WP_MAX_MEMORY_LIMIT', '256M' );
+		}
 		if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 			define( 'MINUTE_IN_SECONDS', 60 );
 		}
@@ -269,6 +275,10 @@ final class WpBootstrap {
 			'wp-includes/class-wp-block-templates-registry.php',
 			'wp-includes/block-template-utils.php',
 			'wp-includes/media.php',
+			'wp-includes/class-wp-image-editor.php',
+			'wp-includes/class-wp-image-editor-gd.php',
+			'wp-includes/class-wp-image-editor-imagick.php',
+			'wp-includes/class-avif-info.php',
 			'wp-includes/class-wp-block-type.php',
 			'wp-includes/class-wp-block-type-registry.php',
 			'wp-includes/class-wp-block-pattern-categories-registry.php',
@@ -400,6 +410,7 @@ final class WpBootstrap {
 			'wp-includes/customize/class-wp-customize-selective-refresh.php',
 			'wp-includes/customize/class-wp-customize-partial.php',
 			'wp-admin/includes/file.php',
+			'wp-admin/includes/image.php',
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/class-wp-screen.php',
 			'wp-admin/includes/screen.php',
