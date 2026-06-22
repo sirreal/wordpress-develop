@@ -193,6 +193,9 @@ final class WpBootstrap {
 		if ( ! defined( 'WP_CRON_LOCK_TIMEOUT' ) ) {
 			define( 'WP_CRON_LOCK_TIMEOUT', MINUTE_IN_SECONDS );
 		}
+		if ( ! defined( 'EMPTY_TRASH_DAYS' ) ) {
+			define( 'EMPTY_TRASH_DAYS', 30 );
+		}
 
 		$files = array(
 			'wp-includes/compat.php',
@@ -326,6 +329,7 @@ final class WpBootstrap {
 			'wp-includes/post.php',
 			'wp-includes/revision.php',
 			'wp-includes/post-template.php',
+			'wp-includes/post-formats.php',
 			'wp-includes/user.php',
 			'wp-includes/comment.php',
 			'wp-includes/comment-template.php',

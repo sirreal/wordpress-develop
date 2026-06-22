@@ -77,6 +77,29 @@ $required_functions = array(
 	'wp_privacy_generate_personal_data_export_group_html',
 	'wp_privacy_process_personal_data_export_page',
 	'wp_privacy_process_personal_data_erasure_page',
+	'get_body_class',
+	'body_class',
+	'get_post_format',
+	'get_language_attributes',
+	'language_attributes',
+	'wp_get_document_title',
+	'wp_resource_hints',
+	'wp_preload_resources',
+	'get_pagenum_link',
+	'paginate_links',
+	'get_search_link',
+	'get_feed_link',
+	'get_home_url',
+	'get_site_url',
+	'get_admin_url',
+	'get_preview_post_link',
+	'get_edit_post_link',
+	'get_delete_post_link',
+	'get_permalink',
+	'wp_get_shortlink',
+	'get_bookmark',
+	'get_bookmark_field',
+	'wp_list_bookmarks',
 );
 
 $required_classes = array(
@@ -127,6 +150,9 @@ $required_classes = array(
 	'WP_Customize_Panel',
 	'WP_Customize_Selective_Refresh',
 	'WP_Customize_Partial',
+	'WP_Query',
+	'WP_Rewrite',
+	'WP_Post',
 );
 
 $missing = array();
@@ -343,6 +369,39 @@ if ( false === has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload
 $lazyloader->reset_queue( 'comment' );
 if ( false !== has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload_meta_callback' ) ) ) {
 	fwrite( STDERR, "Metadata lazyloader reset smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$GLOBALS['wp_query']    = new WP_Query();
+$GLOBALS['wp_rewrite']  = new WP_Rewrite();
+$_SERVER['HTTP_HOST']   = 'example.test';
+$_SERVER['REQUEST_URI'] = '/component-fuzz/template-links-smoke/?paged=2&unsafe=<tag>';
+
+$language_attributes = get_language_attributes( 'xhtml' );
+if ( ! str_contains( $language_attributes, 'lang="en-US"' ) || ! str_contains( $language_attributes, 'xml:lang="en-US"' ) ) {
+	fwrite( STDERR, "Template language attributes smoke invariant failed: {$language_attributes}\n" );
+	exit( 1 );
+}
+
+$pagination = paginate_links(
+	array(
+		'base'      => 'https://example.test/archive/%_%',
+		'format'    => 'page/%#%/',
+		'total'     => 3,
+		'current'   => 2,
+		'type'      => 'array',
+		'add_args'  => array( 'unsafe' => '<tag>' ),
+		'prev_text' => 'Previous',
+		'next_text' => 'Next',
+	)
+);
+if (
+	! is_array( $pagination )
+	|| count( $pagination ) < 3
+	|| ! str_contains( implode( "\n", $pagination ), 'unsafe=%3Ctag%3E' )
+	|| str_contains( strtolower( implode( "\n", $pagination ) ), '<tag>' )
+) {
+	fwrite( STDERR, 'Template pagination smoke invariant failed: ' . wp_json_encode( $pagination ) . "\n" );
 	exit( 1 );
 }
 

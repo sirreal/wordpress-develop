@@ -117,6 +117,10 @@ network requests, or a configured site.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
   registry query consistency, argument normalization, labels, term
   sanitization, synthetic `WP_Term` behavior, and cheap term-link paths.
+- `template-links`: no-DB public template and link helpers, including body and
+  language attributes, document title stability, resource hints/preloads,
+  pagination/search/feed/site/admin URLs, synthetic post preview/edit/delete/
+  shortlink/permalink helpers, and cached bookmark field/list rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, widget ID parsing, sidebar assignment moves/removals, and
   render callback wrapper output.
