@@ -50,6 +50,9 @@ $required_functions = array(
 	'register_nav_menu',
 	'wp_nav_menu',
 	'walk_nav_menu_tree',
+	'wp_oembed_ensure_format',
+	'wp_embed_defaults',
+	'feed_content_type',
 );
 
 $required_classes = array(
@@ -80,6 +83,8 @@ $required_classes = array(
 	'WP_Recovery_Mode_Cookie_Service',
 	'WP_Recovery_Mode',
 	'WP_Paused_Extensions_Storage',
+	'WP_Embed',
+	'WP_oEmbed',
 );
 
 $missing = array();

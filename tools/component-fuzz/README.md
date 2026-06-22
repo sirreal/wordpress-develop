@@ -97,6 +97,9 @@ network requests, or a configured site.
 - `style`: style engine serialization, CSS declaration filtering, theme.json
   schema/data merging, block style variation declarations, selectors, presets,
   custom properties, and no-DB global style guards.
+- `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
+  HTML/XML filtering, feed metadata escaping, default feed normalization, self
+  links, and Atom text construction.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
   registry query consistency, argument normalization, labels, term
   sanitization, synthetic `WP_Term` behavior, and cheap term-link paths.
