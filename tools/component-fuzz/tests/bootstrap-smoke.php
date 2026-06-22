@@ -15,6 +15,16 @@ $required_functions = array(
 	'wp_check_filetype',
 	'parse_blocks',
 	'serialize_blocks',
+	'get_block_theme_folders',
+	'register_block_template',
+	'unregister_block_template',
+	'get_block_file_template',
+	'_build_block_template_result_from_file',
+	'get_block_templates',
+	'get_block_template',
+	'locate_block_template',
+	'resolve_block_template',
+	'locate_template',
 	'shortcode_parse_atts',
 	'force_balance_tags',
 	'sanitize_title_with_dashes',
@@ -135,6 +145,8 @@ $required_classes = array(
 	'WP_HTML_Tag_Processor',
 	'WP_Interactivity_API',
 	'WP_Interactivity_API_Directives_Processor',
+	'WP_Block_Template',
+	'WP_Block_Templates_Registry',
 	'WP_Block_Parser',
 	'WP_REST_Request',
 	'WP_REST_Server',
@@ -600,5 +612,134 @@ if (
 	fwrite( STDERR, 'Template pagination smoke invariant failed: ' . wp_json_encode( $pagination ) . "\n" );
 	exit( 1 );
 }
+
+$block_template_smoke_remove = static function ( string $dir ) use ( &$block_template_smoke_remove ): bool {
+	if ( ! file_exists( $dir ) ) {
+		return true;
+	}
+	if ( ! is_dir( $dir ) ) {
+		return @unlink( $dir );
+	}
+
+	$iterator = new RecursiveIteratorIterator(
+		new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS ),
+		RecursiveIteratorIterator::CHILD_FIRST
+	);
+	foreach ( $iterator as $item ) {
+		$path = $item->getPathname();
+		if ( $item->isDir() && ! $item->isLink() ) {
+			if ( ! @rmdir( $path ) ) {
+				return false;
+			}
+		} elseif ( ! @unlink( $path ) ) {
+			return false;
+		}
+	}
+
+	return @rmdir( $dir );
+};
+
+$block_template_smoke_root   = sys_get_temp_dir() . '/component-fuzz-block-template-smoke-' . getmypid();
+$block_template_theme_root   = $block_template_smoke_root . '/themes';
+$block_template_child_slug   = 'component-fuzz-smoke-child';
+$block_template_parent_slug  = 'component-fuzz-smoke-parent';
+$block_template_child_dir    = $block_template_theme_root . '/' . $block_template_child_slug;
+$block_template_parent_dir   = $block_template_theme_root . '/' . $block_template_parent_slug;
+$block_template_smoke_marker = 'component-fuzz-block-template-smoke';
+
+$block_template_smoke_remove( $block_template_smoke_root );
+foreach ( array( $block_template_child_dir . '/templates', $block_template_parent_dir . '/templates' ) as $block_template_smoke_dir ) {
+	if ( ! mkdir( $block_template_smoke_dir, 0777, true ) && ! is_dir( $block_template_smoke_dir ) ) {
+		fwrite( STDERR, "Block template smoke could not create directory: {$block_template_smoke_dir}\n" );
+		exit( 1 );
+	}
+}
+file_put_contents( $block_template_parent_dir . '/style.css', "/*\nTheme Name: Component Fuzz Smoke Parent\n*/\n" );
+file_put_contents( $block_template_child_dir . '/style.css', "/*\nTheme Name: Component Fuzz Smoke Child\nTemplate: {$block_template_parent_slug}\n*/\n" );
+file_put_contents( $block_template_child_dir . '/theme.json', wp_json_encode( array( 'version' => 3 ), JSON_PRETTY_PRINT ) . "\n" );
+file_put_contents( $block_template_child_dir . '/templates/index.html', '<!-- wp:paragraph --><p>' . $block_template_smoke_marker . '</p><!-- /wp:paragraph -->' );
+
+$block_template_stylesheet = static function () use ( $block_template_child_slug ): string {
+	return $block_template_child_slug;
+};
+$block_template_template = static function () use ( $block_template_parent_slug ): string {
+	return $block_template_parent_slug;
+};
+$block_template_theme_root_filter = static function () use ( $block_template_theme_root ): string {
+	return $block_template_theme_root;
+};
+$block_template_posts_pre_query = static function ( $posts, $query ) {
+	if ( is_object( $query ) && method_exists( $query, 'get' ) ) {
+		$post_type = $query->get( 'post_type' );
+		if ( in_array( $post_type, array( 'wp_template', 'wp_template_part' ), true ) ) {
+			return array();
+		}
+	}
+	return $posts;
+};
+
+if ( ! isset( $GLOBALS['wp_theme_directories'] ) || ! is_array( $GLOBALS['wp_theme_directories'] ) ) {
+	$GLOBALS['wp_theme_directories'] = array();
+}
+$GLOBALS['wp_theme_directories'] = array_values(
+	array_unique(
+		array_merge(
+			$GLOBALS['wp_theme_directories'],
+			array( WP_CONTENT_DIR . '/themes', $block_template_theme_root )
+		)
+	)
+);
+
+add_filter( 'stylesheet', $block_template_stylesheet );
+add_filter( 'template', $block_template_template );
+add_filter( 'theme_root', $block_template_theme_root_filter );
+add_filter( 'pre_option_stylesheet', $block_template_stylesheet );
+add_filter( 'pre_option_template', $block_template_template );
+add_filter( 'pre_option_stylesheet_root', $block_template_theme_root_filter );
+add_filter( 'pre_option_template_root', $block_template_theme_root_filter );
+add_filter( 'posts_pre_query', $block_template_posts_pre_query, 10, 2 );
+add_theme_support( 'block-templates' );
+wp_clean_theme_json_cache();
+
+$registered_block_template = register_block_template(
+	'component-fuzz-smoke//registered',
+	array(
+		'title'      => 'Component Fuzz Smoke Registered',
+		'content'    => '<!-- wp:paragraph --><p>registered smoke</p><!-- /wp:paragraph -->',
+		'post_types' => array( 'page' ),
+	)
+);
+$file_block_template       = get_block_file_template( $block_template_child_slug . '//index', 'wp_template' );
+$listed_block_templates    = get_block_templates( array( 'slug__in' => array( 'index' ) ), 'wp_template' );
+$resolved_block_template   = resolve_block_template( 'index', array( 'index.php' ), '' );
+$located_block_template    = locate_block_template( '', 'index', array( 'index.php' ) );
+
+if (
+	! ( $registered_block_template instanceof WP_Block_Template )
+	|| 'plugin' !== $registered_block_template->source
+	|| ! ( unregister_block_template( 'component-fuzz-smoke//registered' ) instanceof WP_Block_Template )
+	|| ! ( $file_block_template instanceof WP_Block_Template )
+	|| $block_template_child_slug . '//index' !== $file_block_template->id
+	|| 'theme' !== $file_block_template->source
+	|| ! str_contains( $file_block_template->content, $block_template_smoke_marker )
+	|| 1 !== count( $listed_block_templates )
+	|| ! ( $resolved_block_template instanceof WP_Block_Template )
+	|| 'index' !== $resolved_block_template->slug
+	|| ABSPATH . WPINC . '/template-canvas.php' !== $located_block_template
+) {
+	fwrite( STDERR, "Block template smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+remove_filter( 'stylesheet', $block_template_stylesheet );
+remove_filter( 'template', $block_template_template );
+remove_filter( 'theme_root', $block_template_theme_root_filter );
+remove_filter( 'pre_option_stylesheet', $block_template_stylesheet );
+remove_filter( 'pre_option_template', $block_template_template );
+remove_filter( 'pre_option_stylesheet_root', $block_template_theme_root_filter );
+remove_filter( 'pre_option_template_root', $block_template_theme_root_filter );
+remove_filter( 'posts_pre_query', $block_template_posts_pre_query, 10 );
+wp_clean_theme_json_cache();
+$block_template_smoke_remove( $block_template_smoke_root );
 
 fwrite( STDOUT, "component-fuzz bootstrap smoke passed\n" );

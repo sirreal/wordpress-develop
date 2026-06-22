@@ -34,6 +34,10 @@ network requests, or a configured site.
 - `blocks`: block type metadata, variations, hooks, style, pattern/category,
   bindings, and supports registries, including dynamic block attribute
   preparation and wrapper attribute merging.
+- `block-templates`: no-DB block template and block theme resolution coverage,
+  including template registry lifecycle, file-backed templates and parts,
+  parent/child theme precedence, theme.json metadata, hierarchy resolution, and
+  malformed filename/path guards with template CPT queries short-circuited.
 - `capabilities`: role registry mutations, numeric and explicit capability
   grants, role filters, `WP_User` role/direct cap aggregation, and cheap
   `map_meta_cap()` mappings.
@@ -144,6 +148,9 @@ Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page
 submission, `options.php` writes, user preference persistence, real post objects,
 and block-editor compatibility shims that would inspect installed plugins. The
+block templates surface short-circuits template CPT queries through
+`posts_pre_query` and records the current direct-ID traversal behavior as a
+guarded skip while still asserting that file enumeration remains confined. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
 existing no-DB option stub. The Site Health surface avoids loopback,
