@@ -977,6 +977,7 @@ final class TemplateLinksSurface {
 	private static function safe_title_text( string $value ): string {
 		$value = wp_check_invalid_utf8( $value, true );
 		$value = wp_strip_all_tags( $value );
+		$value = preg_replace( '/[^\x20-\x7E]/', '', $value ) ?? '';
 		$value = str_replace( array( '&', '"', "'", '<', '>' ), '', $value );
 		$value = trim( preg_replace( '/\s+/', ' ', $value ) ?? '' );
 

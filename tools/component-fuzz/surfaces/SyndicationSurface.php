@@ -425,7 +425,7 @@ final class SyndicationSurface {
 				'REQUEST_URI' => $_SERVER['REQUEST_URI'] ?? null,
 				'HTTPS'       => $_SERVER['HTTPS'] ?? null,
 			),
-			'earlyProviders' => \WP_oEmbed::$early_providers,
+			'earlyProviders' => self::clone_value( \WP_oEmbed::$early_providers ),
 		);
 	}
 
@@ -447,7 +447,7 @@ final class SyndicationSurface {
 		foreach ( $names as $name ) {
 			$snapshot[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null,
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
 			);
 		}
 		return $snapshot;
@@ -456,11 +456,27 @@ final class SyndicationSurface {
 	private static function restore_globals( array $snapshot ): void {
 		foreach ( $snapshot as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array() ): array {
