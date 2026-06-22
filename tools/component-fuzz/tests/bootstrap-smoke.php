@@ -56,6 +56,13 @@ $required_functions = array(
 	'show_admin_bar',
 	'is_admin_bar_showing',
 	'wp_admin_bar_render',
+	'wp_is_post_revision',
+	'wp_get_user_request',
+	'wp_user_request_action_description',
+	'wp_validate_user_request_key',
+	'wp_privacy_generate_personal_data_export_group_html',
+	'wp_privacy_process_personal_data_export_page',
+	'wp_privacy_process_personal_data_erasure_page',
 );
 
 $required_classes = array(
@@ -82,6 +89,7 @@ $required_classes = array(
 	'WordPress\AiClient\AiClient',
 	'Walker_Nav_Menu',
 	'WP_Application_Passwords',
+	'WP_User_Request',
 	'WP_Recovery_Mode_Key_Service',
 	'WP_Recovery_Mode_Cookie_Service',
 	'WP_Recovery_Mode',

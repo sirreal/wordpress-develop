@@ -1,0 +1,1521 @@
+<?php
+namespace ComponentFuzz\Surfaces;
+
+final class PrivacySurface {
+	public const NAME = 'privacy';
+
+	private const GENERATED_REQUEST_CASES = 10;
+	private const SAMPLE_BYTES            = 160;
+	private const MAX_FAILURES            = 12;
+
+	/** @var array<int,array<string,mixed>> */
+	private static array $post_meta = array();
+
+	/** @var array<string,array<string,mixed>> */
+	private static array $exporters = array();
+
+	/** @var array<string,array<string,mixed>> */
+	private static array $erasers = array();
+
+	/** @var array<int,array<string,mixed>> */
+	private static array $export_file_actions = array();
+
+	/** @var int[] */
+	private static array $erased_actions = array();
+
+	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_requirements();
+		if ( array() !== $missing ) {
+			return array(
+				self::skip(
+					$ctx,
+					'privacy.bootstrap-apis-available',
+					'Required WordPress privacy APIs are unavailable.',
+					array( 'missing' => $missing )
+				),
+			);
+		}
+
+		$snapshot = self::snapshot_globals();
+		$rows     = array();
+
+		try {
+			self::reset_runtime();
+			self::reset_static_state();
+			self::install_scoped_filters();
+
+			$request_cases = self::request_cases( $ctx );
+
+			$rows[] = self::check_user_request_objects( $ctx->fork( 'user-request-objects' ), $request_cases );
+			$rows[] = self::check_action_descriptions( $ctx->fork( 'action-descriptions' ) );
+			$rows[] = self::check_user_request_keys( $ctx->fork( 'request-keys' ) );
+			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
+			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
+			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
+		} catch ( \Throwable $e ) {
+			$rows[] = self::row(
+				$ctx,
+				'privacy.surface-no-throw',
+				false,
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			self::reset_static_state();
+			self::restore_globals( $snapshot );
+		}
+
+		return $rows;
+	}
+
+	public static function filter_get_post_metadata( $value, int $object_id, string $meta_key, bool $single, string $meta_type ) {
+		if ( 'post' !== $meta_type ) {
+			return $value;
+		}
+
+		$meta = self::$post_meta[ $object_id ] ?? array();
+		if ( '' === $meta_key ) {
+			return $meta;
+		}
+
+		if ( ! array_key_exists( $meta_key, $meta ) ) {
+			return $single ? array( '' ) : array();
+		}
+
+		return $single ? array( $meta[ $meta_key ] ) : array( $meta[ $meta_key ] );
+	}
+
+	public static function filter_update_post_metadata( $check, int $object_id, string $meta_key, $meta_value, $prev_value ) {
+		unset( $check, $prev_value );
+
+		if ( ! isset( self::$post_meta[ $object_id ] ) ) {
+			self::$post_meta[ $object_id ] = array();
+		}
+
+		self::$post_meta[ $object_id ][ $meta_key ] = $meta_value;
+
+		return true;
+	}
+
+	public static function filter_delete_post_metadata( $check, int $object_id, string $meta_key, $meta_value, bool $delete_all ) {
+		unset( $check, $meta_value );
+
+		if ( $delete_all ) {
+			foreach ( self::$post_meta as $id => $meta ) {
+				unset( self::$post_meta[ $id ][ $meta_key ] );
+			}
+			return true;
+		}
+
+		unset( self::$post_meta[ $object_id ][ $meta_key ] );
+
+		return true;
+	}
+
+	public static function filter_exporters( array $exporters ): array {
+		unset( $exporters );
+
+		return self::$exporters;
+	}
+
+	public static function filter_erasers( array $erasers ): array {
+		unset( $erasers );
+
+		return self::$erasers;
+	}
+
+	public static function filter_upload_dir( array $uploads ): array {
+		$tmp = sys_get_temp_dir();
+
+		$uploads['path']    = $tmp;
+		$uploads['url']     = 'http://example.test/uploads';
+		$uploads['subdir']  = '';
+		$uploads['basedir'] = $tmp;
+		$uploads['baseurl'] = 'http://example.test/uploads';
+		$uploads['error']   = false;
+
+		return $uploads;
+	}
+
+	public static function record_export_file_action( int $request_id ): void {
+		self::$export_file_actions[] = array(
+			'requestId' => $request_id,
+			'grouped'   => \get_post_meta( $request_id, '_export_data_grouped', true ),
+		);
+	}
+
+	public static function record_erased_action( int $request_id ): void {
+		self::$erased_actions[] = $request_id;
+	}
+
+	private static function missing_requirements(): array {
+		$missing = array();
+		foreach (
+			array(
+				'WP_Error',
+				'WP_User_Request',
+				'WP_Post',
+			) as $class
+		) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'add_action',
+				'add_filter',
+				'delete_post_meta',
+				'esc_attr',
+				'esc_html',
+				'get_post_meta',
+				'is_wp_error',
+				'sanitize_email',
+				'sanitize_title_with_dashes',
+				'update_post_meta',
+				'wp_cache_set',
+				'wp_fast_hash',
+				'wp_get_user_request',
+				'wp_json_encode',
+				'wp_privacy_generate_personal_data_export_group_html',
+				'wp_privacy_process_personal_data_erasure_page',
+				'wp_privacy_process_personal_data_export_page',
+				'wp_user_request_action_description',
+				'wp_validate_user_request_key',
+				'wp_verify_fast_hash',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		return $missing;
+	}
+
+	private static function check_user_request_objects( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$failures       = array();
+		$observed       = array();
+		$non_array_data = 0;
+		$invalid_dates  = 0;
+
+		foreach ( $cases as $case ) {
+			self::prime_request_post( $case['post'] );
+			self::set_post_meta(
+				(int) $case['post']->ID,
+				array(
+					'_wp_user_request_confirmed_timestamp' => $case['confirmed'],
+					'_wp_user_request_completed_timestamp' => $case['completed'],
+				)
+			);
+
+			$direct = self::call(
+				static function () use ( $case ) {
+					return new \WP_User_Request( $case['post'] );
+				}
+			);
+			$looked_up = self::call(
+				static function () use ( $case ) {
+					return \wp_get_user_request( (int) $case['post']->ID );
+				}
+			);
+
+			if ( $direct['threw'] || $looked_up['threw'] ) {
+				self::record_failure(
+					$failures,
+					'wp-user-request.constructor-and-cache-lookup.no-throw',
+					$case,
+					array(
+						'direct'   => self::describe_call( $direct ),
+						'lookedUp' => self::describe_call( $looked_up ),
+					)
+				);
+				continue;
+			}
+
+			$direct_request = $direct['value'];
+			$lookup_request = $looked_up['value'];
+			if ( ! ( $direct_request instanceof \WP_User_Request ) || ! ( $lookup_request instanceof \WP_User_Request ) ) {
+				self::record_failure(
+					$failures,
+					'wp-user-request.constructor-and-cache-lookup.return-type',
+					$case,
+					array(
+						'direct'   => self::describe_value( $direct_request ),
+						'lookedUp' => self::describe_value( $lookup_request ),
+					)
+				);
+				continue;
+			}
+
+			$expected_data = json_decode( $case['post']->post_content, true );
+			if ( ! is_array( $expected_data ) ) {
+				++$non_array_data;
+			}
+
+			$expected_created  = strtotime( $case['post']->post_date_gmt );
+			$expected_modified = strtotime( $case['post']->post_modified_gmt );
+			if ( false === $expected_created || false === $expected_modified ) {
+				++$invalid_dates;
+			}
+
+			$mapped_ok = self::request_matches_post( $direct_request, $case, $expected_data, $expected_created, $expected_modified )
+				&& self::request_matches_post( $lookup_request, $case, $expected_data, $expected_created, $expected_modified )
+				&& self::request_public_shape_ok( $direct_request )
+				&& self::request_public_shape_ok( $lookup_request );
+
+			if ( ! $mapped_ok ) {
+				self::record_failure(
+					$failures,
+					'wp-user-request.field-mapping-and-shape',
+					$case,
+					array(
+						'expectedData'     => self::describe_value( $expected_data ),
+						'expectedCreated'  => $expected_created,
+						'expectedModified' => $expected_modified,
+						'direct'           => self::describe_user_request( $direct_request ),
+						'lookedUp'         => self::describe_user_request( $lookup_request ),
+					)
+				);
+			}
+
+			$observed[] = array(
+				'label'          => $case['label'],
+				'emailSanitized' => \sanitize_email( $case['post']->post_title ),
+				'action'         => self::describe_string( $case['post']->post_name ),
+				'requestData'    => is_array( $expected_data ) ? 'array' : gettype( $expected_data ),
+				'createdType'    => gettype( $direct_request->created_timestamp ),
+				'modifiedType'   => gettype( $direct_request->modified_timestamp ),
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.wp-user-request.synthetic-object-shape',
+			array() === $failures,
+			array(
+				'cases'             => count( $cases ),
+				'nonArrayJsonData'  => $non_array_data,
+				'invalidDateInputs' => $invalid_dates,
+				'observed'          => array_slice( $observed, 0, 8 ),
+				'failures'          => $failures,
+			)
+		);
+	}
+
+	private static function check_action_descriptions( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$unknown  = 'custom<privacy-action-' . $ctx->int( 1000, 9999 ) . "-\xC3\xA9>\"&";
+
+		$known = array(
+			'export_personal_data' => 'Export Personal Data',
+			'remove_personal_data' => 'Erase Personal Data',
+		);
+
+		foreach ( $known as $action => $expected ) {
+			$actual = self::call(
+				static function () use ( $action ) {
+					return \wp_user_request_action_description( $action );
+				}
+			);
+
+			if ( $actual['threw'] || $expected !== $actual['value'] ) {
+				self::record_failure(
+					$failures,
+					'action-description.known-stable',
+					array( 'label' => $action ),
+					array(
+						'expected' => $expected,
+						'actual'   => self::describe_call( $actual ),
+					)
+				);
+			}
+		}
+
+		$default = self::call(
+			static function () use ( $unknown ) {
+				return \wp_user_request_action_description( $unknown );
+			}
+		);
+		$expected_default = sprintf( 'Confirm the "%s" action', $unknown );
+		if ( $default['threw'] || $expected_default !== $default['value'] ) {
+			self::record_failure(
+				$failures,
+				'action-description.unknown-default-shape',
+				array( 'label' => 'unknown-default' ),
+				array(
+					'unknown'  => self::describe_string( $unknown ),
+					'expected' => self::describe_string( $expected_default ),
+					'actual'   => self::describe_call( $default ),
+				)
+			);
+		}
+
+		$seen_filter = array();
+		\add_filter(
+			'user_request_action_description',
+			static function ( string $description, string $action_name ) use ( &$seen_filter, $unknown ): string {
+				$seen_filter[] = array(
+					'description' => $description,
+					'action'      => $action_name,
+				);
+
+				if ( $unknown !== $action_name ) {
+					return $description;
+				}
+
+				return 'filtered:' . \esc_html( $description ) . ':action=' . \esc_attr( $action_name );
+			},
+			10,
+			2
+		);
+
+		$filtered = self::call(
+			static function () use ( $unknown ) {
+				return \wp_user_request_action_description( $unknown );
+			}
+		);
+		$filter_saw_raw = array() !== $seen_filter
+			&& $expected_default === $seen_filter[0]['description']
+			&& $unknown === $seen_filter[0]['action'];
+		$filter_escaped = ! $filtered['threw']
+			&& is_string( $filtered['value'] )
+			&& str_starts_with( $filtered['value'], 'filtered:' )
+			&& false === strpos( $filtered['value'], '<' )
+			&& str_contains( $filtered['value'], '&lt;' )
+			&& str_contains( $filtered['value'], '&quot;' );
+
+		if ( ! $filter_saw_raw || ! $filter_escaped ) {
+			self::record_failure(
+				$failures,
+				'action-description.filter-can-escape-unknown',
+				array( 'label' => 'unknown-filtered' ),
+				array(
+					'unknown'      => self::describe_string( $unknown ),
+					'seenFilter'   => self::describe_value( $seen_filter ),
+					'filteredCall' => self::describe_call( $filtered ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.action-description.known-unknown-filtered',
+			array() === $failures,
+			array(
+				'unknown'  => self::describe_string( $unknown ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_user_request_keys( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$now      = time();
+		$key      = 'key|' . self::random_string( $ctx->fork( 'matching-key' ), 32 );
+		$wrong    = self::mutate_secret( $key );
+		$hash     = \wp_fast_hash( $key );
+
+		self::collect_failure(
+			$failures,
+			\wp_verify_fast_hash( $key, $hash ) && ! \wp_verify_fast_hash( $wrong, $hash ),
+			'wp_fast_hash verifies only the matching request key bytes',
+			array(
+				'key'   => self::describe_string( $key ),
+				'wrong' => self::describe_string( $wrong ),
+				'hash'  => self::describe_string( $hash ),
+			)
+		);
+
+		$cases = array(
+			array(
+				'label'      => 'pending-valid',
+				'id'         => 91001,
+				'status'     => 'request-pending',
+				'storedHash' => $hash,
+				'key'        => $key,
+				'modified'   => $now - 60,
+				'expected'   => true,
+			),
+			array(
+				'label'      => 'failed-valid',
+				'id'         => 91002,
+				'status'     => 'request-failed',
+				'storedHash' => $hash,
+				'key'        => $key,
+				'modified'   => $now - 60,
+				'expected'   => true,
+			),
+			array(
+				'label'      => 'wrong-key',
+				'id'         => 91003,
+				'status'     => 'request-pending',
+				'storedHash' => $hash,
+				'key'        => $wrong,
+				'modified'   => $now - 60,
+				'expected'   => 'invalid_key',
+			),
+			array(
+				'label'      => 'wrong-hash',
+				'id'         => 91004,
+				'status'     => 'request-pending',
+				'storedHash' => \wp_fast_hash( $wrong ),
+				'key'        => $key,
+				'modified'   => $now - 60,
+				'expected'   => 'invalid_key',
+			),
+			array(
+				'label'      => 'missing-key',
+				'id'         => 91005,
+				'status'     => 'request-pending',
+				'storedHash' => $hash,
+				'key'        => '',
+				'modified'   => $now - 60,
+				'expected'   => 'missing_key',
+			),
+			array(
+				'label'      => 'completed-status',
+				'id'         => 91006,
+				'status'     => 'request-completed',
+				'storedHash' => $hash,
+				'key'        => $key,
+				'modified'   => $now - 60,
+				'expected'   => 'expired_request',
+			),
+			array(
+				'label'      => 'missing-hash',
+				'id'         => 91007,
+				'status'     => 'request-pending',
+				'storedHash' => '',
+				'key'        => $key,
+				'modified'   => $now - 60,
+				'expected'   => 'invalid_request',
+			),
+			array(
+				'label'      => 'missing-modified-time',
+				'id'         => 91008,
+				'status'     => 'request-pending',
+				'storedHash' => $hash,
+				'key'        => $key,
+				'modified'   => '',
+				'expected'   => 'invalid_request',
+			),
+			array(
+				'label'      => 'expired-key',
+				'id'         => 91009,
+				'status'     => 'request-pending',
+				'storedHash' => $hash,
+				'key'        => $key,
+				'modified'   => $now - 3 * DAY_IN_SECONDS,
+				'expected'   => 'expired_key',
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$modified_gmt = is_int( $case['modified'] ) ? gmdate( 'Y-m-d H:i:s', $case['modified'] ) : (string) $case['modified'];
+			$post         = self::post_record(
+				array(
+					'ID'                => $case['id'],
+					'post_author'       => '0',
+					'post_title'        => 'privacy-key-' . $case['id'] . '@example.test',
+					'post_name'         => 'export_personal_data',
+					'post_status'       => $case['status'],
+					'post_content'      => '{"key":"validation"}',
+					'post_password'     => $case['storedHash'],
+					'post_modified_gmt' => $modified_gmt,
+					'post_modified'     => $modified_gmt,
+				)
+			);
+			self::prime_request_post( $post );
+			self::set_post_meta( (int) $post->ID, array() );
+
+			$actual = self::call(
+				static function () use ( $case ) {
+					return \wp_validate_user_request_key( $case['id'], $case['key'] );
+				}
+			);
+
+			if ( true === $case['expected'] ) {
+				$ok = ! $actual['threw'] && true === $actual['value'];
+			} else {
+				$ok = ! $actual['threw'] && self::is_error_code( $actual['value'], $case['expected'] );
+			}
+
+			if ( ! $ok ) {
+				self::record_failure(
+					$failures,
+					'user-request-key.validation-case',
+					$case,
+					array(
+						'expected' => $case['expected'],
+						'actual'   => self::describe_call( $actual ),
+					)
+				);
+			}
+		}
+
+		$missing_request_call = self::call(
+			static function () use ( $key ) {
+				return \wp_validate_user_request_key( 91999, $key );
+			}
+		);
+
+		return self::row(
+			$ctx,
+			'privacy.user-request-key.fail-closed-hash-semantics',
+			array() === $failures,
+			array(
+				'cases'                => count( $cases ),
+				'missingRequestLookup' => self::describe_call( $missing_request_call ),
+				'failures'             => $failures,
+			)
+		);
+	}
+
+	private static function check_export_group_html( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$group_id    = 'group<' . self::random_string( $ctx->fork( 'group-id' ), 10 ) . '>';
+		$group_label = 'Profile <Export> & "Unicode" ' . self::random_string( $ctx->fork( 'group-label' ), 8 );
+		$description = "Contains <script>alert(1)</script> & personal data \xC3\xA9.";
+		$url_value   = 'https://example.test/privacy?name=' . rawurlencode( self::random_string( $ctx->fork( 'url' ), 12 ) );
+		$group_data  = array(
+			'group_label'       => $group_label,
+			'group_description' => $description,
+			'items'             => array(
+				'item-1' => array(
+					array(
+						'name'  => 'Display <Name>',
+						'value' => '<img src=x onerror=alert(1)>Alice & Bob',
+					),
+					array(
+						'name'  => 'Profile URL',
+						'value' => $url_value,
+					),
+				),
+				'item-2' => array(
+					array(
+						'name'  => 'Notes & "HTML"',
+						'value' => '<strong>allowed</strong><script>alert(1)</script><a href="javascript:alert(1)">bad</a>',
+					),
+				),
+			),
+		);
+
+		$html = self::call(
+			static function () use ( $group_data, $group_id ) {
+				return \wp_privacy_generate_personal_data_export_group_html( $group_data, $group_id, 2 );
+			}
+		);
+
+		if ( $html['threw'] || ! is_string( $html['value'] ) ) {
+			return self::row(
+				$ctx,
+				'privacy.export-group-html.escapes-and-preserves-structure',
+				false,
+				array(
+					'call' => self::describe_call( $html ),
+				)
+			);
+		}
+
+		$value           = $html['value'];
+		$expected_id     = \sanitize_title_with_dashes( $group_label . '-' . $group_id );
+		$total_rows      = 0;
+		$escaped_ths     = array();
+		$dangerous_terms = array( '<script', '<img', 'onerror', 'javascript:' );
+		foreach ( $group_data['items'] as $item ) {
+			foreach ( $item as $datum ) {
+				++$total_rows;
+				$escaped_ths[] = \esc_html( $datum['name'] );
+			}
+		}
+
+		foreach ( $dangerous_terms as $needle ) {
+			if ( false !== stripos( $value, $needle ) ) {
+				self::record_failure(
+					$failures,
+					'export-group-html.dangerous-html-removed',
+					array( 'label' => $needle ),
+					array( 'html' => self::describe_string( $value ) )
+				);
+			}
+		}
+
+		$structure_ok = str_contains( $value, '<h2 id="' . \esc_attr( $expected_id ) . '">' )
+			&& str_contains( $value, \esc_html( $group_label ) )
+			&& str_contains( $value, \esc_html( $description ) )
+			&& count( $group_data['items'] ) === substr_count( $value, '<table>' )
+			&& $total_rows === substr_count( $value, '<tr>' )
+			&& str_contains( $value, '<span class="count">(2)</span>' )
+			&& str_contains( $value, '<div class="return-to-top">' )
+			&& str_contains( $value, '<a href="' . \esc_url( $url_value ) . '">' . \esc_html( $url_value ) . '</a>' );
+
+		foreach ( $escaped_ths as $escaped_th ) {
+			$structure_ok = $structure_ok && str_contains( $value, '<th>' . $escaped_th . '</th>' );
+		}
+
+		if ( ! $structure_ok ) {
+			self::record_failure(
+				$failures,
+				'export-group-html.structure-and-escaping',
+				array( 'label' => 'group-html' ),
+				array(
+					'expectedId' => $expected_id,
+					'rows'       => $total_rows,
+					'tables'     => count( $group_data['items'] ),
+					'html'       => self::describe_string( $value ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.export-group-html.escapes-and-preserves-structure',
+			array() === $failures,
+			array(
+				'expectedId' => $expected_id,
+				'htmlBytes'  => strlen( $value ),
+				'failures'   => $failures,
+			)
+		);
+	}
+
+	private static function check_export_processor( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$malformed = array(
+			array( 'label' => 'non-array', 'response' => 'not an array' ),
+			array( 'label' => 'missing-done', 'response' => array( 'data' => array() ) ),
+			array( 'label' => 'missing-data', 'response' => array( 'done' => false ) ),
+			array( 'label' => 'data-not-array', 'response' => array( 'done' => false, 'data' => 'bad' ) ),
+		);
+
+		foreach ( $malformed as $case ) {
+			$before_actions = self::$export_file_actions;
+			$actual         = self::call(
+				static function () use ( $case ) {
+					return \wp_privacy_process_personal_data_export_page( $case['response'], 1, 'person@example.test', 1, 0, false, 'bad-shape' );
+				}
+			);
+
+			if ( $actual['threw'] || $actual['value'] !== $case['response'] || $before_actions !== self::$export_file_actions ) {
+				self::record_failure(
+					$failures,
+					'export-processor.malformed-response-passthrough',
+					$case,
+					array(
+						'actual'  => self::describe_call( $actual ),
+						'actions' => self::describe_value( self::$export_file_actions ),
+					)
+				);
+			}
+		}
+
+		self::$exporters = self::processor_exporters();
+		$request_id      = 92001;
+		self::prime_privacy_request( $request_id, 'export_personal_data', 'request-confirmed' );
+		self::set_post_meta(
+			$request_id,
+			array(
+				'_export_file_name' => 'component-fuzz-export.zip',
+			)
+		);
+
+		$page_one = array(
+			'done' => false,
+			'data' => array(
+				self::export_datum( 'profile', 'Profile', 'profile-1', 'Name', 'Alice <script>x</script>' ),
+			),
+		);
+		$page_one_result = self::call(
+			static function () use ( $page_one, $request_id ) {
+				return \wp_privacy_process_personal_data_export_page( $page_one, 1, 'person@example.test', 1, $request_id, false, 'component-one' );
+			}
+		);
+		$raw_after_page_one = \get_post_meta( $request_id, '_export_data_raw', true );
+
+		if (
+			$page_one_result['threw']
+			|| $page_one_result['value'] !== $page_one
+			|| count( $raw_after_page_one ) !== 1
+			|| array() !== self::$export_file_actions
+		) {
+			self::record_failure(
+				$failures,
+				'export-processor.partial-page-accumulates-without-final-side-effects',
+				array( 'label' => 'page-one' ),
+				array(
+					'result'     => self::describe_call( $page_one_result ),
+					'rawMeta'    => self::describe_value( $raw_after_page_one ),
+					'fileAction' => self::describe_value( self::$export_file_actions ),
+				)
+			);
+		}
+
+		$page_two = array(
+			'done' => true,
+			'data' => array(
+				self::export_datum( 'profile', 'Profile', 'profile-1', 'Email', 'person@example.test' ),
+				self::export_datum( 'activity', 'Activity', 'login-1', 'IP', '203.0.113.44' ),
+			),
+		);
+		$page_two_result = self::call(
+			static function () use ( $page_two, $request_id ) {
+				return \wp_privacy_process_personal_data_export_page( $page_two, 2, 'person@example.test', 1, $request_id, false, 'component-two' );
+			}
+		);
+
+		$expected_url = 'http://example.test/uploads/wp-personal-data-exports/component-fuzz-export.zip';
+		$final_ok     = ! $page_two_result['threw']
+			&& is_array( $page_two_result['value'] )
+			&& true === $page_two_result['value']['done']
+			&& $expected_url === ( $page_two_result['value']['url'] ?? null )
+			&& '' === \get_post_meta( $request_id, '_export_data_raw', true )
+			&& '' === \get_post_meta( $request_id, '_export_data_grouped', true )
+			&& 1 === count( self::$export_file_actions )
+			&& self::grouped_export_action_ok( self::$export_file_actions[0] ?? array() );
+
+		if ( ! $final_ok ) {
+			self::record_failure(
+				$failures,
+				'export-processor.final-page-groups-data-and-exposes-url',
+				array( 'label' => 'page-two' ),
+				array(
+					'expectedUrl' => $expected_url,
+					'result'      => self::describe_call( $page_two_result ),
+					'rawMeta'     => self::describe_value( \get_post_meta( $request_id, '_export_data_raw', true ) ),
+					'groupedMeta' => self::describe_value( \get_post_meta( $request_id, '_export_data_grouped', true ) ),
+					'actions'     => self::describe_value( self::$export_file_actions ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.export-processor.shape-done-and-grouping',
+			array() === $failures,
+			array(
+				'exporters' => array_keys( self::$exporters ),
+				'actions'   => self::describe_value( self::$export_file_actions ),
+				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_erasure_processor( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$malformed = array(
+			array( 'label' => 'non-array', 'response' => 'not an array' ),
+			array( 'label' => 'missing-done', 'response' => array( 'items_removed' => false, 'items_retained' => false, 'messages' => array() ) ),
+			array( 'label' => 'missing-items-removed', 'response' => array( 'done' => false, 'items_retained' => false, 'messages' => array() ) ),
+			array( 'label' => 'missing-items-retained', 'response' => array( 'done' => false, 'items_removed' => false, 'messages' => array() ) ),
+			array( 'label' => 'missing-messages', 'response' => array( 'done' => false, 'items_removed' => false, 'items_retained' => false ) ),
+		);
+
+		foreach ( $malformed as $case ) {
+			$actual = self::call(
+				static function () use ( $case ) {
+					return \wp_privacy_process_personal_data_erasure_page( $case['response'], 1, 'person@example.test', 1, 0 );
+				}
+			);
+
+			if ( $actual['threw'] || $actual['value'] !== $case['response'] || array() !== self::$erased_actions ) {
+				self::record_failure(
+					$failures,
+					'erasure-processor.malformed-response-passthrough',
+					$case,
+					array(
+						'actual'        => self::describe_call( $actual ),
+						'erasedActions' => self::describe_value( self::$erased_actions ),
+					)
+				);
+			}
+		}
+
+		self::$erasers = self::processor_erasers();
+		$request_id    = 93001;
+		self::prime_privacy_request( $request_id, 'remove_personal_data', 'request-confirmed' );
+
+		$done_but_not_last = array(
+			'done'           => true,
+			'items_removed'  => true,
+			'items_retained' => false,
+			'messages'       => array( 'first eraser finished' ),
+		);
+		$done_but_not_last_result = self::call(
+			static function () use ( $done_but_not_last, $request_id ) {
+				return \wp_privacy_process_personal_data_erasure_page( $done_but_not_last, 1, 'person@example.test', 1, $request_id );
+			}
+		);
+
+		$last_but_not_done = array(
+			'done'           => false,
+			'items_removed'  => false,
+			'items_retained' => true,
+			'messages'       => array( 'second eraser has another page' ),
+		);
+		$last_but_not_done_result = self::call(
+			static function () use ( $last_but_not_done, $request_id ) {
+				return \wp_privacy_process_personal_data_erasure_page( $last_but_not_done, 2, 'person@example.test', 2, $request_id );
+			}
+		);
+
+		$non_final_ok = ! $done_but_not_last_result['threw']
+			&& $done_but_not_last_result['value'] === $done_but_not_last
+			&& ! $last_but_not_done_result['threw']
+			&& $last_but_not_done_result['value'] === $last_but_not_done
+			&& array() === self::$erased_actions;
+
+		if ( ! $non_final_ok ) {
+			self::record_failure(
+				$failures,
+				'erasure-processor.done-flag-requires-last-eraser',
+				array( 'label' => 'non-final-done-flags' ),
+				array(
+					'doneButNotLast'   => self::describe_call( $done_but_not_last_result ),
+					'lastButNotDone'   => self::describe_call( $last_but_not_done_result ),
+					'erasedActions'    => self::describe_value( self::$erased_actions ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.erasure-processor.shape-and-nonfinal-done-flags',
+			array() === $failures,
+			array(
+				'erasers'                  => array_keys( self::$erasers ),
+				'completedPathExercised'   => false,
+				'completedPathSkipReason'  => 'The final erasure path calls _wp_privacy_completed_request(), which updates posts through DB-backed wp_update_post().',
+				'erasedActions'            => self::describe_value( self::$erased_actions ),
+				'failures'                 => $failures,
+			)
+		);
+	}
+
+	private static function request_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base_time = 1700000000 + $ctx->int( 0, 100000 );
+		$cases     = array(
+			array(
+				'label'     => 'valid-export',
+				'id'        => 90001,
+				'userId'    => '101',
+				'email'     => 'person@example.test',
+				'action'    => 'export_personal_data',
+				'status'    => 'request-pending',
+				'content'   => \wp_json_encode( array( 'source' => 'fixed', 'html' => '<b>Alice</b>' ) ),
+				'created'   => gmdate( 'Y-m-d H:i:s', $base_time ),
+				'modified'  => gmdate( 'Y-m-d H:i:s', $base_time + 60 ),
+				'confirmed' => $base_time + 120,
+				'completed' => 0,
+				'key'       => \wp_fast_hash( 'fixed-export-key' ),
+			),
+			array(
+				'label'     => 'malformed-email-unknown-action',
+				'id'        => 90002,
+				'userId'    => '0',
+				'email'     => "bad@@example.test\x00<script>",
+				'action'    => 'unknown<' . self::random_string( $ctx->fork( 'fixed-action' ), 10 ) . '>',
+				'status'    => 'request-failed',
+				'content'   => '{"broken":',
+				'created'   => 'not-a-date',
+				'modified'  => gmdate( 'Y-m-d H:i:s', $base_time + 120 ),
+				'confirmed' => '',
+				'completed' => '42',
+				'key'       => 'plain-not-a-fast-hash',
+			),
+			array(
+				'label'     => 'unicode-erasure-array-json',
+				'id'        => 90003,
+				'userId'    => '777',
+				'email'     => "δοκιμή@παράδειγμα.δοκιμή",
+				'action'    => 'remove_personal_data',
+				'status'    => 'request-confirmed',
+				'content'   => \wp_json_encode( array( "é", '<script>x</script>', array( 'nested' => "snowman \xE2\x98\x83" ) ) ),
+				'created'   => gmdate( 'Y-m-d H:i:s', $base_time + 240 ),
+				'modified'  => '',
+				'confirmed' => $base_time + 300,
+				'completed' => $base_time + 360,
+				'key'       => \wp_fast_hash( "unicode-key-\xE2\x98\x83" ),
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_REQUEST_CASES; ++$i ) {
+			$case_ctx = $ctx->fork( 'generated-request-' . $i );
+			$action   = $case_ctx->choice(
+				array(
+					'export_personal_data',
+					'remove_personal_data',
+					'custom_' . self::random_string( $case_ctx->fork( 'action' ), $case_ctx->int( 4, 18 ) ),
+				)
+			);
+			$email    = $case_ctx->choice(
+				array(
+					'user+' . $i . '@example.test',
+					'bad@@example.test',
+					"unicode-\xC3\xA9@example.test",
+					self::random_string( $case_ctx->fork( 'email-local' ), 12 ) . '@example.test',
+				)
+			);
+			$content  = $case_ctx->choice(
+				array(
+					\wp_json_encode( array( 'i' => $i, 'value' => self::random_string( $case_ctx->fork( 'json-value' ), 24 ) ) ),
+					\wp_json_encode( array( self::random_string( $case_ctx->fork( 'array-value' ), 16 ) ) ),
+					\wp_json_encode( self::random_string( $case_ctx->fork( 'scalar-value' ), 16 ) ),
+					'{"malformed":',
+				)
+			);
+			$created  = $base_time + 600 + $i * 100;
+			$modified = $created + $case_ctx->int( 0, 3600 );
+
+			$cases[] = array(
+				'label'     => 'generated-' . $i,
+				'id'        => 90100 + $i,
+				'userId'    => (string) $case_ctx->int( 0, 10000 ),
+				'email'     => $email,
+				'action'    => $action,
+				'status'    => $case_ctx->choice( array( 'request-pending', 'request-confirmed', 'request-failed', 'request-completed' ) ),
+				'content'   => false === $content ? 'null' : $content,
+				'created'   => $case_ctx->bool( 10 ) ? 'invalid generated date' : gmdate( 'Y-m-d H:i:s', $created ),
+				'modified'  => $case_ctx->bool( 10 ) ? '' : gmdate( 'Y-m-d H:i:s', $modified ),
+				'confirmed' => $case_ctx->choice( array( 0, '', $modified + 10, (string) ( $modified + 20 ) ) ),
+				'completed' => $case_ctx->choice( array( 0, '', $modified + 30, (string) ( $modified + 40 ) ) ),
+				'key'       => $case_ctx->bool() ? \wp_fast_hash( 'generated-key-' . $i ) : self::random_string( $case_ctx->fork( 'plain-key' ), 20 ),
+			);
+		}
+
+		foreach ( $cases as $index => $case ) {
+			$cases[ $index ]['post'] = self::post_record(
+				array(
+					'ID'                => $case['id'],
+					'post_author'       => $case['userId'],
+					'post_title'        => $case['email'],
+					'post_name'         => $case['action'],
+					'post_status'       => $case['status'],
+					'post_content'      => $case['content'],
+					'post_date'         => $case['created'],
+					'post_date_gmt'     => $case['created'],
+					'post_modified'     => $case['modified'],
+					'post_modified_gmt' => $case['modified'],
+					'post_password'     => $case['key'],
+				)
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function request_matches_post( \WP_User_Request $request, array $case, $expected_data, $expected_created, $expected_modified ): bool {
+		$post = $case['post'];
+
+		return $request->ID === $post->ID
+			&& $request->user_id === $post->post_author
+			&& $request->email === $post->post_title
+			&& $request->action_name === $post->post_name
+			&& $request->status === $post->post_status
+			&& $request->created_timestamp === $expected_created
+			&& $request->modified_timestamp === $expected_modified
+			&& $request->confirmed_timestamp === (int) $case['confirmed']
+			&& $request->completed_timestamp === (int) $case['completed']
+			&& $request->request_data === $expected_data
+			&& $request->confirm_key === $post->post_password;
+	}
+
+	private static function request_public_shape_ok( \WP_User_Request $request ): bool {
+		$properties = array(
+			'ID',
+			'user_id',
+			'email',
+			'action_name',
+			'status',
+			'created_timestamp',
+			'modified_timestamp',
+			'confirmed_timestamp',
+			'completed_timestamp',
+			'request_data',
+			'confirm_key',
+		);
+
+		foreach ( $properties as $property ) {
+			if ( ! property_exists( $request, $property ) ) {
+				return false;
+			}
+		}
+
+		return is_int( $request->ID )
+			&& is_string( $request->user_id )
+			&& is_string( $request->email )
+			&& is_string( $request->action_name )
+			&& is_string( $request->status )
+			&& ( is_int( $request->created_timestamp ) || false === $request->created_timestamp )
+			&& ( is_int( $request->modified_timestamp ) || false === $request->modified_timestamp )
+			&& is_int( $request->confirmed_timestamp )
+			&& is_int( $request->completed_timestamp )
+			&& is_string( $request->confirm_key );
+	}
+
+	private static function post_record( array $overrides ): object {
+		return (object) array_merge(
+			array(
+				'ID'                    => 0,
+				'post_author'           => '0',
+				'post_date'             => '2024-01-01 00:00:00',
+				'post_date_gmt'         => '2024-01-01 00:00:00',
+				'post_content'          => '',
+				'post_title'            => '',
+				'post_excerpt'          => '',
+				'post_status'           => 'request-pending',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'export_personal_data',
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2024-01-01 00:00:00',
+				'post_modified_gmt'     => '2024-01-01 00:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => '',
+				'menu_order'            => 0,
+				'post_type'             => 'user_request',
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			),
+			$overrides
+		);
+	}
+
+	private static function prime_privacy_request( int $request_id, string $action_name, string $status ): void {
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'                => $request_id,
+					'post_author'       => '0',
+					'post_title'        => 'person@example.test',
+					'post_name'         => $action_name,
+					'post_status'       => $status,
+					'post_content'      => '{"processor":"privacy"}',
+					'post_password'     => \wp_fast_hash( 'processor-key-' . $request_id ),
+					'post_modified'     => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+					'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+				)
+			)
+		);
+	}
+
+	private static function prime_request_post( object $post ): void {
+		\wp_cache_set( (int) $post->ID, $post, 'posts' );
+	}
+
+	private static function set_post_meta( int $post_id, array $meta ): void {
+		self::$post_meta[ $post_id ] = $meta;
+	}
+
+	private static function processor_exporters(): array {
+		return array(
+			'component-one' => array(
+				'exporter_friendly_name' => 'Component One',
+				'callback'               => '__return_empty_array',
+			),
+			'component-two' => array(
+				'exporter_friendly_name' => 'Component Two',
+				'callback'               => '__return_empty_array',
+			),
+		);
+	}
+
+	private static function processor_erasers(): array {
+		return array(
+			'component-one' => array(
+				'eraser_friendly_name' => 'Component One',
+				'callback'             => '__return_empty_array',
+			),
+			'component-two' => array(
+				'eraser_friendly_name' => 'Component Two',
+				'callback'             => '__return_empty_array',
+			),
+		);
+	}
+
+	private static function export_datum( string $group_id, string $group_label, string $item_id, string $name, string $value ): array {
+		return array(
+			'group_id'          => $group_id,
+			'group_label'       => $group_label,
+			'group_description' => $group_label . ' data',
+			'item_id'           => $item_id,
+			'data'              => array(
+				array(
+					'name'  => $name,
+					'value' => $value,
+				),
+			),
+		);
+	}
+
+	private static function grouped_export_action_ok( array $action ): bool {
+		if ( 92001 !== ( $action['requestId'] ?? null ) || ! isset( $action['grouped'] ) || ! is_array( $action['grouped'] ) ) {
+			return false;
+		}
+
+		$groups = $action['grouped'];
+
+		return isset( $groups['profile']['items']['profile-1'], $groups['activity']['items']['login-1'] )
+			&& 'Profile' === $groups['profile']['group_label']
+			&& 'Activity' === $groups['activity']['group_label']
+			&& 2 === count( $groups['profile']['items']['profile-1'] )
+			&& 'Email' === $groups['profile']['items']['profile-1'][0]['name']
+			&& 'Name' === $groups['profile']['items']['profile-1'][1]['name']
+			&& 'IP' === $groups['activity']['items']['login-1'][0]['name'];
+	}
+
+	private static function install_scoped_filters(): void {
+		\add_filter( 'get_post_metadata', array( __CLASS__, 'filter_get_post_metadata' ), 10, 5 );
+		\add_filter( 'update_post_metadata', array( __CLASS__, 'filter_update_post_metadata' ), 10, 5 );
+		\add_filter( 'delete_post_metadata', array( __CLASS__, 'filter_delete_post_metadata' ), 10, 5 );
+		\add_filter( 'wp_privacy_personal_data_exporters', array( __CLASS__, 'filter_exporters' ), 10, 1 );
+		\add_filter( 'wp_privacy_personal_data_erasers', array( __CLASS__, 'filter_erasers' ), 10, 1 );
+		\add_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ), 10, 1 );
+		\add_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ), 10, 1 );
+		\add_action( 'wp_privacy_personal_data_erased', array( __CLASS__, 'record_erased_action' ), 10, 1 );
+	}
+
+	private static function reset_runtime(): void {
+		$_GET     = array();
+		$_POST    = array();
+		$_REQUEST = array();
+		$_COOKIE  = array();
+
+		$_SERVER['HTTP_HOST']       = 'example.test';
+		$_SERVER['REQUEST_METHOD']  = 'GET';
+		$_SERVER['REQUEST_URI']     = '/wp-admin/tools.php?page=component-fuzz-privacy';
+		$_SERVER['REMOTE_ADDR']     = '198.51.100.77';
+		$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/privacy';
+		$_SERVER['HTTPS']           = 'off';
+		$_SERVER['SERVER_PORT']     = '80';
+	}
+
+	private static function reset_static_state(): void {
+		self::$post_meta           = array();
+		self::$exporters           = array();
+		self::$erasers             = array();
+		self::$export_file_actions = array();
+		self::$erased_actions      = array();
+	}
+
+	private static function call( callable $callback ): array {
+		try {
+			return array(
+				'threw' => false,
+				'value' => $callback(),
+			);
+		} catch ( \Throwable $e ) {
+			return array(
+				'threw'     => true,
+				'throwable' => self::describe_throwable( $e ),
+			);
+		}
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		self::record_failure(
+			$failures,
+			$label,
+			array( 'label' => $label ),
+			$details
+		);
+	}
+
+	private static function record_failure( array &$failures, string $invariant, array $case, array $details ): void {
+		if ( count( $failures ) >= self::MAX_FAILURES ) {
+			return;
+		}
+
+		$failures[] = array(
+			'invariant' => $invariant,
+			'case'      => self::describe_case( $case ),
+			'details'   => self::describe_value( $details ),
+		);
+	}
+
+	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array(), ?string $status = null ): array {
+		return array(
+			'ok'        => $ok,
+			'status'    => $status ?? ( $ok ? 'passed' : 'failed' ),
+			'surface'   => self::NAME,
+			'invariant' => $invariant,
+			'seed'      => $ctx->seed(),
+			'iteration' => $ctx->iteration(),
+			'data'      => self::describe_value( $data ),
+		);
+	}
+
+	private static function skip( \ComponentFuzz\FuzzContext $ctx, string $invariant, string $reason, array $data = array() ): array {
+		$data['reason'] = $reason;
+		return self::row( $ctx, $invariant, true, $data, 'skipped' );
+	}
+
+	private static function is_error_code( $value, string $code ): bool {
+		return \is_wp_error( $value ) && $code === $value->get_error_code();
+	}
+
+	private static function random_string( \ComponentFuzz\FuzzContext $ctx, int $length ): string {
+		$atoms = array(
+			'a',
+			'Z',
+			'9',
+			'_',
+			'-',
+			'.',
+			'@',
+			' ',
+			"\t",
+			"\n",
+			'|',
+			':/?#[]@!$&\'()*+,;=',
+			'<tag attr="value">',
+			'&amp;',
+			'%0d%0a',
+			"\x00",
+			"\x1F",
+			"\x7F",
+			"\x80",
+			"\xFF",
+			"\xC3\xA9",
+			"\xE2\x98\x83",
+		);
+
+		$out = '';
+		while ( strlen( $out ) < $length ) {
+			$out .= $ctx->choice( $atoms );
+		}
+
+		return substr( $out, 0, $length );
+	}
+
+	private static function mutate_secret( string $secret ): string {
+		if ( '' === $secret ) {
+			return 'component-fuzz-mutated';
+		}
+
+		$first = $secret[0];
+		return ( 'x' === $first ? 'y' : 'x' ) . substr( $secret, 1 ) . '|mutated';
+	}
+
+	private static function describe_call( array $call ) {
+		if ( $call['threw'] ) {
+			return array(
+				'threw'     => true,
+				'throwable' => $call['throwable'],
+			);
+		}
+
+		return array(
+			'threw' => false,
+			'value' => self::describe_value( $call['value'] ),
+		);
+	}
+
+	private static function describe_user_request( \WP_User_Request $request ): array {
+		return array(
+			'ID'                  => $request->ID,
+			'user_id'             => self::describe_string( $request->user_id ),
+			'email'               => self::describe_string( $request->email ),
+			'action_name'         => self::describe_string( $request->action_name ),
+			'status'              => self::describe_string( $request->status ),
+			'created_timestamp'   => $request->created_timestamp,
+			'modified_timestamp'  => $request->modified_timestamp,
+			'confirmed_timestamp' => $request->confirmed_timestamp,
+			'completed_timestamp' => $request->completed_timestamp,
+			'request_data'        => self::describe_value( $request->request_data ),
+			'confirm_key'         => self::describe_string( $request->confirm_key ),
+		);
+	}
+
+	private static function describe_case( array $case ): array {
+		$out = array();
+		foreach ( array( 'label', 'id', 'status', 'action', 'expected' ) as $key ) {
+			if ( array_key_exists( $key, $case ) ) {
+				$out[ $key ] = self::describe_value( $case[ $key ] );
+			}
+		}
+
+		if ( isset( $case['post'] ) && is_object( $case['post'] ) ) {
+			$out['post'] = array(
+				'ID'                => $case['post']->ID,
+				'post_title'        => self::describe_string( $case['post']->post_title ),
+				'post_name'         => self::describe_string( $case['post']->post_name ),
+				'post_status'       => self::describe_string( $case['post']->post_status ),
+				'post_date_gmt'     => self::describe_string( $case['post']->post_date_gmt ),
+				'post_modified_gmt' => self::describe_string( $case['post']->post_modified_gmt ),
+				'post_content'      => self::describe_string( $case['post']->post_content ),
+			);
+		}
+
+		return $out;
+	}
+
+	private static function describe_value( $value, int $depth = 0 ) {
+		if ( is_string( $value ) ) {
+			return self::describe_string( $value );
+		}
+
+		if ( is_array( $value ) ) {
+			if ( $depth >= 4 ) {
+				return array(
+					'type'  => 'array',
+					'count' => count( $value ),
+				);
+			}
+
+			$out = array();
+			$i   = 0;
+			foreach ( $value as $key => $item ) {
+				if ( $i >= 20 ) {
+					$out['...'] = count( $value ) - $i;
+					break;
+				}
+				$out[ is_int( $key ) ? $key : self::escape_bytes( (string) $key ) ] = self::describe_value( $item, $depth + 1 );
+				++$i;
+			}
+			return $out;
+		}
+
+		if ( is_object( $value ) ) {
+			if ( $value instanceof \WP_User_Request ) {
+				return self::describe_user_request( $value );
+			}
+			if ( $value instanceof \WP_Error ) {
+				return array(
+					'type'    => 'WP_Error',
+					'code'    => $value->get_error_code(),
+					'message' => self::describe_string( $value->get_error_message() ),
+				);
+			}
+			if ( $value instanceof \Throwable ) {
+				return self::describe_throwable( $value );
+			}
+
+			return array(
+				'type'  => 'object',
+				'class' => get_class( $value ),
+			);
+		}
+
+		return $value;
+	}
+
+	private static function describe_string( string $value ): array {
+		return array(
+			'type'    => 'string',
+			'bytes'   => strlen( $value ),
+			'sha1'    => sha1( $value ),
+			'preview' => self::escape_bytes( $value ),
+		);
+	}
+
+	private static function describe_throwable( \Throwable $e ): array {
+		return array(
+			'class'   => get_class( $e ),
+			'message' => self::escape_bytes( $e->getMessage() ),
+			'file'    => $e->getFile(),
+			'line'    => $e->getLine(),
+		);
+	}
+
+	private static function escape_bytes( string $value, int $limit = self::SAMPLE_BYTES ): string {
+		$out    = '';
+		$length = strlen( $value );
+		$shown  = min( $length, $limit );
+
+		for ( $i = 0; $i < $shown; ++$i ) {
+			$byte = ord( $value[ $i ] );
+			if ( 0x5C === $byte ) {
+				$out .= '\\\\';
+			} elseif ( $byte >= 0x20 && $byte <= 0x7E ) {
+				$out .= chr( $byte );
+			} elseif ( 0x0A === $byte ) {
+				$out .= '\\n';
+			} elseif ( 0x0D === $byte ) {
+				$out .= '\\r';
+			} elseif ( 0x09 === $byte ) {
+				$out .= '\\t';
+			} else {
+				$out .= sprintf( '\\x%02X', $byte );
+			}
+		}
+
+		if ( $length > $shown ) {
+			$out .= '...';
+		}
+
+		return $out;
+	}
+
+	private static function snapshot_globals(): array {
+		$snapshot = array(
+			'_GET'     => $_GET,
+			'_POST'    => $_POST,
+			'_REQUEST' => $_REQUEST,
+			'_COOKIE'  => $_COOKIE,
+			'_SERVER'  => $_SERVER,
+			'globals'  => array(),
+		);
+
+		foreach (
+			array(
+				'post',
+				'pagenow',
+				'wp_actions',
+				'wp_current_filter',
+				'wp_filter',
+				'wp_filters',
+				'wp_object_cache',
+			) as $name
+		) {
+			$snapshot['globals'][ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		$_GET     = $snapshot['_GET'];
+		$_POST    = $snapshot['_POST'];
+		$_REQUEST = $snapshot['_REQUEST'];
+		$_COOKIE  = $snapshot['_COOKIE'];
+		$_SERVER  = $snapshot['_SERVER'];
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
+	}
+}
