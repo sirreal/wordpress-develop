@@ -70,6 +70,21 @@ $required_functions = array(
 	'show_admin_bar',
 	'is_admin_bar_showing',
 	'wp_admin_bar_render',
+	'get_current_screen',
+	'set_current_screen',
+	'convert_to_screen',
+	'get_column_headers',
+	'add_settings_section',
+	'add_settings_field',
+	'do_settings_sections',
+	'do_settings_fields',
+	'settings_fields',
+	'register_setting',
+	'unregister_setting',
+	'add_meta_box',
+	'do_meta_boxes',
+	'remove_meta_box',
+	'do_accordion_sections',
 	'wp_is_post_revision',
 	'wp_get_user_request',
 	'wp_user_request_action_description',
@@ -148,6 +163,7 @@ $required_classes = array(
 	'WP_Embed',
 	'WP_oEmbed',
 	'WP_Admin_Bar',
+	'WP_Screen',
 	'IXR_Base64',
 	'IXR_Date',
 	'IXR_Error',
@@ -253,6 +269,171 @@ if (
 	|| ! str_contains( $admin_bar_html, "href='https://example.test/component-fuzz/admin-bar-smoke'" )
 ) {
 	fwrite( STDERR, "Admin bar render smoke invariant failed: {$admin_bar_html}\n" );
+	exit( 1 );
+}
+
+$screen_globals = array();
+foreach ( array( 'current_screen', 'typenow', 'taxnow' ) as $screen_global ) {
+	$screen_globals[ $screen_global ] = array(
+		'exists' => array_key_exists( $screen_global, $GLOBALS ),
+		'value'  => $GLOBALS[ $screen_global ] ?? null,
+	);
+}
+$screen = convert_to_screen( 'post-new.php' );
+set_current_screen( $screen );
+$columns_filter = static function () {
+	return array( 'component_fuzz' => 'Component Fuzz Column' );
+};
+add_filter( 'manage_component-fuzz-smoke_columns', $columns_filter );
+$columns = get_column_headers( 'component-fuzz-smoke' );
+remove_filter( 'manage_component-fuzz-smoke_columns', $columns_filter );
+foreach ( $screen_globals as $screen_global => $entry ) {
+	if ( $entry['exists'] ) {
+		$GLOBALS[ $screen_global ] = $entry['value'];
+	} else {
+		unset( $GLOBALS[ $screen_global ] );
+	}
+}
+if (
+	! ( $screen instanceof WP_Screen )
+	|| 'post' !== $screen->id
+	|| 'post' !== $screen->base
+	|| 'post' !== $screen->post_type
+	|| 'add' !== $screen->action
+	|| get_current_screen() !== ( $screen_globals['current_screen']['value'] ?? null )
+	|| array( 'component_fuzz' => 'Component Fuzz Column' ) !== $columns
+) {
+	fwrite( STDERR, "Admin screen smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$setting_group = 'component_fuzz_smoke_group';
+$setting_name  = 'component_fuzz_smoke_option';
+$sanitize_seen = array();
+$sanitize      = static function ( $value ) use ( &$sanitize_seen ) {
+	$sanitize_seen[] = $value;
+	return 'smoke:' . sanitize_key( $value );
+};
+register_setting(
+	$setting_group,
+	$setting_name,
+	array(
+		'type'              => 'string',
+		'label'             => 'Smoke <em>Setting</em>',
+		'description'       => 'Smoke setting description',
+		'sanitize_callback' => $sanitize,
+		'default'           => 'smoke-default',
+		'show_in_rest'      => false,
+	)
+);
+$settings_registry = get_registered_settings();
+$sanitized_setting = sanitize_option( $setting_name, 'Raw Value!' );
+ob_start();
+settings_fields( $setting_group );
+$settings_fields_html = (string) ob_get_clean();
+unregister_setting( $setting_group, $setting_name );
+if (
+	! isset( $settings_registry[ $setting_name ] )
+	|| 'smoke:rawvalue' !== $sanitized_setting
+	|| array( 'Raw Value!' ) !== $sanitize_seen
+	|| ! str_contains( $settings_fields_html, "name='option_page'" )
+	|| ! str_contains( $settings_fields_html, 'name="_wpnonce"' )
+	|| isset( get_registered_settings()[ $setting_name ] )
+) {
+	fwrite( STDERR, "Settings registry smoke invariant failed: {$settings_fields_html}\n" );
+	exit( 1 );
+}
+
+$settings_page    = 'component_fuzz_smoke_page';
+$settings_section = 'component_fuzz_smoke_section';
+$settings_field   = 'component_fuzz_smoke_field';
+add_settings_section(
+	$settings_section,
+	'Smoke Section',
+	static function ( $section ) {
+		echo '<p class="component-fuzz-smoke-section">' . esc_html( $section['id'] ) . '</p>';
+	},
+	$settings_page,
+	array(
+		'before_section' => '<section><script>alert(1)</script>',
+		'after_section'  => '</section>',
+	)
+);
+add_settings_field(
+	$settings_field,
+	'Smoke Field',
+	static function ( $args ) {
+		echo '<input class="component-fuzz-smoke-field" id="' . esc_attr( $args['label_for'] ) . '" />';
+	},
+	$settings_page,
+	$settings_section,
+	array( 'label_for' => 'component_fuzz_smoke_input" onclick="bad' )
+);
+ob_start();
+do_settings_sections( $settings_page );
+$settings_sections_html = (string) ob_get_clean();
+if (
+	! str_contains( $settings_sections_html, 'component-fuzz-smoke-section' )
+	|| ! str_contains( $settings_sections_html, 'component-fuzz-smoke-field' )
+	|| str_contains( strtolower( $settings_sections_html ), '<script' )
+	|| str_contains( $settings_sections_html, ' onclick="' )
+) {
+	fwrite( STDERR, "Settings rendering smoke invariant failed: {$settings_sections_html}\n" );
+	exit( 1 );
+}
+
+$meta_screen = convert_to_screen( 'component-fuzz-meta-smoke' );
+$meta_calls  = array();
+$meta_box    = static function ( $object, $box ) use ( &$meta_calls ) {
+	unset( $object );
+
+	$meta_calls[] = $box['id'];
+	echo '<span class="component-fuzz-meta-box">' . esc_html( $box['args']['payload'] ) . '</span>';
+};
+add_meta_box(
+	'component_fuzz_meta_high',
+	'Smoke High',
+	$meta_box,
+	$meta_screen,
+	'normal',
+	'high',
+	array( 'payload' => '<b>high</b>' )
+);
+add_meta_box(
+	'component_fuzz_meta_removed',
+	'Smoke Removed',
+	$meta_box,
+	$meta_screen,
+	'normal',
+	'low',
+	array( 'payload' => '<b>removed</b>' )
+);
+remove_meta_box( 'component_fuzz_meta_removed', $meta_screen, 'normal' );
+ob_start();
+$meta_count = do_meta_boxes( $meta_screen, 'normal', (object) array( 'ID' => 90904 ) );
+$meta_html  = (string) ob_get_clean();
+add_meta_box(
+	'component_fuzz_accordion',
+	'Accordion <script>bad</script>',
+	$meta_box,
+	$meta_screen,
+	'side',
+	'high',
+	array( 'payload' => '<b>accordion</b>' )
+);
+ob_start();
+$accordion_count = do_accordion_sections( $meta_screen, 'side', (object) array( 'ID' => 90905 ) );
+$accordion_html  = (string) ob_get_clean();
+if (
+	1 !== $meta_count
+	|| array( 'component_fuzz_meta_high', 'component_fuzz_accordion' ) !== $meta_calls
+	|| ! str_contains( $meta_html, 'component-fuzz-meta-box' )
+	|| str_contains( $meta_html, 'component_fuzz_meta_removed' )
+	|| 1 !== $accordion_count
+	|| ! str_contains( $accordion_html, 'accordion-container' )
+	|| str_contains( strtolower( $accordion_html ), '<script' )
+) {
+	fwrite( STDERR, "Meta box smoke invariant failed: {$meta_html}\n{$accordion_html}\n" );
 	exit( 1 );
 }
 

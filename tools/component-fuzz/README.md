@@ -20,6 +20,11 @@ network requests, or a configured site.
 - `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
   group/container behavior, render escaping/raw HTML contracts, and
   `show_admin_bar()` filter/global restoration.
+- `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
+  `WP_Screen` normalization/current-screen globals, column header filter
+  locality, settings registry/default/sanitize callbacks, escaped settings
+  field and nonce output, meta-box ordering/removal/callback args, and
+  accordion section rendering.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, prompt builder
   ability integration, cache and event adapters, and deterministic in-memory
@@ -136,12 +141,16 @@ network requests, or a configured site.
   login behavior without publishing, media, pingback, or option side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
-rendering side effects. The Customizer surface intentionally avoids changeset
-save/publish, nav-menu persistence, widget persistence, and real post/option
-storage beyond the existing no-DB option stub. The Site Health surface avoids
-loopback, WordPress.org, REST availability, update download, mail, cron, and
-filesystem-writing checks unless they are fully short-circuited. Skips are recorded in
-`results.ndjson` with a reason and do not mask failures or PHP errors.
+rendering side effects. The Admin Screen surface intentionally avoids admin page
+submission, `options.php` writes, user preference persistence, real post objects,
+and block-editor compatibility shims that would inspect installed plugins. The
+Customizer surface intentionally avoids changeset save/publish, nav-menu
+persistence, widget persistence, and real post/option storage beyond the
+existing no-DB option stub. The Site Health surface avoids loopback,
+WordPress.org, REST availability, update download, mail, cron, and
+filesystem-writing checks unless they are fully short-circuited. Skips are
+recorded in `results.ndjson` with a reason and do not mask failures or PHP
+errors.
 
 ## Commands
 
