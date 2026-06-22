@@ -84,6 +84,10 @@ network requests, or a configured site.
   no-HTML filtering, strict/custom policy monotonicity.
 - `l10n`: translation fallbacks, escaped translation helpers, plural selection,
   textdomain load/unload state, locale determination, localized numbers/dates.
+- `mail`: no-delivery `wp_mail()` composition coverage, including argument
+  filters, pre-send short-circuiting, PHPMailer recipient/header/content
+  handoff, attachments, embedded images, success/failure actions, and emoji
+  email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
@@ -162,9 +166,10 @@ metadata updates and intentionally avoids media paths that insert attachments,
 create cover-image attachments, process audio/video thumbnails, or otherwise
 require real postmeta writes. The Site Health surface avoids loopback,
 WordPress.org, REST availability, update download, mail, cron, and
-filesystem-writing checks unless they are fully short-circuited. Skips are
-recorded in `results.ndjson` with a reason and do not mask failures or PHP
-errors.
+filesystem-writing checks unless they are fully short-circuited. The mail
+surface intercepts PHPMailer send calls and never attempts real delivery.
+Skips are recorded in `results.ndjson` with a reason and do not mask failures
+or PHP errors.
 
 ## Commands
 

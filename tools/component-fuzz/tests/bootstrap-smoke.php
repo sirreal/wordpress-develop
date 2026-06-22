@@ -56,6 +56,8 @@ $required_functions = array(
 	'wp_verify_fast_hash',
 	'wp_hash_password',
 	'wp_check_password',
+	'wp_mail',
+	'wp_staticize_emoji_for_email',
 	'wp_recovery_mode',
 	'wp_interactivity_process_directives',
 	'wp_interactivity_state',
@@ -175,6 +177,8 @@ $required_classes = array(
 	'WordPress\AiClient\AiClient',
 	'Walker_Nav_Menu',
 	'WP_Application_Passwords',
+	'WP_PHPMailer',
+	'PHPMailer\PHPMailer\PHPMailer',
 	'WP_User_Request',
 	'WP_Metadata_Lazyloader',
 	'WP_Recovery_Mode_Key_Service',
@@ -268,6 +272,31 @@ if (
 	|| WP_Application_Passwords::check_password( 'wrong-component-fuzz-app', $app_hash )
 ) {
 	fwrite( STDERR, "Application password smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$mail_seen   = array();
+$mail_filter = static function ( array $atts ) use ( &$mail_seen ): array {
+	$atts['subject'] .= ' [filtered]';
+	$mail_seen[]      = $atts;
+	return $atts;
+};
+$pre_mail    = static function ( $pre, array $atts ) use ( &$mail_seen ) {
+	$mail_seen[] = $atts;
+	return 'component-fuzz-short-circuit';
+};
+add_filter( 'wp_mail', $mail_filter );
+add_filter( 'pre_wp_mail', $pre_mail, 10, 2 );
+$mail_result = wp_mail( 'smoke@example.test', 'Smoke Mail', 'body' );
+remove_filter( 'wp_mail', $mail_filter );
+remove_filter( 'pre_wp_mail', $pre_mail, 10 );
+if (
+	'component-fuzz-short-circuit' !== $mail_result
+	|| 2 !== count( $mail_seen )
+	|| 'Smoke Mail [filtered]' !== ( $mail_seen[0]['subject'] ?? null )
+	|| 'Smoke Mail [filtered]' !== ( $mail_seen[1]['subject'] ?? null )
+) {
+	fwrite( STDERR, "Mail short-circuit smoke invariant failed.\n" );
 	exit( 1 );
 }
 
