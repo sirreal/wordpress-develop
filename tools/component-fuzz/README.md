@@ -113,6 +113,10 @@ network requests, or a configured site.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, widget ID parsing, sidebar assignment moves/removals, and
   render callback wrapper output.
+- `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
+  request/message round trips, invalid XML fail-closed behavior, fault XML,
+  system method dispatch, method registry filters, demo helpers, and disabled
+  login behavior without publishing, media, pingback, or option side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. Skips are recorded in `results.ndjson` with a reason and

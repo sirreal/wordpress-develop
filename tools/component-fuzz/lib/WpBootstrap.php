@@ -377,6 +377,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-plugin-dependencies.php',
 			'wp-includes/pluggable.php',
 			'wp-includes/class-wp-application-passwords.php',
+			'wp-includes/class-IXR.php',
+			'wp-includes/class-wp-xmlrpc-server.php',
 			'wp-includes/class-wp-admin-bar.php',
 			'wp-includes/admin-bar.php',
 			'wp-admin/includes/file.php',

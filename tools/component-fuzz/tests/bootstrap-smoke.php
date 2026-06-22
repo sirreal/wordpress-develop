@@ -97,6 +97,14 @@ $required_classes = array(
 	'WP_Embed',
 	'WP_oEmbed',
 	'WP_Admin_Bar',
+	'IXR_Base64',
+	'IXR_Date',
+	'IXR_Error',
+	'IXR_Message',
+	'IXR_Request',
+	'IXR_Server',
+	'IXR_Value',
+	'wp_xmlrpc_server',
 );
 
 $missing = array();
