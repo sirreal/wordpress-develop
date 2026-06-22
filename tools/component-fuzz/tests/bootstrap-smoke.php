@@ -44,6 +44,9 @@ $required_functions = array(
 	'wp_is_connector_registered',
 	'wp_get_connector',
 	'wp_get_connectors',
+	'register_nav_menu',
+	'wp_nav_menu',
+	'walk_nav_menu_tree',
 );
 
 $required_classes = array(
@@ -68,6 +71,7 @@ $required_classes = array(
 	'WP_Icons_Registry',
 	'WP_Speculation_Rules',
 	'WordPress\AiClient\AiClient',
+	'Walker_Nav_Menu',
 );
 
 $missing = array();

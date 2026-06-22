@@ -63,6 +63,9 @@ network requests, or a configured site.
   textdomain load/unload state, locale determination, localized numbers/dates.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
+- `navigation`: nav menu location registration, theme menu assignment lookup,
+  menu object and item setup filters, current-item class derivation, walker
+  output, depth pruning, and filtered no-DB `wp_nav_menu()` rendering.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling.
 - `post-types`: post type and post status registry defaults, support feature

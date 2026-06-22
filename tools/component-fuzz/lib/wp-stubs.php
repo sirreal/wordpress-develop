@@ -134,6 +134,28 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $query;
 		}
 
+		public function placeholder_escape() {
+			static $placeholder;
+
+			if ( ! $placeholder ) {
+				$placeholder = '{component-fuzz-placeholder-escape}';
+			}
+
+			if ( function_exists( 'has_filter' ) && function_exists( 'add_filter' ) && false === has_filter( 'query', array( $this, 'remove_placeholder_escape' ) ) ) {
+				add_filter( 'query', array( $this, 'remove_placeholder_escape' ), 0 );
+			}
+
+			return $placeholder;
+		}
+
+		public function add_placeholder_escape( $query ) {
+			return str_replace( '%', $this->placeholder_escape(), (string) $query );
+		}
+
+		public function remove_placeholder_escape( $query ) {
+			return str_replace( $this->placeholder_escape(), '%', (string) $query );
+		}
+
 		public function suppress_errors( $suppress = true ) {
 			$previous = $this->suppress_errors;
 			$this->suppress_errors = (bool) $suppress;
