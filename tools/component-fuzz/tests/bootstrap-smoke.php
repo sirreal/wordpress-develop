@@ -22,6 +22,20 @@ $required_functions = array(
 	'sanitize_term_field',
 	'maybe_serialize',
 	'maybe_unserialize',
+	'register_meta',
+	'register_post_meta',
+	'unregister_meta_key',
+	'get_registered_meta_keys',
+	'get_registered_metadata',
+	'sanitize_meta',
+	'get_metadata_default',
+	'is_protected_meta',
+	'metadata_exists',
+	'get_metadata_raw',
+	'get_metadata',
+	'add_metadata',
+	'update_metadata',
+	'delete_metadata',
 	'rest_validate_value_from_schema',
 	'rest_sanitize_value_from_schema',
 	'sanitize_user',
@@ -90,6 +104,7 @@ $required_classes = array(
 	'Walker_Nav_Menu',
 	'WP_Application_Passwords',
 	'WP_User_Request',
+	'WP_Metadata_Lazyloader',
 	'WP_Recovery_Mode_Key_Service',
 	'WP_Recovery_Mode_Cookie_Service',
 	'WP_Recovery_Mode',
@@ -288,6 +303,46 @@ wp_print_font_faces(
 $font_css = (string) ob_get_clean();
 if ( ! str_contains( $font_css, '@font-face{' ) || ! str_contains( $font_css, 'Component Fuzz Smoke' ) ) {
 	fwrite( STDERR, "Font face smoke invariant failed: {$font_css}\n" );
+	exit( 1 );
+}
+
+$meta_key = 'component_fuzz_smoke_meta';
+$GLOBALS['wp_meta_keys'] = array();
+if (
+	! register_meta(
+		'post',
+		$meta_key,
+		array(
+			'type'    => 'string',
+			'single'  => true,
+			'default' => 'component-fuzz-default',
+		)
+	)
+	|| ! isset( get_registered_meta_keys( 'post' )[ $meta_key ] )
+) {
+	fwrite( STDERR, "Metadata registration smoke invariant failed.\n" );
+	exit( 1 );
+}
+wp_cache_set( 90901, array( 'component_fuzz_smoke_sentinel' => array( '1' ) ), 'post_meta' );
+if (
+	'component-fuzz-default' !== get_metadata_default( 'post', 90901, $meta_key, true )
+	|| 'component-fuzz-default' !== get_metadata( 'post', 90901, $meta_key, true )
+	|| 'component-fuzz-default' !== get_registered_metadata( 'post', 90901, $meta_key )
+	|| ! unregister_meta_key( 'post', $meta_key )
+) {
+	fwrite( STDERR, "Metadata default smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$lazyloader = new WP_Metadata_Lazyloader();
+$lazyloader->queue_objects( 'comment', array( 90902, 90903 ) );
+if ( false === has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload_meta_callback' ) ) ) {
+	fwrite( STDERR, "Metadata lazyloader queue smoke invariant failed.\n" );
+	exit( 1 );
+}
+$lazyloader->reset_queue( 'comment' );
+if ( false !== has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload_meta_callback' ) ) ) {
+	fwrite( STDERR, "Metadata lazyloader reset smoke invariant failed.\n" );
 	exit( 1 );
 }
 

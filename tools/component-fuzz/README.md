@@ -77,6 +77,9 @@ network requests, or a configured site.
   textdomain load/unload state, locale determination, localized numbers/dates.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
+- `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
+  sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
+  CRUD short-circuits, and lazyloader queue/reset behavior.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, walker
   output, depth pruning, and filtered no-DB `wp_nav_menu()` rendering.
