@@ -34,6 +34,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_settings_controller( $ctx );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_patterns_controller( $ctx );
+			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-controllers.themes-controller.skipped',
@@ -123,22 +124,28 @@ final class RestControllersSurface {
 				'get_registered_settings',
 				'get_taxonomies',
 				'get_taxonomy',
+				'has_filter',
 				'is_post_type_viewable',
 				'is_wp_error',
 				'register_block_style',
 				'register_block_type',
 				'register_post_status',
 				'register_post_type',
+				'register_rest_field',
+				'register_rest_route',
 				'register_setting',
 				'register_taxonomy',
 				'remove_filter',
+				'rest_authorization_required_code',
 				'rest_default_additional_properties_to_false',
 				'rest_ensure_response',
 				'rest_filter_response_by_context',
 				'rest_get_route_for_post_type_items',
 				'rest_get_route_for_taxonomy_items',
+				'rest_parse_request_arg',
 				'rest_sanitize_value_from_schema',
 				'rest_url',
+				'rest_validate_request_arg',
 				'rest_validate_value_from_schema',
 				'sanitize_key',
 				'serialize_blocks',
@@ -161,6 +168,7 @@ final class RestControllersSurface {
 		$case       = self::post_type_case( $ctx->fork( 'post-types' ) );
 		$controller = new \WP_REST_Post_Types_Controller();
 		$failures   = array();
+		$additional_field_calls = array();
 
 		$registered = \register_post_type(
 			$case['postType'],
@@ -212,6 +220,27 @@ final class RestControllersSurface {
 				'query_var'    => false,
 			)
 		);
+		\register_rest_field(
+			'type',
+			$case['additionalField'],
+			array(
+				'get_callback' => static function ( array $prepared, string $field_name, \WP_REST_Request $request, string $object_type ) use ( $case, &$additional_field_calls ): string {
+					$additional_field_calls[] = array(
+						'field'      => $field_name,
+						'objectType' => $object_type,
+						'context'    => $request['context'],
+						'slug'       => $prepared['slug'] ?? null,
+					);
+					return $case['additionalValue'];
+				},
+				'schema'       => array(
+					'description' => 'Generated REST controller type field.',
+					'type'        => 'string',
+					'context'     => array( 'edit' ),
+					'readonly'    => true,
+				),
+			)
+		);
 
 		self::collect_failure(
 			$failures,
@@ -237,6 +266,7 @@ final class RestControllersSurface {
 				&& ! isset( $view_data[ $case['hiddenPostType'] ] )
 				&& $case['restBase'] === ( $view_data[ $case['postType'] ]['rest_base'] ?? null )
 				&& ! array_key_exists( 'capabilities', $view_data[ $case['postType'] ] )
+				&& ! array_key_exists( $case['additionalField'], $view_data[ $case['postType'] ] )
 				&& in_array( $case['taxonomy'], $view_data[ $case['postType'] ]['taxonomies'] ?? array(), true )
 				&& ! in_array( $case['hiddenTaxonomy'], $view_data[ $case['postType'] ]['taxonomies'] ?? array(), true ),
 			'post type collection returns only show_in_rest types and view-context fields',
@@ -259,16 +289,39 @@ final class RestControllersSurface {
 
 		$edit_data = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
 		$links     = $edit_item instanceof \WP_REST_Response ? $edit_item->get_links() : array();
+		$schema    = $controller->get_item_schema();
+		$additional_schema_valid = isset( $schema['properties'][ $case['additionalField'] ] )
+			&& true === \rest_validate_value_from_schema(
+				$edit_data[ $case['additionalField'] ] ?? null,
+				$schema['properties'][ $case['additionalField'] ],
+				$case['additionalField']
+			);
 		self::collect_failure(
 			$failures,
 			$edit_item instanceof \WP_REST_Response
 				&& isset( $edit_data['capabilities'], $edit_data['supports'], $edit_data['visibility'] )
+				&& $additional_schema_valid
+				&& $case['additionalValue'] === ( $edit_data[ $case['additionalField'] ] ?? null )
 				&& $case['postType'] === ( $edit_data['slug'] ?? null )
 				&& $case['restBase'] === ( $edit_data['rest_base'] ?? null )
+				&& array(
+					array(
+						'field'      => $case['additionalField'],
+						'objectType' => 'type',
+						'context'    => 'edit',
+						'slug'       => $case['postType'],
+					),
+				) === $additional_field_calls
 				&& \rest_url( '/wp/v2/types' ) === self::link_href( $links, 'collection' )
 				&& \rest_url( '/wp/v2/' . $case['restBase'] ) === self::link_href( $links, 'https://api.w.org/items' ),
 			'post type item edit response exposes edit-context fields and stable rest_base links',
-			array( 'case' => $case, 'editData' => $edit_data, 'links' => $links )
+			array(
+				'case'                 => $case,
+				'editData'             => $edit_data,
+				'links'                => $links,
+				'additionalFieldCalls' => $additional_field_calls,
+				'additionalSchema'     => $schema['properties'][ $case['additionalField'] ] ?? null,
+			)
 		);
 
 		$embed_item = $controller->get_item(
@@ -284,7 +337,7 @@ final class RestControllersSurface {
 			$failures,
 			$embed_item instanceof \WP_REST_Response
 				&& isset( $embed_data['name'], $embed_data['slug'], $embed_data['rest_base'] )
-				&& ! isset( $embed_data['description'], $embed_data['capabilities'], $embed_data['supports'], $embed_data['taxonomies'] ),
+				&& ! isset( $embed_data['description'], $embed_data['capabilities'], $embed_data['supports'], $embed_data['taxonomies'], $embed_data[ $case['additionalField'] ] ),
 			'post type embed context filters view/edit-only schema fields',
 			array( 'embedData' => $embed_data )
 		);
@@ -310,10 +363,8 @@ final class RestControllersSurface {
 			$failures,
 			$head_items instanceof \WP_REST_Response
 				&& array() === $head_items->get_data()
-				&& $hidden_item instanceof \WP_Error
-				&& 'rest_cannot_read_type' === $hidden_item->get_error_code()
-				&& $missing_item instanceof \WP_Error
-				&& 'rest_type_invalid' === $missing_item->get_error_code(),
+				&& self::wp_error_ok( $hidden_item, 'rest_cannot_read_type', \rest_authorization_required_code() )
+				&& self::wp_error_ok( $missing_item, 'rest_type_invalid', 404 ),
 			'post type HEAD and invalid item paths return represented results',
 			array(
 				'headData'      => $head_items instanceof \WP_REST_Response ? $head_items->get_data() : $head_items,
@@ -398,7 +449,7 @@ final class RestControllersSurface {
 		$edit_item_data = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
 		self::collect_failure(
 			$failures,
-			$denied instanceof \WP_Error
+			self::wp_error_ok( $denied, 'rest_cannot_view', \rest_authorization_required_code() )
 				&& true === $allowed
 				&& $edit_items instanceof \WP_REST_Response
 				&& isset( $edit_data[ $case['publicStatus'] ], $edit_data[ $case['privateStatus'] ], $edit_data['trash'] )
@@ -433,10 +484,8 @@ final class RestControllersSurface {
 		);
 		self::collect_failure(
 			$failures,
-			$hidden_permission instanceof \WP_Error
-				&& 'rest_cannot_read_status' === $hidden_permission->get_error_code()
-				&& $missing_item instanceof \WP_Error
-				&& 'rest_status_invalid' === $missing_item->get_error_code(),
+			self::wp_error_ok( $hidden_permission, 'rest_cannot_read_status', \rest_authorization_required_code() )
+				&& self::wp_error_ok( $missing_item, 'rest_status_invalid', 404 ),
 			'post status hidden and invalid values return WP_Error without throwing',
 			array( 'hiddenPermission' => $hidden_permission, 'missingItem' => $missing_item )
 		);
@@ -458,6 +507,7 @@ final class RestControllersSurface {
 		$case       = self::taxonomy_case( $ctx->fork( 'taxonomies' ) );
 		$controller = new \WP_REST_Taxonomies_Controller();
 		$failures   = array();
+		$additional_field_calls = array();
 
 		$post_type = \register_post_type(
 			$case['postType'],
@@ -517,6 +567,27 @@ final class RestControllersSurface {
 				'query_var'    => false,
 			)
 		);
+		\register_rest_field(
+			'taxonomy',
+			$case['additionalField'],
+			array(
+				'get_callback' => static function ( array $prepared, string $field_name, \WP_REST_Request $request, string $object_type ) use ( $case, &$additional_field_calls ): string {
+					$additional_field_calls[] = array(
+						'field'      => $field_name,
+						'objectType' => $object_type,
+						'context'    => $request['context'],
+						'slug'       => $prepared['slug'] ?? null,
+					);
+					return $case['additionalValue'];
+				},
+				'schema'       => array(
+					'description' => 'Generated REST controller taxonomy field.',
+					'type'        => 'string',
+					'context'     => array( 'edit' ),
+					'readonly'    => true,
+				),
+			)
+		);
 
 		self::collect_failure(
 			$failures,
@@ -554,6 +625,7 @@ final class RestControllersSurface {
 				&& isset( $type_data[ $case['taxonomy'] ] )
 				&& ! isset( $type_data[ $case['otherTaxonomy'] ], $type_data[ $case['hiddenTaxonomy'] ] )
 				&& $case['restBase'] === ( $type_data[ $case['taxonomy'] ]['rest_base'] ?? null )
+				&& ! array_key_exists( $case['additionalField'], $type_data[ $case['taxonomy'] ] )
 				&& ! array_key_exists( 'capabilities', $type_data[ $case['taxonomy'] ] ),
 			'taxonomy collection filters hidden taxonomies and optional object type',
 			array( 'viewData' => $view_data, 'typeData' => $type_data )
@@ -575,17 +647,39 @@ final class RestControllersSurface {
 
 		$edit_data = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
 		$links     = $edit_item instanceof \WP_REST_Response ? $edit_item->get_links() : array();
+		$schema    = $controller->get_item_schema();
+		$additional_schema_valid = isset( $schema['properties'][ $case['additionalField'] ] )
+			&& true === \rest_validate_value_from_schema(
+				$edit_data[ $case['additionalField'] ] ?? null,
+				$schema['properties'][ $case['additionalField'] ],
+				$case['additionalField']
+			);
 		self::collect_failure(
 			$failures,
 			$edit_item instanceof \WP_REST_Response
 				&& isset( $edit_data['capabilities'], $edit_data['labels'], $edit_data['visibility'], $edit_data['show_cloud'] )
+				&& $additional_schema_valid
+				&& $case['additionalValue'] === ( $edit_data[ $case['additionalField'] ] ?? null )
 				&& $case['taxonomy'] === ( $edit_data['slug'] ?? null )
 				&& $case['restBase'] === ( $edit_data['rest_base'] ?? null )
 				&& array( $case['postType'] ) === ( $edit_data['types'] ?? null )
+				&& array(
+					array(
+						'field'      => $case['additionalField'],
+						'objectType' => 'taxonomy',
+						'context'    => 'edit',
+						'slug'       => $case['taxonomy'],
+					),
+				) === $additional_field_calls
 				&& \rest_url( '/wp/v2/taxonomies' ) === self::link_href( $links, 'collection' )
 				&& \rest_url( '/wp/v2/' . $case['restBase'] ) === self::link_href( $links, 'https://api.w.org/items' ),
 			'taxonomy edit item exposes edit fields and stable rest_base links',
-			array( 'editData' => $edit_data, 'links' => $links )
+			array(
+				'editData'             => $edit_data,
+				'links'                => $links,
+				'additionalFieldCalls' => $additional_field_calls,
+				'additionalSchema'     => $schema['properties'][ $case['additionalField'] ] ?? null,
+			)
 		);
 
 		$embed_item = $controller->get_item(
@@ -617,10 +711,9 @@ final class RestControllersSurface {
 			$failures,
 			$embed_item instanceof \WP_REST_Response
 				&& isset( $embed_data['name'], $embed_data['slug'], $embed_data['rest_base'] )
-				&& ! isset( $embed_data['description'], $embed_data['capabilities'], $embed_data['types'], $embed_data['visibility'] )
+				&& ! isset( $embed_data['description'], $embed_data['capabilities'], $embed_data['types'], $embed_data['visibility'], $embed_data[ $case['additionalField'] ] )
 				&& false === $hidden_permission
-				&& $missing_item instanceof \WP_Error
-				&& 'rest_taxonomy_invalid' === $missing_item->get_error_code(),
+				&& self::wp_error_ok( $missing_item, 'rest_taxonomy_invalid', 404 ),
 			'taxonomy embed context and invalid item paths are represented',
 			array( 'embedData' => $embed_data, 'hiddenPermission' => $hidden_permission, 'missingItem' => $missing_item )
 		);
@@ -701,6 +794,45 @@ final class RestControllersSurface {
 		);
 		\register_setting(
 			'component_fuzz',
+			$case['arrayOption'],
+			array(
+				'type'         => 'array',
+				'default'      => array( $case['arrayDefault'] ),
+				'show_in_rest' => array(
+					'name'   => $case['arrayName'],
+					'schema' => array(
+						'type'     => 'array',
+						'minItems' => 1,
+						'maxItems' => 3,
+						'items'    => array(
+							'type'    => 'string',
+							'pattern' => '^item-[a-z0-9]+$',
+						),
+					),
+				),
+			)
+		);
+		\register_setting(
+			'component_fuzz',
+			$case['invalidStoredOption'],
+			array(
+				'type'         => 'object',
+				'default'      => array(
+					'flag' => false,
+				),
+				'show_in_rest' => array(
+					'name'   => $case['invalidStoredName'],
+					'schema' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'flag' => array( 'type' => 'boolean' ),
+						),
+					),
+				),
+			)
+		);
+		\register_setting(
+			'component_fuzz',
 			$case['hiddenOption'],
 			array(
 				'type'         => 'string',
@@ -720,6 +852,8 @@ final class RestControllersSurface {
 
 		\update_option( $case['stringOption'], $case['storedString'] );
 		\update_option( $case['integerOption'], $case['storedInteger'] );
+		\update_option( $case['arrayOption'], array( $case['storedArrayItem'] ) );
+		\update_option( $case['invalidStoredOption'], $case['invalidStoredValue'] );
 		\update_option(
 			$case['objectOption'],
 			array(
@@ -748,7 +882,10 @@ final class RestControllersSurface {
 				&& $response instanceof \WP_REST_Response
 				&& $case['storedString'] === ( $data[ $case['stringName'] ] ?? null )
 				&& $case['storedInteger'] === ( $data[ $case['integerName'] ] ?? null )
+				&& array( $case['storedArrayItem'] ) === ( $data[ $case['arrayName'] ] ?? null )
 				&& isset( $data[ $case['objectName'] ]['flag'], $data[ $case['objectName'] ]['label'] )
+				&& array_key_exists( $case['invalidStoredName'], $data )
+				&& null === $data[ $case['invalidStoredName'] ]
 				&& ! isset( $data[ $case['hiddenOption'] ], $data[ $case['invalidTypeOption'] ] )
 				&& isset( $schema['properties'][ $case['stringName'] ]['arg_options']['sanitize_callback'] )
 				&& ! isset( $public_schema['properties'][ $case['stringName'] ]['arg_options'] )
@@ -768,8 +905,10 @@ final class RestControllersSurface {
 		$sanitize_request->set_attributes( array( 'args' => $args ) );
 		$valid_string = $controller->sanitize_callback( $case['updatedString'], $sanitize_request, $case['stringName'] );
 		$valid_integer = $controller->sanitize_callback( (string) $case['updatedInteger'], $sanitize_request, $case['integerName'] );
+		$valid_array = $controller->sanitize_callback( array( $case['updatedArrayItem'] ), $sanitize_request, $case['arrayName'] );
 		$invalid_string = $controller->sanitize_callback( 'bad/value!', $sanitize_request, $case['stringName'] );
 		$invalid_integer = $controller->sanitize_callback( 101, $sanitize_request, $case['integerName'] );
+		$invalid_array = $controller->sanitize_callback( array( 'bad value!' ), $sanitize_request, $case['arrayName'] );
 
 		$captured_filter_update = null;
 		$pre_update_filter      = static function ( $updated, string $name, $value, array $args ) use ( $case, &$captured_filter_update ) {
@@ -792,6 +931,7 @@ final class RestControllersSurface {
 				array(
 					$case['stringName']  => $valid_string,
 					$case['integerName'] => $valid_integer,
+					$case['arrayName']   => $valid_array,
 					$case['objectName']  => array(
 						'flag'  => true,
 						'label' => $case['filteredObjectLabel'],
@@ -805,17 +945,28 @@ final class RestControllersSurface {
 
 		$updated_response = \rest_ensure_response( $updated );
 		$updated_data     = $updated_response instanceof \WP_REST_Response ? $updated_response->get_data() : array();
+		$invalid_stored_update_request = self::request( 'PUT', '/wp/v2/settings' );
+		$invalid_stored_update_request->set_body_params(
+			array(
+				$case['invalidStoredName'] => null,
+			)
+		);
+		$invalid_stored_update = $controller->update_item( $invalid_stored_update_request );
 		self::collect_failure(
 			$failures,
 			$valid_string === $case['updatedString']
 				&& $valid_integer === $case['updatedInteger']
+				&& array( $case['updatedArrayItem'] ) === $valid_array
 				&& $invalid_string instanceof \WP_Error
 				&& $invalid_integer instanceof \WP_Error
+				&& $invalid_array instanceof \WP_Error
 				&& $updated_response instanceof \WP_REST_Response
 				&& $case['updatedString'] === \get_option( $case['stringOption'] )
 				&& $case['updatedInteger'] === \get_option( $case['integerOption'] )
+				&& array( $case['updatedArrayItem'] ) === \get_option( $case['arrayOption'] )
 				&& $case['updatedString'] === ( $updated_data[ $case['stringName'] ] ?? null )
 				&& $case['updatedInteger'] === ( $updated_data[ $case['integerName'] ] ?? null )
+				&& array( $case['updatedArrayItem'] ) === ( $updated_data[ $case['arrayName'] ] ?? null )
 				&& $captured_filter_update === array(
 					'name'       => $case['objectName'],
 					'value'      => array(
@@ -827,19 +978,27 @@ final class RestControllersSurface {
 				&& array(
 					'flag'  => false,
 					'label' => $case['storedObjectLabel'],
-				) === \get_option( $case['objectOption'] ),
+				) === \get_option( $case['objectOption'] )
+				&& false === \has_filter( 'rest_pre_update_setting', $pre_update_filter )
+				&& self::wp_error_ok( $invalid_stored_update, 'rest_invalid_stored_value', 500 )
+				&& $case['invalidStoredValue'] === \get_option( $case['invalidStoredOption'] ),
 			'settings sanitize_callback validates invalid values and update_item uses option stub or pre-update filters',
 			array(
 				'validString' => $valid_string,
 				'validInteger' => $valid_integer,
+				'validArray' => $valid_array,
 				'invalidString' => $invalid_string,
 				'invalidInteger' => $invalid_integer,
+				'invalidArray' => $invalid_array,
+				'invalidStoredUpdate' => $invalid_stored_update,
 				'updatedData' => $updated_data,
 				'capturedFilterUpdate' => $captured_filter_update,
 				'storedOptions' => array(
 					'string' => \get_option( $case['stringOption'] ),
 					'integer' => \get_option( $case['integerOption'] ),
+					'array' => \get_option( $case['arrayOption'] ),
 					'object' => \get_option( $case['objectOption'] ),
+					'invalidStored' => \get_option( $case['invalidStoredOption'] ),
 				),
 			)
 		);
@@ -934,8 +1093,7 @@ final class RestControllersSurface {
 		}
 		self::collect_failure(
 			$failures,
-			$denied instanceof \WP_Error
-				&& 'rest_block_type_cannot_view' === $denied->get_error_code()
+			self::wp_error_ok( $denied, 'rest_block_type_cannot_view', \rest_authorization_required_code() )
 				&& true === $allowed
 				&& $list instanceof \WP_REST_Response
 				&& array( $case['blockName'] ) === $list_names,
@@ -999,8 +1157,7 @@ final class RestControllersSurface {
 			$failures,
 			$head instanceof \WP_REST_Response
 				&& array() === $head->get_data()
-				&& $invalid instanceof \WP_Error
-				&& 'rest_block_type_invalid' === $invalid->get_error_code(),
+				&& self::wp_error_ok( $invalid, 'rest_block_type_invalid', 404 ),
 			'block type HEAD and invalid item paths return represented results',
 			array( 'headData' => $head instanceof \WP_REST_Response ? $head->get_data() : $head, 'invalid' => $invalid )
 		);
@@ -1077,7 +1234,7 @@ final class RestControllersSurface {
 			$failures,
 			true === $category_registered
 				&& true === $pattern_registered
-				&& $denied instanceof \WP_Error
+				&& self::wp_error_ok( $denied, 'rest_cannot_view', \rest_authorization_required_code() )
 				&& true === $allowed
 				&& $pattern_items instanceof \WP_REST_Response
 				&& array( 'categories', 'content', 'name', 'source' ) === $pattern_keys
@@ -1141,6 +1298,305 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_route_registry_behavior( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$post_case     = self::post_type_case( $ctx->fork( 'routes-post-types' ) );
+		$taxonomy_case = self::taxonomy_case( $ctx->fork( 'routes-taxonomies' ) );
+		$settings_case = self::settings_case( $ctx->fork( 'routes-settings' ) );
+		$block_case    = self::block_type_case( $ctx->fork( 'routes-block-types' ) );
+		$pattern_case  = self::block_pattern_case( $ctx->fork( 'routes-patterns' ) );
+		$failures      = array();
+
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions  = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		try {
+			$post_type = \register_post_type(
+				$post_case['postType'],
+				array(
+					'label'          => $post_case['label'],
+					'public'         => true,
+					'show_in_rest'   => true,
+					'rest_base'      => $post_case['restBase'],
+					'rest_namespace' => 'wp/v2',
+					'rewrite'        => false,
+					'query_var'      => false,
+				)
+			);
+			$taxonomy  = \register_taxonomy(
+				$taxonomy_case['taxonomy'],
+				$post_case['postType'],
+				array(
+					'label'          => $taxonomy_case['label'],
+					'public'         => true,
+					'show_in_rest'   => true,
+					'rest_base'      => $taxonomy_case['restBase'],
+					'rest_namespace' => 'wp/v2',
+					'rewrite'        => false,
+					'query_var'      => false,
+				)
+			);
+			\register_post_status( 'trash', array( 'label' => 'Trash', 'internal' => true ) );
+			\register_post_status( $post_case['publicStatus'], array( 'label' => $post_case['publicStatusLabel'], 'public' => true ) );
+			\register_setting(
+				'component_fuzz',
+				$settings_case['stringOption'],
+				array(
+					'type'         => 'string',
+					'default'      => $settings_case['stringDefault'],
+					'show_in_rest' => array(
+						'name'   => $settings_case['stringName'],
+						'schema' => array(
+							'type'      => 'string',
+							'minLength' => 1,
+						),
+					),
+				)
+			);
+			\update_option( $settings_case['stringOption'], $settings_case['storedString'] );
+
+			$block = \register_block_type(
+				$block_case['blockName'],
+				array(
+					'api_version'     => 3,
+					'title'           => $block_case['title'],
+					'description'     => $block_case['description'],
+					'category'        => 'widgets',
+					'render_callback' => static function (): string {
+						return '<p>component fuzz</p>';
+					},
+				)
+			);
+
+			\WP_Block_Pattern_Categories_Registry::get_instance()->register(
+				$pattern_case['categoryName'],
+				array(
+					'label'       => $pattern_case['categoryLabel'],
+					'description' => $pattern_case['categoryDescription'],
+				)
+			);
+			\WP_Block_Patterns_Registry::get_instance()->register(
+				$pattern_case['patternName'],
+				array(
+					'title'      => $pattern_case['patternTitle'],
+					'content'    => $pattern_case['content'],
+					'categories' => array( $pattern_case['categoryName'] ),
+					'source'     => 'plugin',
+				)
+			);
+
+			$post_types_controller = new \WP_REST_Post_Types_Controller();
+			$statuses_controller   = new \WP_REST_Post_Statuses_Controller();
+			$taxonomies_controller = new \WP_REST_Taxonomies_Controller();
+			$settings_controller   = new \WP_REST_Settings_Controller();
+			$block_types_controller = new \WP_REST_Block_Types_Controller();
+			$patterns_controller   = new \WP_REST_Block_Patterns_Controller();
+			$categories_controller = new \WP_REST_Block_Pattern_Categories_Controller();
+			self::set_object_property( $patterns_controller, 'remote_patterns_loaded', true );
+
+			foreach (
+				array(
+					$post_types_controller,
+					$statuses_controller,
+					$taxonomies_controller,
+					$settings_controller,
+					$block_types_controller,
+					$patterns_controller,
+					$categories_controller,
+				) as $controller
+			) {
+				$controller->register_routes();
+			}
+
+			$routes          = $server->get_routes( 'wp/v2' );
+			$registered_keys = array_keys( $routes );
+			sort( $registered_keys );
+			$expected_routes = array(
+				'/wp/v2/block-patterns/categories',
+				'/wp/v2/block-patterns/patterns',
+				'/wp/v2/block-types',
+				'/wp/v2/block-types/(?P<namespace>[a-zA-Z0-9_-]+)',
+				'/wp/v2/block-types/(?P<namespace>[a-zA-Z0-9_-]+)/(?P<name>[a-zA-Z0-9_-]+)',
+				'/wp/v2/settings',
+				'/wp/v2/statuses',
+				'/wp/v2/statuses/(?P<status>[\w-]+)',
+				'/wp/v2/taxonomies',
+				'/wp/v2/taxonomies/(?P<taxonomy>[\w-]+)',
+				'/wp/v2/types',
+				'/wp/v2/types/(?P<type>[\w-]+)',
+			);
+			$missing_routes  = array_values( array_diff( $expected_routes, $registered_keys ) );
+			$settings_methods = self::route_methods( $routes['/wp/v2/settings'] ?? array() );
+			$types_methods    = self::route_methods( $routes['/wp/v2/types'] ?? array() );
+
+			self::collect_failure(
+				$failures,
+				$post_type instanceof \WP_Post_Type
+					&& $taxonomy instanceof \WP_Taxonomy
+					&& $block instanceof \WP_Block_Type
+					&& in_array( 'wp/v2', $server->get_namespaces(), true )
+					&& array() === $missing_routes
+					&& in_array( 'GET', $types_methods, true )
+					&& in_array( 'GET', $settings_methods, true )
+					&& in_array( 'POST', $settings_methods, true )
+					&& in_array( 'PATCH', $settings_methods, true )
+					&& in_array( 'PUT', $settings_methods, true )
+					&& is_callable( $server->get_route_options( '/wp/v2/types' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/settings' )['schema'] ?? null ),
+				'controllers register expected wp/v2 read/edit route handlers and schemas',
+				array(
+					'expectedRoutes'   => $expected_routes,
+					'registeredRoutes' => $registered_keys,
+					'missingRoutes'    => $missing_routes,
+					'typesMethods'     => $types_methods,
+					'settingsMethods'  => $settings_methods,
+				)
+			);
+
+			$cap_filter = self::install_cap_filter( array( 'edit_posts', 'manage_options' ) );
+			try {
+				$type_request = self::request(
+					'GET',
+					'/wp/v2/types/' . $post_case['postType'],
+					array( 'context' => 'edit' )
+				);
+				$type_response = $server->dispatch( $type_request );
+
+				$taxonomy_request = self::request(
+					'GET',
+					'/wp/v2/taxonomies/' . $taxonomy_case['taxonomy'],
+					array( 'context' => 'edit' )
+				);
+				$taxonomy_response = $server->dispatch( $taxonomy_request );
+
+				$settings_response = $server->dispatch( self::request( 'GET', '/wp/v2/settings' ) );
+
+				$block_request = self::request(
+					'GET',
+					'/wp/v2/block-types/' . $block_case['blockName'],
+					array(
+						'context' => 'view',
+						'_fields' => 'name,title,is_dynamic',
+					)
+				);
+				$block_response = $server->dispatch( $block_request );
+
+				$pattern_response = $server->dispatch(
+					self::request(
+						'GET',
+						'/wp/v2/block-patterns/patterns',
+						array(
+							'context' => 'view',
+							'_fields' => 'name,source',
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			$type_data     = $type_response instanceof \WP_REST_Response ? $type_response->get_data() : array();
+			$taxonomy_data = $taxonomy_response instanceof \WP_REST_Response ? $taxonomy_response->get_data() : array();
+			$settings_data = $settings_response instanceof \WP_REST_Response ? $settings_response->get_data() : array();
+			$block_data    = $block_response instanceof \WP_REST_Response ? $block_response->get_data() : array();
+			$pattern_data  = $pattern_response instanceof \WP_REST_Response ? $pattern_response->get_data() : array();
+			$pattern_entry = $pattern_data[0] ?? array();
+
+			self::collect_failure(
+				$failures,
+				$type_response instanceof \WP_REST_Response
+					&& 200 === $type_response->get_status()
+					&& $post_case['postType'] === ( $type_data['slug'] ?? null )
+					&& $post_case['postType'] === ( $type_request->get_url_params()['type'] ?? null )
+					&& $taxonomy_response instanceof \WP_REST_Response
+					&& 200 === $taxonomy_response->get_status()
+					&& $taxonomy_case['taxonomy'] === ( $taxonomy_data['slug'] ?? null )
+					&& $taxonomy_case['taxonomy'] === ( $taxonomy_request->get_url_params()['taxonomy'] ?? null )
+					&& $settings_response instanceof \WP_REST_Response
+					&& 200 === $settings_response->get_status()
+					&& $settings_case['storedString'] === ( $settings_data[ $settings_case['stringName'] ] ?? null )
+					&& $block_response instanceof \WP_REST_Response
+					&& 200 === $block_response->get_status()
+					&& $block_case['blockName'] === ( $block_data['name'] ?? null )
+					&& array(
+						'namespace' => $block_case['namespace'],
+						'name'      => $block_case['name'],
+					) === $block_request->get_url_params()
+					&& $pattern_response instanceof \WP_REST_Response
+					&& 200 === $pattern_response->get_status()
+					&& $pattern_case['patternName'] === ( $pattern_entry['name'] ?? null )
+					&& 'plugin' === ( $pattern_entry['source'] ?? null ),
+				'registered routes dispatch to controller callbacks with URL params and no DB-backed objects',
+				array(
+					'typeData'      => $type_data,
+					'typeUrlParams' => $type_request->get_url_params(),
+					'taxonomyData'  => $taxonomy_data,
+					'settingsData'  => $settings_data,
+					'blockData'     => $block_data,
+					'blockUrlParams' => $block_request->get_url_params(),
+					'patternEntry'  => $pattern_entry,
+				)
+			);
+
+			$head_response     = $server->dispatch( self::request( 'HEAD', '/wp/v2/types/' . $post_case['postType'] ) );
+			$missing_response  = $server->dispatch( self::request( 'GET', '/wp/v2/not-a-controller' ) );
+			$readonly_response = $server->dispatch( self::request( 'DELETE', '/wp/v2/types' ) );
+
+			self::collect_failure(
+				$failures,
+				$head_response instanceof \WP_REST_Response
+					&& 200 === $head_response->get_status()
+					&& array() === $head_response->get_data()
+					&& self::response_error_ok( $missing_response, 'rest_no_route', 404 )
+					&& self::response_error_ok( $readonly_response, 'rest_no_route', 404 ),
+				'registered route dispatch preserves HEAD fallback and represented no-route error shapes',
+				array(
+					'headData'      => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+					'missingRoute'  => $missing_response,
+					'readonlyRoute' => $readonly_response,
+				)
+			);
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'rest-controllers.route-registry-dispatch-errors',
+			array() === $failures,
+			array(
+				'cases'    => array(
+					'postType' => $post_case,
+					'taxonomy' => $taxonomy_case,
+					'settings' => $settings_case,
+					'block'    => $block_case,
+					'pattern'  => $pattern_case,
+				),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function post_type_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		return array(
 			'postType'           => self::name_token( $ctx->fork( 'post-type' ), 'cfzpt', 20 ),
@@ -1149,6 +1605,8 @@ final class RestControllersSurface {
 			'taxonomy'           => self::name_token( $ctx->fork( 'taxonomy' ), 'cfztax', 28 ),
 			'hiddenTaxonomy'     => self::name_token( $ctx->fork( 'hidden-taxonomy' ), 'cfzhtax', 28 ),
 			'taxonomyRestBase'   => self::route_token( $ctx->fork( 'tax-rest-base' ), 'cfz-tax' ),
+			'additionalField'    => self::name_token( $ctx->fork( 'additional-field' ), 'cfzfield', 32 ),
+			'additionalValue'    => 'field-' . substr( hash( 'crc32b', (string) $ctx->fork( 'additional-value' )->seed() ), 0, 8 ),
 			'label'              => 'Fuzz Type ' . $ctx->int( 1, 999 ),
 			'description'        => 'Generated REST controller post type.',
 			'publicStatus'       => self::name_token( $ctx->fork( 'public-status' ), 'cfzpub', 20 ),
@@ -1163,35 +1621,47 @@ final class RestControllersSurface {
 
 	private static function taxonomy_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		return array(
-			'postType'       => self::name_token( $ctx->fork( 'post-type' ), 'cfzpt', 20 ),
-			'otherPostType'  => self::name_token( $ctx->fork( 'other-post-type' ), 'cfzopt', 20 ),
-			'taxonomy'       => self::name_token( $ctx->fork( 'taxonomy' ), 'cfztax', 28 ),
-			'hiddenTaxonomy' => self::name_token( $ctx->fork( 'hidden-taxonomy' ), 'cfzhtax', 28 ),
-			'otherTaxonomy'  => self::name_token( $ctx->fork( 'other-taxonomy' ), 'cfzotax', 28 ),
-			'restBase'       => self::route_token( $ctx->fork( 'rest-base' ), 'cfz-terms' ),
-			'label'          => 'Fuzz Taxonomy ' . $ctx->int( 1, 999 ),
-			'description'    => 'Generated REST controller taxonomy.',
-			'hierarchical'   => $ctx->bool(),
+			'postType'        => self::name_token( $ctx->fork( 'post-type' ), 'cfzpt', 20 ),
+			'otherPostType'   => self::name_token( $ctx->fork( 'other-post-type' ), 'cfzopt', 20 ),
+			'taxonomy'        => self::name_token( $ctx->fork( 'taxonomy' ), 'cfztax', 28 ),
+			'hiddenTaxonomy'  => self::name_token( $ctx->fork( 'hidden-taxonomy' ), 'cfzhtax', 28 ),
+			'otherTaxonomy'   => self::name_token( $ctx->fork( 'other-taxonomy' ), 'cfzotax', 28 ),
+			'restBase'        => self::route_token( $ctx->fork( 'rest-base' ), 'cfz-terms' ),
+			'additionalField' => self::name_token( $ctx->fork( 'additional-field' ), 'cfztaxfield', 32 ),
+			'additionalValue' => 'tax-field-' . substr( hash( 'crc32b', (string) $ctx->fork( 'additional-value' )->seed() ), 0, 8 ),
+			'label'           => 'Fuzz Taxonomy ' . $ctx->int( 1, 999 ),
+			'description'     => 'Generated REST controller taxonomy.',
+			'hierarchical'    => $ctx->bool(),
 		);
 	}
 
 	private static function settings_case( \ComponentFuzz\FuzzContext $ctx ): array {
-		$token = substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		$token         = substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		$array_token   = substr( hash( 'crc32b', (string) $ctx->fork( 'array' )->seed() ), 0, 8 );
+		$invalid_token = substr( hash( 'crc32b', (string) $ctx->fork( 'invalid-stored' )->seed() ), 0, 8 );
 		return array(
 			'stringOption'        => 'cfz_string_' . $token,
 			'integerOption'       => 'cfz_integer_' . $token,
 			'objectOption'        => 'cfz_object_' . $token,
+			'arrayOption'         => 'cfz_array_' . $token,
+			'invalidStoredOption' => 'cfz_invalid_stored_' . $token,
 			'hiddenOption'        => 'cfz_hidden_' . $token,
 			'invalidTypeOption'   => 'cfz_invalid_' . $token,
 			'stringName'          => 'cfzString' . $token,
 			'integerName'         => 'cfzInteger' . $token,
 			'objectName'          => 'cfzObject' . $token,
+			'arrayName'           => 'cfzArray' . $token,
+			'invalidStoredName'   => 'cfzInvalidStored' . $token,
 			'stringDefault'       => 'Default ' . $ctx->int( 1, 99 ),
 			'storedString'        => 'Stored ' . $ctx->int( 1, 99 ),
 			'updatedString'       => 'Updated ' . $ctx->int( 100, 999 ),
 			'integerDefault'      => $ctx->int( 0, 10 ),
 			'storedInteger'       => $ctx->int( 11, 50 ),
 			'updatedInteger'      => $ctx->int( 51, 100 ),
+			'arrayDefault'        => 'item-' . $array_token,
+			'storedArrayItem'     => 'item-' . substr( hash( 'crc32b', $array_token . '-stored' ), 0, 8 ),
+			'updatedArrayItem'    => 'item-' . substr( hash( 'crc32b', $array_token . '-updated' ), 0, 8 ),
+			'invalidStoredValue'  => 'not-object-' . $invalid_token,
 			'objectDefaultLabel'  => 'default-' . $token,
 			'storedObjectLabel'   => 'stored-' . $token,
 			'filteredObjectLabel' => 'filtered-' . $token,
@@ -1294,6 +1764,46 @@ final class RestControllersSurface {
 		}
 
 		return $links[ $rel ][0]['href'];
+	}
+
+	private static function route_methods( array $handlers ): array {
+		$methods = array();
+		foreach ( $handlers as $handler ) {
+			if ( ! is_array( $handler ) || ! isset( $handler['methods'] ) || ! is_array( $handler['methods'] ) ) {
+				continue;
+			}
+			foreach ( $handler['methods'] as $method => $enabled ) {
+				if ( $enabled ) {
+					$methods[] = (string) $method;
+				}
+			}
+		}
+
+		$methods = array_values( array_unique( $methods ) );
+		sort( $methods );
+		return $methods;
+	}
+
+	private static function wp_error_ok( $error, string $code, int $status ): bool {
+		if ( ! $error instanceof \WP_Error || $code !== $error->get_error_code() ) {
+			return false;
+		}
+
+		$data = $error->get_error_data();
+		return is_array( $data ) && $status === ( $data['status'] ?? null );
+	}
+
+	private static function response_error_ok( $response, string $code, int $status ): bool {
+		if ( ! $response instanceof \WP_REST_Response || $status !== $response->get_status() ) {
+			return false;
+		}
+
+		$data = $response->get_data();
+		return is_array( $data )
+			&& $code === ( $data['code'] ?? null )
+			&& isset( $data['data'] )
+			&& is_array( $data['data'] )
+			&& $status === ( $data['data']['status'] ?? null );
 	}
 
 	private static function reset_runtime_state(): void {
