@@ -205,6 +205,12 @@ database, network requests, or a configured site.
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
   filters, `wp_attachment_is()` MIME/extension branches, and
   `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
+- `media-remote`: no-live-network remote media helper coverage for
+  `download_url()`, `media_sideload_image()`, and selected
+  `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
+  Content-Disposition filename sanitization, URL extension/MIME boundaries,
+  temp-file cleanup, size/type rejection, filter locality, and global
+  restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
   CRUD short-circuits, and lazyloader queue/reset behavior.
@@ -453,6 +459,13 @@ filtered temp upload root, and passes a custom upload action for
 of PHP SAPI uploaded-file state. It avoids remote sideload/download helpers,
 browser media UI flows, audio/video cover-art generation, and writes outside the
 component-fuzz temp root.
+The `media-remote` surface complements that local ingest coverage by exercising
+remote download and sideload helpers with `pre_http_request` fixtures only. It
+records every streamed temp filename observed by the HTTP short-circuit,
+removes returned temp files, routes successful sideloads through a temp upload
+root, and asserts that its HTTP, upload, extension, and error-body filters are
+removed after each check. It never lets unregistered remote URLs fall through to
+the live HTTP transport.
 The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.
