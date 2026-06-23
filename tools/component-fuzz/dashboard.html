@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7574 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7593 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Seventeen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Eighteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -433,10 +433,10 @@
 				</tr>
 				<tr>
 					<td><code>cron</code></td>
-					<td><span class="status good">focused validation passed</span></td>
+					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 8000 passed, 0 skipped, 0 failed; latest broad run: 7565 passed, 62 skipped, 0 failed.</td>
-					<td>In-memory cron store, schedule/unschedule filters, ready jobs, clear/reschedule contracts.</td>
+					<td>Main focused run: 8400 passed, 0 skipped, 0 failed; latest broad run: 7593 passed, 62 skipped, 0 failed.</td>
+					<td>In-memory cron store, schedule filters, duplicate windows, recurrence/unschedule/reschedule.</td>
 				</tr>
 				<tr>
 					<td><code>html-api</code></td>
@@ -555,6 +555,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>93b5eda0b5</code></td>
+					<td><code>cron</code></td>
+					<td>8400 passed, 0 skipped, 0 failed.</td>
+					<td>7593 passed, 62 skipped, 0 failed at 2 iterations after duplicate-window and filter short-circuit integration.</td>
+				</tr>
 				<tr>
 					<td><code>9335eed6e6</code></td>
 					<td><code>interactivity</code></td>
