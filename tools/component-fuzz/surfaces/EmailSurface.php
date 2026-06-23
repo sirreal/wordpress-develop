@@ -41,6 +41,7 @@ final class EmailSurface {
 			}
 
 			$rows = array_merge( $rows, self::check_distinct_localparts( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_length_boundaries( $ctx ) );
@@ -72,12 +73,17 @@ final class EmailSurface {
 				'add_filter',
 				'has_filter',
 				'remove_all_filters',
+				'email_exists',
+				'get_user_by',
 				'is_email',
+				'is_wp_error',
 				'sanitize_email',
 				'wp_is_unicode_email',
 				'wp_sanitize_unicode_email',
 				'wp_is_ascii_email',
 				'wp_sanitize_ascii_email',
+				'wp_cache_flush',
+				'wp_insert_user',
 				'wp_is_valid_utf8',
 			) as $function
 		) {
@@ -89,12 +95,15 @@ final class EmailSurface {
 		if ( ! class_exists( 'WP_Email_Address' ) ) {
 			$missing[] = 'class WP_Email_Address';
 		}
+		if ( ! class_exists( 'WP_User' ) ) {
+			$missing[] = 'class WP_User';
+		}
 
 		return $missing;
 	}
 
 	private static function check_unicode_filters( \ComponentFuzz\FuzzContext $ctx ): array {
-		$sample    = "gr\u{00E5}@gr\u{00E5}.org";
+		$sample    = "gr\u{00E5}@example.org";
 		$is_email  = self::call( static fn() => \is_email( $sample ) );
 		$sanitized = self::call( static fn() => \sanitize_email( $sample ) );
 		$ok        = ! $is_email['threw']
@@ -120,7 +129,7 @@ final class EmailSurface {
 	}
 
 	private static function check_utf8mb4_filter_gate( \ComponentFuzz\FuzzContext $ctx ): array {
-		$unicode  = "jos\u{00E9}@gr\u{00E5}.org";
+		$unicode  = "jos\u{00E9}@example.org";
 		$ascii    = 'user@example.com';
 		$charsets = array(
 			array( 'charset' => 'utf8mb4', 'unicode' => true ),
@@ -243,7 +252,7 @@ final class EmailSurface {
 	}
 
 	private static function check_direct_filter_callbacks( \ComponentFuzz\FuzzContext $ctx ): array {
-		$unicode              = "gr\u{00E5}@gr\u{00E5}.org";
+		$unicode              = "gr\u{00E5}@example.org";
 		$ascii                = 'user@example.com';
 		$punycode             = 'books@xn--bcher-kva.de';
 		$punycode_unicode     = "books@b\u{00FC}cher.de";
@@ -260,7 +269,7 @@ final class EmailSurface {
 		$sanitize_punycode_unicode = self::call( static fn() => \wp_sanitize_unicode_email( '', $punycode, null ) );
 
 		$punycode_ok = ! $is_punycode_unicode['threw'] && ! $sanitize_punycode_unicode['threw'] && (
-			! function_exists( 'idn_to_utf8' )
+			! self::has_idn()
 				? false === $is_punycode_unicode['value'] && '' === $sanitize_punycode_unicode['value']
 				: $punycode_unicode === $is_punycode_unicode['value'] && $punycode_unicode === $sanitize_punycode_unicode['value']
 		);
@@ -311,11 +320,13 @@ final class EmailSurface {
 			array( 'label' => 'single-label-domain', 'input' => 'a@b' ),
 			array( 'label' => 'consecutive-local-dots', 'input' => 'first..last@example.com' ),
 			array( 'label' => 'subdomain-hyphen', 'input' => 'user@sub-domain.example' ),
-			array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" ),
-			array( 'label' => 'cjk-address', 'input' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" ),
-			array( 'label' => 'greek-address', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
 			array( 'label' => 'devanagari-local', 'input' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com" ),
 		);
+		if ( self::has_idn() ) {
+			$valid[] = array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" );
+			$valid[] = array( 'label' => 'cjk-address', 'input' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
+			$valid[] = array( 'label' => 'greek-address', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" );
+		}
 		$invalid = array(
 			array( 'label' => 'quoted-rfc5322-local', 'input' => '"quoted"@example.com' ),
 			array( 'label' => 'comment-local', 'input' => 'user(comment)@example.com' ),
@@ -483,7 +494,7 @@ final class EmailSurface {
 			),
 		);
 
-		if ( function_exists( 'idn_to_utf8' ) ) {
+		if ( self::has_idn() ) {
 			$cases[] = array(
 				'label'    => 'punycode-with-separators',
 				'input'    => 'books @ xn--bcher-kva . de.',
@@ -839,12 +850,117 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_user_email_indexes_distinct_localparts( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.distinct-localparts-preserved',
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$inputs = array(
+			'josejose@example.org',
+			'joséjosé@example.org',
+			"jose\u{0301}jose\u{0301}@example.org",
+		);
+		$inserted = array();
+		$lookups  = array();
+		$failures = array();
+
+		self::reset_stub_content();
+		try {
+			foreach ( $inputs as $index => $input ) {
+				$user_id = \wp_insert_user(
+					array(
+						'user_login' => 'cfz_email_' . $ctx->iteration() . '_' . $index . '_' . substr( sha1( $input ), 0, 10 ),
+						'user_pass'  => 'component-fuzz-pass',
+						'user_email' => $input,
+						'role'       => 'subscriber',
+					)
+				);
+
+				$inserted[] = $user_id;
+
+				if ( ! is_int( $user_id ) ) {
+					$failures[] = array(
+						'label'  => 'insert-failed',
+						'input'  => self::describe_string( $input ),
+						'result' => self::describe_value( $user_id ),
+					);
+					continue;
+				}
+
+				$exists  = \email_exists( $input );
+				$by_email = \get_user_by( 'email', $input );
+				$lookups[] = array(
+					'input'    => self::describe_string( $input ),
+					'userId'   => $user_id,
+					'exists'   => $exists,
+					'byEmail'  => $by_email instanceof \WP_User ? $by_email->ID : self::describe_value( $by_email ),
+				);
+
+				if ( $exists !== $user_id || ! ( $by_email instanceof \WP_User ) || $by_email->ID !== $user_id ) {
+					$failures[] = array(
+						'label'   => 'lookup-mismatch',
+						'input'   => self::describe_string( $input ),
+						'userId'  => $user_id,
+						'exists'  => $exists,
+						'byEmail' => self::describe_value( $by_email ),
+					);
+				}
+			}
+
+			$duplicate = \wp_insert_user(
+				array(
+					'user_login' => 'cfz_email_duplicate_' . $ctx->iteration(),
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $inputs[1],
+					'role'       => 'subscriber',
+				)
+			);
+
+			if (
+				count( array_filter( $inserted, 'is_int' ) ) !== count( $inputs )
+				|| count( array_unique( array_filter( $inserted, 'is_int' ), SORT_REGULAR ) ) !== count( $inputs )
+			) {
+				$failures[] = array(
+					'label'    => 'inserted-ids-not-distinct',
+					'inserted' => self::describe_value( $inserted ),
+				);
+			}
+
+			if ( ! \is_wp_error( $duplicate ) || 'existing_user_email' !== $duplicate->get_error_code() ) {
+				$failures[] = array(
+					'label'     => 'exact-duplicate-not-rejected',
+					'duplicate' => self::describe_value( $duplicate ),
+				);
+			}
+		} finally {
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				'email.user-email-indexes.distinct-localparts-preserved',
+				array() === $failures,
+				array(
+					'inputs'   => array_map( array( self::class, 'describe_string' ), $inputs ),
+					'inserted' => self::describe_value( $inserted ),
+					'lookups'  => self::describe_value( $lookups ),
+					'failures' => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
 	private static function check_punycode_views( \ComponentFuzz\FuzzContext $ctx ): array {
-		if ( ! function_exists( 'idn_to_utf8' ) ) {
+		if ( ! self::has_idn() ) {
 			return array(
 				$ctx->skip(
 					'email.wp-email-address.punycode-domain-decodes',
-					'idn_to_utf8() is unavailable.'
+					'idn_to_ascii() or idn_to_utf8() is unavailable.'
 				),
 			);
 		}
@@ -874,7 +990,7 @@ final class EmailSurface {
 	}
 
 	private static function check_idn_views( \ComponentFuzz\FuzzContext $ctx ): array {
-		if ( ! function_exists( 'idn_to_ascii' ) || ! function_exists( 'idn_to_utf8' ) ) {
+		if ( ! self::has_idn() ) {
 			return array(
 				$ctx->skip(
 					'email.wp-email-address.idn-view-matrix',
@@ -990,17 +1106,19 @@ final class EmailSurface {
 				'input' => 'u@' . str_repeat( 'a', 64 ) . '.com',
 				'valid' => false,
 			),
-			array(
+		);
+		if ( self::has_idn() ) {
+			$exact[] = array(
 				'label' => 'unicode-domain-label-63-bytes',
 				'input' => 'u@' . str_repeat( "\u{00E5}", 31 ) . 'a.com',
 				'valid' => true,
-			),
-			array(
+			);
+			$exact[] = array(
 				'label' => 'unicode-domain-label-64-bytes',
 				'input' => 'u@' . str_repeat( "\u{00E5}", 32 ) . '.com',
 				'valid' => false,
-			),
-		);
+			);
+		}
 		$observed    = array(
 			array( 'label' => 'local-64-bytes', 'input' => str_repeat( 'a', 64 ) . '@example.com' ),
 			array( 'label' => 'local-65-bytes', 'input' => str_repeat( 'a', 65 ) . '@example.com' ),
@@ -1152,6 +1270,20 @@ final class EmailSurface {
 			&& $unicode_roundtrip->get_unicode_address() === $email->get_unicode_address();
 	}
 
+	private static function can_reset_stub_content(): bool {
+		return isset( $GLOBALS['wpdb'] )
+			&& is_object( $GLOBALS['wpdb'] )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' );
+	}
+
+	private static function reset_stub_content(): void {
+		if ( self::can_reset_stub_content() ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+
+		\wp_cache_flush();
+	}
+
 	private static function install_email_filters( string $mode ): void {
 		\remove_all_filters( 'is_email' );
 		\remove_all_filters( 'sanitize_email' );
@@ -1179,20 +1311,27 @@ final class EmailSurface {
 	}
 
 	private static function cases( \ComponentFuzz\FuzzContext $ctx ): array {
-		$has_idn = function_exists( 'idn_to_utf8' );
-		$cases   = array(
+		$has_idn                  = self::has_idn();
+		$unicode_domain_label_63  = 'u@' . str_repeat( "\u{00E5}", 31 ) . 'a.com';
+		$unicode_domain_label_64  = 'u@' . str_repeat( "\u{00E5}", 32 ) . '.com';
+		$unicode_domain_63_traits = array( 'unicodeAddress', 'boundaryLength' );
+		if ( $has_idn ) {
+			$unicode_domain_63_traits[] = 'valid';
+		}
+
+		$cases = array(
 			self::case( 'ascii-simple', 'user@example.com', array( 'ascii', 'valid' ), 'user@example.com', 'user@example.com', 'user@example.com', 'user@example.com' ),
 			self::case( 'ascii-plus-subdomain', 'USER+tag@example.co.uk', array( 'ascii', 'valid' ), 'USER+tag@example.co.uk', 'USER+tag@example.co.uk', 'USER+tag@example.co.uk', 'USER+tag@example.co.uk' ),
 			self::case( 'ascii-whatwg-atext-local', 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com', array( 'ascii', 'valid', 'whatwgAtext' ), 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com', 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com', 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com', 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com' ),
-			self::case( 'unicode-local-domain', "gr\u{00E5}@gr\u{00E5}.org", array( 'valid', 'unicodeAddress' ), "gr\u{00E5}@gr\u{00E5}.org", "gr\u{00E5}@gr\u{00E5}.org", false, '' ),
+			self::case( 'unicode-local-domain', "gr\u{00E5}@gr\u{00E5}.org", array( 'valid', 'unicodeAddress' ), $has_idn ? "gr\u{00E5}@gr\u{00E5}.org" : false, $has_idn ? "gr\u{00E5}@gr\u{00E5}.org" : '', false, '' ),
 			self::case( 'unicode-local-ascii-domain', "jos\u{00E9}@example.com", array( 'valid', 'unicodeAddress' ), "jos\u{00E9}@example.com", "jos\u{00E9}@example.com", false, '' ),
 			self::case( 'unicode-combining-local', "jose\u{0301}@example.com", array( 'valid', 'unicodeAddress' ), "jose\u{0301}@example.com", "jose\u{0301}@example.com", false, '' ),
-			self::case( 'unicode-domain', "checkout@b\u{00FC}cher.tld", array( 'valid', 'unicodeAddress' ), "checkout@b\u{00FC}cher.tld", "checkout@b\u{00FC}cher.tld", false, '' ),
-			self::case( 'unicode-cjk-address', "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", array( 'valid', 'unicodeAddress' ), "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", false, '' ),
-			self::case( 'unicode-arabic-address', "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", array( 'valid', 'unicodeAddress' ), "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", false, '' ),
-			self::case( 'unicode-greek-address', "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", array( 'valid', 'unicodeAddress' ), "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", false, '' ),
+			self::case( 'unicode-domain', "checkout@b\u{00FC}cher.tld", array( 'valid', 'unicodeAddress' ), $has_idn ? "checkout@b\u{00FC}cher.tld" : false, $has_idn ? "checkout@b\u{00FC}cher.tld" : '', false, '' ),
+			self::case( 'unicode-cjk-address', "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : false, $has_idn ? "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : '', false, '' ),
+			self::case( 'unicode-arabic-address', "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" : false, $has_idn ? "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" : '', false, '' ),
+			self::case( 'unicode-greek-address', "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : false, $has_idn ? "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : '', false, '' ),
 			self::case( 'unicode-devanagari-local', "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", array( 'valid', 'unicodeAddress' ), "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", false, '' ),
-			self::case( 'unicode-eszett-domain', "mail@fa\u{00DF}.de", array( 'valid', 'unicodeAddress' ), "mail@fa\u{00DF}.de", "mail@fa\u{00DF}.de", false, '' ),
+			self::case( 'unicode-eszett-domain', "mail@fa\u{00DF}.de", array( 'valid', 'unicodeAddress' ), $has_idn ? "mail@fa\u{00DF}.de" : false, $has_idn ? "mail@fa\u{00DF}.de" : '', false, '' ),
 			self::case( 'punycode-domain', 'books@xn--bcher-kva.de', array( 'valid', 'punycodeUnicodeDomain' ), $has_idn ? "books@b\u{00FC}cher.de" : false, $has_idn ? "books@b\u{00FC}cher.de" : '', false, '' ),
 			self::case( 'punycode-cjk-domain', 'mail@xn--fsqu00a.xn--4rr70v', array( 'valid', 'punycodeUnicodeDomain' ), $has_idn ? "mail@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : false, $has_idn ? "mail@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : '', false, '' ),
 			self::case( 'punycode-greek-domain', 'mail@xn--hxajbheg2az3al.xn--jxalpdlp', array( 'valid', 'punycodeUnicodeDomain' ), $has_idn ? "mail@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : false, $has_idn ? "mail@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : '', false, '' ),
@@ -1231,8 +1370,8 @@ final class EmailSurface {
 			self::case( 'surrogate-utf8-local', "surrogate\xED\xA0\x80@example.com", array( 'invalidUtf8', 'unicodeAddress' ), false, '', false, '' ),
 			self::case( 'ascii-domain-label-63', 'u@' . str_repeat( 'a', 63 ) . '.com', array( 'ascii', 'valid', 'boundaryLength' ), 'u@' . str_repeat( 'a', 63 ) . '.com', 'u@' . str_repeat( 'a', 63 ) . '.com', 'u@' . str_repeat( 'a', 63 ) . '.com', 'u@' . str_repeat( 'a', 63 ) . '.com' ),
 			self::case( 'ascii-domain-label-64', 'u@' . str_repeat( 'a', 64 ) . '.com', array( 'malformedDomain', 'boundaryLength' ), false, '', false, '' ),
-			self::case( 'unicode-domain-label-63-bytes', 'u@' . str_repeat( "\u{00E5}", 31 ) . 'a.com', array( 'valid', 'unicodeAddress', 'boundaryLength' ), 'u@' . str_repeat( "\u{00E5}", 31 ) . 'a.com', 'u@' . str_repeat( "\u{00E5}", 31 ) . 'a.com', false, '' ),
-			self::case( 'unicode-domain-label-64-bytes', 'u@' . str_repeat( "\u{00E5}", 32 ) . '.com', array( 'unicodeAddress', 'malformedDomain', 'boundaryLength' ), false, '', false, '' ),
+			self::case( 'unicode-domain-label-63-bytes', $unicode_domain_label_63, $unicode_domain_63_traits, $has_idn ? $unicode_domain_label_63 : false, $has_idn ? $unicode_domain_label_63 : '', false, '' ),
+			self::case( 'unicode-domain-label-64-bytes', $unicode_domain_label_64, array( 'unicodeAddress', 'malformedDomain', 'boundaryLength' ), false, '', false, '' ),
 			self::case( 'local-64-bytes', str_repeat( 'a', 64 ) . '@example.com', array( 'ascii', 'valid', 'boundaryLength' ), str_repeat( 'a', 64 ) . '@example.com', str_repeat( 'a', 64 ) . '@example.com', str_repeat( 'a', 64 ) . '@example.com', str_repeat( 'a', 64 ) . '@example.com' ),
 			self::case( 'local-65-bytes', str_repeat( 'a', 65 ) . '@example.com', array( 'ascii', 'valid', 'boundaryLength' ), str_repeat( 'a', 65 ) . '@example.com', str_repeat( 'a', 65 ) . '@example.com', str_repeat( 'a', 65 ) . '@example.com', str_repeat( 'a', 65 ) . '@example.com' ),
 			self::case( 'leading-local-dot', '.start@example.com', array( 'ascii', 'valid', 'localDot' ), '.start@example.com', '.start@example.com', '.start@example.com', '.start@example.com' ),
@@ -1503,6 +1642,10 @@ final class EmailSurface {
 
 	private static function is_ascii( string $value ): bool {
 		return ! preg_match( '/[\x80-\xff]/', $value );
+	}
+
+	private static function has_idn(): bool {
+		return function_exists( 'idn_to_ascii' ) && function_exists( 'idn_to_utf8' );
 	}
 
 	private static function snapshot_hook_globals(): array {

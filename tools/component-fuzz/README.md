@@ -105,7 +105,8 @@ database, network requests, or a configured site.
   filters without DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
-  malformed address structure, and boundary lengths.
+  malformed address structure, selected boundary lengths, and user email
+  lookup/duplicate behavior for accent-distinct local parts.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
