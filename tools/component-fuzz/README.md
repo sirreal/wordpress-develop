@@ -158,6 +158,11 @@ database, network requests, or a configured site.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, entity normalization, colors, sizes,
   time strings, UTF-8 helpers, and accent removal.
+- `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
+  including bounded malformed fixtures, Magpie item/channel normalization,
+  AtomParser local-file behavior, SimplePie raw-data parsing and KSES
+  sanitization, transient-backed feed cache boundaries, date/status helpers,
+  local file adapter guards, no-network assertions, and state restoration.
 - `feed-rendering`: no-DB RSS2, Atom, and comments RSS2 feed template rendering
   over synthetic query loops, including feed item/entry counts, self links,
   CDATA terminator escaping, excerpt/content mode switches, enclosure metadata,

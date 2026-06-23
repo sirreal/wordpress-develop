@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">95</div>
-			<div class="good">README parity confirmed: 95 documented</div>
+			<div class="metric">96</div>
+			<div class="good">README parity confirmed: 96 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 9898 passed, 0 failed, 0 errored, 84 skipped at 95 surfaces over 3 iterations.</div>
+			<div class="note">Non-skipped pass rate: 9922 passed, 0 failed, 0 errored, 84 skipped at 96 surfaces over 3 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>error-protection</code>: 800 passed, 100 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>feed-parsers</code>: 800 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">5</div>
-			<div class="note">One delegated surface is active and three worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">One delegated surface is active and two worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -328,9 +328,9 @@
 				</tr>
 				<tr>
 					<td><code>feed-parsers</code></td>
-					<td><span class="status wait">ready to integrate</span></td>
-					<td>Mencius: <code>_work/component-fuzz-feed-parsers</code></td>
-					<td>Worker focused run: 800 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; broad run: 9922 passed, 84 skipped, 0 failed.</td>
 					<td>RSS/Atom parsers, SimplePie adapters, bounded XML fixtures, temp cache paths.</td>
 				</tr>
 				<tr>
@@ -359,6 +359,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>ef7248cd3a</code></td>
+					<td><code>error-protection</code></td>
+					<td>800 passed, 100 skipped, 0 failed.</td>
+					<td>9898 passed, 84 skipped, 0 failed at 3 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>4745b98aa9</code></td>
 					<td><code>utility-internals</code></td>
