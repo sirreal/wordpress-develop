@@ -295,9 +295,10 @@ database, network requests, or a configured site.
   token lookup/precomputed table round trips, rewrite match substitution,
   URL-pattern prefix escaping/idempotence boundaries, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
-  including sanitized user-setting serialization, hidden column and meta-box
-  preference defaults/saved values, screen option registration, filter locality,
-  and state restoration without redirecting or dying request handlers.
+  including sanitized user-setting/admin-color serialization, hidden column and
+  meta-box preference defaults/saved values, postbox order/classes, screen
+  option registration/rendering, filter locality, and state restoration without
+  redirecting or dying request handlers.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
   cleanup, and status filtering.
