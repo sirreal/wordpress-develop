@@ -32,6 +32,7 @@ final class HttpSurface {
 			self::install_scoped_filters();
 
 			$rows[] = self::check_remote_retrieve_helpers( $ctx );
+			$rows[] = self::check_remote_request_wrappers( $ctx );
 			$rows[] = self::check_response_objects( $ctx );
 			$rows[] = self::check_header_processing( $ctx );
 			$rows[] = self::check_cookie_parsing_and_headers( $ctx );
@@ -102,6 +103,9 @@ final class HttpSurface {
 				'remove_filter',
 				'wp_http_validate_url',
 				'wp_parse_url',
+				'wp_remote_get',
+				'wp_remote_head',
+				'wp_remote_post',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_cookie',
 				'wp_remote_retrieve_cookie_value',
@@ -110,6 +114,11 @@ final class HttpSurface {
 				'wp_remote_retrieve_headers',
 				'wp_remote_retrieve_response_code',
 				'wp_remote_retrieve_response_message',
+				'wp_remote_request',
+				'wp_safe_remote_get',
+				'wp_safe_remote_head',
+				'wp_safe_remote_post',
+				'wp_safe_remote_request',
 				'wp_sanitize_redirect',
 				'wp_validate_redirect',
 			) as $function
@@ -184,6 +193,186 @@ final class HttpSurface {
 
 		return $ctx->result(
 			'http.remote-retrieve.synthetic-response-shape',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_remote_request_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$captured = array();
+		$responses = array();
+
+		$cases = array(
+			array(
+				'label'             => 'remote-get',
+				'function'          => 'wp_remote_get',
+				'method'            => 'GET',
+				'rejectUnsafeUrls'  => false,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'timeout' => 2.5,
+					'headers' => array( 'X-Fuzz-Wrapper' => 'get' ),
+				),
+			),
+			array(
+				'label'             => 'remote-post',
+				'function'          => 'wp_remote_post',
+				'method'            => 'POST',
+				'rejectUnsafeUrls'  => false,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'body'    => 'payload=' . rawurlencode( self::token( $ctx, 8 ) ),
+					'headers' => array( 'Content-Type' => 'application/x-www-form-urlencoded' ),
+				),
+			),
+			array(
+				'label'             => 'remote-head',
+				'function'          => 'wp_remote_head',
+				'method'            => 'HEAD',
+				'rejectUnsafeUrls'  => false,
+				'expectedRedirects' => 0,
+				'args'              => array(),
+			),
+			array(
+				'label'             => 'remote-request-patch',
+				'function'          => 'wp_remote_request',
+				'method'            => 'PATCH',
+				'rejectUnsafeUrls'  => false,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'method' => 'PATCH',
+					'body'   => self::body_value( $ctx ),
+				),
+			),
+			array(
+				'label'             => 'safe-get',
+				'function'          => 'wp_safe_remote_get',
+				'method'            => 'GET',
+				'rejectUnsafeUrls'  => true,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'reject_unsafe_urls' => false,
+					'limit_response_size' => 1024,
+				),
+			),
+			array(
+				'label'             => 'safe-post',
+				'function'          => 'wp_safe_remote_post',
+				'method'            => 'POST',
+				'rejectUnsafeUrls'  => true,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'reject_unsafe_urls' => false,
+					'body'               => 'safe=' . rawurlencode( self::token( $ctx, 8 ) ),
+				),
+			),
+			array(
+				'label'             => 'safe-head',
+				'function'          => 'wp_safe_remote_head',
+				'method'            => 'HEAD',
+				'rejectUnsafeUrls'  => true,
+				'expectedRedirects' => 0,
+				'args'              => array( 'reject_unsafe_urls' => false ),
+			),
+			array(
+				'label'             => 'safe-request-delete',
+				'function'          => 'wp_safe_remote_request',
+				'method'            => 'DELETE',
+				'rejectUnsafeUrls'  => true,
+				'expectedRedirects' => 5,
+				'args'              => array(
+					'method'             => 'DELETE',
+					'reject_unsafe_urls' => false,
+					'headers'            => array( 'X-Fuzz-Wrapper' => 'safe-request' ),
+				),
+			),
+		);
+
+		$pre_http_request = static function ( $preempt, array $parsed_args, string $url ) use ( &$captured ): array {
+			$index      = count( $captured );
+			$method     = (string) ( $parsed_args['method'] ?? 'GET' );
+			$case       = array(
+				'status'      => 230 + $index,
+				'message'     => 'Synthetic ' . $method,
+				'body'        => 'short-circuited-' . $index . '-' . strtolower( $method ),
+				'contentType' => 'text/plain; charset=UTF-8',
+				'tokenA'      => 'wrapper',
+				'tokenB'      => (string) $index,
+				'cookieName'  => 'http_wrapper_' . $index,
+				'cookieValue' => strtolower( $method ),
+			);
+			$captured[] = array(
+				'preempt' => $preempt,
+				'url'     => $url,
+				'args'    => self::request_arg_summary( $parsed_args ),
+				'case'    => $case,
+			);
+
+			return self::synthetic_response( $case );
+		};
+
+		add_filter( 'pre_http_request', $pre_http_request, 10, 3 );
+		try {
+			foreach ( $cases as $index => $case ) {
+				$url       = 'https://api.example.test/component-fuzz/http/' . $case['label'] . '?q=' . rawurlencode( self::token( $ctx, 6 ) . ' & ' . $index );
+				$function  = $case['function'];
+				$response  = $function( $url, $case['args'] );
+				$responses[] = array(
+					'url'      => $url,
+					'case'     => $case,
+					'response' => $response,
+				);
+			}
+		} finally {
+			remove_filter( 'pre_http_request', $pre_http_request, 10 );
+		}
+
+		foreach ( $responses as $index => $response_case ) {
+			$case     = $response_case['case'];
+			$response = $response_case['response'];
+			$capture  = $captured[ $index ] ?? null;
+			$args     = is_array( $capture ) ? $capture['args'] : array();
+			$expected = is_array( $capture ) ? $capture['case'] : array();
+
+			self::collect_failure(
+				$failures,
+				is_array( $capture )
+					&& false === $capture['preempt']
+					&& $response_case['url'] === $capture['url']
+					&& $case['method'] === ( $args['method'] ?? null )
+					&& $case['rejectUnsafeUrls'] === ( $args['reject_unsafe_urls'] ?? null )
+					&& $case['expectedRedirects'] === ( $args['redirection'] ?? null )
+					&& $case['expectedRedirects'] === ( $args['_redirection'] ?? null )
+					&& $expected['status'] === wp_remote_retrieve_response_code( $response )
+					&& $expected['message'] === wp_remote_retrieve_response_message( $response )
+					&& $expected['body'] === wp_remote_retrieve_body( $response )
+					&& $expected['contentType'] === wp_remote_retrieve_header( $response, 'content-type' )
+					&& $expected['cookieValue'] === wp_remote_retrieve_cookie_value( $response, $expected['cookieName'] ),
+				'wrapper dispatch ' . $case['label'],
+				array(
+					'expected' => $case,
+					'captured' => $capture,
+					'response' => self::describe_value( $response ),
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			count( $cases ) === count( $captured ),
+			'each wrapper call is short-circuited exactly once',
+			array(
+				'expected' => count( $cases ),
+				'actual'   => count( $captured ),
+			)
+		);
+
+		return $ctx->result(
+			'http.remote-request-wrappers.short-circuit-dispatch',
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
@@ -937,6 +1126,20 @@ final class HttpSurface {
 			return $headers->getAll();
 		}
 		return (array) $headers;
+	}
+
+	private static function request_arg_summary( array $args ): array {
+		return array(
+			'method'              => (string) ( $args['method'] ?? '' ),
+			'reject_unsafe_urls'  => (bool) ( $args['reject_unsafe_urls'] ?? false ),
+			'redirection'         => $args['redirection'] ?? null,
+			'_redirection'        => $args['_redirection'] ?? null,
+			'timeout'             => $args['timeout'] ?? null,
+			'blocking'            => $args['blocking'] ?? null,
+			'headers'             => self::describe_value( $args['headers'] ?? array() ),
+			'body'                => self::describe_value( $args['body'] ?? null ),
+			'limit_response_size' => $args['limit_response_size'] ?? null,
+		);
 	}
 
 	private static function describe_cookie( $cookie ) {

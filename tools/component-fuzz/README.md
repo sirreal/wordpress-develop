@@ -193,9 +193,9 @@ database, network requests, or a configured site.
   rich HTML generation, normalization/recovery idempotence, token walking,
   bookmark/seek replay, modifiable text escaping, and namespace/comment/rawtext
   boundary checks.
-- `http`: synthetic HTTP response arrays, response objects, header/cookie
-  parsing, proxy decisions, redirect safety, URL validation, and relative URL
-  resolution without live network requests.
+- `http`: synthetic HTTP response arrays, request wrapper dispatch,
+  response objects, header/cookie parsing, proxy decisions, redirect safety,
+  URL validation, and relative URL resolution without live network requests.
 - `icons-connectors`: no-DB Icons and Connectors API coverage, including
   connector registry lifecycle and init discovery, settings/REST key masking,
   script module serialization, icon manifest/search behavior, SVG sanitization
