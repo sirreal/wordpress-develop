@@ -187,7 +187,22 @@ $required_functions = array(
 	'do_meta_boxes',
 	'remove_meta_box',
 	'do_accordion_sections',
+	'_wp_post_revision_fields',
+	'_wp_post_revision_data',
+	'_wp_put_post_revision',
+	'_wp_copy_post_meta',
+	'wp_check_revisioned_meta_fields_have_changed',
+	'wp_get_post_autosave',
+	'wp_get_post_revision',
+	'wp_get_post_revisions',
+	'wp_get_revision_ui_diff',
 	'wp_is_post_revision',
+	'wp_is_post_autosave',
+	'wp_post_revision_meta_keys',
+	'wp_prepare_revisions_for_js',
+	'wp_restore_post_revision',
+	'wp_revisions_to_keep',
+	'wp_save_post_revision',
 	'wp_get_user_request',
 	'wp_user_request_action_description',
 	'wp_validate_user_request_key',
@@ -429,6 +444,9 @@ foreach ( $required_classes as $class ) {
 	if ( ! class_exists( $class ) ) {
 		$missing[] = "class {$class}";
 	}
+}
+if ( ! defined( 'WP_POST_REVISIONS' ) ) {
+	$missing[] = 'constant WP_POST_REVISIONS';
 }
 
 if ( $missing ) {

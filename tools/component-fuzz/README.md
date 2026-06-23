@@ -200,6 +200,11 @@ database, network requests, or a configured site.
   block patterns, and block pattern categories, including context/_fields
   filtering, collection params, permission gates, REST links, invalid values,
   and state restoration.
+- `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
+  coverage, including revision field/data contracts, autosave and revision
+  predicates, revision insert/save/restore/delete helpers, revisioned meta copy
+  and restore behavior, revision UI diffs, JS payload preparation, preview
+  overlay behavior, and global/filter restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.
@@ -311,6 +316,14 @@ component-fuzz temp root.
 The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.
+The `revisions-autosaves` surface uses the bounded post and postmeta rows in
+the in-memory `wpdb` stub. It records explicit skips for
+`wp_get_latest_revision_id_and_total_count()` and `wp_get_post_revisions_url()`
+because the stub does not emulate the `WP_Query` `found_posts` count SQL shape
+for posts. User-specific `wp_get_post_autosave()` lookup is also skipped
+because the stub does not emulate post author filtering in `WP_Query`. The
+surface avoids browser/admin-template or request-dispatch helpers such as
+`_show_post_preview()` and `wp_print_revision_templates()`.
 The `feed-rendering` surface renders core feed templates through synthetic
 `WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
 headers, remote enclosures, DB-backed query execution, and arbitrary invalid

@@ -217,6 +217,9 @@ final class WpBootstrap {
 		if ( ! defined( 'EMPTY_TRASH_DAYS' ) ) {
 			define( 'EMPTY_TRASH_DAYS', 30 );
 		}
+		if ( ! defined( 'WP_POST_REVISIONS' ) ) {
+			define( 'WP_POST_REVISIONS', true );
+		}
 
 		$files = array(
 			'wp-includes/compat.php',
@@ -468,6 +471,7 @@ final class WpBootstrap {
 			'wp-admin/includes/class-wp-list-table-compat.php',
 			'wp-admin/includes/list-table.php',
 			'wp-admin/includes/post.php',
+			'wp-admin/includes/revision.php',
 			'wp-admin/includes/template.php',
 			'wp-admin/includes/update.php',
 			'wp-admin/includes/class-wp-site-health.php',
