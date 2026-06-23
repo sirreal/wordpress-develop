@@ -145,6 +145,11 @@ database, network requests, or a configured site.
   WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
   malformed address structure, selected boundary lengths, and user email
   lookup/duplicate behavior for accent-distinct local parts.
+- `environment-load`: no-network environment/load/compat helper coverage,
+  including environment type cache boundaries, server/request normalization,
+  Basic Auth and SSL detection, memory-limit parsing, ini mutability,
+  installing/maintenance flags, request guard filters, HTTPS migration
+  short-circuits, and UTF-8 compatibility oracles with state restoration.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
   storage, recovery key/cookie validation, recovery-link generation, filtered
