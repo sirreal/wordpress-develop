@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6715 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6708 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>syndication</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>html-api</code>: 600 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">2</div>
-			<div class="note">Two delegated surfaces are active; one completed worker is pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">1</div>
+			<div class="note">One delegated surface is active; one completed worker is pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -370,9 +370,9 @@
 				</tr>
 				<tr>
 					<td><code>html-api</code></td>
-					<td><span class="status wait">pending integration</span></td>
-					<td>Sagan: <code>_work/component-fuzz-html-api-rich</code></td>
-					<td>Worker focused run: 600 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; broad run: 6708 passed, 63 skipped, 0 failed.</td>
 					<td>HTML Tag/Processor walking, bookmarks, mutation escaping, malformed recovery.</td>
 				</tr>
 				<tr>
@@ -391,9 +391,9 @@
 				</tr>
 				<tr>
 					<td><code>widgets</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">pending integration</span></td>
 					<td>Erdos: <code>_work/component-fuzz-widgets-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Worker focused run: 700 passed, 0 skipped, 0 failed; smoke, standards, and diff check passed.</td>
 					<td>Classic sidebar/widget registries, generated widget IDs, callbacks, state restoration.</td>
 				</tr>
 				<tr>
@@ -422,6 +422,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>fcee053dd5</code></td>
+					<td><code>html-api</code></td>
+					<td>600 passed, 0 skipped, 0 failed.</td>
+					<td>6708 passed, 63 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>685951079a</code></td>
 					<td><code>syndication</code></td>
