@@ -367,9 +367,10 @@ database, network requests, or a configured site.
   predicates, revision insert/save/restore/delete helpers, revisioned meta copy
   and restore behavior, revision UI diffs, JS payload preparation, preview
   overlay behavior, and global/filter restoration.
-- `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
-  query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
-  `url_to_postid()` paths.
+- `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
+  endpoint expansion and mask propagation, match substitution, query arg and
+  build/parse helpers, URL parsing, home/site URL helpers, weird path fragments,
+  and cheap no-DB `url_to_postid()` paths.
 - `security`: salts and HMACs, password and fast-hash verification, nonce
   generation/verification, nonce URLs and hidden fields, admin/ajax referer
   paths, synthetic auth cookies and session tokens, redirect sanitization, and

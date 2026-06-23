@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7678 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7692 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Thirty-two integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
+			<div class="note">Thirty-four integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Tesla the 2nd is active on <code>rewrite</code> in <code>_work/component-fuzz-rewrite-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">No active delegated work; completed <code>rewrite</code>, <code>feed-rendering</code>, and <code>email</code> workers are integrated and closed.</div>
 		</div>
 	</div>
 
@@ -505,8 +505,8 @@
 					<td><code>cron</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 8400 passed, 0 skipped, 0 failed; latest broad run: 7593 passed, 62 skipped, 0 failed.</td>
-					<td>In-memory cron store, schedule filters, duplicate windows, recurrence/unschedule/reschedule.</td>
+					<td>Main focused run: 8500 passed, 0 skipped, 0 failed; latest broad run: 7679 passed, 64 skipped, 0 failed.</td>
+					<td>In-memory cron store, schedule and next-scheduled filters, duplicate windows, recurrence/unschedule/reschedule.</td>
 				</tr>
 				<tr>
 					<td><code>html-api</code></td>
@@ -587,10 +587,10 @@
 				</tr>
 				<tr>
 					<td><code>rewrite</code>, <code>canonical-routing</code></td>
-					<td><span class="status work">rewrite follow-up active</span></td>
-					<td>Tesla the 2nd / <code>_work/component-fuzz-rewrite-rich</code></td>
-					<td>Existing main focused run: 2200 passed, 0 skipped, 0 failed; worker assigned 100-iteration rewrite validation.</td>
-					<td>Rewrite tags, permastructs, endpoints, rule precedence, query substitution, canonical path/query normalization.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Tesla the 2nd / main worktree</td>
+					<td>Rewrite main focused run: 1800 passed, 0 skipped, 0 failed; latest broad run: 7692 passed, 62 skipped, 0 failed.</td>
+					<td>Rewrite tags, permastructs, endpoints, rule precedence, query substitution, match maps, build/parse helpers, canonical path/query normalization.</td>
 				</tr>
 				<tr>
 					<td><code>rest-object-controllers</code></td>
@@ -625,6 +625,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>22386accbd</code></td>
+					<td><code>rewrite</code></td>
+					<td>1800 passed, 0 skipped, 0 failed.</td>
+					<td>7692 passed, 62 skipped, 0 failed at 2 iterations after rewrite collision, endpoint-mask, match-map, query parse, and weird-path coverage.</td>
+				</tr>
+				<tr>
+					<td><code>cb2f19fcef</code></td>
+					<td><code>cron</code></td>
+					<td>8500 passed, 0 skipped, 0 failed.</td>
+					<td>7679 passed, 64 skipped, 0 failed at 2 iterations after <code>wp_next_scheduled</code> filter coverage.</td>
+				</tr>
 				<tr>
 					<td><code>9b99f0ea11</code></td>
 					<td><code>shortcodes</code></td>
