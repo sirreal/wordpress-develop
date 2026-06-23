@@ -110,7 +110,8 @@ database, network requests, or a configured site.
   invalid-input errors, sanitizer agreement, monotonic IDs, cheap hook ordering,
   cache/count refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
-  type partitioning, comment classes, email links, and comment cookies.
+  type partitioning, comment classes, author URL/email links, excerpt/text
+  helpers, and comment cookies.
 - `community-events`: no-network Community Events API client coverage,
   including IP header selection and anonymization, minimal request bodies,
   transient key/cache behavior, event trimming and WordCamp pinning, response

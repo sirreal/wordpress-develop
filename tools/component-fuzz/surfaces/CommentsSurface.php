@@ -66,7 +66,13 @@ final class CommentsSurface {
 				'esc_attr',
 				'esc_html',
 				'esc_url',
+				'get_comment_author_link',
+				'get_comment_author_url',
+				'get_comment_author_url_link',
+				'get_comment_excerpt',
+				'get_comment_text',
 				'is_wp_error',
+				'wp_trim_words',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -472,7 +478,7 @@ final class CommentsSurface {
 
 	private static function check_template_helpers( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case ): array {
 		$missing = array();
-		foreach ( array( 'get_comment_class', 'get_comment_author_email_link', 'get_comment' ) as $function ) {
+		foreach ( array( 'get_comment_class', 'get_comment_author_email_link', 'get_comment_author_link', 'get_comment_author_url', 'get_comment_author_url_link', 'get_comment_excerpt', 'get_comment_text', 'get_comment' ) as $function ) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = $function;
 			}
@@ -571,6 +577,86 @@ final class CommentsSurface {
 			array(
 				'expected' => self::describe_value( $expected ),
 				'actual'   => self::describe_call( $link_call ),
+			)
+		);
+
+		$url_call = self::call( static fn() => \get_comment_author_url( $comment ) );
+		$expected_url = 'http://' === $comment->comment_author_url
+			? ''
+			: \esc_url( $comment->comment_author_url, array( 'http', 'https' ) );
+		$rows[] = self::case_result(
+			$ctx,
+			$case_index,
+			$case,
+			'comments.template.author-url.matches-http-https-escaped-url',
+			! $url_call['threw'] && $expected_url === $url_call['value'],
+			array(
+				'expected' => self::describe_value( $expected_url ),
+				'actual'   => self::describe_call( $url_call ),
+			)
+		);
+
+		$author_link_call = self::call( static fn() => \get_comment_author_link( $comment ) );
+		$author_link      = ! $author_link_call['threw'] && is_string( $author_link_call['value'] ) ? $author_link_call['value'] : '';
+		$rows[] = self::case_result(
+			$ctx,
+			$case_index,
+			$case,
+			'comments.template.author-link.href-and-rel-follow-sanitized-url',
+			! $author_link_call['threw']
+				&& is_string( $author_link_call['value'] )
+				&& self::author_link_matches_url_contract( $author_link, $expected_url ),
+			array(
+				'expectedUrl' => self::describe_value( $expected_url ),
+				'actual'      => self::describe_call( $author_link_call ),
+			)
+		);
+
+		$url_link_call = self::call( static fn() => \get_comment_author_url_link( 'Visit <site>', '{', '}', $comment ) );
+		$rows[] = self::case_result(
+			$ctx,
+			$case_index,
+			$case,
+			'comments.template.author-url-link-uses-sanitized-href',
+			! $url_link_call['threw']
+				&& is_string( $url_link_call['value'] )
+				&& str_starts_with( $url_link_call['value'], '{<a href="' . $expected_url . '" rel="external">' )
+				&& str_ends_with( $url_link_call['value'], '</a>}' )
+				&& ! str_contains( $url_link_call['value'], 'javascript:' ),
+			array(
+				'expectedUrl' => self::describe_value( $expected_url ),
+				'actual'      => self::describe_call( $url_link_call ),
+			)
+		);
+
+		$text_call = self::call( static fn() => \get_comment_text( $comment, array( 'component_fuzz' => true ) ) );
+		$rows[] = self::case_result(
+			$ctx,
+			$case_index,
+			$case,
+			'comments.template.get-comment-text-preserves-comment-content',
+			! $text_call['threw'] && $comment->comment_content === $text_call['value'],
+			array(
+				'expected' => self::describe_value( $comment->comment_content ),
+				'actual'   => self::describe_call( $text_call ),
+			)
+		);
+
+		$excerpt_call = self::call( static fn() => \get_comment_excerpt( $comment ) );
+		$expected_excerpt = \wp_trim_words(
+			strip_tags( str_replace( array( "\n", "\r" ), ' ', $comment->comment_content ) ),
+			20,
+			'&hellip;'
+		);
+		$rows[] = self::case_result(
+			$ctx,
+			$case_index,
+			$case,
+			'comments.template.get-comment-excerpt-strips-tags-and-trims',
+			! $excerpt_call['threw'] && $expected_excerpt === $excerpt_call['value'],
+			array(
+				'expected' => self::describe_value( $expected_excerpt ),
+				'actual'   => self::describe_call( $excerpt_call ),
 			)
 		);
 
@@ -1192,6 +1278,17 @@ final class CommentsSurface {
 		}
 
 		return true;
+	}
+
+	private static function author_link_matches_url_contract( string $link, string $expected_url ): bool {
+		if ( '' === $expected_url ) {
+			return ! str_contains( $link, '<a ' ) && ! str_contains( $link, 'href=' );
+		}
+
+		return str_contains( $link, '<a href="' . $expected_url . '" class="url"' )
+			&& str_contains( $link, 'rel="' )
+			&& str_contains( $link, 'ugc' )
+			&& ! str_contains( $link, 'javascript:' );
 	}
 
 	private static function classes_have_no_raw_angle_brackets( array $classes ): bool {
