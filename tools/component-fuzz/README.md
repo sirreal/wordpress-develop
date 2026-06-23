@@ -318,9 +318,10 @@ database, network requests, or a configured site.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
-  `WP::parse_request()`, rewrite-rule matching, query-var precedence,
-  `register_globals()`, `handle_404()` status transitions, and `send_headers()`
-  filters/actions with deterministic global restoration.
+  `WP::parse_request()`, rewrite/pathinfo/index matching, public/private
+  query-var gates, query-var precedence, `register_globals()`, `handle_404()`
+  status transitions, and `send_headers()` filters/actions with deterministic
+  global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, and block pattern categories, including context/_fields
