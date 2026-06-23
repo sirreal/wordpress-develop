@@ -291,6 +291,11 @@ database, network requests, or a configured site.
   fields, safe create/update/delete error paths, upload-no-data paths, and
   deterministic state restoration without live uploads, remote requests, or a
   live database.
+- `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
+  global styles, template/template-part response shaping, template revisions
+  and autosaves, navigation fallback, and edit-site export guards, including
+  route normalization, schema/context behavior, permission and error contracts,
+  custom CSS validation, temp theme fixtures, and state restoration.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including revision field/data contracts, autosave and revision
   predicates, revision insert/save/restore/delete helpers, revisioned meta copy
@@ -419,6 +424,13 @@ lifecycle-heavy read and status paths are covered by `plugin-theme-lifecycle`,
 while install/update/delete controller methods are still avoided. Block pattern
 coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
+The `rest-site-editor` surface creates a bounded temp theme under the harness
+`WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
+`wp_template`, `wp_template_part`, `revision`, and `wp_navigation` fixtures. It
+does not dispatch live REST requests, run broad template collection queries, or
+call `WP_REST_Edit_Site_Export_Controller::export()` because that path
+generates, streams, unlinks, and exits with a zip file; export coverage is
+limited to route and permission guards.
 The `block-editor-adjuncts` surface keeps REST preloading on synthetic
 `rest_pre_dispatch` responses and keeps theme styles local to temp fixtures;
 it does not load editor screens, dispatch DB-backed REST controllers, fetch

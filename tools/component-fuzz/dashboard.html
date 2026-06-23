@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">90</div>
-			<div class="good">README parity confirmed: 90 documented</div>
+			<div class="metric">91</div>
+			<div class="good">README parity confirmed: 91 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6534 passed, 0 failed, 0 errored, 51 skipped at 90 surfaces.</div>
+			<div class="note">Non-skipped pass rate: 6554 passed, 0 failed, 0 errored, 55 skipped at 91 surfaces.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>customizer-persistence</code>: 600 passed, 0 failed, 0 skipped at 100 iterations.</div>
+			<div class="note"><code>rest-site-editor</code>: 900 passed, 200 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Two worker results are ready for integration. All workers use priority <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">0</div>
+			<div class="note">Two worker results are ready for integration. All workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -272,9 +272,9 @@
 				</tr>
 				<tr>
 					<td><code>rest-site-editor</code></td>
-					<td><span class="status wait">ready to integrate</span></td>
-					<td><code>_work/component-fuzz-rest-site-editor</code></td>
-					<td>Worker focused run: 900 passed, 200 skipped, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 900 passed, 200 skipped, 0 failed; broad run: 6554 passed, 55 skipped, 0 failed.</td>
 					<td>REST server/request, global styles/templates/navigation controllers, temp fixtures.</td>
 				</tr>
 				<tr>
@@ -293,9 +293,9 @@
 				</tr>
 				<tr>
 					<td><code>image-metadata</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">ready to integrate</span></td>
 					<td><code>_work/component-fuzz-image-metadata</code></td>
-					<td>Target: 100 focused iterations, smoke, diff check, commit.</td>
+					<td>Worker focused run: 600 passed, 0 failed; smoke and diff check passed.</td>
 					<td>Admin image metadata parser, EXIF/IPTC availability, local binary fixtures.</td>
 				</tr>
 			</tbody>
@@ -317,6 +317,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>157d5a1d4b</code></td>
+					<td><code>customizer-persistence</code></td>
+					<td>600 passed, 0 skipped, 0 failed.</td>
+					<td>6534 passed, 51 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>bae57b7db8</code></td>
 					<td><code>media-remote</code></td>
