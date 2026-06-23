@@ -1,0 +1,707 @@
+<?php
+namespace ComponentFuzz\Surfaces;
+
+/**
+ * Fuzzes no-upload appearance media helpers for custom backgrounds, headers, and site icons.
+ */
+final class AppearanceMediaSurface {
+	public const NAME = 'appearance-media';
+
+	private const MAX_FAILURES = 8;
+
+	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_support();
+
+		$missing = self::missing_requirements();
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					'appearance-media.bootstrap-apis-available',
+					'Required appearance media APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$snapshot = self::snapshot_state();
+		$rows     = array();
+
+		try {
+			self::prepare_runtime( $ctx );
+
+			$rows[] = self::check_background_post_normalization( $ctx->fork( 'background' ) );
+			$rows[] = self::check_header_defaults_and_selection( $ctx->fork( 'headers' ) );
+			$rows[] = self::check_header_and_background_frontend_helpers( $ctx->fork( 'frontend' ) );
+			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
+			$rows[] = $ctx->skip(
+				'appearance-media.unsafe-upload-and-ajax-paths',
+				'Custom header/background uploads, crops, AJAX handlers, and full admin page dispatch can redirect, exit, or require real uploaded files; safe helper paths are covered directly.'
+			);
+		} catch ( \Throwable $e ) {
+			$rows[] = $ctx->fail(
+				'appearance-media.surface-no-throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			self::restore_state( $snapshot );
+		}
+
+		$state_diff = self::state_diff( $snapshot );
+		$rows[]     = self::row(
+			$ctx,
+			'appearance-media.state-restored',
+			array() === $state_diff,
+			array(
+				'trackedGlobals' => array_keys( $snapshot['globals'] ),
+				'trackedOptions' => array_keys( $snapshot['options'] ),
+				'obLevel'        => ob_get_level(),
+				'diff'           => $state_diff,
+			)
+		);
+
+		return $rows;
+	}
+
+	private static function load_support(): void {
+		$files = array(
+			'Custom_Background'    => defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/class-custom-background.php' : '',
+			'Custom_Image_Header' => defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/class-custom-image-header.php' : '',
+			'WP_Site_Icon'        => defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/class-wp-site-icon.php' : '',
+		);
+
+		foreach ( $files as $class => $path ) {
+			if ( ! class_exists( $class, false ) && $path && file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
+	}
+
+	private static function missing_requirements(): array {
+		$missing = array();
+		foreach ( array( 'Custom_Background', 'Custom_Image_Header', 'WP_Site_Icon' ) as $class ) {
+			if ( ! class_exists( $class, false ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'add_filter',
+				'add_theme_support',
+				'apply_filters',
+				'checked',
+				'create_initial_post_types',
+				'delete_option',
+				'display_header_text',
+				'get_background_color',
+				'get_background_image',
+				'get_header_image',
+				'get_header_image_tag',
+				'get_header_textcolor',
+				'get_option',
+				'get_site_icon_url',
+				'get_stylesheet',
+				'get_template_directory_uri',
+				'get_theme_mod',
+				'get_theme_support',
+				'has_filter',
+				'has_header_image',
+				'has_site_icon',
+				'is_random_header_image',
+				'remove_all_filters',
+				'remove_filter',
+				'remove_theme_mod',
+				'set_theme_mod',
+				'update_option',
+				'wp_create_nonce',
+				'wp_nonce_tick',
+				'wp_site_icon',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		return $missing;
+	}
+
+	private static function prepare_runtime( \ComponentFuzz\FuzzContext $ctx ): void {
+		unset( $ctx );
+
+		if ( ! get_post_type_object( 'post' ) || ! get_post_status_object( 'publish' ) ) {
+			\create_initial_post_types();
+		}
+
+		\update_option( 'template', 'component-fuzz-theme' );
+		\update_option( 'stylesheet', 'component-fuzz-theme' );
+		\update_option( self::theme_mod_option_name(), array() );
+
+		\add_theme_support(
+			'custom-background',
+			array(
+				'default-color'      => 'f0f0f0',
+				'default-image'      => 'http://example.test/default-background.png',
+				'default-preset'     => 'fill',
+				'default-position-x' => 'left',
+				'default-position-y' => 'top',
+				'default-size'       => 'auto',
+				'default-repeat'     => 'repeat',
+				'default-attachment' => 'scroll',
+			)
+		);
+		\add_theme_support(
+			'custom-header',
+			array(
+				'default-image'      => '%s/images/default-header.jpg',
+				'default-text-color' => '123456',
+				'header-text'        => true,
+				'width'              => 1200,
+				'height'             => 300,
+				'random-default'     => true,
+			)
+		);
+
+		$GLOBALS['_wp_default_headers'] = self::default_headers_case();
+	}
+
+	private static function check_background_post_normalization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$case     = self::background_case( $ctx );
+		$nonce    = \wp_create_nonce( 'custom-background' );
+		$subject  = new \Custom_Background();
+
+		$_POST = array(
+			'_wpnonce'              => $nonce,
+			'background-preset'     => $case['presetInput'],
+			'background-position'   => $case['positionInput'],
+			'background-size'       => $case['sizeInput'],
+			'background-repeat'     => $case['repeatInput'],
+			'background-attachment' => $case['attachmentInput'],
+			'background-color'      => $case['colorInput'],
+		);
+		$_REQUEST = $_POST;
+
+		$subject->take_action();
+
+		$actual = array(
+			'preset'     => \get_theme_mod( 'background_preset' ),
+			'positionX'  => \get_theme_mod( 'background_position_x' ),
+			'positionY'  => \get_theme_mod( 'background_position_y' ),
+			'size'       => \get_theme_mod( 'background_size' ),
+			'repeat'     => \get_theme_mod( 'background_repeat' ),
+			'attachment' => \get_theme_mod( 'background_attachment' ),
+			'color'      => \get_theme_mod( 'background_color' ),
+		);
+
+		self::collect_failure(
+			$failures,
+			$case['expected'] === $actual,
+			'Custom_Background::take_action normalizes bounded display options into theme mods',
+			array(
+				'case'     => $case,
+				'actual'   => $actual,
+				'themeMod' => \get_option( self::theme_mod_option_name() ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.background.post-normalization',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_header_defaults_and_selection( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$subject  = new \Custom_Image_Header( static function (): void {} );
+		$subject->process_default_headers();
+
+		$template_uri   = \get_template_directory_uri();
+		$stylesheet_uri = \get_stylesheet_directory_uri();
+		$header_alpha   = $subject->default_headers['alpha'] ?? null;
+		$header_beta    = $subject->default_headers['beta'] ?? null;
+
+		self::collect_failure(
+			$failures,
+			is_array( $header_alpha )
+				&& is_array( $header_beta )
+				&& "{$template_uri}/images/alpha.jpg" === $header_alpha['url']
+				&& "{$stylesheet_uri}/images/alpha-thumb.jpg" === $header_alpha['thumbnail_url']
+				&& "{$stylesheet_uri}/images/beta.jpg" === $header_beta['url'],
+			'process_default_headers expands template and stylesheet placeholders once',
+			array(
+				'alpha'        => $header_alpha,
+				'beta'         => $header_beta,
+				'templateUri'  => $template_uri,
+				'stylesheetUri' => $stylesheet_uri,
+			)
+		);
+
+		$subject->set_header_image( 'alpha' );
+		$selected      = \get_theme_mod( 'header_image' );
+		$selected_data = \get_theme_mod( 'header_image_data' );
+		$output        = self::capture( static fn() => $subject->show_header_selector( 'default' ) );
+		$subject->remove_header_image();
+		$removed = \get_header_image();
+		$subject->set_header_image(
+			array(
+				'attachment_id' => 991,
+				'url'           => 'http://example.test/uploads/generated-header.jpg?unsafe=<tag>',
+				'width'         => 1440,
+				'height'        => 360,
+			)
+		);
+		$array_data = \get_theme_mod( 'header_image_data' );
+		$array_url  = \get_theme_mod( 'header_image' );
+		$subject->set_header_image( 'random-default-image' );
+
+		self::collect_failure(
+			$failures,
+			"{$template_uri}/images/alpha.jpg" === $selected
+				&& is_array( $selected_data )
+				&& 'Alpha <unsafe>' === ( $selected_data['alt_text'] ?? null )
+				&& false === $removed
+				&& $array_data instanceof \stdClass
+				&& 991 === (int) $array_data->attachment_id
+				&& 'http://example.test/uploads/generated-header.jpg?unsafe=tag' === $array_url
+				&& \is_random_header_image( 'default' )
+				&& str_contains( $output, 'Random:' )
+				&& str_contains( $output, 'Alpha &lt;unsafe&gt;' )
+				&& ! str_contains( $output, '<unsafe>' ),
+			'set_header_image handles default, remove, array, and random choices with escaped selector output',
+			array(
+				'selected'     => $selected,
+				'selectedData' => self::describe_value( $selected_data ),
+				'removed'      => $removed,
+				'arrayData'    => self::describe_value( $array_data ),
+				'arrayUrl'     => $array_url,
+				'currentImage' => \get_theme_mod( 'header_image' ),
+				'random'       => \is_random_header_image( 'default' ),
+				'selector'     => self::preview( $output ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.header.defaults-and-selection',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_header_and_background_frontend_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		\set_theme_mod( 'header_textcolor', 'abcdef' );
+		\set_theme_mod( 'header_image', 'http://example.test/header-image.jpg?x=<tag>' );
+		\set_theme_mod(
+			'header_image_data',
+			(object) array(
+				'attachment_id' => 0,
+				'url'           => 'http://example.test/header-image.jpg?x=<tag>',
+				'thumbnail_url' => 'http://example.test/header-thumb.jpg',
+				'width'         => 960,
+				'height'        => 240,
+			)
+		);
+		\set_theme_mod( 'background_image', 'http://example.test/bg.png?x=<tag>' );
+		\set_theme_mod( 'background_color', '#12zz34' );
+
+		$header_image = \get_header_image();
+		$header_tag   = \get_header_image_tag(
+			array(
+				'alt'     => 'Header <alt>',
+				'loading' => false,
+				'decoding' => false,
+			)
+		);
+		$bg_image     = \get_background_image();
+		$bg_color     = \get_background_color();
+		$text_color   = \get_header_textcolor();
+		$display_text = \display_header_text();
+
+		self::collect_failure(
+			$failures,
+			'http://example.test/header-image.jpg?x=tag' === $header_image
+				&& str_contains( $header_tag, 'src="http://example.test/header-image.jpg?x=tag"' )
+				&& str_contains( $header_tag, 'alt="Header &lt;alt&gt;"' )
+				&& ! str_contains( $header_tag, 'loading=' )
+				&& ! str_contains( $header_tag, 'decoding=' )
+				&& 'http://example.test/bg.png?x=<tag>' === $bg_image
+				&& '#12zz34' === $bg_color
+				&& 'abcdef' === $text_color
+				&& true === $display_text,
+			'frontend header/background helpers sanitize URLs, escape markup attributes, and expose theme mods consistently',
+			array(
+				'headerImage' => self::preview( (string) $header_image ),
+				'headerTag'   => self::preview( $header_tag ),
+				'bgImage'     => self::preview( (string) $bg_image ),
+				'bgColor'     => $bg_color,
+				'textColor'   => $text_color,
+				'displayText' => $display_text,
+			)
+		);
+
+		\set_theme_mod( 'header_textcolor', 'blank' );
+		self::collect_failure(
+			$failures,
+			false === \display_header_text(),
+			'blank header text color hides header text',
+			array( 'displayText' => \display_header_text() )
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.frontend.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_site_icon_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$site_icon   = new \WP_Site_Icon();
+		$size_filter = static function ( array $sizes ) use ( $ctx ): array {
+			unset( $sizes );
+			return array( 16, 270, $ctx->choice( array( 64, 128, 300 ) ), 640 );
+		};
+		$url_filter  = static function ( string $url, int $size, int $blog_id ): string {
+			unset( $url, $blog_id );
+			return 'http://example.test/icon-' . $size . '.png?x=<tag>';
+		};
+		$meta_filter = static function ( array $tags ): array {
+			$tags[] = '<meta name="component-fuzz-site-icon" content="yes" />';
+			$tags[] = '';
+			return $tags;
+		};
+
+		\add_filter( 'site_icon_image_sizes', $size_filter );
+		\add_filter( 'get_site_icon_url', $url_filter, 10, 3 );
+		\add_filter( 'site_icon_meta_tags', $meta_filter );
+
+		try {
+			$additional = $site_icon->additional_sizes(
+				array(
+					'soft' => array(
+						'width'  => 100,
+						'height' => 100,
+						'crop'   => false,
+					),
+					'hard' => array(
+						'width'  => 90,
+						'height' => 90,
+						'crop'   => true,
+					),
+				)
+			);
+			$intermediate = $site_icon->intermediate_image_sizes( array( 'thumbnail' ) );
+
+			\update_option( 'site_icon', 4242 );
+			$metadata_value = $site_icon->get_post_metadata( null, 4242, '_wp_attachment_backup_sizes', true );
+			$has_meta_hook  = false !== \has_filter( 'intermediate_image_sizes', array( $site_icon, 'intermediate_image_sizes' ) );
+			$site_icon->delete_attachment_data( 4242 );
+			$deleted = (int) \get_option( 'site_icon' );
+
+			$icon_url = \get_site_icon_url( 32, '', 0 );
+			$has_icon = \has_site_icon();
+			$meta     = self::capture( static fn() => \wp_site_icon() );
+
+			self::collect_failure(
+				$failures,
+				isset( $additional['soft'], $additional['hard'], $additional['site_icon-270'], $additional['site_icon-16'] )
+					&& ! isset( $additional['site_icon-640'] )
+					&& in_array( 'site_icon-270', $intermediate, true )
+					&& in_array( 'site_icon-640', $intermediate, true )
+					&& null === $metadata_value
+					&& $has_meta_hook
+					&& 0 === $deleted
+					&& 'http://example.test/icon-32.png?x=<tag>' === $icon_url
+					&& true === $has_icon
+					&& str_contains( $meta, 'rel="icon"' )
+					&& str_contains( $meta, 'sizes="32x32"' )
+					&& str_contains( $meta, 'component-fuzz-site-icon' )
+					&& str_contains( $meta, 'x=tag' ),
+				'WP_Site_Icon sizes, metadata hook, deletion, URL filter, and meta tag output stay coherent',
+				array(
+					'additional'    => $additional,
+					'intermediate'  => $intermediate,
+					'metadataValue' => self::describe_value( $metadata_value ),
+					'hasMetaHook'   => $has_meta_hook,
+					'deleted'       => $deleted,
+					'iconUrl'       => self::preview( $icon_url ),
+					'hasIcon'       => $has_icon,
+					'meta'          => self::preview( $meta ),
+				)
+			);
+		} finally {
+			\remove_filter( 'site_icon_image_sizes', $size_filter );
+			\remove_filter( 'get_site_icon_url', $url_filter, 10 );
+			\remove_filter( 'site_icon_meta_tags', $meta_filter );
+			\remove_filter( 'intermediate_image_sizes', array( $site_icon, 'intermediate_image_sizes' ) );
+		}
+
+		return self::row(
+			$ctx,
+			'appearance-media.site-icon.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function background_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$preset     = $ctx->choice( array( 'default', 'fill', 'fit', 'repeat', 'custom', 'invalid-preset' ) );
+		$position_x = $ctx->choice( array( 'left', 'center', 'right', 'bad-x' ) );
+		$position_y = $ctx->choice( array( 'top', 'center', 'bottom', 'bad-y' ) );
+		$size       = $ctx->choice( array( 'auto', 'contain', 'cover', 'stretch' ) );
+		$repeat     = $ctx->choice( array( 'repeat', 'no-repeat', 'round' ) );
+		$attachment = $ctx->choice( array( 'scroll', 'fixed', 'local' ) );
+		$color      = $ctx->choice( array( '#abc', 'a1b2c3', 'zzzzzz', '12-34-56', '1234567' ) );
+
+		$normalized_color = preg_replace( '/[^0-9a-fA-F]/', '', $color );
+		if ( 3 !== strlen( $normalized_color ) && 6 !== strlen( $normalized_color ) ) {
+			$normalized_color = '';
+		}
+
+		return array(
+			'presetInput'     => $preset,
+			'positionInput'   => $position_x . ' ' . $position_y,
+			'sizeInput'       => $size,
+			'repeatInput'     => $repeat,
+			'attachmentInput' => $attachment,
+			'colorInput'      => $color,
+			'expected'        => array(
+				'preset'     => in_array( $preset, array( 'default', 'fill', 'fit', 'repeat', 'custom' ), true ) ? $preset : 'default',
+				'positionX'  => in_array( $position_x, array( 'left', 'center', 'right' ), true ) ? $position_x : 'left',
+				'positionY'  => in_array( $position_y, array( 'top', 'center', 'bottom' ), true ) ? $position_y : 'top',
+				'size'       => in_array( $size, array( 'auto', 'contain', 'cover' ), true ) ? $size : 'auto',
+				'repeat'     => 'no-repeat' === $repeat ? 'no-repeat' : 'repeat',
+				'attachment' => 'fixed' === $attachment ? 'fixed' : 'scroll',
+				'color'      => $normalized_color,
+			),
+		);
+	}
+
+	private static function default_headers_case(): array {
+		return array(
+			'alpha' => array(
+				'url'           => '%s/images/alpha.jpg',
+				'thumbnail_url' => '%2$s/images/alpha-thumb.jpg',
+				'description'   => 'Alpha Header',
+				'alt_text'      => 'Alpha <unsafe>',
+			),
+			'beta'  => array(
+				'url'           => '%2$s/images/beta.jpg',
+				'thumbnail_url' => '%s/images/beta-thumb.jpg',
+				'description'   => 'Beta Header',
+				'alt_text'      => 'Beta & Header',
+			),
+		);
+	}
+
+	private static function theme_mod_option_name(): string {
+		return 'theme_mods_' . \get_stylesheet();
+	}
+
+	private static function capture( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition || count( $failures ) >= self::MAX_FAILURES ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => self::describe_value( $details ),
+		);
+	}
+
+	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array(), ?string $status = null ): array {
+		return array(
+			'ok'        => $ok,
+			'status'    => $status ?? ( $ok ? 'passed' : 'failed' ),
+			'surface'   => self::NAME,
+			'invariant' => $invariant,
+			'seed'      => $ctx->seed(),
+			'iteration' => $ctx->iteration(),
+			'data'      => self::describe_value( $data ),
+		);
+	}
+
+	private static function snapshot_state(): array {
+		$option_names = array(
+			'stylesheet',
+			'template',
+			'site_icon',
+			self::theme_mod_option_name(),
+			'theme_mods_component-fuzz-theme',
+		);
+
+		$options = array();
+		foreach ( $option_names as $name ) {
+			$options[ $name ] = array(
+				'exists' => false !== \get_option( $name, false ),
+				'value'  => \get_option( $name, null ),
+			);
+		}
+
+		return array(
+			'globals' => self::snapshot_globals(
+				array(
+					'_wp_default_headers',
+					'_wp_theme_features',
+					'custom_background',
+					'custom_image_header',
+					'wp_current_filter',
+					'wp_filter',
+					'wp_post_statuses',
+					'wp_post_types',
+				)
+			),
+			'options' => $options,
+			'post'    => $_POST,
+			'request' => $_REQUEST,
+			'get'     => $_GET,
+			'obLevel' => ob_get_level(),
+		);
+	}
+
+	private static function restore_state( array $snapshot ): void {
+		while ( ob_get_level() > $snapshot['obLevel'] ) {
+			ob_end_clean();
+		}
+
+		self::restore_globals( $snapshot['globals'] );
+		foreach ( $snapshot['options'] as $name => $option ) {
+			if ( $option['exists'] ) {
+				\update_option( $name, $option['value'] );
+			} else {
+				\delete_option( $name );
+			}
+		}
+
+		$_POST    = $snapshot['post'];
+		$_REQUEST = $snapshot['request'];
+		$_GET     = $snapshot['get'];
+	}
+
+	private static function state_diff( array $snapshot ): array {
+		$diff = array();
+		if ( ob_get_level() !== $snapshot['obLevel'] ) {
+			$diff['obLevel'] = array( 'expected' => $snapshot['obLevel'], 'actual' => ob_get_level() );
+		}
+
+		foreach ( $snapshot['options'] as $name => $option ) {
+			$current_exists = false !== \get_option( $name, false );
+			$current_value  = \get_option( $name, null );
+			if ( $current_exists !== $option['exists'] || $current_value !== $option['value'] ) {
+				$diff['options'][ $name ] = array(
+					'expectedExists' => $option['exists'],
+					'actualExists'   => $current_exists,
+					'expectedValue'  => self::describe_value( $option['value'] ),
+					'actualValue'    => self::describe_value( $current_value ),
+				);
+			}
+		}
+
+		if ( $_POST !== $snapshot['post'] || $_REQUEST !== $snapshot['request'] || $_GET !== $snapshot['get'] ) {
+			$diff['superglobals'] = array(
+				'post'    => $_POST !== $snapshot['post'],
+				'request' => $_REQUEST !== $snapshot['request'],
+				'get'     => $_GET !== $snapshot['get'],
+			);
+		}
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( $exists !== $entry['exists'] ) {
+				$diff['globals'][ $name ] = array( 'expectedExists' => $entry['exists'], 'actualExists' => $exists );
+				continue;
+			}
+			if ( $exists && $GLOBALS[ $name ] !== $entry['value'] ) {
+				$diff['globals'][ $name ] = 'value changed';
+			}
+		}
+
+		return $diff;
+	}
+
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => $GLOBALS[ $name ] ?? null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function describe_throwable( \Throwable $e ): string {
+		return wp_json_encode(
+			array(
+				'class'   => get_class( $e ),
+				'message' => $e->getMessage(),
+				'file'    => $e->getFile(),
+				'line'    => $e->getLine(),
+			),
+			JSON_UNESCAPED_SLASHES
+		);
+	}
+
+	private static function describe_value( $value ) {
+		if ( is_array( $value ) ) {
+			$out = array();
+			foreach ( array_slice( $value, 0, 12, true ) as $key => $item ) {
+				$out[ $key ] = self::describe_value( $item );
+			}
+			if ( count( $value ) > 12 ) {
+				$out['__truncated__'] = count( $value ) - 12;
+			}
+			return $out;
+		}
+
+		if ( is_object( $value ) ) {
+			return array(
+				'type'  => get_class( $value ),
+				'props' => self::describe_value( get_object_vars( $value ) ),
+			);
+		}
+
+		if ( is_string( $value ) ) {
+			return self::preview( $value );
+		}
+
+		return $value;
+	}
+
+	private static function preview( string $value, int $limit = 220 ): string {
+		$value = preg_replace( '/\s+/', ' ', $value );
+		if ( strlen( $value ) <= $limit ) {
+			return $value;
+		}
+
+		return substr( $value, 0, $limit ) . '...';
+	}
+}

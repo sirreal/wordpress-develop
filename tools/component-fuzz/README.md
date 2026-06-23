@@ -55,6 +55,10 @@ database, network requests, or a configured site.
   generation without network calls.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
+- `appearance-media`: no-upload appearance media helper coverage, including
+  custom background POST normalization, custom header default processing and
+  selection, frontend header/background helpers, site icon sizes/meta tags, and
+  state restoration without admin upload/AJAX dispatch.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
   sign-on cookie actions with cookie sending short-circuited, auth cookie
@@ -356,6 +360,9 @@ object-cache fixtures, temporary plugin/theme metadata, and `posts_pre_query`,
 privacy request tables, install/update tables, destructive plugin/theme
 operations, real uploads, and true multisite write paths; network site/user
 rows remain synthetic when the shared PHP process is not in multisite mode. The
+`appearance-media` surface covers custom background/header/site icon helpers
+without invoking media uploads, image crops, AJAX actions, or admin page
+dispatch. The
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The
