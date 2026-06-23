@@ -418,8 +418,9 @@ database, network requests, or a configured site.
   shortlink/permalink helpers, and cached bookmark field/list rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, direct widget/control callbacks, generated sidebars, widget ID
-  parsing, sidebar assignment moves/removals, inactive widget placement, render
-  callback wrappers, no-external-DB guards, and registry restoration.
+  parsing, sidebar option cache/filter behavior, sidebar assignment
+  moves/removals, inactive widget placement, render callback wrappers,
+  no-external-DB guards, and registry restoration.
 - `wpdb-sql`: no-connection real `wpdb` SQL formatting coverage, including
   placeholder count/type handling, `%i` identifier containment, literal percent
   and LIKE escaping, malformed placeholders, and captured insert/update/delete/

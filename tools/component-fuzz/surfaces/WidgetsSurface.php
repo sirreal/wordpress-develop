@@ -43,6 +43,7 @@ final class WidgetsSurface {
 			$rows[] = self::check_widget_factory_registration( $ctx );
 			$rows[] = self::check_direct_widget_registration( $ctx );
 			$rows[] = self::check_sidebar_assignment( $ctx );
+			$rows[] = self::check_sidebars_widgets_option_flow( $ctx );
 			$rows[] = self::check_widget_rendering( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -577,6 +578,135 @@ final class WidgetsSurface {
 		);
 	}
 
+	private static function check_sidebars_widgets_option_flow( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$side_a          = self::id( $ctx->fork( 'option-side-a' ), 'sidebar_option_a' );
+		$side_b          = self::id( $ctx->fork( 'option-side-b' ), 'sidebar_option_b' );
+		$filtered_side   = self::id( $ctx->fork( 'filtered-side' ), 'sidebar_filtered' );
+		$hyphen_base     = self::id( $ctx->fork( 'hyphen-base' ), 'cfz-hyphen-base' );
+		$hyphen_widget   = $hyphen_base . '-' . $ctx->int( 10, 30 );
+		$legacy_widget   = self::id( $ctx->fork( 'legacy-widget' ), 'legacy_widget' );
+		$other_widget    = self::id( $ctx->fork( 'other-widget' ), 'other_widget' ) . '-2';
+		$inactive_widget = self::id( $ctx->fork( 'inactive-widget' ), 'inactive_widget' ) . '-3';
+		$replacement     = self::id( $ctx->fork( 'replacement-widget' ), 'replacement_widget' ) . '-4';
+		$filtered_widget = self::id( $ctx->fork( 'filtered-widget' ), 'filtered_widget' ) . '-5';
+		$initial         = array(
+			$side_a               => array( $hyphen_widget, $legacy_widget ),
+			$side_b               => array( $other_widget ),
+			'wp_inactive_widgets' => array( $inactive_widget ),
+			'array_version'       => 3,
+		);
+		$updated_option  = array(
+			$side_a               => array( self::id( $ctx->fork( 'stale-widget' ), 'stale_widget' ) . '-6' ),
+			$side_b               => array( $replacement ),
+			'wp_inactive_widgets' => array(),
+		);
+		$filter_seen     = array();
+		$filter          = static function ( $sidebars_widgets ) use ( &$filter_seen, $filtered_side, $filtered_widget ) {
+			$filter_seen[] = is_array( $sidebars_widgets ) ? $sidebars_widgets : array( 'non_array' => gettype( $sidebars_widgets ) );
+			if ( is_array( $sidebars_widgets ) ) {
+				$sidebars_widgets[ $filtered_side ] = array( $filtered_widget );
+			}
+			return $sidebars_widgets;
+		};
+
+		\update_option( 'sidebars_widgets', $initial );
+		$GLOBALS['_wp_sidebars_widgets'] = array();
+		$GLOBALS['sidebars_widgets']     = array();
+
+		try {
+			\add_filter( 'sidebars_widgets', $filter );
+			$first = \wp_get_sidebars_widgets();
+
+			\update_option(
+				'sidebars_widgets',
+				array(
+					$side_b               => array( self::id( $ctx->fork( 'changed-option' ), 'changed_widget' ) . '-7' ),
+					'wp_inactive_widgets' => array(),
+					'array_version'       => 3,
+				)
+			);
+			$cached = \wp_get_sidebars_widgets();
+
+			\wp_set_sidebars_widgets( $updated_option );
+			$stored_after_set = \get_option( 'sidebars_widgets', array() );
+			$after_set        = \wp_get_sidebars_widgets();
+			$replacement_side = \wp_find_widgets_sidebar( $replacement );
+			$filtered_lookup  = \wp_find_widgets_sidebar( $filtered_widget );
+		} finally {
+			\remove_filter( 'sidebars_widgets', $filter );
+		}
+
+		$parse_cases = array(
+			$hyphen_widget                 => array(
+				'id_base' => $hyphen_base,
+				'number'  => (int) substr( strrchr( $hyphen_widget, '-' ), 1 ),
+			),
+			$hyphen_base . '-00012'       => array(
+				'id_base' => $hyphen_base,
+				'number'  => 12,
+			),
+			$hyphen_base . '--12'         => array(
+				'id_base' => $hyphen_base . '-',
+				'number'  => 12,
+			),
+			$hyphen_base . '-12-extra'    => array(
+				'id_base' => $hyphen_base . '-12-extra',
+			),
+			$legacy_widget                => array(
+				'id_base' => $legacy_widget,
+			),
+		);
+		$parse_observed = array();
+		$parse_ok       = true;
+		foreach ( $parse_cases as $widget_id => $expected ) {
+			$parsed                       = \wp_parse_widget_id( $widget_id );
+			$parse_observed[ $widget_id ] = $parsed;
+			$has_number                   = array_key_exists( 'number', $expected );
+			$parse_ok                     = $parse_ok
+				&& $expected['id_base'] === ( $parsed['id_base'] ?? null )
+				&& $has_number === array_key_exists( 'number', $parsed )
+				&& ( ! $has_number || $expected['number'] === ( $parsed['number'] ?? null ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			isset( $filter_seen[0], $filter_seen[1], $filter_seen[2] )
+				&& ! isset( $filter_seen[0]['array_version'] )
+				&& ! isset( $first['array_version'], $cached['array_version'], $after_set['array_version'] )
+				&& array( $hyphen_widget, $legacy_widget ) === array_values( $first[ $side_a ] ?? array() )
+				&& array( $filtered_widget ) === array_values( $first[ $filtered_side ] ?? array() )
+				&& array( $hyphen_widget, $legacy_widget ) === array_values( $cached[ $side_a ] ?? array() )
+				&& ! in_array( $replacement, $cached[ $side_b ] ?? array(), true )
+				&& 3 === ( $stored_after_set['array_version'] ?? null )
+				&& array( $replacement ) === array_values( $after_set[ $side_b ] ?? array() )
+				&& $side_b === $replacement_side
+				&& $filtered_side === $filtered_lookup
+				&& $parse_ok,
+			'wp_get_sidebars_widgets caches front-end option state, filters returned sidebars, and parses final numeric suffixes',
+			array(
+				'initial'         => $initial,
+				'first'           => $first,
+				'cached'          => $cached,
+				'storedAfterSet'  => $stored_after_set,
+				'afterSet'        => $after_set,
+				'filterSeen'      => $filter_seen,
+				'replacementSide' => $replacement_side,
+				'filteredLookup'  => $filtered_lookup,
+				'parseExpected'   => $parse_cases,
+				'parseObserved'   => $parse_observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'widgets.sidebars.option-cache-filter-and-id-parsing',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_widget_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
 		global $wp_registered_widgets;
 
@@ -815,6 +945,7 @@ final class WidgetsSurface {
 		$GLOBALS['sidebars_widgets']              = array();
 		$GLOBALS['wp_widget_factory']             = new \WP_Widget_Factory();
 		$GLOBALS['_wp_theme_features']            = array();
+		unset( $GLOBALS['current_screen'] );
 		self::$widget_calls                       = array();
 		self::$direct_widget_calls                = array();
 		self::$direct_control_calls               = array();
@@ -1077,6 +1208,7 @@ final class WidgetsSurface {
 			array(
 				'_wp_theme_features',
 				'_wp_sidebars_widgets',
+				'current_screen',
 				'current_user',
 				'pagenow',
 				'sidebars_widgets',
