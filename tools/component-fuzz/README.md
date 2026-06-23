@@ -182,6 +182,11 @@ database, network requests, or a configured site.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie
   parsing, proxy decisions, redirect safety, URL validation, and relative URL
   resolution without live network requests.
+- `icons-connectors`: no-DB Icons and Connectors API coverage, including
+  connector registry lifecycle and init discovery, settings/REST key masking,
+  script module serialization, icon manifest/search behavior, SVG sanitization
+  and file caching, REST icons schema/permission/error contracts, and state
+  restoration.
 - `images`: image constraint and resize math, metadata dimension lookup,
   responsive `srcset`/`sizes` generation, attachment image helpers, image tag
   attribute insertion, and loading optimization attributes.
