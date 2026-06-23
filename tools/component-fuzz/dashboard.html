@@ -220,30 +220,30 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">96</div>
-			<div class="good">README parity confirmed: 96 documented</div>
+			<div class="metric">99</div>
+			<div class="good">README parity confirmed: 99 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 9922 passed, 0 failed, 0 errored, 84 skipped at 96 surfaces over 3 iterations.</div>
+			<div class="note">Non-skipped pass rate: 10012 passed, 0 failed, 0 errored, 93 skipped at 99 surfaces over 3 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>feed-parsers</code>: 800 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>email</code>: 110184 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">5</div>
-			<div class="note">One delegated surface is active and two worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">Latest delegated results are integrated. Workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress plus active delegated surfaces.</span>
+			<span class="note">Committed main-tree progress from the latest delegated surfaces.</span>
 		</div>
 		<table>
 			<thead>
@@ -307,16 +307,16 @@
 				</tr>
 				<tr>
 					<td><code>icons-connectors</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Maxwell: <code>_work/component-fuzz-icons-connectors</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 400 passed, 0 skipped, 0 failed; broad run: 6656 passed, 60 skipped, 0 failed.</td>
 					<td>Connector registry, icons registry, REST icon guards, schema/escaping contracts.</td>
 				</tr>
 				<tr>
 					<td><code>script-loader-runtime</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Dewey: <code>_work/component-fuzz-script-loader-runtime</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1000 passed, 200 skipped, 0 failed; broad run: 6646 passed, 60 skipped, 0 failed.</td>
 					<td>Script/style loader helpers, inline data, translations, emoji/settings output.</td>
 				</tr>
 				<tr>
@@ -335,10 +335,17 @@
 				</tr>
 				<tr>
 					<td><code>environment-load</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Helmholtz: <code>_work/component-fuzz-environment-load</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>email</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 110184 passed, 0 skipped, 0 failed; latest broad run: 10012 passed, 93 skipped, 0 failed.</td>
+					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups.</td>
 				</tr>
 			</tbody>
 		</table>
@@ -359,6 +366,36 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>ba642bf12d</code></td>
+					<td><code>email</code></td>
+					<td>110184 passed, 0 skipped, 0 failed.</td>
+					<td>10012 passed, 93 skipped, 0 failed at 3 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>77c3261c5a</code></td>
+					<td><code>environment-load</code></td>
+					<td>1500 passed, 100 skipped, 0 failed.</td>
+					<td>6673 passed, 64 skipped, 0 failed at 2 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>65cb994010</code></td>
+					<td><code>icons-connectors</code></td>
+					<td>400 passed, 0 skipped, 0 failed.</td>
+					<td>6656 passed, 60 skipped, 0 failed at 2 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>2132510f82</code></td>
+					<td><code>script-loader-runtime</code></td>
+					<td>1000 passed, 200 skipped, 0 failed.</td>
+					<td>6646 passed, 60 skipped, 0 failed at 2 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>fb12f51f20</code></td>
+					<td><code>feed-parsers</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>9922 passed, 84 skipped, 0 failed at 3 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>ef7248cd3a</code></td>
 					<td><code>error-protection</code></td>
@@ -484,8 +521,8 @@
 			<tbody>
 				<tr>
 					<td>Unicode email</td>
-					<td>Verified 110,050 passed checks at 100 focused iterations.</td>
-					<td>No mail delivery; validation/sanitization and user lookup behavior only.</td>
+					<td>Verified 110,184 passed checks at 100 focused iterations, including machine/readable UTF-8 address views.</td>
+					<td>No mail delivery or browser UI validation; direct validation, sanitization, structural views, and user lookup behavior only.</td>
 				</tr>
 				<tr>
 					<td>Admin/browser flows</td>
