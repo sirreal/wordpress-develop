@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7840 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7838 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validation: <code>query</code> at 7940 passed after <code>WP_Query</code> execution coverage; largest remains <code>email</code> at 183696 passed.</div>
+			<div class="note">Latest focused validation: <code>network-media</code> at 100 aggregate iterations with 1752 assertions in the sampled result; largest remains <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">REST controller and query follow-ups were integrated; no delegated worker is currently active.</div>
+			<div class="metric work">1</div>
+			<div class="note">Helmholtz the 2nd is active on <code>revisions-autosaves</code> in <code>_work/component-fuzz-revisions-autosaves-deep</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -470,8 +470,15 @@
 					<td><code>network-media</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 100 passed, 0 skipped, 0 failed; repro seed 616161: 2 passed; latest broad run: 7565 passed, 62 skipped, 0 failed.</td>
-					<td>URL/path/file/media network-adjacent helpers with DNS/live network avoidance.</td>
+					<td>Main focused run: 100 passed, 0 skipped, 0 failed; sampled result had 1752 assertions; latest broad run: 7838 passed, 62 skipped, 0 failed.</td>
+					<td>URL/path/file/media network-adjacent helpers, multisite upload quota decisions, DNS/live network avoidance.</td>
+				</tr>
+				<tr>
+					<td><code>revisions-autosaves</code></td>
+					<td><span class="status work">delegated follow-up active</span></td>
+					<td>Helmholtz the 2nd / <code>_work/component-fuzz-revisions-autosaves-deep</code></td>
+					<td>Worker assigned 100-iteration revisions/autosaves validation.</td>
+					<td>Revision field copying/diffing, autosave and restore decisions, post type support, capability/error paths.</td>
 				</tr>
 				<tr>
 					<td><code>options-autoload</code></td>
@@ -632,6 +639,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>e77aa7c74a</code></td>
+					<td><code>network-media</code></td>
+					<td>100 aggregate iterations passed; sampled result had 1752 assertions and 0 failures.</td>
+					<td>7838 passed, 62 skipped, 0 failed at 2 iterations after multisite upload quota and size-limit helper coverage.</td>
+				</tr>
 				<tr>
 					<td><code>537a1945d8</code></td>
 					<td><code>query</code></td>
