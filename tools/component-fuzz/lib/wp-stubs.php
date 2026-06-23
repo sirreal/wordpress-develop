@@ -187,10 +187,18 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$args = $args[0];
 			}
 
-			foreach ( $args as $arg ) {
-				$query = preg_replace( '/%[sdFfi]/', "'" . $this->_escape( $arg ) . "'", $query, 1 );
-			}
-			return $query;
+			$index = 0;
+			return preg_replace_callback(
+				'/%[sdFfi]/',
+				function ( $match ) use ( $args, &$index ) {
+					if ( ! array_key_exists( $index, $args ) ) {
+						return $match[0];
+					}
+
+					return "'" . $this->_escape( $args[ $index++ ] ) . "'";
+				},
+				$query
+			);
 		}
 
 		public function esc_like( $text ) {
@@ -1316,7 +1324,31 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return array();
 			}
 
-			return array_map( 'stripslashes', $matches[1] );
+			return array_map( array( $this, 'component_fuzz_unescape_addslashes_sql_string' ), $matches[1] );
+		}
+
+		private function component_fuzz_unescape_addslashes_sql_string( $value ) {
+			$value  = (string) $value;
+			$out    = '';
+			$length = strlen( $value );
+
+			for ( $i = 0; $i < $length; $i++ ) {
+				if ( '\\' !== $value[ $i ] || $i + 1 >= $length ) {
+					$out .= $value[ $i ];
+					continue;
+				}
+
+				$next = $value[ ++$i ];
+				if ( '0' === $next ) {
+					$out .= "\0";
+				} elseif ( in_array( $next, array( '\\', "'", '"' ), true ) ) {
+					$out .= $next;
+				} else {
+					$out .= '\\' . $next;
+				}
+			}
+
+			return $out;
 		}
 
 		private function component_fuzz_delete_meta_ids( $meta_type, array $ids ) {

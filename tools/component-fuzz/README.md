@@ -192,6 +192,10 @@ database, network requests, or a configured site.
   output, depth pruning, and filtered no-DB `wp_nav_menu()` rendering.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling.
+- `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
+  for generated option values, including alloptions membership, notoptions
+  transitions, raw serialized cache shape, default/pre/update filters, cache
+  priming stability, and safe option-name boundary cases.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
   validation, no-DB plugin dependency metadata, theme headers, parent/child
   relationships, active theme file helpers, screenshots, and broken theme errors.
@@ -310,7 +314,11 @@ server-side helpers with synthetic attachment rows and cache/filter-backed
 metadata only. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
-existing no-DB option stub. The `media-editor` surface short-circuits attachment
+existing no-DB option stub. The `options-autoload` surface uses that same
+bounded in-memory option table and object cache, and deliberately focuses on
+core option/autoload/cache semantics rather than settings-page submission,
+network options, transients, or arbitrary SQL support. The `media-editor`
+surface short-circuits attachment
 metadata updates and intentionally avoids media paths that insert attachments,
 create cover-image attachments, process audio/video thumbnails, or otherwise
 require real postmeta writes. The `multisite` surface leaves `MULTISITE`

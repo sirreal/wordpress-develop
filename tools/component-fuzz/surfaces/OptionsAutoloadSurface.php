@@ -1,0 +1,1011 @@
+<?php
+namespace ComponentFuzz\Surfaces;
+
+final class OptionsAutoloadSurface {
+	public const NAME = 'options-autoload';
+
+	private const GENERATED_VALUE_CASES = 8;
+
+	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_requirements();
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					'options-autoload.bootstrap-apis-available',
+					'Required WordPress option/cache APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$snapshot = self::snapshot_globals();
+		$rows     = array();
+
+		try {
+			$rows[] = self::check_value_round_trips( $ctx );
+			$rows[] = self::check_duplicate_add_preserves_existing_value( $ctx );
+			$rows[] = self::check_update_missing_creates_option_and_clears_notoptions( $ctx );
+			$rows[] = self::check_alloptions_autoload_membership_and_transitions( $ctx );
+			$rows[] = self::check_get_option_filters( $ctx );
+			$rows[] = self::check_pre_update_filters_transform_and_veto( $ctx );
+			$rows[] = self::check_prime_option_caches_stability( $ctx );
+			$rows[] = self::check_notoptions_delete_add_lifecycle( $ctx );
+			$rows[] = self::check_serialized_value_cache_shape( $ctx );
+			$rows[] = self::check_option_name_boundaries( $ctx );
+		} catch ( \Throwable $e ) {
+			$rows[] = $ctx->fail(
+				'options-autoload.surface-no-throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			self::restore_globals( $snapshot );
+		}
+
+		return $rows;
+	}
+
+	private static function missing_requirements(): array {
+		$missing = array();
+		foreach (
+			array(
+				'add_filter',
+				'remove_filter',
+				'get_option',
+				'add_option',
+				'update_option',
+				'delete_option',
+				'wp_load_alloptions',
+				'wp_prime_option_caches',
+				'wp_cache_get',
+				'wp_cache_set',
+				'wp_cache_delete',
+				'wp_cache_get_multiple',
+				'wp_cache_init',
+				'wp_cache_flush',
+				'wp_determine_option_autoload_value',
+				'wp_autoload_values_to_autoload',
+				'maybe_serialize',
+				'maybe_unserialize',
+				'is_serialized',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
+			$missing[] = 'class Component_Fuzz_WPDB_Stub';
+		}
+
+		return $missing;
+	}
+
+	private static function check_value_round_trips( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$case      = $ctx->fork( 'round-trips' );
+		$failures  = array();
+		$autoloads = array( null, true, false, 'yes', 'no', 'on', 'off' );
+
+		foreach ( self::value_cases( $case ) as $index => $value ) {
+			$key       = self::option_name( $ctx, 'round-trip-' . $index );
+			$autoload  = $autoloads[ $index % count( $autoloads ) ];
+			$updated   = self::wrapped_value( 'updated-' . $index, self::value( $ctx->fork( 'round-trip-update-' . $index ) ) );
+			$missing   = self::missing_default( $key );
+			$add       = add_option( $key, $value, '', $autoload );
+			$store     = self::option_store();
+			$raw       = $store[ $key ]['option_value'] ?? null;
+			$raw_auto  = $store[ $key ]['autoload'] ?? null;
+			wp_cache_flush();
+			$got       = get_option( $key, $missing );
+			$update    = update_option( $key, $updated, false );
+			$got_upd   = get_option( $key, $missing );
+			$delete    = delete_option( $key );
+			$after_del = get_option( $key, $missing );
+			$notopts   = wp_cache_get( 'notoptions', 'options' );
+
+			self::collect_failure(
+				$failures,
+				true === $add
+					&& self::same_value( self::returned_value_for_storage( $value ), $got )
+					&& self::stored_value( $value ) === $raw
+					&& self::expected_autoload( $key, $value, $autoload ) === $raw_auto
+					&& true === $update
+					&& self::same_value( $updated, $got_upd )
+					&& true === $delete
+					&& self::same_value( $missing, $after_del )
+					&& is_array( $notopts )
+					&& isset( $notopts[ $key ] ),
+				"round trip case {$index} preserves normalized option value and delete/default behavior",
+				array(
+					'key'              => $key,
+					'autoloadInput'    => $autoload,
+					'storedAutoload'   => $raw_auto,
+					'expectedAutoload' => self::expected_autoload( $key, $value, $autoload ),
+					'input'            => self::describe_value( $value ),
+					'expected'         => self::describe_value( self::returned_value_for_storage( $value ) ),
+					'got'              => self::describe_value( $got ),
+					'raw'              => self::describe_value( $raw ),
+					'updatedGot'       => self::describe_value( $got_upd ),
+					'afterDelete'      => self::describe_value( $after_del ),
+				)
+			);
+		}
+
+		return $ctx->result(
+			'options-autoload.crud-round-trips-normalized-serializable-values',
+			array() === $failures,
+			array(
+				'cases'    => count( self::value_cases( $case ) ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_duplicate_add_preserves_existing_value( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key         = self::option_name( $ctx, 'duplicate-add' );
+		$first       = self::wrapped_value( 'first', self::value( $ctx->fork( 'duplicate-first' ) ) );
+		$second      = self::wrapped_value( 'second', self::value( $ctx->fork( 'duplicate-second' ) ) );
+		$add         = add_option( $key, $first, '', true );
+		$raw_before  = self::option_store()[ $key ]['option_value'] ?? null;
+		$dup         = add_option( $key, $second, '', false );
+		$got         = get_option( $key, self::missing_default( $key ) );
+		$store       = self::option_store();
+		$alloptions  = wp_load_alloptions( true );
+		$raw_after   = $store[ $key ]['option_value'] ?? null;
+		$auto_after  = $store[ $key ]['autoload'] ?? null;
+		$expected_raw = self::stored_value( $first );
+
+		$ok = true === $add
+			&& false === $dup
+			&& self::same_value( $first, $got )
+			&& $expected_raw === $raw_before
+			&& $expected_raw === $raw_after
+			&& 'on' === $auto_after
+			&& isset( $alloptions[ $key ] )
+			&& $expected_raw === $alloptions[ $key ];
+
+		return $ctx->result(
+			'options-autoload.duplicate-add-fails-without-mutating-value-or-autoload',
+			$ok,
+			array(
+				'key'         => $key,
+				'add'         => $add,
+				'duplicate'   => $dup,
+				'got'         => self::describe_value( $got ),
+				'rawBefore'   => self::describe_value( $raw_before ),
+				'rawAfter'    => self::describe_value( $raw_after ),
+				'autoload'    => $auto_after,
+				'inAlloptions' => isset( $alloptions[ $key ] ),
+			)
+		);
+	}
+
+	private static function check_update_missing_creates_option_and_clears_notoptions( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key       = self::option_name( $ctx, 'update-missing' );
+		$missing   = self::missing_default( $key );
+		$value     = self::wrapped_value( 'created-by-update', self::value( $ctx->fork( 'update-missing-value' ) ) );
+		$before    = get_option( $key, $missing );
+		$not_before = wp_cache_get( 'notoptions', 'options' );
+		$update    = update_option( $key, $value, false );
+		$got       = get_option( $key, $missing );
+		$store     = self::option_store();
+		$not_after = wp_cache_get( 'notoptions', 'options' );
+
+		$ok = self::same_value( $missing, $before )
+			&& is_array( $not_before )
+			&& isset( $not_before[ $key ] )
+			&& true === $update
+			&& isset( $store[ $key ] )
+			&& 'off' === ( $store[ $key ]['autoload'] ?? null )
+			&& self::same_value( $value, $got )
+			&& is_array( $not_after )
+			&& ! isset( $not_after[ $key ] );
+
+		return $ctx->result(
+			'options-autoload.update-missing-adds-option-and-removes-notoption',
+			$ok,
+			array(
+				'key'             => $key,
+				'before'          => self::describe_value( $before ),
+				'notoptionBefore' => is_array( $not_before ) && isset( $not_before[ $key ] ),
+				'update'          => $update,
+				'got'             => self::describe_value( $got ),
+				'inStore'         => isset( $store[ $key ] ),
+				'autoload'        => $store[ $key ]['autoload'] ?? null,
+				'notoptionAfter'  => is_array( $not_after ) && isset( $not_after[ $key ] ),
+			)
+		);
+	}
+
+	private static function check_alloptions_autoload_membership_and_transitions( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures = array();
+		$cases    = array(
+			array( 'label' => 'bool-true', 'autoload' => true ),
+			array( 'label' => 'bool-false', 'autoload' => false ),
+			array( 'label' => 'null-auto', 'autoload' => null ),
+			array( 'label' => 'legacy-yes', 'autoload' => 'yes' ),
+			array( 'label' => 'legacy-no', 'autoload' => 'no' ),
+			array( 'label' => 'string-on', 'autoload' => 'on' ),
+			array( 'label' => 'string-off', 'autoload' => 'off' ),
+		);
+		$names    = array();
+
+		foreach ( $cases as $index => $case ) {
+			$key            = self::option_name( $ctx, 'alloptions-' . $case['label'] );
+			$value          = self::wrapped_value( $case['label'], self::value( $ctx->fork( 'alloptions-value-' . $index ) ) );
+			$expected_auto  = self::expected_autoload( $key, $value, $case['autoload'] );
+			$should_autoload = in_array( $expected_auto, wp_autoload_values_to_autoload(), true );
+			$names[]        = array(
+				'key'            => $key,
+				'value'          => $value,
+				'autoloadInput'  => $case['autoload'],
+				'expectedRaw'    => self::stored_value( $value ),
+				'storedAutoload' => $expected_auto,
+				'shouldAutoload' => $should_autoload,
+			);
+
+			add_option( $key, $value, '', $case['autoload'] );
+		}
+
+		wp_cache_delete( 'alloptions', 'options' );
+		$alloptions = wp_load_alloptions();
+
+		foreach ( $names as $entry ) {
+			$present = array_key_exists( $entry['key'], $alloptions );
+			self::collect_failure(
+				$failures,
+				$entry['shouldAutoload'] === $present
+					&& ( ! $present || $entry['expectedRaw'] === $alloptions[ $entry['key'] ] ),
+				"alloptions membership matches autoload value for {$entry['key']}",
+				array(
+					'key'            => $entry['key'],
+					'autoloadInput'  => $entry['autoloadInput'],
+					'storedAutoload' => $entry['storedAutoload'],
+					'shouldAutoload' => $entry['shouldAutoload'],
+					'present'        => $present,
+				)
+			);
+		}
+
+		$to_off = self::first_entry_with_membership( $names, true );
+		$to_on  = self::first_entry_with_membership( $names, false );
+
+		$off_value = self::wrapped_value( 'transition-off', self::value( $ctx->fork( 'transition-off' ) ) );
+		$on_value  = self::wrapped_value( 'transition-on', self::value( $ctx->fork( 'transition-on' ) ) );
+
+		$off_update = update_option( $to_off['key'], $off_value, false );
+		$on_update  = update_option( $to_on['key'], $on_value, true );
+		$after      = wp_load_alloptions( true );
+		$off_cache  = wp_cache_get( $to_off['key'], 'options' );
+		$on_cache   = wp_cache_get( $to_on['key'], 'options' );
+
+		self::collect_failure(
+			$failures,
+			true === $off_update
+				&& true === $on_update
+				&& ! isset( $after[ $to_off['key'] ] )
+				&& isset( $after[ $to_on['key'] ] )
+				&& self::stored_value( $on_value ) === $after[ $to_on['key'] ]
+				&& self::stored_value( $off_value ) === $off_cache
+				&& false === $on_cache,
+			'update_option moves options between alloptions and individual option caches when autoload changes',
+			array(
+				'toOff'      => $to_off['key'],
+				'toOn'       => $to_on['key'],
+				'offUpdate'  => $off_update,
+				'onUpdate'   => $on_update,
+				'offPresent' => isset( $after[ $to_off['key'] ] ),
+				'onPresent'  => isset( $after[ $to_on['key'] ] ),
+				'offCache'   => self::describe_value( $off_cache ),
+				'onCache'    => self::describe_value( $on_cache ),
+			)
+		);
+
+		return $ctx->result(
+			'options-autoload.alloptions-only-autoloaded-and-reflects-updates',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_get_option_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$pre_key              = self::option_name( $ctx, 'pre-option-filter' );
+		$default_missing_key  = self::option_name( $ctx, 'default-option-missing' );
+		$default_existing_key = self::option_name( $ctx, 'default-option-existing' );
+		$option_key           = self::option_name( $ctx, 'option-filter' );
+		$stored_pre           = self::wrapped_value( 'pre-stored', self::value( $ctx->fork( 'pre-stored' ) ) );
+		$pre_value            = self::wrapped_value( 'pre-short-circuit', self::value( $ctx->fork( 'pre-value' ) ) );
+		$default_value        = self::wrapped_value( 'default-filter', self::value( $ctx->fork( 'default-value' ) ) );
+		$stored_default       = self::wrapped_value( 'default-stored', self::value( $ctx->fork( 'default-stored' ) ) );
+		$stored_option        = self::wrapped_value( 'option-stored', self::value( $ctx->fork( 'option-stored' ) ) );
+		$filtered_option      = self::wrapped_value( 'option-filtered', self::value( $ctx->fork( 'option-filtered' ) ) );
+		$pre_calls            = 0;
+		$default_missing_calls = 0;
+		$default_existing_calls = 0;
+		$option_calls         = 0;
+
+		add_option( $pre_key, $stored_pre, '', false );
+		add_option( $default_existing_key, $stored_default, '', false );
+		add_option( $option_key, $stored_option, '', false );
+
+		$pre_filter = static function () use ( &$pre_calls, $pre_value ) {
+			++$pre_calls;
+			return $pre_value;
+		};
+		$default_missing_filter = static function () use ( &$default_missing_calls, $default_value ) {
+			++$default_missing_calls;
+			return $default_value;
+		};
+		$default_existing_filter = static function () use ( &$default_existing_calls ) {
+			++$default_existing_calls;
+			return array( 'unexpected' => true );
+		};
+		$option_filter = static function () use ( &$option_calls, $filtered_option ) {
+			++$option_calls;
+			return $filtered_option;
+		};
+
+		add_filter( "pre_option_{$pre_key}", $pre_filter, 10, 3 );
+		add_filter( "default_option_{$default_missing_key}", $default_missing_filter, 10, 3 );
+		add_filter( "default_option_{$default_existing_key}", $default_existing_filter, 10, 3 );
+		add_filter( "option_{$option_key}", $option_filter, 10, 2 );
+
+		try {
+			$pre_got              = get_option( $pre_key, self::missing_default( $pre_key ) );
+			$default_missing_got  = get_option( $default_missing_key, self::missing_default( $default_missing_key ) );
+			$default_existing_got = get_option( $default_existing_key, self::missing_default( $default_existing_key ) );
+			$option_got           = get_option( $option_key, self::missing_default( $option_key ) );
+			$store                = self::option_store();
+			$notoptions           = wp_cache_get( 'notoptions', 'options' );
+		} finally {
+			remove_filter( "pre_option_{$pre_key}", $pre_filter, 10 );
+			remove_filter( "default_option_{$default_missing_key}", $default_missing_filter, 10 );
+			remove_filter( "default_option_{$default_existing_key}", $default_existing_filter, 10 );
+			remove_filter( "option_{$option_key}", $option_filter, 10 );
+		}
+
+		$ok = self::same_value( $pre_value, $pre_got )
+			&& 1 === $pre_calls
+			&& isset( $store[ $pre_key ] )
+			&& self::stored_value( $stored_pre ) === $store[ $pre_key ]['option_value']
+			&& self::same_value( $default_value, $default_missing_got )
+			&& 1 === $default_missing_calls
+			&& ! isset( $store[ $default_missing_key ] )
+			&& is_array( $notoptions )
+			&& isset( $notoptions[ $default_missing_key ] )
+			&& self::same_value( $stored_default, $default_existing_got )
+			&& 0 === $default_existing_calls
+			&& self::same_value( $filtered_option, $option_got )
+			&& 1 === $option_calls
+			&& self::stored_value( $stored_option ) === ( $store[ $option_key ]['option_value'] ?? null );
+
+		return $ctx->result(
+			'options-autoload.get-option-filter-precedence-and-storage-isolation',
+			$ok,
+			array(
+				'preKey'               => $pre_key,
+				'defaultMissingKey'    => $default_missing_key,
+				'defaultExistingKey'   => $default_existing_key,
+				'optionKey'            => $option_key,
+				'preCalls'             => $pre_calls,
+				'defaultMissingCalls'  => $default_missing_calls,
+				'defaultExistingCalls' => $default_existing_calls,
+				'optionCalls'          => $option_calls,
+				'preGot'               => self::describe_value( $pre_got ),
+				'defaultMissingGot'    => self::describe_value( $default_missing_got ),
+				'defaultExistingGot'   => self::describe_value( $default_existing_got ),
+				'optionGot'            => self::describe_value( $option_got ),
+			)
+		);
+	}
+
+	private static function check_pre_update_filters_transform_and_veto( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$transform_key   = self::option_name( $ctx, 'pre-update-transform' );
+		$veto_key        = self::option_name( $ctx, 'pre-update-veto' );
+		$generic_key     = self::option_name( $ctx, 'pre-update-generic' );
+		$initial         = self::wrapped_value( 'initial', self::value( $ctx->fork( 'pre-update-initial' ) ) );
+		$incoming        = self::wrapped_value( 'incoming', self::value( $ctx->fork( 'pre-update-incoming' ) ) );
+		$veto_incoming   = self::wrapped_value( 'veto-incoming', self::value( $ctx->fork( 'pre-update-veto-incoming' ) ) );
+		$generic_incoming = self::wrapped_value( 'generic-incoming', self::value( $ctx->fork( 'pre-update-generic-incoming' ) ) );
+		$transformed     = self::wrapped_value( 'specific-filtered', array( 'incoming' => $incoming, 'old' => $initial ) );
+		$generic_value   = self::wrapped_value( 'generic-filtered', $generic_incoming );
+		$specific_seen   = array();
+		$veto_seen       = array();
+		$generic_seen    = array();
+
+		add_option( $transform_key, $initial, '', false );
+		add_option( $veto_key, $initial, '', false );
+		add_option( $generic_key, $initial, '', false );
+
+		$specific_filter = static function ( $value, $old_value, $option ) use ( &$specific_seen, $transformed ) {
+			$specific_seen = array(
+				'value' => $value,
+				'old'   => $old_value,
+				'option' => $option,
+			);
+			return $transformed;
+		};
+		$veto_filter = static function ( $value, $old_value, $option ) use ( &$veto_seen ) {
+			$veto_seen = array(
+				'value' => $value,
+				'old'   => $old_value,
+				'option' => $option,
+			);
+			return $old_value;
+		};
+		$generic_filter = static function ( $value, $option, $old_value ) use ( &$generic_seen, $generic_key, $generic_value ) {
+			if ( $option !== $generic_key ) {
+				return $value;
+			}
+
+			$generic_seen = array(
+				'value' => $value,
+				'old'   => $old_value,
+				'option' => $option,
+			);
+			return $generic_value;
+		};
+
+		add_filter( "pre_update_option_{$transform_key}", $specific_filter, 10, 3 );
+		add_filter( "pre_update_option_{$veto_key}", $veto_filter, 10, 3 );
+		add_filter( 'pre_update_option', $generic_filter, 10, 3 );
+
+		try {
+			$transform_update = update_option( $transform_key, $incoming, false );
+			$transform_got    = get_option( $transform_key, self::missing_default( $transform_key ) );
+			$veto_update      = update_option( $veto_key, $veto_incoming, false );
+			$veto_got         = get_option( $veto_key, self::missing_default( $veto_key ) );
+			$generic_update   = update_option( $generic_key, $generic_incoming, false );
+			$generic_got      = get_option( $generic_key, self::missing_default( $generic_key ) );
+			$store            = self::option_store();
+		} finally {
+			remove_filter( "pre_update_option_{$transform_key}", $specific_filter, 10 );
+			remove_filter( "pre_update_option_{$veto_key}", $veto_filter, 10 );
+			remove_filter( 'pre_update_option', $generic_filter, 10 );
+		}
+
+		$ok = true === $transform_update
+			&& self::same_value( $incoming, $specific_seen['value'] ?? null )
+			&& self::same_value( $initial, $specific_seen['old'] ?? null )
+			&& $transform_key === ( $specific_seen['option'] ?? null )
+			&& self::same_value( $transformed, $transform_got )
+			&& self::stored_value( $transformed ) === ( $store[ $transform_key ]['option_value'] ?? null )
+			&& false === $veto_update
+			&& self::same_value( $veto_incoming, $veto_seen['value'] ?? null )
+			&& self::same_value( $initial, $veto_seen['old'] ?? null )
+			&& $veto_key === ( $veto_seen['option'] ?? null )
+			&& self::same_value( $initial, $veto_got )
+			&& self::stored_value( $initial ) === ( $store[ $veto_key ]['option_value'] ?? null )
+			&& true === $generic_update
+			&& self::same_value( $generic_incoming, $generic_seen['value'] ?? null )
+			&& self::same_value( $initial, $generic_seen['old'] ?? null )
+			&& $generic_key === ( $generic_seen['option'] ?? null )
+			&& self::same_value( $generic_value, $generic_got );
+
+		return $ctx->result(
+			'options-autoload.pre-update-filters-transform-or-veto-before-storage',
+			$ok,
+			array(
+				'transformKey'    => $transform_key,
+				'vetoKey'         => $veto_key,
+				'genericKey'      => $generic_key,
+				'transformUpdate' => $transform_update,
+				'vetoUpdate'      => $veto_update,
+				'genericUpdate'   => $generic_update,
+				'transformGot'    => self::describe_value( $transform_got ),
+				'vetoGot'         => self::describe_value( $veto_got ),
+				'genericGot'      => self::describe_value( $generic_got ),
+			)
+		);
+	}
+
+	private static function check_prime_option_caches_stability( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key1    = self::option_name( $ctx, 'prime-one' );
+		$key2    = self::option_name( $ctx, 'prime-two' );
+		$missing = self::option_name( $ctx, 'prime-missing' );
+		$value1  = self::wrapped_value( 'prime-one', self::value( $ctx->fork( 'prime-one' ) ) );
+		$value2  = self::wrapped_value( 'prime-two', self::value( $ctx->fork( 'prime-two' ) ) );
+
+		add_option( $key1, $value1, '', false );
+		add_option( $key2, $value2, '', false );
+		wp_cache_delete( $key1, 'options' );
+		wp_cache_delete( $key2, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+
+		$found_before = null;
+		$before       = wp_cache_get( $key1, 'options', false, $found_before );
+		wp_prime_option_caches( array( $key1, $key2, $missing, $key1 ) );
+		$raw_cache    = wp_cache_get_multiple( array( $key1, $key2, $missing ), 'options' );
+		$found_after  = null;
+		$after_cache  = wp_cache_get( $key1, 'options', false, $found_after );
+		$first_read   = get_option( $key1, self::missing_default( $key1 ) );
+		$second_read  = get_option( $key1, self::missing_default( $key1 ) );
+		$missing_read = get_option( $missing, self::missing_default( $missing ) );
+		$notoptions   = wp_cache_get( 'notoptions', 'options' );
+		$last_query   = isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb']->last_query : null;
+		wp_prime_option_caches( array( $key1, $key2, $missing ) );
+		$second_query = isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb']->last_query : null;
+
+		$ok = false === $before
+			&& false === $found_before
+			&& true === $found_after
+			&& self::stored_value( $value1 ) === $after_cache
+			&& isset( $raw_cache[ $key1 ], $raw_cache[ $key2 ] )
+			&& self::stored_value( $value1 ) === $raw_cache[ $key1 ]
+			&& self::stored_value( $value2 ) === $raw_cache[ $key2 ]
+			&& false === ( $raw_cache[ $missing ] ?? false )
+			&& self::same_value( $value1, $first_read )
+			&& self::same_value( $first_read, $second_read )
+			&& self::same_value( self::missing_default( $missing ), $missing_read )
+			&& is_array( $notoptions )
+			&& isset( $notoptions[ $missing ] )
+			&& $last_query === $second_query;
+
+		return $ctx->result(
+			'options-autoload.prime-option-caches-stabilizes-found-and-missing-reads',
+			$ok,
+			array(
+				'key1'             => $key1,
+				'key2'             => $key2,
+				'missing'          => $missing,
+				'foundBefore'      => $found_before,
+				'foundAfter'       => $found_after,
+				'cacheBefore'      => self::describe_value( $before ),
+				'cacheAfter'       => self::describe_value( $after_cache ),
+				'missingNotoption' => is_array( $notoptions ) && isset( $notoptions[ $missing ] ),
+				'lastQueryStable'  => $last_query === $second_query,
+			)
+		);
+	}
+
+	private static function check_notoptions_delete_add_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key     = self::option_name( $ctx, 'notoptions-lifecycle' );
+		$value   = self::wrapped_value( 'notoptions-value', self::value( $ctx->fork( 'notoptions-value' ) ) );
+		$updated = self::wrapped_value( 'notoptions-updated', self::value( $ctx->fork( 'notoptions-updated' ) ) );
+		$missing = self::missing_default( $key );
+
+		$missing_read = get_option( $key, $missing );
+		$after_missing = wp_cache_get( 'notoptions', 'options' );
+		$add          = add_option( $key, $value, '', false );
+		$after_add    = wp_cache_get( 'notoptions', 'options' );
+		$delete       = delete_option( $key );
+		$after_delete = wp_cache_get( 'notoptions', 'options' );
+		$update       = update_option( $key, $updated, false );
+		$after_update = wp_cache_get( 'notoptions', 'options' );
+		$got          = get_option( $key, $missing );
+
+		$ok = self::same_value( $missing, $missing_read )
+			&& is_array( $after_missing )
+			&& isset( $after_missing[ $key ] )
+			&& true === $add
+			&& is_array( $after_add )
+			&& ! isset( $after_add[ $key ] )
+			&& true === $delete
+			&& is_array( $after_delete )
+			&& isset( $after_delete[ $key ] )
+			&& true === $update
+			&& is_array( $after_update )
+			&& ! isset( $after_update[ $key ] )
+			&& self::same_value( $updated, $got );
+
+		return $ctx->result(
+			'options-autoload.notoptions-tracks-missing-delete-add-update-lifecycle',
+			$ok,
+			array(
+				'key'          => $key,
+				'add'          => $add,
+				'delete'       => $delete,
+				'update'       => $update,
+				'afterMissing' => is_array( $after_missing ) && isset( $after_missing[ $key ] ),
+				'afterAdd'     => is_array( $after_add ) && isset( $after_add[ $key ] ),
+				'afterDelete'  => is_array( $after_delete ) && isset( $after_delete[ $key ] ),
+				'afterUpdate'  => is_array( $after_update ) && isset( $after_update[ $key ] ),
+				'got'          => self::describe_value( $got ),
+			)
+		);
+	}
+
+	private static function check_serialized_value_cache_shape( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key   = self::option_name( $ctx, 'serialized-cache-shape' );
+		$value = array(
+			'list'              => array( null, false, 0, '0', '' ),
+			'object'            => (object) array(
+				'name'   => 'cache-shape',
+				'nested' => array( 'seed' => $ctx->seed() ),
+			),
+			'serialized_string' => serialize( array( 'already' => 'serialized', 'iteration' => $ctx->iteration() ) ),
+		);
+		$expected_raw = self::stored_value( $value );
+
+		$add       = add_option( $key, $value, '', false );
+		$raw_add   = wp_cache_get( $key, 'options' );
+		wp_cache_delete( $key, 'options' );
+		$raw_gone  = wp_cache_get( $key, 'options' );
+		wp_prime_option_caches( array( $key ) );
+		$raw_prime = wp_cache_get( $key, 'options' );
+		$got       = get_option( $key, self::missing_default( $key ) );
+
+		$ok = true === $add
+			&& is_string( $expected_raw )
+			&& is_serialized( $expected_raw )
+			&& $expected_raw === $raw_add
+			&& false === $raw_gone
+			&& $expected_raw === $raw_prime
+			&& self::same_value( $value, $got );
+
+		return $ctx->result(
+			'options-autoload.serialized-values-use-raw-cache-and-public-unserialize',
+			$ok,
+			array(
+				'key'       => $key,
+				'add'       => $add,
+				'rawAdd'    => self::describe_value( $raw_add ),
+				'rawGone'   => self::describe_value( $raw_gone ),
+				'rawPrime'  => self::describe_value( $raw_prime ),
+				'got'       => self::describe_value( $got ),
+				'rawSha1'   => sha1( $expected_raw ),
+			)
+		);
+	}
+
+	private static function check_option_name_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$trimmed_name = self::option_name( $ctx, 'trimmed-name' );
+		$raw_name     = " \t" . $trimmed_name . " \n";
+		$value        = self::wrapped_value( 'trimmed', self::value( $ctx->fork( 'trimmed-name-value' ) ) );
+		$numeric_name = $ctx->int( 1000, 9999 );
+		$numeric_value = self::wrapped_value( 'numeric', self::value( $ctx->fork( 'numeric-name-value' ) ) );
+
+		$empty_get    = get_option( '', 'fallback' );
+		$empty_add    = add_option( '', 'value', '', false );
+		$space_update = update_option( " \t\n", 'value', false );
+		$zero_add     = add_option( '0', 'value', '', false );
+		$trim_add     = add_option( $raw_name, $value, '', false );
+		$trim_got     = get_option( $raw_name, self::missing_default( $trimmed_name ) );
+		$numeric_add  = add_option( $numeric_name, $numeric_value, '', false );
+		$numeric_got  = get_option( $numeric_name, self::missing_default( (string) $numeric_name ) );
+		$store        = self::option_store();
+		$trim_delete  = delete_option( $raw_name );
+		$numeric_delete = delete_option( $numeric_name );
+		$after_delete_store = self::option_store();
+
+		$ok = false === $empty_get
+			&& false === $empty_add
+			&& false === $space_update
+			&& false === $zero_add
+			&& true === $trim_add
+			&& isset( $store[ $trimmed_name ] )
+			&& ! isset( $store[ $raw_name ] )
+			&& self::same_value( $value, $trim_got )
+			&& true === $numeric_add
+			&& isset( $store[ (string) $numeric_name ] )
+			&& self::same_value( $numeric_value, $numeric_got )
+			&& true === $trim_delete
+			&& true === $numeric_delete
+			&& ! isset( $after_delete_store[ $trimmed_name ] )
+			&& ! isset( $after_delete_store[ (string) $numeric_name ] );
+
+		return $ctx->result(
+			'options-autoload.option-name-trimming-empty-zero-and-numeric-boundaries',
+			$ok,
+			array(
+				'trimmedName'       => $trimmed_name,
+				'numericName'       => $numeric_name,
+				'emptyGet'          => self::describe_value( $empty_get ),
+				'emptyAdd'          => $empty_add,
+				'spaceUpdate'       => $space_update,
+				'zeroAdd'           => $zero_add,
+				'trimAdd'           => $trim_add,
+				'trimStored'        => isset( $store[ $trimmed_name ] ),
+				'rawStored'         => isset( $store[ $raw_name ] ),
+				'numericAdd'        => $numeric_add,
+				'numericStored'     => isset( $store[ (string) $numeric_name ] ),
+				'trimDelete'        => $trim_delete,
+				'numericDelete'     => $numeric_delete,
+			)
+		);
+	}
+
+	private static function reset_runtime(): void {
+		if ( function_exists( 'wp_using_ext_object_cache' ) ) {
+			wp_using_ext_object_cache( false );
+		}
+		if ( function_exists( 'wp_installing' ) ) {
+			wp_installing( false );
+		}
+		if ( function_exists( 'wp_suspend_cache_addition' ) ) {
+			wp_suspend_cache_addition( false );
+		}
+
+		wp_cache_init();
+		$GLOBALS['wpdb'] = new \Component_Fuzz_WPDB_Stub(
+			array(
+				'component_fuzz_autoload_anchor' => array(
+					'option_value' => '1',
+					'autoload'     => 'on',
+				),
+				'blog_charset' => array(
+					'option_value' => 'UTF-8',
+					'autoload'     => 'on',
+				),
+			)
+		);
+		wp_cache_flush();
+	}
+
+	private static function snapshot_globals(): array {
+		$snapshot = array(
+			'cache_addition_suspended' => function_exists( 'wp_suspend_cache_addition' ) ? wp_suspend_cache_addition() : null,
+			'installing'               => function_exists( 'wp_installing' ) ? wp_installing() : null,
+			'globals'                  => array(),
+		);
+
+		foreach ( array( 'wp_object_cache', 'wpdb', 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', '_wp_using_ext_object_cache' ) as $name ) {
+			$snapshot['globals'][ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => $GLOBALS[ $name ] ?? null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		if ( function_exists( 'wp_suspend_cache_addition' ) && is_bool( $snapshot['cache_addition_suspended'] ) ) {
+			wp_suspend_cache_addition( $snapshot['cache_addition_suspended'] );
+		}
+		if ( function_exists( 'wp_installing' ) && is_bool( $snapshot['installing'] ) ) {
+			wp_installing( $snapshot['installing'] );
+		}
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function option_store(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_get_options();
+		}
+
+		return array();
+	}
+
+	private static function first_entry_with_membership( array $entries, bool $should_autoload ): array {
+		foreach ( $entries as $entry ) {
+			if ( $should_autoload === $entry['shouldAutoload'] ) {
+				return $entry;
+			}
+		}
+
+		throw new \RuntimeException( 'Missing alloptions transition fixture.' );
+	}
+
+	private static function value_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			null,
+			false,
+			true,
+			0,
+			'0',
+			'',
+			'plain text',
+			"line\nbreak\tvalue",
+			serialize( array( 'already' => 'serialized' ) ),
+			array( 'empty' => '', 'zero' => 0, 'false' => false, 'null' => null ),
+			(object) array( 'name' => 'object-like', 'nested' => array( 'x' => 1 ) ),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_VALUE_CASES; $i++ ) {
+			$cases[] = self::value( $ctx->fork( 'generated-value-' . $i ) );
+		}
+
+		return $cases;
+	}
+
+	private static function value( \ComponentFuzz\FuzzContext $ctx, int $depth = 0 ) {
+		if ( $depth >= 3 ) {
+			return self::scalar_value( $ctx );
+		}
+
+		$type = $ctx->weightedChoice(
+			array(
+				array( 8, 'null' ),
+				array( 10, 'bool' ),
+				array( 14, 'int' ),
+				array( 8, 'float' ),
+				array( 24, 'string' ),
+				array( 24, 'array' ),
+				array( 12, 'object' ),
+			)
+		);
+
+		if ( 'array' === $type ) {
+			$out   = array();
+			$count = $ctx->int( 0, 4 );
+			$list  = $ctx->bool();
+			for ( $i = 0; $i < $count; $i++ ) {
+				if ( $list ) {
+					$out[] = self::value( $ctx, $depth + 1 );
+				} else {
+					$out[ self::array_key( $ctx, $i ) ] = self::value( $ctx, $depth + 1 );
+				}
+			}
+			return $out;
+		}
+
+		if ( 'object' === $type ) {
+			$object = new \stdClass();
+			$count  = $ctx->int( 0, 3 );
+			for ( $i = 0; $i < $count; $i++ ) {
+				$property          = 'p' . $i . '_' . preg_replace( '/[^A-Za-z0-9_]/', '_', $ctx->identifier( 1, 8 ) );
+				$object->$property = self::value( $ctx, $depth + 1 );
+			}
+			return $object;
+		}
+
+		return self::scalar_value( $ctx, $type );
+	}
+
+	private static function scalar_value( \ComponentFuzz\FuzzContext $ctx, ?string $type = null ) {
+		$type = $type ?? $ctx->choice( array( 'null', 'bool', 'int', 'float', 'string' ) );
+
+		if ( 'null' === $type ) {
+			return null;
+		}
+		if ( 'bool' === $type ) {
+			return $ctx->bool();
+		}
+		if ( 'int' === $type ) {
+			return $ctx->int( -100000, 100000 );
+		}
+		if ( 'float' === $type ) {
+			return $ctx->int( -100000, 100000 ) / max( 1, $ctx->int( 1, 1000 ) );
+		}
+
+		return $ctx->choice(
+			array(
+				'',
+				'0',
+				'false',
+				'plain ascii',
+				"line\nbreak\tvalue",
+				"unicode-\xC3\xA9-\xE2\x98\x83",
+				$ctx->ascii( 0, 32 ),
+			)
+		);
+	}
+
+	private static function wrapped_value( string $label, $payload ): array {
+		return array(
+			'label'   => $label,
+			'payload' => $payload,
+		);
+	}
+
+	private static function option_name( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
+		return 'cfz_options_autoload_' . $ctx->iteration() . '_' . preg_replace( '/[^A-Za-z0-9_]+/', '_', $label ) . '_' . substr( sha1( $label . ':' . $ctx->seed() ), 0, 10 );
+	}
+
+	private static function array_key( \ComponentFuzz\FuzzContext $ctx, int $index ) {
+		if ( $ctx->bool( 25 ) ) {
+			return $index;
+		}
+
+		return 'k' . $index . '_' . preg_replace( '/[^A-Za-z0-9_]/', '_', $ctx->identifier( 1, 8 ) );
+	}
+
+	private static function missing_default( string $key ): array {
+		return array(
+			'component_fuzz_missing_option' => $key,
+		);
+	}
+
+	private static function expected_autoload( string $option, $value, $autoload ): string {
+		return wp_determine_option_autoload_value( $option, $value, self::stored_value( $value ), $autoload );
+	}
+
+	private static function stored_value( $value ): string {
+		return (string) maybe_serialize( $value );
+	}
+
+	private static function returned_value_for_storage( $value ) {
+		return maybe_unserialize( self::stored_value( $value ) );
+	}
+
+	private static function collect_failure( array &$failures, bool $ok, string $message, array $data = array() ): void {
+		if ( $ok ) {
+			return;
+		}
+
+		$failures[] = array(
+			'message' => $message,
+			'data'    => $data,
+		);
+	}
+
+	private static function same_value( $left, $right ): bool {
+		return serialize( $left ) === serialize( $right );
+	}
+
+	private static function describe_value( $value ) {
+		if ( is_string( $value ) ) {
+			return self::describe_string( $value );
+		}
+		if ( is_array( $value ) ) {
+			$out = array();
+			$i   = 0;
+			foreach ( $value as $key => $item ) {
+				if ( $i >= 8 ) {
+					$out['...'] = count( $value ) - $i;
+					break;
+				}
+				$out[ is_int( $key ) ? $key : self::escape_bytes( (string) $key ) ] = self::describe_value( $item );
+				++$i;
+			}
+			return $out;
+		}
+		if ( is_object( $value ) ) {
+			$out = array( 'class' => get_class( $value ) );
+			foreach ( get_object_vars( $value ) as $key => $item ) {
+				$out[ $key ] = self::describe_value( $item );
+			}
+			return $out;
+		}
+
+		return $value;
+	}
+
+	private static function describe_string( string $value ): array {
+		return array(
+			'bytes'   => strlen( $value ),
+			'preview' => self::escape_bytes( $value ),
+			'sha1'    => sha1( $value ),
+		);
+	}
+
+	private static function describe_throwable( \Throwable $e ): array {
+		return array(
+			'class'   => get_class( $e ),
+			'message' => self::escape_bytes( $e->getMessage() ),
+			'file'    => $e->getFile(),
+			'line'    => $e->getLine(),
+		);
+	}
+
+	private static function escape_bytes( string $value ): string {
+		return preg_replace_callback(
+			'/[^\x20-\x7E]/',
+			static function ( array $match ): string {
+				return sprintf( '\\x%02X', ord( $match[0] ) );
+			},
+			$value
+		);
+	}
+}

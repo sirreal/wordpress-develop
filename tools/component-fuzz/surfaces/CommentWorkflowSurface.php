@@ -151,9 +151,11 @@ final class CommentWorkflowSurface {
 	}
 
 	private static function check_allow_comment_decisions( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
-		$failures = array();
-		$post_id  = self::insert_post( $case, 'open' );
-		$data     = self::slashed_comment_data( $case, $post_id, 'duplicate seed ' . $case['token'] );
+		$failures       = array();
+		$post_id        = self::insert_post( $case, 'open' );
+		$duplicate_case = $case;
+		$duplicate_case['author'] = 'Duplicate Author ' . $case['token'];
+		$data           = self::slashed_comment_data( $duplicate_case, $post_id, 'duplicate seed ' . $case['token'] );
 		$first_id = \wp_insert_comment(
 			array_merge(
 				\wp_unslash( $data ),
