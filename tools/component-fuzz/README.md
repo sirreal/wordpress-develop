@@ -295,6 +295,10 @@ database, network requests, or a configured site.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, widget ID parsing, sidebar assignment moves/removals, and
   render callback wrapper output.
+- `wpdb-sql`: no-connection real `wpdb` SQL formatting coverage, including
+  placeholder count/type handling, `%i` identifier containment, literal percent
+  and LIKE escaping, malformed placeholders, and captured insert/update/delete/
+  replace builder SQL shape.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
   system method dispatch, method registry filters, demo helpers, and disabled
