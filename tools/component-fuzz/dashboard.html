@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">93</div>
-			<div class="good">README parity confirmed: 93 documented</div>
+			<div class="metric">94</div>
+			<div class="good">README parity confirmed: 94 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 9859 passed, 0 failed, 0 errored, 81 skipped at 93 surfaces over 3 iterations.</div>
+			<div class="note">Non-skipped pass rate: 9874 passed, 0 failed, 0 errored, 81 skipped at 94 surfaces over 3 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>image-metadata</code>: 600 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>utility-internals</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">5</div>
-			<div class="note">Five delegated surfaces are active. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">Three delegated surfaces are active and two worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -299,6 +299,13 @@
 					<td>Admin image metadata parser, EXIF/IPTC availability, local binary fixtures.</td>
 				</tr>
 				<tr>
+					<td><code>utility-internals</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; broad run: 9874 passed, 81 skipped, 0 failed.</td>
+					<td>List utilities, token maps, rewrite match substitution, URL pattern prefixing.</td>
+				</tr>
+				<tr>
 					<td><code>icons-connectors</code></td>
 					<td><span class="status work">worker active</span></td>
 					<td>Maxwell: <code>_work/component-fuzz-icons-connectors</code></td>
@@ -314,16 +321,16 @@
 				</tr>
 				<tr>
 					<td><code>error-protection</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">ready to integrate</span></td>
 					<td>Peirce: <code>_work/component-fuzz-error-protection</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Worker focused run: 800 passed, 100 skipped, 0 failed; smoke and diff check passed.</td>
 					<td>Recovery mode, paused extensions, fatal handler guards, no real exits or mail.</td>
 				</tr>
 				<tr>
 					<td><code>feed-parsers</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">ready to integrate</span></td>
 					<td>Mencius: <code>_work/component-fuzz-feed-parsers</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Worker focused run: 800 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
 					<td>RSS/Atom parsers, SimplePie adapters, bounded XML fixtures, temp cache paths.</td>
 				</tr>
 				<tr>

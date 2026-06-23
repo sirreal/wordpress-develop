@@ -260,6 +260,11 @@ database, network requests, or a configured site.
   install-package lifecycles, plugin/theme package validation helpers,
   no-update upgrade branches, auto-update decision filters, core version-policy
   decisions, and maintenance-mode writes against a temp filesystem only.
+- `utility-internals`: no-DB low-level utility coverage for `WP_List_Util`,
+  list helper wrappers, `WP_Token_Map`, `WP_MatchesMapRegex`, and
+  `WP_URL_Pattern_Prefixer`, including reference filter/pluck/sort oracles,
+  token lookup/precomputed table round trips, rewrite match substitution,
+  URL-pattern prefix escaping/idempotence boundaries, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting serialization, hidden column and meta-box
   preference defaults/saved values, screen option registration, filter locality,
@@ -536,6 +541,11 @@ activation or switching, full plugin/theme/core update execution, core
 loops, fatal-error loopback checks, and any process-exit paths. It exercises
 safe class/helper paths directly and only uses filters to short-circuit network
 or external filesystem credentials.
+The `utility-internals` surface focuses on deterministic pure-PHP helpers and
+does not replace higher-level rewrite, frontend-feature, or REST coverage that
+uses the same classes incidentally. Case-insensitive token-map assertions avoid
+known ambiguous overlapping-token inputs and keep exact lookup coverage over the
+full generated mapping.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 
