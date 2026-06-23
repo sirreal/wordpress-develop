@@ -66,13 +66,21 @@ final class KsesSurface {
 			);
 		}
 
-		$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
+		$global_snapshot = self::snapshot_globals( self::kses_global_names() );
+		try {
+			$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
+			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
 
-		$rng = self::rng( $seed );
-		for ( $case_index = 0; $case_index < $case_count; ++$case_index ) {
-			$case    = self::generate_case( $rng, $case_index );
-			$results = array_merge( $results, self::check_case( $seed, $case_index, $case ) );
+			$rng = self::rng( $seed );
+			for ( $case_index = 0; $case_index < $case_count; ++$case_index ) {
+				$case    = self::generate_case( $rng, $case_index );
+				$results = array_merge( $results, self::check_case( $seed, $case_index, $case ) );
+			}
+		} finally {
+			self::restore_globals( $global_snapshot );
 		}
+
+		$results[] = self::check_global_restoration( $seed, $global_snapshot );
 
 		return $results;
 	}
@@ -81,10 +89,12 @@ final class KsesSurface {
 		$results = array();
 		$results = array_merge( $results, self::check_wp_kses_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_wp_kses_post_invariants( $seed, $case_index, $case ) );
+		$results = array_merge( $results, self::check_wp_kses_data_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_bad_protocol_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_url_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_safecss_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_nohtml_invariants( $seed, $case_index, $case ) );
+		$results = array_merge( $results, self::check_entity_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_hair_parse_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_one_attr_invariants( $seed, $case_index, $case ) );
 
@@ -95,7 +105,7 @@ final class KsesSurface {
 		$results = array();
 
 		try {
-			$contexts = array( 'post', 'data', 'strip', 'entities' );
+			$contexts = array( 'post', 'data', 'strip', 'entities', 'user_description', 'pre_user_description' );
 			$counts   = array();
 			foreach ( $contexts as $context ) {
 				$allowed = \wp_kses_allowed_html( $context );
@@ -187,6 +197,211 @@ final class KsesSurface {
 		return $results;
 	}
 
+	private static function check_custom_policy_and_filter_invariants( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'apply_filters', 'safecss_filter_attr' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						null,
+						'kses.custom-policy-filters.available',
+						$function_name . '() is not loaded',
+						''
+					),
+				);
+			}
+		}
+
+		$results       = array();
+		$context       = 'component_fuzz_kses_' . substr( sha1( (string) $seed ), 0, 12 );
+		$pre_marker    = 'cf-pre-kses-' . substr( sha1( 'pre:' . $seed ), 0, 8 );
+		$custom_policy = self::custom_context_policy();
+		$protocols     = array( 'https', 'mailto' );
+		$html          = '<mark data-cf="safe" data-cf.bad="drop" class="drop">Custom &amp; text</mark>'
+			. '<a href="https://example.com/path" data-cf="link" onclick="evil()">Link</a>'
+			. '<strong>Plain</strong><mark data-cf-extra="tail">Tail</mark>';
+		$style_probe   = 'text-transform-case-probe:uppercase;color:red';
+
+		$post_before    = \wp_kses_allowed_html( 'post' );
+		$data_before    = \wp_kses_allowed_html( 'data' );
+		$current_before = $GLOBALS['wp_current_filter'] ?? null;
+
+		$allowed_filter = static function ( $allowed_html, $received_context ) use ( $context, $custom_policy ) {
+			if ( $received_context === $context ) {
+				return $custom_policy;
+			}
+
+			return $allowed_html;
+		};
+		$pre_filter     = static function ( $content, $allowed_html ) use ( $context, $pre_marker ) {
+			if ( $allowed_html === $context ) {
+				return $content . '<mark data-cf="pre">' . $pre_marker . '</mark>';
+			}
+
+			return $content;
+		};
+		$style_filter   = static function ( $properties ) {
+			$properties[] = 'text-transform-case-probe';
+			return $properties;
+		};
+
+		\add_filter( 'wp_kses_allowed_html', $allowed_filter, 10, 2 );
+		\add_filter( 'pre_kses', $pre_filter, 10, 3 );
+		\add_filter( 'safe_style_css', $style_filter, 10, 1 );
+
+		$filtered        = '';
+		$filtered_style  = '';
+		$policy_during   = null;
+		$post_during     = null;
+		$data_during     = null;
+		$exception       = null;
+		$filters_removed = false;
+
+		try {
+			$policy_during  = \wp_kses_allowed_html( $context );
+			$post_during    = \wp_kses_allowed_html( 'post' );
+			$data_during    = \wp_kses_allowed_html( 'data' );
+			$filtered       = \wp_kses( $html, $context, $protocols );
+			$filtered_style = \safecss_filter_attr( $style_probe );
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			\remove_filter( 'wp_kses_allowed_html', $allowed_filter, 10 );
+			\remove_filter( 'pre_kses', $pre_filter, 10 );
+			\remove_filter( 'safe_style_css', $style_filter, 10 );
+			$filters_removed = false === \has_filter( 'wp_kses_allowed_html', $allowed_filter )
+				&& false === \has_filter( 'pre_kses', $pre_filter )
+				&& false === \has_filter( 'safe_style_css', $style_filter );
+		}
+
+		if ( null !== $exception ) {
+			return array(
+				self::throwable_result(
+					$seed,
+					null,
+					'kses.custom-policy-and-filter-locality.no-throw',
+					$html,
+					$exception
+				),
+			);
+		}
+
+		$details = array(
+			'context'       => $context,
+			'outputPreview' => self::preview( $filtered ),
+			'stylePreview'  => self::preview( $filtered_style ),
+		);
+
+		if ( $custom_policy === $policy_during ) {
+			$results[] = self::pass( $seed, null, 'wp_kses_allowed_html.custom-context-policy-visible', $context, $details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				null,
+				'wp_kses_allowed_html.custom-context-policy-visible',
+				$context,
+				$custom_policy,
+				$policy_during,
+				$details
+			);
+		}
+
+		$violations = self::policy_violations( $filtered, $custom_policy, $protocols );
+		$violations = array_merge( $violations, self::attribute_boundary_violations( $filtered ) );
+		$violations = array_merge( $violations, self::comment_syntax_violations( $filtered ) );
+		if (
+			empty( $violations )
+			&& false !== strpos( $filtered, '<mark data-cf="safe">Custom &amp; text</mark>' )
+			&& false !== strpos( $filtered, '<a href="https://example.com/path" data-cf="link">Link</a>' )
+			&& false !== strpos( $filtered, $pre_marker )
+			&& false === strpos( $filtered, 'onclick' )
+			&& false === strpos( $filtered, '<strong' )
+		) {
+			$results[] = self::pass( $seed, null, 'wp_kses.custom-context-enforces-local-policy', $html, $details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				null,
+				'wp_kses.custom-context-enforces-local-policy',
+				$html,
+				'custom context keeps only its allowed tags/attributes and scoped pre_kses marker',
+				array(
+					'violations' => $violations,
+					'output'     => self::preview( $filtered ),
+				),
+				$details
+			);
+		}
+
+		if ( $post_before === $post_during && $data_before === $data_during ) {
+			$results[] = self::pass( $seed, null, 'wp_kses_allowed_html.custom-context-does-not-change-builtins', $context, $details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				null,
+				'wp_kses_allowed_html.custom-context-does-not-change-builtins',
+				$context,
+				'builtin post/data policies remain unchanged while custom filter is active',
+				array(
+					'postChanged' => $post_before !== $post_during,
+					'dataChanged' => $data_before !== $data_during,
+				),
+				$details
+			);
+		}
+
+		if ( 'text-transform-case-probe:uppercase;color:red' === $filtered_style ) {
+			$results[] = self::pass( $seed, null, 'safecss_filter_attr.safe_style_css-filter-locality-active', $style_probe, $details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				null,
+				'safecss_filter_attr.safe_style_css-filter-locality-active',
+				$style_probe,
+				'temporarily filtered property and baseline color rule',
+				$filtered_style,
+				$details
+			);
+		}
+
+		$post_after          = \wp_kses_allowed_html( 'post' );
+		$data_after          = \wp_kses_allowed_html( 'data' );
+		$custom_after        = \wp_kses_allowed_html( $context );
+		$style_after         = \safecss_filter_attr( $style_probe );
+		$current_after       = $GLOBALS['wp_current_filter'] ?? null;
+		$restoration_details = $details + array(
+			'filtersRemoved'    => $filters_removed,
+			'postRestored'      => $post_before === $post_after,
+			'dataRestored'      => $data_before === $data_after,
+			'customPolicyGone'  => $custom_after !== $custom_policy,
+			'styleAfterPreview' => self::preview( $style_after ),
+			'currentRestored'   => $current_before === $current_after,
+		);
+
+		if (
+			$filters_removed
+			&& $post_before === $post_after
+			&& $data_before === $data_after
+			&& $custom_after !== $custom_policy
+			&& 'color:red' === $style_after
+			&& $current_before === $current_after
+		) {
+			$results[] = self::pass( $seed, null, 'kses.custom-filters-restored', $context, $restoration_details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				null,
+				'kses.custom-filters-restored',
+				$context,
+				'custom KSES/CSS filters removed and builtin policies/filter stack restored',
+				$restoration_details,
+				$restoration_details
+			);
+		}
+
+		return $results;
+	}
+
 	private static function check_wp_kses_invariants( int $seed, int $case_index, array $case ): array {
 		$results   = array();
 		$html      = $case['html'];
@@ -227,6 +442,8 @@ final class KsesSurface {
 			}
 
 			$violations = self::policy_violations( $filtered, $policy, $protocols );
+			$violations = array_merge( $violations, self::attribute_boundary_violations( $filtered ) );
+			$violations = array_merge( $violations, self::comment_syntax_violations( $filtered ) );
 			if ( empty( $violations ) ) {
 				$results[] = self::pass( $seed, $case_index, 'wp_kses.strict-policy-enforced', $html, self::case_details( $case, $filtered ) );
 			} else {
@@ -238,6 +455,25 @@ final class KsesSurface {
 					'only tags, attributes, and URI protocols from the strict policy',
 					$violations,
 					self::case_details( $case, $filtered )
+				);
+			}
+
+			$missing_markers = self::missing_text_markers( $filtered, $case );
+			if ( empty( $missing_markers ) && self::strict_marker_attribute_retained( $filtered, $case ) ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses.strict-policy-retains-allowed-text-and-marker-attrs', $html, self::case_details( $case, $filtered ) );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses.strict-policy-retains-allowed-text-and-marker-attrs',
+					$html,
+					'generated allowed text markers and their data-* boundary attributes remain in strict output',
+					array(
+						'missingMarkers' => $missing_markers,
+						'markerAttr'     => self::marker_attribute_expectation( $case ),
+						'output'         => self::preview( $filtered ),
+					),
+					self::case_details( $case )
 				);
 			}
 
@@ -329,17 +565,39 @@ final class KsesSurface {
 			}
 
 			$violations = self::post_output_security_violations( $post, self::default_protocols() );
+			$violations = array_merge( $violations, self::style_attribute_violations( $post, self::default_protocols() ) );
+			$violations = array_merge( $violations, self::attribute_boundary_violations( $post ) );
+			$violations = array_merge( $violations, self::comment_syntax_violations( $post ) );
 			if ( empty( $violations ) ) {
-				$results[] = self::pass( $seed, $case_index, 'wp_kses_post.uri-attributes-safe', $html, self::case_details( $case, $post ) );
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_post.output-security-boundaries-safe', $html, self::case_details( $case, $post ) );
 			} else {
 				$results[] = self::fail(
 					$seed,
 					$case_index,
-					'wp_kses_post.uri-attributes-safe',
+					'wp_kses_post.output-security-boundaries-safe',
 					$html,
-					'no forbidden URI protocols in post-policy output attributes',
+					'no forbidden URI protocols, unsafe style rules, event handlers, raw attribute boundaries, or malformed comments',
 					$violations,
 					self::case_details( $case, $post )
+				);
+			}
+
+			$missing_markers = self::missing_text_markers( $post, $case );
+			if ( empty( $missing_markers ) && self::strict_marker_attribute_retained( $post, $case ) ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_post.retains-allowed-text-and-marker-attrs', $html, self::case_details( $case, $post ) );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses_post.retains-allowed-text-and-marker-attrs',
+					$html,
+					'generated allowed text markers and their data-* boundary attributes remain in post output',
+					array(
+						'missingMarkers' => $missing_markers,
+						'markerAttr'     => self::marker_attribute_expectation( $case ),
+						'output'         => self::preview( $post ),
+					),
+					self::case_details( $case )
 				);
 			}
 
@@ -359,6 +617,122 @@ final class KsesSurface {
 			}
 		} catch ( \Throwable $e ) {
 			$results[] = self::throwable_result( $seed, $case_index, 'wp_kses_post.invariants-no-throw', $html, $e, self::case_details( $case ) );
+		}
+
+		return $results;
+	}
+
+	private static function check_wp_kses_data_invariants( int $seed, int $case_index, array $case ): array {
+		$html = $case['html'];
+		foreach ( array( 'wp_kses_data', 'wp_filter_kses', 'add_filter', 'remove_filter', 'has_filter', 'apply_filters' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						$case_index,
+						'wp_kses_data.wrapper-functions.available',
+						$function_name . '() is not loaded',
+						$html
+					),
+				);
+			}
+		}
+
+		$results = array();
+		try {
+			$data    = \wp_kses_data( $html );
+			$direct  = \wp_kses( $html, 'data' );
+			$details = self::case_details( $case, $data );
+
+			if ( $data === $direct ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_data.equals-wp_kses-data-outside-filter', $html, $details );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses_data.equals-wp_kses-data-outside-filter',
+					$html,
+					'direct wp_kses($html, "data") output',
+					array(
+						'wpKsesData' => self::preview( $data ),
+						'direct'     => self::preview( $direct ),
+					),
+					$details
+				);
+			}
+
+			$violations = self::policy_violations( $data, \wp_kses_allowed_html( 'data' ), self::default_protocols() );
+			$violations = array_merge( $violations, self::style_attribute_violations( $data, self::default_protocols() ) );
+			$violations = array_merge( $violations, self::attribute_boundary_violations( $data ) );
+			$violations = array_merge( $violations, self::comment_syntax_violations( $data ) );
+			if ( empty( $violations ) ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_data.output-security-boundaries-safe', $html, $details );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses_data.output-security-boundaries-safe',
+					$html,
+					'data-policy output contains only allowed tags/attributes with safe values and comments',
+					$violations,
+					$details
+				);
+			}
+
+			$tag              = self::case_filter_tag( $seed, $case_index, 'data' );
+			$slashed_tag      = self::case_filter_tag( $seed, $case_index, 'filter' );
+			$current_before   = $GLOBALS['wp_current_filter'] ?? null;
+			$filtered_data    = null;
+			$filtered_slashed = null;
+
+			\add_filter( $tag, 'wp_kses_data' );
+			\add_filter( $slashed_tag, 'wp_filter_kses' );
+			try {
+				$filtered_data    = \apply_filters( $tag, $html );
+				$slashed          = addslashes( $html );
+				$filtered_slashed = \apply_filters( $slashed_tag, $slashed );
+			} finally {
+				\remove_filter( $tag, 'wp_kses_data' );
+				\remove_filter( $slashed_tag, 'wp_filter_kses' );
+			}
+
+			$expected_data    = \wp_kses( $html, $tag );
+			$expected_slashed = addslashes( \wp_kses( stripslashes( addslashes( $html ) ), $slashed_tag ) );
+			$current_after    = $GLOBALS['wp_current_filter'] ?? null;
+			$filter_details   = $details + array(
+				'dataTag'        => $tag,
+				'slashedTag'     => $slashed_tag,
+				'dataPreview'    => self::preview( (string) $filtered_data ),
+				'slashedPreview' => self::preview( (string) $filtered_slashed ),
+			);
+
+			if (
+				$expected_data === $filtered_data
+				&& $expected_slashed === $filtered_slashed
+				&& false === \has_filter( $tag, 'wp_kses_data' )
+				&& false === \has_filter( $slashed_tag, 'wp_filter_kses' )
+				&& $current_before === $current_after
+			) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_data.wp_filter_kses.current-filter-agreement-and-restoration', $html, $filter_details );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses_data.wp_filter_kses.current-filter-agreement-and-restoration',
+					$html,
+					'wrapper output agrees with current-filter wp_kses definitions and temporary filters are removed',
+					array(
+						'dataMatches'       => $expected_data === $filtered_data,
+						'slashedMatches'    => $expected_slashed === $filtered_slashed,
+						'dataFilterGone'    => false === \has_filter( $tag, 'wp_kses_data' ),
+						'slashedFilterGone' => false === \has_filter( $slashed_tag, 'wp_filter_kses' ),
+						'currentRestored'   => $current_before === $current_after,
+					),
+					$filter_details
+				);
+			}
+		} catch ( \Throwable $e ) {
+			$results[] = self::throwable_result( $seed, $case_index, 'wp_kses_data.wrapper-invariants-no-throw', $html, $e, self::case_details( $case ) );
 		}
 
 		return $results;
@@ -636,6 +1010,69 @@ final class KsesSurface {
 		return $results;
 	}
 
+	private static function check_entity_invariants( int $seed, int $case_index, array $case ): array {
+		$html = $case['html'];
+		foreach ( array( 'wp_kses_normalize_entities', 'wp_kses_decode_entities' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						$case_index,
+						'wp_kses.entity-helpers.available',
+						$function_name . '() is not loaded',
+						$html
+					),
+				);
+			}
+		}
+
+		$results = array();
+		try {
+			$normalized       = \wp_kses_normalize_entities( $html );
+			$normalized_again = \wp_kses_normalize_entities( $normalized );
+			$filtered         = \wp_kses( $html, self::strict_policy(), $case['protocols'] );
+			$filtered_again   = \wp_kses_normalize_entities( $filtered );
+			$details          = self::case_details( $case, $filtered ) + array(
+				'normalizedPreview' => self::preview( $normalized ),
+			);
+
+			if ( $normalized === $normalized_again ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses_normalize_entities.idempotent', $html, $details );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses_normalize_entities.idempotent',
+					$html,
+					$normalized,
+					$normalized_again,
+					$details
+				);
+			}
+
+			if ( $filtered === $filtered_again ) {
+				$results[] = self::pass( $seed, $case_index, 'wp_kses.output-entities-normalized', $html, $details );
+			} else {
+				$results[] = self::fail(
+					$seed,
+					$case_index,
+					'wp_kses.output-entities-normalized',
+					$html,
+					'strict wp_kses output is stable under entity normalization',
+					array(
+						'filtered'   => self::preview( $filtered ),
+						'normalized' => self::preview( $filtered_again ),
+					),
+					$details
+				);
+			}
+		} catch ( \Throwable $e ) {
+			$results[] = self::throwable_result( $seed, $case_index, 'wp_kses.entity-invariants-no-throw', $html, $e, self::case_details( $case ) );
+		}
+
+		return $results;
+	}
+
 	private static function check_hair_parse_invariants( int $seed, int $case_index, array $case ): array {
 		$attrs   = $case['attrs'];
 		$results = array();
@@ -783,18 +1220,21 @@ final class KsesSurface {
 			if ( ! isset( $case['protocols'] ) ) {
 				$case['protocols'] = self::random_protocols( $rng );
 			}
-			return $case;
+			return self::finalize_case( $case, $case_index );
 		}
 
 		$profile = self::rng_weighted(
 			$rng,
 			array(
-				'protocol-attributes' => 24,
-				'css-url-values'      => 18,
-				'foreign-content'     => 14,
-				'malformed-markup'    => 16,
-				'nested-tags'         => 18,
-				'byte-edges'          => 10,
+				'protocol-attributes' => 18,
+				'css-url-values'      => 14,
+				'foreign-content'     => 12,
+				'malformed-markup'    => 14,
+				'nested-tags'         => 16,
+				'comment-entities'    => 10,
+				'attribute-boundaries' => 10,
+				'allowed-matrix'      => 10,
+				'byte-edges'          => 8,
 			)
 		);
 
@@ -820,7 +1260,20 @@ final class KsesSurface {
 				$html = '<p ' . $attrs . '><<script>alert(1)</script><a href=' . $urls[0] . ' title="unterminated><img src="' . $urls[1] . '" onerror="evil()">';
 				break;
 			case 'nested-tags':
-				$html = self::random_nodes( $rng, 3, $urls, $css );
+				$html = self::random_nodes( $rng, 4, $urls, $css );
+				break;
+			case 'comment-entities':
+				$html = '<!--<img src=x onerror=evil()>--><!bogus><p title="&lt;safe&gt; &amp; &quot;quoted&quot;">'
+					. self::random_text( $rng )
+					. '</p><a href="' . self::rng_choice( $rng, $urls ) . '">entity &#x3c; text</a><!--dash---tail-->';
+				break;
+			case 'attribute-boundaries':
+				$html = '<a href="' . $urls[0] . '" title="quote &quot; apostrophe &#039; gt &gt;" data-safe="x>y" onclick="evil()">'
+					. 'boundary</a><p ' . $attrs . ' data-good="&lt;not-tag&gt;">attr text</p>'
+					. '<img src="' . $urls[1] . '" alt="bad`tick" onerror="evil()">';
+				break;
+			case 'allowed-matrix':
+				$html = self::allowed_matrix_html( $urls, $css );
 				break;
 			case 'byte-edges':
 				$html = "\x00\x01" . '<div ' . $attrs . '>bytes ' . self::random_text( $rng ) . "\x0B\x0C" . '<a href="' . $urls[0] . '">link</a></div>';
@@ -832,14 +1285,17 @@ final class KsesSurface {
 				break;
 		}
 
-		return array(
-			'profile'   => $profile,
-			'html'      => $html,
-			'urls'      => $urls,
-			'css'       => $css,
-			'attrs'     => $attrs,
-			'tag'       => $tag,
-			'protocols' => $protocols,
+		return self::finalize_case(
+			array(
+				'profile'   => $profile,
+				'html'      => $html,
+				'urls'      => $urls,
+				'css'       => $css,
+				'attrs'     => $attrs,
+				'tag'       => $tag,
+				'protocols' => $protocols,
+			),
+			$case_index
 		);
 	}
 
@@ -912,6 +1368,31 @@ final class KsesSurface {
 		);
 	}
 
+	private static function finalize_case( array $case, int $case_index ): array {
+		$marker = 'cf-kses-marker-' . $case_index . '-' . substr( sha1( $case['profile'] . ':' . $case_index ), 0, 8 );
+
+		$case['html'] .= '<p class="cf-marker" data-marker="' . $marker . '">' . $marker . '</p>';
+		$case['textMarkers'] = array_values(
+			array_unique(
+				array_merge(
+					$case['textMarkers'] ?? array(),
+					array( $marker )
+				)
+			)
+		);
+		$case['markerAttr'] = 'data-marker="' . $marker . '"';
+
+		return $case;
+	}
+
+	private static function allowed_matrix_html( array $urls, string $css ): string {
+		return '<p class="kept" title="allowed" data-safe="1" data-bad.dot="drop" onclick="evil()">Paragraph text</p>'
+			. '<span class="kept" data-name="value" aria-label="drop">Span text</span>'
+			. '<a href="' . $urls[0] . '" title="allowed" rel="nofollow" data-safe="1" style="' . $css . '" onmouseover="evil()">Anchor text</a>'
+			. '<strong>Strong text</strong><em>Em text</em><code>Code text</code>'
+			. '<img src="' . $urls[1] . '" alt="drop"><script>script text</script><iframe src="' . $urls[2] . '">frame text</iframe>';
+	}
+
 	private static function random_nodes( array &$rng, int $depth, array $urls, string $css ): string {
 		if ( $depth <= 0 ) {
 			return self::random_text( $rng );
@@ -925,7 +1406,20 @@ final class KsesSurface {
 				continue;
 			}
 
-			$tag   = self::rng_choice( $rng, array( 'a', 'div', 'span', 'p', 'strong', 'em', 'code', 'blockquote', 'ul', 'li', 'table', 'tr', 'td', 'script', 'style', 'iframe', 'custom-element' ) );
+			if ( self::rng_chance( $rng, 18 ) ) {
+				$out .= self::rng_choice(
+					$rng,
+					array(
+						'<!--<script>alert(1)</script>-->',
+						'<!bogus declaration>',
+						'</3 invalid close>',
+						'<!--dash---tail-->',
+					)
+				);
+				continue;
+			}
+
+			$tag   = self::rng_choice( $rng, array( 'a', 'div', 'span', 'p', 'strong', 'em', 'code', 'blockquote', 'ul', 'li', 'table', 'tr', 'td', 'script', 'style', 'iframe', 'template', 'object', 'custom-element' ) );
 			$attrs = self::random_attr_list( $rng, $urls );
 			if ( in_array( $tag, array( 'script', 'style', 'iframe' ), true ) ) {
 				$out .= '<' . $tag . ' ' . $attrs . '>alert(1)</' . $tag . '>';
@@ -943,9 +1437,14 @@ final class KsesSurface {
 		$names = array(
 			'href',
 			'src',
+			'srcset',
 			'poster',
 			'cite',
 			'background',
+			'action',
+			'formaction',
+			'longdesc',
+			'usemap',
 			'title',
 			'alt',
 			'class',
@@ -953,9 +1452,13 @@ final class KsesSurface {
 			'style',
 			'onclick',
 			'onload',
+			'onERROR',
+			'onmouseover',
 			'data-safe',
+			'data--odd',
 			'data-evil.dot',
 			'aria-label',
+			'aria-description',
 			'xlink:href',
 			'xml:space',
 			'disabled',
@@ -971,7 +1474,9 @@ final class KsesSurface {
 				continue;
 			}
 
-			if ( in_array( strtolower( $name ), self::uri_attributes(), true ) || 'xlink:href' === strtolower( $name ) ) {
+			if ( 'srcset' === strtolower( $name ) ) {
+				$value = self::rng_choice( $rng, $urls ) . ' 1x, https://example.com/safe.png 2x';
+			} elseif ( in_array( strtolower( $name ), self::uri_attributes(), true ) || 'xlink:href' === strtolower( $name ) ) {
 				$value = self::rng_choice( $rng, $urls );
 			} elseif ( 'style' === $name ) {
 				$value = self::random_css( $rng, $urls );
@@ -979,7 +1484,7 @@ final class KsesSurface {
 				$value = self::random_attr_value( $rng );
 			}
 
-			$quote = self::rng_choice( $rng, array( '"', "'", '' ) );
+			$quote = 'style' === strtolower( $name ) ? self::rng_choice( $rng, array( '"', "'" ) ) : self::rng_choice( $rng, array( '"', "'", '' ) );
 			if ( '' === $quote ) {
 				$value   = preg_replace( '/\s+/', '', $value );
 				$parts[] = $name . '=' . $value;
@@ -1044,9 +1549,12 @@ final class KsesSurface {
 						'var(--wp--preset--spacing--20)',
 						'repeat(2, minmax(0, 1fr))',
 						'linear-gradient(red, blue)',
+						'url("https://example.com/safe.png")',
+						'image-set(url(https://example.com/a.png) 1x, url(javascript:alert(1)) 2x)',
 						'expression(alert(1))',
 						'2px}',
 						'\\2px',
+						'calc(var(--gap, 1rem) + 2px)',
 					)
 				);
 			}
@@ -1076,14 +1584,25 @@ final class KsesSurface {
 				'javascript:alert(1)',
 				'JaVaScRiPt:alert(1)',
 				"java\t" . 'script:alert(1)',
+				"java\r\nscript:alert(1)",
 				'jav&#x09;ascript&#58;alert(1)',
+				'&#x6a;&#x61;vascript:alert(1)',
 				'javascript&#0000058alert(1)',
+				'javascript%3Aalert(1)',
+				'java%0Ascript:alert(1)',
+				'%6a%61vascript:alert(1)',
 				'feed:javascript:alert(1)',
 				'feed:feed:javascript:alert(1)',
 				'data:text/html,<svg/onload=alert(1)>',
+				'data:image/svg+xml,%3Csvg%20onload=alert(1)%3E',
 				'vbscript:msgbox(1)',
+				'file:///etc/passwd',
+				'blob:https://example.com/uuid',
 				"\x00javascript:alert(1)",
 				'http://[::FFFF::127.0.0.1]/?foo[bar]=baz',
+				'https://example.com/%3Cscript%3E?x=%26y%3D1',
+				'mailto:user@example.com?subject=%3Ctag%3E&body=Hi%0Athere',
+				'//user:pass@example.com/%2f%2e%2e',
 				'foo://example.com/custom',
 			)
 		);
@@ -1143,11 +1662,138 @@ final class KsesSurface {
 		);
 	}
 
+	private static function custom_context_policy(): array {
+		return array(
+			'a'    => array(
+				'href'    => true,
+				'data-cf' => true,
+			),
+			'mark' => array(
+				'data-cf'       => true,
+				'data-cf-extra' => true,
+			),
+		);
+	}
+
 	private static function post_output_security_violations( string $html, array $protocols ): array {
 		$allowed = function_exists( 'wp_kses_allowed_html' ) ? \wp_kses_allowed_html( 'post' ) : array();
 		$policy_violations = is_array( $allowed ) ? self::policy_violations( $html, $allowed, $protocols, false ) : array();
 
 		return $policy_violations;
+	}
+
+	private static function style_attribute_violations( string $html, array $protocols ): array {
+		$violations = array();
+		$styles     = self::style_attribute_values( $html );
+
+		foreach ( $styles as $style ) {
+			foreach ( self::css_policy_violations( self::decode_attribute_text( $style['value'] ), $protocols ) as $violation ) {
+				$violations[] = array(
+					'type'      => 'style-attribute',
+					'attribute' => 'style',
+					'offset'    => $style['offset'],
+					'violation' => $violation,
+				);
+			}
+		}
+
+		return $violations;
+	}
+
+	private static function style_attribute_values( string $html ): array {
+		$values = array();
+		if ( 1 !== preg_match_all( '/<\s*[A-Za-z][A-Za-z0-9:-]*\b([^<>]*)>/s', $html, $tags, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+			return $values;
+		}
+
+		foreach ( $tags as $tag ) {
+			$attr_text = $tag[1][0];
+			$attr_base = $tag[1][1];
+			if ( 1 === preg_match_all( '/\sstyle\s*=\s*(["\'])(.*?)\1/is', $attr_text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+				foreach ( $matches as $match ) {
+					$values[] = array(
+						'value'  => $match[2][0],
+						'offset' => $attr_base + $match[0][1],
+					);
+				}
+			}
+
+			if ( 1 === preg_match_all( '/\sstyle\s*=\s*([^\s"\'=<>`]+)/i', $attr_text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+				foreach ( $matches as $match ) {
+					$values[] = array(
+						'value'  => $match[1][0],
+						'offset' => $attr_base + $match[0][1],
+					);
+				}
+			}
+		}
+
+		return $values;
+	}
+
+	private static function attribute_boundary_violations( string $html ): array {
+		$violations = array();
+		if ( 1 !== preg_match_all( '/<\s*[A-Za-z][A-Za-z0-9:-]*\b([^<>]*)>/s', $html, $tags, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+			return $violations;
+		}
+
+		foreach ( $tags as $tag ) {
+			$attr_text = $tag[1][0];
+			$attr_base = $tag[1][1];
+			if ( 1 === preg_match_all( '/\s([A-Za-z_:][A-Za-z0-9_:\.-]*)\s*=\s*(["\'])(.*?)\2/s', $attr_text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+				foreach ( $matches as $match ) {
+					$value = $match[3][0];
+					if ( false !== strpos( $value, '<' ) || false !== strpos( $value, '>' ) ) {
+						$violations[] = array(
+							'type'      => 'raw-angle-in-quoted-attribute',
+							'attribute' => $match[1][0],
+							'value'     => self::preview( $value ),
+							'offset'    => $attr_base + $match[0][1],
+						);
+					}
+				}
+			}
+
+			if ( 1 === preg_match_all( '/\s([A-Za-z_:][A-Za-z0-9_:\.-]*)\s*=\s*`/s', $attr_text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+				foreach ( $matches as $match ) {
+					$violations[] = array(
+						'type'      => 'backtick-quoted-attribute',
+						'attribute' => $match[1][0],
+						'offset'    => $attr_base + $match[0][1],
+					);
+				}
+			}
+		}
+
+		return $violations;
+	}
+
+	private static function comment_syntax_violations( string $html ): array {
+		$violations = array();
+		$open_count  = substr_count( $html, '<!--' );
+		$close_count = substr_count( $html, '-->' );
+		if ( $open_count !== $close_count ) {
+			$violations[] = array(
+				'type'   => 'unbalanced-comment-boundary',
+				'opens'  => $open_count,
+				'closes' => $close_count,
+			);
+		}
+
+		if ( 1 === preg_match_all( '/<!--(.*?)-->/s', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+			foreach ( $matches as $match ) {
+				$content = $match[1][0];
+				if ( false !== strpos( $content, '--' ) || str_ends_with( $content, '-' ) ) {
+					$violations[] = array(
+						'type'    => 'unsafe-comment-dash-sequence',
+						'content' => self::preview( $content ),
+						'offset'  => $match[0][1],
+					);
+				}
+			}
+		}
+
+		return $violations;
 	}
 
 	private static function policy_violations( string $html, array $allowed_html, array $protocols, bool $tag_must_be_allowed = true ): array {
@@ -1621,6 +2267,42 @@ final class KsesSurface {
 		return array_values( array_unique( $pieces ) );
 	}
 
+	private static function missing_text_markers( string $html, array $case ): array {
+		$missing = array();
+		foreach ( $case['textMarkers'] ?? array() as $marker ) {
+			if ( false === strpos( $html, $marker ) ) {
+				$missing[] = $marker;
+			}
+		}
+
+		return $missing;
+	}
+
+	private static function marker_attribute_expectation( array $case ): string {
+		return (string) ( $case['markerAttr'] ?? '' );
+	}
+
+	private static function strict_marker_attribute_retained( string $html, array $case ): bool {
+		$marker_attr = self::marker_attribute_expectation( $case );
+		return '' === $marker_attr || false !== strpos( $html, $marker_attr );
+	}
+
+	private static function decode_attribute_text( string $value ): string {
+		if ( class_exists( '\WP_HTML_Decoder' ) && method_exists( '\WP_HTML_Decoder', 'decode_attribute' ) ) {
+			try {
+				return \WP_HTML_Decoder::decode_attribute( $value );
+			} catch ( \Throwable $e ) {
+				// Fall back to PHP's entity decoder below.
+			}
+		}
+
+		return html_entity_decode( $value, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+	}
+
+	private static function case_filter_tag( int $seed, int $case_index, string $purpose ): string {
+		return 'component_fuzz_kses_' . $purpose . '_' . substr( sha1( $seed . ':' . $case_index . ':' . $purpose ), 0, 12 );
+	}
+
 	private static function allowed_html_case_violations( array $allowed_html ): array {
 		$violations = array();
 		foreach ( $allowed_html as $tag => $attrs ) {
@@ -1733,6 +2415,88 @@ final class KsesSurface {
 		}
 
 		return array_values( array_unique( $out ) );
+	}
+
+	private static function kses_global_names(): array {
+		return array(
+			'pass_allowed_html',
+			'pass_allowed_protocols',
+			'wp_current_filter',
+		);
+	}
+
+	private static function check_global_restoration( int $seed, array $snapshot ): array {
+		$restored = self::globals_match( $snapshot );
+		$details  = array(
+			'globals'  => array_keys( $snapshot ),
+			'restored' => $restored,
+		);
+
+		if ( $restored ) {
+			return self::pass( $seed, null, 'kses.surface-global-state-restored', implode( ',', array_keys( $snapshot ) ), $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.surface-global-state-restored',
+			implode( ',', array_keys( $snapshot ) ),
+			'tracked KSES globals restored after surface execution',
+			array(
+				'before' => self::describe_global_snapshot( $snapshot ),
+				'after'  => self::describe_global_snapshot( self::snapshot_globals( array_keys( $snapshot ) ) ),
+			),
+			$details
+		);
+	}
+
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( empty( $entry['exists'] ) ) {
+				unset( $GLOBALS[ $name ] );
+			} else {
+				$GLOBALS[ $name ] = $entry['value'];
+			}
+		}
+	}
+
+	private static function globals_match( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( $exists !== (bool) $entry['exists'] ) {
+				return false;
+			}
+			if ( $exists && $GLOBALS[ $name ] != $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function describe_global_snapshot( array $snapshot ): array {
+		$described = array();
+		foreach ( $snapshot as $name => $entry ) {
+			$described[ $name ] = array(
+				'exists' => (bool) ( $entry['exists'] ?? false ),
+				'type'   => isset( $entry['value'] ) ? gettype( $entry['value'] ) : 'NULL',
+				'sha1'   => sha1( serialize( $entry['value'] ?? null ) ),
+			);
+		}
+
+		return $described;
 	}
 
 	private static function seed_from_context( $ctx ): int {

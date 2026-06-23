@@ -220,8 +220,9 @@ database, network requests, or a configured site.
   derived context/element helpers, and state/config merge serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
   nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
-- `kses`: KSES policies, protocol filtering, safe CSS, attribute parsing,
-  no-HTML filtering, strict/custom policy monotonicity.
+- `kses`: KSES policies, wrapper agreement, protocol filtering, safe CSS,
+  attribute/entity/comment handling, no-HTML filtering, custom context locality,
+  strict/custom policy monotonicity, and filter/global restoration.
 - `l10n`: translation fallbacks, escaped translation helpers, plural selection,
   textdomain load/unload state, locale determination, localized numbers/dates.
 - `translations`: no-DB POMO and translation-file parsing/loading coverage,
