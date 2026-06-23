@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7607 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7618 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Twenty-one integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Twenty-two integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -276,6 +276,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7607 passed, 62 skipped, 0 failed.</td>
 					<td><code>wp_mail()</code>, PHPMailer state reuse, recipient/header parsing, attachments, embeds, success/failure hooks.</td>
+				</tr>
+				<tr>
+					<td><code>block-widgets</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7618 passed, 62 skipped, 0 failed.</td>
+					<td><code>WP_Widget_Block</code>, legacy class matrix, malformed/unknown block fallbacks, sidebar widget mapping.</td>
 				</tr>
 				<tr>
 					<td><code>l10n</code></td>
@@ -576,6 +583,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>d744e80b6b</code></td>
+					<td><code>block-widgets</code></td>
+					<td>600 passed, 0 skipped, 0 failed.</td>
+					<td>7618 passed, 62 skipped, 0 failed at 2 iterations after legacy class matrix integration.</td>
+				</tr>
 				<tr>
 					<td><code>0a907d9fbc</code></td>
 					<td><code>mail</code></td>
