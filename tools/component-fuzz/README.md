@@ -25,6 +25,11 @@ network requests, or a configured site.
   locality, settings registry/default/sanitize callbacks, escaped settings
   field and nonce output, meta-box ordering/removal/callback args, and
   accordion section rendering.
+- `admin-workflows`: no-DB admin menu, list-table, and referer-helper
+  workflows, including menu/submenu global registration and removal, hook suffix
+  and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
+  pagination/columns/views/bulk actions/row actions/tablenav rendering, and
+  safe admin/AJAX nonce checks without process exits.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, prompt builder
   ability integration, cache and event adapters, and deterministic in-memory
@@ -170,6 +175,11 @@ Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page
 submission, `options.php` writes, user preference persistence, real post objects,
 and block-editor compatibility shims that would inspect installed plugins. The
+Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` request
+dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
+or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list
+table API with synthetic items and referer helpers only where valid nonces or
+`stop=false` avoid exits. The
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The

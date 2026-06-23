@@ -164,6 +164,19 @@ $required_functions = array(
 	'wp_replace_insecure_home_url',
 	'wp_get_https_detection_errors',
 	'status_header',
+	'add_menu_page',
+	'add_submenu_page',
+	'remove_menu_page',
+	'remove_submenu_page',
+	'menu_page_url',
+	'get_admin_page_parent',
+	'get_admin_page_title',
+	'get_plugin_page_hook',
+	'get_plugin_page_hookname',
+	'_get_list_table',
+	'register_column_headers',
+	'print_column_headers',
+	'get_hidden_columns',
 );
 
 $required_classes = array(
@@ -212,6 +225,7 @@ $required_classes = array(
 	'WP_oEmbed',
 	'WP_Admin_Bar',
 	'WP_Screen',
+	'WP_List_Table',
 	'IXR_Base64',
 	'IXR_Date',
 	'IXR_Error',
@@ -264,6 +278,178 @@ try {
 } catch ( Throwable $e ) {
 	fwrite( STDERR, 'Bootstrap init smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage() . "\n" );
 	exit( 1 );
+}
+
+$admin_workflows_snapshot = component_fuzz_smoke_snapshot_globals(
+	array(
+		'_GET',
+		'_POST',
+		'_REQUEST',
+		'admin_page_hooks',
+		'hook_suffix',
+		'menu',
+		'pagenow',
+		'parent_file',
+		'plugin_page',
+		'submenu',
+		'title',
+		'typenow',
+		'_parent_pages',
+		'_registered_pages',
+		'_wp_menu_nopriv',
+		'_wp_real_parent_file',
+		'_wp_submenu_nopriv',
+	)
+);
+$admin_workflows_cap_filter = static function ( array $allcaps ): array {
+	$allcaps['manage_options'] = true;
+	return $allcaps;
+};
+
+add_filter( 'user_has_cap', $admin_workflows_cap_filter, 10, 4 );
+
+try {
+	$GLOBALS['menu']                 = array();
+	$GLOBALS['submenu']              = array();
+	$GLOBALS['admin_page_hooks']     = array();
+	$GLOBALS['_registered_pages']    = array();
+	$GLOBALS['_parent_pages']        = array();
+	$GLOBALS['_wp_real_parent_file'] = array();
+	$GLOBALS['_wp_submenu_nopriv']   = array();
+	$GLOBALS['_wp_menu_nopriv']      = array();
+	$GLOBALS['pagenow']              = 'admin.php';
+	$_GET                            = array();
+	$_POST                           = array();
+	$_REQUEST                        = array( 'paged' => 1 );
+
+	$top_hook = add_menu_page(
+		'Component Fuzz Smoke',
+		'Component Fuzz',
+		'manage_options',
+		'cfz-smoke.php',
+		'',
+		'dashicons-admin-tools',
+		65
+	);
+	$sub_hook = add_submenu_page(
+		'cfz-smoke.php',
+		'Component Fuzz Submenu',
+		'Submenu',
+		'manage_options',
+		'cfz-smoke-sub',
+		'',
+		1
+	);
+	$url      = menu_page_url( 'cfz-smoke-sub', false );
+
+	if ( ! is_string( $top_hook ) || '' === $top_hook || ! is_string( $sub_hook ) || '' === $sub_hook || '' === $url ) {
+		throw new RuntimeException( 'Admin menu helpers did not register smoke pages.' );
+	}
+
+	$screen = convert_to_screen( 'cfz-smoke-list' );
+	$table  = new class( $screen ) extends WP_List_Table {
+		public function __construct( WP_Screen $screen ) {
+			parent::__construct(
+				array(
+					'ajax'     => false,
+					'plural'   => 'cfz_smoke_items',
+					'screen'   => $screen,
+					'singular' => 'cfz_smoke_item',
+				)
+			);
+		}
+
+		public function get_columns(): array {
+			return array(
+				'cb'    => '<span class="screen-reader-text">Select</span>',
+				'title' => 'Title',
+			);
+		}
+
+		public function prepare_items(): void {
+			$this->items = array(
+				array(
+					'id'    => 1,
+					'title' => 'Smoke Item',
+				),
+			);
+			$this->set_pagination_args(
+				array(
+					'per_page'    => 1,
+					'total_items' => 1,
+					'total_pages' => 1,
+				)
+			);
+		}
+
+		protected function column_cb( $item ): string {
+			return '<input type="checkbox" name="cfz_smoke_item[]" value="' . esc_attr( $item['id'] ) . '" />';
+		}
+
+		public function column_title( $item ): string {
+			return esc_html( $item['title'] );
+		}
+	};
+
+	$table->prepare_items();
+	ob_start();
+	$table->display();
+	$table_html = (string) ob_get_clean();
+
+	remove_filter( "manage_{$screen->id}_columns", array( $table, 'get_columns' ), 0 );
+
+	if (
+		! str_contains( $table_html, 'wp-list-table' )
+		|| ! str_contains( $table_html, 'Smoke Item' )
+		|| ! str_contains( $table_html, 'name="_wpnonce"' )
+	) {
+		throw new RuntimeException( 'Synthetic list table smoke path did not render expected markup.' );
+	}
+} catch ( Throwable $e ) {
+	fwrite( STDERR, 'Admin workflows smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage() . "\n" );
+	exit( 1 );
+} finally {
+	remove_filter( 'user_has_cap', $admin_workflows_cap_filter, 10 );
+	component_fuzz_smoke_restore_globals( $admin_workflows_snapshot );
+}
+
+function component_fuzz_smoke_snapshot_globals( array $names ): array {
+	$snapshot = array();
+
+	foreach ( $names as $name ) {
+		$snapshot[ $name ] = array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => array_key_exists( $name, $GLOBALS ) ? component_fuzz_smoke_clone_value( $GLOBALS[ $name ] ) : null,
+		);
+	}
+
+	return $snapshot;
+}
+
+function component_fuzz_smoke_restore_globals( array $snapshot ): void {
+	foreach ( $snapshot as $name => $entry ) {
+		if ( $entry['exists'] ) {
+			$GLOBALS[ $name ] = component_fuzz_smoke_clone_value( $entry['value'] );
+		} else {
+			unset( $GLOBALS[ $name ] );
+		}
+	}
+}
+
+function component_fuzz_smoke_clone_value( $value ) {
+	if ( is_array( $value ) ) {
+		$copy = array();
+		foreach ( $value as $key => $item ) {
+			$copy[ $key ] = component_fuzz_smoke_clone_value( $item );
+		}
+		return $copy;
+	}
+
+	if ( is_object( $value ) ) {
+		return clone $value;
+	}
+
+	return $value;
 }
 
 $sample_html = wp_kses_post( '<script>alert(1)</script><p onclick="x">ok</p>' );

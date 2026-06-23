@@ -433,6 +433,9 @@ final class WpBootstrap {
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/class-wp-screen.php',
 			'wp-admin/includes/screen.php',
+			'wp-admin/includes/class-wp-list-table.php',
+			'wp-admin/includes/class-wp-list-table-compat.php',
+			'wp-admin/includes/list-table.php',
 			'wp-admin/includes/post.php',
 			'wp-admin/includes/template.php',
 			'wp-admin/includes/update.php',
@@ -477,6 +480,9 @@ final class WpBootstrap {
 		}
 		if ( ! isset( $GLOBALS['table_prefix'] ) ) {
 			$GLOBALS['table_prefix'] = 'wp_';
+		}
+		if ( ! isset( $GLOBALS['wp_plugin_paths'] ) || ! is_array( $GLOBALS['wp_plugin_paths'] ) ) {
+			$GLOBALS['wp_plugin_paths'] = array();
 		}
 		if ( ! isset( $GLOBALS['_wp_switched_stack'] ) || ! is_array( $GLOBALS['_wp_switched_stack'] ) ) {
 			$GLOBALS['_wp_switched_stack'] = array();
