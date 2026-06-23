@@ -31,6 +31,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_post_types_controller( $ctx );
 			$rows[] = self::check_post_statuses_controller( $ctx );
 			$rows[] = self::check_taxonomies_controller( $ctx );
+			$rows[] = self::check_additional_fields_controller_callbacks( $ctx );
 			$rows[] = self::check_settings_controller( $ctx );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_patterns_controller( $ctx );
@@ -721,6 +722,320 @@ final class RestControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-controllers.taxonomies.registry-context-links',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_additional_fields_controller_callbacks( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case         = self::additional_field_case( $ctx->fork( 'additional-fields' ) );
+		$controller   = new \WP_REST_Post_Types_Controller();
+		$failures     = array();
+		$get_calls    = array();
+		$update_calls = array();
+
+		$registered = \register_post_type(
+			$case['postType'],
+			array(
+				'label'        => $case['label'],
+				'public'       => true,
+				'show_in_rest' => true,
+				'rest_base'    => $case['restBase'],
+				'rewrite'      => false,
+				'query_var'    => false,
+				'show_ui'      => true,
+			)
+		);
+
+		\register_rest_field(
+			'type',
+			$case['field'],
+			array(
+				'get_callback'    => static function ( array $prepared, string $field_name, \WP_REST_Request $request, string $object_type ) use ( $case, &$get_calls ): array {
+					$get_calls[] = array(
+						'field'      => $field_name,
+						'objectType' => $object_type,
+						'context'    => $request['context'],
+						'slug'       => $prepared['slug'] ?? null,
+					);
+
+					return array(
+						'label'  => $case['readLabel'],
+						'nested' => array(
+							'editOnly' => $case['nestedEdit'],
+							'viewOnly' => $case['nestedView'],
+						),
+					);
+				},
+				'update_callback' => static function ( $value, object $object, string $field_name, \WP_REST_Request $request, string $object_type ) use ( $case, &$update_calls ) {
+					$update_calls[] = array(
+						'field'      => $field_name,
+						'objectType' => $object_type,
+						'context'    => $request['context'],
+						'objectName' => $object->name ?? null,
+						'value'      => $value,
+					);
+
+					if ( is_array( $value ) && $case['invalidUpdateLabel'] === ( $value['label'] ?? null ) ) {
+						return new \WP_Error(
+							'rest_component_fuzz_additional_field_rejected',
+							'Generated REST additional field rejected.',
+							array( 'status' => 400 )
+						);
+					}
+
+					return true;
+				},
+				'schema'          => array(
+					'description'          => 'Generated REST controller additional field.',
+					'type'                 => 'object',
+					'context'              => array( 'edit' ),
+					'properties'           => array(
+						'label'  => array(
+							'type'    => 'string',
+							'context' => array( 'edit' ),
+						),
+						'nested' => array(
+							'type'                 => 'object',
+							'context'              => array( 'edit' ),
+							'properties'           => array(
+								'editOnly' => array(
+									'type'    => 'string',
+									'context' => array( 'edit' ),
+								),
+								'viewOnly' => array(
+									'type'    => 'string',
+									'context' => array( 'view' ),
+								),
+							),
+							'additionalProperties' => false,
+						),
+					),
+					'additionalProperties' => false,
+				),
+			)
+		);
+
+		$schema       = $controller->get_item_schema();
+		$field_schema = $schema['properties'][ $case['field'] ] ?? array();
+		self::collect_failure(
+			$failures,
+			$registered instanceof \WP_Post_Type
+				&& array( 'edit' ) === ( $field_schema['context'] ?? null )
+				&& false === ( $field_schema['additionalProperties'] ?? null )
+				&& false === ( $field_schema['properties']['nested']['additionalProperties'] ?? null )
+				&& array( 'edit' ) === ( $field_schema['properties']['nested']['properties']['editOnly']['context'] ?? null )
+				&& array( 'view' ) === ( $field_schema['properties']['nested']['properties']['viewOnly']['context'] ?? null ),
+			'additional REST field schema is registered with nested context and closed object contracts',
+			array(
+				'case'        => $case,
+				'fieldSchema' => $field_schema,
+				'registered'  => $registered,
+			)
+		);
+
+		$cap_filter = self::install_cap_filter( array( $registered instanceof \WP_Post_Type ? $registered->cap->edit_posts : 'edit_posts' ) );
+		try {
+			$limited_item = $controller->get_item(
+				self::request(
+					'GET',
+					'/wp/v2/types/' . $case['postType'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'slug',
+					),
+					array( 'type' => $case['postType'] )
+				)
+			);
+			$limited_get_calls = $get_calls;
+
+			$edit_item = $controller->get_item(
+				self::request(
+					'GET',
+					'/wp/v2/types/' . $case['postType'],
+					array( 'context' => 'edit' ),
+					array( 'type' => $case['postType'] )
+				)
+			);
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+		}
+
+		$limited_data = $limited_item instanceof \WP_REST_Response ? $limited_item->get_data() : array();
+		$limited_keys = array_keys( $limited_data );
+		sort( $limited_keys );
+		$edit_data    = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
+		$field_value  = $edit_data[ $case['field'] ] ?? null;
+		$filtered_view = \rest_filter_response_by_context(
+			array(
+				'slug'         => $case['postType'],
+				$case['field'] => array(
+					'label'  => $case['readLabel'],
+					'nested' => array(
+						'editOnly' => $case['nestedEdit'],
+						'viewOnly' => $case['nestedView'],
+					),
+				),
+			),
+			$schema,
+			'view'
+		);
+		$filtered_edit = \rest_filter_response_by_context(
+			array(
+				'slug'         => $case['postType'],
+				$case['field'] => array(
+					'label'  => $case['readLabel'],
+					'nested' => array(
+						'editOnly' => $case['nestedEdit'],
+						'viewOnly' => $case['nestedView'],
+					),
+				),
+			),
+			$schema,
+			'edit'
+		);
+		self::collect_failure(
+			$failures,
+			$limited_item instanceof \WP_REST_Response
+				&& array( 'slug' ) === $limited_keys
+				&& array() === $limited_get_calls
+				&& $edit_item instanceof \WP_REST_Response
+				&& array(
+					array(
+						'field'      => $case['field'],
+						'objectType' => 'type',
+						'context'    => 'edit',
+						'slug'       => $case['postType'],
+					),
+				) === $get_calls
+				&& is_array( $field_value )
+				&& $case['readLabel'] === ( $field_value['label'] ?? null )
+				&& $case['nestedEdit'] === ( $field_value['nested']['editOnly'] ?? null )
+				&& ! isset( $field_value['nested']['viewOnly'] )
+				&& ! isset( $filtered_view[ $case['field'] ] )
+				&& $case['nestedEdit'] === ( $filtered_edit[ $case['field'] ]['nested']['editOnly'] ?? null )
+				&& ! isset( $filtered_edit[ $case['field'] ]['nested']['viewOnly'] ),
+			'additional REST field get callbacks respect _fields and schema context pruning',
+			array(
+				'limitedData'     => $limited_data,
+				'limitedGetCalls' => $limited_get_calls,
+				'editData'        => $edit_data,
+				'getCalls'        => $get_calls,
+				'filteredView'    => $filtered_view,
+				'filteredEdit'    => $filtered_edit,
+			)
+		);
+
+		$valid_schema = true === \rest_validate_value_from_schema(
+			$field_value,
+			$field_schema,
+			$case['field']
+		);
+		$extra_property_invalid = \rest_validate_value_from_schema(
+			array(
+				'label'  => $case['readLabel'],
+				'nested' => array(
+					'editOnly' => $case['nestedEdit'],
+				),
+				'extra'  => 'not allowed',
+			),
+			$field_schema,
+			$case['field']
+		);
+
+		$data_object = $registered instanceof \WP_Post_Type ? $registered : (object) array( 'name' => $case['postType'] );
+		$update_value = array(
+			'label'  => $case['updateLabel'],
+			'nested' => array(
+				'editOnly' => $case['nestedUpdate'],
+			),
+		);
+		$update_request = self::request(
+			'PUT',
+			'/wp/v2/types/' . $case['postType'],
+			array( 'context' => 'edit' ),
+			array( 'type' => $case['postType'] )
+		);
+		$update_request->set_body_params( array( $case['field'] => $update_value ) );
+		$update_result = self::invoke_object_method(
+			$controller,
+			'update_additional_fields_for_object',
+			array( $data_object, $update_request )
+		);
+
+		$missing_update_request = self::request(
+			'PUT',
+			'/wp/v2/types/' . $case['postType'],
+			array( 'context' => 'edit' ),
+			array( 'type' => $case['postType'] )
+		);
+		$missing_update_result = self::invoke_object_method(
+			$controller,
+			'update_additional_fields_for_object',
+			array( $data_object, $missing_update_request )
+		);
+
+		$invalid_update_value = array(
+			'label'  => $case['invalidUpdateLabel'],
+			'nested' => array(
+				'editOnly' => $case['nestedUpdate'],
+			),
+		);
+		$invalid_update_request = self::request(
+			'PUT',
+			'/wp/v2/types/' . $case['postType'],
+			array( 'context' => 'edit' ),
+			array( 'type' => $case['postType'] )
+		);
+		$invalid_update_request->set_body_params( array( $case['field'] => $invalid_update_value ) );
+		$invalid_update_result = self::invoke_object_method(
+			$controller,
+			'update_additional_fields_for_object',
+			array( $data_object, $invalid_update_request )
+		);
+
+		self::collect_failure(
+			$failures,
+			$valid_schema
+				&& $extra_property_invalid instanceof \WP_Error
+				&& true === $update_result
+				&& true === $missing_update_result
+				&& self::wp_error_ok( $invalid_update_result, 'rest_component_fuzz_additional_field_rejected', 400 )
+				&& array(
+					array(
+						'field'      => $case['field'],
+						'objectType' => 'type',
+						'context'    => 'edit',
+						'objectName' => $case['postType'],
+						'value'      => $update_value,
+					),
+					array(
+						'field'      => $case['field'],
+						'objectType' => 'type',
+						'context'    => 'edit',
+						'objectName' => $case['postType'],
+						'value'      => $invalid_update_value,
+					),
+				) === $update_calls,
+			'additional REST field schema validation and update callbacks preserve success, absence, and WP_Error results',
+			array(
+				'validSchema'          => $valid_schema,
+				'extraPropertyInvalid' => $extra_property_invalid,
+				'updateResult'         => $update_result,
+				'missingUpdateResult'  => $missing_update_result,
+				'invalidUpdateResult'  => $invalid_update_result,
+				'updateCalls'          => $update_calls,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.additional-fields.context-update-schema',
 			array() === $failures,
 			array(
 				'case'     => $case,
@@ -1635,6 +1950,22 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function additional_field_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		return array(
+			'postType'           => self::name_token( $ctx->fork( 'post-type' ), 'cfzpt', 20 ),
+			'restBase'           => self::route_token( $ctx->fork( 'rest-base' ), 'cfz-rest' ),
+			'field'              => self::name_token( $ctx->fork( 'field' ), 'cfzfield', 32 ),
+			'label'              => 'Additional Field Type ' . $ctx->int( 1, 999 ),
+			'readLabel'          => 'read-' . $token,
+			'nestedEdit'         => 'edit-' . substr( hash( 'crc32b', $token . '-edit' ), 0, 8 ),
+			'nestedView'         => 'view-' . substr( hash( 'crc32b', $token . '-view' ), 0, 8 ),
+			'updateLabel'        => 'update-' . substr( hash( 'crc32b', $token . '-update' ), 0, 8 ),
+			'nestedUpdate'       => 'updated-' . substr( hash( 'crc32b', $token . '-nested-update' ), 0, 8 ),
+			'invalidUpdateLabel' => 'reject-' . substr( hash( 'crc32b', $token . '-reject' ), 0, 8 ),
+		);
+	}
+
 	private static function settings_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token         = substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
 		$array_token   = substr( hash( 'crc32b', (string) $ctx->fork( 'array' )->seed() ), 0, 8 );
@@ -2055,6 +2386,11 @@ final class RestControllersSurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function invoke_object_method( object $object, string $method, array $args = array() ) {
+		$reflection = new \ReflectionMethod( $object, $method );
+		return $reflection->invokeArgs( $object, $args );
 	}
 
 	private static function get_static_property( string $class, string $property ) {
