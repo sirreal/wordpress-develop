@@ -83,6 +83,11 @@ database, network requests, or a configured site.
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
   cancellation, fragment stripping, and query-argument removal contracts.
+- `classic-walkers`: deterministic Walker base and classic walker coverage,
+  including `walk()`, `paged_walk()`, direct `display_element()` traversal,
+  page/category/comment/nav rendering, current/selected classes, admin nav menu
+  checklist/edit field names, bounded HTML balance, escaping contracts, and
+  global/filter/superglobal/output-buffer restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
@@ -326,6 +331,10 @@ database, network requests, or a configured site.
   placeholder count/type handling, `%i` identifier containment, literal percent
   and LIKE escaping, malformed placeholders, and captured insert/update/delete/
   replace builder SQL shape.
+- `wxr-export`: subprocess-isolated WXR export coverage over deterministic
+  synthetic posts, terms, authors, comments, and meta, including export
+  argument filtering, XML/CDATA/UTF-8 safety, meta skip filters, author and term
+  ordering, header observability, and state restoration.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
   system method dispatch, method registry filters, demo helpers, and disabled
@@ -406,10 +415,9 @@ paths and avoids install, update, remote lookup, and destructive REST delete
 methods.
 The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
-metadata lifecycle APIs; it is not a general SQL engine. Post-to-term
-relationship coverage remains limited to simple recognized term relationship
-queries, and deeper taxonomy assignment behavior is not treated as fully
-covered.
+metadata lifecycle APIs; it is not a general SQL engine. Rich post-to-term
+relationship behavior is covered by `taxonomy-relationships`, still limited to
+the recognized term relationship SQL shapes emitted by the targeted core APIs.
 The `auth-flow` surface short-circuits auth cookie sending and avoids browser
 redirect/login-form dispatch, real mail, application-password API requests, and
 process-exit paths.
@@ -417,10 +425,21 @@ The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
 redirects, attachment-page redirects, and paths that call `wp_redirect()` and
 `exit` are intentionally avoided.
+The `classic-walkers` surface uses synthetic objects, object-cache fixtures, and
+local filters only. It loads the single comment/admin walker class files when
+available, but avoids nav menu AJAX quick-search, meta-box pagination, browser
+admin page dispatch, and any DB-backed menu/page/category/comment queries.
 The `import-diff` surface covers importer registry, importer form, imported
-comment lookup, text diff, and error-transfer helpers without invoking WXR
-`export_wp()` headers, remote importer discovery, upload handling, or importer
-dispatch screens.
+comment lookup, text diff, and error-transfer helpers without remote importer
+discovery, upload handling, or importer dispatch screens. WXR download
+generation is covered separately by `wxr-export`.
+The `wxr-export` surface invokes actual `export_wp()` once per isolated PHP
+subprocess because core defines `wxr_*` helper functions inside that function.
+It uses a surface-local in-memory `wpdb` double and deterministic fixtures only;
+it does not use a live database, contact the network, or write download files.
+PHP CLI usually does not expose `header()` calls through `headers_list()`, so
+filename/content-type checks are asserted when observable and otherwise recorded
+as explicit skips while the filename filter invocation remains captured.
 The `media-ingest` surface uses local temp files only, routes uploads through a
 filtered temp upload root, and passes a custom upload action for
 `media_handle_upload()` so CLI fixtures use core's readable-file branch instead
