@@ -212,7 +212,7 @@
 			<div class="note">Scope: broad WordPress component fuzzing with deterministic generators and explicit invariants.</div>
 		</div>
 		<div class="updated">
-			Updated: 2026-06-23<br>
+			Updated: 2026-06-24<br>
 			Branch: <code>component-fuzzers</code>
 		</div>
 	</header>
@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7565 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7577 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Fifteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Sixteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">No delegated rich-surface workers are active. New workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">1</div>
+			<div class="note">Kant the 2nd is active on <code>l10n</code> in <code>_work/component-fuzz-l10n-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -256,6 +256,20 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>l10n</code></td>
+					<td><span class="status work">delegated active</span></td>
+					<td>Kant the 2nd / <code>_work/component-fuzz-l10n-rich</code></td>
+					<td>Worker assigned focused 100-iteration and broad 2-iteration validation; integration pending.</td>
+					<td>Translation globals, MO files, locale switching, escaped/nooped plural helpers.</td>
+				</tr>
+				<tr>
+					<td><code>privacy</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 7577 passed, 63 skipped, 0 failed.</td>
+					<td>User requests, request keys, exporter/eraser registries, temp export paths, privacy policy content.</td>
+				</tr>
 				<tr>
 					<td><code>appearance-media</code></td>
 					<td><span class="status good">local validation passed</span></td>
@@ -534,6 +548,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>3f967115f8</code></td>
+					<td><code>privacy</code></td>
+					<td>1300 passed, 0 skipped, 0 failed.</td>
+					<td>7577 passed, 63 skipped, 0 failed at 2 iterations after privacy lifecycle/export cleanup integration.</td>
+				</tr>
 				<tr>
 					<td><code>df78e95206</code></td>
 					<td><code>metadata</code></td>
