@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7667 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7678 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Thirty-one integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
+			<div class="note">Thirty-two integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -498,8 +498,8 @@
 					<td><code>shortcodes</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 1200 passed, 0 skipped, 0 failed; latest broad run: 7565 passed, 62 skipped, 0 failed.</td>
-					<td>Registry, attributes, dynamic filters, rendering filters, tag discovery, aliasing, malformed/nested cases.</td>
+					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 7678 passed, 63 skipped, 0 failed.</td>
+					<td>Registry, attributes, dynamic filters, rendering filters, strip filters, tag discovery, aliasing, malformed/nested cases.</td>
 				</tr>
 				<tr>
 					<td><code>cron</code></td>
@@ -625,6 +625,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>9b99f0ea11</code></td>
+					<td><code>shortcodes</code></td>
+					<td>1300 passed, 0 skipped, 0 failed.</td>
+					<td>7678 passed, 63 skipped, 0 failed at 2 iterations after <code>strip_shortcodes_tagnames</code> filter coverage.</td>
+				</tr>
 				<tr>
 					<td><code>d3b4aa01ff</code></td>
 					<td><code>email</code></td>
