@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">94</div>
-			<div class="good">README parity confirmed: 94 documented</div>
+			<div class="metric">95</div>
+			<div class="good">README parity confirmed: 95 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 9874 passed, 0 failed, 0 errored, 81 skipped at 94 surfaces over 3 iterations.</div>
+			<div class="note">Non-skipped pass rate: 9898 passed, 0 failed, 0 errored, 84 skipped at 95 surfaces over 3 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>utility-internals</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>error-protection</code>: 800 passed, 100 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">5</div>
-			<div class="note">Three delegated surfaces are active and two worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">One delegated surface is active and three worker results are ready. All workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -321,9 +321,9 @@
 				</tr>
 				<tr>
 					<td><code>error-protection</code></td>
-					<td><span class="status wait">ready to integrate</span></td>
-					<td>Peirce: <code>_work/component-fuzz-error-protection</code></td>
-					<td>Worker focused run: 800 passed, 100 skipped, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 100 skipped, 0 failed; broad run: 9898 passed, 84 skipped, 0 failed.</td>
 					<td>Recovery mode, paused extensions, fatal handler guards, no real exits or mail.</td>
 				</tr>
 				<tr>
@@ -359,6 +359,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>4745b98aa9</code></td>
+					<td><code>utility-internals</code></td>
+					<td>500 passed, 0 skipped, 0 failed.</td>
+					<td>9874 passed, 81 skipped, 0 failed at 3 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>fd3aca30cd</code></td>
 					<td><code>image-metadata</code></td>
