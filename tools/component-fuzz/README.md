@@ -142,9 +142,9 @@ database, network requests, or a configured site.
   URL/index expansion, escaped sitemap XML rendering, and sitemap max-URL
   filters without DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
-  WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
-  malformed address structure, selected boundary lengths, and user email
-  lookup/duplicate behavior for accent-distinct local parts.
+  WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
+  views, invalid UTF-8, malformed address structure, selected boundary lengths,
+  and user email lookup/duplicate behavior for accent-distinct local parts.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,

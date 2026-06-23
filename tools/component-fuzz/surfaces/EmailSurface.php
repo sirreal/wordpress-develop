@@ -5,6 +5,7 @@ final class EmailSurface {
 	public const NAME = 'email';
 
 	private const GENERATED_CASES = 28;
+	private const GENERATED_VIEW_CASES = 10;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -44,6 +45,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
+			$rows = array_merge( $rows, self::check_extension_address_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_length_boundaries( $ctx ) );
 
 			self::install_email_filters( 'ascii' );
@@ -1098,6 +1100,123 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_extension_address_views( \ComponentFuzz\FuzzContext $ctx ): array {
+		$samples  = self::extension_view_cases( $ctx );
+		$failures = array();
+		$views    = array();
+
+		foreach ( $samples as $sample ) {
+			$input  = $sample['local'] . '@' . $sample['domain'];
+			$parsed = self::call( static fn() => \WP_Email_Address::from_string( $input, 'unicode' ) );
+			$email  = $parsed['value'] ?? null;
+
+			if ( $parsed['threw'] || ! ( $email instanceof \WP_Email_Address ) ) {
+				$failures[] = array(
+					'label'  => $sample['label'],
+					'source' => $sample['source'],
+					'input'  => self::describe_string( $input ),
+					'parsed' => self::describe_call( $parsed ),
+				);
+				continue;
+			}
+
+			$href_address = $email->get_ascii_address();
+			$href         = 'mailto:' . $href_address;
+			$text         = $email->get_unicode_address();
+			$href_parts   = explode( '@', $href_address, 2 );
+			$text_parts   = explode( '@', $text, 2 );
+			$href_local   = 2 === count( $href_parts ) ? $href_parts[0] : null;
+			$href_domain  = 2 === count( $href_parts ) ? $href_parts[1] : null;
+			$text_local   = 2 === count( $text_parts ) ? $text_parts[0] : null;
+			$text_domain  = 2 === count( $text_parts ) ? $text_parts[1] : null;
+			$href_parse   = self::call( static fn() => \WP_Email_Address::from_string( $href_address, 'unicode' ) );
+			$text_parse   = self::call( static fn() => \WP_Email_Address::from_string( $text, 'unicode' ) );
+
+			$has_unicode_local  = ! self::is_ascii( $email->get_localpart() );
+			$has_unicode_domain = $email->get_ascii_domain() !== $email->get_unicode_domain();
+			$href_roundtrip     = $href_parse['value'] ?? null;
+			$text_roundtrip     = $text_parse['value'] ?? null;
+			$href_has_mailto    = 0 === strpos( $href, 'mailto:' )
+				&& $href_address === substr( $href, strlen( 'mailto:' ) );
+			$local_preserved    = $email->get_localpart() === $href_local
+				&& $email->get_localpart() === $text_local;
+			$domain_views       = $email->get_ascii_domain() === $href_domain
+				&& $email->get_unicode_domain() === $text_domain
+				&& is_string( $href_domain )
+				&& self::is_ascii( $href_domain );
+			$unicode_local      = ! $has_unicode_local
+				|| (
+					is_string( $href_local )
+					&& is_string( $text_local )
+					&& ! self::is_ascii( $href_local )
+					&& ! self::is_ascii( $text_local )
+				);
+			$unicode_domain     = ! $has_unicode_domain || $href_domain !== $text_domain;
+			$roundtrips         = ! $href_parse['threw']
+				&& ! $text_parse['threw']
+				&& $href_roundtrip instanceof \WP_Email_Address
+				&& $text_roundtrip instanceof \WP_Email_Address
+				&& $href_roundtrip->get_ascii_address() === $email->get_ascii_address()
+				&& $href_roundtrip->get_unicode_address() === $email->get_unicode_address()
+				&& $text_roundtrip->get_ascii_address() === $email->get_ascii_address()
+				&& $text_roundtrip->get_unicode_address() === $email->get_unicode_address();
+			$ok                 = $href_has_mailto
+				&& $href_address === $email->get_ascii_address()
+				&& $text === $email->get_unicode_address()
+				&& $local_preserved
+				&& $domain_views
+				&& $unicode_local
+				&& $unicode_domain
+				&& $roundtrips;
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'         => $sample['label'],
+					'source'        => $sample['source'],
+					'input'         => self::describe_string( $input ),
+					'address'       => self::describe_address( $email ),
+					'href'          => self::describe_string( $href ),
+					'text'          => self::describe_string( $text ),
+					'hrefLocal'     => self::describe_value( $href_local ),
+					'hrefDomain'    => self::describe_value( $href_domain ),
+					'textLocal'     => self::describe_value( $text_local ),
+					'textDomain'    => self::describe_value( $text_domain ),
+					'hrefParse'     => self::describe_call( $href_parse ),
+					'textParse'     => self::describe_call( $text_parse ),
+					'hrefHasMailto' => $href_has_mailto,
+					'localPreserved' => $local_preserved,
+					'domainViews'   => $domain_views,
+					'unicodeLocal'  => $unicode_local,
+					'unicodeDomain' => $unicode_domain,
+					'roundtrips'    => $roundtrips,
+				);
+			}
+
+			$views[] = array(
+				'label'             => $sample['label'],
+				'source'            => $sample['source'],
+				'input'             => self::describe_string( $input ),
+				'machineAddress'    => self::describe_string( $href_address ),
+				'readableAddress'   => self::describe_string( $text ),
+				'machineDomainAscii' => is_string( $href_domain ) && self::is_ascii( $href_domain ),
+				'unicodeLocal'      => $has_unicode_local,
+				'unicodeDomain'     => $has_unicode_domain,
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.wp-email-address.extension-machine-readable-views',
+				array() === $failures,
+				array(
+					'caseCount' => count( $samples ),
+					'views'     => $views,
+					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
 	private static function check_length_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
 		$address_254 = str_repeat( 'a', 64 ) . '@' . str_repeat( 'b', 63 ) . '.' . str_repeat( 'c', 63 ) . '.' . str_repeat( 'd', 57 ) . '.com';
 		$address_255 = str_repeat( 'a', 64 ) . '@' . str_repeat( 'b', 63 ) . '.' . str_repeat( 'c', 63 ) . '.' . str_repeat( 'd', 58 ) . '.com';
@@ -1413,6 +1532,64 @@ final class EmailSurface {
 		}
 
 		return $case;
+	}
+
+	private static function extension_view_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$locals = array(
+			'mail',
+			'USER+tag',
+			"gr\u{00E5}",
+			"jose\u{0301}",
+			"\u{7528}\u{6237}",
+		);
+		$domains = array(
+			'example.com',
+			'sub-domain.example',
+		);
+		$samples = array(
+			array(
+				'label'  => 'unicode-local-ascii-domain',
+				'source' => 'anchor',
+				'local'  => "jos\u{00E9}",
+				'domain' => 'example.com',
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = "b\u{00FC}cher.de";
+			$domains[] = "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}";
+			$domains[] = 'xn--bcher-kva.de';
+			$samples[] = array(
+				'label'  => 'ascii-local-unicode-domain',
+				'source' => 'anchor',
+				'local'  => 'mail',
+				'domain' => "b\u{00FC}cher.de",
+			);
+			$samples[] = array(
+				'label'  => 'unicode-local-unicode-domain',
+				'source' => 'anchor',
+				'local'  => "\u{7528}\u{6237}",
+				'domain' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}",
+			);
+			$samples[] = array(
+				'label'  => 'combining-local-punycode-domain',
+				'source' => 'anchor',
+				'local'  => "jose\u{0301}",
+				'domain' => 'xn--bcher-kva.de',
+			);
+		}
+
+		$view_ctx = $ctx->fork( 'email-extension-address-views' );
+		for ( $i = 0; $i < self::GENERATED_VIEW_CASES; $i++ ) {
+			$samples[] = array(
+				'label'  => 'generated-view-' . $i,
+				'source' => 'generated',
+				'local'  => $view_ctx->choice( $locals ),
+				'domain' => $view_ctx->choice( $domains ),
+			);
+		}
+
+		return $samples;
 	}
 
 	private static function generated_cases( \ComponentFuzz\FuzzContext $ctx ): array {
