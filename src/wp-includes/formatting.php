@@ -2056,6 +2056,9 @@ function sanitize_file_name( $filename ) {
 		 * @see https://www.php.net/manual/en/regexp.reference.unicode.php
 		 */
 		$filename = preg_replace( '#\p{Zs}#siu', ' ', $filename );
+		if ( null === $filename ) {
+			$filename = '';
+		}
 	}
 
 	/**

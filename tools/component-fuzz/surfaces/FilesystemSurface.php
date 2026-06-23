@@ -1362,7 +1362,21 @@ final class FilesystemSurface {
 			$without_wrapper = substr( $without_wrapper, 2 );
 		}
 
-		return false !== strpos( $without_wrapper, '//' );
+		$length = strlen( $without_wrapper );
+		for ( $i = 1; $i < $length; ++$i ) {
+			if ( '/' !== $without_wrapper[ $i - 1 ] || '/' !== $without_wrapper[ $i ] ) {
+				continue;
+			}
+
+			if ( $i >= 2 && "\n" === $without_wrapper[ $i - 2 ] ) {
+				++$i;
+				continue;
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 	private static function has_lowercase_drive_letter( string $path ): bool {
