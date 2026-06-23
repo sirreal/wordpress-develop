@@ -151,6 +151,13 @@ database, network requests, or a configured site.
   no-HTML filtering, strict/custom policy monotonicity.
 - `l10n`: translation fallbacks, escaped translation helpers, plural selection,
   textdomain load/unload state, locale determination, localized numbers/dates.
+- `translations`: no-DB POMO and translation-file parsing/loading coverage,
+  including generated `Translation_Entry` lookup and merge behavior,
+  `NOOP_Translations` identity contracts, MO/PO/PHP translation file round
+  trips, explicit plural-rule oracles, textdomain load/unload cycles, helper
+  agreement with loaded domain entries, malformed-file closed failures, and
+  state restoration across `$l10n`, `$l10n_unloaded`, registry, and controller
+  globals.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
   handoff, attachments, embedded images, success/failure actions, and emoji
