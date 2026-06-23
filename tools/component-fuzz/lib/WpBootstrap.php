@@ -302,6 +302,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-block-parser-frame.php',
 			'wp-includes/class-wp-block-parser.php',
 			'wp-includes/blocks.php',
+			'wp-includes/class-wp-block-editor-context.php',
+			'wp-includes/block-editor.php',
 			'wp-includes/class-wp-taxonomy.php',
 			'wp-includes/class-wp-term.php',
 			'wp-includes/class-wp-term-query.php',

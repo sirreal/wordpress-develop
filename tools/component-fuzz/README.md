@@ -52,6 +52,11 @@ database, network requests, or a configured site.
   including template registry lifecycle, file-backed templates and parts,
   parent/child theme precedence, theme.json metadata, hierarchy resolution, and
   malformed filename/path guards with template CPT queries short-circuited.
+- `block-editor-adjuncts`: no-DB block editor adjunct API coverage, including
+  editor context objects, category and allowed-block filters, legacy widget and
+  merged editor settings, local theme style helpers, iframe asset collection,
+  REST preload path normalization with dispatch short-circuited, and global
+  restoration.
 - `capabilities`: role registry mutations, numeric and explicit capability
   grants, role filters, `WP_User` role/direct cap aggregation, and cheap
   `map_meta_cap()` mappings.
@@ -250,6 +255,10 @@ their lifecycle-heavy read and status paths are covered by
 `plugin-theme-lifecycle`, while install/update/delete controller methods are
 still avoided. Block pattern coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
+The `block-editor-adjuncts` surface keeps REST preloading on synthetic
+`rest_pre_dispatch` responses and keeps theme styles local to temp fixtures;
+it does not load editor screens, dispatch DB-backed REST controllers, fetch
+remote editor styles, or render browser UI.
 The `plugin-theme-lifecycle` surface uses a process-local temp `wp-content`
 tree and generated minimal fixtures only; it does not activate repository
 plugins or switch to repository themes. Network-wide activation is not forced
