@@ -36,6 +36,8 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_whatwg_examples( $ctx ) );
 			$rows = array_merge( $rows, self::check_whatwg_ascii_oracle( $ctx ) );
 			$rows = array_merge( $rows, self::check_sanitizer_recovery( $ctx ) );
+			$rows = array_merge( $rows, self::check_malformed_utf8_byte_matrix( $ctx ) );
+			$rows = array_merge( $rows, self::check_unicode_localpart_byte_boundaries( $ctx ) );
 
 			foreach ( $cases as $case_index => $case ) {
 				$rows = array_merge( $rows, self::check_unicode_case( $ctx, $case_index, $case ) );
@@ -497,6 +499,11 @@ final class EmailSurface {
 				'expected' => "jos\u{00E9}@gr\u{00E5}.org",
 			),
 			array(
+				'label'    => 'quoted-display-name-unicode',
+				'input'    => "\"\u{00C5}sa Example\" <gr\u{00E5} @ example . com.>",
+				'expected' => "gr\u{00E5}@example.com",
+			),
+			array(
 				'label'    => 'nbsp-around-separators',
 				'input'    => "user\u{00A0}@\u{00A0}example.com",
 				'expected' => 'user@example.com',
@@ -555,6 +562,191 @@ final class EmailSurface {
 				array(
 					'caseCount' => count( $cases ),
 					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_malformed_utf8_byte_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$fragments = array(
+			array( 'label' => 'lone-continuation', 'bytes' => "\x80" ),
+			array( 'label' => 'truncated-two-byte', 'bytes' => "\xC3" ),
+			array( 'label' => 'truncated-three-byte', 'bytes' => "\xE2\x82" ),
+			array( 'label' => 'truncated-four-byte', 'bytes' => "\xF0\x9F\x98" ),
+			array( 'label' => 'overlong-slash', 'bytes' => "\xC0\xAF" ),
+			array( 'label' => 'surrogate-codepoint', 'bytes' => "\xED\xA0\x80" ),
+			array( 'label' => 'impossible-leading-byte', 'bytes' => "\xFE" ),
+		);
+		$failures  = array();
+		$observed  = array();
+
+		foreach ( $fragments as $fragment ) {
+			$inputs = array(
+				array(
+					'label'   => $fragment['label'] . '-local',
+					'segment' => 'local',
+					'input'   => 'bad' . $fragment['bytes'] . '@example.com',
+				),
+				array(
+					'label'   => $fragment['label'] . '-domain-label',
+					'segment' => 'domain',
+					'input'   => 'user@bad' . $fragment['bytes'] . '.example',
+				),
+				array(
+					'label'   => $fragment['label'] . '-domain-suffix',
+					'segment' => 'domain',
+					'input'   => 'user@example.' . $fragment['bytes'],
+				),
+			);
+
+			foreach ( $inputs as $case ) {
+				$is_valid_utf8 = self::call( static fn() => \wp_is_valid_utf8( $case['input'] ) );
+				$is_email      = self::call( static fn() => \is_email( $case['input'] ) );
+				$sanitized     = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$unicode_parse = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+				$ascii_parse   = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'ascii' ) );
+				$ok            = ! $is_valid_utf8['threw']
+					&& ! $is_email['threw']
+					&& ! $sanitized['threw']
+					&& ! $unicode_parse['threw']
+					&& ! $ascii_parse['threw']
+					&& false === $is_valid_utf8['value']
+					&& false === $is_email['value']
+					&& '' === $sanitized['value']
+					&& null === $unicode_parse['value']
+					&& null === $ascii_parse['value'];
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'       => $case['label'],
+						'segment'     => $case['segment'],
+						'input'       => self::describe_string( $case['input'] ),
+						'validUtf8'   => self::describe_call( $is_valid_utf8 ),
+						'isEmail'     => self::describe_call( $is_email ),
+						'sanitizeEmail' => self::describe_call( $sanitized ),
+						'unicodeParse' => self::describe_call( $unicode_parse ),
+						'asciiParse'  => self::describe_call( $ascii_parse ),
+					);
+				}
+
+				$observed[] = array(
+					'label'     => $case['label'],
+					'segment'   => $case['segment'],
+					'bytes'     => strlen( $case['input'] ),
+					'rejected'  => $ok,
+				);
+			}
+		}
+
+		return array(
+			$ctx->result(
+				'email.invalid-utf8.byte-matrix-rejected',
+				array() === $failures,
+				array(
+					'caseCount' => count( $observed ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_unicode_localpart_byte_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'      => 'latin-two-byte-local-64-bytes',
+				'local'      => str_repeat( "\u{00E5}", 32 ),
+				'localBytes' => 64,
+			),
+			array(
+				'label'      => 'latin-two-byte-local-65-bytes',
+				'local'      => str_repeat( "\u{00E5}", 32 ) . 'a',
+				'localBytes' => 65,
+			),
+			array(
+				'label'      => 'combining-local-64-bytes',
+				'local'      => str_repeat( "e\u{0301}", 21 ) . 'x',
+				'localBytes' => 64,
+			),
+			array(
+				'label'      => 'combining-local-65-bytes',
+				'local'      => str_repeat( "e\u{0301}", 21 ) . 'xy',
+				'localBytes' => 65,
+			),
+			array(
+				'label'      => 'cjk-local-63-bytes',
+				'local'      => str_repeat( "\u{7528}", 21 ),
+				'localBytes' => 63,
+			),
+			array(
+				'label'      => 'cjk-local-66-bytes',
+				'local'      => str_repeat( "\u{7528}", 22 ),
+				'localBytes' => 66,
+			),
+		);
+		$failures = array();
+		$observed = array();
+
+		foreach ( $cases as $case ) {
+			$input          = $case['local'] . '@example.com';
+			$parsed         = self::call( static fn() => \WP_Email_Address::from_string( $input, 'unicode' ) );
+			$is_email       = self::call( static fn() => \is_email( $input ) );
+			$sanitized      = self::call( static fn() => \sanitize_email( $input ) );
+			$ascii_parse    = self::call( static fn() => \WP_Email_Address::from_string( $input, 'ascii' ) );
+			$ascii_is       = self::call( static fn() => \wp_is_ascii_email( false, $input, null ) );
+			$ascii_sanitize = self::call( static fn() => \wp_sanitize_ascii_email( '', $input, null ) );
+			$email          = $parsed['value'] ?? null;
+			$ok             = ! $parsed['threw']
+				&& ! $is_email['threw']
+				&& ! $sanitized['threw']
+				&& ! $ascii_parse['threw']
+				&& ! $ascii_is['threw']
+				&& ! $ascii_sanitize['threw']
+				&& $email instanceof \WP_Email_Address
+				&& $case['localBytes'] === strlen( $case['local'] )
+				&& \wp_is_valid_utf8( $case['local'] )
+				&& $case['local'] === $email->get_localpart()
+				&& 'example.com' === $email->get_ascii_domain()
+				&& 'example.com' === $email->get_unicode_domain()
+				&& $input === $email->get_ascii_address()
+				&& $input === $email->get_unicode_address()
+				&& $input === $is_email['value']
+				&& $input === $sanitized['value']
+				&& null === $ascii_parse['value']
+				&& false === $ascii_is['value']
+				&& '' === $ascii_sanitize['value'];
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'         => $case['label'],
+					'input'         => self::describe_string( $input ),
+					'localBytes'    => strlen( $case['local'] ),
+					'expectedBytes' => $case['localBytes'],
+					'parsed'        => self::describe_call( $parsed ),
+					'isEmail'       => self::describe_call( $is_email ),
+					'sanitizeEmail' => self::describe_call( $sanitized ),
+					'asciiParse'    => self::describe_call( $ascii_parse ),
+					'asciiIsEmail'  => self::describe_call( $ascii_is ),
+					'asciiSanitize' => self::describe_call( $ascii_sanitize ),
+				);
+			}
+
+			$observed[] = array(
+				'label'         => $case['label'],
+				'localBytes'    => strlen( $case['local'] ),
+				'addressBytes'  => strlen( $input ),
+				'unicodeValid'  => $email instanceof \WP_Email_Address,
+				'asciiRejected' => ! $ascii_parse['threw'] && null === $ascii_parse['value'],
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.wp-email-address.unicode-localpart-byte-boundaries',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
 				)
 			),
 		);
@@ -1664,6 +1856,7 @@ final class EmailSurface {
 			self::case( 'mixed-case-punycode-prefix', 'books@XN--BCHER-KVA.DE', array( 'reservedAcePrefix' ), false, '', false, '' ),
 			self::case( 'display-name-wrapper', 'Display Name <user@example.com>', array( 'displayName' ), false, 'user@example.com', false, 'user@example.com' ),
 			self::case( 'display-name-unicode-wrapper', "Display Name <jos\u{00E9} @ gr\u{00E5} . org.>", array( 'displayName', 'recoverableWhitespace' ), false, "jos\u{00E9}@gr\u{00E5}.org", false, '' ),
+			self::case( 'display-name-quoted-local-rejected', 'Display <"quoted"@example.com>', array( 'displayName', 'quotedLookingLocal' ), false, '', false, '' ),
 			self::case( 'separator-whitespace-and-trailing-dot', " info @ example . com. \t", array( 'recoverableWhitespace' ), false, 'info@example.com', false, 'info@example.com' ),
 			self::case( 'nbsp-separator-whitespace', "user\u{00A0}@\u{00A0}example.com", array( 'recoverableWhitespace' ), false, 'user@example.com', false, 'user@example.com' ),
 			self::case( 'soft-hyphen-near-dot', "info@example\u{00AD}.com", array( 'recoverableWhitespace' ), false, 'info@example.com', false, 'info@example.com' ),
