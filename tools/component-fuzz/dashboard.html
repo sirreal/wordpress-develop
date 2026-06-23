@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6720 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6894 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
-			<div class="label">Current Focused Run</div>
+			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>cron</code>: 8000 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note">Five integrated rich surfaces passed focused 100-iteration validation; largest was <code>query-loop</code> at 7400 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">5</div>
-			<div class="note">Five delegated rich-surface workers are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">1</div>
+			<div class="note">One delegated UTF-8 email worker is active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -348,6 +348,13 @@
 					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups.</td>
 				</tr>
 				<tr>
+					<td><code>email</code> UTF-8 follow-up</td>
+					<td><span class="status work">worker active</span></td>
+					<td>Pascal the 2nd: <code>_work/component-fuzz-email-unicode-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>New Unicode local-part behavior, IDN/Punycode address views, validation/sanitization filters.</td>
+				</tr>
+				<tr>
 					<td><code>capabilities</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
@@ -372,7 +379,7 @@
 					<td><code>cron</code></td>
 					<td><span class="status good">focused validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 8000 passed, 0 skipped, 0 failed; broad rerun pending active <code>rest-controllers</code> finding.</td>
+					<td>Main focused run: 8000 passed, 0 skipped, 0 failed; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td>In-memory cron store, schedule/unschedule filters, ready jobs, clear/reschedule contracts.</td>
 				</tr>
 				<tr>
@@ -412,37 +419,37 @@
 				</tr>
 				<tr>
 					<td><code>rest-controllers</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Boole the 2nd: <code>_work/component-fuzz-rest-controllers-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree from Boole the 2nd</td>
+					<td>Main focused run: 800 passed, 200 skipped, 0 failed; repro seed 470788260: 8 passed, 2 skipped; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td>REST controller registries, schemas, context filtering, permissions, state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>query-loop</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Leibniz the 2nd: <code>_work/component-fuzz-query-loop-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree from Leibniz the 2nd</td>
+					<td>Main focused run: 7400 passed, 0 skipped, 0 failed; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td><code>WP_Query</code>, loop state, conditional flags, cache/filter restoration.</td>
 				</tr>
 				<tr>
 					<td><code>media-ingest</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Euclid the 2nd: <code>_work/component-fuzz-media-ingest-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td>Upload/sideload helpers, MIME checks, unique filenames, local temp cleanup.</td>
 				</tr>
 				<tr>
 					<td><code>multisite</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Ramanujan the 2nd: <code>_work/component-fuzz-multisite-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree from Ramanujan the 2nd</td>
+					<td>Main focused run: 1400 passed, 100 skipped, 0 failed; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td>Network/site helpers, switch/restore stack, cache groups, URL/path normalization.</td>
 				</tr>
 				<tr>
 					<td><code>taxonomy-relationships</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>James the 2nd: <code>_work/component-fuzz-taxonomy-relationships-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree from James the 2nd</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 6894 passed, 62 skipped, 0 failed.</td>
 					<td>Object-term assignment, append/replace, counts, duplicate/invalid inputs, state restoration.</td>
 				</tr>
 			</tbody>
@@ -465,10 +472,40 @@
 			</thead>
 			<tbody>
 				<tr>
+					<td><code>b1439dba84</code></td>
+					<td><code>taxonomy-relationships</code></td>
+					<td>900 passed, 0 skipped, 0 failed.</td>
+					<td>6894 passed, 62 skipped, 0 failed at 2 iterations after the rich-surface wave.</td>
+				</tr>
+				<tr>
+					<td><code>a6adbb00dc</code></td>
+					<td><code>query-loop</code></td>
+					<td>7400 passed, 0 skipped, 0 failed.</td>
+					<td>6894 passed, 62 skipped, 0 failed at 2 iterations after the rich-surface wave.</td>
+				</tr>
+				<tr>
+					<td><code>d5c3d20572</code></td>
+					<td><code>multisite</code></td>
+					<td>1400 passed, 100 skipped, 0 failed.</td>
+					<td>6894 passed, 62 skipped, 0 failed at 2 iterations after the rich-surface wave.</td>
+				</tr>
+				<tr>
+					<td><code>fce93ba0d1</code></td>
+					<td><code>rest-controllers</code></td>
+					<td>800 passed, 200 skipped, 0 failed; repro seed <code>470788260</code>: 8 passed, 2 skipped.</td>
+					<td>6894 passed, 62 skipped, 0 failed at 2 iterations after the rich-surface wave.</td>
+				</tr>
+				<tr>
+					<td><code>afe952e27c</code></td>
+					<td><code>media-ingest</code></td>
+					<td>900 passed, 0 skipped, 0 failed.</td>
+					<td>6894 passed, 62 skipped, 0 failed at 2 iterations after the rich-surface wave.</td>
+				</tr>
+				<tr>
 					<td><code>4cce3d5090</code></td>
 					<td><code>cron</code></td>
 					<td>8000 passed, 0 skipped, 0 failed.</td>
-					<td>Broad rerun found pre-existing <code>rest-controllers</code> seed <code>470788260</code>; assigned to active worker.</td>
+					<td>Previous broad rerun found <code>rest-controllers</code> seed <code>470788260</code>; fixed by <code>fce93ba0d1</code>.</td>
 				</tr>
 				<tr>
 					<td><code>95a2e1aa81</code></td>
