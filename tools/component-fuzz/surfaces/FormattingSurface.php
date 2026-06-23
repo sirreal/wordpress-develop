@@ -27,6 +27,7 @@ final class FormattingSurface {
 		$rows[] = self::check_normalize_whitespace( $ctx, $inputs['strings'] );
 		$rows[] = self::check_autop_shortcode_stability( $ctx, $inputs['autopCases'] );
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
+		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
 		$rows[] = self::check_entity_normalization( $ctx, $inputs['entityCases'] );
 		$rows[] = self::check_zeroise( $ctx, $inputs['zeroiseCases'] );
 		$rows[] = self::check_size_format( $ctx, $inputs['sizeCases'] );
@@ -74,6 +75,7 @@ final class FormattingSurface {
 			'roundTripStrings' => $round_trip_strings,
 			'autopCases'       => self::generate_autop_cases( $ctx->fork( 'formatting-autop' ) ),
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
+			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
 			'entityCases'      => self::generate_entity_cases( $ctx->fork( 'formatting-entities' ) ),
 			'zeroiseCases'     => self::generate_zeroise_cases( $ctx->fork( 'formatting-zeroise' ) ),
 			'sizeCases'        => self::generate_size_cases( $ctx->fork( 'formatting-size' ) ),
@@ -563,6 +565,91 @@ final class FormattingSurface {
 		return self::check_row(
 			$ctx,
 			'make_clickable.bounded_idempotent_links',
+			$failures,
+			array( 'cases' => $checked )
+		);
+	}
+
+	private static function check_url_sanitizers( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		foreach ( array( 'esc_url', 'sanitize_url' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'url_sanitizers.display_storage_contracts', "{$function}() is unavailable." );
+			}
+		}
+
+		$failures = array();
+		$checked  = 0;
+
+		foreach ( $cases as $case_index => $case ) {
+			$input       = $case['input'];
+			$display     = self::call(
+				'esc_url',
+				static function () use ( $input ) {
+					return \esc_url( $input );
+				}
+			);
+			$storage     = self::call(
+				'sanitize_url',
+				static function () use ( $input ) {
+					return \sanitize_url( $input );
+				}
+			);
+			$storage_raw = self::call(
+				'esc_url:db',
+				static function () use ( $input ) {
+					return \esc_url( $input, null, 'db' );
+				}
+			);
+			++$checked;
+
+			if ( ! $display['ok'] || ! is_string( $display['value'] ) || ! $storage['ok'] || ! is_string( $storage['value'] ) || ! $storage_raw['ok'] || ! is_string( $storage_raw['value'] ) ) {
+				$failures[] = array(
+					'name'      => 'url-sanitizer-call-failed',
+					'message'   => 'URL sanitizer returned a non-string value or threw.',
+					'caseIndex' => $case_index,
+					'input'     => self::describe_string( $input ),
+					'display'   => self::call_summary( $display ),
+					'storage'   => self::call_summary( $storage ),
+					'raw'       => self::call_summary( $storage_raw ),
+				);
+				continue;
+			}
+
+			$violations = array();
+			if ( $storage['value'] !== $storage_raw['value'] ) {
+				$violations[] = 'sanitize-url-esc-url-db-disagreement';
+			}
+			if ( \sanitize_url( $storage['value'] ) !== $storage['value'] ) {
+				$violations[] = 'sanitize-url-not-idempotent';
+			}
+			if ( preg_match( '/[\x00-\x1F\x7F<>"\']/', $display['value'] . $storage['value'] ) ) {
+				$violations[] = 'unsafe-control-or-html-delimiter';
+			}
+			if ( $case['disallowedProtocol'] && ( '' !== $display['value'] || '' !== $storage['value'] ) ) {
+				$violations[] = 'disallowed-protocol-not-rejected';
+			}
+			if ( ! $case['disallowedProtocol'] && '' !== $storage['value'] && ! self::url_has_allowed_shape( $storage['value'] ) ) {
+				$violations[] = 'unexpected-storage-url-shape';
+			}
+
+			if ( array() !== $violations ) {
+				$failures[] = array(
+					'name'       => 'url-sanitizer-contract-violation',
+					'message'    => 'esc_url()/sanitize_url() did not preserve display/storage URL contracts for a generated URL case.',
+					'caseIndex'  => $case_index,
+					'case'       => $case,
+					'input'      => self::describe_string( $input ),
+					'display'    => self::describe_string( $display['value'] ),
+					'storage'    => self::describe_string( $storage['value'] ),
+					'storageRaw' => self::describe_string( $storage_raw['value'] ),
+					'violations' => $violations,
+				);
+			}
+		}
+
+		return self::check_row(
+			$ctx,
+			'url_sanitizers.display_storage_contracts',
 			$failures,
 			array( 'cases' => $checked )
 		);
@@ -1223,6 +1310,45 @@ final class FormattingSurface {
 		return $cases;
 	}
 
+	private static function generate_url_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array( 'input' => 'http://example.com/a?b=1&c=2', 'disallowedProtocol' => false ),
+			array( 'input' => 'https://example.test/path with spaces/?q=<tag>&ok=1', 'disallowedProtocol' => false ),
+			array( 'input' => 'mailto:user+tag@example.com?subject=Hello World', 'disallowedProtocol' => false ),
+			array( 'input' => '/relative/path?x=1&y=two#frag', 'disallowedProtocol' => false ),
+			array( 'input' => '//cdn.example.test/lib.js?ver=1', 'disallowedProtocol' => false ),
+			array( 'input' => 'ftp://example.com/file.txt', 'disallowedProtocol' => false ),
+			array( 'input' => 'javascript:alert(1)', 'disallowedProtocol' => true ),
+			array( 'input' => 'data:text/html,<script>alert(1)</script>', 'disallowedProtocol' => true ),
+			array( 'input' => "vbscript:msgbox(1)\x00", 'disallowedProtocol' => true ),
+		);
+
+		$schemes = array( 'http', 'https', 'mailto', 'ftp', 'javascript', 'data', 'vbscript', '' );
+		for ( $i = 0; $i < 10; ++$i ) {
+			$scheme       = $ctx->choice( $schemes );
+			$path         = rawurlencode( $ctx->text( 0, 18 ) );
+			$query        = rawurlencode( $ctx->text( 0, 18 ) );
+			$is_disallowed = in_array( $scheme, array( 'javascript', 'data', 'vbscript' ), true );
+
+			if ( '' === $scheme ) {
+				$input = '/' . $path . '?q=' . $query;
+			} elseif ( 'mailto' === $scheme ) {
+				$input = 'mailto:user' . $i . '@example.test?subject=' . $query;
+			} elseif ( $is_disallowed ) {
+				$input = $scheme . ':' . $ctx->choice( array( 'alert(1)', '<svg/onload=1>', 'text/html,<b>x</b>' ) );
+			} else {
+				$input = $scheme . '://example.test/' . $path . '?q=' . $query . '&unsafe=<tag>';
+			}
+
+			$cases[] = array(
+				'input'              => $input,
+				'disallowedProtocol' => $is_disallowed,
+			);
+		}
+
+		return $cases;
+	}
+
 	private static function generate_entity_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$entities = array_merge(
 			self::known_ncr_entities(),
@@ -1416,6 +1542,14 @@ final class FormattingSurface {
 
 	private static function strip_cdata_sections( string $value ): string {
 		return (string) preg_replace( '/<!\[CDATA\[.*?\]\]>/s', '', $value );
+	}
+
+	private static function url_has_allowed_shape( string $value ): bool {
+		if ( preg_match( '/^(?:https?|ftp|mailto):/i', $value ) ) {
+			return true;
+		}
+
+		return str_starts_with( $value, '/' ) || str_starts_with( $value, '#' ) || str_starts_with( $value, '?' );
 	}
 
 	private static function check_row( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {
