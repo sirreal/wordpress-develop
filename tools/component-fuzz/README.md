@@ -285,7 +285,8 @@ database, network requests, or a configured site.
   output, depth pruning, short-circuit/fallback behavior, container allowlists,
   attribute filter escaping, and filtered no-DB `wp_nav_menu()` rendering.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
-  filename sanitization, filetype checks, unique filenames, sideload handling.
+  filename sanitization, filetype checks, unique filenames, sideload handling,
+  multisite upload quota, remaining-space, size-limit, and over-quota helpers.
 - `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
   for generated option values, including alloptions membership, notoptions
   transitions, raw serialized cache shape, default/pre/update filters, cache

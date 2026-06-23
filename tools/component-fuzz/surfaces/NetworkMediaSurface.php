@@ -36,6 +36,7 @@ final class NetworkMediaSurface {
 			self::exercise_url_apis( $rng, $result );
 			self::exercise_path_apis( $rng, $result );
 			self::exercise_filename_apis( $rng, $result );
+			self::exercise_multisite_quota_apis( $rng, $result );
 
 			if ( null === $temp_root ) {
 				self::skip_once( $result, 'temporary-files', 'Could not create an isolated directory under sys_get_temp_dir().' );
@@ -574,6 +575,191 @@ final class NetworkMediaSurface {
 					);
 				}
 			}
+		}
+	}
+
+	private static function exercise_multisite_quota_apis( array &$rng, array &$result ): void {
+		self::load_admin_multisite_helpers();
+
+		$required = array(
+			'get_space_allowed',
+			'get_upload_space_available',
+			'is_upload_space_available',
+			'upload_size_limit_filter',
+			'upload_is_user_over_quota',
+			'add_filter',
+			'remove_filter',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'multisite-quota', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		foreach ( self::quota_cases( $rng ) as $case ) {
+			++$result['caseCount'];
+			self::feature( $result, 'multisite-quota' );
+
+			$blog_space_filter = static function () use ( $case ) {
+				return $case['blogSpace'];
+			};
+			$site_option_filter = static function ( $pre_site_option, string $option ) use ( $case ) {
+				unset( $pre_site_option );
+				if ( 'blog_upload_space' === $option ) {
+					return $case['siteSpace'];
+				}
+				if ( 'upload_space_check_disabled' === $option ) {
+					return $case['disabled'];
+				}
+				if ( 'fileupload_maxk' === $option ) {
+					return $case['fileuploadMaxK'];
+				}
+
+				return false;
+			};
+			$used_filter = static function () use ( $case ) {
+				return $case['usedSpace'];
+			};
+
+			\add_filter( 'pre_option_blog_upload_space', $blog_space_filter );
+			\add_filter( 'pre_site_option', $site_option_filter, 10, 2 );
+			\add_filter( 'pre_get_space_used', $used_filter );
+
+			try {
+				$allowed = self::call_api(
+					$result,
+					'get_space_allowed',
+					$case,
+					static function () {
+						return get_space_allowed();
+					}
+				);
+				$available = self::call_api(
+					$result,
+					'get_upload_space_available',
+					$case,
+					static function () {
+						return get_upload_space_available();
+					}
+				);
+				$has_space = self::call_api(
+					$result,
+					'is_upload_space_available',
+					$case,
+					static function () {
+						return is_upload_space_available();
+					}
+				);
+				$limit = self::call_api(
+					$result,
+					'upload_size_limit_filter',
+					$case,
+					static function () use ( $case ) {
+						return upload_size_limit_filter( $case['inputLimit'] );
+					}
+				);
+				$over_quiet = self::call_api(
+					$result,
+					'upload_is_user_over_quota.quiet',
+					$case,
+					static function () {
+						ob_start();
+						$over_quota = upload_is_user_over_quota( false );
+						$output     = ob_get_clean();
+						return array(
+							'overQuota' => $over_quota,
+							'output'    => $output,
+						);
+					}
+				);
+				$over_display = self::call_api(
+					$result,
+					'upload_is_user_over_quota.display',
+					$case,
+					static function () {
+						ob_start();
+						$over_quota = upload_is_user_over_quota( true );
+						$output     = ob_get_clean();
+						return array(
+							'overQuota' => $over_quota,
+							'output'    => $output,
+						);
+					}
+				);
+			} finally {
+				\remove_filter( 'pre_get_space_used', $used_filter );
+				\remove_filter( 'pre_site_option', $site_option_filter, 10 );
+				\remove_filter( 'pre_option_blog_upload_space', $blog_space_filter );
+			}
+
+			$expected = self::quota_expectations( $case );
+			self::check_invariant(
+				$result,
+				$allowed['ok'] && $expected['allowedMb'] === $allowed['value'],
+				'multisite-quota:get-space-allowed-fallback',
+				$case,
+				array(
+					'expected' => $expected['allowedMb'],
+					'actual'   => $allowed['value'] ?? null,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$available['ok'] && $expected['availableBytes'] === $available['value'],
+				'multisite-quota:get-upload-space-available-bytes',
+				$case,
+				array(
+					'expected' => $expected['availableBytes'],
+					'actual'   => $available['value'] ?? null,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$has_space['ok'] && $expected['hasSpace'] === $has_space['value'],
+				'multisite-quota:is-upload-space-available',
+				$case,
+				array(
+					'expected' => $expected['hasSpace'],
+					'actual'   => $has_space['value'] ?? null,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$limit['ok'] && $expected['uploadLimit'] === $limit['value'],
+				'multisite-quota:upload-size-limit-filter-minimum',
+				$case,
+				array(
+					'expected' => $expected['uploadLimit'],
+					'actual'   => $limit['value'] ?? null,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$over_quiet['ok']
+					&& is_array( $over_quiet['value'] )
+					&& $expected['overQuota'] === $over_quiet['value']['overQuota']
+					&& '' === $over_quiet['value']['output'],
+				'multisite-quota:quiet-over-quota-boolean-no-output',
+				$case,
+				array(
+					'expected' => $expected['overQuota'],
+					'actual'   => $over_quiet['value'] ?? null,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$over_display['ok']
+					&& is_array( $over_display['value'] )
+					&& $expected['overQuota'] === $over_display['value']['overQuota']
+					&& ( $expected['overQuota'] ? '' !== $over_display['value']['output'] : '' === $over_display['value']['output'] ),
+				'multisite-quota:display-over-quota-output-is-bounded',
+				$case,
+				array(
+					'expected' => $expected['overQuota'],
+					'actual'   => $over_display['value'] ?? null,
+				)
+			);
 		}
 	}
 
@@ -1433,6 +1619,100 @@ final class NetworkMediaSurface {
 		return array_values( array_unique( $cases ) );
 	}
 
+	private static function quota_cases( array &$rng ): array {
+		$cases = array(
+			array(
+				'label'          => 'disabled-check-uses-size-cap-only',
+				'blogSpace'      => 25,
+				'siteSpace'      => 100,
+				'usedSpace'      => 40,
+				'disabled'       => 1,
+				'fileuploadMaxK' => 2048,
+				'inputLimit'     => 8 * MB_IN_BYTES,
+			),
+			array(
+				'label'          => 'under-quota-limits-by-remaining-space',
+				'blogSpace'      => 40,
+				'siteSpace'      => 100,
+				'usedSpace'      => 12,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 32768,
+				'inputLimit'     => 50 * MB_IN_BYTES,
+			),
+			array(
+				'label'          => 'over-quota-blocks-uploads',
+				'blogSpace'      => 10,
+				'siteSpace'      => 100,
+				'usedSpace'      => 15,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 4096,
+				'inputLimit'     => 10 * MB_IN_BYTES,
+			),
+			array(
+				'label'          => 'site-option-fallback',
+				'blogSpace'      => 'not-numeric',
+				'siteSpace'      => 33,
+				'usedSpace'      => 5,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 1024,
+				'inputLimit'     => 2 * MB_IN_BYTES,
+			),
+			array(
+				'label'          => 'negative-quota-clamps-availability',
+				'blogSpace'      => -5,
+				'siteSpace'      => 100,
+				'usedSpace'      => 1,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 1024,
+				'inputLimit'     => 2 * MB_IN_BYTES,
+			),
+		);
+
+		for ( $i = 0; $i < 8; ++$i ) {
+			$cases[] = array(
+				'label'          => 'generated-quota-' . $i,
+				'blogSpace'      => self::rng_choice( $rng, array( self::rng_int( $rng, -3, 120 ), (string) self::rng_int( $rng, 0, 120 ), 'bad' ) ),
+				'siteSpace'      => self::rng_int( $rng, 1, 150 ),
+				'usedSpace'      => self::rng_int( $rng, 0, 180 ),
+				'disabled'       => self::rng_int( $rng, 0, 4 ) === 0 ? 1 : 0,
+				'fileuploadMaxK' => self::rng_int( $rng, 1, 65536 ),
+				'inputLimit'     => self::rng_int( $rng, 1, 96 ) * MB_IN_BYTES,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function quota_expectations( array $case ): array {
+		if ( is_numeric( $case['blogSpace'] ) ) {
+			$allowed_return = $case['blogSpace'];
+		} elseif ( is_numeric( $case['siteSpace'] ) ) {
+			$allowed_return = $case['siteSpace'];
+		} else {
+			$allowed_return = 100;
+		}
+
+		$allowed_numeric   = (int) $allowed_return;
+		$clamped_allowed   = max( 0, $allowed_numeric );
+		$space_allowed    = $clamped_allowed * MB_IN_BYTES;
+		$space_used       = (int) $case['usedSpace'] * MB_IN_BYTES;
+		$disabled         = (bool) $case['disabled'];
+		$available_bytes  = $disabled ? $space_allowed : max( 0, $space_allowed - $space_used );
+		$fileupload_bytes = (int) $case['fileuploadMaxK'] * KB_IN_BYTES;
+		$upload_limit     = min( (int) $case['inputLimit'], $fileupload_bytes );
+		if ( ! $disabled ) {
+			$upload_limit = min( $upload_limit, $available_bytes );
+		}
+
+		return array(
+			'allowedMb'      => $allowed_return,
+			'availableBytes' => $available_bytes,
+			'hasSpace'       => $disabled ? true : (bool) $available_bytes,
+			'uploadLimit'    => $upload_limit,
+			'overQuota'      => $disabled ? false : ( ( $allowed_numeric - (int) $case['usedSpace'] ) < 0 ),
+		);
+	}
+
 	private static function generated_unique_filename_cases( array &$rng ): array {
 		$cases = array();
 		$bases = array( 'photo', 'image', 'thumb-150x150', 'thumb-scaled', 'report final', 'a/b', 'archive.tar', 'resume' );
@@ -1502,6 +1782,17 @@ final class NetworkMediaSurface {
 		}
 
 		$file = rtrim( ABSPATH, '/\\' ) . '/wp-admin/includes/file.php';
+		if ( is_file( $file ) ) {
+			require_once $file;
+		}
+	}
+
+	private static function load_admin_multisite_helpers(): void {
+		if ( function_exists( 'upload_is_user_over_quota' ) || ! defined( 'ABSPATH' ) ) {
+			return;
+		}
+
+		$file = rtrim( ABSPATH, '/\\' ) . '/wp-admin/includes/ms.php';
 		if ( is_file( $file ) ) {
 			require_once $file;
 		}
