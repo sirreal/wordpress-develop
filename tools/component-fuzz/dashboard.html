@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7630 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7640 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Twenty-six integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Twenty-seven integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -262,6 +262,13 @@
 					<td>Bacon the 2nd / <code>_work/component-fuzz-feed-rendering-rich</code></td>
 					<td>Worker assigned focused 100-iteration and broad 2-iteration validation; integration pending.</td>
 					<td>RSS2, Atom, and comments feed templates, escaping, CDATA boundaries, content/excerpt switches, enclosure/build-date behavior.</td>
+				</tr>
+				<tr>
+					<td><code>state</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1700 passed, 0 skipped, 0 failed; latest broad run: 7640 passed, 62 skipped, 0 failed.</td>
+					<td>Object cache, options, transient filters, cache-backed site transients, serialization/JSON value helpers.</td>
 				</tr>
 				<tr>
 					<td><code>capabilities</code></td>
@@ -604,6 +611,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>8e7a6a32ec</code></td>
+					<td><code>state</code></td>
+					<td>1700 passed, 0 skipped, 0 failed.</td>
+					<td>7640 passed, 62 skipped, 0 failed at 2 iterations after cache-backed site-transient branch and filter integration.</td>
+				</tr>
 				<tr>
 					<td><code>dd69f1c879</code></td>
 					<td><code>capabilities</code></td>
