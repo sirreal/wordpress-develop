@@ -260,8 +260,10 @@ database, network requests, or a configured site.
   temp-file cleanup, size/type rejection, filter locality, and global
   restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
-  sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
-  CRUD short-circuits, and lazyloader queue/reset behavior.
+  registration argument edges, legacy callbacks, sanitize/auth/protected-meta
+  filters, cache-backed lookup shape, filtered and in-memory CRUD cache
+  invalidation, mid-row helpers, cache priming, and lazyloader queue/reset
+  behavior.
 - `multisite`: no-DB multisite/network API coverage, including synthetic
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
   lookups, blog-switch stack/cache restoration, filter-backed network option

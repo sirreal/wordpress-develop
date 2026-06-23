@@ -31,10 +31,13 @@ final class MetadataSurface {
 			self::reset_runtime();
 
 			$rows[] = self::check_registration_visibility( $ctx->fork( 'registration' ) );
+			$rows[] = self::check_registration_argument_edges( $ctx->fork( 'registration-edges' ) );
 			$rows[] = self::check_defaults_agree_with_lookup( $ctx->fork( 'defaults' ) );
+			$rows[] = self::check_object_type_and_subtype_boundaries( $ctx->fork( 'boundaries' ) );
 			$rows[] = self::check_sanitize_and_auth_callback_locality( $ctx->fork( 'callbacks' ) );
 			$rows[] = self::check_protected_meta_locality( $ctx->fork( 'protected' ) );
 			$rows[] = self::check_no_db_crud_filters_and_cache( $ctx->fork( 'crud' ) );
+			$rows[] = self::check_in_memory_crud_cache_invalidation( $ctx->fork( 'crud-cache' ) );
 			$rows[] = self::check_lazyloader_queue_and_cache( $ctx->fork( 'lazyloader' ) );
 			$rows[] = self::check_registered_metadata_by_object_subtype( $ctx->fork( 'by-subtype' ) );
 		} catch ( \Throwable $e ) {
@@ -70,8 +73,10 @@ final class MetadataSurface {
 				'add_metadata',
 				'apply_filters',
 				'delete_metadata',
+				'delete_metadata_by_mid',
 				'get_metadata',
 				'get_metadata_default',
+				'get_metadata_by_mid',
 				'get_metadata_raw',
 				'get_object_subtype',
 				'get_registered_meta_keys',
@@ -87,7 +92,10 @@ final class MetadataSurface {
 				'sanitize_meta',
 				'unregister_meta_key',
 				'update_metadata',
+				'update_metadata_by_mid',
+				'update_meta_cache',
 				'wp_cache_delete',
+				'wp_cache_delete_multiple',
 				'wp_cache_flush',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -218,6 +226,194 @@ final class MetadataSurface {
 		);
 	}
 
+	private static function check_registration_argument_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures = array();
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case                = $ctx->fork( 'registration-edges-' . $object_type );
+			$object_id           = 1800 + $case->int( 1, 8000 ) + $index;
+			$subtype             = self::object_subtype( $case, $object_type );
+			$args_key            = self::meta_key( $case->fork( 'args-key' ), 'args' );
+			$invalid_array_key   = self::meta_key( $case->fork( 'invalid-array' ), 'invalid-array' );
+			$invalid_default_key = self::meta_key( $case->fork( 'invalid-default' ), 'invalid-default' );
+			$legacy_key          = self::meta_key( $case->fork( 'legacy' ), 'legacy' );
+			$expected_label      = 'Component Fuzz ' . $case->identifier( 4, 10 );
+			$expected_description = 'Filtered registration ' . $case->identifier( 4, 10 );
+			$filter_records      = array();
+			$legacy_calls        = array(
+				'sanitize' => 0,
+				'auth'     => 0,
+			);
+			$allowed_list_filter_present = false !== \has_filter( 'register_meta_args', '_wp_register_meta_args_allowed_list' );
+
+			$args_filter = static function ( $args, $defaults, $filtered_object_type, $filtered_meta_key ) use (
+				&$filter_records,
+				$object_type,
+				$args_key,
+				$expected_label,
+				$expected_description
+			) {
+				$target           = $object_type === $filtered_object_type && $args_key === $filtered_meta_key;
+				$filter_records[] = array(
+					'objectType'          => $filtered_object_type,
+					'metaKey'             => $filtered_meta_key,
+					'target'              => $target,
+					'hasLabelDefault'     => array_key_exists( 'label', $defaults ),
+					'hasRevisionsDefault' => array_key_exists( 'revisions_enabled', $defaults ),
+				);
+
+				if ( $target ) {
+					$args['single']                 = true;
+					$args['label']                  = $expected_label;
+					$args['description']            = $expected_description;
+					$args['component_fuzz_extra']   = 'must be dropped by the allowed-list filter';
+					$args['revisions_enabled']      = false;
+				}
+
+				return $args;
+			};
+			$legacy_sanitize = static function ( $meta_value, $key, $type ) use (
+				&$legacy_calls,
+				$legacy_key,
+				$object_type
+			) {
+				++$legacy_calls['sanitize'];
+				return array(
+					'legacy'   => true,
+					'keyMatch' => $legacy_key === $key,
+					'type'     => $type,
+					'typeMatch' => $object_type === $type,
+					'value'    => $meta_value,
+				);
+			};
+			$legacy_auth = static function ( $allowed, $key, $object_id_arg ) use (
+				&$legacy_calls,
+				$legacy_key,
+				$object_id
+			) {
+				unset( $allowed );
+				++$legacy_calls['auth'];
+				return $legacy_key === $key && $object_id === (int) $object_id_arg;
+			};
+
+			\add_filter( 'register_meta_args', $args_filter, 5, 4 );
+			$args_registered = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$args_key,
+				array(
+					'type'        => 'string',
+					'description' => 'Unfiltered registration',
+					'single'      => false,
+					'label'       => 'Unfiltered',
+				)
+			);
+			\remove_filter( 'register_meta_args', $args_filter, 5 );
+
+			$args_keys    = \get_registered_meta_keys( $object_type, $subtype );
+			$args_record  = $args_keys[ $args_key ] ?? array();
+			$target_seen  = false;
+			$defaults_seen = false;
+			foreach ( $filter_records as $record ) {
+				if ( true === $record['target'] ) {
+					$target_seen   = true;
+					$defaults_seen = true === $record['hasLabelDefault']
+						&& true === $record['hasRevisionsDefault'];
+				}
+			}
+
+			$invalid_array_registered = \register_meta(
+				$object_type,
+				$invalid_array_key,
+				array(
+					'type'         => 'array',
+					'single'       => true,
+					'show_in_rest' => true,
+				)
+			);
+			$invalid_default_registered = \register_meta(
+				$object_type,
+				$invalid_default_key,
+				array(
+					'type'    => 'integer',
+					'single'  => true,
+					'default' => 'not-an-integer-' . $case->identifier( 4, 8 ),
+				)
+			);
+			\remove_filter( "auth_{$object_type}_meta_{$invalid_default_key}", '__return_true', 10 );
+
+			$legacy_registered = \register_meta( $object_type, $legacy_key, $legacy_sanitize, $legacy_auth );
+			$legacy_value      = self::metadata_value( $case->fork( 'legacy-value' ) );
+			$legacy_sanitized  = \sanitize_meta( $legacy_key, $legacy_value, $object_type );
+			$legacy_auth_ok    = \apply_filters(
+				"auth_{$object_type}_meta_{$legacy_key}",
+				null,
+				$legacy_key,
+				$object_id,
+				0,
+				'edit',
+				array()
+			);
+			$legacy_unregistered = \unregister_meta_key( $object_type, $legacy_key );
+			$legacy_keys         = \get_registered_meta_keys( $object_type );
+			\remove_filter( "sanitize_{$object_type}_meta_{$legacy_key}", $legacy_sanitize, 10 );
+			\remove_filter( "auth_{$object_type}_meta_{$legacy_key}", $legacy_auth, 10 );
+
+			self::collect_failure(
+				$failures,
+				true === $args_registered
+					&& $target_seen
+					&& $defaults_seen
+					&& true === ( $args_record['single'] ?? null )
+					&& $expected_label === ( $args_record['label'] ?? null )
+					&& $expected_description === ( $args_record['description'] ?? null )
+					&& (
+						$allowed_list_filter_present
+							? ! array_key_exists( 'component_fuzz_extra', $args_record )
+							: 'must be dropped by the allowed-list filter' === ( $args_record['component_fuzz_extra'] ?? null )
+					)
+					&& false === $invalid_array_registered
+					&& false === \registered_meta_key_exists( $object_type, $invalid_array_key )
+					&& false === $invalid_default_registered
+					&& false === \registered_meta_key_exists( $object_type, $invalid_default_key )
+					&& false === $legacy_registered
+					&& ! isset( $legacy_keys[ $legacy_key ] )
+					&& true === ( $legacy_sanitized['legacy'] ?? null )
+					&& self::same_value( $legacy_value, $legacy_sanitized['value'] ?? null )
+					&& true === $legacy_auth_ok
+					&& array( 'sanitize' => 1, 'auth' => 1 ) === $legacy_calls
+					&& false === $legacy_unregistered
+					&& false === \has_filter( "sanitize_{$object_type}_meta_{$legacy_key}", $legacy_sanitize )
+					&& false === \has_filter( "auth_{$object_type}_meta_{$legacy_key}", $legacy_auth ),
+				"registration argument filtering and legacy callbacks are deterministic for {$object_type}",
+				array(
+					'objectType'               => $object_type,
+					'subtype'                  => $subtype,
+					'argsKey'                  => $args_key,
+					'argsRecord'               => $args_record,
+					'filterRecords'            => $filter_records,
+					'allowedListFilterPresent' => $allowed_list_filter_present,
+					'invalidArrayRegistered'   => $invalid_array_registered,
+					'invalidDefaultRegistered' => $invalid_default_registered,
+					'legacyRegistered'         => $legacy_registered,
+					'legacySanitized'          => $legacy_sanitized,
+					'legacyAuthOk'             => $legacy_auth_ok,
+					'legacyCalls'              => $legacy_calls,
+					'legacyUnregistered'       => $legacy_unregistered,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.registration.args-validation-legacy-callbacks',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
 	private static function check_defaults_agree_with_lookup( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -333,6 +529,118 @@ final class MetadataSurface {
 			'metadata.defaults.match-lookup-fallbacks',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_object_type_and_subtype_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$object_id  = 2800 + $ctx->int( 1, 7000 );
+		$shared_key = self::meta_key( $ctx->fork( 'shared-key' ), 'boundary-shared' );
+		$owner_key  = self::meta_key( $ctx->fork( 'owner-key' ), 'boundary-owner' );
+		$owner_type = $ctx->choice( self::OBJECT_TYPES );
+		$failures   = array();
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case         = $ctx->fork( 'boundary-' . $object_type );
+			$subtype      = self::object_subtype( $case, $object_type );
+			$shared_single = $case->bool();
+			$first_value  = $object_type . '-first-' . $case->identifier( 4, 9 );
+			$second_value = $object_type . '-second-' . $case->identifier( 4, 9 );
+			$owner_value  = $object_type . '-owner-' . $case->identifier( 4, 9 );
+
+			$subtype_filter = static function ( $current, $id ) use ( $object_id, $subtype ) {
+				return (int) $id === $object_id ? $subtype : $current;
+			};
+			\add_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10, 2 );
+
+			$shared_registered = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$shared_key,
+				array(
+					'type'        => 'string',
+					'description' => 'Boundary shared key',
+					'single'      => $shared_single,
+				)
+			);
+			$owner_registered  = true;
+			if ( $owner_type === $object_type ) {
+				$owner_registered = \register_meta(
+					$object_type,
+					$owner_key,
+					array(
+						'type'   => 'string',
+						'single' => true,
+					)
+				);
+			}
+
+			\wp_cache_set(
+				$object_id,
+				array(
+					$shared_key => array( \maybe_serialize( $first_value ), \maybe_serialize( $second_value ) ),
+					$owner_key  => array( \maybe_serialize( $owner_value ) ),
+				),
+				$object_type . '_meta'
+			);
+
+			$specific_shared = \get_registered_metadata( $object_type, $object_id, $shared_key );
+			$specific_owner  = \get_registered_metadata( $object_type, $object_id, $owner_key );
+			$registered_all  = \get_registered_metadata( $object_type, $object_id );
+			$raw_all         = \get_metadata( $object_type, $object_id );
+			$raw_shared      = \get_metadata_raw( $object_type, $object_id, $shared_key, false );
+			$wrong_subtype_keys = \get_registered_meta_keys(
+				self::different_object_type( $object_type ),
+				$subtype
+			);
+
+			\remove_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10 );
+
+			$expected_shared = $shared_single ? $first_value : array( $first_value, $second_value );
+			$expected_owner  = $owner_type === $object_type ? $owner_value : false;
+
+			self::collect_failure(
+				$failures,
+				true === $shared_registered
+					&& true === $owner_registered
+					&& \registered_meta_key_exists( $object_type, $shared_key, $subtype )
+					&& ! \registered_meta_key_exists( self::different_object_type( $object_type ), $shared_key, $subtype )
+					&& ! isset( $wrong_subtype_keys[ $shared_key ] )
+					&& self::same_value( $expected_shared, $specific_shared )
+					&& self::same_value( array( $first_value, $second_value ), $raw_shared )
+					&& self::same_value( $expected_owner, $specific_owner )
+					&& isset( $registered_all[ $shared_key ] )
+					&& ( $owner_type === $object_type ) === isset( $registered_all[ $owner_key ] )
+					&& isset( $raw_all[ $owner_key ] )
+					&& isset( $raw_all[ $shared_key ] ),
+				"metadata cache and registry boundaries hold for {$object_type}",
+				array(
+					'objectType'       => $object_type,
+					'ownerType'        => $owner_type,
+					'subtype'          => $subtype,
+					'sharedKey'        => $shared_key,
+					'ownerKey'         => $owner_key,
+					'sharedSingle'     => $shared_single,
+					'specificShared'   => $specific_shared,
+					'specificOwner'    => $specific_owner,
+					'registeredAllKeys' => is_array( $registered_all ) ? array_keys( $registered_all ) : $registered_all,
+					'rawAllKeys'       => is_array( $raw_all ) ? array_keys( $raw_all ) : $raw_all,
+					'wrongSubtypeKeys' => array_keys( $wrong_subtype_keys ),
+					'index'            => $index,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.boundaries.object-type-subtype-cache-isolation',
+			array() === $failures,
+			array(
+				'objectId'  => $object_id,
+				'ownerType' => $owner_type,
+				'failures'  => array_slice( $failures, 0, 8 ),
+			)
 		);
 	}
 
@@ -807,6 +1115,196 @@ final class MetadataSurface {
 		);
 	}
 
+	private static function check_in_memory_crud_cache_invalidation( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::has_in_memory_metadata_store() ) {
+			return $ctx->skip(
+				'metadata.in-memory-crud-cache.stub-available',
+				'Metadata CRUD cache invalidation is intentionally limited to the component fuzzer in-memory DB stub.'
+			);
+		}
+
+		self::reset_runtime();
+
+		$failures = array();
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case             = $ctx->fork( 'crud-cache-' . $object_type );
+			$object_id        = 6100 + $case->int( 1, 6000 ) + $index;
+			$other_object_id  = $object_id + 9000 + $index;
+			$cached_id        = $object_id + 19000;
+			$primed_id        = $object_id + 29000;
+			$missing_id       = $object_id + 39000;
+			$group            = $object_type . '_meta';
+			$object_id_column = $object_type . '_id';
+			$meta_key         = self::meta_key( $case->fork( 'meta-key' ), 'crud-cache' );
+			$prime_key        = self::meta_key( $case->fork( 'prime-key' ), 'prime-cache' );
+			$first_value      = self::metadata_db_value( $case->fork( 'first' ) );
+			$updated_value    = self::metadata_db_value( $case->fork( 'updated' ) );
+			$second_value     = self::metadata_db_value( $case->fork( 'second' ) );
+			$by_mid_value     = self::metadata_db_value( $case->fork( 'by-mid' ) );
+			$other_value      = self::metadata_db_value( $case->fork( 'other' ) );
+			$cache_hit_value  = self::metadata_db_value( $case->fork( 'cache-hit' ) );
+			$db_prime_value   = self::metadata_db_value( $case->fork( 'db-prime' ) );
+
+			\wp_cache_set(
+				$object_id,
+				array(
+					'stale_' . $meta_key => array( \maybe_serialize( 'stale' ) ),
+				),
+				$group
+			);
+
+			$add_id            = \add_metadata(
+				$object_type,
+				$object_id,
+				\wp_slash( $meta_key ),
+				\wp_slash( $first_value ),
+				true
+			);
+			$cache_after_add   = \wp_cache_get( $object_id, $group );
+			$read_after_add    = \get_metadata_raw( $object_type, $object_id, $meta_key, false );
+			$cache_after_prime = \wp_cache_get( $object_id, $group );
+			$same_update       = \update_metadata(
+				$object_type,
+				$object_id,
+				\wp_slash( $meta_key ),
+				\wp_slash( $first_value )
+			);
+			$cache_after_same  = \wp_cache_get( $object_id, $group );
+			$update_result     = \update_metadata(
+				$object_type,
+				$object_id,
+				\wp_slash( $meta_key ),
+				\wp_slash( $updated_value )
+			);
+			$cache_after_update = \wp_cache_get( $object_id, $group );
+			$read_after_update = \get_metadata_raw( $object_type, $object_id, $meta_key, true );
+
+			$second_id          = \add_metadata(
+				$object_type,
+				$object_id,
+				\wp_slash( $meta_key ),
+				\wp_slash( $second_value ),
+				false
+			);
+			$cache_after_second = \wp_cache_get( $object_id, $group );
+			$multi_after_second = \get_metadata_raw( $object_type, $object_id, $meta_key, false );
+			$by_mid_before      = \get_metadata_by_mid( $object_type, $second_id );
+			$by_mid_update      = \update_metadata_by_mid( $object_type, $second_id, $by_mid_value, $meta_key );
+			$cache_after_by_mid_update = \wp_cache_get( $object_id, $group );
+			$by_mid_after       = \get_metadata_by_mid( $object_type, $second_id );
+			$delete_mid         = \delete_metadata_by_mid( $object_type, $second_id );
+			$cache_after_delete_mid = \wp_cache_get( $object_id, $group );
+			$after_delete_mid   = \get_metadata_raw( $object_type, $object_id, $meta_key, false );
+
+			$other_add_id = \add_metadata(
+				$object_type,
+				$other_object_id,
+				\wp_slash( $meta_key ),
+				\wp_slash( $other_value ),
+				false
+			);
+			$other_before_delete_all = \get_metadata_raw( $object_type, $other_object_id, $meta_key, true );
+			$delete_all              = \delete_metadata( $object_type, 0, \wp_slash( $meta_key ), '', true );
+			$cache_after_delete_all  = \wp_cache_get( $object_id, $group );
+			$other_cache_after_delete_all = \wp_cache_get( $other_object_id, $group );
+			$raw_after_delete_all    = \get_metadata_raw( $object_type, $object_id, $meta_key, true );
+			$default_after_delete_all = \get_metadata( $object_type, $object_id, $meta_key, true );
+
+			$prime_add_id = \add_metadata(
+				$object_type,
+				$primed_id,
+				\wp_slash( $prime_key ),
+				\wp_slash( $db_prime_value ),
+				false
+			);
+			\wp_cache_set(
+				$cached_id,
+				array(
+					$prime_key => array( \maybe_serialize( $cache_hit_value ) ),
+				),
+				$group
+			);
+			$primed_cache  = \update_meta_cache( $object_type, array( $cached_id, $primed_id, $missing_id ) );
+			$cached_read   = \get_metadata_raw( $object_type, $cached_id, $prime_key, true );
+			$db_read       = \get_metadata_raw( $object_type, $primed_id, $prime_key, true );
+			$missing_cache = \wp_cache_get( $missing_id, $group );
+
+			self::collect_failure(
+				$failures,
+				is_int( $add_id )
+					&& $add_id > 0
+					&& false === $cache_after_add
+					&& self::same_value( array( $first_value ), $read_after_add )
+					&& false === $same_update
+					&& self::same_value( $cache_after_prime, $cache_after_same )
+					&& true === $update_result
+					&& false === $cache_after_update
+					&& self::same_value( $updated_value, $read_after_update )
+					&& is_int( $second_id )
+					&& $second_id > $add_id
+					&& false === $cache_after_second
+					&& self::same_value( array( $updated_value, $second_value ), $multi_after_second )
+					&& $by_mid_before instanceof \stdClass
+					&& $meta_key === $by_mid_before->meta_key
+					&& $object_id === (int) $by_mid_before->{$object_id_column}
+					&& self::same_value( $second_value, $by_mid_before->meta_value )
+					&& true === $by_mid_update
+					&& false === $cache_after_by_mid_update
+					&& $by_mid_after instanceof \stdClass
+					&& self::same_value( $by_mid_value, $by_mid_after->meta_value )
+					&& true === $delete_mid
+					&& false === $cache_after_delete_mid
+					&& self::same_value( array( $updated_value ), $after_delete_mid )
+					&& is_int( $other_add_id )
+					&& $other_add_id > 0
+					&& self::same_value( $other_value, $other_before_delete_all )
+					&& true === $delete_all
+					&& false === $cache_after_delete_all
+					&& false === $other_cache_after_delete_all
+					&& null === $raw_after_delete_all
+					&& '' === $default_after_delete_all
+					&& is_int( $prime_add_id )
+					&& is_array( $primed_cache )
+					&& isset( $primed_cache[ $cached_id ], $primed_cache[ $primed_id ], $primed_cache[ $missing_id ] )
+					&& array() === $primed_cache[ $missing_id ]
+					&& array() === $missing_cache
+					&& self::same_value( $cache_hit_value, $cached_read )
+					&& self::same_value( $db_prime_value, $db_read ),
+				"in-memory {$object_type} metadata CRUD invalidates and primes caches deterministically",
+				array(
+					'objectType'                 => $object_type,
+					'objectId'                   => $object_id,
+					'metaKey'                    => $meta_key,
+					'addId'                      => $add_id,
+					'secondId'                   => $second_id,
+					'otherAddId'                 => $other_add_id,
+					'primeAddId'                 => $prime_add_id,
+					'readAfterAdd'               => $read_after_add,
+					'readAfterUpdate'            => $read_after_update,
+					'multiAfterSecond'           => $multi_after_second,
+					'byMidBefore'                => self::describe_value( $by_mid_before ),
+					'byMidAfter'                 => self::describe_value( $by_mid_after ),
+					'afterDeleteMid'             => $after_delete_mid,
+					'rawAfterDeleteAll'          => $raw_after_delete_all,
+					'defaultAfterDeleteAll'      => $default_after_delete_all,
+					'primedCacheKeys'            => is_array( $primed_cache ) ? array_keys( $primed_cache ) : $primed_cache,
+					'missingCache'               => $missing_cache,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.in-memory-crud.cache-invalidation-and-priming',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'note'     => 'Uses only the component fuzzer in-memory wpdb stub; no live database writes are required.',
+			)
+		);
+	}
+
 	private static function check_lazyloader_queue_and_cache( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -1117,6 +1615,25 @@ final class MetadataSurface {
 		return $ctx->text( 0, 48 ) . $ctx->bytes( 0, 8 );
 	}
 
+	private static function metadata_db_value( \ComponentFuzz\FuzzContext $ctx ) {
+		$type = $ctx->choice( array( 'string', 'quoted-string', 'array' ) );
+
+		if ( 'array' === $type ) {
+			return array(
+				'label' => $ctx->identifier( 3, 10 ),
+				'path'  => 'segment\\' . $ctx->identifier( 3, 10 ),
+				'count' => $ctx->int( -1000, 1000 ),
+				'list'  => array( $ctx->identifier( 3, 8 ), (string) $ctx->int( 0, 99 ) ),
+			);
+		}
+
+		if ( 'quoted-string' === $type ) {
+			return "quote ' slash \\" . $ctx->identifier( 3, 12 );
+		}
+
+		return 'value-' . $ctx->identifier( 3, 12 ) . '-' . $ctx->int( -1000, 1000 );
+	}
+
 	private static function slug( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
 		$slug = strtolower( $prefix . '-' . $ctx->identifier( 3, 10 ) );
 		$slug = preg_replace( '/[^a-z0-9_-]+/', '-', $slug );
@@ -1133,7 +1650,18 @@ final class MetadataSurface {
 			\wp_installing( false );
 		}
 
+		if ( self::has_in_memory_metadata_store() ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+
 		\wp_cache_flush();
+	}
+
+	private static function has_in_memory_metadata_store(): bool {
+		return isset( $GLOBALS['wpdb'] )
+			&& is_object( $GLOBALS['wpdb'] )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' );
 	}
 
 	private static function snapshot_state(): array {
