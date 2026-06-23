@@ -4,7 +4,7 @@ namespace ComponentFuzz\Surfaces;
 final class EmailSurface {
 	public const NAME = 'email';
 
-	private const GENERATED_CASES = 28;
+	private const GENERATED_CASES = 32;
 	private const GENERATED_VIEW_CASES = 10;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
@@ -42,6 +42,8 @@ final class EmailSurface {
 			}
 
 			$rows = array_merge( $rows, self::check_distinct_localparts( $ctx ) );
+			$rows = array_merge( $rows, self::check_normalization_sensitive_localparts( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_author_email_filters( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
@@ -327,11 +329,15 @@ final class EmailSurface {
 			array( 'label' => 'devanagari-local', 'input' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", 'expected' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com" ),
 			array( 'label' => 'arabic-local', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@example.com", 'expected' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@example.com" ),
 			array( 'label' => 'greek-local', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@example.com", 'expected' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@example.com" ),
+			array( 'label' => 'cyrillic-local', 'input' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com", 'expected' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com" ),
+			array( 'label' => 'hiragana-local', 'input' => "\u{3086}\u{3046}\u{3056}\u{3042}@example.com", 'expected' => "\u{3086}\u{3046}\u{3056}\u{3042}@example.com" ),
 		);
 		if ( self::has_idn() ) {
 			$valid[] = array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", 'expected' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" );
 			$valid[] = array( 'label' => 'cjk-address', 'input' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", 'expected' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
 			$valid[] = array( 'label' => 'greek-address', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", 'expected' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" );
+			$valid[] = array( 'label' => 'cyrillic-address', 'input' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}", 'expected' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" );
+			$valid[] = array( 'label' => 'hiragana-address', 'input' => "\u{3086}\u{3046}\u{3056}\u{3042}@\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}", 'expected' => "\u{3086}\u{3046}\u{3056}\u{3042}@\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" );
 		}
 		$invalid = array(
 			array( 'label' => 'quoted-rfc5322-local', 'input' => '"quoted"@example.com' ),
@@ -858,6 +864,195 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_normalization_sensitive_localparts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$pairs = array(
+			array(
+				'label' => 'latin-acute',
+				'nfc'   => "jos\u{00E9}@example.com",
+				'nfd'   => "jose\u{0301}@example.com",
+			),
+			array(
+				'label' => 'latin-ring',
+				'nfc'   => "\u{00E5}ngstrom@example.com",
+				'nfd'   => "a\u{030A}ngstrom@example.com",
+			),
+			array(
+				'label' => 'greek-tonos',
+				'nfc'   => "\u{03AC}\u{03BB}\u{03C6}\u{03B1}@example.com",
+				'nfd'   => "\u{03B1}\u{0301}\u{03BB}\u{03C6}\u{03B1}@example.com",
+			),
+		);
+		$failures = array();
+		$observed = array();
+
+		foreach ( $pairs as $pair ) {
+			$nfc_sanitized = self::call( static fn() => \sanitize_email( $pair['nfc'] ) );
+			$nfd_sanitized = self::call( static fn() => \sanitize_email( $pair['nfd'] ) );
+			$nfc_parsed    = self::call( static fn() => \WP_Email_Address::from_string( $pair['nfc'], 'unicode' ) );
+			$nfd_parsed    = self::call( static fn() => \WP_Email_Address::from_string( $pair['nfd'], 'unicode' ) );
+			$nfc_email     = $nfc_parsed['value'] ?? null;
+			$nfd_email     = $nfd_parsed['value'] ?? null;
+			$ok            = ! $nfc_sanitized['threw']
+				&& ! $nfd_sanitized['threw']
+				&& ! $nfc_parsed['threw']
+				&& ! $nfd_parsed['threw']
+				&& $pair['nfc'] === $nfc_sanitized['value']
+				&& $pair['nfd'] === $nfd_sanitized['value']
+				&& $nfc_email instanceof \WP_Email_Address
+				&& $nfd_email instanceof \WP_Email_Address
+				&& $pair['nfc'] === $nfc_email->get_unicode_address()
+				&& $pair['nfd'] === $nfd_email->get_unicode_address()
+				&& $nfc_email->get_localpart() !== $nfd_email->get_localpart()
+				&& $nfc_email->get_unicode_address() !== $nfd_email->get_unicode_address();
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'        => $pair['label'],
+					'nfc'          => self::describe_string( $pair['nfc'] ),
+					'nfd'          => self::describe_string( $pair['nfd'] ),
+					'nfcSanitized' => self::describe_call( $nfc_sanitized ),
+					'nfdSanitized' => self::describe_call( $nfd_sanitized ),
+					'nfcParsed'    => self::describe_call( $nfc_parsed ),
+					'nfdParsed'    => self::describe_call( $nfd_parsed ),
+				);
+			}
+
+			$observed[] = array(
+				'label'         => $pair['label'],
+				'nfcLocal'      => $nfc_email instanceof \WP_Email_Address ? self::describe_string( $nfc_email->get_localpart() ) : null,
+				'nfdLocal'      => $nfd_email instanceof \WP_Email_Address ? self::describe_string( $nfd_email->get_localpart() ) : null,
+				'localsDistinct' => $nfc_email instanceof \WP_Email_Address && $nfd_email instanceof \WP_Email_Address && $nfc_email->get_localpart() !== $nfd_email->get_localpart(),
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.wp-email-address.normalization-sensitive-localparts-preserved',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_comment_author_email_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'wp_filter_comment' ) ) {
+			return array(
+				$ctx->skip(
+					'email.comment-author-email.filter-agreement',
+					'wp_filter_comment() is unavailable.'
+				),
+			);
+		}
+
+		$cases = array(
+			array(
+				'label'       => 'cyrillic-local',
+				'email'       => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com",
+				'expectEmail' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com",
+			),
+			array(
+				'label'       => 'hiragana-local',
+				'email'       => "\u{3086}\u{3046}\u{3056}\u{3042}@example.com",
+				'expectEmail' => "\u{3086}\u{3046}\u{3056}\u{3042}@example.com",
+			),
+			array(
+				'label'       => 'display-name-recovery',
+				'email'       => "Display Name <jos\u{00E9} @ example . com.>",
+				'expectEmail' => "jos\u{00E9}@example.com",
+			),
+			array(
+				'label'       => 'emoji-local-rejected',
+				'email'       => "emoji\u{1F600}@example.com",
+				'expectEmail' => '',
+			),
+			array(
+				'label'       => 'fullwidth-at-rejected',
+				'email'       => "bad\u{FF20}example.com",
+				'expectEmail' => '',
+			),
+		);
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			\remove_all_filters( 'pre_comment_author_email' );
+			\add_filter( 'pre_comment_author_email', 'trim' );
+			\add_filter( 'pre_comment_author_email', 'sanitize_email' );
+
+			foreach ( $cases as $index => $case ) {
+				$comment = array(
+					'comment_author'       => 'Component Fuzzer',
+					'comment_author_email' => $case['email'],
+					'comment_author_url'   => '',
+					'comment_content'      => 'Unicode email comment case ' . $index,
+					'comment_author_IP'    => '127.0.0.1',
+					'comment_agent'        => 'component-fuzz',
+				);
+				$filtered       = self::call( static fn() => \wp_filter_comment( $comment ) );
+				$sanitized      = self::call( static fn() => \sanitize_email( trim( $case['email'] ) ) );
+				$filtered_email = ! $filtered['threw'] && is_array( $filtered['value'] )
+					? ( $filtered['value']['comment_author_email'] ?? null )
+					: null;
+				$filtered_valid = '' === $filtered_email
+					? array( 'threw' => false, 'value' => false )
+					: self::call( static fn() => \is_email( $filtered_email ) );
+				$parsed         = '' === $filtered_email || ! is_string( $filtered_email )
+					? array( 'threw' => false, 'value' => null )
+					: self::call( static fn() => \WP_Email_Address::from_string( $filtered_email, 'unicode' ) );
+				$ok             = ! $filtered['threw']
+					&& ! $sanitized['threw']
+					&& ! $filtered_valid['threw']
+					&& ! $parsed['threw']
+					&& is_array( $filtered['value'] )
+					&& true === ( $filtered['value']['filtered'] ?? null )
+					&& $case['expectEmail'] === $filtered_email
+					&& $sanitized['value'] === $filtered_email
+					&& (
+						'' === $filtered_email
+						? false === $filtered_valid['value'] && null === $parsed['value']
+						: $filtered_email === $filtered_valid['value'] && $parsed['value'] instanceof \WP_Email_Address
+					);
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'         => $case['label'],
+						'input'         => self::describe_string( $case['email'] ),
+						'expectedEmail' => self::describe_string( $case['expectEmail'] ),
+						'filteredEmail' => self::describe_value( $filtered_email ),
+						'filtered'      => self::describe_call( $filtered ),
+						'sanitized'     => self::describe_call( $sanitized ),
+						'isEmail'       => self::describe_call( $filtered_valid ),
+						'parsed'        => self::describe_call( $parsed ),
+					);
+				}
+
+				$observed[] = array(
+					'label'         => $case['label'],
+					'input'         => self::describe_string( $case['email'] ),
+					'filteredEmail' => self::describe_value( $filtered_email ),
+					'accepted'      => '' !== $filtered_email,
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.comment-author-email.filter-agreement',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
+		);
+	}
+
 	private static function check_user_email_indexes_distinct_localparts( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! self::can_reset_stub_content() ) {
 			return array(
@@ -1012,6 +1207,8 @@ final class EmailSurface {
 			array( 'label' => 'latin-ring', 'domain' => "gr\u{00E5}.org" ),
 			array( 'label' => 'cjk', 'domain' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" ),
 			array( 'label' => 'greek', 'domain' => "\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
+			array( 'label' => 'cyrillic', 'domain' => "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" ),
+			array( 'label' => 'hiragana', 'domain' => "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" ),
 			array( 'label' => 'eszett', 'domain' => "fa\u{00DF}.de" ),
 		);
 		$failures = array();
@@ -1456,6 +1653,10 @@ final class EmailSurface {
 			self::case( 'unicode-arabic-address', "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" : false, $has_idn ? "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" : '', false, '' ),
 			self::case( 'unicode-greek-address', "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : false, $has_idn ? "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" : '', false, '' ),
 			self::case( 'unicode-devanagari-local', "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", array( 'valid', 'unicodeAddress' ), "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", false, '' ),
+			self::case( 'unicode-cyrillic-local', "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com", array( 'valid', 'unicodeAddress' ), "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com", "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@example.com", false, '' ),
+			self::case( 'unicode-hiragana-local', "\u{3086}\u{3046}\u{3056}\u{3042}@example.com", array( 'valid', 'unicodeAddress' ), "\u{3086}\u{3046}\u{3056}\u{3042}@example.com", "\u{3086}\u{3046}\u{3056}\u{3042}@example.com", false, '' ),
+			self::case( 'unicode-cyrillic-address', "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" : false, $has_idn ? "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}@\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" : '', false, '' ),
+			self::case( 'unicode-hiragana-address', "\u{3086}\u{3046}\u{3056}\u{3042}@\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}", array( 'valid', 'unicodeAddress' ), $has_idn ? "\u{3086}\u{3046}\u{3056}\u{3042}@\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" : false, $has_idn ? "\u{3086}\u{3046}\u{3056}\u{3042}@\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" : '', false, '' ),
 			self::case( 'unicode-eszett-domain', "mail@fa\u{00DF}.de", array( 'valid', 'unicodeAddress' ), $has_idn ? "mail@fa\u{00DF}.de" : false, $has_idn ? "mail@fa\u{00DF}.de" : '', false, '' ),
 			self::case( 'punycode-domain', 'books@xn--bcher-kva.de', array( 'valid', 'punycodeUnicodeDomain' ), $has_idn ? "books@b\u{00FC}cher.de" : false, $has_idn ? "books@b\u{00FC}cher.de" : '', false, '' ),
 			self::case( 'punycode-cjk-domain', 'mail@xn--fsqu00a.xn--4rr70v', array( 'valid', 'punycodeUnicodeDomain' ), $has_idn ? "mail@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : false, $has_idn ? "mail@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" : '', false, '' ),
@@ -1541,6 +1742,8 @@ final class EmailSurface {
 			"gr\u{00E5}",
 			"jose\u{0301}",
 			"\u{7528}\u{6237}",
+			"\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}",
+			"\u{3086}\u{3046}\u{3056}\u{3042}",
 		);
 		$domains = array(
 			'example.com',
@@ -1558,6 +1761,8 @@ final class EmailSurface {
 		if ( self::has_idn() ) {
 			$domains[] = "b\u{00FC}cher.de";
 			$domains[] = "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}";
+			$domains[] = "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}";
+			$domains[] = "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}";
 			$domains[] = 'xn--bcher-kva.de';
 			$samples[] = array(
 				'label'  => 'ascii-local-unicode-domain',
@@ -1570,6 +1775,18 @@ final class EmailSurface {
 				'source' => 'anchor',
 				'local'  => "\u{7528}\u{6237}",
 				'domain' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}",
+			);
+			$samples[] = array(
+				'label'  => 'cyrillic-local-domain',
+				'source' => 'anchor',
+				'local'  => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}",
+				'domain' => "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}",
+			);
+			$samples[] = array(
+				'label'  => 'hiragana-local-domain',
+				'source' => 'anchor',
+				'local'  => "\u{3086}\u{3046}\u{3056}\u{3042}",
+				'domain' => "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}",
 			);
 			$samples[] = array(
 				'label'  => 'combining-local-punycode-domain',
@@ -1604,6 +1821,8 @@ final class EmailSurface {
 			array( 'value' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}", 'traits' => array( 'unicodeAddress' ) ),
+			array( 'value' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}", 'traits' => array( 'unicodeAddress' ) ),
+			array( 'value' => "\u{3086}\u{3046}\u{3056}\u{3042}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "emoji\u{1F600}", 'traits' => array( 'unicodeAddress', 'localInvalidChars' ) ),
 			array( 'value' => "\u{0301}bad", 'traits' => array( 'unicodeAddress', 'localInvalidChars' ) ),
 			array( 'value' => "zero\u{200D}width", 'traits' => array( 'unicodeAddress', 'localInvalidChars' ) ),
@@ -1628,6 +1847,8 @@ final class EmailSurface {
 			array( 'value' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", 'traits' => array( 'unicodeAddress' ) ),
+			array( 'value' => "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}", 'traits' => array( 'unicodeAddress' ) ),
+			array( 'value' => "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => "fa\u{00DF}.de", 'traits' => array( 'unicodeAddress' ) ),
 			array( 'value' => 'xn--bcher-kva.de', 'traits' => array( 'punycodeUnicodeDomain' ) ),
 			array( 'value' => 'xn--fsqu00a.xn--4rr70v', 'traits' => array( 'punycodeUnicodeDomain' ) ),
