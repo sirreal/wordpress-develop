@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6696 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6715 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>request-lifecycle</code>: 800 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>syndication</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">2</div>
-			<div class="note">Two delegated surfaces are active; two completed workers are pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">Two delegated surfaces are active; one completed worker is pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -377,9 +377,9 @@
 				</tr>
 				<tr>
 					<td><code>syndication</code></td>
-					<td><span class="status wait">pending integration</span></td>
-					<td>Arendt: <code>_work/component-fuzz-syndication-rich</code></td>
-					<td>Worker focused run: 500 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; broad run: 6715 passed, 62 skipped, 0 failed.</td>
 					<td>oEmbed providers/handlers, feed helpers, XML/HTML escaping, no-network filters.</td>
 				</tr>
 				<tr>
@@ -422,6 +422,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>685951079a</code></td>
+					<td><code>syndication</code></td>
+					<td>500 passed, 0 skipped, 0 failed.</td>
+					<td>6715 passed, 62 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>9c8eb1f52a</code></td>
 					<td><code>request-lifecycle</code></td>
