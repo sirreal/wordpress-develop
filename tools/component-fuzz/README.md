@@ -115,6 +115,11 @@ database, network requests, or a configured site.
   GD/Imagick availability, output format filters, resize/save metadata,
   intermediate and generated sub-sizes, and cache/filter-backed attachment
   metadata helpers with temp-file cleanup.
+- `media-ingest`: no-network media upload and sideload ingest coverage over
+  generated temp fixtures, including upload directory filters, MIME/filetype
+  boundaries, sanitized unique filenames, attachment row and postmeta creation
+  in the in-memory wpdb stub, metadata update failure paths, and cleanup
+  restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
   CRUD short-circuits, and lazyloader queue/reset behavior.
@@ -251,6 +256,12 @@ The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
 redirects, attachment-page redirects, and paths that call `wp_redirect()` and
 `exit` are intentionally avoided.
+The `media-ingest` surface uses local temp files only, routes uploads through a
+filtered temp upload root, and passes a custom upload action for
+`media_handle_upload()` so CLI fixtures use core's readable-file branch instead
+of PHP SAPI uploaded-file state. It avoids remote sideload/download helpers,
+browser media UI flows, audio/video cover-art generation, and writes outside the
+component-fuzz temp root.
 The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.

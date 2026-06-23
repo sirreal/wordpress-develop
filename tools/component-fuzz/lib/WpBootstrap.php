@@ -442,6 +442,7 @@ final class WpBootstrap {
 			'wp-includes/customize/class-wp-customize-partial.php',
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/image.php',
+			'wp-admin/includes/media.php',
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/theme.php',
 			'wp-admin/includes/class-wp-screen.php',
