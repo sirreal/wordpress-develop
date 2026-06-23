@@ -30,7 +30,10 @@ final class InteractivitySurface {
 
 			$rows[] = self::check_state_config_helpers( $ctx, $case );
 			$rows[] = self::check_directive_processing( $ctx, $case );
+			$rows[] = self::check_namespaced_directive_evaluation( $ctx->fork( 'namespaced-directives' ), $case );
 			$rows[] = self::check_context_and_element_helpers( $ctx, $case );
+			$rows[] = self::check_script_module_hooks( $ctx->fork( 'script-module-hooks' ), $case );
+			$rows[] = self::check_each_edge_cases( $ctx->fork( 'each-edge-cases' ), $case );
 			$rows[] = self::check_router_region( $ctx, $case );
 			$rows[] = self::check_unbalanced_and_unsupported_fallbacks( $ctx, $case );
 		} catch ( \Throwable $e ) {
@@ -79,7 +82,9 @@ final class InteractivitySurface {
 				'esc_attr',
 				'esc_html',
 				'has_action',
+				'has_filter',
 				'do_action',
+				'remove_filter',
 				'wp_add_inline_style',
 				'wp_enqueue_style',
 				'wp_register_style',
@@ -247,6 +252,91 @@ final class InteractivitySurface {
 		);
 	}
 
+	private static function check_namespaced_directive_evaluation( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::install_fresh_api();
+
+		$primary_items = array(
+			'first-' . self::safe_token( $ctx, 'first' ),
+			'second-' . self::safe_token( $ctx, 'second' ),
+			'third-' . self::safe_token( $ctx, 'third' ),
+		);
+		$primary_text  = 'Primary <' . self::safe_token( $ctx, 'primary' ) . '> & value';
+		$other_text    = 'Other <' . self::safe_token( $ctx, 'other-text' ) . '> & value';
+		$local_text    = 'Local <' . self::safe_token( $ctx, 'local' ) . '> & value';
+
+		\wp_interactivity_state(
+			$case['namespace'],
+			array(
+				'hide'        => true,
+				'dataFlag'    => false,
+				'emptyString' => '',
+				'items'       => $primary_items,
+				'text'        => $primary_text,
+			)
+		);
+		\wp_interactivity_state(
+			$case['otherNamespace'],
+			array(
+				'text'    => $other_text,
+				'visible' => false,
+			)
+		);
+
+		$interactive = \esc_attr( \wp_json_encode( array( 'namespace' => $case['namespace'] ) ) );
+		$html        = '<div data-wp-interactive="' . $interactive . '" '
+			. \wp_interactivity_data_wp_context( array( 'local' => $local_text ), $case['namespace'] )
+			. '>'
+			. '<button data-case="eval" hidden'
+			. ' data-wp-bind--hidden="!state.hide"'
+			. ' data-wp-bind--data-flag="state.dataFlag"'
+			. ' data-wp-bind--data-empty="state.emptyString"'
+			. ' data-wp-text="state.items.length">old count</button>'
+			. '<span data-case="other"'
+			. ' data-wp-bind--aria-hidden="' . \esc_attr( $case['otherNamespace'] . '::!state.visible' ) . '"'
+			. ' data-wp-text="' . \esc_attr( $case['otherNamespace'] . '::state.text' ) . '">old other</span>'
+			. '<span data-case="local" data-wp-text="context.local">old local</span>'
+			. '<span data-case="string-length" data-wp-text="state.text.length">old string length</span>'
+			. '</div>';
+
+		$processed     = \wp_interactivity_process_directives( $html );
+		$eval_tag      = self::find_first_tag_by_attribute( $processed, 'data-case', 'eval' );
+		$other_tag     = self::find_first_tag_by_attribute( $processed, 'data-case', 'other' );
+		$eval_body     = self::find_element_body( $processed, 'button', 'data-case', 'eval' );
+		$other_body    = self::find_element_body( $processed, 'span', 'data-case', 'other' );
+		$local_body    = self::find_element_body( $processed, 'span', 'data-case', 'local' );
+		$length_body   = self::find_element_body( $processed, 'span', 'data-case', 'string-length' );
+		$eval_attrs    = is_array( $eval_tag ) ? $eval_tag['attributes'] : array();
+		$other_attrs   = is_array( $other_tag ) ? $other_tag['attributes'] : array();
+		$expected_body = (string) count( $primary_items );
+
+		$ok = $expected_body === $eval_body
+			&& ! array_key_exists( 'hidden', $eval_attrs )
+			&& 'false' === ( $eval_attrs['data-flag'] ?? null )
+			&& array_key_exists( 'data-empty', $eval_attrs )
+			&& '' === $eval_attrs['data-empty']
+			&& 'true' === ( $other_attrs['aria-hidden'] ?? null )
+			&& \esc_html( $other_text ) === $other_body
+			&& \esc_html( $local_text ) === $local_body
+			&& (string) strlen( $primary_text ) === $length_body;
+
+		return self::result(
+			$ctx,
+			'interactivity.directives.namespace-negation-length-and-boolean-bindings',
+			$ok,
+			array(
+				'namespace'      => $case['namespace'],
+				'otherNamespace' => $case['otherNamespace'],
+				'processed'      => self::preview( $processed ),
+				'evalAttrs'      => $eval_attrs,
+				'otherAttrs'     => $other_attrs,
+				'evalBody'       => $eval_body,
+				'otherBody'      => $other_body,
+				'localBody'      => $local_body,
+				'lengthBody'     => $length_body,
+			)
+		);
+	}
+
 	private static function check_context_and_element_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$api = self::install_fresh_api();
 
@@ -298,6 +388,144 @@ final class InteractivitySurface {
 				'seenContext'     => $seen_context,
 				'seenElement'     => $seen_element,
 				'derivedClosures' => $client_data['derivedStateClosures'][ $case['namespace'] ] ?? null,
+			)
+		);
+	}
+
+	private static function check_script_module_hooks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$api       = self::install_fresh_api();
+		$module_id = '@component-fuzz/interactivity-' . self::safe_token( $ctx, 'module' );
+
+		$api->add_client_navigation_support_to_script_module( $module_id );
+		$matching_attrs = $api->add_load_on_client_navigation_attribute_to_script_modules(
+			array(
+				'type' => 'module',
+				'id'   => $module_id . '-js-module',
+			)
+		);
+		$nonmatching_attrs = $api->add_load_on_client_navigation_attribute_to_script_modules(
+			array(
+				'type' => 'module',
+				'id'   => $module_id . '-different-js-module',
+			)
+		);
+		$classic_attrs = $api->add_load_on_client_navigation_attribute_to_script_modules(
+			array(
+				'type' => 'text/javascript',
+				'id'   => $module_id . '-js-module',
+			)
+		);
+
+		$router_data = $api->filter_script_module_interactivity_router_data( array( 'existing' => true ) );
+		$empty_data  = $api->filter_script_module_interactivity_data( array( 'existing' => true ) );
+
+		$api->add_hooks();
+		$hooks_present = false !== \has_filter( 'script_module_data_@wordpress/interactivity', array( $api, 'filter_script_module_interactivity_data' ) )
+			&& false !== \has_filter( 'script_module_data_@wordpress/interactivity-router', array( $api, 'filter_script_module_interactivity_router_data' ) )
+			&& false !== \has_filter( 'wp_script_attributes', array( $api, 'add_load_on_client_navigation_attribute_to_script_modules' ) );
+
+		\remove_filter( 'script_module_data_@wordpress/interactivity', array( $api, 'filter_script_module_interactivity_data' ) );
+		\remove_filter( 'script_module_data_@wordpress/interactivity-router', array( $api, 'filter_script_module_interactivity_router_data' ) );
+		\remove_filter( 'wp_script_attributes', array( $api, 'add_load_on_client_navigation_attribute_to_script_modules' ) );
+
+		$hooks_removed = false === \has_filter( 'script_module_data_@wordpress/interactivity', array( $api, 'filter_script_module_interactivity_data' ) )
+			&& false === \has_filter( 'script_module_data_@wordpress/interactivity-router', array( $api, 'filter_script_module_interactivity_router_data' ) )
+			&& false === \has_filter( 'wp_script_attributes', array( $api, 'add_load_on_client_navigation_attribute_to_script_modules' ) );
+
+		$options = isset( $matching_attrs['data-wp-router-options'] )
+			? json_decode( (string) $matching_attrs['data-wp-router-options'], true )
+			: null;
+
+		$ok = array( 'loadOnClientNavigation' => true ) === $options
+			&& ! array_key_exists( 'data-wp-router-options', $nonmatching_attrs )
+			&& ! array_key_exists( 'data-wp-router-options', $classic_attrs )
+			&& isset( $router_data['i18n']['loading'], $router_data['i18n']['loaded'] )
+			&& true === $router_data['existing']
+			&& array( 'existing' => true ) === $empty_data
+			&& $hooks_present
+			&& $hooks_removed;
+
+		return self::result(
+			$ctx,
+			'interactivity.script-module-hooks.router-data-and-client-navigation-attributes',
+			$ok,
+			array(
+				'moduleId'         => $module_id,
+				'matchingAttrs'    => $matching_attrs,
+				'nonmatchingAttrs' => $nonmatching_attrs,
+				'classicAttrs'     => $classic_attrs,
+				'routerData'       => $router_data,
+				'emptyData'        => $empty_data,
+				'hooksPresent'     => $hooks_present,
+				'hooksRemoved'     => $hooks_removed,
+			)
+		);
+	}
+
+	private static function check_each_edge_cases( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::install_fresh_api();
+
+		$rows = array(
+			array( 'title' => 'Row 0 <' . self::safe_token( $ctx, 'row0' ) . '> & value' ),
+			array( 'title' => 'Row 1 <' . self::safe_token( $ctx, 'row1' ) . '> & value' ),
+		);
+		\wp_interactivity_state(
+			$case['namespace'],
+			array(
+				'manualList' => array( array( 'title' => 'Manual generated should not render' ) ),
+				'assocList'  => array( 'alpha' => array( 'title' => 'Assoc generated should not render' ) ),
+				'rows'       => $rows,
+			)
+		);
+
+		$html = '<section data-wp-interactive="' . \esc_attr( $case['namespace'] ) . '">'
+			. '<template data-case="manual" data-wp-each="state.manualList"><span data-wp-text="context.item.title">manual old</span></template>'
+			. '<span data-wp-each-child="manual">manual server child</span>'
+			. '<template data-case="assoc" data-wp-each="state.assocList"><span data-wp-text="context.item.title">assoc old</span></template>'
+			. '<template data-case="toptext" data-wp-each="state.rows"> top text <span data-wp-text="context.item.title">top old</span></template>'
+			. '<template data-case="named" data-wp-each--entry-row="state.rows"><span data-case="row" data-wp-text="context.entryRow.title">row old</span></template>'
+			. '</section>';
+
+		$processed       = \wp_interactivity_process_directives( $html );
+		$manual_children = self::find_each_children( $processed, $case['namespace'] . '::state.manualList' );
+		$assoc_children  = self::find_each_children( $processed, $case['namespace'] . '::state.assocList' );
+		$top_children    = self::find_each_children( $processed, $case['namespace'] . '::state.rows' );
+		$row_failures    = array();
+
+		foreach ( $rows as $index => $row ) {
+			$rendered = $top_children[ $index ] ?? null;
+			self::collect_failure(
+				$row_failures,
+				is_array( $rendered ) && \esc_html( $row['title'] ) === $rendered['body'],
+				"named data-wp-each rendered row {$index}",
+				array(
+					'row'      => $row,
+					'rendered' => $rendered,
+				)
+			);
+		}
+
+		$ok = array() === $manual_children
+			&& array() === $assoc_children
+			&& count( $top_children ) === count( $rows )
+			&& array() === $row_failures
+			&& str_contains( $processed, 'manual server child' )
+			&& str_contains( $processed, 'assoc old' )
+			&& str_contains( $processed, 'top old' )
+			&& ! str_contains( $processed, 'Manual generated should not render' )
+			&& ! str_contains( $processed, 'Assoc generated should not render' );
+
+		return self::result(
+			$ctx,
+			'interactivity.each.edge-cases-manual-associative-top-text-and-named-context',
+			$ok,
+			array(
+				'namespace'      => $case['namespace'],
+				'processed'      => self::preview( $processed ),
+				'manualChildren' => $manual_children,
+				'assocChildren'  => $assoc_children,
+				'rowChildren'    => $top_children,
+				'rowFailures'    => array_slice( $row_failures, 0, 5 ),
 			)
 		);
 	}

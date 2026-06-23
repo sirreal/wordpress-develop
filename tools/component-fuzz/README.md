@@ -216,8 +216,10 @@ database, network requests, or a configured site.
   equivalent-schema no-ops, isolated column/index diffs, SQL table allowlists,
   and malformed DDL fail-closed behavior.
 - `interactivity`: server-side directive processing for context, bind, class,
-  style, text, and each directives, unsupported/unbalanced HTML fallbacks,
-  derived context/element helpers, and state/config merge serialization.
+  style, text, and each directives, explicit namespace/negation/length
+  evaluation, script-module router metadata, unsupported/unbalanced HTML
+  fallbacks, derived context/element helpers, and state/config merge
+  serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
   nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, wrapper agreement, protocol filtering, safe CSS,
