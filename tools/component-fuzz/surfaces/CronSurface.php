@@ -28,6 +28,8 @@ final class CronSurface {
 			$rows = array_merge( $rows, self::check_schedules( $ctx ) );
 			$rows = array_merge( $rows, self::check_rejection_contracts( $ctx ) );
 			$rows = array_merge( $rows, self::check_schedule_filters( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_duplicate_single_event_windows( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_clear_and_reschedule_filters( $ctx, $store ) );
 
 			foreach ( self::cases( $ctx ) as $case_index => $case ) {
 				$store = array( 'version' => 2 );
@@ -285,6 +287,165 @@ final class CronSurface {
 				'unschedule' => self::describe_call( $unschedule ),
 				'kept'       => self::describe_call( $kept ),
 				'events'     => self::describe_value( $unschedule_seen ),
+				'store'      => self::describe_cron_store( $store ),
+			)
+		);
+
+		return $rows;
+	}
+
+	private static function check_duplicate_single_event_windows( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$rows  = array();
+		$store = array( 'version' => 2 );
+		$now   = time();
+		$base  = $now + 2 * \HOUR_IN_SECONDS;
+		$hook  = 'component_fuzz_duplicate_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$args  = array( 'group' => 'duplicate', 'token' => self::safe_hook_fragment( $ctx->text( 0, 12 ) ) );
+
+		$first          = self::call( static fn() => \wp_schedule_single_event( $base, $hook, $args, true ) );
+		$duplicate      = self::call( static fn() => \wp_schedule_single_event( $base + 5 * \MINUTE_IN_SECONDS, $hook, $args, true ) );
+		$outside_window = self::call( static fn() => \wp_schedule_single_event( $base + 11 * \MINUTE_IN_SECONDS, $hook, $args, true ) );
+		$different_args = self::call( static fn() => \wp_schedule_single_event( $base + 6 * \MINUTE_IN_SECONDS, $hook, array_merge( $args, array( 'variant' => 1 ) ), true ) );
+		$cron_array     = self::call( static fn() => \_get_cron_array() );
+		$timestamps     = $cron_array['threw'] ? array() : self::event_timestamps( $cron_array['value'], $hook, $args );
+
+		$rows[] = $ctx->result(
+			'cron.single-event-duplicate-window-blocks-identical-args-only',
+			! $first['threw']
+				&& true === $first['value']
+				&& ! $duplicate['threw']
+				&& 'duplicate_event' === self::error_code( $duplicate['value'] ?? null )
+				&& ! $outside_window['threw']
+				&& true === $outside_window['value']
+				&& ! $different_args['threw']
+				&& true === $different_args['value']
+				&& array( $base, $base + 11 * \MINUTE_IN_SECONDS ) === $timestamps,
+			array(
+				'first'          => self::describe_call( $first ),
+				'duplicate'      => self::describe_call( $duplicate ),
+				'outsideWindow'  => self::describe_call( $outside_window ),
+				'differentArgs'  => self::describe_call( $different_args ),
+				'timestamps'     => self::describe_value( $timestamps ),
+				'store'          => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store       = array( 'version' => 2 );
+		$near_future = $now + 5 * \MINUTE_IN_SECONDS;
+		$near_hook   = 'component_fuzz_duplicate_near_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$near_args   = array( 'group' => 'near-now' );
+		$near_first  = self::call( static fn() => \wp_schedule_single_event( $near_future, $near_hook, $near_args, true ) );
+		$past_dupe   = self::call( static fn() => \wp_schedule_single_event( $now - 60, $near_hook, $near_args, true ) );
+
+		$rows[] = $ctx->result(
+			'cron.single-event-duplicate-window-treats-near-now-past-as-duplicates',
+			! $near_first['threw']
+				&& true === $near_first['value']
+				&& ! $past_dupe['threw']
+				&& 'duplicate_event' === self::error_code( $past_dupe['value'] ?? null ),
+			array(
+				'nearFirst' => self::describe_call( $near_first ),
+				'pastDupe'  => self::describe_call( $past_dupe ),
+				'store'     => self::describe_cron_store( $store ),
+			)
+		);
+
+		return $rows;
+	}
+
+	private static function check_clear_and_reschedule_filters( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$rows  = array();
+		$store = array( 'version' => 2 );
+		$now   = time();
+
+		$clear_hook = 'component_fuzz_pre_clear_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$clear_args = array( 'group' => 'pre-clear' );
+		\wp_schedule_single_event( $now + \HOUR_IN_SECONDS, $clear_hook, $clear_args, true );
+		\wp_schedule_single_event( $now + 2 * \HOUR_IN_SECONDS, $clear_hook, $clear_args, true );
+
+		$clear_seen = array();
+		$clear_pre  = static function ( $pre, string $hook, array $args, bool $wp_error ) use ( &$clear_seen, $clear_hook ) {
+			$clear_seen[] = array(
+				'pre'   => $pre,
+				'hook'  => $hook,
+				'args'  => $args,
+				'error' => $wp_error,
+			);
+
+			return $clear_hook === $hook ? 7 : $pre;
+		};
+
+		\add_filter( 'pre_clear_scheduled_hook', $clear_pre, 10, 4 );
+		try {
+			$clear_result = self::call( static fn() => \wp_clear_scheduled_hook( $clear_hook, $clear_args, true ) );
+			$still_there  = self::call( static fn() => \wp_next_scheduled( $clear_hook, $clear_args ) );
+		} finally {
+			\remove_filter( 'pre_clear_scheduled_hook', $clear_pre, 10 );
+		}
+
+		$rows[] = $ctx->result(
+			'cron.filters.pre-clear-short-circuits-and-preserves-events',
+			! $clear_result['threw']
+				&& 7 === $clear_result['value']
+				&& ! $still_there['threw']
+				&& false !== $still_there['value']
+				&& 1 === count( $clear_seen )
+				&& $clear_hook === ( $clear_seen[0]['hook'] ?? null )
+				&& $clear_args === ( $clear_seen[0]['args'] ?? null )
+				&& true === ( $clear_seen[0]['error'] ?? null )
+				&& false === \has_filter( 'pre_clear_scheduled_hook', $clear_pre ),
+			array(
+				'clearResult' => self::describe_call( $clear_result ),
+				'stillThere'  => self::describe_call( $still_there ),
+				'seen'        => self::describe_value( $clear_seen ),
+				'store'       => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store           = array( 'version' => 2 );
+		$reschedule_hook = 'component_fuzz_pre_reschedule_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$reschedule_args = array( 'group' => 'pre-reschedule' );
+		$reschedule_time = $now - 2 * \HOUR_IN_SECONDS;
+		\wp_schedule_event( $reschedule_time, 'hourly', $reschedule_hook, $reschedule_args, true );
+
+		$reschedule_seen = array();
+		$reschedule_pre  = static function ( $pre, object $event, bool $wp_error ) use ( &$reschedule_seen, $reschedule_hook ) {
+			$reschedule_seen[] = array(
+				'pre'       => $pre,
+				'hook'      => $event->hook,
+				'timestamp' => $event->timestamp,
+				'schedule'  => $event->schedule,
+				'interval'  => $event->interval,
+				'error'     => $wp_error,
+			);
+
+			return $reschedule_hook === $event->hook ? 'component-fuzz-rescheduled' : $pre;
+		};
+
+		\add_filter( 'pre_reschedule_event', $reschedule_pre, 10, 3 );
+		try {
+			$reschedule = self::call( static fn() => \wp_reschedule_event( $reschedule_time, 'hourly', $reschedule_hook, $reschedule_args, true ) );
+			$cron_array = self::call( static fn() => \_get_cron_array() );
+		} finally {
+			\remove_filter( 'pre_reschedule_event', $reschedule_pre, 10 );
+		}
+		$timestamps = $cron_array['threw'] ? array() : self::event_timestamps( $cron_array['value'], $reschedule_hook, $reschedule_args );
+
+		$rows[] = $ctx->result(
+			'cron.filters.pre-reschedule-short-circuits-without-new-occurrence',
+			! $reschedule['threw']
+				&& 'component-fuzz-rescheduled' === $reschedule['value']
+				&& array( $reschedule_time ) === $timestamps
+				&& 1 === count( $reschedule_seen )
+				&& $reschedule_hook === ( $reschedule_seen[0]['hook'] ?? null )
+				&& 'hourly' === ( $reschedule_seen[0]['schedule'] ?? null )
+				&& \HOUR_IN_SECONDS === ( $reschedule_seen[0]['interval'] ?? null )
+				&& true === ( $reschedule_seen[0]['error'] ?? null )
+				&& false === \has_filter( 'pre_reschedule_event', $reschedule_pre ),
+			array(
+				'reschedule' => self::describe_call( $reschedule ),
+				'timestamps' => self::describe_value( $timestamps ),
+				'seen'       => self::describe_value( $reschedule_seen ),
 				'store'      => self::describe_cron_store( $store ),
 			)
 		);
