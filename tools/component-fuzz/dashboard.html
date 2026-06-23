@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">91</div>
-			<div class="good">README parity confirmed: 91 documented</div>
+			<div class="metric">92</div>
+			<div class="good">README parity confirmed: 92 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6554 passed, 0 failed, 0 errored, 55 skipped at 91 surfaces.</div>
+			<div class="note">Non-skipped pass rate: 6564 passed, 0 failed, 0 errored, 54 skipped at 92 surfaces.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>rest-site-editor</code>: 900 passed, 200 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>bookmark-links</code>: 700 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">0</div>
-			<div class="note">Two worker results are ready for integration. All workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">One worker result is ready for integration. All workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -260,13 +260,13 @@
 					<td><code>appearance-media</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Focused 100 iterations passed; broad run pending after dashboard update.</td>
+					<td>Main focused run: 500 passed, 100 skipped; broad run: 6527 passed, 50 skipped, 0 failed.</td>
 					<td>Theme mods, theme support globals, site icon filters, post type/status bootstrap.</td>
 				</tr>
 				<tr>
 					<td><code>customizer-persistence</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td><code>_work/component-fuzz-customizer-persistence</code></td>
+					<td>Main worktree</td>
 					<td>Main focused run: 600 passed; broad run: 6534 passed, 51 skipped, 0 failed.</td>
 					<td>Customizer classes, custom CSS setting, options/theme mods, no browser dispatch.</td>
 				</tr>
@@ -280,15 +280,15 @@
 				<tr>
 					<td><code>media-remote</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td><code>_work/component-fuzz-media-remote</code></td>
+					<td>Main worktree</td>
 					<td>Main focused run: 400 passed; broad run: 6519 passed, 51 skipped, 0 failed.</td>
 					<td>HTTP short-circuiting, temp files, filetype checks, media sideload helpers.</td>
 				</tr>
 				<tr>
 					<td><code>bookmark-links</code></td>
-					<td><span class="status wait">ready to integrate</span></td>
-					<td><code>_work/component-fuzz-bookmarks-links</code></td>
-					<td>Worker focused run: 700 passed, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; broad run: 6564 passed, 54 skipped, 0 failed.</td>
 					<td>Link/bookmark APIs, optional narrow wpdb link-table support, template links.</td>
 				</tr>
 				<tr>
@@ -317,6 +317,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>23cdb7cd1e</code></td>
+					<td><code>rest-site-editor</code></td>
+					<td>900 passed, 200 skipped, 0 failed.</td>
+					<td>6554 passed, 55 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>157d5a1d4b</code></td>
 					<td><code>customizer-persistence</code></td>
@@ -422,8 +428,8 @@
 				</tr>
 				<tr>
 					<td>Remote/network paths</td>
-					<td>HTTP and community events use short-circuited responses.</td>
-					<td>Live network access remains out of scope; media remote worker will add local response fixtures.</td>
+					<td>HTTP, community events, and media remote helpers use short-circuited local responses.</td>
+					<td>Live network access remains out of scope.</td>
 				</tr>
 				<tr>
 					<td>DB-backed behavior</td>

@@ -78,6 +78,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		public $is_mysql = false;
 		public $posts = 'wp_posts';
 		public $comments = 'wp_comments';
+		public $links = 'wp_links';
 		public $terms = 'wp_terms';
 		public $term_taxonomy = 'wp_term_taxonomy';
 		public $term_relationships = 'wp_term_relationships';
@@ -98,6 +99,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private $component_fuzz_term_relationship_rows = array();
 		private $component_fuzz_users = array();
 		private $component_fuzz_comments = array();
+		private $component_fuzz_links = array();
 		private $component_fuzz_meta = array();
 		private $component_fuzz_next_ids = array();
 
@@ -136,6 +138,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$this->component_fuzz_term_relationship_rows = array();
 			$this->component_fuzz_users                 = array();
 			$this->component_fuzz_comments              = array();
+			$this->component_fuzz_links                 = array();
 			$this->component_fuzz_meta                  = array(
 				'post'    => array(),
 				'term'    => array(),
@@ -148,6 +151,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'term_taxonomy' => 1,
 				'users'         => 1,
 				'comments'      => 1,
+				'links'         => 1,
 				'post_meta'     => 1,
 				'term_meta'     => 1,
 				'comment_meta'  => 1,
@@ -167,6 +171,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'term_relationships' => count( $this->component_fuzz_term_relationship_rows ),
 				'users'              => count( $this->component_fuzz_users ),
 				'comments'           => count( $this->component_fuzz_comments ),
+				'links'              => count( $this->component_fuzz_links ),
 				'post_meta'          => count( $this->component_fuzz_meta['post'] ),
 				'term_meta'          => count( $this->component_fuzz_meta['term'] ),
 				'comment_meta'       => count( $this->component_fuzz_meta['comment'] ),
@@ -405,6 +410,13 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_finish_insert( $id );
 			}
 
+			if ( 'links' === $table_key ) {
+				$id                                = $this->component_fuzz_row_id( $data, 'link_id', 'links' );
+				$row                               = array_merge( $this->component_fuzz_link_defaults(), $data, array( 'link_id' => $id ) );
+				$this->component_fuzz_links[ $id ] = $row;
+				return $this->component_fuzz_finish_insert( $id );
+			}
+
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
 			if ( null !== $meta_type ) {
 				$id_column  = 'user' === $meta_type ? 'umeta_id' : 'meta_id';
@@ -473,6 +485,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_update_rows( $this->component_fuzz_comments, $data, $where );
 			}
 
+			if ( 'links' === $table_key ) {
+				return $this->component_fuzz_update_rows( $this->component_fuzz_links, $data, $where );
+			}
+
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
 			if ( null !== $meta_type ) {
 				return $this->component_fuzz_update_rows( $this->component_fuzz_meta[ $meta_type ], $data, $where );
@@ -518,6 +534,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( 'comments' === $table_key ) {
 				return $this->component_fuzz_delete_rows( $this->component_fuzz_comments, $where );
+			}
+
+			if ( 'links' === $table_key ) {
+				return $this->component_fuzz_delete_rows( $this->component_fuzz_links, $where );
 			}
 
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
@@ -662,6 +682,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( preg_match( '/\bFROM\s+`?wp_comments`?\b/i', $query ) ) {
 				return $this->component_fuzz_select_comments( $query );
+			}
+
+			if ( preg_match( '/\bFROM\s+`?wp_links`?\b/i', $query ) ) {
+				return $this->component_fuzz_select_links( $query );
 			}
 
 			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
@@ -937,6 +961,215 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_select_links( $query ) {
+			$rows = array_values( $this->component_fuzz_links );
+			$rows = $this->component_fuzz_maybe_join_links_to_link_categories( $query, $rows );
+
+			if ( preg_match( '/\bCHAR_LENGTH\s*\(\s*link_name\s*\)\s+AS\s+length\b/i', $query ) ) {
+				foreach ( $rows as &$row ) {
+					$row['length'] = function_exists( 'mb_strlen' ) ? mb_strlen( (string) $row['link_name'], 'UTF-8' ) : strlen( (string) $row['link_name'] );
+				}
+				unset( $row );
+			}
+
+			if ( preg_match( '/\brecently_updated\b/i', $query ) || preg_match( '/\blink_updated_f\b/i', $query ) ) {
+				foreach ( $rows as &$row ) {
+					$updated_timestamp      = strtotime( (string) $row['link_updated'] );
+					$row['link_updated_f']  = false === $updated_timestamp ? '0' : (string) $updated_timestamp;
+					$row['recently_updated'] = false !== $updated_timestamp && $updated_timestamp + 120 * MINUTE_IN_SECONDS >= time() ? '1' : '0';
+				}
+				unset( $row );
+			}
+
+			foreach ( array( 'link_id', 'link_owner', 'link_visible' ) as $column ) {
+				$values = $this->component_fuzz_all_compare_values( $query, $column, '=' );
+				if ( array() === $values ) {
+					continue;
+				}
+
+				$value_map = array_fill_keys( array_map( 'strval', $values ), true );
+				$rows      = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value_map ) {
+						return isset( $value_map[ (string) $row[ $column ] ] );
+					}
+				);
+			}
+
+			$excluded_ids = $this->component_fuzz_all_compare_values( $query, 'link_id', '<>' );
+			if ( array() === $excluded_ids ) {
+				$excluded_ids = $this->component_fuzz_all_compare_values( $query, 'link_id', '!=' );
+			}
+			if ( array() !== $excluded_ids ) {
+				$excluded_map = array_fill_keys( array_map( 'intval', $excluded_ids ), true );
+				$rows         = array_filter(
+					$rows,
+					static function ( $row ) use ( $excluded_map ) {
+						return ! isset( $excluded_map[ (int) $row['link_id'] ] );
+					}
+				);
+			}
+
+			$term_ids = $this->component_fuzz_all_compare_values( $query, 'term_id', '=' );
+			if ( array() !== $term_ids ) {
+				$term_map = array_fill_keys( array_map( 'intval', $term_ids ), true );
+				$rows     = array_filter(
+					$rows,
+					static function ( $row ) use ( $term_map ) {
+						return isset( $row['term_id'] ) && isset( $term_map[ (int) $row['term_id'] ] );
+					}
+				);
+			}
+
+			$taxonomy = $this->component_fuzz_compare_value( $query, 'taxonomy' );
+			if ( null !== $taxonomy ) {
+				$rows = array_filter(
+					$rows,
+					static function ( $row ) use ( $taxonomy ) {
+						return isset( $row['taxonomy'] ) && (string) $row['taxonomy'] === (string) $taxonomy;
+					}
+				);
+			}
+
+			$rows = $this->component_fuzz_filter_links_by_search_like( $query, $rows );
+			$rows = $this->component_fuzz_sort_link_rows( $query, array_values( $rows ) );
+			$rows = $this->component_fuzz_apply_limit( $query, $rows );
+
+			if ( preg_match( '/SELECT\s+link_id\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'link_id' ) );
+			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_maybe_join_links_to_link_categories( $query, array $link_rows ) {
+			if ( ! preg_match( '/\bwp_term_relationships\b/i', $query ) && ! preg_match( '/\bwp_term_taxonomy\b/i', $query ) ) {
+				return $link_rows;
+			}
+
+			$joined = array();
+			foreach ( $link_rows as $link_row ) {
+				foreach ( $this->component_fuzz_term_relationship_rows as $relationship ) {
+					if ( (int) $relationship['object_id'] !== (int) $link_row['link_id'] ) {
+						continue;
+					}
+
+					$tt_id = (int) $relationship['term_taxonomy_id'];
+					if ( ! isset( $this->component_fuzz_term_taxonomy_rows[ $tt_id ] ) ) {
+						continue;
+					}
+
+					$joined[] = array_merge( $link_row, $relationship, $this->component_fuzz_term_taxonomy_rows[ $tt_id ] );
+				}
+			}
+
+			return $joined;
+		}
+
+		private function component_fuzz_filter_links_by_search_like( $query, array $rows ) {
+			if ( ! preg_match( '/\blink_url\s+LIKE\s+(\'(?:\\\\.|[^\'\\\\])*\')/i', $query, $matches ) ) {
+				return $rows;
+			}
+
+			$needle = $this->component_fuzz_unquote_sql_value( $matches[1] );
+			$needle = str_replace( array( '\\%', '\\_' ), array( '%', '_' ), trim( $needle, '%' ) );
+
+			return array_filter(
+				$rows,
+				static function ( $row ) use ( $needle ) {
+					foreach ( array( 'link_url', 'link_name', 'link_description' ) as $column ) {
+						if ( false !== stripos( (string) $row[ $column ], $needle ) ) {
+							return true;
+						}
+					}
+					return false;
+				}
+			);
+		}
+
+		private function component_fuzz_sort_link_rows( $query, array $rows ) {
+			if ( ! preg_match( '/\bORDER\s+BY\s+(.+?)(?:\s+LIMIT\s+\d+|\z)/is', $query, $matches ) ) {
+				return array_values( $rows );
+			}
+
+			$order_expression = trim( $matches[1] );
+			if ( preg_match( '/\brand\s*\(\s*\)/i', $order_expression ) ) {
+				usort(
+					$rows,
+					static function ( $a, $b ) use ( $query ) {
+						return strcmp(
+							md5( $query . ':' . (string) $a['link_id'] ),
+							md5( $query . ':' . (string) $b['link_id'] )
+						);
+					}
+				);
+				return $rows;
+			}
+
+			$order = 'ASC';
+			if ( preg_match( '/\s+(ASC|DESC)\s*$/i', $order_expression, $order_match ) ) {
+				$order            = strtoupper( $order_match[1] );
+				$order_expression = trim( substr( $order_expression, 0, -strlen( $order_match[0] ) ) );
+			}
+
+			$columns = array_filter(
+				array_map(
+					array( $this, 'component_fuzz_normalize_link_orderby_column' ),
+					explode( ',', $order_expression )
+				)
+			);
+
+			if ( array() === $columns ) {
+				$columns = array( 'link_name' );
+			}
+
+			usort(
+				$rows,
+				static function ( $a, $b ) use ( $columns, $order ) {
+					foreach ( $columns as $column ) {
+						if ( in_array( $column, array( 'link_id', 'link_owner', 'link_rating', 'length' ), true ) ) {
+							$comparison = (int) ( $a[ $column ] ?? 0 ) <=> (int) ( $b[ $column ] ?? 0 );
+						} else {
+							$comparison = strcasecmp( (string) ( $a[ $column ] ?? '' ), (string) ( $b[ $column ] ?? '' ) );
+						}
+
+						if ( 0 !== $comparison ) {
+							return 'DESC' === $order ? -$comparison : $comparison;
+						}
+					}
+
+					$comparison = (int) $a['link_id'] <=> (int) $b['link_id'];
+					return 'DESC' === $order ? -$comparison : $comparison;
+				}
+			);
+
+			return $rows;
+		}
+
+		private function component_fuzz_normalize_link_orderby_column( $column ) {
+			$column = trim( (string) $column, "` \t\n\r\0\x0B" );
+			$column = preg_replace( '/^`?wp_links`?\./i', '', $column );
+			$column = trim( (string) $column, "` \t\n\r\0\x0B" );
+
+			if ( 'length' === $column ) {
+				return 'length';
+			}
+
+			$allowed = array(
+				'link_id',
+				'link_name',
+				'link_url',
+				'link_visible',
+				'link_rating',
+				'link_owner',
+				'link_updated',
+				'link_notes',
+				'link_description',
+			);
+
+			return in_array( $column, $allowed, true ) ? $column : '';
 		}
 
 		private function component_fuzz_select_term_relationships( $query ) {
@@ -1263,6 +1496,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return count( $this->component_fuzz_select_comments( $query ) );
 			}
 
+			if ( preg_match( '/\bFROM\s+`?wp_links`?\b/i', $query ) ) {
+				return count( $this->component_fuzz_select_links( $query ) );
+			}
+
 			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
 				return count( $this->component_fuzz_select_term_relationships( $query ) );
 			}
@@ -1356,6 +1593,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$this->term_relationships => 'term_relationships',
 				$this->users              => 'users',
 				$this->comments           => 'comments',
+				$this->links              => 'links',
 				$this->postmeta           => 'post_meta',
 				$this->termmeta           => 'term_meta',
 				$this->commentmeta        => 'comment_meta',
@@ -1434,6 +1672,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $this->component_fuzz_csv_values( $matches[1] );
+		}
+
+		private function component_fuzz_all_compare_values( $query, $column, $operator ) {
+			$column   = preg_quote( $column, '/' );
+			$operator = preg_quote( $operator, '/' );
+
+			if ( ! preg_match_all( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s*' . $operator . '\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+				return array();
+			}
+
+			return array_map( array( $this, 'component_fuzz_unquote_sql_value' ), $matches[1] );
 		}
 
 		private function component_fuzz_csv_values( $csv ) {
@@ -1661,6 +1910,24 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'comment_type'         => 'comment',
 				'comment_parent'       => 0,
 				'user_id'              => 0,
+			);
+		}
+
+		private function component_fuzz_link_defaults() {
+			return array(
+				'link_id'          => 0,
+				'link_url'         => '',
+				'link_name'        => '',
+				'link_image'       => '',
+				'link_target'      => '',
+				'link_description' => '',
+				'link_visible'     => 'Y',
+				'link_owner'       => 0,
+				'link_rating'      => 0,
+				'link_updated'     => '0000-00-00 00:00:00',
+				'link_rel'         => '',
+				'link_notes'       => '',
+				'link_rss'         => '',
 			);
 		}
 

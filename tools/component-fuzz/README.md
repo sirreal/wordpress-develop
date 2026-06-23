@@ -71,6 +71,11 @@ database, network requests, or a configured site.
   rendering, dynamic legacy class mapping, content sanitization on update,
   form escaping, widgets block editor support toggles, and sidebars widget
   mapping for block widget instances.
+- `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
+  including in-memory link rows and link categories for `get_bookmark()`,
+  `get_bookmarks()`, `wp_list_bookmarks()` escaping, edit bookmark links,
+  bookmark sanitizers, selected deprecated wrappers, safe link CRUD, argument
+  filtering, ordering, limits, visibility, ratings, and bookmark caches.
 - `block-templates`: no-DB block template and block theme resolution coverage,
   including template registry lifecycle, file-backed templates and parts,
   parent/child theme precedence, theme.json metadata, hierarchy resolution, and
@@ -448,6 +453,11 @@ recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
 metadata lifecycle APIs; it is not a general SQL engine. Rich post-to-term
 relationship behavior is covered by `taxonomy-relationships`, still limited to
 the recognized term relationship SQL shapes emitted by the targeted core APIs.
+The `bookmark-links` surface extends that stub only for the `wp_links` shapes
+emitted by bookmark APIs and safe link CRUD: ID lookups, visibility/search,
+include/exclude/category joins through `link_category`, supported order/limit
+clauses, and `link_id` projections. It intentionally does not emulate arbitrary
+link-manager SQL, admin page dispatch, or live database behavior.
 The `auth-flow` surface short-circuits auth cookie sending and avoids browser
 redirect/login-form dispatch, real mail, application-password API requests, and
 process-exit paths.
