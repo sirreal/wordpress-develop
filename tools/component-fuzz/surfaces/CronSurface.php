@@ -28,6 +28,7 @@ final class CronSurface {
 			$rows = array_merge( $rows, self::check_schedules( $ctx ) );
 			$rows = array_merge( $rows, self::check_rejection_contracts( $ctx ) );
 			$rows = array_merge( $rows, self::check_schedule_filters( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_next_scheduled_filter( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_duplicate_single_event_windows( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_clear_and_reschedule_filters( $ctx, $store ) );
 
@@ -292,6 +293,66 @@ final class CronSurface {
 		);
 
 		return $rows;
+	}
+
+	private static function check_next_scheduled_filter( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$store     = array( 'version' => 2 );
+		$timestamp = time() + 2 * \HOUR_IN_SECONDS + $ctx->int( 0, 600 );
+		$hook      = 'component_fuzz_next_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$args      = array(
+			'group' => 'next-filter',
+			'token' => self::safe_hook_fragment( $ctx->text( 0, 12 ) ),
+		);
+		$override  = $timestamp + 123;
+		$seen      = array();
+
+		$schedule = self::call( static fn() => \wp_schedule_event( $timestamp, 'hourly', $hook, $args, true ) );
+		$filter   = static function ( int $next_timestamp, object $event, string $filter_hook, array $filter_args ) use ( &$seen, $hook, $args, $override ): int {
+			$seen[] = array(
+				'timestamp' => $next_timestamp,
+				'hook'      => $filter_hook,
+				'args'      => $filter_args,
+				'event'     => $event,
+			);
+
+			return $hook === $filter_hook && $args === $filter_args ? $override : $next_timestamp;
+		};
+
+		\add_filter( 'wp_next_scheduled', $filter, 10, 4 );
+		try {
+			$next    = self::call( static fn() => \wp_next_scheduled( $hook, $args ) );
+			$missing = self::call( static fn() => \wp_next_scheduled( $hook, array( 'missing' => true ) ) );
+		} finally {
+			\remove_filter( 'wp_next_scheduled', $filter, 10 );
+		}
+
+		$event = $seen[0]['event'] ?? null;
+		return array(
+			$ctx->result(
+				'cron.next-scheduled.filter-overrides-existing-event-only',
+				! $schedule['threw']
+					&& true === $schedule['value']
+					&& ! $next['threw']
+					&& $override === $next['value']
+					&& ! $missing['threw']
+					&& false === $missing['value']
+					&& 1 === count( $seen )
+					&& $event instanceof \stdClass
+					&& $hook === $event->hook
+					&& $timestamp === $event->timestamp
+					&& 'hourly' === $event->schedule
+					&& $args === $event->args
+					&& \HOUR_IN_SECONDS === $event->interval
+					&& false === \has_filter( 'wp_next_scheduled', $filter ),
+				array(
+					'schedule' => self::describe_call( $schedule ),
+					'next'     => self::describe_call( $next ),
+					'missing'  => self::describe_call( $missing ),
+					'seen'     => self::describe_value( $seen ),
+					'store'    => self::describe_cron_store( $store ),
+				)
+			),
+		);
 	}
 
 	private static function check_duplicate_single_event_windows( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
