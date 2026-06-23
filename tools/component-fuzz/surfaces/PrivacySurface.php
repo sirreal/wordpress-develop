@@ -48,11 +48,16 @@ final class PrivacySurface {
 
 			$rows[] = self::check_user_request_objects( $ctx->fork( 'user-request-objects' ), $request_cases );
 			$rows[] = self::check_action_descriptions( $ctx->fork( 'action-descriptions' ) );
+			$rows[] = self::check_request_lifecycle_helpers( $ctx->fork( 'request-lifecycle' ) );
 			$rows[] = self::check_user_request_keys( $ctx->fork( 'request-keys' ) );
+			$rows[] = self::check_user_request_key_expiration_filters( $ctx->fork( 'request-key-expiration-filters' ) );
+			$rows[] = self::check_confirmation_messages( $ctx->fork( 'confirmation-messages' ) );
 			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
+			$rows[] = self::check_registry_filters( $ctx->fork( 'registry-filters' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
 			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
 			$rows[] = self::check_anonymization_helpers( $ctx->fork( 'anonymization' ) );
+			$rows[] = self::check_export_paths_and_cleanup( $ctx->fork( 'export-paths-cleanup' ) );
 			$rows[] = self::check_policy_content_helpers( $ctx->fork( 'policy-content' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -167,14 +172,18 @@ final class PrivacySurface {
 			array(
 				'add_action',
 				'add_filter',
+				'clean_post_cache',
 				'delete_post_meta',
 				'esc_attr',
 				'esc_html',
+				'has_filter',
 				'get_post_meta',
 				'is_wp_error',
+				'remove_filter',
 				'sanitize_email',
 				'sanitize_title_with_dashes',
 				'update_post_meta',
+				'wp_generate_user_request_key',
 				'wp_cache_set',
 				'wp_fast_hash',
 				'wp_get_user_request',
@@ -184,10 +193,16 @@ final class PrivacySurface {
 				'wp_privacy_process_personal_data_export_page',
 				'wp_privacy_anonymize_data',
 				'wp_privacy_anonymize_ip',
+				'wp_privacy_delete_old_export_files',
+				'wp_privacy_exports_dir',
+				'wp_privacy_exports_url',
 				'wp_add_privacy_policy_content',
 				'wp_user_request_action_description',
 				'wp_validate_user_request_key',
 				'wp_verify_fast_hash',
+				'_wp_privacy_account_request_confirmed',
+				'_wp_privacy_account_request_confirmed_message',
+				'_wp_privacy_completed_request',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -418,6 +433,169 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_request_lifecycle_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return self::skip(
+				$ctx,
+				'privacy.request-lifecycle.key-confirm-complete',
+				'The wpdb content stub is unavailable for DB-backed request lifecycle helpers.'
+			);
+		}
+
+		$failures = array();
+
+		self::reset_db_content();
+		try {
+			$request_id = 94001;
+			self::seed_db_request_post(
+				self::post_record(
+					array(
+						'ID'                => $request_id,
+						'post_title'        => 'lifecycle@example.test',
+						'post_name'         => 'export_personal_data',
+						'post_status'       => 'request-failed',
+						'post_content'      => \wp_json_encode( array( 'source' => 'request-lifecycle' ) ),
+						'post_password'     => \wp_fast_hash( 'old-confirm-key' ),
+						'post_modified'     => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ),
+						'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ),
+					)
+				)
+			);
+			self::set_post_meta( $request_id, array() );
+
+			$key_call  = self::call(
+				static function () use ( $request_id ) {
+					return \wp_generate_user_request_key( $request_id );
+				}
+			);
+			$key_after = \wp_get_user_request( $request_id );
+			$key_ok    = ! $key_call['threw']
+				&& is_string( $key_call['value'] )
+				&& 20 === strlen( $key_call['value'] )
+				&& $key_after instanceof \WP_User_Request
+				&& 'request-pending' === $key_after->status
+				&& \wp_verify_fast_hash( $key_call['value'], $key_after->confirm_key );
+
+			if ( ! $key_ok ) {
+				self::record_failure(
+					$failures,
+					'request-lifecycle.generate-key-updates-pending-hash',
+					array( 'label' => 'generate-key' ),
+					array(
+						'keyCall' => self::describe_call( $key_call ),
+						'request' => self::describe_value( $key_after ),
+					)
+				);
+			}
+
+			$confirm_call  = self::call(
+				static function () use ( $request_id ): void {
+					\_wp_privacy_account_request_confirmed( $request_id );
+				}
+			);
+			$confirm_after = \wp_get_user_request( $request_id );
+			$confirmed_at  = \get_post_meta( $request_id, '_wp_user_request_confirmed_timestamp', true );
+			$confirm_ok    = ! $confirm_call['threw']
+				&& $confirm_after instanceof \WP_User_Request
+				&& 'request-confirmed' === $confirm_after->status
+				&& is_int( $confirmed_at )
+				&& $confirmed_at <= time()
+				&& $confirmed_at >= time() - 5;
+
+			if ( ! $confirm_ok ) {
+				self::record_failure(
+					$failures,
+					'request-lifecycle.confirmed-action-marks-status-and-meta',
+					array( 'label' => 'confirm-action' ),
+					array(
+						'confirmCall' => self::describe_call( $confirm_call ),
+						'request'     => self::describe_value( $confirm_after ),
+						'confirmedAt' => self::describe_value( $confirmed_at ),
+					)
+				);
+			}
+
+			$complete_call  = self::call(
+				static function () use ( $request_id ) {
+					return \_wp_privacy_completed_request( $request_id );
+				}
+			);
+			$complete_after = \wp_get_user_request( $request_id );
+			$completed_at   = \get_post_meta( $request_id, '_wp_user_request_completed_timestamp', true );
+			$complete_ok    = ! $complete_call['threw']
+				&& (int) $request_id === (int) $complete_call['value']
+				&& $complete_after instanceof \WP_User_Request
+				&& 'request-completed' === $complete_after->status
+				&& is_int( $completed_at )
+				&& $completed_at <= time()
+				&& $completed_at >= time() - 5;
+
+			if ( ! $complete_ok ) {
+				self::record_failure(
+					$failures,
+					'request-lifecycle.completed-request-marks-status-and-meta',
+					array( 'label' => 'complete-request' ),
+					array(
+						'completeCall' => self::describe_call( $complete_call ),
+						'request'      => self::describe_value( $complete_after ),
+						'completedAt'  => self::describe_value( $completed_at ),
+					)
+				);
+			}
+
+			$closed_id = 94002;
+			self::seed_db_request_post(
+				self::post_record(
+					array(
+						'ID'                => $closed_id,
+						'post_title'        => 'closed@example.test',
+						'post_name'         => 'remove_personal_data',
+						'post_status'       => 'request-completed',
+						'post_content'      => '{"closed":true}',
+						'post_password'     => \wp_fast_hash( 'closed-key' ),
+						'post_modified'     => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ),
+						'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ),
+					)
+				)
+			);
+			self::set_post_meta( $closed_id, array() );
+
+			$closed_call  = self::call(
+				static function () use ( $closed_id ): void {
+					\_wp_privacy_account_request_confirmed( $closed_id );
+				}
+			);
+			$closed_after = \wp_get_user_request( $closed_id );
+			$closed_meta  = \get_post_meta( $closed_id, '_wp_user_request_confirmed_timestamp', true );
+			$closed_ok    = ! $closed_call['threw']
+				&& $closed_after instanceof \WP_User_Request
+				&& 'request-completed' === $closed_after->status
+				&& '' === $closed_meta;
+
+			if ( ! $closed_ok ) {
+				self::record_failure(
+					$failures,
+					'request-lifecycle.confirm-action-ignores-closed-requests',
+					array( 'label' => 'closed-request' ),
+					array(
+						'closedCall' => self::describe_call( $closed_call ),
+						'request'    => self::describe_value( $closed_after ),
+						'meta'       => self::describe_value( $closed_meta ),
+					)
+				);
+			}
+		} finally {
+			self::reset_db_content();
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.request-lifecycle.key-confirm-complete',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_user_request_keys( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$now      = time();
@@ -581,6 +759,208 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_user_request_key_expiration_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$now      = time();
+		$key      = 'expiration|' . self::random_string( $ctx->fork( 'expiration-key' ), 24 );
+		$hash     = \wp_fast_hash( $key );
+		$post     = self::post_record(
+			array(
+				'ID'                => 91101,
+				'post_title'        => 'expiration@example.test',
+				'post_name'         => 'export_personal_data',
+				'post_status'       => 'request-pending',
+				'post_content'      => '{"expiration":"filter"}',
+				'post_password'     => $hash,
+				'post_modified'     => gmdate( 'Y-m-d H:i:s', $now - 60 ),
+				'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', $now - 60 ),
+			)
+		);
+
+		self::prime_request_post( $post );
+		self::set_post_meta( (int) $post->ID, array() );
+
+		$seen_short = array();
+		$short      = static function ( int $expiration ) use ( &$seen_short ): int {
+			$seen_short[] = $expiration;
+			return 1;
+		};
+		\add_filter( 'user_request_key_expiration', $short, 10, 1 );
+		try {
+			$expired = self::call(
+				static function () use ( $post, $key ) {
+					return \wp_validate_user_request_key( (int) $post->ID, $key );
+				}
+			);
+		} finally {
+			\remove_filter( 'user_request_key_expiration', $short, 10 );
+		}
+
+		$seen_long = array();
+		$long      = static function ( int $expiration ) use ( &$seen_long ): int {
+			$seen_long[] = $expiration;
+			return 7 * DAY_IN_SECONDS;
+		};
+		\add_filter( 'user_request_key_expiration', $long, 10, 1 );
+		try {
+			$valid = self::call(
+				static function () use ( $post, $key ) {
+					return \wp_validate_user_request_key( (int) $post->ID, $key );
+				}
+			);
+		} finally {
+			\remove_filter( 'user_request_key_expiration', $long, 10 );
+		}
+
+		$ok = ! $expired['threw']
+			&& self::is_error_code( $expired['value'], 'expired_key' )
+			&& ! $valid['threw']
+			&& true === $valid['value']
+			&& array( DAY_IN_SECONDS ) === $seen_short
+			&& array( DAY_IN_SECONDS ) === $seen_long
+			&& false === \has_filter( 'user_request_key_expiration', $short )
+			&& false === \has_filter( 'user_request_key_expiration', $long );
+
+		if ( ! $ok ) {
+			self::record_failure(
+				$failures,
+				'user-request-key.expiration-filter-controls-window',
+				array( 'label' => 'expiration-filters' ),
+				array(
+					'expired'   => self::describe_call( $expired ),
+					'valid'     => self::describe_call( $valid ),
+					'seenShort' => self::describe_value( $seen_short ),
+					'seenLong'  => self::describe_value( $seen_long ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.user-request-key.expiration-filter-contract',
+			array() === $failures,
+			array(
+				'requestId' => (int) $post->ID,
+				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_confirmation_messages( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label'    => 'export',
+				'id'       => 91201,
+				'action'   => 'export_personal_data',
+				'expected' => 'export request',
+			),
+			array(
+				'label'    => 'erase',
+				'id'       => 91202,
+				'action'   => 'remove_personal_data',
+				'expected' => 'erasure request',
+			),
+			array(
+				'label'    => 'unknown',
+				'id'       => 91203,
+				'action'   => 'custom_' . self::random_string( $ctx->fork( 'unknown-action' ), 10 ),
+				'expected' => 'Action has been confirmed.',
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			self::prime_request_post(
+				self::post_record(
+					array(
+						'ID'           => $case['id'],
+						'post_title'   => $case['label'] . '@example.test',
+						'post_name'    => $case['action'],
+						'post_status'  => 'request-confirmed',
+						'post_content' => '{"confirmed":"message"}',
+					)
+				)
+			);
+		}
+
+		$seen_filter = array();
+		$filter      = static function ( string $message, int $request_id ) use ( &$seen_filter ): string {
+			$seen_filter[] = array(
+				'id'      => $request_id,
+				'message' => $message,
+			);
+
+			if ( 91202 !== $request_id ) {
+				return $message;
+			}
+
+			return '<p class="component-fuzz-filtered">' . \esc_html( $message ) . '</p>';
+		};
+		\add_filter( 'user_request_action_confirmed_message', $filter, 10, 2 );
+		try {
+			foreach ( $cases as $case ) {
+				$actual = self::call(
+					static function () use ( $case ) {
+						return \_wp_privacy_account_request_confirmed_message( $case['id'] );
+					}
+				);
+
+				$contains_expected = ! $actual['threw']
+					&& is_string( $actual['value'] )
+					&& false !== stripos( $actual['value'], $case['expected'] );
+				$filtered_erase    = 'erase' !== $case['label']
+					|| (
+						str_contains( $actual['value'], 'component-fuzz-filtered' )
+						&& false === strpos( $actual['value'], '<script' )
+					);
+
+				if ( ! $contains_expected || ! $filtered_erase ) {
+					self::record_failure(
+						$failures,
+						'confirmation-message.case-and-filter',
+						$case,
+						array( 'actual' => self::describe_call( $actual ) )
+					);
+				}
+			}
+
+			$missing = self::call(
+				static function () {
+					return \_wp_privacy_account_request_confirmed_message( 91919 );
+				}
+			);
+			if ( $missing['threw'] || ! is_string( $missing['value'] ) || ! str_contains( $missing['value'], 'Action has been confirmed.' ) ) {
+				self::record_failure(
+					$failures,
+					'confirmation-message.missing-request-default',
+					array( 'label' => 'missing-request' ),
+					array( 'actual' => self::describe_call( $missing ) )
+				);
+			}
+		} finally {
+			\remove_filter( 'user_request_action_confirmed_message', $filter, 10 );
+		}
+
+		if ( 4 !== count( $seen_filter ) || false !== \has_filter( 'user_request_action_confirmed_message', $filter ) ) {
+			self::record_failure(
+				$failures,
+				'confirmation-message.filter-locality',
+				array( 'label' => 'filter-locality' ),
+				array(
+					'seenFilter' => self::describe_value( $seen_filter ),
+					'hasFilter'  => \has_filter( 'user_request_action_confirmed_message', $filter ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.confirmation-message.known-unknown-filtered',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_export_group_html( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures    = array();
 		$group_id    = 'group<' . self::random_string( $ctx->fork( 'group-id' ), 10 ) . '>';
@@ -685,6 +1065,98 @@ final class PrivacySurface {
 				'expectedId' => $expected_id,
 				'htmlBytes'  => strlen( $value ),
 				'failures'   => $failures,
+			)
+		);
+	}
+
+	private static function check_registry_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		self::$exporters = array(
+			'alpha-exporter' => array(
+				'exporter_friendly_name' => 'Alpha Exporter ' . $ctx->identifier( 3, 7 ),
+				'callback'               => '__return_empty_array',
+			),
+			'unicode-exporter' => array(
+				'exporter_friendly_name' => "Unicode Exporter \xC3\xA9",
+				'callback'               => '__return_empty_array',
+			),
+		);
+		self::$erasers   = array(
+			'alpha-eraser' => array(
+				'eraser_friendly_name' => 'Alpha Eraser ' . $ctx->identifier( 3, 7 ),
+				'callback'             => '__return_empty_array',
+			),
+			'unicode-eraser' => array(
+				'eraser_friendly_name' => "Unicode Eraser \xE2\x98\x83",
+				'callback'             => '__return_empty_array',
+			),
+		);
+
+		$seen_exporters = array();
+		$late_exporter  = static function ( array $exporters ) use ( &$seen_exporters ): array {
+			$seen_exporters[]          = array_keys( $exporters );
+			$exporters['late-export'] = array(
+				'exporter_friendly_name' => 'Late Exporter',
+				'callback'               => '__return_empty_array',
+			);
+			return $exporters;
+		};
+
+		$seen_erasers = array();
+		$late_eraser  = static function ( array $erasers ) use ( &$seen_erasers ): array {
+			$seen_erasers[]         = array_keys( $erasers );
+			$erasers['late-erase'] = array(
+				'eraser_friendly_name' => 'Late Eraser',
+				'callback'             => '__return_empty_array',
+			);
+			return $erasers;
+		};
+
+		\add_filter( 'wp_privacy_personal_data_exporters', $late_exporter, 20, 1 );
+		\add_filter( 'wp_privacy_personal_data_erasers', $late_eraser, 20, 1 );
+		try {
+			$exporters = \apply_filters( 'wp_privacy_personal_data_exporters', array( 'incoming' => array() ) );
+			$erasers   = \apply_filters( 'wp_privacy_personal_data_erasers', array( 'incoming' => array() ) );
+		} finally {
+			\remove_filter( 'wp_privacy_personal_data_exporters', $late_exporter, 20 );
+			\remove_filter( 'wp_privacy_personal_data_erasers', $late_eraser, 20 );
+		}
+
+		$exporters_ok = isset( $exporters['alpha-exporter'], $exporters['unicode-exporter'], $exporters['late-export'] )
+			&& ! isset( $exporters['incoming'] )
+			&& array( array( 'alpha-exporter', 'unicode-exporter' ) ) === $seen_exporters
+			&& is_callable( $exporters['alpha-exporter']['callback'] );
+		$erasers_ok   = isset( $erasers['alpha-eraser'], $erasers['unicode-eraser'], $erasers['late-erase'] )
+			&& ! isset( $erasers['incoming'] )
+			&& array( array( 'alpha-eraser', 'unicode-eraser' ) ) === $seen_erasers
+			&& is_callable( $erasers['unicode-eraser']['callback'] );
+		$filters_gone = false === \has_filter( 'wp_privacy_personal_data_exporters', $late_exporter )
+			&& false === \has_filter( 'wp_privacy_personal_data_erasers', $late_eraser );
+
+		if ( ! $exporters_ok || ! $erasers_ok || ! $filters_gone ) {
+			self::record_failure(
+				$failures,
+				'privacy-registry.filters-shape-order-and-locality',
+				array( 'label' => 'registry-filters' ),
+				array(
+					'exporters'     => self::describe_value( $exporters ),
+					'erasers'       => self::describe_value( $erasers ),
+					'seenExporters' => self::describe_value( $seen_exporters ),
+					'seenErasers'   => self::describe_value( $seen_erasers ),
+					'filtersGone'   => $filters_gone,
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.registry-filters.exporter-eraser-shape-and-locality',
+			array() === $failures,
+			array(
+				'exporterKeys' => array_keys( $exporters ),
+				'eraserKeys'   => array_keys( $erasers ),
+				'failures'     => $failures,
 			)
 		);
 	}
@@ -1036,6 +1508,121 @@ final class PrivacySurface {
 				'ipCases'   => count( $ip_cases ),
 				'dataTypes' => array_keys( $data_cases ),
 				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_export_paths_and_cleanup( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = substr( sha1( (string) $ctx->seed() . ':' . (string) $ctx->iteration() ), 0, 12 );
+		$base_dir = sys_get_temp_dir() . '/component-fuzz-privacy-' . $token;
+		$dir      = $base_dir . '/wp-personal-data-exports/';
+		$url      = 'https://privacy.example.test/exports/' . $token . '/';
+
+		self::remove_tree( $base_dir );
+		if ( ! is_dir( $dir ) ) {
+			mkdir( $dir, 0777, true );
+		}
+
+		$old_file   = $dir . 'export-old.zip';
+		$new_file   = $dir . 'export-new.zip';
+		$index_file = $dir . 'index.php';
+		file_put_contents( $old_file, 'old export' );
+		file_put_contents( $new_file, 'new export' );
+		file_put_contents( $index_file, '<?php // silence' );
+		touch( $old_file, time() - 5 * DAY_IN_SECONDS );
+		touch( $new_file, time() - HOUR_IN_SECONDS );
+		touch( $index_file, time() - 5 * DAY_IN_SECONDS );
+		clearstatcache();
+
+		$seen_dir_filter = array();
+		$dir_filter      = static function ( string $exports_dir ) use ( &$seen_dir_filter, $dir ): string {
+			$seen_dir_filter[] = $exports_dir;
+			return $dir;
+		};
+		$seen_url_filter = array();
+		$url_filter      = static function ( string $exports_url ) use ( &$seen_url_filter, $url ): string {
+			$seen_url_filter[] = $exports_url;
+			return $url;
+		};
+		$seen_expiration = array();
+		$expiration      = static function ( int $seconds ) use ( &$seen_expiration ): int {
+			$seen_expiration[] = $seconds;
+			return 2 * DAY_IN_SECONDS;
+		};
+
+		\add_filter( 'wp_privacy_exports_dir', $dir_filter, 10, 1 );
+		\add_filter( 'wp_privacy_exports_url', $url_filter, 10, 1 );
+		\add_filter( 'wp_privacy_export_expiration', $expiration, 10, 1 );
+		try {
+			$exports_dir = \wp_privacy_exports_dir();
+			$exports_url = \wp_privacy_exports_url();
+			$cleanup     = self::call(
+				static function (): void {
+					\wp_privacy_delete_old_export_files();
+				}
+			);
+			clearstatcache();
+
+			$ok = ! $cleanup['threw']
+				&& $dir === $exports_dir
+				&& $url === $exports_url
+				&& ! file_exists( $old_file )
+				&& file_exists( $new_file )
+				&& file_exists( $index_file )
+				&& 2 === count( $seen_dir_filter )
+				&& array( 3 * DAY_IN_SECONDS ) === $seen_expiration
+				&& array() !== $seen_url_filter;
+
+			if ( ! $ok ) {
+				self::record_failure(
+					$failures,
+					'export-paths.filtered-dir-url-and-expiration-cleanup',
+					array( 'label' => 'export-paths-cleanup' ),
+					array(
+						'exportsDir'      => self::describe_string( (string) $exports_dir ),
+						'exportsUrl'      => self::describe_string( (string) $exports_url ),
+						'cleanup'         => self::describe_call( $cleanup ),
+						'oldExists'       => file_exists( $old_file ),
+						'newExists'       => file_exists( $new_file ),
+						'indexExists'     => file_exists( $index_file ),
+						'seenDirFilter'   => self::describe_value( $seen_dir_filter ),
+						'seenUrlFilter'   => self::describe_value( $seen_url_filter ),
+						'seenExpiration'  => self::describe_value( $seen_expiration ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'wp_privacy_exports_dir', $dir_filter, 10 );
+			\remove_filter( 'wp_privacy_exports_url', $url_filter, 10 );
+			\remove_filter( 'wp_privacy_export_expiration', $expiration, 10 );
+			self::remove_tree( $base_dir );
+		}
+
+		if (
+			false !== \has_filter( 'wp_privacy_exports_dir', $dir_filter )
+			|| false !== \has_filter( 'wp_privacy_exports_url', $url_filter )
+			|| false !== \has_filter( 'wp_privacy_export_expiration', $expiration )
+		) {
+			self::record_failure(
+				$failures,
+				'export-paths.filters-removed',
+				array( 'label' => 'filter-locality' ),
+				array(
+					'dirFilter'        => \has_filter( 'wp_privacy_exports_dir', $dir_filter ),
+					'urlFilter'        => \has_filter( 'wp_privacy_exports_url', $url_filter ),
+					'expirationFilter' => \has_filter( 'wp_privacy_export_expiration', $expiration ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.export-paths.dir-url-and-expiration-cleanup',
+			array() === $failures,
+			array(
+				'token'    => $token,
+				'failures' => $failures,
 			)
 		);
 	}
@@ -1395,6 +1982,27 @@ final class PrivacySurface {
 			&& 'IP' === $groups['activity']['items']['login-1'][0]['name'];
 	}
 
+	private static function wpdb_stub_available(): bool {
+		return isset( $GLOBALS['wpdb'] )
+			&& $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' );
+	}
+
+	private static function reset_db_content(): void {
+		if ( self::wpdb_stub_available() ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+	}
+
+	private static function seed_db_request_post( object $post ): void {
+		if ( ! self::wpdb_stub_available() ) {
+			return;
+		}
+
+		$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, get_object_vars( $post ) );
+		\clean_post_cache( (int) $post->ID );
+	}
+
 	private static function install_scoped_filters(): void {
 		\add_filter( 'get_post_metadata', array( __CLASS__, 'filter_get_post_metadata' ), 10, 5 );
 		\add_filter( 'update_post_metadata', array( __CLASS__, 'filter_update_post_metadata' ), 10, 5 );
@@ -1565,6 +2173,32 @@ final class PrivacySurface {
 
 		$first = $secret[0];
 		return ( 'x' === $first ? 'y' : 'x' ) . substr( $secret, 1 ) . '|mutated';
+	}
+
+	private static function remove_tree( string $path ): void {
+		if ( '' === $path || ! file_exists( $path ) ) {
+			return;
+		}
+
+		if ( is_file( $path ) || is_link( $path ) ) {
+			@unlink( $path );
+			return;
+		}
+
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $path, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $iterator as $item ) {
+			if ( $item->isDir() && ! $item->isLink() ) {
+				@rmdir( $item->getPathname() );
+			} else {
+				@unlink( $item->getPathname() );
+			}
+		}
+
+		@rmdir( $path );
 	}
 
 	private static function describe_call( array $call ) {
