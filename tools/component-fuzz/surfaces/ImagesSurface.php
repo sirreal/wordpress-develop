@@ -7,7 +7,7 @@ namespace ComponentFuzz\Surfaces;
 final class ImagesSurface {
 	public const NAME = 'images';
 
-	private const CASES         = 16;
+	private const CASES         = 24;
 	private const PREVIEW_BYTES = 180;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -29,10 +29,13 @@ final class ImagesSurface {
 		try {
 			$rows[] = self::check_constrain_dimensions( $ctx );
 			$rows[] = self::check_resize_dimensions( $ctx );
+			$rows[] = self::check_intermediate_size_helpers( $ctx );
 			$rows[] = self::check_srcset_and_sizes( $ctx );
+			$rows[] = self::check_responsive_filter_boundaries( $ctx );
 			$rows[] = self::check_image_tag_attributes( $ctx );
 			$rows[] = self::check_loading_optimization_attributes( $ctx );
 			$rows[] = self::check_attachment_helpers( $ctx );
+			$rows[] = self::check_filetype_helpers( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -52,15 +55,22 @@ final class ImagesSurface {
 		foreach (
 			array(
 				'image_resize_dimensions',
+				'image_get_intermediate_size',
+				'image_hwstring',
+				'get_intermediate_image_sizes',
+				'wp_check_filetype',
 				'wp_calculate_image_sizes',
 				'wp_calculate_image_srcset',
 				'wp_constrain_dimensions',
+				'wp_ext2type',
+				'wp_get_default_extension_for_mime_type',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_sizes',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_image_srcset',
 				'wp_get_attachment_image_url',
 				'wp_get_loading_optimization_attributes',
+				'wp_get_mime_types',
 				'wp_image_add_srcset_and_sizes',
 				'wp_image_file_matches_image_meta',
 				'wp_image_src_get_dimensions',
@@ -138,6 +148,7 @@ final class ImagesSurface {
 				}
 
 				list( $dst_x, $dst_y, $src_x, $src_y, $dst_w, $dst_h, $src_w, $src_h ) = $result;
+				$expected = self::expected_resize_result( $case, $crop );
 				self::collect_failure(
 					$failures,
 					0 === $dst_x
@@ -151,16 +162,45 @@ final class ImagesSurface {
 						&& $src_x + $src_w <= $case['origW']
 						&& $src_y + $src_h <= $case['origH']
 						&& $dst_w <= max( $case['destW'], $case['origW'] )
-						&& $dst_h <= max( $case['destH'], $case['origH'] ),
+						&& $dst_h <= max( $case['destH'], $case['origH'] )
+						&& $expected === $result,
 					"image_resize_dimensions crop bounds case {$index}",
 					array(
-						'case'   => $case,
-						'crop'   => $crop,
-						'result' => $result,
+						'case'     => $case,
+						'crop'     => $crop,
+						'result'   => $result,
+						'expected' => $expected,
 					)
 				);
 			}
 		}
+
+		$sentinel = array( 0, 0, 1, 2, 3, 4, 5, 6 );
+		$filter   = static function ( $output, int $orig_w, int $orig_h, int $dest_w, int $dest_h, $crop ) use ( $sentinel ) {
+			if ( 777 === $orig_w && 555 === $orig_h && 333 === $dest_w && 222 === $dest_h && false === $crop ) {
+				return $sentinel;
+			}
+
+			return $output;
+		};
+
+		\add_filter( 'image_resize_dimensions', $filter, 10, 6 );
+		try {
+			$filtered = \image_resize_dimensions( 777, 555, 333, 222, false );
+		} finally {
+			\remove_filter( 'image_resize_dimensions', $filter, 10 );
+		}
+		$after_filter = \image_resize_dimensions( 777, 555, 333, 222, false );
+
+		self::collect_failure(
+			$failures,
+			$sentinel === $filtered && $sentinel !== $after_filter,
+			'image_resize_dimensions short-circuit filter is local and removable',
+			array(
+				'filtered'    => $filtered,
+				'afterFilter' => $after_filter,
+			)
+		);
 
 		return self::row(
 			$ctx,
@@ -173,6 +213,86 @@ final class ImagesSurface {
 		);
 	}
 
+	private static function check_intermediate_size_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$attachment_id = 200000 + $ctx->iteration();
+		$meta          = self::generated_image_meta( $ctx->fork( 'intermediate-meta' ) );
+		$medium        = $meta['sizes']['medium'];
+		$large         = $meta['sizes']['large'];
+		$filtered_name = 'component-fuzz-' . $ctx->int( 100, 999 );
+
+		$meta_filter = static function ( $value, int $object_id, string $meta_key, bool $single ) use ( $attachment_id, $meta ) {
+			if ( $attachment_id !== $object_id || '_wp_attachment_metadata' !== $meta_key || ! $single ) {
+				return $value;
+			}
+
+			return array( $meta );
+		};
+		$size_filter = static function ( array $sizes ) use ( $filtered_name ): array {
+			$sizes[] = $filtered_name;
+			return $sizes;
+		};
+		$output_filter = static function ( $data, int $post_id, $size ) use ( $attachment_id ) {
+			if ( $attachment_id === $post_id && 'medium' === $size && is_array( $data ) ) {
+				$data['component_fuzz_filtered'] = 'yes';
+			}
+
+			return $data;
+		};
+
+		\add_filter( 'get_post_metadata', $meta_filter, 10, 4 );
+		\add_filter( 'intermediate_image_sizes', $size_filter );
+		\add_filter( 'image_get_intermediate_size', $output_filter, 10, 3 );
+		try {
+			$exact     = \image_get_intermediate_size( $attachment_id, 'medium' );
+			$array     = \image_get_intermediate_size( $attachment_id, array( 0, $large['height'] ) );
+			$missing   = \image_get_intermediate_size( $attachment_id, 'not-a-size' );
+			$size_list = \get_intermediate_image_sizes();
+		} finally {
+			\remove_filter( 'image_get_intermediate_size', $output_filter, 10 );
+			\remove_filter( 'intermediate_image_sizes', $size_filter );
+			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
+		}
+
+		$after_exact     = \image_get_intermediate_size( $attachment_id, 'medium' );
+		$after_size_list = \get_intermediate_image_sizes();
+
+		self::collect_failure(
+			$failures,
+			is_array( $exact )
+				&& $medium['file'] === $exact['file']
+				&& $medium['width'] === $exact['width']
+				&& $medium['height'] === $exact['height']
+				&& $medium['path'] === $exact['path']
+				&& $medium['url'] === $exact['url']
+				&& 'yes' === ( $exact['component_fuzz_filtered'] ?? null )
+				&& is_array( $array )
+				&& $large['file'] === $array['file']
+				&& $large['height'] === $array['height']
+				&& false === $missing
+				&& in_array( $filtered_name, $size_list, true )
+				&& false === $after_exact
+				&& ! in_array( $filtered_name, $after_size_list, true ),
+			'image_get_intermediate_size uses synthetic metadata and local filters',
+			array(
+				'meta'          => $meta,
+				'exact'         => $exact,
+				'array'         => $array,
+				'missing'       => $missing,
+				'sizeList'      => $size_list,
+				'afterExact'    => $after_exact,
+				'afterSizeList' => $after_size_list,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'images.intermediate.synthetic-metadata-filters',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_srcset_and_sizes( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$meta     = self::image_meta( $ctx );
@@ -182,8 +302,21 @@ final class ImagesSurface {
 		$full_dim = \wp_image_src_get_dimensions( 'https://example.test/wp-content/uploads/2026/06/photo.jpg', $meta, 0 );
 		$med_dim  = \wp_image_src_get_dimensions( $src, $meta, 0 );
 		$missing  = \wp_image_src_get_dimensions( 'https://example.test/wp-content/uploads/2026/06/missing.jpg', $meta, 0 );
+		$generated_meta   = self::generated_image_meta( $ctx->fork( 'srcset-meta' ) );
+		$generated_medium = $generated_meta['sizes']['medium'];
+		$generated_src    = self::image_url( $generated_meta, 'medium' );
+		$generated_srcset = \wp_calculate_image_srcset(
+			array( $generated_medium['width'], $generated_medium['height'] ),
+			$generated_src,
+			$generated_meta,
+			0
+		);
+		$generated_sizes  = \wp_calculate_image_sizes( 'medium', $generated_src, $generated_meta, 0 );
+		$generated_dim    = \wp_image_src_get_dimensions( $generated_src, $generated_meta, 0 );
+		$generated_query_dim = \wp_image_src_get_dimensions( $generated_src . '?cache=1', $generated_meta, 0 );
 
 		$candidates = is_string( $srcset ) ? self::parse_srcset_widths( $srcset ) : array();
+		$generated_candidates = is_string( $generated_srcset ) ? self::parse_srcset_widths( $generated_srcset ) : array();
 		self::collect_failure(
 			$failures,
 			is_string( $srcset )
@@ -194,15 +327,25 @@ final class ImagesSurface {
 				&& '(max-width: 600px) 100vw, 600px' === $sizes
 				&& array( 1200, 800 ) === $full_dim
 				&& array( 600, 400 ) === $med_dim
-				&& false === $missing,
+				&& false === $missing
+				&& is_string( $generated_srcset )
+				&& self::expected_srcset_widths_present( $generated_meta, $generated_candidates, $generated_medium['width'], $generated_medium['height'] )
+				&& sprintf( '(max-width: %1$dpx) 100vw, %1$dpx', $generated_medium['width'] ) === $generated_sizes
+				&& array( $generated_medium['width'], $generated_medium['height'] ) === $generated_dim
+				&& false === $generated_query_dim,
 			'wp_calculate_image_srcset/sizes and metadata dimensions agree',
 			array(
-				'srcset'     => $srcset,
-				'candidates' => $candidates,
-				'sizes'      => $sizes,
-				'fullDim'    => $full_dim,
-				'medDim'     => $med_dim,
-				'missing'    => $missing,
+				'srcset'              => $srcset,
+				'candidates'          => $candidates,
+				'sizes'               => $sizes,
+				'fullDim'             => $full_dim,
+				'medDim'              => $med_dim,
+				'missing'             => $missing,
+				'generatedSrcset'     => $generated_srcset,
+				'generatedCandidates' => $generated_candidates,
+				'generatedSizes'      => $generated_sizes,
+				'generatedDim'        => $generated_dim,
+				'generatedQueryDim'   => $generated_query_dim,
 			)
 		);
 
@@ -214,12 +357,107 @@ final class ImagesSurface {
 		);
 	}
 
+	private static function check_responsive_filter_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$attachment_id = 300000 + $ctx->iteration();
+		$meta          = self::generated_image_meta( $ctx->fork( 'responsive-boundary-meta' ) );
+		$medium        = $meta['sizes']['medium'];
+		$large         = $meta['sizes']['large'];
+		$src           = self::image_url( $meta, 'medium' );
+
+		$max_width_filter = static fn() => $medium['width'];
+		\add_filter( 'max_srcset_image_width', $max_width_filter );
+		try {
+			$limited = \wp_calculate_image_srcset( array( $medium['width'], $medium['height'] ), $src, $meta, $attachment_id );
+		} finally {
+			\remove_filter( 'max_srcset_image_width', $max_width_filter );
+		}
+
+		$meta_filter = static function ( array $image_meta, array $size_array, string $image_src, int $id ) use ( $attachment_id ): array {
+			if ( $attachment_id === $id ) {
+				$image_meta['sizes'] = array();
+			}
+
+			return $image_meta;
+		};
+		\add_filter( 'wp_calculate_image_srcset_meta', $meta_filter, 10, 4 );
+		try {
+			$blocked = \wp_calculate_image_srcset( array( $medium['width'], $medium['height'] ), $src, $meta, $attachment_id );
+		} finally {
+			\remove_filter( 'wp_calculate_image_srcset_meta', $meta_filter, 10 );
+		}
+
+		$size_filter = static fn() => '100vw';
+		\add_filter( 'wp_calculate_image_sizes', $size_filter );
+		try {
+			$filtered_sizes = \wp_calculate_image_sizes( array( $medium['width'], $medium['height'] ), $src, $meta, $attachment_id );
+		} finally {
+			\remove_filter( 'wp_calculate_image_sizes', $size_filter );
+		}
+		$after_filtered_sizes = \wp_calculate_image_sizes( array( $medium['width'], $medium['height'] ), $src, $meta, $attachment_id );
+
+		$gif_meta = $meta;
+		foreach ( $gif_meta['sizes'] as &$size_data ) {
+			$size_data['mime-type'] = 'image/gif';
+			$size_data['file']      = preg_replace( '/\.jpg$/', '.gif', $size_data['file'] );
+			$size_data['path']      = preg_replace( '/\.jpg$/', '.gif', $size_data['path'] );
+			$size_data['url']       = preg_replace( '/\.jpg$/', '.gif', $size_data['url'] );
+		}
+		unset( $size_data );
+		$gif_meta['file']           = preg_replace( '/\.jpg$/', '.gif', $gif_meta['file'] );
+		$gif_meta['original_image'] = preg_replace( '/\.jpg$/', '.gif', $gif_meta['original_image'] );
+		$gif_full_src               = self::image_url( $gif_meta, null );
+		$gif_medium_src             = self::image_url( $gif_meta, 'medium' );
+		$gif_full_srcset            = \wp_calculate_image_srcset( array( $gif_meta['width'], $gif_meta['height'] ), $gif_full_src, $gif_meta, 0 );
+		$gif_medium_srcset          = \wp_calculate_image_srcset( array( $medium['width'], $medium['height'] ), $gif_medium_src, $gif_meta, 0 );
+
+		$limited_widths = is_string( $limited ) ? self::parse_srcset_widths( $limited ) : array();
+		$gif_widths     = is_string( $gif_medium_srcset ) ? self::parse_srcset_widths( $gif_medium_srcset ) : array();
+		self::collect_failure(
+			$failures,
+			is_string( $limited )
+				&& isset( $limited_widths[ $medium['width'] ] )
+				&& ! isset( $limited_widths[ $large['width'] ] )
+				&& false === $blocked
+				&& '100vw' === $filtered_sizes
+				&& sprintf( '(max-width: %1$dpx) 100vw, %1$dpx', $medium['width'] ) === $after_filtered_sizes
+				&& false === $gif_full_srcset
+				&& is_string( $gif_medium_srcset )
+				&& isset( $gif_widths[ $medium['width'] ] )
+				&& ! isset( $gif_widths[ $gif_meta['width'] ] ),
+			'responsive image filters, width caps, and GIF animation boundaries hold',
+			array(
+				'limited'            => $limited,
+				'limitedWidths'      => $limited_widths,
+				'blocked'            => $blocked,
+				'filteredSizes'      => $filtered_sizes,
+				'afterFilteredSizes' => $after_filtered_sizes,
+				'gifFullSrcset'      => $gif_full_srcset,
+				'gifMediumSrcset'    => $gif_medium_srcset,
+				'gifWidths'          => $gif_widths,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'images.responsive.filters-gif-boundaries',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_image_tag_attributes( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$meta     = self::image_meta( $ctx );
 		$image    = '<img class="wp-image-10" src="https://example.test/wp-content/uploads/2026/06/photo-600x400.jpg" width="600" height="400" alt="Example">';
 		$first    = \wp_image_add_srcset_and_sizes( $image, $meta, 10 );
 		$existing = \wp_image_add_srcset_and_sizes( str_replace( ' alt=', ' sizes="100vw" alt=', $image ), $meta, 10 );
+		$derived  = \wp_image_add_srcset_and_sizes( str_replace( ' width="600" height="400"', '', $image ), $meta, 10 );
+		$single_quoted = \wp_image_add_srcset_and_sizes(
+			"<img class='wp-image-10' src='https://example.test/wp-content/uploads/2026/06/photo-600x400.jpg' width='600' height='400' alt='Single'>",
+			$meta,
+			10
+		);
 
 		self::collect_failure(
 			$failures,
@@ -233,11 +471,17 @@ final class ImagesSurface {
 				&& str_contains( $first, 'photo.jpg 1200w' )
 				&& 1 === substr_count( $existing, ' sizes=' )
 				&& 1 === substr_count( $existing, ' srcset=' )
-				&& str_contains( $existing, 'sizes="100vw"' ),
+				&& str_contains( $existing, 'sizes="100vw"' )
+				&& str_contains( $derived, ' srcset=' )
+				&& str_contains( $derived, ' sizes=' )
+				&& ! str_contains( $derived, ' width=' )
+				&& $single_quoted === "<img class='wp-image-10' src='https://example.test/wp-content/uploads/2026/06/photo-600x400.jpg' width='600' height='400' alt='Single'>",
 			'wp_image_add_srcset_and_sizes inserts responsive attrs without clobbering sizes',
 			array(
-				'first'    => self::describe_string( $first ),
-				'existing' => self::describe_string( $existing ),
+				'first'        => self::describe_string( $first ),
+				'existing'     => self::describe_string( $existing ),
+				'derived'      => self::describe_string( $derived ),
+				'singleQuoted' => self::describe_string( $single_quoted ),
 			)
 		);
 
@@ -266,6 +510,40 @@ final class ImagesSurface {
 		$template = \wp_get_loading_optimization_attributes( 'img', $attrs, 'template' );
 		$span     = \wp_get_loading_optimization_attributes( 'span', $attrs, 'component-fuzz' );
 		$explicit = \wp_get_loading_optimization_attributes( 'img', $attrs + array( 'loading' => 'eager', 'decoding' => 'sync' ), 'component-fuzz' );
+		$low      = \wp_get_loading_optimization_attributes( 'img', $attrs + array( 'fetchpriority' => 'low' ), 'component-fuzz-low' );
+		$auto     = \wp_get_loading_optimization_attributes( 'img', $attrs + array( 'fetchpriority' => 'auto' ), 'component-fuzz-auto' );
+		$iframe   = \wp_get_loading_optimization_attributes( 'iframe', $attrs, 'component-fuzz-frame' );
+		$missing_dimensions = \wp_get_loading_optimization_attributes(
+			'img',
+			array( 'src' => 'https://example.test/missing-dimensions.jpg' ),
+			'component-fuzz'
+		);
+		$pre_filter = static function ( $loading_attrs, string $tag_name, array $attr, string $context ) {
+			if ( 'component-fuzz-short-circuit' === $context ) {
+				return array(
+					'loading'       => 'eager',
+					'fetchpriority' => 'low',
+				);
+			}
+
+			return $loading_attrs;
+		};
+		$lazy_filter = static function ( bool $default, string $tag_name, string $context ): bool {
+			if ( 'component-fuzz-no-lazy' === $context ) {
+				return false;
+			}
+
+			return $default;
+		};
+		\add_filter( 'pre_wp_get_loading_optimization_attributes', $pre_filter, 10, 4 );
+		\add_filter( 'wp_lazy_loading_enabled', $lazy_filter, 10, 3 );
+		try {
+			$short_circuit = \wp_get_loading_optimization_attributes( 'img', $attrs, 'component-fuzz-short-circuit' );
+			$no_lazy       = \wp_get_loading_optimization_attributes( 'img', $attrs, 'component-fuzz-no-lazy' );
+		} finally {
+			\remove_filter( 'wp_lazy_loading_enabled', $lazy_filter, 10 );
+			\remove_filter( 'pre_wp_get_loading_optimization_attributes', $pre_filter, 10 );
+		}
 
 		self::collect_failure(
 			$failures,
@@ -276,15 +554,36 @@ final class ImagesSurface {
 				&& array() === $span
 				&& isset( $explicit['decoding'] )
 				&& 'sync' === $explicit['decoding']
-				&& ! isset( $explicit['loading'] ),
+				&& ! isset( $explicit['loading'] )
+				&& isset( $low['fetchpriority'] )
+				&& 'low' === $low['fetchpriority']
+				&& ! isset( $low['loading'] )
+				&& isset( $auto['fetchpriority'] )
+				&& 'auto' === $auto['fetchpriority']
+				&& isset( $auto['loading'] )
+				&& 'lazy' === $auto['loading']
+				&& ! isset( $iframe['decoding'] )
+				&& isset( $iframe['loading'] )
+				&& 'lazy' === $iframe['loading']
+				&& array( 'decoding' => 'async' ) === $missing_dimensions
+				&& array( 'loading' => 'eager', 'fetchpriority' => 'low' ) === $short_circuit
+				&& isset( $no_lazy['decoding'] )
+				&& 'async' === $no_lazy['decoding']
+				&& ! isset( $no_lazy['loading'] ),
 			'wp_get_loading_optimization_attributes deterministic context behavior',
 			array(
-				'attrs'    => $attrs,
-				'first'    => $first,
-				'second'   => $second,
-				'template' => $template,
-				'span'     => $span,
-				'explicit' => $explicit,
+				'attrs'             => $attrs,
+				'first'             => $first,
+				'second'            => $second,
+				'template'          => $template,
+				'span'              => $span,
+				'explicit'          => $explicit,
+				'low'               => $low,
+				'auto'              => $auto,
+				'iframe'            => $iframe,
+				'missingDimensions' => $missing_dimensions,
+				'shortCircuit'      => $short_circuit,
+				'noLazy'            => $no_lazy,
 			)
 		);
 
@@ -302,6 +601,7 @@ final class ImagesSurface {
 		$meta          = self::image_meta( $ctx );
 		$src           = 'http://example.test/wp-content/uploads/2026/06/photo-600x400.jpg';
 		$full_src      = 'http://example.test/wp-content/uploads/2026/06/photo.jpg';
+		$attr_calls    = array();
 
 		if ( class_exists( '\WP_Query' ) && ! isset( $GLOBALS['wp_query'] ) ) {
 			$GLOBALS['wp_query'] = new \WP_Query();
@@ -327,9 +627,41 @@ final class ImagesSurface {
 			return $image;
 		};
 		$auto_sizes_filter = static fn() => false;
+		$meta_filter       = static function ( $value, int $object_id, string $meta_key, bool $single ) use ( $attachment_id, $meta ) {
+			if ( $attachment_id !== $object_id || ! $single ) {
+				return $value;
+			}
+
+			if ( '_wp_attachment_metadata' === $meta_key ) {
+				return array( $meta );
+			}
+
+			if ( '_wp_attachment_image_alt' === $meta_key ) {
+				return 'Default <Alt>';
+			}
+
+			return $value;
+		};
+		$attribute_filter  = static function ( array $attr, $attachment, $size ) use ( &$attr_calls ): array {
+			$attr_calls[] = array(
+				'attachmentClass' => is_object( $attachment ) ? get_class( $attachment ) : gettype( $attachment ),
+				'size'            => $size,
+				'hasWidth'        => isset( $attr['width'] ),
+				'hasHeight'       => isset( $attr['height'] ),
+			);
+
+			if ( 'medium' === $size ) {
+				$attr['class']        .= ' component-fuzzed';
+				$attr['data-filtered'] = 'filter <value>';
+			}
+
+			return $attr;
+		};
 
 		\add_filter( 'wp_get_attachment_image_src', $source_filter, 10, 3 );
 		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		\add_filter( 'get_post_metadata', $meta_filter, 10, 4 );
+		\add_filter( 'wp_get_attachment_image_attributes', $attribute_filter, 10, 3 );
 		try {
 			$image_src = \wp_get_attachment_image_src( $attachment_id, 'medium' );
 			$image_url = \wp_get_attachment_image_url( $attachment_id, 'medium' );
@@ -347,6 +679,8 @@ final class ImagesSurface {
 				)
 			);
 		} finally {
+			\remove_filter( 'wp_get_attachment_image_attributes', $attribute_filter, 10 );
+			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
 			\remove_filter( 'wp_get_attachment_image_src', $source_filter, 10 );
 			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
 		}
@@ -355,6 +689,20 @@ final class ImagesSurface {
 		$thumbnail_match = \wp_image_file_matches_image_meta( '/var/www/wp-content/uploads/2026/06/photo-300x200.jpg', $meta, $attachment_id );
 		$original_match  = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/photo-original.jpg', $meta, $attachment_id );
 		$missing_match   = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/other.jpg', $meta, $attachment_id );
+		$match_filter    = static function ( bool $match, string $image_location, array $image_meta, int $id ) use ( $attachment_id ): bool {
+			if ( $attachment_id === $id && str_contains( $image_location, 'forced-match.jpg' ) ) {
+				return true;
+			}
+
+			return $match;
+		};
+		\add_filter( 'wp_image_file_matches_image_meta', $match_filter, 10, 4 );
+		try {
+			$forced_match = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/forced-match.jpg', $meta, $attachment_id );
+		} finally {
+			\remove_filter( 'wp_image_file_matches_image_meta', $match_filter, 10 );
+		}
+		$after_forced_match = \wp_image_file_matches_image_meta( 'http://example.test/wp-content/uploads/2026/06/forced-match.jpg', $meta, $attachment_id );
 
 		self::collect_failure(
 			$failures,
@@ -372,12 +720,21 @@ final class ImagesSurface {
 				&& str_contains( $html, 'height="400"' )
 				&& str_contains( $html, 'alt="Fuzz &lt;Alt&gt;"' )
 				&& str_contains( $html, 'decoding="sync"' )
+				&& str_contains( $html, 'class="attachment-medium size-medium component-fuzzed"' )
+				&& str_contains( $html, 'data-filtered="filter &lt;value&gt;"' )
 				&& str_contains( $html, 'data-extra="raw &quot; value"' )
+				&& str_contains( $html, 'srcset=' )
+				&& str_contains( $html, 'sizes=' )
 				&& ! str_contains( $html, ' loading=' )
 				&& true === $full_match
 				&& true === $thumbnail_match
 				&& true === $original_match
-				&& false === $missing_match,
+				&& false === $missing_match
+				&& true === $forced_match
+				&& false === $after_forced_match
+				&& 1 === count( $attr_calls )
+				&& true === $attr_calls[0]['hasWidth']
+				&& true === $attr_calls[0]['hasHeight'],
 			'wp_get_attachment_image helpers and image-meta matching agree',
 			array(
 				'imageSrc'       => $image_src,
@@ -389,12 +746,77 @@ final class ImagesSurface {
 				'thumbnailMatch' => $thumbnail_match,
 				'originalMatch'  => $original_match,
 				'missingMatch'   => $missing_match,
+				'forcedMatch'    => $forced_match,
+				'afterForced'    => $after_forced_match,
+				'attrCalls'      => $attr_calls,
 			)
 		);
 
 		return self::row(
 			$ctx,
 			'images.attachment.helpers-meta-agreement',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_filetype_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$mimes    = array(
+			'jpg|jpeg|jpe' => 'image/jpeg',
+			'png'          => 'image/png',
+			'webp'         => 'image/webp',
+			'avif'         => 'image/avif',
+			'svg'          => 'image/svg+xml',
+		);
+		$cases    = array(
+			array( 'name' => 'photo-' . $ctx->int( 100, 999 ) . '.JPG', 'ext' => 'jpg', 'type' => 'image/jpeg' ),
+			array( 'name' => 'nested/path/diagram.' . $ctx->choice( array( 'png', 'PNG' ) ), 'ext' => 'png', 'type' => 'image/png' ),
+			array( 'name' => 'vector.SVG', 'ext' => 'svg', 'type' => 'image/svg+xml' ),
+			array( 'name' => 'archive.jpg.php', 'ext' => false, 'type' => false ),
+			array( 'name' => 'query.webp?ver=1', 'ext' => false, 'type' => false ),
+			array( 'name' => 'no-extension', 'ext' => false, 'type' => false ),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$result = \wp_check_filetype( $case['name'], $mimes );
+			self::collect_failure(
+				$failures,
+				$case['ext'] === ( is_string( $result['ext'] ) ? strtolower( $result['ext'] ) : $result['ext'] )
+					&& $case['type'] === $result['type'],
+				"wp_check_filetype maps extension case {$index}",
+				array(
+					'case'   => $case,
+					'result' => $result,
+				)
+			);
+		}
+
+		$hw_width_only = \image_hwstring( '640px', 0 );
+		$hw_both       = \image_hwstring( 320, '180px' );
+		$mime_types    = \wp_get_mime_types();
+		$default_jpeg  = \wp_get_default_extension_for_mime_type( 'image/jpeg' );
+
+		self::collect_failure(
+			$failures,
+			'image' === \wp_ext2type( 'JPG' )
+				&& null === \wp_ext2type( 'component-fuzz-unknown' )
+				&& 'jpg' === $default_jpeg
+				&& isset( $mime_types['jpg|jpeg|jpe'] )
+				&& 'image/jpeg' === $mime_types['jpg|jpeg|jpe']
+				&& 'width="640" ' === $hw_width_only
+				&& 'width="320" height="180" ' === $hw_both,
+			'image extension, MIME, and dimension-attribute helpers agree',
+			array(
+				'defaultJpeg' => $default_jpeg,
+				'hwWidthOnly' => $hw_width_only,
+				'hwBoth'      => $hw_both,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'images.filetypes.extensions-hwstring',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -430,12 +852,60 @@ final class ImagesSurface {
 		);
 	}
 
+	private static function generated_image_meta( \ComponentFuzz\FuzzContext $ctx ): array {
+		$width   = $ctx->int( 900, 2400 );
+		$height  = $ctx->int( 500, 1800 );
+		$base    = 'fuzz-' . $ctx->int( 1000, 9999 );
+		$dirname = '2026/06';
+		$sizes   = array();
+
+		foreach (
+			array(
+				'thumbnail'    => 0.25,
+				'medium'       => 0.5,
+				'medium_large' => 0.625,
+				'large'        => 0.75,
+			) as $name => $scale
+		) {
+			$size_width = max( 1, (int) round( $width * $scale ) );
+			$size_height = max( 1, (int) round( $height * $size_width / $width ) );
+			$file      = "{$base}-{$size_width}x{$size_height}.jpg";
+			$sizes[ $name ] = array(
+				'file'      => $file,
+				'width'     => $size_width,
+				'height'    => $size_height,
+				'mime-type' => 'image/jpeg',
+				'path'      => "{$dirname}/{$file}",
+				'url'       => "http://example.test/wp-content/uploads/{$dirname}/{$file}",
+			);
+		}
+
+		return array(
+			'width'          => $width,
+			'height'         => $height,
+			'file'           => "{$dirname}/{$base}.jpg",
+			'original_image' => "{$base}-original.jpg",
+			'sizes'          => $sizes,
+		);
+	}
+
+	private static function image_url( array $meta, ?string $size ): string {
+		$dirname = dirname( $meta['file'] );
+		$prefix  = '.' === $dirname ? '' : trim( $dirname, '/' ) . '/';
+		$file    = null === $size ? basename( $meta['file'] ) : $meta['sizes'][ $size ]['file'];
+
+		return "http://example.test/wp-content/uploads/{$prefix}{$file}";
+	}
+
 	private static function dimension_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array( 'width' => 1200, 'height' => 800, 'maxWidth' => 600, 'maxHeight' => 600 ),
 			array( 'width' => 465, 'height' => 700, 'maxWidth' => 177, 'maxHeight' => 177 ),
 			array( 'width' => 1, 'height' => 400, 'maxWidth' => 100, 'maxHeight' => 100 ),
 			array( 'width' => 640, 'height' => 480, 'maxWidth' => 0, 'maxHeight' => 240 ),
+			array( 'width' => 4096, 'height' => 1, 'maxWidth' => 2048, 'maxHeight' => 99 ),
+			array( 'width' => 37, 'height' => 113, 'maxWidth' => 36, 'maxHeight' => 112 ),
+			array( 'width' => 1000, 'height' => 1000, 'maxWidth' => 333, 'maxHeight' => 0 ),
 		);
 
 		for ( $i = count( $cases ); $i < self::CASES; ++$i ) {
@@ -454,8 +924,14 @@ final class ImagesSurface {
 	}
 
 	private static function resize_cases( \ComponentFuzz\FuzzContext $ctx ): array {
-		$cases = array();
-		for ( $i = 0; $i < self::CASES; ++$i ) {
+		$cases = array(
+			array( 'origW' => 600, 'origH' => 300, 'destW' => 400, 'destH' => 400 ),
+			array( 'origW' => 300, 'origH' => 600, 'destW' => 200, 'destH' => 0 ),
+			array( 'origW' => 300, 'origH' => 200, 'destW' => 0, 'destH' => 100 ),
+			array( 'origW' => 64, 'origH' => 64, 'destW' => 128, 'destH' => 0 ),
+		);
+
+		for ( $i = count( $cases ); $i < self::CASES; ++$i ) {
 			$case   = $ctx->fork( 'resize-' . $i );
 			$orig_w = $case->int( 32, 4096 );
 			$orig_h = $case->int( 32, 4096 );
@@ -468,6 +944,44 @@ final class ImagesSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function expected_resize_result( array $case, $crop ) {
+		if ( self::resize_expected_false( $case, $crop ) ) {
+			return false;
+		}
+
+		list( $new_w, $new_h ) = self::resize_target_dimensions( $case, $crop );
+
+		if ( $crop ) {
+			$size_ratio = max( $new_w / $case['origW'], $new_h / $case['origH'] );
+			$crop_w     = round( $new_w / $size_ratio );
+			$crop_h     = round( $new_h / $size_ratio );
+			$crop       = is_array( $crop ) && 2 === count( $crop ) ? $crop : array( 'center', 'center' );
+
+			if ( 'left' === $crop[0] ) {
+				$src_x = 0;
+			} elseif ( 'right' === $crop[0] ) {
+				$src_x = $case['origW'] - $crop_w;
+			} else {
+				$src_x = floor( ( $case['origW'] - $crop_w ) / 2 );
+			}
+
+			if ( 'top' === $crop[1] ) {
+				$src_y = 0;
+			} elseif ( 'bottom' === $crop[1] ) {
+				$src_y = $case['origH'] - $crop_h;
+			} else {
+				$src_y = floor( ( $case['origH'] - $crop_h ) / 2 );
+			}
+		} else {
+			$crop_w = $case['origW'];
+			$crop_h = $case['origH'];
+			$src_x  = 0;
+			$src_y  = 0;
+		}
+
+		return array( 0, 0, (int) $src_x, (int) $src_y, (int) $new_w, (int) $new_h, (int) $crop_w, (int) $crop_h );
 	}
 
 	private static function resize_expected_false( array $case, $crop ): bool {
@@ -537,8 +1051,32 @@ final class ImagesSurface {
 		return $widths;
 	}
 
+	private static function expected_srcset_widths_present( array $meta, array $candidates, int $src_width, int $src_height ): bool {
+		$images = array_merge(
+			array(
+				array(
+					'width'  => (int) $meta['width'],
+					'height' => (int) $meta['height'],
+				),
+			),
+			array_values( $meta['sizes'] )
+		);
+
+		foreach ( $images as $image ) {
+			$width            = (int) $image['width'];
+			$ratio_matches    = \wp_image_matches_ratio( $src_width, $src_height, $width, (int) $image['height'] );
+			$allowed_by_width = $width <= 2048 || $width === $src_width;
+
+			if ( $ratio_matches && $allowed_by_width && ! isset( $candidates[ $width ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function aspect_close( int $orig_w, int $orig_h, int $new_w, int $new_h ): bool {
-		if ( $orig_w <= 1 || $orig_h <= 1 || $new_w <= 1 || $new_h <= 1 ) {
+		if ( $orig_w <= 1 || $orig_h <= 1 || $new_w <= 2 || $new_h <= 2 ) {
 			return true;
 		}
 
@@ -664,7 +1202,7 @@ final class ImagesSurface {
 
 	private static function snapshot_globals(): array {
 		$snapshot = array();
-		foreach ( array( 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter', 'wp_query' ) as $name ) {
+		foreach ( array( 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter', 'wp_query', '_wp_additional_image_sizes' ) as $name ) {
 			$snapshot[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,

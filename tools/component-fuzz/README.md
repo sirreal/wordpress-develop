@@ -198,9 +198,11 @@ database, network requests, or a configured site.
   script module serialization, icon manifest/search behavior, SVG sanitization
   and file caching, REST icons schema/permission/error contracts, and state
   restoration.
-- `images`: image constraint and resize math, metadata dimension lookup,
-  responsive `srcset`/`sizes` generation, attachment image helpers, image tag
-  attribute insertion, and loading optimization attributes.
+- `images`: image constraint and resize math, synthetic intermediate metadata,
+  metadata dimension lookup, responsive `srcset`/`sizes` generation and filter
+  boundaries, attachment image helpers and attribute filters, image tag
+  attribute insertion, loading optimization attributes, and image
+  filetype/extension helpers.
 - `image-metadata`: local admin image metadata parser coverage over generated
   bounded JPEG/TIFF/PNG byte fixtures, including `wp_read_image_metadata()`
   malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
