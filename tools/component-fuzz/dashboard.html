@@ -226,24 +226,24 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7593 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7597 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Eighteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Nineteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Kant the 2nd is active on <code>l10n</code> in <code>_work/component-fuzz-l10n-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric">0</div>
+			<div class="note">No active delegated worker after integrating Kant the 2nd's <code>l10n</code> commit.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress plus the next active delegated rich-surface wave.</span>
+			<span class="note">Committed main-tree progress and the latest integrated rich-surface wave.</span>
 		</div>
 		<table>
 			<thead>
@@ -258,10 +258,10 @@
 			<tbody>
 				<tr>
 					<td><code>l10n</code></td>
-					<td><span class="status work">delegated active</span></td>
-					<td>Kant the 2nd / <code>_work/component-fuzz-l10n-rich</code></td>
-					<td>Worker assigned focused 100-iteration and broad 2-iteration validation; integration pending.</td>
-					<td>Translation globals, MO files, locale switching, escaped/nooped plural helpers.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Kant the 2nd / main worktree</td>
+					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 7597 passed, 62 skipped, 0 failed.</td>
+					<td>Translation globals, MO files, locale switching, script translations, nooped plurals, filters/actions.</td>
 				</tr>
 				<tr>
 					<td><code>privacy</code></td>
@@ -555,6 +555,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>5e6efd5c91</code></td>
+					<td><code>l10n</code></td>
+					<td>1300 passed, 0 skipped, 0 failed.</td>
+					<td>7597 passed, 62 skipped, 0 failed at 2 iterations after locale, path, script translation, and nooped-plural integration.</td>
+				</tr>
 				<tr>
 					<td><code>93b5eda0b5</code></td>
 					<td><code>cron</code></td>
