@@ -30,10 +30,13 @@ final class CanonicalRoutingSurface {
 			$case = self::case_for_context( $ctx );
 
 			$rows[] = self::check_path_query_and_host_cleanup( $ctx->fork( 'cleanup' ), $case );
+			$rows[] = self::check_cleanup_variant_matrix( $ctx->fork( 'cleanup-matrix' ), $case );
 			$rows[] = self::check_early_bailouts( $ctx->fork( 'bailouts' ), $case );
 			$rows[] = self::check_invalid_date_redirect( $ctx->fork( 'date' ), $case );
 			$rows[] = self::check_feed_and_paged_redirect( $ctx->fork( 'feed' ), $case );
 			$rows[] = self::check_redirect_filter_contract( $ctx->fork( 'filter' ), $case );
+			$rows[] = self::check_unsafe_redirect_replacement_is_cancelled( $ctx->fork( 'unsafe-filter' ), $case );
+			$rows[] = self::check_trailing_slash_modes( $ctx->fork( 'slashes' ), $case );
 			$rows[] = self::check_canonical_helpers( $ctx->fork( 'helpers' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -161,6 +164,94 @@ final class CanonicalRoutingSurface {
 				'parts'      => $parts,
 				'query'      => $query,
 				'idempotent' => $idempotent,
+			)
+		);
+	}
+
+	private static function check_cleanup_variant_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$variants = array(
+			array(
+				'label'         => 'terminal-tag-space',
+				'host'          => 'example.test',
+				'path'          => 'archive//' . rawurlencode( $case['token'] ) . '/index.php/%E2%80%9D',
+				'query'         => 'feed=rss&tag=' . rawurlencode( 'tag-' . $case['token'] ) . '%20',
+				'expectQuery'   => array(
+					'feed' => 'rss2',
+					'tag'  => 'tag-' . $case['token'],
+				),
+				'pathMissing'   => array( '//', '/index.php/', '%E2%80%9D' ),
+				'pathContains'  => array( '/site-base/archive/' ),
+				'expectedHost'  => 'example.test',
+			),
+			array(
+				'label'         => 'malformed-octet-preserved',
+				'host'          => 'example.test',
+				'path'          => 'bad/%zz//' . rawurlencode( $case['token'] ) . '/index.php/.',
+				'query'         => 'keep=' . rawurlencode( $case['keep'] ),
+				'expectQuery'   => array(
+					'keep' => $case['keep'],
+				),
+				'pathMissing'   => array( '//', '/index.php/' ),
+				'pathContains'  => array( '%zz' ),
+				'expectedHost'  => 'example.test',
+			),
+			array(
+				'label'         => 'www-host-normalized',
+				'host'          => 'www.example.test',
+				'path'          => 'library//' . rawurlencode( $case['token'] ) . '/%C2%A0%C2%A0',
+				'query'         => 'p=' . $ctx->int( 100, 999 ) . '.&keep=' . rawurlencode( $case['keep'] ),
+				'expectQuery'   => array(
+					'keep' => $case['keep'],
+				),
+				'pathMissing'   => array( '//', '%C2%A0' ),
+				'pathContains'  => array( '/site-base/library/' ),
+				'expectedHost'  => 'example.test',
+			),
+		);
+
+		$failures = array();
+		foreach ( $variants as $variant ) {
+			self::prepare_request( array(), array( 'is_home' => true ) );
+
+			$requested = 'http://' . $variant['host'] . '/site-base/' . $variant['path'] . '?' . $variant['query'];
+			$redirect  = \redirect_canonical( $requested, false );
+			$parts     = is_string( $redirect ) ? \wp_parse_url( $redirect ) : array();
+			$query     = self::parse_query_from_parts( $parts );
+			$path      = (string) ( $parts['path'] ?? '' );
+
+			$case_ok = is_string( $redirect )
+				&& $variant['expectedHost'] === ( $parts['host'] ?? null )
+				&& ! self::path_has_trailing_cleanup_junk( $path );
+
+			foreach ( $variant['pathMissing'] as $needle ) {
+				$case_ok = $case_ok && ! str_contains( $path, $needle );
+			}
+
+			foreach ( $variant['pathContains'] as $needle ) {
+				$case_ok = $case_ok && str_contains( $path, $needle );
+			}
+
+			foreach ( $variant['expectQuery'] as $key => $value ) {
+				$case_ok = $case_ok && $value === ( $query[ $key ] ?? null );
+			}
+
+			if ( ! $case_ok ) {
+				$failures[] = array(
+					'label'     => $variant['label'],
+					'requested' => $requested,
+					'redirect'  => $redirect,
+					'parts'     => $parts,
+					'query'     => $query,
+				);
+			}
+		}
+
+		return $ctx->result(
+			'canonical-routing.cleanup-variant-matrix',
+			array() === $failures,
+			array(
+				'checked'  => count( $variants ),
+				'failures' => array_slice( $failures, 0, 3 ),
 			)
 		);
 	}
@@ -301,6 +392,98 @@ final class CanonicalRoutingSurface {
 				'requested' => $requested,
 				'result'    => $result,
 				'seen'      => $seen,
+			)
+		);
+	}
+
+	private static function check_unsafe_redirect_replacement_is_cancelled( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_request( array(), array( 'is_home' => true ) );
+
+		$seen    = array();
+		$replace = static function ( $redirect_url, $requested_url ) use ( &$seen ) {
+			$seen['originalRedirect'] = $redirect_url;
+			$seen['requested']        = $requested_url;
+
+			return 'https://evil.test/collect?next=' . rawurlencode( $requested_url );
+		};
+		$cancel  = static function ( $redirect_url, $requested_url ) use ( &$seen ) {
+			$parts                 = \wp_parse_url( (string) $redirect_url );
+			$seen['candidateHost'] = $parts['host'] ?? null;
+			$seen['candidateUrl']  = $redirect_url;
+
+			if ( 'example.test' !== ( $parts['host'] ?? null ) ) {
+				return false;
+			}
+
+			return $redirect_url;
+		};
+
+		$requested = self::HOME_URL . '/' . $case['dirtyPath'] . '?feed=rss&keep=' . rawurlencode( $case['keep'] );
+		\add_filter( 'redirect_canonical', $replace, 9, 2 );
+		\add_filter( 'redirect_canonical', $cancel, 10, 2 );
+		try {
+			$result = \redirect_canonical( $requested, false );
+		} finally {
+			\remove_filter( 'redirect_canonical', $replace, 9 );
+			\remove_filter( 'redirect_canonical', $cancel, 10 );
+		}
+
+		$ok = null === $result
+			&& is_string( $seen['originalRedirect'] ?? null )
+			&& self::lowercase_octets( $requested ) === ( $seen['requested'] ?? null )
+			&& 'evil.test' === ( $seen['candidateHost'] ?? null )
+			&& false === \has_filter( 'redirect_canonical', $replace )
+			&& false === \has_filter( 'redirect_canonical', $cancel );
+
+		return $ctx->result(
+			'canonical-routing.redirect-filter-cancels-unsafe-replacement',
+			$ok,
+			array(
+				'requested' => $requested,
+				'result'    => $result,
+				'seen'      => $seen,
+			)
+		);
+	}
+
+	private static function check_trailing_slash_modes( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		global $wp_rewrite;
+
+		self::prepare_request( array(), array( 'is_home' => true ) );
+
+		$seen   = array();
+		$filter = static function ( $url, $type ) use ( &$seen ) {
+			$seen[] = array(
+				'url'  => $url,
+				'type' => $type,
+			);
+
+			return $url;
+		};
+
+		\add_filter( 'user_trailingslashit', $filter, 10, 2 );
+		try {
+			$wp_rewrite->use_trailing_slashes = true;
+			$single_with_slash                = \user_trailingslashit( '/site-base/' . $case['token'], 'single' );
+
+			$wp_rewrite->use_trailing_slashes = false;
+			$paged_without_slash              = \user_trailingslashit( '/site-base/' . $case['token'] . '/', 'paged' );
+		} finally {
+			\remove_filter( 'user_trailingslashit', $filter, 10 );
+		}
+
+		$ok = '/site-base/' . $case['token'] . '/' === $single_with_slash
+			&& '/site-base/' . $case['token'] === $paged_without_slash
+			&& array( 'single', 'paged' ) === array_column( $seen, 'type' )
+			&& false === \has_filter( 'user_trailingslashit', $filter );
+
+		return $ctx->result(
+			'canonical-routing.trailing-slash-modes-respect-rewrite-state',
+			$ok,
+			array(
+				'singleWithSlash'   => $single_with_slash,
+				'pagedWithoutSlash' => $paged_without_slash,
+				'filterSeen'        => $seen,
 			)
 		);
 	}
@@ -501,6 +684,19 @@ final class CanonicalRoutingSurface {
 			},
 			$url
 		);
+	}
+
+	private static function parse_query_from_parts( array $parts ): array {
+		$query = array();
+		if ( isset( $parts['query'] ) ) {
+			parse_str( $parts['query'], $query );
+		}
+
+		return $query;
+	}
+
+	private static function path_has_trailing_cleanup_junk( string $path ): bool {
+		return 1 === preg_match( '/(?:%20|[ !"\',.;{}()]|%21|%22|%27|%28|%29|%2C|%2E|%3B|%7B|%7D|%C2%A0|%E2%80%9C|%E2%80%9D)$/i', $path );
 	}
 
 	private static function clone_value( $value ) {

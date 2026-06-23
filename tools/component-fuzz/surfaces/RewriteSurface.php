@@ -34,8 +34,10 @@ final class RewriteSurface {
 
 			$rows[] = self::check_rewrite_tags( $ctx, $case );
 			$rows[] = self::check_permastruct_generation( $ctx, $case );
+			$rows[] = self::check_verbose_page_rules_and_root_boundaries( $ctx, $case );
 			$rows[] = self::check_rule_precedence_and_storage( $ctx, $case );
 			$rows[] = self::check_query_substitution( $ctx, $case );
+			$rows[] = self::check_feed_pagination_embed_variants( $ctx, $case );
 			$rows[] = self::check_endpoints( $ctx, $case );
 			$rows[] = self::check_query_arg_helpers( $ctx, $case );
 			$rows[] = self::check_wp_parse_url_edges( $ctx, $case );
@@ -55,12 +57,13 @@ final class RewriteSurface {
 			self::restore_globals( $snapshot );
 
 			$after_restore = self::snapshot_globals();
+			$restored      = self::snapshots_match( $snapshot, $after_restore );
 			$rows[]        = $ctx->result(
 				'rewrite.globals-restored',
-				$snapshot === $after_restore,
+				$restored,
 				array(
 					'trackedGlobals' => array_keys( $snapshot['globals'] ),
-					'difference'     => $snapshot === $after_restore ? null : self::first_value_difference( $snapshot, $after_restore ),
+					'difference'     => $restored ? null : self::first_value_difference( $snapshot, $after_restore ),
 				)
 			);
 		}
@@ -213,6 +216,81 @@ final class RewriteSurface {
 		);
 	}
 
+	private static function check_verbose_page_rules_and_root_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$verbose_rewrite = self::new_rewrite_for_structure( '/%postname%/', $case );
+		$page_rules      = $verbose_rewrite->page_rewrite_rules();
+		$date_rewrite    = self::new_rewrite_for_structure( '/%year%/%postname%/', $case );
+		$slashless       = self::new_rewrite_for_structure( '/news/%postname%', $case );
+
+		$index_rewrite = self::new_rewrite_for_structure( '/index.php/articles/%postname%/', $case );
+		$index_rewrite->add_permastruct(
+			'with_front_' . $case['token'],
+			'genre/%postname%',
+			array(
+				'with_front' => true,
+				'ep_mask'    => EP_NONE,
+				'paged'      => false,
+				'feed'       => false,
+				'walk_dirs'  => false,
+				'endpoints'  => false,
+			)
+		);
+		$index_rewrite->add_permastruct(
+			'root_only_' . $case['token'],
+			'genre/%postname%',
+			array(
+				'with_front' => false,
+				'ep_mask'    => EP_NONE,
+				'paged'      => false,
+				'feed'       => false,
+				'walk_dirs'  => false,
+				'endpoints'  => false,
+			)
+		);
+
+		$with_front = $index_rewrite->extra_permastructs[ 'with_front_' . $case['token'] ] ?? array();
+		$root_only  = $index_rewrite->extra_permastructs[ 'root_only_' . $case['token'] ] ?? array();
+		$with_rules = isset( $with_front['struct'] )
+			? $index_rewrite->generate_rewrite_rules( $with_front['struct'], EP_NONE, false, false, false, false, false )
+			: array();
+		$root_rules = isset( $root_only['struct'] )
+			? $index_rewrite->generate_rewrite_rules( $root_only['struct'], EP_NONE, false, false, false, false, false )
+			: array();
+
+		$checks = array(
+			'verbosePostnameEnabled' => true === $verbose_rewrite->use_verbose_page_rules,
+			'dateFirstNotVerbose'    => false === $date_rewrite->use_verbose_page_rules,
+			'pageRulesGenerated'     => array() !== $page_rules
+				&& count( $page_rules ) <= self::MAX_RULES
+				&& self::rules_have_query_vars( $page_rules, array( 'pagename' ) )
+				&& ! self::rules_contain_unexpanded_tags( $page_rules ),
+			'trailingSlashFlag'      => true === $verbose_rewrite->use_trailing_slashes
+				&& false === $slashless->use_trailing_slashes,
+			'indexRootDetected'      => 'index.php/' === $index_rewrite->root
+				&& '/index.php/articles/' === $index_rewrite->front
+				&& $index_rewrite->using_index_permalinks(),
+			'withFrontStruct'        => '/index.php/articles/genre/%postname%' === ( $with_front['struct'] ?? null ),
+			'rootOnlyStruct'         => 'index.php/genre/%postname%' === ( $root_only['struct'] ?? null ),
+			'withFrontRules'         => self::rules_have_key_prefix( $with_rules, 'index.php/articles/genre/' )
+				&& self::rules_have_query_vars( $with_rules, array( 'name' ) ),
+			'rootOnlyRules'          => self::rules_have_key_prefix( $root_rules, 'index.php/genre/' )
+				&& self::rules_have_query_vars( $root_rules, array( 'name' ) ),
+		);
+
+		return $ctx->result(
+			'rewrite.verbose-page-rules-root-index-boundaries',
+			! in_array( false, $checks, true ),
+			self::case_data( $case ) + array(
+				'checks'          => $checks,
+				'pageRuleSample'  => self::sample_assoc( $page_rules ),
+				'withFrontStruct' => $with_front['struct'] ?? null,
+				'rootOnlyStruct'  => $root_only['struct'] ?? null,
+				'withRuleSample'  => self::sample_assoc( $with_rules ),
+				'rootRuleSample'  => self::sample_assoc( $root_rules ),
+			)
+		);
+	}
+
 	private static function check_rule_precedence_and_storage( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		global $wp_rewrite;
 
@@ -288,25 +366,19 @@ final class RewriteSurface {
 
 		$segment_a = $case['pathSegments'][0];
 		$segment_b = $case['pathSegments'][1];
-		$struct    = 'route/' . $case['customTag'] . '/%postname%';
+		$segment_c = (string) $ctx->int( 100, 999 );
+		$struct    = 'route/%year%/' . $case['customTag'] . '/' . $case['numericTag'] . '/%postname%';
 		$rules     = $rewrite->generate_rewrite_rules( $struct, EP_NONE, false, false, false, false, false );
-		$path      = 'route/' . $segment_a . '/' . $segment_b . '/';
-		$matches   = array();
-		$template  = self::first_matching_rule_with_query_vars( $rules, array( $case['customQueryVar'], 'name' ), $path, $matches );
-
-		$matched = false;
-		$vars    = array();
-		if ( null !== $template ) {
-			$matched = true;
-			$query   = preg_replace( '!^.+\?!', '', $template['query'] );
-			$query   = \WP_MatchesMapRegex::apply( $query, $matches );
-			\wp_parse_str( $query, $vars );
-		}
+		$path      = 'route/2025/' . $segment_a . '/' . $segment_c . '/' . $segment_b . '/';
+		$matched   = self::substituted_query_vars( $rules, array( 'year', $case['customQueryVar'], $case['numericQueryVar'], 'name' ), $path );
+		$template  = $matched['template'];
+		$vars      = $matched['vars'];
 
 		$ok = null !== $template
-			&& $matched
-			&& isset( $vars[ $case['customQueryVar'] ], $vars['name'] )
+			&& isset( $vars['year'], $vars[ $case['customQueryVar'] ], $vars[ $case['numericQueryVar'] ], $vars['name'] )
+			&& '2025' === $vars['year']
 			&& $segment_a === $vars[ $case['customQueryVar'] ]
+			&& $segment_c === $vars[ $case['numericQueryVar'] ]
 			&& $segment_b === $vars['name'];
 
 		return $ctx->result(
@@ -315,11 +387,62 @@ final class RewriteSurface {
 			self::case_data( $case ) + array(
 				'struct'       => $struct,
 				'path'         => $path,
-				'pathSegments' => array( $segment_a, $segment_b ),
+				'pathSegments' => array( '2025', $segment_a, $segment_c, $segment_b ),
 				'template'     => $template,
-				'matched'      => $matched,
+				'matches'      => $matched['matches'],
 				'vars'         => $vars,
 				'ruleSample'   => self::sample_assoc( $rules ),
+			)
+		);
+	}
+
+	private static function check_feed_pagination_embed_variants( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$rewrite                  = self::new_rewrite();
+		$rewrite->matches         = 'matches';
+		$rewrite->pagination_base = 'p' . $case['token'];
+		$rewrite->feed_base       = 'feed' . $case['token'];
+
+		$struct         = 'calendar/%year%/%monthnum%/%postname%';
+		$rules          = $rewrite->generate_rewrite_rules( $struct, EP_PERMALINK | EP_DATE, true, true, false, true, true );
+		$comments_rules = $rewrite->generate_rewrite_rules( $struct, EP_PERMALINK | EP_DATE, true, true, true, true, true );
+
+		$feed_path  = 'calendar/2024/07/' . $case['pathSegments'][0] . '/' . $rewrite->feed_base . '/rss2/';
+		$paged_path = 'calendar/2024/07/' . $case['pathSegments'][0] . '/' . $rewrite->pagination_base . '/3/';
+		$embed_path = 'calendar/2024/07/' . $case['pathSegments'][0] . '/embed/';
+
+		$feed_match  = self::substituted_query_vars( $rules, array( 'year', 'monthnum', 'name', 'feed' ), $feed_path );
+		$paged_match = self::substituted_query_vars( $rules, array( 'year', 'monthnum', 'name', 'paged' ), $paged_path );
+		$embed_match = self::substituted_query_vars( $rules, array( 'year', 'monthnum', 'name', 'embed' ), $embed_path );
+
+		$checks = array(
+			'ruleBounded'       => count( $rules ) <= self::MAX_RULES,
+			'feedQueryVars'     => isset( $feed_match['vars']['year'], $feed_match['vars']['monthnum'], $feed_match['vars']['name'], $feed_match['vars']['feed'] )
+				&& '2024' === $feed_match['vars']['year']
+				&& '07' === $feed_match['vars']['monthnum']
+				&& $case['pathSegments'][0] === $feed_match['vars']['name']
+				&& 'rss2' === $feed_match['vars']['feed'],
+			'pagedQueryVars'    => isset( $paged_match['vars']['paged'] )
+				&& '3' === $paged_match['vars']['paged'],
+			'embedQueryVars'    => isset( $embed_match['vars']['embed'] )
+				&& 'true' === $embed_match['vars']['embed'],
+			'commentsFeedRules' => self::rules_have_literal_query( $comments_rules, 'withcomments=1' ),
+			'unexpandedTags'    => ! self::rules_contain_unexpanded_tags( $rules ),
+		);
+
+		return $ctx->result(
+			'rewrite.feed-pagination-embed-variants-substitute',
+			! in_array( false, $checks, true ),
+			self::case_data( $case ) + array(
+				'checks'            => $checks,
+				'struct'            => $struct,
+				'feedPath'          => $feed_path,
+				'pagedPath'         => $paged_path,
+				'embedPath'         => $embed_path,
+				'feedMatch'         => $feed_match,
+				'pagedMatch'        => $paged_match,
+				'embedMatch'        => $embed_match,
+				'ruleSample'        => self::sample_assoc( $rules ),
+				'commentRuleSample' => self::sample_assoc( $comments_rules ),
 			)
 		);
 	}
@@ -330,26 +453,55 @@ final class RewriteSurface {
 		$json_var  = 'json_' . $case['token'];
 		$embed_var = 'embed_' . $case['token'];
 		$raw_name  = 'rawjson_' . $case['token'];
+		$root_name = 'rooted_' . $case['token'];
+		$root_var  = 'root_ep_' . $case['token'];
 
 		\add_rewrite_endpoint( 'json', EP_PERMALINK | EP_PAGES, $json_var );
 		\add_rewrite_endpoint( 'embed', EP_PERMALINK, $embed_var );
 		\add_rewrite_endpoint( $raw_name, EP_PERMALINK, false );
+		\add_rewrite_endpoint( $root_name, EP_ROOT, $root_var );
 
-		$struct   = 'article/%postname%';
-		$without  = $wp_rewrite->generate_rewrite_rules( $struct, EP_PERMALINK, true, true, false, false, false );
-		$with     = $wp_rewrite->generate_rewrite_rules( $struct, EP_PERMALINK, true, true, false, false, true );
-		$base_ok  = self::rules_preserve_subset( $without, $with );
-		$json_ok  = self::rules_have_endpoint_query( $with, 'json', $json_var );
-		$embed_ok = self::rules_have_endpoint_query( $with, 'embed', $embed_var );
-		$raw_ok   = ! in_array( $raw_name, $wp->public_query_vars, true )
+		$wp_rewrite->matches = 'matches';
+
+		$struct     = 'article/%postname%';
+		$without    = $wp_rewrite->generate_rewrite_rules( $struct, EP_PERMALINK, true, true, false, false, false );
+		$with       = $wp_rewrite->generate_rewrite_rules( $struct, EP_PERMALINK, true, true, false, false, true );
+		$root       = $wp_rewrite->generate_rewrite_rules( '/', EP_ROOT, false, false, false, false, true );
+		$json_endpoint_value = 'tail-' . $case['token'];
+		$root_endpoint_value = 'root-' . $case['token'];
+		$json_path  = 'article/' . $case['pathSegments'][0] . '/json/' . $json_endpoint_value;
+		$json_match = self::substituted_query_vars( $with, array( 'name', $json_var ), $json_path );
+		$root_path  = $root_name . '/' . $root_endpoint_value;
+		$root_match = self::substituted_query_vars( $root, array( $root_var ), $root_path );
+		$base_ok    = self::rules_preserve_subset( $without, $with );
+		$json_ok    = self::rules_have_endpoint_query( $with, 'json', $json_var );
+		$embed_ok   = self::rules_have_endpoint_query( $with, 'embed', $embed_var );
+		$raw_ok     = ! in_array( $raw_name, $wp->public_query_vars, true )
 			&& self::rules_have_endpoint_query( $with, $raw_name, '' );
-		$feed_ok  = self::rules_have_query_vars( $with, array( 'feed' ) );
+		$root_checks = array(
+			'publicQueryVar'      => in_array( $root_var, $wp->public_query_vars, true ),
+			'rootRulePresent'     => self::rules_have_endpoint_query( $root, $root_name, $root_var ),
+			'absentFromPermalink' => ! self::rules_have_endpoint_query( $with, $root_name, $root_var ),
+			'valueSubstituted'    => isset( $root_match['vars'][ $root_var ] )
+				&& $root_endpoint_value === $root_match['vars'][ $root_var ],
+		);
+		$json_checks = array(
+			'nameSubstituted'     => isset( $json_match['vars']['name'] )
+				&& $case['pathSegments'][0] === $json_match['vars']['name'],
+			'endpointSubstituted' => isset( $json_match['vars'][ $json_var ] )
+				&& $json_endpoint_value === $json_match['vars'][ $json_var ],
+		);
+		$root_ok     = ! in_array( false, $root_checks, true );
+		$json_substitution_ok = ! in_array( false, $json_checks, true );
+		$feed_ok       = self::rules_have_query_vars( $with, array( 'feed' ) );
 		$core_embed_ok = self::rules_have_literal_query( $with, 'embed=true' );
 
 		$ok = $base_ok
 			&& $json_ok
 			&& $embed_ok
 			&& $raw_ok
+			&& $root_ok
+			&& $json_substitution_ok
 			&& $feed_ok
 			&& $core_embed_ok
 			&& in_array( $json_var, $wp->public_query_vars, true )
@@ -363,12 +515,19 @@ final class RewriteSurface {
 				'struct'           => $struct,
 				'endpointVars'     => array( $json_var, $embed_var ),
 				'rawEndpointName'  => $raw_name,
+				'rootEndpointName' => $root_name,
 				'baseRuleCount'    => count( $without ),
 				'endpointRuleCount' => count( $with ),
+				'rootRuleCount'    => count( $root ),
 				'basePreserved'    => $base_ok,
 				'jsonEndpoint'     => $json_ok,
 				'embedEndpoint'    => $embed_ok,
 				'rawEndpointQuery' => $raw_ok,
+				'rootEndpoint'     => $root_ok,
+				'rootChecks'       => $root_checks,
+				'jsonChecks'       => $json_checks,
+				'jsonMatch'        => $json_match,
+				'rootMatch'        => $root_match,
 				'feedRules'        => $feed_ok,
 				'coreEmbedRules'   => $core_embed_ok,
 				'ruleSample'       => self::sample_assoc( $with ),
@@ -586,6 +745,10 @@ final class RewriteSurface {
 			'token'              => $token,
 			'customTag'          => '%cfuzz_' . $token . '%',
 			'customQueryVar'     => 'cfuzz_' . $token,
+			'regexTag'           => '%cfuzz_rx_' . $token . '%',
+			'regexQueryVar'      => 'cfuzz_rx_' . $token,
+			'numericTag'         => '%cfuzz_num_' . $token . '%',
+			'numericQueryVar'    => 'cfuzz_num_' . $token,
 			'permalinkStructure' => $ctx->choice(
 				array(
 					'/%year%/%monthnum%/%day%/%postname%/',
@@ -622,6 +785,10 @@ final class RewriteSurface {
 			'author/%author%',
 			'search/%search%',
 			'custom//' . $case['customTag'] . '/%postname%',
+			'index.php/root/%year%/%postname%/',
+			'bounded/' . $case['regexTag'] . '/' . $case['numericTag'] . '/%postname%',
+			'preview/%post_id%/%postname%',
+			'date/%year%/%monthnum%/%day%',
 		);
 	}
 
@@ -665,6 +832,32 @@ final class RewriteSurface {
 		return $rewrite;
 	}
 
+	private static function new_rewrite_for_structure( string $structure, array $case ): \WP_Rewrite {
+		$rewrite = self::new_rewrite();
+		self::add_surface_tags( $rewrite, $case );
+		self::configure_rewrite_structure( $rewrite, $structure );
+
+		return $rewrite;
+	}
+
+	private static function configure_rewrite_structure( \WP_Rewrite $rewrite, string $structure ): void {
+		$rewrite->permalink_structure   = $structure;
+		$percent_position               = strpos( $structure, '%' );
+		$rewrite->front                 = false === $percent_position ? $structure : substr( $structure, 0, $percent_position );
+		$rewrite->root                  = $rewrite->using_index_permalinks() ? $rewrite->index . '/' : '';
+		$rewrite->use_trailing_slashes  = str_ends_with( $structure, '/' );
+		$rewrite->use_verbose_page_rules = 1 === preg_match( '/^[^%]*%(?:postname|category|tag|author)%/', $structure );
+
+		unset(
+			$rewrite->author_structure,
+			$rewrite->date_structure,
+			$rewrite->page_structure,
+			$rewrite->search_structure,
+			$rewrite->feed_structure,
+			$rewrite->comment_feed_structure
+		);
+	}
+
 	private static function add_core_like_tags( \WP_Rewrite $rewrite ): void {
 		$rewrite->add_rewrite_tag( '%category%', '(.+?)', 'category_name=' );
 		$rewrite->add_rewrite_tag( '%tag%', '([^/]+)', 'tag=' );
@@ -672,6 +865,8 @@ final class RewriteSurface {
 
 	private static function add_surface_tags( \WP_Rewrite $rewrite, array $case ): void {
 		$rewrite->add_rewrite_tag( $case['customTag'], '([^/]+)', $case['customQueryVar'] . '=' );
+		$rewrite->add_rewrite_tag( $case['regexTag'], '([a-z][a-z0-9-]{0,18})', $case['regexQueryVar'] . '=' );
+		$rewrite->add_rewrite_tag( $case['numericTag'], '([0-9]{2,4})', $case['numericQueryVar'] . '=' );
 	}
 
 	private static function rules_have_query_vars( array $rules, array $vars ): bool {
@@ -715,6 +910,24 @@ final class RewriteSurface {
 		}
 
 		return null;
+	}
+
+	private static function substituted_query_vars( array $rules, array $vars, string $path ): array {
+		$matches  = array();
+		$template = self::first_matching_rule_with_query_vars( $rules, $vars, $path, $matches );
+		$parsed   = array();
+
+		if ( null !== $template ) {
+			$query = preg_replace( '!^.+\?!', '', $template['query'] );
+			$query = \WP_MatchesMapRegex::apply( $query, $matches );
+			\wp_parse_str( $query, $parsed );
+		}
+
+		return array(
+			'template' => $template,
+			'matches'  => $matches,
+			'vars'     => $parsed,
+		);
 	}
 
 	private static function rules_have_endpoint_query( array $rules, string $endpoint, string $query_var ): bool {
@@ -825,6 +1038,16 @@ final class RewriteSurface {
 		return count( $keys ) === count( array_unique( $keys ) );
 	}
 
+	private static function rules_have_key_prefix( array $rules, string $prefix ): bool {
+		foreach ( $rules as $regex => $query ) {
+			if ( str_starts_with( (string) $regex, $prefix ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static function sample_assoc( array $array, int $limit = 3 ): array {
 		$sample = array();
 		foreach ( $array as $key => $value ) {
@@ -853,28 +1076,28 @@ final class RewriteSurface {
 		) {
 			$globals[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => $GLOBALS[ $name ] ?? null,
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
 			);
 		}
 
 		return array(
 			'globals' => $globals,
-			'_SERVER' => $_SERVER,
-			'_GET'    => $_GET,
+			'_SERVER' => self::clone_value( $_SERVER ),
+			'_GET'    => self::clone_value( $_GET ),
 		);
 	}
 
 	private static function restore_globals( array $snapshot ): void {
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
 
-		$_SERVER = $snapshot['_SERVER'];
-		$_GET    = $snapshot['_GET'];
+		$_SERVER = self::clone_value( $snapshot['_SERVER'] );
+		$_GET    = self::clone_value( $snapshot['_GET'] );
 	}
 
 	private static function case_data( array $case ): array {
@@ -883,6 +1106,8 @@ final class RewriteSurface {
 			'permalinkStructure' => $case['permalinkStructure'],
 			'customTag'          => $case['customTag'],
 			'customQueryVar'     => $case['customQueryVar'],
+			'regexTag'           => $case['regexTag'],
+			'numericTag'         => $case['numericTag'],
 			'unicodeSlug'        => $case['unicodeSlug'],
 			'suspiciousQuery'    => $case['suspiciousQuery'],
 		);
@@ -893,6 +1118,26 @@ final class RewriteSurface {
 		$value = trim( $value, '_' );
 
 		return '' === $value ? 'x' : $value;
+	}
+
+	private static function snapshots_match( array $expected, array $actual ): bool {
+		return $expected == $actual;
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
 	}
 
 	private static function describe_throwable( \Throwable $e ): array {
