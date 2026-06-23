@@ -27,6 +27,7 @@ final class BlockWidgetsSurface {
 		try {
 			self::reset_runtime();
 
+			$rows[] = self::check_dynamic_classname_matrix( $ctx->fork( 'class-matrix' ) );
 			$rows[] = self::check_block_widget_rendering( $ctx->fork( 'render' ) );
 			$rows[] = self::check_update_and_form_escaping( $ctx->fork( 'update-form' ) );
 			$rows[] = self::check_widgets_block_editor_support( $ctx->fork( 'support' ) );
@@ -98,6 +99,87 @@ final class BlockWidgetsSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function check_dynamic_classname_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$widget   = new \WP_Widget_Block();
+		$seen     = array();
+		$cases    = array(
+			array( 'core/paragraph', 'widget_text', '<!-- wp:paragraph --><p>Paragraph ' . $ctx->identifier( 3, 8 ) . '</p><!-- /wp:paragraph -->' ),
+			array( 'core/calendar', 'widget_calendar', '<!-- wp:calendar /-->' ),
+			array( 'core/search', 'widget_search', '<!-- wp:search {"label":"Find"} /-->' ),
+			array( 'core/html', 'widget_custom_html', '<!-- wp:html --><div>Custom</div><!-- /wp:html -->' ),
+			array( 'core/archives', 'widget_archive', '<!-- wp:archives /-->' ),
+			array( 'core/latest-posts', 'widget_recent_entries', '<!-- wp:latest-posts /-->' ),
+			array( 'core/latest-comments', 'widget_recent_comments', '<!-- wp:latest-comments /-->' ),
+			array( 'core/tag-cloud', 'widget_tag_cloud', '<!-- wp:tag-cloud /-->' ),
+			array( 'core/categories', 'widget_categories', '<!-- wp:categories /-->' ),
+			array( 'core/audio', 'widget_media_audio', '<!-- wp:audio {"id":1} /-->' ),
+			array( 'core/video', 'widget_media_video', '<!-- wp:video {"id":2} /-->' ),
+			array( 'core/image', 'widget_media_image', '<!-- wp:image {"id":3} --><figure><img src="https://example.test/image.jpg" alt=""></figure><!-- /wp:image -->' ),
+			array( 'core/gallery', 'widget_media_gallery', '<!-- wp:gallery {"ids":[1,2]} --><figure></figure><!-- /wp:gallery -->' ),
+			array( 'core/rss', 'widget_rss', '<!-- wp:rss {"feedURL":"https://example.test/feed/"} /-->' ),
+			array( 'component-fuzz/unknown', null, '<!-- wp:component-fuzz/unknown --><p>Unknown</p><!-- /wp:component-fuzz/unknown -->' ),
+			array( null, null, '<p>Loose unparsed ' . $ctx->identifier( 3, 8 ) . '</p>' ),
+		);
+		$class_filter = static function ( string $classname, ?string $block_name ) use ( &$seen ): string {
+			$seen[] = array(
+				'classname' => $classname,
+				'blockName' => $block_name,
+			);
+			return $classname;
+		};
+
+		\add_filter( 'widget_block_dynamic_classname', $class_filter, 10, 2 );
+		try {
+			foreach ( $cases as $index => $case ) {
+				list( $block_name, $legacy_class, $content ) = $case;
+				ob_start();
+				$widget->widget(
+					array(
+						'before_widget' => '<aside id="matrix-' . $index . '" class="widget widget_block marker">',
+						'after_widget'  => '</aside>',
+					),
+					array( 'content' => $content )
+				);
+				$output = ob_get_clean();
+
+				self::collect_failure(
+					$failures,
+					str_contains( $output, 'class="widget widget_block' )
+						&& str_contains( $output, ' marker"' )
+						&& ( null !== $legacy_class || ! preg_match( '/widget_(text|calendar|search|custom_html|archive|recent_entries|recent_comments|tag_cloud|categories|media_audio|media_video|media_image|media_gallery|rss)/', $output ) )
+						&& ( null === $legacy_class || str_contains( $output, $legacy_class ) )
+						&& isset( $seen[ $index ] )
+						&& array_key_exists( 'blockName', $seen[ $index ] )
+						&& $seen[ $index ]['blockName'] === $block_name,
+					'WP_Widget_Block maps parsed first block names to legacy widget classes only for known mappings',
+					array(
+						'index'       => $index,
+						'blockName'   => $block_name,
+						'legacyClass' => $legacy_class,
+						'seen'        => $seen[ $index ] ?? null,
+						'output'      => self::preview( $output ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'widget_block_dynamic_classname', $class_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			count( $cases ) === count( $seen )
+				&& false === \has_filter( 'widget_block_dynamic_classname', $class_filter ),
+			'dynamic classname filter fires once per matrix case and is removed',
+			array(
+				'cases' => count( $cases ),
+				'seen'  => $seen,
+			)
+		);
+
+		return self::result( $ctx, 'block-widgets.render.legacy-class-matrix', $failures );
 	}
 
 	private static function check_block_widget_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
