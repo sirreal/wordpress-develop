@@ -28,15 +28,18 @@ final class RestObjectControllersSurface {
 		try {
 			self::reset_runtime_state();
 
-			$case     = self::object_case( $ctx );
+			$case                   = self::object_case( $ctx );
+			$additional_field_calls = array();
+			self::register_additional_fields( $case, $additional_field_calls );
 			$fixtures = self::seed_fixtures( $case );
 
-			$rows[] = self::check_posts_controller( $ctx, $case, $fixtures );
-			$rows[] = self::check_terms_controller( $ctx, $case, $fixtures );
-			$rows[] = self::check_comments_controller( $ctx, $case, $fixtures );
-			$rows[] = self::check_users_controller( $ctx, $case, $fixtures );
-			$rows[] = self::check_revisions_controller( $ctx, $case, $fixtures );
-			$rows[] = self::check_attachments_controller( $ctx, $case, $fixtures );
+			$rows[] = self::check_posts_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_terms_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_comments_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_users_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_revisions_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_attachments_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-object-controllers.templates-controller.skipped',
@@ -126,8 +129,10 @@ final class RestObjectControllersSurface {
 				'get_post_meta',
 				'get_term',
 				'get_user_by',
+				'has_filter',
 				'is_wp_error',
 				'register_post_meta',
+				'register_rest_field',
 				'remove_filter',
 				'rest_ensure_response',
 				'rest_get_route_for_post',
@@ -158,7 +163,7 @@ final class RestObjectControllersSurface {
 		return $missing;
 	}
 
-	private static function check_posts_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_posts_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Posts_Controller( 'post' );
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -167,24 +172,33 @@ final class RestObjectControllersSurface {
 		$status_request->set_attributes( array( 'args' => $params ) );
 		$private_denied = call_user_func( $params['status']['sanitize_callback'], array( 'private' ), $status_request, 'status' );
 		$cap_filter     = self::install_cap_filter( array( 'edit_posts', 'read_private_posts' ) );
+		$status_filter_restored = false;
 		try {
 			$private_allowed = call_user_func( $params['status']['sanitize_callback'], array( 'private' ), $status_request, 'status' );
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$status_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['status'], $params['orderby'], $params['search_columns'] )
-				&& $private_denied instanceof \WP_Error
-				&& 'rest_forbidden_status' === $private_denied->get_error_code()
-				&& array( 'private' ) === $private_allowed,
+				&& self::collection_has_params(
+					$params,
+					array( 'after', 'author', 'before', 'categories', 'order', 'orderby', 'per_page', 'search', 'search_columns', 'slug', 'status' )
+				)
+				&& self::collection_default_ok( $params, 'per_page', 10 )
+				&& self::collection_default_ok( $params, 'order', 'desc' )
+				&& self::collection_default_ok( $params, 'status', 'publish' )
+				&& self::collection_enum_contains( $params, 'order', array( 'asc', 'desc' ) )
+				&& self::error_matches( $private_denied, 'rest_forbidden_status', 403 )
+				&& array( 'private' ) === $private_allowed
+				&& $status_filter_restored,
 			'post collection params sanitize status and expose query controls without querying',
 			array(
-				'params'         => self::param_summary( $params ),
-				'privateDenied'  => $private_denied,
-				'privateAllowed' => $private_allowed,
+				'params'               => self::param_summary( $params ),
+				'privateDenied'        => $private_denied,
+				'privateAllowed'       => $private_allowed,
+				'statusFilterRestored' => $status_filter_restored,
 			)
 		);
 
@@ -196,6 +210,8 @@ final class RestObjectControllersSurface {
 		);
 		$edit_denied  = $controller->get_item_permissions_check( $edit_request );
 		$cap_filter   = self::install_cap_filter( array( 'edit_posts', 'edit_others_posts', 'edit_published_posts' ) );
+		$edit_filter_restored = false;
+		$post_extra_calls_before = self::additional_field_call_count( $additional_field_calls, 'post', $case['postAdditionalField'] );
 		try {
 			$edit_allowed = $controller->get_item_permissions_check( $edit_request );
 			$item         = $controller->get_item(
@@ -204,36 +220,64 @@ final class RestObjectControllersSurface {
 					'/wp/v2/posts/' . $fixtures['post'],
 					array(
 						'context' => 'edit',
-						'_fields' => 'id,title,content,meta,slug,_links',
+						'_fields' => 'id,title,content,meta,slug,' . $case['postAdditionalField'] . ',_links',
 					),
 					array( 'id' => $fixtures['post'] )
 				)
 			);
+			$post_extra_calls_after_item = self::additional_field_call_count( $additional_field_calls, 'post', $case['postAdditionalField'] );
+			$projected_item             = $controller->get_item(
+				self::request(
+					'GET',
+					'/wp/v2/posts/' . $fixtures['post'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,title',
+					),
+					array( 'id' => $fixtures['post'] )
+				)
+			);
+			$post_extra_calls_after_projection = self::additional_field_call_count( $additional_field_calls, 'post', $case['postAdditionalField'] );
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$edit_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
-		$item_data = $item instanceof \WP_REST_Response ? $item->get_data() : array();
-		$item_keys = array_keys( $item_data );
-		sort( $item_keys );
-		$item_links = $item instanceof \WP_REST_Response ? $item->get_links() : array();
+		$item_data      = $item instanceof \WP_REST_Response ? $item->get_data() : array();
+		$item_links     = $item instanceof \WP_REST_Response ? $item->get_links() : array();
+		$projected_data = $projected_item instanceof \WP_REST_Response ? $projected_item->get_data() : array();
 		self::collect_failure(
 			$failures,
-			$edit_denied instanceof \WP_Error
-				&& 'rest_forbidden_context' === $edit_denied->get_error_code()
+			self::error_matches( $edit_denied, 'rest_forbidden_context', 403 )
 				&& true === $edit_allowed
 				&& $item instanceof \WP_REST_Response
-				&& array( 'content', 'id', 'meta', 'slug', 'title' ) === $item_keys
+				&& self::projected_keys_match(
+					$item_data,
+					array( 'content', 'id', 'meta', 'slug', 'title', $case['postAdditionalField'] )
+				)
+				&& self::response_matches_schema_context( $controller, $item_data, 'edit' )
 				&& $case['postTitle'] === ( $item_data['title']['raw'] ?? null )
 				&& $case['postContent'] === ( $item_data['content']['raw'] ?? null )
 				&& $case['postMetaStored'] === ( $item_data['meta'][ $case['postMetaKey'] ] ?? null )
+				&& $case['postAdditionalValue'] === ( $item_data[ $case['postAdditionalField'] ] ?? null )
+				&& $post_extra_calls_before + 1 === $post_extra_calls_after_item
+				&& $post_extra_calls_after_item === $post_extra_calls_after_projection
+				&& $projected_item instanceof \WP_REST_Response
+				&& self::projected_keys_match( $projected_data, array( 'id', 'title' ) )
 				&& \rest_url( 'wp/v2/posts/' . $fixtures['post'] ) === self::link_href( $item_links, 'self' )
-				&& \rest_url( 'wp/v2/posts' ) === self::link_href( $item_links, 'collection' ),
+				&& \rest_url( 'wp/v2/posts' ) === self::link_href( $item_links, 'collection' )
+				&& $edit_filter_restored,
 			'post get_item gates edit context, respects _fields/context, exposes meta, and emits REST links',
 			array(
-				'editDenied' => $edit_denied,
-				'editData'   => $item_data,
-				'links'      => $item_links,
+				'editDenied'         => $edit_denied,
+				'editData'           => $item_data,
+				'links'              => $item_links,
+				'projectedData'      => $projected_data,
+				'additionalCalls'    => array(
+					'before'          => $post_extra_calls_before,
+					'afterItem'       => $post_extra_calls_after_item,
+					'afterProjection' => $post_extra_calls_after_projection,
+				),
+				'editFilterRestored' => $edit_filter_restored,
 			)
 		);
 
@@ -244,16 +288,20 @@ final class RestObjectControllersSurface {
 		$invalid_item  = $controller->get_item(
 			self::request( 'GET', '/wp/v2/posts/999999', array( 'context' => 'view' ), array( 'id' => 999999 ) )
 		);
+		$malformed_item = $controller->get_item(
+			self::request( 'GET', '/wp/v2/posts/' . $case['malformedId'], array( 'context' => 'view' ), array( 'id' => $case['malformedId'] ) )
+		);
 		self::collect_failure(
 			$failures,
 			$head_response instanceof \WP_REST_Response
 				&& array() === $head_response->get_data()
-				&& $invalid_item instanceof \WP_Error
-				&& 'rest_post_invalid_id' === $invalid_item->get_error_code(),
-			'post HEAD and invalid ID error paths are represented',
+				&& self::error_matches( $invalid_item, 'rest_post_invalid_id', 404 )
+				&& self::error_matches( $malformed_item, 'rest_post_invalid_id', 404 ),
+			'post HEAD and invalid/malformed ID error paths are represented',
 			array(
-				'headData'    => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
-				'invalidItem' => $invalid_item,
+				'headData'      => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'invalidItem'   => $invalid_item,
+				'malformedItem' => $malformed_item,
 			)
 		);
 
@@ -283,6 +331,10 @@ final class RestObjectControllersSurface {
 		);
 		\add_filter( 'rest_block_hooks_post_types', $block_filter, 10, 3 );
 		\add_filter( 'rest_post_trashable', $trash_filter, 10, 2 );
+		$post_counts_before = self::content_counts();
+		$write_filter_restored = false;
+		$trash_filter_restored = false;
+		$block_filter_restored = false;
 		try {
 			$created = $controller->create_item(
 				self::request(
@@ -325,11 +377,14 @@ final class RestObjectControllersSurface {
 			);
 		} finally {
 			\remove_filter( 'rest_post_trashable', $trash_filter, 10 );
+			$trash_filter_restored = false === \has_filter( 'rest_post_trashable', $trash_filter );
 			\remove_filter( 'rest_block_hooks_post_types', $block_filter, 10 );
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$block_filter_restored = false === \has_filter( 'rest_block_hooks_post_types', $block_filter );
+			$write_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$updated_data = $updated instanceof \WP_REST_Response ? $updated->get_data() : array();
+		$post_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
 			$existing_create instanceof \WP_Error
@@ -344,16 +399,32 @@ final class RestObjectControllersSurface {
 				&& $updated instanceof \WP_REST_Response
 				&& $case['updatedPostTitle'] === ( $updated_data['title']['raw'] ?? null )
 				&& $case['postMetaUpdateSanitized'] === \get_post_meta( $created_id, $case['postMetaKey'], true )
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches(
+					$post_counts_before,
+					$post_counts_after,
+					array(
+						'post_meta' => 1,
+						'posts'     => 1,
+					),
+					array( 'post_meta', 'posts' )
+				)
+				&& $write_filter_restored
+				&& $trash_filter_restored
+				&& $block_filter_restored,
 			'post create/update/delete error paths use the in-memory post and meta stores',
 			array(
-				'existingCreate' => $existing_create,
-				'createDenied'   => $create_denied,
-				'createdData'    => $created_data,
-				'updatedData'    => $updated_data,
-				'deleteError'    => $delete_error,
-				'storedMeta'     => $created_id > 0 ? \get_post_meta( $created_id, $case['postMetaKey'], true ) : null,
+				'existingCreate'       => $existing_create,
+				'createDenied'         => $create_denied,
+				'createdData'          => $created_data,
+				'updatedData'          => $updated_data,
+				'deleteError'          => $delete_error,
+				'storedMeta'           => $created_id > 0 ? \get_post_meta( $created_id, $case['postMetaKey'], true ) : null,
+				'contentCountsBefore'  => $post_counts_before,
+				'contentCountsAfter'   => $post_counts_after,
+				'writeFilterRestored'  => $write_filter_restored,
+				'trashFilterRestored'  => $trash_filter_restored,
+				'blockFilterRestored'  => $block_filter_restored,
 			)
 		);
 
@@ -368,7 +439,7 @@ final class RestObjectControllersSurface {
 		);
 	}
 
-	private static function check_terms_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_terms_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Terms_Controller( 'category' );
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -377,9 +448,14 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['hide_empty'], $params['post'], $params['orderby'] )
-				&& 'asc' === ( $params['order']['default'] ?? null )
-				&& in_array( 'desc', $params['order']['enum'] ?? array(), true )
+				&& self::collection_has_params(
+					$params,
+					array( 'hide_empty', 'order', 'orderby', 'parent', 'per_page', 'post', 'search', 'slug' )
+				)
+				&& self::collection_default_ok( $params, 'order', 'asc' )
+				&& self::collection_default_ok( $params, 'orderby', 'name' )
+				&& self::collection_default_ok( $params, 'hide_empty', false )
+				&& self::collection_enum_contains( $params, 'order', array( 'asc', 'desc' ) )
 				&& \sanitize_title( $case['termSlugInput'] ) === $slug_sanitized,
 			'term collection params expose enum defaults and slug sanitization is stable',
 			array(
@@ -394,7 +470,7 @@ final class RestObjectControllersSurface {
 				'/wp/v2/categories/' . $fixtures['term'],
 				array(
 					'context' => 'view',
-					'_fields' => 'id,name,slug,taxonomy,parent,_links',
+					'_fields' => 'id,name,slug,taxonomy,parent,' . $case['termAdditionalField'] . ',_links',
 				),
 				array( 'id' => $fixtures['term'] )
 			)
@@ -409,33 +485,120 @@ final class RestObjectControllersSurface {
 		);
 		$edit_denied = $controller->get_item_permissions_check( $edit_request );
 		$cap_filter  = self::install_cap_filter( array( 'edit_categories', 'manage_categories' ) );
+		$edit_filter_restored = false;
 		try {
 			$edit_allowed = $controller->get_item_permissions_check( $edit_request );
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$edit_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 		self::collect_failure(
 			$failures,
 			$item instanceof \WP_REST_Response
+				&& self::projected_keys_match(
+					$item_data,
+					array( 'id', 'name', 'parent', 'slug', 'taxonomy', $case['termAdditionalField'] )
+				)
+				&& self::response_matches_schema_context( $controller, $item_data, 'view' )
 				&& $fixtures['term'] === (int) ( $item_data['id'] ?? 0 )
 				&& $case['termName'] === ( $item_data['name'] ?? null )
 				&& 'category' === ( $item_data['taxonomy'] ?? null )
+				&& $case['termAdditionalValue'] === ( $item_data[ $case['termAdditionalField'] ] ?? null )
+				&& self::additional_field_call_count( $additional_field_calls, 'category', $case['termAdditionalField'], 'view', $fixtures['term'] ) > 0
 				&& \rest_url( 'wp/v2/categories/' . $fixtures['term'] ) === self::link_href( $item_links, 'self' )
 				&& \rest_url( 'wp/v2/categories' ) === self::link_href( $item_links, 'collection' )
-				&& $edit_denied instanceof \WP_Error
-				&& 'rest_forbidden_context' === $edit_denied->get_error_code()
-				&& true === $edit_allowed,
+				&& self::error_matches( $edit_denied, 'rest_forbidden_context', 403 )
+				&& true === $edit_allowed
+				&& $edit_filter_restored,
 			'term get_item respects fields, links, and edit permission gates',
 			array(
-				'itemData'    => $item_data,
-				'links'       => $item_links,
-				'editDenied'  => $edit_denied,
-				'editAllowed' => $edit_allowed,
+				'itemData'           => $item_data,
+				'links'              => $item_links,
+				'editDenied'         => $edit_denied,
+				'editAllowed'        => $edit_allowed,
+				'editFilterRestored' => $edit_filter_restored,
 			)
 		);
 
+		$term_slug_map = array(
+			\sanitize_title( $case['childTermSlugInput'] ) => $fixtures['child_term'],
+			\sanitize_title( $case['termSlugInput'] )      => $fixtures['term'],
+		);
+		ksort( $term_slug_map, SORT_STRING );
+		$term_query_args     = array();
+		$term_query_filter   = static function ( array $prepared_args ) use ( &$term_query_args ): array {
+			$term_query_args[] = $prepared_args;
+			return $prepared_args;
+		};
+		$term_filter_restored = false;
+		\add_filter( 'rest_category_query', $term_query_filter, 10, 2 );
+		try {
+			$slug_collection = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/categories',
+					array(
+						'context'    => 'view',
+						'_fields'    => 'id,slug,parent',
+						'hide_empty' => '0',
+						'order'      => 'asc',
+						'orderby'    => 'slug',
+						'per_page'   => 2,
+						'slug'       => array_keys( $term_slug_map ),
+					)
+				)
+			);
+			$parent_collection = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/categories',
+					array(
+						'context'    => 'view',
+						'_fields'    => 'id,parent',
+						'hide_empty' => '0',
+						'order'      => 'asc',
+						'orderby'    => 'name',
+						'parent'     => $fixtures['term'],
+						'per_page'   => 5,
+					)
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_category_query', $term_query_filter, 10 );
+			$term_filter_restored = false === \has_filter( 'rest_category_query', $term_query_filter );
+		}
+		$slug_collection_data = $slug_collection instanceof \WP_REST_Response ? $slug_collection->get_data() : array();
+		$parent_collection_data = $parent_collection instanceof \WP_REST_Response ? $parent_collection->get_data() : array();
+		self::collect_failure(
+			$failures,
+			$slug_collection instanceof \WP_REST_Response
+				&& $parent_collection instanceof \WP_REST_Response
+				&& 2 === count( $term_query_args )
+				&& 'category' === ( $term_query_args[0]['taxonomy'] ?? null )
+				&& array_keys( $term_slug_map ) === ( $term_query_args[0]['slug'] ?? null )
+				&& 'asc' === ( $term_query_args[0]['order'] ?? null )
+				&& 'slug' === ( $term_query_args[0]['orderby'] ?? null )
+				&& 2 === (int) ( $term_query_args[0]['number'] ?? 0 )
+				&& '0' === (string) ( $term_query_args[0]['hide_empty'] ?? '' )
+				&& $fixtures['term'] === (int) ( $term_query_args[1]['parent'] ?? 0 )
+				&& 'name' === ( $term_query_args[1]['orderby'] ?? null )
+				&& 5 === (int) ( $term_query_args[1]['number'] ?? 0 )
+				&& $term_filter_restored,
+			'term collection filtering/order maps slug, parent, per_page, and order deterministically',
+			array(
+				'queryArgs'          => $term_query_args,
+				'slugData'           => $slug_collection_data,
+				'parentData'         => $parent_collection_data,
+				'headers'            => $slug_collection instanceof \WP_REST_Response ? $slug_collection->get_headers() : array(),
+				'termFilterRestored' => $term_filter_restored,
+			)
+		);
+
+		$term_error_counts_before = self::content_counts();
 		$invalid_item = $controller->get_item(
 			self::request( 'GET', '/wp/v2/categories/999999', array(), array( 'id' => 999999 ) )
+		);
+		$malformed_item = $controller->get_item(
+			self::request( 'GET', '/wp/v2/categories/' . $case['malformedId'], array(), array( 'id' => $case['malformedId'] ) )
 		);
 		$invalid_parent = $controller->create_item(
 			self::request(
@@ -453,23 +616,29 @@ final class RestObjectControllersSurface {
 			\get_term( $fixtures['term'], 'category' ),
 			self::request( 'HEAD', '/wp/v2/categories/' . $fixtures['term'], array(), array( 'id' => $fixtures['term'] ) )
 		);
+		$term_error_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
-			$invalid_item instanceof \WP_Error
-				&& 'rest_term_invalid' === $invalid_item->get_error_code()
-				&& $invalid_parent instanceof \WP_Error
-				&& 'rest_term_invalid' === $invalid_parent->get_error_code()
+			self::error_matches( $invalid_item, 'rest_term_invalid', 404 )
+				&& self::error_matches( $malformed_item, 'rest_term_invalid', 404 )
+				&& self::error_matches( $invalid_parent, 'rest_term_invalid', 400 )
 				&& $head_response instanceof \WP_REST_Response
-				&& array() === $head_response->get_data(),
-			'term invalid ID, invalid parent, and HEAD paths are represented',
+				&& array() === $head_response->get_data()
+				&& self::content_count_delta_matches( $term_error_counts_before, $term_error_counts_after, array(), array() ),
+			'term invalid/malformed ID, invalid parent, and HEAD paths are represented without row changes',
 			array(
-				'invalidItem'   => $invalid_item,
+				'invalidItem'  => $invalid_item,
+				'malformedItem' => $malformed_item,
 				'invalidParent' => $invalid_parent,
-				'headData'      => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'headData'     => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'countsBefore' => $term_error_counts_before,
+				'countsAfter'  => $term_error_counts_after,
 			)
 		);
 
 		$cap_filter = self::install_cap_filter( array( 'delete_categories', 'edit_categories', 'manage_categories' ) );
+		$term_counts_before = self::content_counts();
+		$write_filter_restored = false;
 		try {
 			$created = $controller->create_item(
 				self::request(
@@ -505,10 +674,11 @@ final class RestObjectControllersSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$write_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$updated_data = $updated instanceof \WP_REST_Response ? $updated->get_data() : array();
+		$term_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
 			$created instanceof \WP_REST_Response
@@ -518,13 +688,25 @@ final class RestObjectControllersSurface {
 				&& \sanitize_title( $case['createdTermSlugInput'] ) === ( $created_data['slug'] ?? null )
 				&& $updated instanceof \WP_REST_Response
 				&& $case['updatedTermName'] === ( $updated_data['name'] ?? null )
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches(
+					$term_counts_before,
+					$term_counts_after,
+					array(
+						'term_taxonomy' => 1,
+						'terms'         => 1,
+					),
+					array( 'term_taxonomy', 'terms' )
+				)
+				&& $write_filter_restored,
 			'term create/update/delete error paths use the in-memory term tables',
 			array(
-				'createdData' => $created_data,
-				'updatedData' => $updated_data,
-				'deleteError' => $delete_error,
+				'createdData'         => $created_data,
+				'updatedData'         => $updated_data,
+				'deleteError'         => $delete_error,
+				'contentCountsBefore' => $term_counts_before,
+				'contentCountsAfter'  => $term_counts_after,
+				'writeFilterRestored' => $write_filter_restored,
 			)
 		);
 
@@ -539,7 +721,7 @@ final class RestObjectControllersSurface {
 		);
 	}
 
-	private static function check_comments_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_comments_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Comments_Controller();
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -551,15 +733,95 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['author_email'], $params['post'], $params['type'] )
+				&& self::collection_has_params(
+					$params,
+					array( 'author_email', 'order', 'orderby', 'parent', 'per_page', 'post', 'search', 'status', 'type' )
+				)
+				&& self::collection_default_ok( $params, 'order', 'desc' )
+				&& self::collection_default_ok( $params, 'orderby', 'date_gmt' )
+				&& self::collection_default_ok( $params, 'status', 'approve' )
+				&& self::collection_enum_contains( $params, 'order', array( 'asc', 'desc' ) )
 				&& 'approved' === $status_sanitized
-				&& $invalid_email instanceof \WP_Error
-				&& 'rest_invalid_email' === $invalid_email->get_error_code(),
+				&& self::error_matches( $invalid_email, 'rest_invalid_email' ),
 			'comment collection params sanitize status and validate author email',
 			array(
 				'params'          => self::param_summary( $params ),
 				'statusSanitized' => $status_sanitized,
 				'invalidEmail'    => $invalid_email,
+			)
+		);
+
+		$comment_query_args     = array();
+		$comment_query_filter   = static function ( array $prepared_args ) use ( &$comment_query_args ): array {
+			$comment_query_args[] = $prepared_args;
+			return $prepared_args;
+		};
+		$comment_filter_restored = false;
+		\add_filter( 'rest_comment_query', $comment_query_filter, 10, 2 );
+		try {
+			$comment_collection = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/comments',
+					array(
+						'context'  => 'view',
+						'_fields'  => 'id,post,parent,status,type',
+						'order'    => 'desc',
+						'orderby'  => 'id',
+						'page'     => 1,
+						'per_page' => 2,
+						'post'     => array( $fixtures['post'] ),
+						'status'   => 'approve',
+						'type'     => 'comment',
+					)
+				)
+			);
+			$child_comment_collection = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/comments',
+					array(
+						'context'  => 'view',
+						'_fields'  => 'id,parent',
+						'order'    => 'asc',
+						'orderby'  => 'id',
+						'page'     => 1,
+						'parent'   => array( $fixtures['comment'] ),
+						'per_page' => 5,
+						'post'     => array( $fixtures['post'] ),
+						'status'   => 'approve',
+					)
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_comment_query', $comment_query_filter, 10 );
+			$comment_filter_restored = false === \has_filter( 'rest_comment_query', $comment_query_filter );
+		}
+		$comment_collection_data = $comment_collection instanceof \WP_REST_Response ? $comment_collection->get_data() : array();
+		$child_comment_data = $child_comment_collection instanceof \WP_REST_Response ? $child_comment_collection->get_data() : array();
+		self::collect_failure(
+			$failures,
+			$comment_collection instanceof \WP_REST_Response
+				&& $child_comment_collection instanceof \WP_REST_Response
+				&& 2 === count( $comment_query_args )
+				&& array( $fixtures['post'] ) === ( $comment_query_args[0]['post__in'] ?? null )
+				&& 'approve' === ( $comment_query_args[0]['status'] ?? null )
+				&& 'comment' === ( $comment_query_args[0]['type'] ?? null )
+				&& 'comment_ID' === ( $comment_query_args[0]['orderby'] ?? null )
+				&& 'desc' === ( $comment_query_args[0]['order'] ?? null )
+				&& 2 === (int) ( $comment_query_args[0]['number'] ?? 0 )
+				&& 0 === (int) ( $comment_query_args[0]['offset'] ?? -1 )
+				&& array( $fixtures['comment'] ) === ( $comment_query_args[1]['parent__in'] ?? null )
+				&& 'asc' === ( $comment_query_args[1]['order'] ?? null )
+				&& 5 === (int) ( $comment_query_args[1]['number'] ?? 0 )
+				&& $comment_filter_restored,
+			'comment collection filtering/order maps post, status, parent, per_page, and id ordering deterministically',
+			array(
+				'queryArgs'      => $comment_query_args,
+				'collectionData' => $comment_collection_data,
+				'childData'      => $child_comment_data,
+				'headers'        => $comment_collection instanceof \WP_REST_Response ? $comment_collection->get_headers() : array(),
+				'filterRestored' => $comment_filter_restored,
 			)
 		);
 
@@ -577,6 +839,8 @@ final class RestObjectControllersSurface {
 		$view_data = $view_item instanceof \WP_REST_Response ? $view_item->get_data() : array();
 		$view_links = $view_item instanceof \WP_REST_Response ? $view_item->get_links() : array();
 		$cap_filter = self::install_cap_filter( array( 'edit_posts', 'moderate_comments' ) );
+		$edit_filter_restored = false;
+		$comment_extra_calls_before = self::additional_field_call_count( $additional_field_calls, 'comment', $case['commentAdditionalField'] );
 		try {
 			$edit_item = $controller->get_item(
 				self::request(
@@ -584,37 +848,60 @@ final class RestObjectControllersSurface {
 					'/wp/v2/comments/' . $fixtures['comment'],
 					array(
 						'context' => 'edit',
-						'_fields' => 'id,content,author_email,status,_links',
+						'_fields' => 'id,content,author_email,status,' . $case['commentAdditionalField'] . ',_links',
 					),
 					array( 'id' => $fixtures['comment'] )
 				)
 			);
+			$comment_extra_calls_after = self::additional_field_call_count( $additional_field_calls, 'comment', $case['commentAdditionalField'] );
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$edit_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 		$edit_data = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
 		self::collect_failure(
 			$failures,
 			$view_item instanceof \WP_REST_Response
+				&& self::response_matches_schema_context( $controller, $view_data, 'view' )
 				&& $fixtures['comment'] === (int) ( $view_data['id'] ?? 0 )
 				&& $fixtures['post'] === (int) ( $view_data['post'] ?? 0 )
-				&& ! isset( $view_data['author_email'], $view_data['content']['raw'] )
+				&& ! isset( $view_data['author_email'], $view_data['content']['raw'], $view_data[ $case['commentAdditionalField'] ] )
 				&& isset( $view_data['content']['rendered'] )
 				&& 'approved' === ( $view_data['status'] ?? null )
 				&& \rest_url( 'wp/v2/comments/' . $fixtures['comment'] ) === self::link_href( $view_links, 'self' )
 				&& $edit_item instanceof \WP_REST_Response
+				&& self::projected_keys_match( $edit_data, array( 'author_email', 'content', 'id', 'status', $case['commentAdditionalField'] ) )
+				&& self::response_matches_schema_context( $controller, $edit_data, 'edit' )
 				&& $case['commentAuthorEmail'] === ( $edit_data['author_email'] ?? null )
-				&& $case['commentContent'] === ( $edit_data['content']['raw'] ?? null ),
+				&& $case['commentContent'] === ( $edit_data['content']['raw'] ?? null )
+				&& $case['commentAdditionalValue'] === ( $edit_data[ $case['commentAdditionalField'] ] ?? null )
+				&& $comment_extra_calls_before + 1 === $comment_extra_calls_after
+				&& $edit_filter_restored,
 			'comment get_item filters edit-only fields by context and emits links',
 			array(
-				'viewData' => $view_data,
-				'editData' => $edit_data,
-				'links'    => $view_links,
+				'viewData'           => $view_data,
+				'editData'           => $edit_data,
+				'links'              => $view_links,
+				'additionalCalls'    => array(
+					'before' => $comment_extra_calls_before,
+					'after'  => $comment_extra_calls_after,
+				),
+				'editFilterRestored' => $edit_filter_restored,
+				'checkViewSchema'    => self::response_matches_schema_context( $controller, $view_data, 'view' ),
+				'checkEditProjection' => self::projected_keys_match( $edit_data, array( 'author_email', 'content', 'id', 'status', $case['commentAdditionalField'] ) ),
+				'checkEditSchema'    => self::response_matches_schema_context( $controller, $edit_data, 'edit' ),
+				'checkEmail'         => $case['commentAuthorEmail'] === ( $edit_data['author_email'] ?? null ),
+				'checkContent'       => $case['commentContent'] === ( $edit_data['content']['raw'] ?? null ),
+				'checkAdditional'    => $case['commentAdditionalValue'] === ( $edit_data[ $case['commentAdditionalField'] ] ?? null ),
+				'checkCallDelta'     => $comment_extra_calls_before + 1 === $comment_extra_calls_after,
 			)
 		);
 
+		$comment_error_counts_before = self::content_counts();
 		$invalid_item = $controller->get_item(
 			self::request( 'GET', '/wp/v2/comments/999999', array(), array( 'id' => 999999 ) )
+		);
+		$malformed_item = $controller->get_item(
+			self::request( 'GET', '/wp/v2/comments/' . $case['malformedId'], array(), array( 'id' => $case['malformedId'] ) )
 		);
 		$missing_post = $controller->create_item_permissions_check(
 			self::request( 'POST', '/wp/v2/comments', array(), array(), array( 'content' => $case['createdCommentContent'] ) )
@@ -637,22 +924,25 @@ final class RestObjectControllersSurface {
 			\get_comment( $fixtures['comment'] ),
 			self::request( 'HEAD', '/wp/v2/comments/' . $fixtures['comment'], array(), array( 'id' => $fixtures['comment'] ) )
 		);
+		$comment_error_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
-			$invalid_item instanceof \WP_Error
-				&& 'rest_comment_invalid_id' === $invalid_item->get_error_code()
-				&& $missing_post instanceof \WP_Error
-				&& 'rest_comment_invalid_post_id' === $missing_post->get_error_code()
-				&& $bad_type instanceof \WP_Error
-				&& 'rest_invalid_comment_type' === $bad_type->get_error_code()
+			self::error_matches( $invalid_item, 'rest_comment_invalid_id', 404 )
+				&& self::error_matches( $malformed_item, 'rest_comment_invalid_id', 404 )
+				&& self::error_matches( $missing_post, 'rest_comment_invalid_post_id', 403 )
+				&& self::error_matches( $bad_type, 'rest_invalid_comment_type', 400 )
 				&& $head_response instanceof \WP_REST_Response
-				&& array() === $head_response->get_data(),
-			'comment invalid ID, missing post, invalid type, and HEAD paths are represented',
+				&& array() === $head_response->get_data()
+				&& self::content_count_delta_matches( $comment_error_counts_before, $comment_error_counts_after, array(), array() ),
+			'comment invalid/malformed ID, missing post, invalid type, and HEAD paths are represented without row changes',
 			array(
-				'invalidItem' => $invalid_item,
-				'missingPost' => $missing_post,
-				'badType'     => $bad_type,
-				'headData'    => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'invalidItem'  => $invalid_item,
+				'malformedItem' => $malformed_item,
+				'missingPost'  => $missing_post,
+				'badType'      => $bad_type,
+				'headData'     => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'countsBefore' => $comment_error_counts_before,
+				'countsAfter'  => $comment_error_counts_after,
 			)
 		);
 
@@ -660,6 +950,9 @@ final class RestObjectControllersSurface {
 			return false;
 		};
 		$cap_filter   = self::install_cap_filter( array( 'edit_posts', 'moderate_comments' ) );
+		$comment_counts_before = self::content_counts();
+		$trash_filter_restored = false;
+		$write_filter_restored = false;
 		\add_filter( 'rest_comment_trashable', $trash_filter, 10, 2 );
 		try {
 			$created = $controller->create_item(
@@ -705,10 +998,12 @@ final class RestObjectControllersSurface {
 			);
 		} finally {
 			\remove_filter( 'rest_comment_trashable', $trash_filter, 10 );
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$trash_filter_restored = false === \has_filter( 'rest_comment_trashable', $trash_filter );
+			$write_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$updated_data = $updated instanceof \WP_REST_Response ? $updated->get_data() : array();
+		$comment_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
 			$created instanceof \WP_REST_Response
@@ -720,13 +1015,24 @@ final class RestObjectControllersSurface {
 				&& $updated instanceof \WP_REST_Response
 				&& $case['updatedCommentContent'] === ( $updated_data['content']['raw'] ?? null )
 				&& 'hold' === ( $updated_data['status'] ?? null )
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches(
+					$comment_counts_before,
+					$comment_counts_after,
+					array( 'comments' => 1 ),
+					array( 'comments' )
+				)
+				&& $trash_filter_restored
+				&& $write_filter_restored,
 			'comment create/update/delete error paths use the in-memory comment table',
 			array(
-				'createdData' => $created_data,
-				'updatedData' => $updated_data,
-				'deleteError' => $delete_error,
+				'createdData'         => $created_data,
+				'updatedData'         => $updated_data,
+				'deleteError'         => $delete_error,
+				'contentCountsBefore' => $comment_counts_before,
+				'contentCountsAfter'  => $comment_counts_after,
+				'trashFilterRestored' => $trash_filter_restored,
+				'writeFilterRestored' => $write_filter_restored,
 			)
 		);
 
@@ -741,7 +1047,7 @@ final class RestObjectControllersSurface {
 		);
 	}
 
-	private static function check_users_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_users_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Users_Controller();
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -755,14 +1061,18 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['roles'], $params['capabilities'], $params['who'] )
-				&& $roles_denied instanceof \WP_Error
-				&& 'rest_user_cannot_view' === $roles_denied->get_error_code()
+				&& self::collection_has_params(
+					$params,
+					array( 'capabilities', 'order', 'orderby', 'per_page', 'roles', 'search', 'search_columns', 'slug', 'who' )
+				)
+				&& self::collection_default_ok( $params, 'order', 'asc' )
+				&& self::collection_default_ok( $params, 'orderby', 'name' )
+				&& self::collection_enum_contains( $params, 'order', array( 'asc', 'desc' ) )
+				&& self::error_matches( $roles_denied, 'rest_user_cannot_view', 403 )
 				&& $reassign_invalid instanceof \WP_Error
 				&& 'rest_invalid_param' === $reassign_invalid->get_error_code()
 				&& false === $reassign_false
-				&& $bad_username instanceof \WP_Error
-				&& 'rest_user_invalid_username' === $bad_username->get_error_code(),
+				&& self::error_matches( $bad_username, 'rest_user_invalid_username', 400 ),
 			'user collection params and helper sanitizers reject privileged filters and invalid values',
 			array(
 				'params'          => self::param_summary( $params ),
@@ -779,7 +1089,7 @@ final class RestObjectControllersSurface {
 				'/wp/v2/users/' . $fixtures['author'],
 				array(
 					'context' => 'embed',
-					'_fields' => 'id,name,email,slug,_links',
+					'_fields' => 'id,name,email,slug,' . $case['userAdditionalField'] . ',_links',
 				),
 				array( 'id' => $fixtures['author'] )
 			)
@@ -794,6 +1104,7 @@ final class RestObjectControllersSurface {
 		);
 		$edit_denied = $controller->get_item_permissions_check( $edit_request );
 		$cap_filter  = self::install_cap_filter( array( 'edit_user', 'edit_users', 'list_users' ) );
+		$edit_filter_restored = false;
 		try {
 			$edit_allowed = $controller->get_item_permissions_check( $edit_request );
 			$edit_item    = $controller->get_item(
@@ -808,33 +1119,44 @@ final class RestObjectControllersSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$edit_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$edit_data = $edit_item instanceof \WP_REST_Response ? $edit_item->get_data() : array();
 		self::collect_failure(
 			$failures,
 			$embed_item instanceof \WP_REST_Response
+				&& self::projected_keys_match( $embed_data, array( 'id', 'name', 'slug', $case['userAdditionalField'] ) )
+				&& self::response_matches_schema_context( $controller, $embed_data, 'embed' )
 				&& $fixtures['author'] === (int) ( $embed_data['id'] ?? 0 )
 				&& ! isset( $embed_data['email'] )
+				&& $case['userAdditionalValue'] === ( $embed_data[ $case['userAdditionalField'] ] ?? null )
+				&& self::additional_field_call_count( $additional_field_calls, 'user', $case['userAdditionalField'], 'embed', $fixtures['author'] ) > 0
 				&& \rest_url( 'wp/v2/users/' . $fixtures['author'] ) === self::link_href( $embed_links, 'self' )
 				&& true === $edit_denied
 				&& true === $edit_allowed
 				&& $edit_item instanceof \WP_REST_Response
+				&& self::response_matches_schema_context( $controller, $edit_data, 'edit' )
 				&& $case['authorEmail'] === ( $edit_data['email'] ?? null )
-				&& $case['authorLogin'] === ( $edit_data['username'] ?? null ),
+				&& $case['authorLogin'] === ( $edit_data['username'] ?? null )
+				&& $edit_filter_restored,
 			'user get_item filters edit-only fields by context and allows current-user edit context',
 			array(
-				'embedData'   => $embed_data,
-				'editData'    => $edit_data,
-				'links'       => $embed_links,
-				'editDenied'  => $edit_denied,
-				'editAllowed' => $edit_allowed,
+				'embedData'          => $embed_data,
+				'editData'           => $edit_data,
+				'links'              => $embed_links,
+				'editDenied'         => $edit_denied,
+				'editAllowed'        => $edit_allowed,
+				'editFilterRestored' => $edit_filter_restored,
 			)
 		);
 
+		$user_error_counts_before = self::content_counts();
 		$invalid_item    = $controller->get_item(
 			self::request( 'GET', '/wp/v2/users/999999', array(), array( 'id' => 999999 ) )
+		);
+		$malformed_item = $controller->get_item(
+			self::request( 'GET', '/wp/v2/users/' . $case['malformedId'], array(), array( 'id' => $case['malformedId'] ) )
 		);
 		$existing_create = $controller->create_item(
 			self::request( 'POST', '/wp/v2/users', array(), array(), array( 'id' => $fixtures['author'] ) )
@@ -844,26 +1166,31 @@ final class RestObjectControllersSurface {
 			\get_user_by( 'id', $fixtures['author'] ),
 			self::request( 'HEAD', '/wp/v2/users/' . $fixtures['author'], array(), array( 'id' => $fixtures['author'] ) )
 		);
+		$user_error_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
-			$invalid_item instanceof \WP_Error
-				&& 'rest_user_invalid_id' === $invalid_item->get_error_code()
-				&& $existing_create instanceof \WP_Error
-				&& 'rest_user_exists' === $existing_create->get_error_code()
-				&& $create_denied instanceof \WP_Error
-				&& 'rest_cannot_create_user' === $create_denied->get_error_code()
+			self::error_matches( $invalid_item, 'rest_user_invalid_id', 404 )
+				&& self::error_matches( $malformed_item, 'rest_user_invalid_id', 404 )
+				&& self::error_matches( $existing_create, 'rest_user_exists', 400 )
+				&& self::error_matches( $create_denied, 'rest_cannot_create_user', 403 )
 				&& $head_response instanceof \WP_REST_Response
-				&& array() === $head_response->get_data(),
-			'user invalid ID, existing create, create permission, and HEAD paths are represented',
+				&& array() === $head_response->get_data()
+				&& self::content_count_delta_matches( $user_error_counts_before, $user_error_counts_after, array(), array() ),
+			'user invalid/malformed ID, existing create, create permission, and HEAD paths are represented without row changes',
 			array(
 				'invalidItem'    => $invalid_item,
+				'malformedItem'  => $malformed_item,
 				'existingCreate' => $existing_create,
 				'createDenied'   => $create_denied,
 				'headData'       => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'countsBefore'   => $user_error_counts_before,
+				'countsAfter'    => $user_error_counts_after,
 			)
 		);
 
 		$cap_filter = self::install_cap_filter( array( 'create_users', 'delete_user', 'delete_users', 'edit_user', 'edit_users', 'list_users' ) );
+		$user_counts_before = self::content_counts();
+		$write_filter_restored = false;
 		try {
 			$created = $controller->create_item(
 				self::request(
@@ -913,10 +1240,11 @@ final class RestObjectControllersSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$write_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$updated_data = $updated instanceof \WP_REST_Response ? $updated->get_data() : array();
+		$user_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
 			$created instanceof \WP_REST_Response
@@ -924,18 +1252,26 @@ final class RestObjectControllersSurface {
 				&& $created_id > 0
 				&& $case['createdUserLogin'] === ( $created_data['username'] ?? null )
 				&& \sanitize_title( $case['createdUserSlugInput'] ) === ( $created_data['slug'] ?? null )
-				&& $username_update instanceof \WP_Error
-				&& 'rest_user_invalid_argument' === $username_update->get_error_code()
+				&& self::error_matches( $username_update, 'rest_user_invalid_argument', 400 )
 				&& $updated instanceof \WP_REST_Response
 				&& $case['updatedUserName'] === ( $updated_data['name'] ?? null )
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches(
+					$user_counts_before,
+					$user_counts_after,
+					array( 'users' => 1 ),
+					array( 'user_meta', 'users' )
+				)
+				&& $write_filter_restored,
 			'user create/update/delete error paths use the in-memory user table',
 			array(
-				'createdData'    => $created_data,
-				'usernameUpdate' => $username_update,
-				'updatedData'    => $updated_data,
-				'deleteError'    => $delete_error,
+				'createdData'         => $created_data,
+				'usernameUpdate'      => $username_update,
+				'updatedData'         => $updated_data,
+				'deleteError'         => $delete_error,
+				'contentCountsBefore' => $user_counts_before,
+				'contentCountsAfter'  => $user_counts_after,
+				'writeFilterRestored' => $write_filter_restored,
 			)
 		);
 
@@ -950,7 +1286,7 @@ final class RestObjectControllersSurface {
 		);
 	}
 
-	private static function check_revisions_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_revisions_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Revisions_Controller( 'post' );
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -958,10 +1294,11 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['include'], $params['exclude'], $params['orderby'] )
+				&& self::collection_has_params( $params, array( 'exclude', 'include', 'order', 'orderby', 'per_page' ) )
 				&& ! isset( $params['per_page']['default'] )
-				&& 'desc' === ( $params['order']['default'] ?? null )
-				&& in_array( 'asc', $params['order']['enum'] ?? array(), true ),
+				&& self::collection_default_ok( $params, 'order', 'desc' )
+				&& self::collection_default_ok( $params, 'orderby', 'date' )
+				&& self::collection_enum_contains( $params, 'order', array( 'asc', 'desc' ) ),
 			'revision collection params expose bounded controls without a default per_page',
 			array(
 				'params' => self::param_summary( $params ),
@@ -979,6 +1316,7 @@ final class RestObjectControllersSurface {
 		);
 		$read_denied = $controller->get_item_permissions_check( $read_request );
 		$cap_filter  = self::install_cap_filter( array( 'edit_others_posts', 'edit_posts', 'edit_published_posts' ) );
+		$read_filter_restored = false;
 		try {
 			$read_allowed = $controller->get_item_permissions_check( $read_request );
 			$item         = $controller->get_item(
@@ -987,7 +1325,7 @@ final class RestObjectControllersSurface {
 					'/wp/v2/posts/' . $fixtures['post'] . '/revisions/' . $fixtures['revision'],
 					array(
 						'context' => 'edit',
-						'_fields' => 'id,parent,title,content,_links',
+						'_fields' => 'id,parent,title,content,' . $case['revisionAdditionalField'] . ',_links',
 					),
 					array(
 						'parent' => $fixtures['post'],
@@ -996,31 +1334,37 @@ final class RestObjectControllersSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$read_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
 
 		$item_data = $item instanceof \WP_REST_Response ? $item->get_data() : array();
 		$item_links = $item instanceof \WP_REST_Response ? $item->get_links() : array();
 		self::collect_failure(
 			$failures,
-			$read_denied instanceof \WP_Error
-				&& 'rest_cannot_read' === $read_denied->get_error_code()
+			self::error_matches( $read_denied, 'rest_cannot_read', 403 )
 				&& true === $read_allowed
 				&& $item instanceof \WP_REST_Response
+				&& self::projected_keys_match( $item_data, array( 'content', 'id', 'parent', 'title', $case['revisionAdditionalField'] ) )
+				&& self::response_matches_schema_context( $controller, $item_data, 'edit' )
 				&& $fixtures['revision'] === (int) ( $item_data['id'] ?? 0 )
 				&& $fixtures['post'] === (int) ( $item_data['parent'] ?? 0 )
 				&& $case['revisionTitle'] === ( $item_data['title']['raw'] ?? null )
 				&& $case['revisionContent'] === ( $item_data['content']['raw'] ?? null )
-				&& \rest_url( 'wp/v2/posts/' . $fixtures['post'] ) === self::link_href( $item_links, 'parent' ),
+				&& $case['revisionAdditionalValue'] === ( $item_data[ $case['revisionAdditionalField'] ] ?? null )
+				&& self::additional_field_call_count( $additional_field_calls, 'post-revision', $case['revisionAdditionalField'], 'edit', $fixtures['revision'] ) > 0
+				&& \rest_url( 'wp/v2/posts/' . $fixtures['post'] ) === self::link_href( $item_links, 'parent' )
+				&& $read_filter_restored,
 			'revision get_item gates parent edit permission and exposes parent links',
 			array(
-				'readDenied'  => $read_denied,
-				'readAllowed' => $read_allowed,
-				'itemData'    => $item_data,
-				'links'       => $item_links,
+				'readDenied'         => $read_denied,
+				'readAllowed'        => $read_allowed,
+				'itemData'           => $item_data,
+				'links'              => $item_links,
+				'readFilterRestored' => $read_filter_restored,
 			)
 		);
 
+		$revision_error_counts_before = self::content_counts();
 		$mismatch = $controller->get_item(
 			self::request(
 				'GET',
@@ -1039,6 +1383,17 @@ final class RestObjectControllersSurface {
 				array( 'context' => 'view' ),
 				array(
 					'parent' => 999999,
+					'id'     => $fixtures['revision'],
+				)
+			)
+		);
+		$malformed_parent = $controller->get_item(
+			self::request(
+				'GET',
+				'/wp/v2/posts/' . $case['malformedId'] . '/revisions/' . $fixtures['revision'],
+				array( 'context' => 'view' ),
+				array(
+					'parent' => $case['malformedId'],
 					'id'     => $fixtures['revision'],
 				)
 			)
@@ -1066,22 +1421,24 @@ final class RestObjectControllersSurface {
 				array( 'force' => false )
 			)
 		);
+		$revision_error_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
-			$mismatch instanceof \WP_Error
-				&& 'rest_revision_parent_id_mismatch' === $mismatch->get_error_code()
-				&& $invalid_parent instanceof \WP_Error
-				&& 'rest_post_invalid_parent' === $invalid_parent->get_error_code()
-				&& $invalid_revision instanceof \WP_Error
-				&& 'rest_post_invalid_id' === $invalid_revision->get_error_code()
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
-			'revision parent mismatch, invalid parent/revision, and delete error paths are represented',
+			self::error_matches( $mismatch, 'rest_revision_parent_id_mismatch', 404 )
+				&& self::error_matches( $invalid_parent, 'rest_post_invalid_parent', 404 )
+				&& self::error_matches( $malformed_parent, 'rest_post_invalid_parent', 404 )
+				&& self::error_matches( $invalid_revision, 'rest_post_invalid_id', 404 )
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches( $revision_error_counts_before, $revision_error_counts_after, array(), array() ),
+			'revision parent mismatch, invalid/malformed parent/revision, and delete error paths are represented without row changes',
 			array(
 				'mismatch'        => $mismatch,
 				'invalidParent'   => $invalid_parent,
+				'malformedParent' => $malformed_parent,
 				'invalidRevision' => $invalid_revision,
 				'deleteError'     => $delete_error,
+				'countsBefore'    => $revision_error_counts_before,
+				'countsAfter'     => $revision_error_counts_after,
 			)
 		);
 
@@ -1096,7 +1453,7 @@ final class RestObjectControllersSurface {
 		);
 	}
 
-	private static function check_attachments_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+	private static function check_attachments_controller( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
 		$controller = new \WP_REST_Attachments_Controller( 'attachment' );
 		$failures   = array();
 		$params     = $controller->get_collection_params();
@@ -1104,8 +1461,13 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			self::collection_context_param_ok( $params )
-				&& isset( $params['media_type'], $params['mime_type'], $params['parent'] )
-				&& 'inherit' === ( $params['status']['default'] ?? null ),
+				&& self::collection_has_params(
+					$params,
+					array( 'media_type', 'mime_type', 'order', 'orderby', 'parent', 'per_page', 'search', 'slug', 'status' )
+				)
+				&& self::collection_default_ok( $params, 'status', 'inherit' )
+				&& self::collection_default_ok( $params, 'order', 'desc' )
+				&& self::collection_items_enum_contains( $params, 'media_type', array( 'image' ) ),
 			'attachment collection params expose media filters and inherit status default',
 			array( 'params' => self::param_summary( $params ) )
 		);
@@ -1116,7 +1478,7 @@ final class RestObjectControllersSurface {
 				'/wp/v2/media/' . $fixtures['attachment'],
 				array(
 					'context' => 'view',
-					'_fields' => 'id,title,media_type,mime_type,source_url,alt_text,_links',
+					'_fields' => 'id,title,media_type,mime_type,source_url,alt_text,' . $case['attachmentAdditionalField'] . ',_links',
 				),
 				array( 'id' => $fixtures['attachment'] )
 			)
@@ -1126,10 +1488,17 @@ final class RestObjectControllersSurface {
 		self::collect_failure(
 			$failures,
 			$item instanceof \WP_REST_Response
+				&& self::projected_keys_match(
+					$item_data,
+					array( 'alt_text', 'id', 'media_type', 'mime_type', 'source_url', 'title', $case['attachmentAdditionalField'] )
+				)
+				&& self::response_matches_schema_context( $controller, $item_data, 'view' )
 				&& $fixtures['attachment'] === (int) ( $item_data['id'] ?? 0 )
 				&& 'image' === ( $item_data['media_type'] ?? null )
 				&& 'image/jpeg' === ( $item_data['mime_type'] ?? null )
 				&& $case['attachmentAlt'] === ( $item_data['alt_text'] ?? null )
+				&& $case['attachmentAdditionalValue'] === ( $item_data[ $case['attachmentAdditionalField'] ] ?? null )
+				&& self::additional_field_call_count( $additional_field_calls, 'attachment', $case['attachmentAdditionalField'], 'view', $fixtures['attachment'] ) > 0
 				&& is_string( $item_data['source_url'] ?? null )
 				&& '' !== ( $item_data['source_url'] ?? '' )
 				&& \rest_url( 'wp/v2/media/' . $fixtures['attachment'] ) === self::link_href( $item_links, 'self' ),
@@ -1143,8 +1512,13 @@ final class RestObjectControllersSurface {
 		$invalid_item  = $controller->get_item(
 			self::request( 'GET', '/wp/v2/media/999999', array(), array( 'id' => 999999 ) )
 		);
+		$malformed_item = $controller->get_item(
+			self::request( 'GET', '/wp/v2/media/' . $case['malformedId'], array(), array( 'id' => $case['malformedId'] ) )
+		);
 		$create_denied = $controller->create_item_permissions_check( self::request( 'POST', '/wp/v2/media' ) );
 		$cap_filter    = self::install_cap_filter( array( 'create_posts', 'delete_others_posts', 'delete_posts', 'delete_published_posts', 'edit_posts', 'upload_files' ) );
+		$attachment_counts_before = self::content_counts();
+		$write_filter_restored = false;
 		try {
 			$create_allowed = $controller->create_item_permissions_check( self::request( 'POST', '/wp/v2/media' ) );
 			$upload_error   = $controller->create_item( self::request( 'POST', '/wp/v2/media' ) );
@@ -1158,26 +1532,30 @@ final class RestObjectControllersSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			$write_filter_restored = self::remove_cap_filter( $cap_filter );
 		}
+		$attachment_counts_after = self::content_counts();
 		self::collect_failure(
 			$failures,
-			$invalid_item instanceof \WP_Error
-				&& 'rest_post_invalid_id' === $invalid_item->get_error_code()
-				&& $create_denied instanceof \WP_Error
-				&& 'rest_cannot_create' === $create_denied->get_error_code()
+			self::error_matches( $invalid_item, 'rest_post_invalid_id', 404 )
+				&& self::error_matches( $malformed_item, 'rest_post_invalid_id', 404 )
+				&& self::error_matches( $create_denied, 'rest_cannot_create', 403 )
 				&& true === $create_allowed
-				&& $upload_error instanceof \WP_Error
-				&& 'rest_upload_no_data' === $upload_error->get_error_code()
-				&& $delete_error instanceof \WP_Error
-				&& 'rest_trash_not_supported' === $delete_error->get_error_code(),
+				&& self::error_matches( $upload_error, 'rest_upload_no_data', 400 )
+				&& self::error_matches( $delete_error, 'rest_trash_not_supported', 501 )
+				&& self::content_count_delta_matches( $attachment_counts_before, $attachment_counts_after, array(), array() )
+				&& $write_filter_restored,
 			'attachment invalid ID, upload permission, no-file upload, and delete error paths are represented without real uploads',
 			array(
-				'invalidItem'   => $invalid_item,
-				'createDenied'  => $create_denied,
-				'createAllowed' => $create_allowed,
-				'uploadError'   => $upload_error,
-				'deleteError'   => $delete_error,
+				'invalidItem'         => $invalid_item,
+				'malformedItem'       => $malformed_item,
+				'createDenied'        => $create_denied,
+				'createAllowed'       => $create_allowed,
+				'uploadError'         => $upload_error,
+				'deleteError'         => $delete_error,
+				'contentCountsBefore' => $attachment_counts_before,
+				'contentCountsAfter'  => $attachment_counts_after,
+				'writeFilterRestored' => $write_filter_restored,
 			)
 		);
 
@@ -1191,6 +1569,81 @@ final class RestObjectControllersSurface {
 				'skipped'  => array(
 					'realUploads' => 'Multipart/raw upload bodies, sideloads, image editor post-processing, and remote fetches are intentionally not invoked.',
 				),
+			)
+		);
+	}
+
+	private static function check_additional_field_registry( \ComponentFuzz\FuzzContext $ctx, array $case, array $additional_field_calls ): array {
+		$failures = array();
+		$registry = $GLOBALS['wp_rest_additional_fields'] ?? array();
+		$fields   = array(
+			array(
+				'controller' => new \WP_REST_Posts_Controller( 'post' ),
+				'contexts'   => array( 'edit' ),
+				'field'      => $case['postAdditionalField'],
+				'object'     => 'post',
+				'value'      => $case['postAdditionalValue'],
+			),
+			array(
+				'controller' => new \WP_REST_Terms_Controller( 'category' ),
+				'contexts'   => array( 'view', 'edit' ),
+				'field'      => $case['termAdditionalField'],
+				'object'     => 'category',
+				'value'      => $case['termAdditionalValue'],
+			),
+			array(
+				'controller' => new \WP_REST_Comments_Controller(),
+				'contexts'   => array( 'edit' ),
+				'field'      => $case['commentAdditionalField'],
+				'object'     => 'comment',
+				'value'      => $case['commentAdditionalValue'],
+			),
+			array(
+				'controller' => new \WP_REST_Users_Controller(),
+				'contexts'   => array( 'embed', 'view', 'edit' ),
+				'field'      => $case['userAdditionalField'],
+				'object'     => 'user',
+				'value'      => $case['userAdditionalValue'],
+			),
+			array(
+				'controller' => new \WP_REST_Revisions_Controller( 'post' ),
+				'contexts'   => array( 'edit' ),
+				'field'      => $case['revisionAdditionalField'],
+				'object'     => 'post-revision',
+				'value'      => $case['revisionAdditionalValue'],
+			),
+			array(
+				'controller' => new \WP_REST_Attachments_Controller( 'attachment' ),
+				'contexts'   => array( 'view', 'edit', 'embed' ),
+				'field'      => $case['attachmentAdditionalField'],
+				'object'     => 'attachment',
+				'value'      => $case['attachmentAdditionalValue'],
+			),
+		);
+
+		foreach ( $fields as $field ) {
+			self::collect_failure(
+				$failures,
+				isset( $registry[ $field['object'] ][ $field['field'] ] )
+					&& self::schema_property_matches( $field['controller'], $field['field'], $field['contexts'], $field['value'] )
+					&& self::additional_field_call_count( $additional_field_calls, $field['object'], $field['field'] ) > 0,
+				'registered additional field is schema-visible and exercised',
+				array(
+					'object' => $field['object'],
+					'field'  => $field['field'],
+					'calls'  => self::additional_field_call_count( $additional_field_calls, $field['object'], $field['field'] ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.additional-fields.schema-callbacks-registry',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'calls'    => array_slice( $additional_field_calls, 0, 20 ),
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1212,34 +1665,112 @@ final class RestObjectControllersSurface {
 			'postMetaStored'              => 'stored-' . $token,
 			'postMetaSanitized'           => \sanitize_text_field( " <b>Meta {$token}</b>\n" ),
 			'postMetaUpdateSanitized'     => \sanitize_text_field( " Updated\t{$token}<script>x</script> " ),
+			'postAdditionalField'         => 'cfz_post_field_' . $token,
+			'postAdditionalValue'         => 'post-extra-' . $token,
 			'createdPostTitle'            => 'Created REST Post ' . $ctx->int( 10, 999 ),
 			'createdPostContent'          => '<p>Created content ' . $token . '</p>',
 			'createdPostSlugInput'        => 'Created REST Slug ' . $token,
 			'updatedPostTitle'            => 'Updated REST Post ' . $ctx->int( 10, 999 ),
 			'termName'                    => 'REST Category ' . $ctx->int( 10, 999 ),
 			'termSlugInput'               => 'Term Slug ' . $token,
+			'childTermName'               => 'Child Term ' . $ctx->int( 10, 999 ),
+			'childTermSlugInput'          => 'Child Term Slug ' . $token,
 			'createdTermName'             => 'Created Term ' . $ctx->int( 10, 999 ),
 			'createdTermDescription'      => 'Generated term description ' . $token,
 			'createdTermSlugInput'        => 'Created Term Slug ' . $token,
 			'updatedTermName'             => 'Updated Term ' . $ctx->int( 10, 999 ),
+			'termAdditionalField'         => 'cfz_term_field_' . $token,
+			'termAdditionalValue'         => 'term-extra-' . $token,
 			'commentAuthorName'           => 'Commenter ' . $ctx->int( 10, 999 ),
 			'commentAuthorEmail'          => 'commenter-' . $token . '@example.test',
 			'commentContent'              => 'Fixture comment ' . $token,
+			'secondCommentContent'        => 'Second fixture comment ' . $token,
 			'createdCommentContent'       => 'Created comment ' . $token,
 			'createdCommentContentPadded' => "  Created comment {$token}\n",
 			'updatedCommentContent'       => 'Updated comment ' . $token,
+			'commentAdditionalField'      => 'cfz_comment_field_' . $token,
+			'commentAdditionalValue'      => 'comment-extra-' . $token,
 			'createdUserLogin'            => 'cfz_user_' . $token,
 			'createdUserEmail'            => 'created-' . $token . '@example.test',
 			'createdUserName'             => 'Created User ' . $ctx->int( 10, 999 ),
 			'createdUserPassword'         => 'pass-' . $token . '-A1',
 			'createdUserSlugInput'        => 'Created User ' . $token,
 			'updatedUserName'             => 'Updated User ' . $ctx->int( 10, 999 ),
+			'userAdditionalField'         => 'cfz_user_field_' . $token,
+			'userAdditionalValue'         => 'user-extra-' . $token,
 			'revisionTitle'               => 'Revision Title ' . $ctx->int( 10, 999 ),
 			'revisionContent'             => '<p>Revision content ' . $token . '</p>',
+			'revisionAdditionalField'     => 'cfz_revision_field_' . $token,
+			'revisionAdditionalValue'     => 'revision-extra-' . $token,
 			'attachmentTitle'             => 'Attachment ' . $ctx->int( 10, 999 ),
 			'attachmentAlt'               => 'Alt text ' . $token,
 			'attachmentFile'              => 'component-fuzz-' . $token . '.jpg',
+			'attachmentAdditionalField'   => 'cfz_attachment_field_' . $token,
+			'attachmentAdditionalValue'   => 'attachment-extra-' . $token,
+			'malformedId'                 => -1 * $ctx->int( 1, 999 ),
 		);
+	}
+
+	private static function register_additional_fields( array $case, array &$calls ): void {
+		$fields = array(
+			'post'          => array(
+				'field'    => $case['postAdditionalField'],
+				'value'    => $case['postAdditionalValue'],
+				'contexts' => array( 'edit' ),
+			),
+			'category'      => array(
+				'field'    => $case['termAdditionalField'],
+				'value'    => $case['termAdditionalValue'],
+				'contexts' => array( 'view', 'edit' ),
+			),
+			'comment'       => array(
+				'field'    => $case['commentAdditionalField'],
+				'value'    => $case['commentAdditionalValue'],
+				'contexts' => array( 'edit' ),
+			),
+			'user'          => array(
+				'field'    => $case['userAdditionalField'],
+				'value'    => $case['userAdditionalValue'],
+				'contexts' => array( 'embed', 'view', 'edit' ),
+			),
+			'post-revision' => array(
+				'field'    => $case['revisionAdditionalField'],
+				'value'    => $case['revisionAdditionalValue'],
+				'contexts' => array( 'edit' ),
+			),
+			'attachment'    => array(
+				'field'    => $case['attachmentAdditionalField'],
+				'value'    => $case['attachmentAdditionalValue'],
+				'contexts' => array( 'view', 'edit', 'embed' ),
+			),
+		);
+
+		foreach ( $fields as $object_type => $spec ) {
+			\register_rest_field(
+				$object_type,
+				$spec['field'],
+				array(
+					'get_callback' => static function ( array $prepared, string $field_name, \WP_REST_Request $request, string $registered_object_type ) use ( &$calls, $object_type, $spec ): string {
+						$calls[] = array(
+							'context'        => $request['context'],
+							'field'          => $field_name,
+							'id'             => isset( $prepared['id'] ) ? (int) $prepared['id'] : null,
+							'method'         => $request->get_method(),
+							'objectType'     => $object_type,
+							'registeredType' => $registered_object_type,
+						);
+						return $spec['value'];
+					},
+					'schema'       => array(
+						'description' => 'Component fuzz deterministic additional field.',
+						'type'        => 'string',
+						'context'     => $spec['contexts'],
+						'readonly'    => true,
+						'default'     => $spec['value'],
+					),
+				)
+			);
+		}
 	}
 
 	private static function seed_fixtures( array $case ): array {
@@ -1318,6 +1849,19 @@ final class RestObjectControllersSurface {
 			throw new \RuntimeException( 'Could not create term fixture.' );
 		}
 
+		$child_term = \wp_insert_term(
+			$case['childTermName'],
+			'category',
+			array(
+				'description' => 'Fixture child term ' . $case['token'],
+				'parent'      => (int) $term['term_id'],
+				'slug'        => \sanitize_title( $case['childTermSlugInput'] ),
+			)
+		);
+		if ( \is_wp_error( $child_term ) || ! is_array( $child_term ) || empty( $child_term['term_id'] ) ) {
+			throw new \RuntimeException( 'Could not create child term fixture.' );
+		}
+
 		$comment = \wp_insert_comment(
 			array(
 				'comment_approved'     => '1',
@@ -1331,6 +1875,37 @@ final class RestObjectControllersSurface {
 		);
 		if ( ! $comment ) {
 			throw new \RuntimeException( 'Could not create comment fixture.' );
+		}
+
+		$second_comment = \wp_insert_comment(
+			array(
+				'comment_approved'     => '1',
+				'comment_author'       => $case['commentAuthorName'] . ' Two',
+				'comment_author_email' => $case['commentAuthorEmail'],
+				'comment_content'      => $case['secondCommentContent'],
+				'comment_parent'       => (int) $comment,
+				'comment_post_ID'      => (int) $post,
+				'comment_type'         => 'comment',
+				'user_id'              => (int) $author,
+			)
+		);
+		if ( ! $second_comment ) {
+			throw new \RuntimeException( 'Could not create second comment fixture.' );
+		}
+
+		$pending_comment = \wp_insert_comment(
+			array(
+				'comment_approved'     => '0',
+				'comment_author'       => $case['commentAuthorName'] . ' Pending',
+				'comment_author_email' => $case['commentAuthorEmail'],
+				'comment_content'      => 'Pending fixture comment ' . $case['token'],
+				'comment_post_ID'      => (int) $post,
+				'comment_type'         => 'comment',
+				'user_id'              => (int) $author,
+			)
+		);
+		if ( ! $pending_comment ) {
+			throw new \RuntimeException( 'Could not create pending comment fixture.' );
 		}
 
 		$revision = \wp_insert_post(
@@ -1374,13 +1949,16 @@ final class RestObjectControllersSurface {
 		\update_post_meta( (int) $attachment, '_wp_attachment_image_alt', $case['attachmentAlt'] );
 
 		return array(
-			'attachment' => (int) $attachment,
-			'author'     => (int) $author,
-			'comment'    => (int) $comment,
-			'other_post' => (int) $other_post,
-			'post'       => (int) $post,
-			'revision'   => (int) $revision,
-			'term'       => (int) $term['term_id'],
+			'attachment'      => (int) $attachment,
+			'author'          => (int) $author,
+			'child_term'      => (int) $child_term['term_id'],
+			'comment'         => (int) $comment,
+			'other_post'      => (int) $other_post,
+			'pending_comment' => (int) $pending_comment,
+			'post'            => (int) $post,
+			'revision'        => (int) $revision,
+			'second_comment'  => (int) $second_comment,
+			'term'            => (int) $term['term_id'],
 		);
 	}
 
@@ -1465,6 +2043,196 @@ final class RestObjectControllersSurface {
 			&& 'view' === call_user_func( $sanitize, 'View!!' )
 			&& is_array( $enum )
 			&& in_array( 'view', $enum, true );
+	}
+
+	private static function collection_has_params( array $params, array $names ): bool {
+		foreach ( $names as $name ) {
+			if ( ! isset( $params[ $name ] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function collection_default_ok( array $params, string $name, $expected ): bool {
+		return isset( $params[ $name ] ) && array_key_exists( 'default', $params[ $name ] )
+			&& $expected === $params[ $name ]['default'];
+	}
+
+	private static function collection_enum_contains( array $params, string $name, array $values ): bool {
+		if ( ! isset( $params[ $name ]['enum'] ) || ! is_array( $params[ $name ]['enum'] ) ) {
+			return false;
+		}
+
+		foreach ( $values as $value ) {
+			if ( ! in_array( $value, $params[ $name ]['enum'], true ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function collection_items_enum_contains( array $params, string $name, array $values ): bool {
+		if ( ! isset( $params[ $name ]['items']['enum'] ) || ! is_array( $params[ $name ]['items']['enum'] ) ) {
+			return false;
+		}
+
+		foreach ( $values as $value ) {
+			if ( ! in_array( $value, $params[ $name ]['items']['enum'], true ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function projected_keys_match( array $data, array $expected_keys ): bool {
+		$actual_keys = array_keys( $data );
+		sort( $actual_keys );
+		sort( $expected_keys );
+		return $expected_keys === $actual_keys;
+	}
+
+	private static function response_matches_schema_context( \WP_REST_Controller $controller, array $data, string $context ): bool {
+		$schema     = $controller->get_item_schema();
+		$properties = $schema['properties'] ?? array();
+
+		foreach ( $data as $field => $value ) {
+			if ( in_array( $field, array( '_embedded', '_links' ), true ) ) {
+				continue;
+			}
+
+			if ( ! isset( $properties[ $field ] ) ) {
+				return false;
+			}
+
+			$field_contexts = $properties[ $field ]['context'] ?? array();
+			if ( array() !== $field_contexts && ! in_array( $context, $field_contexts, true ) ) {
+				return false;
+			}
+
+			if ( array_key_exists( 'type', $properties[ $field ] ) ) {
+				if ( ! self::value_matches_schema_type( $value, $properties[ $field ]['type'] ) ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function value_matches_schema_type( $value, $type ): bool {
+		$types = is_array( $type ) ? $type : array( $type );
+
+		foreach ( $types as $single_type ) {
+			if ( 'null' === $single_type && null === $value ) {
+				return true;
+			}
+			if ( 'string' === $single_type && is_string( $value ) ) {
+				return true;
+			}
+			if ( 'integer' === $single_type && is_int( $value ) ) {
+				return true;
+			}
+			if ( 'number' === $single_type && ( is_int( $value ) || is_float( $value ) ) ) {
+				return true;
+			}
+			if ( 'boolean' === $single_type && is_bool( $value ) ) {
+				return true;
+			}
+			if ( 'array' === $single_type && is_array( $value ) ) {
+				return true;
+			}
+			if ( 'object' === $single_type && is_array( $value ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function schema_property_matches( \WP_REST_Controller $controller, string $field, array $contexts, $default ): bool {
+		$schema   = $controller->get_item_schema();
+		$property = $schema['properties'][ $field ] ?? null;
+		if ( ! is_array( $property ) ) {
+			return false;
+		}
+
+		$actual_contexts = $property['context'] ?? array();
+		sort( $actual_contexts );
+		sort( $contexts );
+
+		return 'string' === ( $property['type'] ?? null )
+			&& $contexts === $actual_contexts
+			&& array_key_exists( 'default', $property )
+			&& $default === $property['default'];
+	}
+
+	private static function error_matches( $value, string $code, ?int $status = null ): bool {
+		if ( ! $value instanceof \WP_Error || $code !== $value->get_error_code() ) {
+			return false;
+		}
+
+		if ( null === $status ) {
+			return true;
+		}
+
+		$data = $value->get_error_data();
+		return is_array( $data ) && $status === (int) ( $data['status'] ?? 0 );
+	}
+
+	private static function content_counts(): array {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			return array();
+		}
+
+		return $GLOBALS['wpdb']->component_fuzz_content_counts();
+	}
+
+	private static function content_count_delta_matches( array $before, array $after, array $expected_delta, array $allowed_changed ): bool {
+		if ( array() === $before || array() === $after ) {
+			return false;
+		}
+
+		$allowed_map = array_fill_keys( $allowed_changed, true );
+		$keys        = array_unique( array_merge( array_keys( $before ), array_keys( $after ), array_keys( $expected_delta ) ) );
+
+		foreach ( $keys as $key ) {
+			$delta = (int) ( $after[ $key ] ?? 0 ) - (int) ( $before[ $key ] ?? 0 );
+			if ( array_key_exists( $key, $expected_delta ) ) {
+				if ( (int) $expected_delta[ $key ] !== $delta ) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( 0 !== $delta && ! isset( $allowed_map[ $key ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function additional_field_call_count( array $calls, string $object_type, string $field, ?string $context = null, ?int $id = null ): int {
+		$count = 0;
+		foreach ( $calls as $call ) {
+			if ( $object_type !== ( $call['objectType'] ?? null ) || $field !== ( $call['field'] ?? null ) ) {
+				continue;
+			}
+			if ( null !== $context && $context !== ( $call['context'] ?? null ) ) {
+				continue;
+			}
+			if ( null !== $id && $id !== ( $call['id'] ?? null ) ) {
+				continue;
+			}
+			++$count;
+		}
+		return $count;
+	}
+
+	private static function remove_cap_filter( callable $filter ): bool {
+		\remove_filter( 'user_has_cap', $filter, 10 );
+		return false === \has_filter( 'user_has_cap', $filter );
 	}
 
 	private static function install_cap_filter( array $granted_caps ): callable {
