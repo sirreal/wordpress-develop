@@ -24,6 +24,11 @@ database, network requests, or a configured site.
 - `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
   group/container behavior, render escaping/raw HTML contracts, and
   `show_admin_bar()` filter/global restoration.
+- `admin-dashboard`: no-live-DB admin dashboard API coverage, including
+  dashboard widget registration/control callbacks, meta-box context and
+  priority normalization, dashboard container rendering across column counts,
+  safe recent draft/comment output helpers, explicit skips for redirect/remote
+  paths, and filter/global/superglobal/output-buffer restoration.
 - `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
   `WP_Screen` normalization/current-screen globals, column header filter
   locality, settings registry/default/sanitize callbacks, escaped settings
@@ -285,6 +290,11 @@ database, network requests, or a configured site.
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS
   detection short-circuits, and selected direct `WP_Site_Health` tests without
   remote requests.
+- `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
+  formatting and database-size helpers, including private field/section
+  suppression, debug vs info labels, `debug_information` filter locality,
+  scoped `SHOW TABLE STATUS` wpdb doubles, and explicit skips for unsafe full
+  debug-data scans.
 - `state`: object cache groups and multi-operations, option and transient APIs
   backed by the no-DB stub, filters, serialization, JSON, and value helpers.
 - `style`: style engine serialization, CSS declaration filtering, theme.json
