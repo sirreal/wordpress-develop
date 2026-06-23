@@ -11,6 +11,7 @@ final class WpBootstrap {
 
 		$root = repo_root();
 		$src  = $root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
+		$component_fuzz_content_dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-wp-content-' . getmypid();
 
 		if ( ! isset( $_SERVER['REQUEST_URI'] ) ) {
 			$_SERVER['REQUEST_URI'] = '/component-fuzz/';
@@ -35,7 +36,13 @@ final class WpBootstrap {
 			define( 'WPINC', 'wp-includes' );
 		}
 		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
-			define( 'WP_CONTENT_DIR', ABSPATH . 'wp-content' );
+			self::reset_temp_content_dir( $component_fuzz_content_dir );
+			define( 'WP_CONTENT_DIR', $component_fuzz_content_dir );
+			register_shutdown_function(
+				static function () use ( $component_fuzz_content_dir ): void {
+					WpBootstrap::remove_temp_content_dir( $component_fuzz_content_dir );
+				}
+			);
 		}
 		if ( ! defined( 'WP_LANG_DIR' ) ) {
 			define( 'WP_LANG_DIR', WP_CONTENT_DIR . '/languages' );
@@ -402,6 +409,8 @@ final class WpBootstrap {
 			'wp-includes/rest-api/endpoints/class-wp-rest-block-types-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-block-patterns-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-block-pattern-categories-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-plugins-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-themes-controller.php',
 			'wp-includes/abilities-api/class-wp-ability-category.php',
 			'wp-includes/abilities-api/class-wp-ability-categories-registry.php',
 			'wp-includes/abilities-api/class-wp-ability.php',
@@ -432,6 +441,7 @@ final class WpBootstrap {
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/image.php',
 			'wp-admin/includes/plugin.php',
+			'wp-admin/includes/theme.php',
 			'wp-admin/includes/class-wp-screen.php',
 			'wp-admin/includes/screen.php',
 			'wp-admin/includes/class-wp-list-table.php',
@@ -560,5 +570,45 @@ final class WpBootstrap {
 		}
 
 		self::$loaded = true;
+	}
+
+	private static function reset_temp_content_dir( string $dir ): void {
+		if ( file_exists( $dir ) ) {
+			self::remove_temp_content_dir( $dir );
+		}
+
+		foreach ( array( $dir, $dir . '/plugins', $dir . '/mu-plugins', $dir . '/themes', $dir . '/languages' ) as $path ) {
+			if ( ! is_dir( $path ) && ! mkdir( $path, 0777, true ) && ! is_dir( $path ) ) {
+				throw new \RuntimeException( 'Could not create component fuzz content directory: ' . $path );
+			}
+		}
+	}
+
+	public static function remove_temp_content_dir( string $dir ): void {
+		$temp_prefix = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-wp-content-';
+		if ( ! str_starts_with( $dir, $temp_prefix ) || ! file_exists( $dir ) ) {
+			return;
+		}
+
+		if ( ! is_dir( $dir ) ) {
+			@unlink( $dir );
+			return;
+		}
+
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $iterator as $item ) {
+			$path = $item->getPathname();
+			if ( $item->isDir() && ! $item->isLink() ) {
+				@rmdir( $path );
+			} else {
+				@unlink( $path );
+			}
+		}
+
+		@rmdir( $dir );
 	}
 }

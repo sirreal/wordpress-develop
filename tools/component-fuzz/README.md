@@ -58,6 +58,10 @@ database, network requests, or a configured site.
   cache/count refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, email links, and comment cookies.
+- `comment-workflow`: in-memory comment submission, duplicate/flood approval
+  decisions, moderation short-circuits, update/status transition hooks,
+  trash/untrash and spam/unspam restoration, and WP_Error failure paths without
+  process exits.
 - `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
   unscheduling and rescheduling contracts.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
@@ -123,6 +127,13 @@ database, network requests, or a configured site.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
   validation, no-DB plugin dependency metadata, theme headers, parent/child
   relationships, active theme file helpers, screenshots, and broken theme errors.
+- `plugin-theme-lifecycle`: no-network plugin/theme lifecycle coverage over
+  generated temp fixtures, including plugin validation and requirement errors,
+  dependency failure states, activation/deactivation success and output-failure
+  paths, active and sitewide-active option shapes, plugin/theme deletion
+  validation, theme enumeration and requirement checks, safe child-theme
+  switching, theme support/template globals, and read-only REST plugin/theme
+  controller paths.
 - `update-install-upgrader`: no-network update/install/upgrader coverage,
   including generated core/plugin/theme update transient shapes, aggregate
   update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
@@ -214,9 +225,18 @@ surface intercepts PHPMailer send calls and never attempts real delivery. The
 `rest-controllers` surface intentionally avoids DB-backed object controllers
 such as posts, terms, comments, users, revisions, attachments, and templates;
 it also records explicit skips for the themes and plugins controllers because
-they inspect installed filesystem state, active theme/plugin state, or
-activation/update paths. Block pattern coverage is registry-backed only:
+their lifecycle-heavy read and status paths are covered by
+`plugin-theme-lifecycle`, while install/update/delete controller methods are
+still avoided. Block pattern coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
+The `plugin-theme-lifecycle` surface uses a process-local temp `wp-content`
+tree and generated minimal fixtures only; it does not activate repository
+plugins or switch to repository themes. Network-wide activation is not forced
+when the shared process is not running with `MULTISITE`; in that mode the
+surface verifies sitewide option shapes and the non-multisite false branch.
+REST plugin/theme controller coverage is limited to read/status/parameter
+paths and avoids install, update, remote lookup, and destructive REST delete
+methods.
 The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
 metadata lifecycle APIs; it is not a general SQL engine. Post-to-term
@@ -227,6 +247,9 @@ The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
 redirects, attachment-page redirects, and paths that call `wp_redirect()` and
 `exit` are intentionally avoided.
+The `comment-workflow` surface uses the bounded content/comment rows in the
+in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
+`wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core

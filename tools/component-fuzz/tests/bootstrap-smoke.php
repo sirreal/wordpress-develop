@@ -102,6 +102,14 @@ $required_functions = array(
 	'get_comment',
 	'wp_insert_comment',
 	'wp_new_comment',
+	'wp_handle_comment_submission',
+	'wp_allow_comment',
+	'wp_update_comment',
+	'wp_set_comment_status',
+	'wp_trash_comment',
+	'wp_untrash_comment',
+	'wp_spam_comment',
+	'wp_unspam_comment',
 	'wp_delete_comment',
 	'get_current_screen',
 	'set_current_screen',
@@ -206,6 +214,22 @@ $required_functions = array(
 	'register_column_headers',
 	'print_column_headers',
 	'get_hidden_columns',
+	'get_plugins',
+	'validate_plugin',
+	'validate_plugin_requirements',
+	'is_plugin_active',
+	'is_plugin_active_for_network',
+	'activate_plugin',
+	'deactivate_plugins',
+	'delete_plugins',
+	'wp_clean_plugins_cache',
+	'wp_get_theme',
+	'wp_get_themes',
+	'validate_theme_requirements',
+	'switch_theme',
+	'delete_theme',
+	'wp_clean_themes_cache',
+	'wp_set_template_globals',
 );
 
 $required_classes = array(
@@ -219,6 +243,8 @@ $required_classes = array(
 	'WP_REST_Block_Pattern_Categories_Controller',
 	'WP_REST_Block_Patterns_Controller',
 	'WP_REST_Block_Types_Controller',
+	'WP_REST_Plugins_Controller',
+	'WP_REST_Themes_Controller',
 	'WP_REST_Controller',
 	'WP_REST_Post_Statuses_Controller',
 	'WP_REST_Post_Types_Controller',
@@ -294,6 +320,8 @@ $required_classes = array(
 	'Theme_Upgrader',
 	'Core_Upgrader',
 	'WP_Automatic_Updater',
+	'WP_Plugin_Dependencies',
+	'WP_Theme',
 );
 
 $missing = array();
@@ -532,6 +560,148 @@ function component_fuzz_smoke_clone_value( $value ) {
 	}
 
 	return $value;
+}
+
+$lifecycle_smoke_snapshot = component_fuzz_smoke_snapshot_globals(
+	array(
+		'_GET',
+		'_POST',
+		'_REQUEST',
+		'_wp_filesystem_direct_method',
+		'pagenow',
+		'wp_actions',
+		'wp_current_filter',
+		'wp_filesystem',
+		'wp_filter',
+		'wp_filters',
+		'wp_object_cache',
+		'wp_plugin_paths',
+		'wp_stylesheet_path',
+		'wp_template_path',
+		'wp_theme_directories',
+	)
+);
+$lifecycle_smoke_options  = isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
+	? $GLOBALS['wpdb']->component_fuzz_get_options()
+	: array();
+$lifecycle_smoke_plugin_slug = 'component-fuzz-smoke-plugin';
+$lifecycle_smoke_theme_slug  = 'component-fuzz-smoke-theme';
+$lifecycle_smoke_plugin_dir  = WP_PLUGIN_DIR . '/' . $lifecycle_smoke_plugin_slug;
+$lifecycle_smoke_plugin_file = $lifecycle_smoke_plugin_slug . '/' . $lifecycle_smoke_plugin_slug . '.php';
+$lifecycle_smoke_theme_dir   = WP_CONTENT_DIR . '/themes/' . $lifecycle_smoke_theme_slug;
+$lifecycle_smoke_remove      = static function ( string $dir ): bool {
+	if ( ! file_exists( $dir ) ) {
+		return true;
+	}
+	if ( ! is_dir( $dir ) ) {
+		return @unlink( $dir );
+	}
+
+	$iterator = new RecursiveIteratorIterator(
+		new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS ),
+		RecursiveIteratorIterator::CHILD_FIRST
+	);
+	foreach ( $iterator as $item ) {
+		$path = $item->getPathname();
+		if ( $item->isDir() && ! $item->isLink() ) {
+			if ( ! @rmdir( $path ) ) {
+				return false;
+			}
+		} elseif ( ! @unlink( $path ) ) {
+			return false;
+		}
+	}
+
+	return @rmdir( $dir );
+};
+
+try {
+	$lifecycle_smoke_remove( $lifecycle_smoke_plugin_dir );
+	$lifecycle_smoke_remove( $lifecycle_smoke_theme_dir );
+
+	if ( ! mkdir( $lifecycle_smoke_plugin_dir, 0777, true ) && ! is_dir( $lifecycle_smoke_plugin_dir ) ) {
+		throw new RuntimeException( 'Could not create lifecycle smoke plugin directory.' );
+	}
+	if ( ! mkdir( $lifecycle_smoke_theme_dir, 0777, true ) && ! is_dir( $lifecycle_smoke_theme_dir ) ) {
+		throw new RuntimeException( 'Could not create lifecycle smoke theme directory.' );
+	}
+
+	file_put_contents(
+		$lifecycle_smoke_plugin_dir . '/' . $lifecycle_smoke_plugin_slug . '.php',
+		"<?php\n"
+		. "/**\n"
+		. " * Plugin Name: Component Fuzz Lifecycle Smoke Plugin\n"
+		. " * Version: 1.0.0\n"
+		. " * Requires at least: 5.0\n"
+		. " * Requires PHP: 5.6\n"
+		. " */\n"
+	);
+	file_put_contents(
+		$lifecycle_smoke_theme_dir . '/style.css',
+		"/*\n"
+		. "Theme Name: Component Fuzz Lifecycle Smoke Theme\n"
+		. "Version: 1.0.0\n"
+		. "Requires at least: 5.0\n"
+		. "Requires PHP: 5.6\n"
+		. "*/\n"
+	);
+	file_put_contents( $lifecycle_smoke_theme_dir . '/index.php', "<?php\n// Lifecycle smoke theme.\n" );
+
+	$GLOBALS['wp_theme_directories'] = array( WP_CONTENT_DIR . '/themes' );
+	update_option( 'active_plugins', array() );
+	update_site_option( 'active_sitewide_plugins', array() );
+	wp_clean_plugins_cache( false );
+	wp_clean_themes_cache( false );
+
+	$plugin_activation = activate_plugin( $lifecycle_smoke_plugin_file, '', false, true );
+	$plugin_active     = is_plugin_active( $lifecycle_smoke_plugin_file );
+	deactivate_plugins( $lifecycle_smoke_plugin_file, true );
+
+	update_option( 'stylesheet', $lifecycle_smoke_theme_slug );
+	update_option( 'template', $lifecycle_smoke_theme_slug );
+	update_option( 'current_theme', 'Component Fuzz Lifecycle Smoke Theme' );
+	wp_set_template_globals();
+
+	$plugins_controller = new WP_REST_Plugins_Controller();
+	$plugin_request     = new WP_REST_Request( 'GET', '/wp/v2/plugins/' . $lifecycle_smoke_plugin_slug . '/' . $lifecycle_smoke_plugin_slug );
+	$plugin_request->set_query_params( array( '_fields' => 'plugin,status,name,version' ) );
+	$plugin_request->set_url_params( array( 'plugin' => $lifecycle_smoke_plugin_file ) );
+	$plugin_response = $plugins_controller->get_item( $plugin_request );
+
+	$themes_controller = new WP_REST_Themes_Controller();
+	$theme_request     = new WP_REST_Request( 'GET', '/wp/v2/themes/' . $lifecycle_smoke_theme_slug );
+	$theme_request->set_query_params( array( '_fields' => 'stylesheet,template,status,name,version' ) );
+	$theme_request->set_url_params( array( 'stylesheet' => $lifecycle_smoke_theme_slug ) );
+	$theme_response = $themes_controller->get_item( $theme_request );
+
+	if (
+		0 !== validate_plugin( $lifecycle_smoke_plugin_file )
+		|| true !== validate_plugin_requirements( $lifecycle_smoke_plugin_file )
+		|| null !== $plugin_activation
+		|| ! $plugin_active
+		|| is_plugin_active( $lifecycle_smoke_plugin_file )
+		|| true !== validate_theme_requirements( $lifecycle_smoke_theme_slug )
+		|| ! wp_get_theme( $lifecycle_smoke_theme_slug )->exists()
+		|| ! isset( wp_get_themes()[ $lifecycle_smoke_theme_slug ] )
+		|| ! ( $plugin_response instanceof WP_REST_Response )
+		|| ! ( $theme_response instanceof WP_REST_Response )
+		|| $lifecycle_smoke_plugin_slug . '/' . $lifecycle_smoke_plugin_slug !== ( $plugin_response->get_data()['plugin'] ?? null )
+		|| $lifecycle_smoke_theme_slug !== ( $theme_response->get_data()['stylesheet'] ?? null )
+	) {
+		throw new RuntimeException( 'Lifecycle smoke invariant failed.' );
+	}
+} catch ( Throwable $e ) {
+	fwrite( STDERR, 'Plugin/theme lifecycle smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage() . "\n" );
+	exit( 1 );
+} finally {
+	$lifecycle_smoke_remove( $lifecycle_smoke_plugin_dir );
+	$lifecycle_smoke_remove( $lifecycle_smoke_theme_dir );
+	wp_clean_plugins_cache( false );
+	wp_clean_themes_cache( false );
+	if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+		$GLOBALS['wpdb']->component_fuzz_reset_options( $lifecycle_smoke_options );
+	}
+	component_fuzz_smoke_restore_globals( $lifecycle_smoke_snapshot );
 }
 
 $sample_html = wp_kses_post( '<script>alert(1)</script><p onclick="x">ok</p>' );
@@ -1742,5 +1912,127 @@ foreach ( $lifecycle_server as $server_key => $entry ) {
 		unset( $_SERVER[ $server_key ] );
 	}
 }
+
+$comment_workflow_options = $GLOBALS['wpdb']->component_fuzz_get_options();
+$GLOBALS['wpdb']->component_fuzz_reset_content();
+$GLOBALS['wpdb']->component_fuzz_reset_options(
+	array(
+		'admin_email'            => 'admin@example.test',
+		'blog_charset'           => 'UTF-8',
+		'comment_moderation'     => 0,
+		'comment_registration'   => 0,
+		'comments_notify'        => 0,
+		'default_comment_status' => 'open',
+		'default_ping_status'    => 'closed',
+		'disallowed_keys'        => '',
+		'home'                   => 'http://example.test',
+		'moderation_keys'        => '',
+		'require_name_email'     => 0,
+		'siteurl'                => 'http://example.test',
+	)
+);
+wp_cache_flush();
+$GLOBALS['wp_rewrite']       = new WP_Rewrite();
+$GLOBALS['wp_post_types']    = array();
+$GLOBALS['wp_post_statuses'] = array();
+create_initial_post_types();
+wp_set_current_user( 0 );
+$_SERVER['REMOTE_ADDR']     = '127.0.0.1';
+$_SERVER['HTTP_USER_AGENT'] = 'ComponentFuzz comment workflow smoke';
+
+$comment_workflow_post_id = wp_insert_post(
+	wp_slash(
+		array(
+			'post_type'      => 'post',
+			'post_title'     => 'Comment Workflow Smoke',
+			'post_content'   => 'Comment workflow smoke content',
+			'post_status'    => 'publish',
+			'post_name'      => 'comment-workflow-smoke',
+			'comment_status' => 'open',
+		)
+	),
+	true,
+	false
+);
+$comment_workflow_approve = static function () {
+	return 1;
+};
+add_filter( 'pre_comment_approved', $comment_workflow_approve, 10, 2 );
+$comment_workflow_comment = wp_handle_comment_submission(
+	array(
+		'comment_post_ID' => $comment_workflow_post_id,
+		'author'          => 'Smoke Commenter',
+		'email'           => 'smoke-commenter@example.test',
+		'url'             => 'http://example.test/commenter',
+		'comment'         => 'Smoke workflow comment',
+		'comment_parent'  => 0,
+	)
+);
+remove_filter( 'pre_comment_approved', $comment_workflow_approve, 10 );
+
+$comment_workflow_comment_id = $comment_workflow_comment instanceof WP_Comment ? (int) $comment_workflow_comment->comment_ID : 0;
+$comment_workflow_duplicate  = $comment_workflow_comment instanceof WP_Comment
+	? wp_allow_comment(
+		wp_slash(
+			array(
+				'comment_post_ID'      => $comment_workflow_post_id,
+				'comment_parent'       => 0,
+				'comment_author'       => 'Smoke Commenter',
+				'comment_author_email' => 'smoke-commenter@example.test',
+				'comment_content'      => 'Smoke workflow comment',
+				'comment_author_IP'    => '127.0.0.1',
+				'comment_agent'        => 'ComponentFuzz comment workflow smoke',
+				'comment_date_gmt'     => '2026-06-23 12:00:00',
+			)
+		),
+		true
+	)
+	: null;
+$comment_workflow_update    = $comment_workflow_comment_id
+	? wp_update_comment(
+		array(
+			'comment_ID'       => $comment_workflow_comment_id,
+			'comment_content'  => 'Smoke workflow comment updated',
+			'comment_approved' => 'approve',
+		),
+		true
+	)
+	: null;
+$comment_workflow_hold      = $comment_workflow_comment_id ? wp_set_comment_status( $comment_workflow_comment_id, 'hold', true ) : null;
+$comment_workflow_held      = $comment_workflow_comment_id ? get_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_trash     = $comment_workflow_comment_id ? wp_trash_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_trashed   = $comment_workflow_comment_id ? get_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_untrash   = $comment_workflow_comment_id ? wp_untrash_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_spam      = $comment_workflow_comment_id ? wp_spam_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_spammed   = $comment_workflow_comment_id ? get_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_unspam    = $comment_workflow_comment_id ? wp_unspam_comment( $comment_workflow_comment_id ) : null;
+$comment_workflow_unspammed = $comment_workflow_comment_id ? get_comment( $comment_workflow_comment_id ) : null;
+
+if (
+	! ( $comment_workflow_comment instanceof WP_Comment )
+	|| ! is_wp_error( $comment_workflow_duplicate )
+	|| 'comment_duplicate' !== $comment_workflow_duplicate->get_error_code()
+	|| 1 !== $comment_workflow_update
+	|| true !== $comment_workflow_hold
+	|| ! ( $comment_workflow_held instanceof WP_Comment )
+	|| '0' !== (string) $comment_workflow_held->comment_approved
+	|| true !== $comment_workflow_trash
+	|| ! ( $comment_workflow_trashed instanceof WP_Comment )
+	|| 'trash' !== $comment_workflow_trashed->comment_approved
+	|| true !== $comment_workflow_untrash
+	|| true !== $comment_workflow_spam
+	|| ! ( $comment_workflow_spammed instanceof WP_Comment )
+	|| 'spam' !== $comment_workflow_spammed->comment_approved
+	|| true !== $comment_workflow_unspam
+	|| ! ( $comment_workflow_unspammed instanceof WP_Comment )
+	|| '0' !== (string) $comment_workflow_unspammed->comment_approved
+) {
+	fwrite( STDERR, "Comment workflow smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$GLOBALS['wpdb']->component_fuzz_reset_content();
+$GLOBALS['wpdb']->component_fuzz_reset_options( $comment_workflow_options );
+wp_cache_flush();
 
 fwrite( STDOUT, "component-fuzz bootstrap smoke passed\n" );
