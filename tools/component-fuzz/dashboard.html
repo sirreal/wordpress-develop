@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7692 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7840 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Thirty-four integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
+			<div class="note">Latest focused validation: <code>query</code> at 7940 passed after <code>WP_Query</code> execution coverage; largest remains <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Nietzsche the 2nd is active on <code>rest-controllers</code> in <code>_work/component-fuzz-rest-controllers-deep</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">REST controller and query follow-ups were integrated; no delegated worker is currently active.</div>
 		</div>
 	</div>
 
@@ -533,8 +533,8 @@
 					<td><code>widgets</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 700 passed, 0 skipped, 0 failed; broad run: 6720 passed, 62 skipped, 0 failed.</td>
-					<td>Classic sidebar/widget registries, generated widget IDs, callbacks, state restoration.</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7840 passed, 62 skipped, 0 failed.</td>
+					<td>Classic sidebar/widget registries, generated widget IDs, sidebars option cache/filter behavior, callbacks, state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>user-preferences</code></td>
@@ -545,10 +545,17 @@
 				</tr>
 				<tr>
 					<td><code>rest-controllers</code></td>
-					<td><span class="status work">delegated follow-up active</span></td>
-					<td>Nietzsche the 2nd / <code>_work/component-fuzz-rest-controllers-deep</code></td>
-					<td>Existing main focused run: 800 passed, 200 skipped, 0 failed; worker assigned 100-iteration REST controller validation.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Nietzsche the 2nd / main worktree</td>
+					<td>Main focused run: 900 passed, 200 skipped, 0 failed; latest broad run: 7840 passed, 62 skipped, 0 failed.</td>
 					<td>REST controller registries, schemas, context filtering, additional fields, permissions, state restoration.</td>
+				</tr>
+				<tr>
+					<td><code>query</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree; Boyle the 2nd superseded after main-worktree partial edits</td>
+					<td>Main focused run: 7940 passed, 0 skipped, 0 failed; latest broad run: 7840 passed, 62 skipped, 0 failed.</td>
+					<td>Query arg normalization, meta/tax/date/search interactions, pagination, sticky posts, SQL-shape safety, state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>query-loop</code></td>
@@ -625,6 +632,24 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>537a1945d8</code></td>
+					<td><code>query</code></td>
+					<td>7940 passed, 0 skipped, 0 failed.</td>
+					<td>7840 passed, 62 skipped, 0 failed at 2 iterations after no-DB <code>WP_Query</code> execution SQL-shape and bounded global-state coverage.</td>
+				</tr>
+				<tr>
+					<td><code>fa59e81908</code></td>
+					<td><code>rest-controllers</code></td>
+					<td>900 passed, 200 skipped, 0 failed.</td>
+					<td>7840 passed, 62 skipped, 0 failed at 2 iterations after REST additional-field get/update/schema coverage.</td>
+				</tr>
+				<tr>
+					<td><code>ad4062a0af</code></td>
+					<td><code>widgets</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>7690 passed, 63 skipped, 0 failed at 2 iterations after sidebar option cache/filter and widget ID parsing coverage.</td>
+				</tr>
 				<tr>
 					<td><code>22386accbd</code></td>
 					<td><code>rewrite</code></td>
