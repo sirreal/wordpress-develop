@@ -28,6 +28,7 @@ final class MailSurface {
 		try {
 			$rows[] = self::check_pre_wp_mail_short_circuit( $ctx->fork( 'pre' ) );
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
+			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
 			$rows[] = self::check_phpmailer_failure_action( $ctx->fork( 'failure' ) );
 			$rows[] = self::check_staticize_emoji_for_email( $ctx->fork( 'emoji' ) );
 		} catch ( \Throwable $e ) {
@@ -254,6 +255,98 @@ final class MailSurface {
 		);
 
 		return self::row( $ctx, 'mail.phpmailer.composition-and-actions', $failures );
+	}
+
+	private static function check_string_header_and_path_parsing( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {
+		$failures = array();
+
+		if ( null === $temp_root ) {
+			return $ctx->skip( 'mail.phpmailer.string-header-and-path-parsing', 'Could not create temporary attachment root.' );
+		}
+
+		$attachment_a = $temp_root . DIRECTORY_SEPARATOR . 'string-attachment-a-' . $ctx->identifier( 4, 8 ) . '.txt';
+		$attachment_b = $temp_root . DIRECTORY_SEPARATOR . 'string-attachment-b-' . $ctx->identifier( 4, 8 ) . '.txt';
+		$embed        = $temp_root . DIRECTORY_SEPARATOR . 'string-embed-' . $ctx->identifier( 4, 8 ) . '.gif';
+		file_put_contents( $attachment_a, 'attachment-a ' . $ctx->text( 0, 16 ) );
+		file_put_contents( $attachment_b, 'attachment-b ' . $ctx->text( 0, 16 ) );
+		file_put_contents( $embed, "GIF89a" . $ctx->identifier( 4, 8 ) );
+
+		$token     = 'str-' . $ctx->identifier( 4, 10 );
+		$to        = 'Alpha Recipient <alpha@example.test>, beta@example.test';
+		$subject   = 'String Header ' . $token;
+		$message   = '<strong>' . $token . '</strong>';
+		$headers   = implode(
+			"\r\n",
+			array(
+				'From: String Sender <string-sender@example.test>',
+				'Cc: Carbon One <carbon@example.test>, carbon2@example.test',
+				'Bcc: Blind One <blind-string@example.test>',
+				'Reply-To: Reply String <reply-string@example.test>',
+				'Content-Type: text/html; charset=UTF-8',
+				'X-String-Token: ' . $token,
+				'MIME-Version: ignored-custom',
+				'X-Mailer: ignored-custom',
+			)
+		);
+		$succeeded = array();
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']    = self::new_mailer();
+
+		$success_action = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+
+		\add_action( 'wp_mail_succeeded', $success_action );
+		try {
+			$result = \wp_mail(
+				$to,
+				$subject,
+				$message,
+				$headers,
+				$attachment_a . "\n" . $attachment_b,
+				$embed
+			);
+		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+		}
+
+		$sent = MailSurfaceMailer::$sent[0] ?? array();
+		self::collect_failure(
+			$failures,
+			true === $result
+				&& 1 === count( MailSurfaceMailer::$sent )
+				&& self::addresses_include( $sent['to'] ?? array(), 'alpha@example.test', 'Alpha Recipient' )
+				&& self::addresses_include( $sent['to'] ?? array(), 'beta@example.test', '' )
+				&& self::addresses_include( $sent['cc'] ?? array(), 'carbon@example.test', 'Carbon One' )
+				&& self::addresses_include( $sent['cc'] ?? array(), 'carbon2@example.test', '' )
+				&& self::addresses_include( $sent['bcc'] ?? array(), 'blind-string@example.test', 'Blind One' )
+				&& self::addresses_include( $sent['replyTo'] ?? array(), 'reply-string@example.test', 'Reply String' )
+				&& 'string-sender@example.test' === ( $sent['from'] ?? null )
+				&& 'String Sender' === ( $sent['fromName'] ?? null )
+				&& $subject === ( $sent['subject'] ?? null )
+				&& $message === ( $sent['body'] ?? null )
+				&& 'text/html' === ( $sent['contentType'] ?? null )
+				&& 'UTF-8' === ( $sent['charset'] ?? null )
+				&& self::attachments_include( $sent['attachments'] ?? array(), basename( $attachment_a ), 'attachment' )
+				&& self::attachments_include( $sent['attachments'] ?? array(), basename( $attachment_b ), 'attachment' )
+				&& self::attachments_include( $sent['attachments'] ?? array(), basename( $embed ), 'inline', '0' )
+				&& 1 === count( $sent['customHeaders'] ?? array() )
+				&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-String-Token' )
+				&& 1 === count( $succeeded )
+				&& is_array( $succeeded[0]['to'] ?? null )
+				&& array( $attachment_a, $attachment_b ) === ( $succeeded[0]['attachments'] ?? null )
+				&& array( $embed ) === ( $succeeded[0]['embeds'] ?? null ),
+			'wp_mail parses comma recipients plus newline headers, attachments, and embeds',
+			array(
+				'result'    => $result,
+				'sent'      => self::describe_value( $sent ),
+				'succeeded' => self::describe_value( $succeeded ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.string-header-and-path-parsing', $failures );
 	}
 
 	private static function check_phpmailer_failure_action( \ComponentFuzz\FuzzContext $ctx ): array {

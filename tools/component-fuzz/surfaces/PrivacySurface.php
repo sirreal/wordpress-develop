@@ -938,7 +938,7 @@ final class PrivacySurface {
 			),
 			array(
 				'label'    => 'not-an-ip',
-				'input'    => 'not an ip ' . self::random_string( $ctx->fork( 'not-ip' ), 8 ),
+				'input'    => 'not-an-ip-' . substr( hash( 'sha1', (string) $ctx->fork( 'not-ip' )->seed() ), 0, 8 ),
 				'expected' => '0.0.0.0',
 			),
 		);
