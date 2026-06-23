@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7643 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7667 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Twenty-nine integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Thirty-one integrated rich surfaces passed focused validation; largest was <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Franklin the 2nd is active on <code>email</code> Unicode follow-up coverage in <code>_work/component-fuzz-email-unicode-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">No active delegated work; completed <code>feed-rendering</code> and <code>email</code> workers are integrated and closed.</div>
 		</div>
 	</div>
 
@@ -269,6 +269,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7643 passed, 62 skipped, 0 failed.</td>
 					<td>Remote request wrappers, <code>pre_http_request</code> short-circuiting, safe URL flags, response helpers, header/cookie/proxy/redirect contracts.</td>
+				</tr>
+				<tr>
+					<td><code>security</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7642 passed, 62 skipped, 0 failed.</td>
+					<td>Salts/HMACs, password and fast-hash verification, nonce helpers, admin/AJAX referers, auth cookies, redirects.</td>
 				</tr>
 				<tr>
 					<td><code>state</code></td>
@@ -433,9 +440,9 @@
 				</tr>
 				<tr>
 					<td><code>email</code></td>
-					<td><span class="status work">delegated follow-up active</span></td>
-					<td>Franklin the 2nd / <code>_work/component-fuzz-email-unicode-rich</code></td>
-					<td>Existing main focused run: 120981 passed, 0 skipped, 0 failed; worker assigned 150-iteration Unicode follow-up validation.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Franklin the 2nd / main worktree</td>
+					<td>Main focused run: 183696 passed, 0 skipped, 0 failed; latest broad run: 7667 passed, 62 skipped, 0 failed.</td>
 					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups, malformed UTF-8 and boundary follow-up oracles.</td>
 				</tr>
 				<tr>
@@ -618,6 +625,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>d3b4aa01ff</code></td>
+					<td><code>email</code></td>
+					<td>183696 passed, 0 skipped, 0 failed.</td>
+					<td>7667 passed, 62 skipped, 0 failed at 2 iterations after malformed UTF-8, Unicode local-part byte boundary, and display-name recovery integration.</td>
+				</tr>
+				<tr>
+					<td><code>9d9434d4b5</code></td>
+					<td><code>security</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>7642 passed, 62 skipped, 0 failed at 2 iterations after password and fast-hash verification coverage.</td>
+				</tr>
 				<tr>
 					<td><code>d759a80a3e</code></td>
 					<td><code>http</code></td>
