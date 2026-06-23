@@ -387,8 +387,9 @@ database, network requests, or a configured site.
   suppression, debug vs info labels, `debug_information` filter locality,
   scoped `SHOW TABLE STATUS` wpdb doubles, and explicit skips for unsafe full
   debug-data scans.
-- `state`: object cache groups and multi-operations, option and transient APIs
-  backed by the no-DB stub, filters, serialization, JSON, and value helpers.
+- `state`: object cache groups and multi-operations, option, transient, and
+  cache-backed site-transient APIs, filters, serialization, JSON, and value
+  helpers.
 - `style`: style engine serialization, CSS declaration filtering, theme.json
   schema/data merging, block style variation declarations, selectors, presets,
   custom properties, and no-DB global style guards.

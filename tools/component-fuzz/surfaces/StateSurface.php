@@ -39,6 +39,7 @@ final class StateSurface {
 
 			$rows[] = self::check_transient_crud_and_expiration( $ctx );
 			$rows[] = self::check_transient_filters( $ctx );
+			$rows[] = self::check_site_transient_cache_branch( $ctx );
 
 			$rows[] = self::check_serialization_helpers( $ctx );
 			$rows[] = self::check_json_encoding( $ctx );
@@ -88,12 +89,17 @@ final class StateSurface {
 				'get_transient',
 				'set_transient',
 				'delete_transient',
+				'get_site_transient',
+				'set_site_transient',
+				'delete_site_transient',
 				'maybe_serialize',
 				'maybe_unserialize',
 				'is_serialized',
 				'is_serialized_string',
 				'wp_json_encode',
 				'map_deep',
+				'remove_filter',
+				'wp_using_ext_object_cache',
 				'wp_parse_args',
 			) as $function
 		) {
@@ -700,6 +706,112 @@ final class StateSurface {
 				'timeout'   => self::describe_value( $timeout ),
 				'preGot'    => self::describe_value( $pre_got ),
 				'setGot'    => self::describe_value( $set_got ),
+			)
+		);
+	}
+
+	private static function check_site_transient_cache_branch( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$name             = self::key( $ctx, 'site-transient' );
+		$pre_name         = self::key( $ctx, 'pre-site-transient' );
+		$filtered_name    = self::key( $ctx, 'filtered-site-transient' );
+		$value            = self::wrapped_value( 'site-transient', self::value( $ctx->fork( 'site-transient-value' ) ) );
+		$pre_value        = self::wrapped_value( 'pre-site-transient', self::value( $ctx->fork( 'pre-site-transient-value' ) ) );
+		$set_value        = self::wrapped_value( 'set-site-transient', self::value( $ctx->fork( 'set-site-transient-value' ) ) );
+		$read_value       = self::wrapped_value( 'read-site-transient', self::value( $ctx->fork( 'read-site-transient-value' ) ) );
+		$pre_set_calls    = array();
+		$expiration_calls = array();
+		$pre_filter       = static function () use ( $pre_value ) {
+			return $pre_value;
+		};
+		$pre_set_filter   = static function ( $raw, string $transient ) use ( $set_value, &$pre_set_calls ) {
+			$pre_set_calls[] = array(
+				'raw'       => $raw,
+				'transient' => $transient,
+			);
+			return $set_value;
+		};
+		$expiration_filter = static function ( int $expiration, $filtered_value, string $transient ) use ( &$expiration_calls ): int {
+			$expiration_calls[] = array(
+				'expiration' => $expiration,
+				'value'      => $filtered_value,
+				'transient'  => $transient,
+			);
+			return 17;
+		};
+		$read_filter       = static function () use ( $read_value ) {
+			return $read_value;
+		};
+		$previous_ext      = wp_using_ext_object_cache( true );
+
+		try {
+			$missing_before = get_site_transient( $name );
+			$set            = set_site_transient( $name, $value, 60 );
+			$got            = get_site_transient( $name );
+			$found_cached   = null;
+			$cached         = wp_cache_get( $name, 'site-transient', false, $found_cached );
+			$delete         = delete_site_transient( $name );
+			$after_delete   = get_site_transient( $name );
+
+			add_filter( "pre_site_transient_{$pre_name}", $pre_filter, 10, 2 );
+			$pre_got    = get_site_transient( $pre_name );
+			$pre_cached = wp_cache_get( $pre_name, 'site-transient' );
+
+			add_filter( "pre_set_site_transient_{$filtered_name}", $pre_set_filter, 10, 2 );
+			add_filter( "expiration_of_site_transient_{$filtered_name}", $expiration_filter, 10, 3 );
+			$set_filtered = set_site_transient( $filtered_name, array( 'raw' => 'ignored' ), 99 );
+			$got_filtered = get_site_transient( $filtered_name );
+			$cached_filtered = wp_cache_get( $filtered_name, 'site-transient' );
+
+			add_filter( "site_transient_{$filtered_name}", $read_filter, 10, 2 );
+			$read_filtered = get_site_transient( $filtered_name );
+		} finally {
+			remove_filter( "pre_site_transient_{$pre_name}", $pre_filter, 10 );
+			remove_filter( "pre_set_site_transient_{$filtered_name}", $pre_set_filter, 10 );
+			remove_filter( "expiration_of_site_transient_{$filtered_name}", $expiration_filter, 10 );
+			remove_filter( "site_transient_{$filtered_name}", $read_filter, 10 );
+			wp_using_ext_object_cache( $previous_ext );
+		}
+
+		$store = self::option_store();
+		$ok    = false === $missing_before
+			&& true === $set
+			&& self::same_value( $value, $got )
+			&& true === $found_cached
+			&& self::same_value( $value, $cached )
+			&& true === $delete
+			&& false === $after_delete
+			&& self::same_value( $pre_value, $pre_got )
+			&& false === $pre_cached
+			&& true === $set_filtered
+			&& self::same_value( $set_value, $got_filtered )
+			&& self::same_value( $set_value, $cached_filtered )
+			&& self::same_value( $read_value, $read_filtered )
+			&& 1 === count( $pre_set_calls )
+			&& array( 'raw' => array( 'raw' => 'ignored' ), 'transient' => $filtered_name ) === $pre_set_calls[0]
+			&& 1 === count( $expiration_calls )
+			&& 99 === $expiration_calls[0]['expiration']
+			&& self::same_value( $set_value, $expiration_calls[0]['value'] )
+			&& $filtered_name === $expiration_calls[0]['transient']
+			&& ! isset( $store[ '_site_transient_' . $name ] )
+			&& ! isset( $store[ '_site_transient_timeout_' . $name ] )
+			&& ! isset( $store[ '_site_transient_' . $filtered_name ] );
+
+		return $ctx->result(
+			'state.site-transients.external-cache-branch-and-filters',
+			$ok,
+			array(
+				'name'            => $name,
+				'filteredName'    => $filtered_name,
+				'set'             => $set,
+				'delete'          => $delete,
+				'foundCached'     => $found_cached,
+				'preCached'       => self::describe_value( $pre_cached ),
+				'preSetCalls'     => self::describe_value( $pre_set_calls ),
+				'expirationCalls' => self::describe_value( $expiration_calls ),
+				'readFiltered'    => self::describe_value( $read_filtered ),
+				'optionKeys'      => implode( ',', array_keys( $store ) ),
 			)
 		);
 	}
