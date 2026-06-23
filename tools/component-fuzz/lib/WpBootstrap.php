@@ -359,6 +359,7 @@ final class WpBootstrap {
 			'wp-includes/comment-template.php',
 			'wp-includes/class-wp-widget.php',
 			'wp-includes/class-wp-widget-factory.php',
+			'wp-includes/widgets/class-wp-widget-block.php',
 			'wp-includes/widgets.php',
 			'wp-includes/class-wp-walker.php',
 			'wp-includes/class-walker-nav-menu.php',

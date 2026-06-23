@@ -39,6 +39,10 @@ database, network requests, or a configured site.
 - `blocks`: block type metadata, variations, hooks, style, pattern/category,
   bindings, and supports registries, including dynamic block attribute
   preparation and wrapper attribute merging.
+- `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
+  rendering, dynamic legacy class mapping, content sanitization on update,
+  form escaping, widgets block editor support toggles, and sidebars widget
+  mapping for block widget instances.
 - `block-templates`: no-DB block template and block theme resolution coverage,
   including template registry lifecycle, file-backed templates and parts,
   parent/child theme precedence, theme.json metadata, hierarchy resolution, and
@@ -218,6 +222,9 @@ table API with synthetic items and referer helpers only where valid nonces or
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The
+`block-widgets` surface exercises `WP_Widget_Block` and sidebars widget option
+mapping without loading the browser widgets editor, performing REST persistence,
+or depending on theme files. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
 existing no-DB option stub. The `media-editor` surface short-circuits attachment
