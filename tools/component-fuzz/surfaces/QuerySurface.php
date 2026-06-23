@@ -31,6 +31,7 @@ final class QuerySurface {
 			$rows = array_merge( $rows, self::check_tax_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_date_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_parsing( $ctx ) );
+			$rows = array_merge( $rows, self::check_wp_query_execution( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_parsing( $ctx ) );
 		} catch ( \Throwable $e ) {
@@ -41,6 +42,12 @@ final class QuerySurface {
 		} finally {
 			self::restore_globals( $snapshot );
 		}
+
+		$rows[] = $ctx->result(
+			'query.global-state-restored',
+			self::globals_match_snapshot( $snapshot ),
+			array( 'trackedGlobals' => array_keys( $snapshot ) )
+		);
 
 		return $rows;
 	}
@@ -69,6 +76,7 @@ final class QuerySurface {
 				'_get_meta_table',
 				'add_filter',
 				'register_taxonomy',
+				'remove_filter',
 				'sanitize_key',
 				'taxonomy_exists',
 				'wp_parse_args',
@@ -383,6 +391,115 @@ final class QuerySurface {
 				'query.wp-query.flags-consistent',
 				self::wp_query_flags_are_consistent( $first['flags'] ),
 				array( 'flags' => self::describe_value( $first['flags'] ) )
+			);
+		}
+
+		return $rows;
+	}
+
+	private static function check_wp_query_execution( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows  = array();
+		$cases = self::wp_query_execution_cases( $ctx );
+
+		foreach ( $cases as $case_index => $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_execution_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-no-throw',
+				$call['ok'] && self::is_wp_query_execution_observation( $call['value'] ),
+				array( 'call' => self::describe_call( $call ) )
+			);
+
+			if ( ! $call['ok'] || ! self::is_wp_query_execution_observation( $call['value'] ) ) {
+				continue;
+			}
+
+			$observation = $call['value'];
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-sql-shape-safe',
+				self::wp_query_request_sql_is_safe( $observation['request'] )
+					&& self::wp_query_recorded_sql_is_safe( $observation['wpdbQueries'] ),
+				array(
+					'request' => self::describe_value( $observation['request'] ),
+					'queries' => self::describe_value( $observation['wpdbQueries'] ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-expected-sql-features',
+				self::sql_expectations_match( $observation['request'], $case['expect'] ?? array() )
+					&& self::wp_query_execution_expectations_match( $observation, $case['expect'] ?? array() ),
+				array(
+					'expect'      => $case['expect'] ?? array(),
+					'request'     => self::describe_value( $observation['request'] ),
+					'foundPosts'  => $observation['foundPosts'],
+					'maxNumPages' => $observation['maxNumPages'],
+					'postIds'     => $observation['postIds'],
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-normalized-vars-safe',
+				self::query_vars_are_scalar_array_safe( $observation['queryVars'] )
+					&& self::wp_query_normalization_holds( $observation['queryVars'] )
+					&& self::wp_query_execution_vars_hold( $observation['queryVars'] ),
+				array( 'queryVars' => self::describe_value( $observation['queryVars'] ) )
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-flags-consistent',
+				self::wp_query_flags_are_consistent( $observation['flags'] )
+					&& self::wp_query_expected_flags_match( $observation['flags'], $case['expect']['flags'] ?? array() ),
+				array( 'flags' => self::describe_value( $observation['flags'] ) )
+			);
+
+			$second = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_execution_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-deterministic',
+				$second['ok'] && self::wp_query_execution_observations_match( $observation, $second['value'] ),
+				array( 'second' => self::describe_call( $second ) )
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-globals-unchanged',
+				$observation['globalsUnchanged'],
+				array(
+					'trackedGlobals'             => array_keys( $observation['globalSnapshot'] ),
+					'allowedGlobalMismatches'     => self::wp_query_allowed_global_mismatches(),
+					'globalMismatches'            => $observation['globalMismatches'],
+					'unexpectedGlobalMismatches'  => $observation['unexpectedGlobalMismatches'],
+				)
 			);
 		}
 
@@ -1142,6 +1259,110 @@ final class QuerySurface {
 		return $cases;
 	}
 
+	private static function wp_query_execution_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$execution_defaults = array(
+			'cache_results'          => false,
+			'ignore_sticky_posts'    => true,
+			'lazy_load_term_meta'    => false,
+			'no_found_rows'          => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+		);
+		$cases              = array(
+			array(
+				'label'     => 'search-paged-found-rows',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'ignore_sticky_posts' => true,
+						'no_found_rows'       => false,
+						'paged'               => 2,
+						'post_status'         => 'publish',
+						'post_type'           => 'post',
+						'posts_per_page'      => 5,
+						's'                   => "alpha quote'value -excluded",
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'FROM wp_posts', 'post_title', 'LIMIT 5, 5' ),
+					'flags'    => array(
+						'is_paged'  => true,
+						'is_search' => true,
+					),
+				),
+			),
+			array(
+				'label'     => 'meta-tax-date-sql',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => self::date_cases( $ctx )[1]['query'],
+						'meta_query'     => self::meta_cases( $ctx )[1]['query'],
+						'post_status'    => array( 'publish', 'private' ),
+						'post_type'      => 'post',
+						'posts_per_page' => 7,
+						'tax_query'      => array(
+							array(
+								'taxonomy'         => self::TAXONOMY,
+								'field'            => 'term_taxonomy_id',
+								'terms'            => array( 5, '9', 'bad' ),
+								'include_children' => false,
+							),
+						),
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'JOIN wp_postmeta', 'wp_term_relationships', 'post_date' ),
+				),
+			),
+			array(
+				'label'     => 'post-in-order-preserved',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'orderby'        => 'post__in',
+						'post__in'       => array( '7', 3, 'bad', 7 ),
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => 3,
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'wp_posts.ID IN', 'FIELD(' ),
+				),
+			),
+			array(
+				'label'     => 'singular-id-flags',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'p'           => 123,
+						'post_status' => 'publish',
+						'post_type'   => 'post',
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'wp_posts.ID = 123' ),
+					'flags'    => array(
+						'is_single'   => true,
+						'is_singular' => true,
+					),
+				),
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_CASES; $i++ ) {
+			$case_ctx = $ctx->fork( 'wp-query-execution-' . $i );
+			$cases[]  = array(
+				'label'     => 'generated-wp-query-execution-' . $i,
+				'queryVars' => array_merge( $execution_defaults, self::generated_wp_query_vars( $case_ctx ) ),
+				'expect'    => array( 'contains' => array( 'FROM wp_posts' ) ),
+			);
+		}
+
+		return $cases;
+	}
+
 	private static function user_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array(
@@ -1523,6 +1744,29 @@ final class QuerySurface {
 		);
 	}
 
+	private static function wp_query_execution_observation( array $case ): array {
+		$query_vars      = $case['queryVars'];
+		$global_snapshot = self::snapshot_globals();
+		$query           = new \WP_Query();
+		$posts           = $query->query( $query_vars );
+		$global_mismatches = self::globals_snapshot_mismatches( $global_snapshot );
+		$unexpected_global_mismatches = array_values( array_diff( $global_mismatches, self::wp_query_allowed_global_mismatches() ) );
+
+		return array(
+			'request'                    => (string) $query->request,
+			'wpdbQueries'                => self::wpdb_recorded_queries(),
+			'foundPosts'                 => (int) $query->found_posts,
+			'maxNumPages'                => (int) $query->max_num_pages,
+			'postIds'                    => self::post_ids_from_results( $posts ),
+			'queryVars'                  => $query->query_vars,
+			'flags'                      => self::wp_query_summary( $query )['flags'],
+			'globalsUnchanged'           => array() === $unexpected_global_mismatches,
+			'globalMismatches'           => $global_mismatches,
+			'unexpectedGlobalMismatches' => $unexpected_global_mismatches,
+			'globalSnapshot'             => $global_snapshot,
+		);
+	}
+
 	private static function user_query_parse_observation( array $query_vars ): array {
 		$query = new \WP_User_Query();
 		$query->prepare_query( $query_vars );
@@ -1893,6 +2137,128 @@ final class QuerySurface {
 		return true;
 	}
 
+	private static function is_wp_query_execution_observation( $value ): bool {
+		return is_array( $value )
+			&& is_string( $value['request'] ?? null )
+			&& is_array( $value['wpdbQueries'] ?? null )
+			&& is_int( $value['foundPosts'] ?? null )
+			&& is_int( $value['maxNumPages'] ?? null )
+			&& is_array( $value['postIds'] ?? null )
+			&& is_array( $value['queryVars'] ?? null )
+			&& is_array( $value['flags'] ?? null )
+			&& is_bool( $value['globalsUnchanged'] ?? null )
+			&& is_array( $value['globalSnapshot'] ?? null );
+	}
+
+	private static function wp_query_request_sql_is_safe( string $sql ): bool {
+		return '' !== $sql
+			&& str_contains( $sql, 'wp_posts' )
+			&& self::sql_string_is_balanced( $sql )
+			&& self::sql_has_no_unexpanded_placeholders( $sql );
+	}
+
+	private static function wp_query_recorded_sql_is_safe( array $queries ): bool {
+		foreach ( $queries as $query ) {
+			if ( ! is_string( $query ) || ! self::sql_string_is_balanced( $query ) || ! self::sql_has_no_unexpanded_placeholders( $query ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_execution_expectations_match( array $observation, array $expect ): bool {
+		if ( array_key_exists( 'foundPosts', $expect ) && (int) $expect['foundPosts'] !== $observation['foundPosts'] ) {
+			return false;
+		}
+
+		if ( array_key_exists( 'maxNumPages', $expect ) && (int) $expect['maxNumPages'] !== $observation['maxNumPages'] ) {
+			return false;
+		}
+
+		if ( array_key_exists( 'postIds', $expect ) && array_values( $expect['postIds'] ) !== $observation['postIds'] ) {
+			return false;
+		}
+
+		foreach ( $expect['queryVarEquals'] ?? array() as $key => $value ) {
+			if ( ! array_key_exists( $key, $observation['queryVars'] ) || $value !== $observation['queryVars'][ $key ] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_execution_vars_hold( array $query_vars ): bool {
+		foreach ( array( 'posts_per_page', 'paged', 'offset' ) as $key ) {
+			if ( array_key_exists( $key, $query_vars ) && ! is_int( $query_vars[ $key ] ) ) {
+				return false;
+			}
+		}
+
+		foreach ( array( 'cache_results', 'ignore_sticky_posts', 'no_found_rows', 'update_post_meta_cache', 'update_post_term_cache' ) as $key ) {
+			if ( array_key_exists( $key, $query_vars ) && ! is_bool( $query_vars[ $key ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_expected_flags_match( array $flags, array $expected ): bool {
+		foreach ( $expected as $flag => $value ) {
+			if ( ! array_key_exists( $flag, $flags ) || (bool) $value !== (bool) $flags[ $flag ] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_execution_observations_match( array $first, $second ): bool {
+		return self::is_wp_query_execution_observation( $second )
+			&& $first['request'] === $second['request']
+			&& $first['queryVars'] === $second['queryVars']
+			&& $first['flags'] === $second['flags']
+			&& $first['foundPosts'] === $second['foundPosts']
+			&& $first['maxNumPages'] === $second['maxNumPages']
+			&& $first['postIds'] === $second['postIds'];
+	}
+
+	private static function post_ids_from_results( $posts ): array {
+		if ( ! is_array( $posts ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $posts as $post ) {
+			if ( is_object( $post ) && isset( $post->ID ) ) {
+				$ids[] = (int) $post->ID;
+			} elseif ( is_numeric( $post ) ) {
+				$ids[] = (int) $post;
+			}
+		}
+
+		return $ids;
+	}
+
+	private static function wpdb_recorded_queries(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && isset( $GLOBALS['wpdb']->queries ) && is_array( $GLOBALS['wpdb']->queries ) ) {
+			return $GLOBALS['wpdb']->queries;
+		}
+
+		return array();
+	}
+
+	private static function wp_query_allowed_global_mismatches(): array {
+		return array(
+			'current_user:exists',
+			'wp_actions:value',
+			'wp_post_types:exists',
+			'wp_the_query:exists',
+		);
+	}
+
 	private static function user_query_defaults_present( array $query_vars ): bool {
 		foreach ( array( 'blog_id', 'meta_key', 'meta_value', 'include', 'exclude', 'search', 'orderby', 'order', 'offset', 'number', 'paged', 'count_total', 'fields', 'cache_results' ) as $key ) {
 			if ( ! array_key_exists( $key, $query_vars ) ) {
@@ -2089,6 +2455,9 @@ final class QuerySurface {
 	private static function new_wpdb_stub(): object {
 		return new class() {
 			public $suppress_errors = false;
+			public $last_query = '';
+			public $num_rows = 0;
+			public $queries = array();
 			public $posts = 'wp_posts';
 			public $comments = 'wp_comments';
 			public $terms = 'wp_terms';
@@ -2172,33 +2541,47 @@ final class QuerySurface {
 			}
 
 			public function get_var( $query = null, $x = 0, $y = 0 ) {
-				unset( $query, $x, $y );
+				unset( $x, $y );
+				$this->record_query( $query );
 				return null;
 			}
 
 			public function get_row( $query = null, $output = OBJECT, $y = 0 ) {
-				unset( $query, $output, $y );
+				unset( $output, $y );
+				$this->record_query( $query );
 				return null;
 			}
 
 			public function get_results( $query = null, $output = OBJECT ) {
-				unset( $query, $output );
+				unset( $output );
+				$this->record_query( $query );
 				return array();
 			}
 
 			public function get_col( $query = null, $x = 0 ) {
-				unset( $query, $x );
+				unset( $x );
+				$this->record_query( $query );
 				return array();
 			}
 
 			public function query( $query ) {
-				unset( $query );
+				$this->record_query( $query );
 				return false;
 			}
 
 			public function get_blog_prefix( $blog_id = null ) {
 				unset( $blog_id );
 				return 'wp_';
+			}
+
+			private function record_query( $query ): void {
+				if ( null === $query ) {
+					return;
+				}
+
+				$this->last_query = (string) $query;
+				$this->queries[]  = $this->last_query;
+				$this->num_rows   = 0;
 			}
 		};
 	}
@@ -2237,6 +2620,32 @@ final class QuerySurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function globals_match_snapshot( array $snapshot ): bool {
+		return array() === self::globals_snapshot_mismatches( $snapshot );
+	}
+
+	private static function globals_snapshot_mismatches( array $snapshot ): array {
+		$mismatches = array();
+
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				$mismatches[] = $name . ':exists';
+				continue;
+			}
+
+			if ( ! $entry['exists'] ) {
+				continue;
+			}
+
+			if ( $entry['value'] !== $GLOBALS[ $name ] ) {
+				$mismatches[] = $name . ':value';
+			}
+		}
+
+		return $mismatches;
 	}
 
 	private static function call_guarded( callable $callback ): array {
