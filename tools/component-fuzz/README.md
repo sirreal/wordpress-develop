@@ -369,6 +369,7 @@ database, network requests, or a configured site.
   schema/data merging, block style variation declarations, selectors, presets,
   custom properties, and no-DB global style guards.
 - `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
+  wildcard/regex matching, cache-key lookup, no-network fetch short-circuits,
   HTML/XML filtering, feed metadata escaping, default feed normalization, self
   links, and Atom text construction.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,

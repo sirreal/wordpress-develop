@@ -31,10 +31,11 @@ final class SyndicationSurface {
 		try {
 			self::reset_runtime();
 
-			$rows[] = self::check_embed_handler_lifecycle( $ctx );
-			$rows[] = self::check_oembed_provider_registry( $ctx );
-			$rows[] = self::check_oembed_output_filters( $ctx );
-			$rows[] = self::check_feed_helpers( $ctx );
+			$rows[] = self::check_embed_handler_lifecycle( $ctx->fork( 'embed-handlers' ) );
+			$rows[] = self::check_oembed_provider_registry( $ctx->fork( 'providers' ) );
+			$rows[] = self::check_oembed_output_filters( $ctx->fork( 'output-filters' ) );
+			$rows[] = self::check_oembed_no_network_shortcuts( $ctx->fork( 'no-network' ) );
+			$rows[] = self::check_feed_helpers( $ctx->fork( 'feed-helpers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -79,6 +80,11 @@ final class SyndicationSurface {
 		return 'https://example.test';
 	}
 
+	public static function filter_blogdescription( $pre_option, string $option = '', $default_value = false ): string {
+		unset( $pre_option, $option, $default_value );
+		return 'Feed summary <em>RSS</em> & <script>alert(1)</script>';
+	}
+
 	private static function missing_requirements(): array {
 		$missing = array();
 
@@ -91,20 +97,28 @@ final class SyndicationSurface {
 		foreach (
 			array(
 				'_oembed_create_xml',
+				'_oembed_filter_feed_content',
 				'add_filter',
 				'feed_content_type',
 				'get_bloginfo_rss',
 				'get_default_feed',
 				'get_self_link',
+				'has_filter',
 				'prep_atom_text_construct',
 				'remove_filter',
 				'self_link',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 				'wp_embed_defaults',
 				'wp_embed_register_handler',
 				'wp_embed_unregister_handler',
 				'wp_filter_oembed_iframe_title_attribute',
 				'wp_filter_oembed_result',
+				'wp_maybe_load_embeds',
+				'wp_oembed_get',
 				'wp_oembed_ensure_format',
+				'wp_parse_args',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -122,33 +136,105 @@ final class SyndicationSurface {
 		$wp_embed = new \WP_Embed();
 		self::$handler_calls = array();
 
-		$id       = 'cfz_' . strtolower( $ctx->identifier( 4, 10 ) );
-		$priority = $ctx->int( 1, 20 );
-		$url      = 'https://media.example.test/item/' . rawurlencode( $ctx->identifier( 3, 12 ) );
+		$token             = self::slug( $ctx, 4, 10 );
+		$id                = 'cfz_' . $token;
+		$neighbor_id       = $id . '_neighbor';
+		$fallback_id       = $id . '_fallback';
+		$priority          = $ctx->int( 1, 20 );
+		$fallback_priority = $priority + $ctx->int( 1, 10 );
+		$url               = 'https://media.example.test/item/' . rawurlencode( self::slug( $ctx, 3, 12 ) );
+		$default_width     = $ctx->int( 320, 880 );
+		$default_height    = $ctx->int( 180, 720 );
+		$raw_width         = $ctx->int( 240, 960 );
 
-		\wp_embed_register_handler( $id, '~^https://media\.example\.test/item/([^/?#]+)~i', array( self::class, 'embed_handler' ), $priority );
-		$html = $wp_embed->get_embed_handler_html(
-			array(
-				'width' => $ctx->int( 240, 960 ),
-			),
-			$url
+		$handler_filter_calls = array();
+		$handler_filter       = static function (
+			string $return,
+			string $filtered_url,
+			array $attr
+		) use ( &$handler_filter_calls, $token ): string {
+			$handler_filter_calls[] = array(
+				'url'    => $filtered_url,
+				'attr'   => $attr,
+				'return' => $return,
+			);
+
+			return str_replace( '</iframe>', '<!-- ' . \esc_html( $token ) . ' --></iframe>', $return );
+		};
+
+		$defaults_calls  = array();
+		$defaults_filter = static function (
+			array $size,
+			string $defaults_url
+		) use ( &$defaults_calls, $default_width, $default_height ): array {
+			$defaults_calls[] = array(
+				'size' => $size,
+				'url'  => $defaults_url,
+			);
+
+			return array(
+				'width'  => $default_width,
+				'height' => $default_height,
+			);
+		};
+
+		\add_filter( 'embed_handler_html', $handler_filter, 10, 3 );
+		\add_filter( 'embed_defaults', $defaults_filter, 10, 2 );
+		\wp_embed_register_handler(
+			$neighbor_id,
+			'~^https://media\.example\.test/other/([^/?#]+)~i',
+			array( self::class, 'embed_handler' ),
+			$priority
 		);
+		\wp_embed_register_handler(
+			$fallback_id,
+			'~^https://media\.example\.test/item/([^/?#]+)~i',
+			array( self::class, 'embed_handler' ),
+			$fallback_priority
+		);
+		\wp_embed_register_handler( $id, '~^https://media\.example\.test/item/([^/?#]+)~i', array( self::class, 'embed_handler' ), $priority );
+
+		try {
+			$html = $wp_embed->get_embed_handler_html(
+				array(
+					'width' => $raw_width,
+				),
+				$url
+			);
+		} finally {
+			\remove_filter( 'embed_handler_html', $handler_filter, 10 );
+			\remove_filter( 'embed_defaults', $defaults_filter, 10 );
+		}
 
 		self::collect_failure(
 			$failures,
 			is_string( $html )
 				&& 1 === count( self::$handler_calls )
+				&& 1 === count( $handler_filter_calls )
+				&& 1 === count( $defaults_calls )
 				&& str_contains( $html, '<iframe ' )
 				&& str_contains( $html, 'src="' . \esc_url( $url ) . '"' )
+				&& str_contains( $html, '<!-- ' . \esc_html( $token ) . ' -->' )
 				&& isset( $wp_embed->handlers[ $priority ][ $id ] )
+				&& isset( $wp_embed->handlers[ $priority ][ $neighbor_id ] )
+				&& isset( $wp_embed->handlers[ $fallback_priority ][ $fallback_id ] )
 				&& isset( self::$handler_calls[0]['attr']['width'], self::$handler_calls[0]['attr']['height'] )
-				&& self::$handler_calls[0]['rawattr']['width'] === self::$handler_calls[0]['attr']['width'],
-			'registered embed handler receives raw and defaulted attributes and returns HTML',
+				&& $raw_width === self::$handler_calls[0]['attr']['width']
+				&& $default_height === self::$handler_calls[0]['attr']['height']
+				&& self::$handler_calls[0]['rawattr']['width'] === self::$handler_calls[0]['attr']['width']
+				&& false === \has_filter( 'embed_handler_html', $handler_filter, 10 )
+				&& false === \has_filter( 'embed_defaults', $defaults_filter, 10 ),
+			'registered embed handler receives raw/defaulted attributes, honors priority, and scopes filters',
 			array(
-				'id'      => $id,
-				'html'    => self::describe_string( is_string( $html ) ? $html : '' ),
-				'calls'   => self::$handler_calls,
-				'handler' => $wp_embed->handlers[ $priority ][ $id ] ?? null,
+				'id'                   => $id,
+				'html'                 => self::describe_string( is_string( $html ) ? $html : '' ),
+				'handlerCalls'         => self::$handler_calls,
+				'handlerFilterCalls'   => $handler_filter_calls,
+				'defaultsCalls'        => $defaults_calls,
+				'handler'              => $wp_embed->handlers[ $priority ][ $id ] ?? null,
+				'fallbackHandler'      => $wp_embed->handlers[ $fallback_priority ][ $fallback_id ] ?? null,
+				'handlerFilterActive'  => \has_filter( 'embed_handler_html', $handler_filter, 10 ),
+				'defaultsFilterActive' => \has_filter( 'embed_defaults', $defaults_filter, 10 ),
 			)
 		);
 
@@ -160,15 +246,75 @@ final class SyndicationSurface {
 			array( 'denied' => $denied )
 		);
 
+		self::$handler_calls = array();
 		\wp_embed_unregister_handler( $id, $priority );
 		$after_unregister = $wp_embed->get_embed_handler_html( array(), $url );
 		self::collect_failure(
 			$failures,
-			false === $after_unregister && ! isset( $wp_embed->handlers[ $priority ][ $id ] ),
-			'unregister removes only the selected embed handler',
+			is_string( $after_unregister )
+				&& 1 === count( self::$handler_calls )
+				&& ! isset( $wp_embed->handlers[ $priority ][ $id ] )
+				&& isset( $wp_embed->handlers[ $priority ][ $neighbor_id ] )
+				&& isset( $wp_embed->handlers[ $fallback_priority ][ $fallback_id ] ),
+			'unregister removes only the selected embed handler and leaves fallbacks available',
 			array(
 				'afterUnregister' => $after_unregister,
 				'handlers'        => $wp_embed->handlers,
+				'calls'           => self::$handler_calls,
+			)
+		);
+
+		\wp_embed_unregister_handler( $neighbor_id, $priority );
+		\wp_embed_unregister_handler( $fallback_id, $fallback_priority );
+
+		$load_filter = static fn (): bool => false;
+		\add_filter( 'load_default_embeds', $load_filter );
+		try {
+			$wp_embed->handlers = array();
+			\wp_maybe_load_embeds();
+			$handlers_after_short_circuit = $wp_embed->handlers;
+		} finally {
+			\remove_filter( 'load_default_embeds', $load_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $handlers_after_short_circuit
+				&& false === \has_filter( 'load_default_embeds', $load_filter, 10 ),
+			'load_default_embeds filter short-circuits default handler registration locally',
+			array(
+				'handlers'     => $handlers_after_short_circuit,
+				'filterActive' => \has_filter( 'load_default_embeds', $load_filter, 10 ),
+			)
+		);
+
+		$cache_url    = 'https://cache.example.test/embed/' . rawurlencode( self::slug( $ctx, 4, 12 ) );
+		$cache_attr   = array(
+			'width'  => $ctx->int( 240, 1024 ),
+			'height' => $ctx->int( 180, 900 ),
+		);
+		$cache_suffix = md5( $cache_url . serialize( \wp_parse_args( $cache_attr, \wp_embed_defaults( $cache_url ) ) ) );
+		$cache_post   = self::cached_oembed_post( $ctx->int( 100000, 999999 ) );
+
+		\wp_cache_set( $cache_post->ID, $cache_post, 'posts' );
+		\wp_cache_set( $cache_suffix, $cache_post->ID, 'oembed_cache_post' );
+		try {
+			$cache_hit = $wp_embed->find_oembed_post_id( $cache_suffix );
+		} finally {
+			\wp_cache_delete( $cache_post->ID, 'posts' );
+			\wp_cache_delete( $cache_suffix, 'oembed_cache_post' );
+		}
+
+		self::collect_failure(
+			$failures,
+			$cache_post->ID === $cache_hit,
+			'oEmbed cache post lookup honors the generated key suffix through object-cache hits',
+			array(
+				'cacheUrl'    => $cache_url,
+				'cacheAttr'   => $cache_attr,
+				'cacheSuffix' => $cache_suffix,
+				'cacheHit'    => $cache_hit,
+				'postId'      => $cache_post->ID,
 			)
 		);
 
@@ -181,40 +327,79 @@ final class SyndicationSurface {
 	}
 
 	private static function check_oembed_provider_registry( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
-		$format   = 'https://provider-' . strtolower( $ctx->identifier( 3, 8 ) ) . '.example.test/watch/*';
-		$url      = str_replace( '*', rawurlencode( $ctx->identifier( 3, 12 ) ), $format );
-		$endpoint = 'https://oembed.example.test/provider.{format}?token=' . rawurlencode( $ctx->identifier( 3, 10 ) );
+		$failures        = array();
+		$provider_token  = self::slug( $ctx, 3, 8 );
+		$watch_token     = self::slug( $ctx, 3, 12 );
+		$clip_token      = self::slug( $ctx, 3, 12 );
+		$format          = 'http://provider-' . $provider_token . '.example.test/watch/*/clip/*';
+		$url             = 'https://provider-' . $provider_token . '.example.test/watch/'
+			. rawurlencode( $watch_token ) . '/clip/'
+			. rawurlencode( $clip_token ) . '?q=1';
+		$near_miss_url   = 'https://provider-' . $provider_token . '.example.test/watch/'
+			. rawurlencode( $watch_token ) . '/miss/'
+			. rawurlencode( $clip_token );
+		$endpoint        = 'https://oembed.example.test/provider.{format}?token=' . rawurlencode( self::slug( $ctx, 3, 10 ) );
+		$regex_token     = self::slug( $ctx, 3, 8 );
+		$regex_format    = '#https://regex-' . preg_quote( $regex_token, '#' ) . '\.example\.test/items/[a-z0-9-]+$#i';
+		$regex_url       = 'https://regex-' . $regex_token . '.example.test/items/' . self::slug( $ctx, 4, 12 );
+		$regex_endpoint  = 'https://oembed.example.test/regex.json?token=' . rawurlencode( $regex_token );
+		$neighbor_format = 'https://neighbor-' . self::slug( $ctx, 3, 8 ) . '.example.test/watch/*';
+		$neighbor_url    = str_replace( '*', rawurlencode( self::slug( $ctx, 3, 12 ) ), $neighbor_format );
+		$neighbor_ep     = 'https://oembed.example.test/neighbor.{format}';
 
 		\WP_oEmbed::$early_providers = array();
 		\WP_oEmbed::_add_provider_early( $format, $endpoint, false );
-		$oembed = new \WP_oEmbed();
-		$found  = $oembed->get_provider( $url, array( 'discover' => false ) );
+		\WP_oEmbed::_add_provider_early( $regex_format, $regex_endpoint, true );
+		$oembed        = new \WP_oEmbed();
+		$found         = $oembed->get_provider( $url, array( 'discover' => false ) );
+		$regex_found   = $oembed->get_provider( $regex_url, array( 'discover' => false ) );
+		$near_miss     = $oembed->get_provider( $near_miss_url, array( 'discover' => false ) );
+		$provider_copy = $oembed->providers;
 
 		self::collect_failure(
 			$failures,
 			str_replace( '{format}', 'json', $endpoint ) === $found
+				&& $regex_endpoint === $regex_found
+				&& false === $near_miss
+				&& isset( $provider_copy[ $format ], $provider_copy[ $regex_format ] )
+				&& false === $provider_copy[ $format ][1]
+				&& true === $provider_copy[ $regex_format ][1]
 				&& array() === \WP_oEmbed::$early_providers,
-			'early oEmbed providers are consumed by the next WP_oEmbed instance',
+			'early oEmbed providers are consumed, normalized, and matched by wildcard or regex shape',
 			array(
-				'format'   => $format,
-				'url'      => $url,
-				'endpoint' => $endpoint,
-				'found'    => $found,
-				'early'    => \WP_oEmbed::$early_providers,
+				'format'      => $format,
+				'url'         => $url,
+				'endpoint'    => $endpoint,
+				'found'       => $found,
+				'regexFormat' => $regex_format,
+				'regexUrl'    => $regex_url,
+				'regexFound'  => $regex_found,
+				'nearMiss'    => $near_miss,
+				'early'       => \WP_oEmbed::$early_providers,
 			)
 		);
 
 		\WP_oEmbed::$early_providers = array();
 		\WP_oEmbed::_add_provider_early( $format, $endpoint, false );
+		\WP_oEmbed::_add_provider_early( $neighbor_format, $neighbor_ep, false );
 		\WP_oEmbed::_remove_provider_early( $format );
-		$removed = new \WP_oEmbed();
+		$removed        = new \WP_oEmbed();
+		$removed_match  = $removed->get_provider( $url, array( 'discover' => false ) );
+		$neighbor_match = $removed->get_provider( $neighbor_url, array( 'discover' => false ) );
 
 		self::collect_failure(
 			$failures,
-			false === $removed->get_provider( $url, array( 'discover' => false ) ),
-			'early provider removal wins over early addition for the same format',
-			array( 'providers' => $removed->providers[ $format ] ?? null )
+			false === $removed_match
+				&& str_replace( '{format}', 'json', $neighbor_ep ) === $neighbor_match
+				&& ! isset( $removed->providers[ $format ] )
+				&& isset( $removed->providers[ $neighbor_format ] ),
+			'early provider removal wins for the selected format without removing neighbors',
+			array(
+				'removedMatch'  => $removed_match,
+				'neighborMatch' => $neighbor_match,
+				'removed'       => $removed->providers[ $format ] ?? null,
+				'neighbor'      => $removed->providers[ $neighbor_format ] ?? null,
+			)
 		);
 
 		$photo = $oembed->data2html(
@@ -235,6 +420,29 @@ final class SyndicationSurface {
 			$url
 		);
 
+		$dataparse_calls  = array();
+		$dataparse_filter = static function ( $return, object $data, string $source_url ) use ( &$dataparse_calls ) {
+			$dataparse_calls[] = array(
+				'return' => $return,
+				'type'   => $data->type ?? null,
+				'url'    => $source_url,
+			);
+
+			return $return;
+		};
+		\add_filter( 'oembed_dataparse', $dataparse_filter, 11, 3 );
+		try {
+			$rich = $oembed->data2html(
+				(object) array(
+					'type' => 'rich',
+					'html' => "<div>\n<iframe src=\"https://player.example.test/embed\"></iframe>\n<pre>keep\nline</pre></div>",
+				),
+				$url
+			);
+		} finally {
+			\remove_filter( 'oembed_dataparse', $dataparse_filter, 11 );
+		}
+
 		self::collect_failure(
 			$failures,
 			is_string( $photo )
@@ -242,11 +450,19 @@ final class SyndicationSurface {
 				&& ! str_contains( strtolower( $photo ), 'javascript:' )
 				&& str_contains( $photo, 'alt="Photo &quot;Title&quot; &lt;tag&gt;"' )
 				&& is_string( $link )
-				&& str_contains( $link, 'Link &lt;Title&gt; &amp; more' ),
-			'WP_oEmbed data2html escapes photo/link fields and strips unsafe protocols',
+				&& str_contains( $link, 'Link &lt;Title&gt; &amp; more' )
+				&& is_string( $rich )
+				&& ! str_contains( $rich, "\n<iframe" )
+				&& str_contains( $rich, "keep\nline" )
+				&& 1 === count( $dataparse_calls )
+				&& false === \has_filter( 'oembed_dataparse', $dataparse_filter, 11 ),
+			'WP_oEmbed data2html escapes photo/link fields, strips unsafe protocols, and scopes dataparse filters',
 			array(
-				'photo' => self::describe_string( is_string( $photo ) ? $photo : '' ),
-				'link'  => self::describe_string( is_string( $link ) ? $link : '' ),
+				'photo'           => self::describe_string( is_string( $photo ) ? $photo : '' ),
+				'link'            => self::describe_string( is_string( $link ) ? $link : '' ),
+				'rich'            => self::describe_string( is_string( $rich ) ? $rich : '' ),
+				'dataparseCalls'  => $dataparse_calls,
+				'dataparseFilter' => \has_filter( 'oembed_dataparse', $dataparse_filter, 11 ),
 			)
 		);
 
@@ -266,10 +482,13 @@ final class SyndicationSurface {
 			'type'  => 'video',
 			'title' => $title,
 		);
-		$html     = '<blockquote><a href="javascript:alert(1)">bad</a></blockquote><script>alert(1)</script><iframe src="https://player.example.test/embed" width="640" height="360"></iframe>';
+		$html     = '<blockquote><a href="javascript:alert(1)">bad</a></blockquote>'
+			. '<script>alert(1)</script>'
+			. '<iframe src="https://player.example.test/embed" width="640" height="360"></iframe>';
 
 		$titled   = \wp_filter_oembed_iframe_title_attribute( '<iframe src="https://player.example.test/embed"></iframe>', $data, $url );
 		$filtered = \wp_filter_oembed_result( $html, $data, $url );
+		$rejected = \wp_filter_oembed_result( '<blockquote>no iframe</blockquote><script>alert(1)</script>', $data, $url );
 
 		self::collect_failure(
 			$failures,
@@ -281,11 +500,92 @@ final class SyndicationSurface {
 				&& str_contains( $filtered, 'sandbox="allow-scripts"' )
 				&& str_contains( $filtered, 'security="restricted"' )
 				&& str_contains( $filtered, 'data-secret=' )
-				&& str_contains( $filtered, 'wp-embedded-content' ),
-			'oEmbed filters add iframe titles and sandbox untrusted rich/video HTML',
+				&& str_contains( $filtered, 'wp-embedded-content' )
+				&& false === $rejected,
+			'oEmbed filters add iframe titles, sandbox untrusted rich/video HTML, and reject iframe-less payloads',
 			array(
 				'title'    => self::describe_string( is_string( $titled ) ? $titled : '' ),
 				'filtered' => self::describe_string( is_string( $filtered ) ? $filtered : '' ),
+				'rejected' => $rejected,
+			)
+		);
+
+		$existing_title = 'Existing "Title" <safe> ' . self::slug( $ctx, 3, 8 );
+		$title_marker   = 'filtered-' . self::slug( $ctx, 3, 8 );
+		$title_calls    = array();
+		$title_filter   = static function (
+			string $candidate,
+			string $result,
+			object $filter_data,
+			string $source_url
+		) use ( &$title_calls, $title_marker ): string {
+			$title_calls[] = array(
+				'title'  => $candidate,
+				'result' => $result,
+				'type'   => $filter_data->type ?? null,
+				'url'    => $source_url,
+			);
+
+			return $candidate . ' ' . $title_marker;
+		};
+
+		\add_filter( 'oembed_iframe_title_attribute', $title_filter, 10, 4 );
+		try {
+			$titled_existing = \wp_filter_oembed_iframe_title_attribute(
+				'<iframe TITLE="' . \esc_attr( $existing_title ) . '" src="https://player.example.test/embed"></iframe>',
+				$data,
+				$url
+			);
+		} finally {
+			\remove_filter( 'oembed_iframe_title_attribute', $title_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $titled_existing )
+				&& 1 === substr_count( strtolower( $titled_existing ), 'title=' )
+				&& str_contains(
+					$titled_existing,
+					'title="' . \esc_attr( $existing_title . ' ' . $title_marker ) . '"'
+				)
+				&& 1 === count( $title_calls )
+				&& \esc_attr( $existing_title ) === $title_calls[0]['title']
+				&& false === \has_filter( 'oembed_iframe_title_attribute', $title_filter, 10 ),
+			'oEmbed iframe title filter prefers existing titles and remains local to the check',
+			array(
+				'titledExisting' => self::describe_string( is_string( $titled_existing ) ? $titled_existing : '' ),
+				'titleCalls'     => $title_calls,
+				'filterActive'   => \has_filter( 'oembed_iframe_title_attribute', $title_filter, 10 ),
+			)
+		);
+
+		$trusted_html     = '<blockquote><script>alert(1)</script><iframe src="https://www.youtube.com/embed/'
+			. \esc_attr( self::slug( $ctx, 4, 12 ) )
+			. '"></iframe></blockquote>';
+		$trusted_filtered = \wp_filter_oembed_result(
+			$trusted_html,
+			(object) array(
+				'type'  => 'video',
+				'title' => 'Trusted',
+			),
+			'https://www.youtube.com/watch?v=' . rawurlencode( self::slug( $ctx, 4, 12 ) )
+		);
+		$feed_iframe          = '<iframe class="wp-embedded-content" style="position:absolute;visibility:hidden"'
+			. ' src="https://player.example.test/embed"></iframe>'
+			. '<iframe style="kept" src="https://player.example.test/other"></iframe>';
+		$feed_filtered_iframe = \_oembed_filter_feed_content( $feed_iframe );
+
+		self::collect_failure(
+			$failures,
+			$trusted_html === $trusted_filtered
+				&& is_string( $feed_filtered_iframe )
+				&& str_contains( $feed_filtered_iframe, 'class="wp-embedded-content"' )
+				&& ! str_contains( $feed_filtered_iframe, 'visibility:hidden' )
+				&& str_contains( $feed_filtered_iframe, 'style="kept"' ),
+			'trusted provider HTML is left untouched while feed iframe filtering only removes embedded-content styles',
+			array(
+				'trustedFiltered' => self::describe_string( is_string( $trusted_filtered ) ? $trusted_filtered : '' ),
+				'feedFiltered'    => self::describe_string( is_string( $feed_filtered_iframe ) ? $feed_filtered_iframe : '' ),
 			)
 		);
 
@@ -309,8 +609,11 @@ final class SyndicationSurface {
 				&& str_contains( $xml, '<oembed>' )
 				&& str_contains( $xml, '<nested>' )
 				&& str_contains( $xml, '<oembed>first</oembed>' )
-				&& str_contains( $xml, 'A&amp;B &lt; C' ),
-			'_oembed_create_xml serializes nested arrays and escapes text nodes',
+				&& str_contains( $xml, 'A&amp;B &lt; C' )
+				&& false === \_oembed_create_xml( array() )
+				&& 'json' === \wp_oembed_ensure_format( 'jsonp' )
+				&& 'xml' === \wp_oembed_ensure_format( 'xml' ),
+			'_oembed_create_xml serializes nested arrays, escapes text nodes, and rejects empty payloads',
 			array( 'xml' => self::describe_string( is_string( $xml ) ? $xml : '' ) )
 		);
 
@@ -322,22 +625,189 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function check_oembed_no_network_shortcuts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = self::slug( $ctx, 4, 12 );
+		$url      = 'https://shortcircuit-' . $token . '.example.test/watch/' . rawurlencode( self::slug( $ctx, 3, 8 ) );
+		$fixture  = '<div class="component-fuzz-oembed">' . \esc_html( $ctx->text( 0, 24 ) ) . '</div>';
+		$width    = $ctx->int( 280, 960 );
+		$height   = $ctx->int( 180, 720 );
+
+		$pre_calls  = array();
+		$http_calls = array();
+		$pre_filter = static function ( $pre, string $source_url, $args ) use ( &$pre_calls, $url, $fixture ) {
+			$pre_calls[] = array(
+				'pre'  => $pre,
+				'url'  => $source_url,
+				'args' => $args,
+			);
+
+			if ( $source_url === $url ) {
+				return $fixture;
+			}
+
+			return $pre;
+		};
+		$http_filter = static function ( $preempt, array $parsed_args, string $request_url ) use ( &$http_calls ) {
+			$http_calls[] = array(
+				'preempt' => $preempt,
+				'args'    => $parsed_args,
+				'url'     => $request_url,
+			);
+
+			return new \WP_Error( 'component_fuzz_no_network', 'Syndication fuzzing blocks live oEmbed HTTP requests.' );
+		};
+
+		\add_filter( 'pre_oembed_result', $pre_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		try {
+			$result = \wp_oembed_get(
+				$url,
+				array(
+					'width'    => $width,
+					'height'   => $height,
+					'discover' => true,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_oembed_result', $pre_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$fixture === $result
+				&& 1 === count( $pre_calls )
+				&& array() === $http_calls
+				&& false === \has_filter( 'pre_oembed_result', $pre_filter, 10 )
+				&& false === \has_filter( 'pre_http_request', $http_filter, 10 ),
+			'pre_oembed_result short-circuits wp_oembed_get before provider discovery or HTTP',
+			array(
+				'result'           => self::describe_string( is_string( $result ) ? $result : '' ),
+				'preCalls'         => $pre_calls,
+				'httpCalls'        => $http_calls,
+				'preFilterActive'  => \has_filter( 'pre_oembed_result', $pre_filter, 10 ),
+				'httpFilterActive' => \has_filter( 'pre_http_request', $http_filter, 10 ),
+			)
+		);
+
+		$provider_url  = 'https://oembed-no-network.example.test/endpoint?token=' . rawurlencode( $token );
+		$target_url    = 'https://target-' . $token . '.example.test/watch/'
+			. rawurlencode( self::slug( $ctx, 4, 12 ) )
+			. '?a=1&b=' . rawurlencode( $ctx->text( 0, 10 ) );
+		$fetch_width   = $ctx->int( 320, 1280 );
+		$fetch_height  = $ctx->int( 180, 900 );
+		$fetch_calls   = array();
+		$fetch_filter  = static function ( string $fetch_url, string $source_url, array $args ) use ( &$fetch_calls ): string {
+			$fetch_calls[] = array(
+				'fetchUrl' => $fetch_url,
+				'url'      => $source_url,
+				'args'     => $args,
+			);
+
+			return $fetch_url;
+		};
+		$fetch_http    = array();
+		$fetch_blocker = static function ( $preempt, array $parsed_args, string $request_url ) use ( &$fetch_http ) {
+			$fetch_http[] = array(
+				'preempt' => $preempt,
+				'args'    => $parsed_args,
+				'url'     => $request_url,
+			);
+
+			return new \WP_Error( 'component_fuzz_no_network', 'Syndication fuzzing blocks live oEmbed fetch HTTP requests.' );
+		};
+		$oembed        = new \WP_oEmbed();
+
+		\add_filter( 'oembed_fetch_url', $fetch_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $fetch_blocker, 10, 3 );
+		try {
+			$fetched = $oembed->fetch(
+				$provider_url,
+				$target_url,
+				array(
+					'width'  => $fetch_width,
+					'height' => $fetch_height,
+				)
+			);
+		} finally {
+			\remove_filter( 'oembed_fetch_url', $fetch_filter, 10 );
+			\remove_filter( 'pre_http_request', $fetch_blocker, 10 );
+		}
+
+		$query = array();
+		if ( isset( $fetch_http[0]['url'] ) ) {
+			parse_str( (string) parse_url( $fetch_http[0]['url'], PHP_URL_QUERY ), $query );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === $fetched
+				&& 1 === count( $fetch_calls )
+				&& 1 === count( $fetch_http )
+				&& (string) $fetch_width === (string) ( $query['maxwidth'] ?? null )
+				&& (string) $fetch_height === (string) ( $query['maxheight'] ?? null )
+				&& $target_url === ( $query['url'] ?? null )
+				&& '1' === (string) ( $query['dnt'] ?? null )
+				&& 'json' === ( $query['format'] ?? null )
+				&& false === \has_filter( 'oembed_fetch_url', $fetch_filter, 10 )
+				&& false === \has_filter( 'pre_http_request', $fetch_blocker, 10 ),
+			'WP_oEmbed::fetch generates provider query arguments before the local HTTP blocker fails closed',
+			array(
+				'fetched'           => $fetched,
+				'fetchCalls'        => $fetch_calls,
+				'httpCalls'         => $fetch_http,
+				'query'             => $query,
+				'fetchFilterActive' => \has_filter( 'oembed_fetch_url', $fetch_filter, 10 ),
+				'httpFilterActive'  => \has_filter( 'pre_http_request', $fetch_blocker, 10 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'syndication.oembed.short-circuited-no-network',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_feed_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
 		\add_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10, 3 );
 		\add_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10, 3 );
+		\add_filter( 'pre_option_blogdescription', array( self::class, 'filter_blogdescription' ), 10, 3 );
 		try {
-			$bloginfo = \get_bloginfo_rss( 'name' );
-			$_SERVER['REQUEST_URI'] = '/feed/?q=' . rawurlencode( $ctx->text( 0, 16 ) );
-			$self_link = \get_self_link();
+			$bloginfo               = \get_bloginfo_rss( 'name' );
+			$blogdescription        = \get_bloginfo_rss( 'description' );
+			$_SERVER['HTTP_HOST']   = 'attacker.example.test';
+			$_SERVER['REQUEST_URI'] = '/feed/'
+				. rawurlencode( self::slug( $ctx, 3, 12 ) )
+				. '/?q=' . rawurlencode( $ctx->text( 0, 16 ) )
+				. '&danger=<script>';
+			$self_link              = \get_self_link();
+			$self_link_marker       = self::slug( $ctx, 3, 8 );
+			$expected_filtered      = $self_link . '&cfz=' . rawurlencode( $self_link_marker );
+			$self_link_filter_calls = array();
+			$self_link_filter       = static function (
+				string $feed_link
+			) use ( &$self_link_filter_calls, $self_link_marker ): string {
+				$self_link_filter_calls[] = $feed_link;
 
+				return $feed_link . '&cfz=' . rawurlencode( $self_link_marker );
+			};
+
+			\add_filter( 'self_link', $self_link_filter );
 			ob_start();
 			\self_link();
 			$self_link_output = (string) ob_get_clean();
 		} finally {
+			if ( isset( $self_link_filter ) ) {
+				\remove_filter( 'self_link', $self_link_filter );
+			}
 			\remove_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10 );
 			\remove_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10 );
+			\remove_filter( 'pre_option_blogdescription', array( self::class, 'filter_blogdescription' ), 10 );
 		}
 
 		$rss_filter = static fn (): string => 'rss';
@@ -349,28 +819,64 @@ final class SyndicationSurface {
 		$atom_default = \get_default_feed();
 		\remove_filter( 'default_feed', $atom_filter );
 
+		$content_type_calls  = array();
+		$custom_feed_type    = 'cfz-' . self::slug( $ctx, 3, 8 );
+		$custom_content_type = 'application/x-' . $custom_feed_type . '+xml';
+		$content_filter      = static function (
+			string $content_type,
+			string $type
+		) use ( &$content_type_calls, $custom_feed_type, $custom_content_type ): string {
+			$content_type_calls[] = array(
+				'contentType' => $content_type,
+				'type'        => $type,
+			);
+
+			return $custom_feed_type === $type ? $custom_content_type : $content_type;
+		};
+		\add_filter( 'feed_content_type', $content_filter, 10, 2 );
+		$filtered_content_type = \feed_content_type( $custom_feed_type );
+		\remove_filter( 'feed_content_type', $content_filter, 10 );
+		$unfiltered_content_type = \feed_content_type( $custom_feed_type );
+
 		self::collect_failure(
 			$failures,
 			'Component Fuzz &#038; "Feeds"' === $bloginfo
+				&& ! str_contains( $blogdescription, '<' )
+				&& ! str_contains( strtolower( $blogdescription ), 'script' )
+				&& str_contains( $blogdescription, '&#038;' )
 				&& 'rss2' === $rss_default
 				&& 'atom' === $atom_default
 				&& 'application/rss+xml' === \feed_content_type( 'rss2' )
 				&& 'application/atom+xml' === \feed_content_type( 'atom' )
 				&& str_starts_with( $self_link, 'https://example.test/feed/' )
-				&& $self_link_output === \esc_url( $self_link ),
-			'feed helpers escape bloginfo, normalize default feed, map content types, and render self links',
+				&& ! str_contains( $self_link, 'attacker.example.test' )
+				&& $self_link_output === \esc_url( $expected_filtered )
+				&& 1 === count( $self_link_filter_calls )
+				&& $custom_content_type === $filtered_content_type
+				&& 'application/octet-stream' === $unfiltered_content_type
+				&& 1 === count( $content_type_calls )
+				&& false === \has_filter( 'feed_content_type', $content_filter, 10 )
+				&& false === \has_filter( 'self_link', $self_link_filter, 10 ),
+			'feed helpers escape bloginfo, normalize default feed, map content types, and render filtered self links safely',
 			array(
-				'bloginfo'       => $bloginfo,
-				'rssDefault'     => $rss_default,
-				'atomDefault'    => $atom_default,
-				'selfLink'       => $self_link,
-				'selfLinkOutput' => $self_link_output,
+				'bloginfo'              => $bloginfo,
+				'blogdescription'       => $blogdescription,
+				'rssDefault'            => $rss_default,
+				'atomDefault'           => $atom_default,
+				'selfLink'              => $self_link,
+				'selfLinkOutput'        => $self_link_output,
+				'expectedFiltered'      => $expected_filtered,
+				'selfLinkFilterCalls'   => $self_link_filter_calls,
+				'filteredContentType'   => $filtered_content_type,
+				'unfilteredContentType' => $unfiltered_content_type,
+				'contentTypeCalls'      => $content_type_calls,
 			)
 		);
 
 		$plain = \prep_atom_text_construct( 'plain text' );
 		$xhtml = \prep_atom_text_construct( '<strong>ok</strong>' );
 		$html  = \prep_atom_text_construct( '<strong>broken' );
+		$cdata = \prep_atom_text_construct( 'bad ]]> marker <em>x</em> &' );
 
 		self::collect_failure(
 			$failures,
@@ -378,12 +884,17 @@ final class SyndicationSurface {
 				&& 'xhtml' === $xhtml[0]
 				&& str_contains( $xhtml[1], "xmlns='http://www.w3.org/1999/xhtml'" )
 				&& 'html' === $html[0]
-				&& str_contains( $html[1], '<![CDATA[' ),
-			'prep_atom_text_construct partitions plain, xhtml, and html fallback payloads',
+				&& str_contains( $html[1], '<![CDATA[' )
+				&& 'html' === $cdata[0]
+				&& ! str_contains( $cdata[1], ']]>' )
+				&& str_contains( $cdata[1], '&gt;' )
+				&& str_contains( $cdata[1], '&lt;em&gt;' ),
+			'prep_atom_text_construct partitions plain, xhtml, CDATA, and escaped CDATA-terminator payloads',
 			array(
 				'plain' => $plain,
 				'xhtml' => $xhtml,
 				'html'  => $html,
+				'cdata' => $cdata,
 			)
 		);
 
@@ -392,6 +903,47 @@ final class SyndicationSurface {
 			'syndication.feed.helpers-and-atom-text',
 			array() === $failures,
 			array( 'failures' => $failures )
+		);
+	}
+
+	private static function slug( \ComponentFuzz\FuzzContext $ctx, int $min = 3, int $max = 12 ): string {
+		$raw  = strtolower( $ctx->identifier( $min, $max ) );
+		$slug = (string) preg_replace( '/[^a-z0-9-]+/', '-', $raw );
+		$slug = trim( $slug, '-' );
+
+		if ( '' === $slug ) {
+			return substr( hash( 'crc32b', $raw ), 0, 8 );
+		}
+
+		return $slug;
+	}
+
+	private static function cached_oembed_post( int $post_id ): object {
+		return (object) array(
+			'ID'                    => $post_id,
+			'post_author'           => 0,
+			'post_date'             => '2024-01-01 00:00:00',
+			'post_date_gmt'         => '2024-01-01 00:00:00',
+			'post_content'          => '<div class="cached-oembed"></div>',
+			'post_title'            => 'Cached oEmbed',
+			'post_excerpt'          => '',
+			'post_status'           => 'publish',
+			'comment_status'        => 'closed',
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => 'cached-oembed-' . $post_id,
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => '2024-01-01 00:00:00',
+			'post_modified_gmt'     => '2024-01-01 00:00:00',
+			'post_content_filtered' => '',
+			'post_parent'           => 0,
+			'guid'                  => '',
+			'menu_order'            => 0,
+			'post_type'             => 'oembed_cache',
+			'post_mime_type'        => '',
+			'comment_count'         => 0,
+			'filter'                => 'raw',
 		);
 	}
 
