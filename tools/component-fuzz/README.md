@@ -36,6 +36,11 @@ database, network requests, or a configured site.
   generation without network calls.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, loading strategies, script modules, and printed tag escaping.
+- `auth-flow`: no-DB authentication and session flow coverage, including
+  synthetic user rows, username/email/password authentication filters,
+  sign-on cookie actions with cookie sending short-circuited, auth cookie
+  validation hooks/default parsing, current-user and cookie global restoration,
+  and session token lifecycle operations.
 - `blocks`: block type metadata, variations, hooks, style, pattern/category,
   bindings, and supports registries, including dynamic block attribute
   preparation and wrapper attribute merging.
@@ -259,6 +264,9 @@ metadata lifecycle APIs; it is not a general SQL engine. Post-to-term
 relationship coverage remains limited to simple recognized term relationship
 queries, and deeper taxonomy assignment behavior is not treated as fully
 covered.
+The `auth-flow` surface short-circuits auth cookie sending and avoids browser
+redirect/login-form dispatch, real mail, application-password API requests, and
+process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
 redirects, attachment-page redirects, and paths that call `wp_redirect()` and
