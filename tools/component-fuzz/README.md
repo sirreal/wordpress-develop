@@ -127,6 +127,11 @@ network requests, or a configured site.
   `WP::parse_request()`, rewrite-rule matching, query-var precedence,
   `register_globals()`, `handle_404()` status transitions, and `send_headers()`
   filters/actions with deterministic global restoration.
+- `rest-controllers`: no-DB default REST endpoint controller coverage for
+  registry-backed post types, post statuses, taxonomies, settings, block types,
+  block patterns, and block pattern categories, including context/_fields
+  filtering, collection params, permission gates, REST links, invalid values,
+  and state restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.
@@ -180,7 +185,13 @@ short-circuited through filters, while non-multisite network-option CRUD remains
 covered by the existing option stub. The Site Health surface avoids loopback,
 WordPress.org, REST availability, update download, mail, cron, and
 filesystem-writing checks unless they are fully short-circuited. The mail
-surface intercepts PHPMailer send calls and never attempts real delivery.
+surface intercepts PHPMailer send calls and never attempts real delivery. The
+`rest-controllers` surface intentionally avoids DB-backed object controllers
+such as posts, terms, comments, users, revisions, attachments, and templates;
+it also records explicit skips for the themes and plugins controllers because
+they inspect installed filesystem state, active theme/plugin state, or
+activation/update paths. Block pattern coverage is registry-backed only:
+remote pattern and current-theme pattern loaders are short-circuited.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 

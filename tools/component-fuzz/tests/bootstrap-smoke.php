@@ -174,9 +174,17 @@ $required_classes = array(
 	'WP_Block_Template',
 	'WP_Block_Templates_Registry',
 	'WP_Block_Parser',
+	'WP_REST_Block_Pattern_Categories_Controller',
+	'WP_REST_Block_Patterns_Controller',
+	'WP_REST_Block_Types_Controller',
+	'WP_REST_Controller',
+	'WP_REST_Post_Statuses_Controller',
+	'WP_REST_Post_Types_Controller',
 	'WP_REST_Request',
-	'WP_REST_Server',
 	'WP_REST_Response',
+	'WP_REST_Server',
+	'WP_REST_Settings_Controller',
+	'WP_REST_Taxonomies_Controller',
 	'WP_Date_Query',
 	'WP_Ability',
 	'WP_Abilities_Registry',
@@ -269,6 +277,84 @@ $request->set_query_params( array( 'id' => 'query' ) );
 $request->set_body_params( array( 'id' => 'body' ) );
 if ( 'body' !== $request->get_param( 'id' ) ) {
 	fwrite( STDERR, "REST request precedence smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$rest_controller_smoke_globals = array();
+foreach ( array( 'wp_post_types', '_wp_post_type_features', 'post_type_meta_caps', 'wp', 'wp_rewrite', 'wp_rest_server' ) as $global_name ) {
+	$rest_controller_smoke_globals[ $global_name ] = array(
+		'exists' => array_key_exists( $global_name, $GLOBALS ),
+		'value'  => array_key_exists( $global_name, $GLOBALS ) ? $GLOBALS[ $global_name ] : null,
+	);
+}
+
+$rest_controller_smoke_error = null;
+try {
+	$GLOBALS['wp_post_types']          = array();
+	$GLOBALS['_wp_post_type_features'] = array();
+	$GLOBALS['post_type_meta_caps']    = array();
+	$GLOBALS['wp_rest_server']         = new WP_REST_Server();
+
+	if ( class_exists( 'WP' ) ) {
+		$GLOBALS['wp']                    = new WP();
+		$GLOBALS['wp']->public_query_vars = array();
+	}
+	if ( class_exists( 'WP_Rewrite' ) ) {
+		$GLOBALS['wp_rewrite'] = new WP_Rewrite();
+	}
+
+	register_post_type(
+		'cfz_smoke_type',
+		array(
+			'label'        => 'Component Fuzz Smoke',
+			'public'       => true,
+			'show_in_rest' => true,
+			'rest_base'    => 'cfz-smoke-types',
+			'rewrite'      => false,
+			'query_var'    => false,
+		)
+	);
+	register_post_type(
+		'cfz_smoke_hidden',
+		array(
+			'label'        => 'Component Fuzz Hidden Smoke',
+			'public'       => true,
+			'show_in_rest' => false,
+			'rewrite'      => false,
+			'query_var'    => false,
+		)
+	);
+
+	$rest_controller = new WP_REST_Post_Types_Controller();
+	$rest_collection = $rest_controller->get_items( new WP_REST_Request( 'GET', '/wp/v2/types' ) );
+	$rest_item_request = new WP_REST_Request( 'GET', '/wp/v2/types/cfz_smoke_type' );
+	$rest_item_request->set_url_params( array( 'type' => 'cfz_smoke_type' ) );
+	$rest_item = $rest_controller->get_item( $rest_item_request );
+
+	if (
+		! ( $rest_collection instanceof WP_REST_Response )
+		|| ! ( $rest_item instanceof WP_REST_Response )
+		|| ! isset( $rest_collection->get_data()['cfz_smoke_type'] )
+		|| isset( $rest_collection->get_data()['cfz_smoke_hidden'] )
+		|| 'cfz-smoke-types' !== ( $rest_item->get_data()['rest_base'] ?? null )
+		|| rest_url( '/wp/v2/cfz-smoke-types' ) !== ( $rest_item->get_links()['https://api.w.org/items'][0]['href'] ?? null )
+	) {
+		$rest_controller_smoke_error = 'REST post type controller smoke invariant failed.';
+	}
+} catch ( Throwable $e ) {
+	$rest_controller_smoke_error = 'REST post type controller smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage();
+} finally {
+	foreach ( $rest_controller_smoke_globals as $global_name => $entry ) {
+		if ( $entry['exists'] ) {
+			$GLOBALS[ $global_name ] = $entry['value'];
+		} else {
+			unset( $GLOBALS[ $global_name ] );
+		}
+	}
+}
+
+if ( null !== $rest_controller_smoke_error ) {
+	fwrite( STDERR, $rest_controller_smoke_error . "\n" );
 	exit( 1 );
 }
 
