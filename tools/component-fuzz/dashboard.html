@@ -235,15 +235,15 @@
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">Latest delegated results are integrated. Workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">4</div>
+			<div class="note">Four delegated surfaces are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress from the latest delegated surfaces.</span>
+			<span class="note">Committed main-tree progress plus active delegated surfaces.</span>
 		</div>
 		<table>
 			<thead>
@@ -346,6 +346,34 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 110184 passed, 0 skipped, 0 failed; latest broad run: 10012 passed, 93 skipped, 0 failed.</td>
 					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups.</td>
+				</tr>
+				<tr>
+					<td><code>html-api</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Sagan: <code>_work/component-fuzz-html-api-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>HTML Tag/Processor walking, bookmarks, mutation escaping, malformed recovery.</td>
+				</tr>
+				<tr>
+					<td><code>hooks</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Mill: <code>_work/component-fuzz-hooks-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><code>WP_Hook</code>, nested dispatch, mutation during dispatch, accepted args, counters.</td>
+				</tr>
+				<tr>
+					<td><code>syndication</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Arendt: <code>_work/component-fuzz-syndication-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>oEmbed providers/handlers, feed helpers, XML/HTML escaping, no-network filters.</td>
+				</tr>
+				<tr>
+					<td><code>request-lifecycle</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Lovelace: <code>_work/component-fuzz-request-lifecycle-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Front-controller parsing, query vars, 404/header transitions, superglobal restoration.</td>
 				</tr>
 			</tbody>
 		</table>
