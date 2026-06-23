@@ -226,24 +226,24 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6708 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6720 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>html-api</code>: 600 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>user-preferences</code>: 700 passed, 100 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">One delegated surface is active; one completed worker is pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">All delegated worker patches from this wave are integrated and closed. Workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress plus active delegated surfaces.</span>
+			<span class="note">Committed main-tree progress; no active delegated surfaces.</span>
 		</div>
 		<table>
 			<thead>
@@ -391,16 +391,16 @@
 				</tr>
 				<tr>
 					<td><code>widgets</code></td>
-					<td><span class="status wait">pending integration</span></td>
-					<td>Erdos: <code>_work/component-fuzz-widgets-rich</code></td>
-					<td>Worker focused run: 700 passed, 0 skipped, 0 failed; smoke, standards, and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; broad run: 6720 passed, 62 skipped, 0 failed.</td>
 					<td>Classic sidebar/widget registries, generated widget IDs, callbacks, state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>user-preferences</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Bernoulli: <code>_work/component-fuzz-user-preferences-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 100 skipped, 0 failed; broad run: 6720 passed, 62 skipped, 0 failed.</td>
 					<td>User settings, hidden columns, meta boxes, screen options, admin preference filters.</td>
 				</tr>
 			</tbody>
@@ -422,6 +422,24 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>95a2e1aa81</code></td>
+					<td><code>user-preferences</code></td>
+					<td>700 passed, 100 skipped, 0 failed.</td>
+					<td>6720 passed, 62 skipped, 0 failed at 2 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>ff28a0beea</code></td>
+					<td><code>wpdb-stub</code></td>
+					<td><code>content-lifecycle</code> repro: 6 passed, 0 failed.</td>
+					<td>Resolved empty quoted CSV value warning in final broad run.</td>
+				</tr>
+				<tr>
+					<td><code>424837f7e9</code></td>
+					<td><code>widgets</code></td>
+					<td>700 passed, 0 skipped, 0 failed.</td>
+					<td>6720 passed, 63 skipped, 0 failed at 2 iterations before stub rerun.</td>
+				</tr>
 				<tr>
 					<td><code>fcee053dd5</code></td>
 					<td><code>html-api</code></td>
