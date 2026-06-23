@@ -43,6 +43,7 @@ final class ShortcodesSurface {
 			$rows[] = self::check_escaped_shortcodes( $ctx->fork( 'escaping' ), $attribute_cases );
 			$rows[] = self::check_html_attribute_behavior( $ctx->fork( 'html-attributes' ) );
 			$rows[] = self::check_strip_and_has_shortcode( $ctx->fork( 'strip-has' ), $attribute_cases );
+			$rows[] = self::check_strip_tagnames_filter_contract( $ctx->fork( 'strip-filter' ), $attribute_cases );
 			$rows[] = self::check_tag_discovery_and_apply_alias( $ctx->fork( 'tag-discovery' ), $attribute_cases );
 			$rows[] = self::check_malformed_and_nested_cases( $ctx->fork( 'malformed-nested' ) );
 		} catch ( \Throwable $e ) {
@@ -713,6 +714,85 @@ final class ShortcodesSurface {
 			array(
 				'tags'      => array( $outer, $inner ),
 				'callCount' => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_strip_tagnames_filter_contract( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$keep       = self::tag( $ctx, 'strip-keep' );
+		$remove     = self::tag( $ctx, 'strip-remove' );
+		$self_close = self::tag( $ctx, 'strip-self' );
+		$absent     = self::tag( $ctx, 'strip-filter-absent' );
+		$calls      = array();
+		$callback   = self::recording_callback( $calls, false );
+		$source     = 'pre [' . $keep . ' ' . $cases[0]['text'] . ']keep body[/' . $keep . '] mid [' . $remove . ' ' . $cases[1]['text'] . ']remove body[/' . $remove . '] end [' . $self_close . ' ' . $cases[2]['text'] . ' /] [' . $absent . ' /]';
+		$seen       = array();
+		$filter     = static function ( array $tags_to_remove, string $content ) use ( &$seen, $remove, $self_close ): array {
+			$seen[] = array(
+				'tags'    => $tags_to_remove,
+				'content' => self::describe_string( $content ),
+			);
+
+			return array( $remove, $self_close, 'not_registered' );
+		};
+		$failures   = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $keep, $callback );
+		\add_shortcode( $remove, $callback );
+		\add_shortcode( $self_close, $callback );
+
+		\add_filter( 'strip_shortcodes_tagnames', $filter, 10, 2 );
+		try {
+			$stripped = \strip_shortcodes( $source );
+		} finally {
+			\remove_filter( 'strip_shortcodes_tagnames', $filter, 10 );
+		}
+
+		$unfiltered = \strip_shortcodes( $source );
+
+		self::collect_failure(
+			$failures,
+			1 === count( $seen )
+				&& array( $keep, $remove, $self_close ) === $seen[0]['tags'],
+			'strip_shortcodes_tagnames receives registered tags in registry order and the original content',
+			array(
+				'seen'       => $seen,
+				'registered' => array( $keep, $remove, $self_close ),
+				'source'     => self::describe_string( $source ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $stripped, '[' . $keep )
+				&& str_contains( $stripped, '[/' . $keep . ']' )
+				&& str_contains( $stripped, 'keep body' )
+				&& ! str_contains( $stripped, '[' . $remove )
+				&& ! str_contains( $stripped, '[/' . $remove . ']' )
+				&& ! str_contains( $stripped, 'remove body' )
+				&& ! str_contains( $stripped, '[' . $self_close )
+				&& str_contains( $stripped, '[' . $absent . ' /]' )
+				&& ! str_contains( $unfiltered, '[' . $keep )
+				&& ! str_contains( $unfiltered, '[' . $remove )
+				&& ! str_contains( $unfiltered, '[' . $self_close )
+				&& str_contains( $unfiltered, '[' . $absent . ' /]' )
+				&& array() === $calls,
+			'strip_shortcodes_tagnames limits stripping to filtered registered tags without invoking callbacks',
+			array(
+				'source'     => self::describe_string( $source ),
+				'stripped'   => self::describe_string( $stripped ),
+				'unfiltered' => self::describe_string( $unfiltered ),
+				'calls'      => $calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.strip-tagnames-filter-locality',
+			$failures,
+			array(
+				'tags' => array( $keep, $remove, $self_close, $absent ),
 			)
 		);
 	}
