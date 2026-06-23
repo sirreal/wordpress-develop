@@ -260,8 +260,8 @@ final class NetworkMediaSurface {
 						self::check_invariant(
 							$result,
 							is_array( $parts )
-								&& isset( $parts['scheme'], $parts['host'] )
-								&& in_array( strtolower( (string) $parts['scheme'] ), array( 'http', 'https' ), true )
+								&& isset( $parts['host'] )
+								&& ( ! isset( $parts['scheme'] ) || in_array( strtolower( (string) $parts['scheme'] ), array( 'http', 'https' ), true ) )
 								&& ! isset( $parts['user'], $parts['pass'] ),
 							'wp_http_validate_url:accepted-url-shape',
 							$url,
