@@ -241,9 +241,9 @@ database, network requests, or a configured site.
   metadata helpers with temp-file cleanup.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
-  boundaries, sanitized unique filenames, attachment row and postmeta creation
-  in the in-memory wpdb stub, metadata update failure paths, and cleanup
-  restoration.
+  boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
+  attachment row and postmeta creation in the in-memory wpdb stub, download
+  short-circuit cleanup, metadata update failure paths, and cleanup restoration.
 - `media-metadata`: local audio/video metadata parser coverage over generated
   bounded byte fixtures, including `wp_read_audio_metadata()` and
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
@@ -541,9 +541,10 @@ as explicit skips while the filename filter invocation remains captured.
 The `media-ingest` surface uses local temp files only, routes uploads through a
 filtered temp upload root, and passes a custom upload action for
 `media_handle_upload()` so CLI fixtures use core's readable-file branch instead
-of PHP SAPI uploaded-file state. It avoids remote sideload/download helpers,
-browser media UI flows, audio/video cover-art generation, and writes outside the
-component-fuzz temp root.
+of PHP SAPI uploaded-file state. It exercises direct `wp_handle_*()` hooks and
+`download_url()` only through local files or `pre_http_request` short-circuits.
+It avoids browser media UI flows, audio/video cover-art generation, and writes
+outside the component-fuzz temp root.
 The `media-remote` surface complements that local ingest coverage by exercising
 remote download and sideload helpers with `pre_http_request` fixtures only. It
 records every streamed temp filename observed by the HTTP short-circuit,

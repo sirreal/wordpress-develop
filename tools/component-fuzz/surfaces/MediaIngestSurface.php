@@ -7,8 +7,32 @@ namespace ComponentFuzz\Surfaces;
 final class MediaIngestSurface {
 	public const NAME = 'media-ingest';
 
-	private const SUCCESS_CASES = 4;
-	private const PREVIEW_BYTES  = 180;
+	private const SUCCESS_CASES         = 8;
+	private const FILENAME_CASES        = 18;
+	private const DIRECT_HANDLE_CASES   = 3;
+	private const REJECTION_CASES       = 6;
+	private const PREVIEW_BYTES         = 180;
+	private const WPDB_PRIVATE_PROPS    = array(
+		'component_fuzz_options',
+		'component_fuzz_posts',
+		'component_fuzz_terms',
+		'component_fuzz_term_taxonomy_rows',
+		'component_fuzz_term_relationship_rows',
+		'component_fuzz_users',
+		'component_fuzz_comments',
+		'component_fuzz_links',
+		'component_fuzz_meta',
+		'component_fuzz_next_ids',
+	);
+	private const WPDB_PUBLIC_PROPS     = array(
+		'insert_id',
+		'is_mysql',
+		'last_error',
+		'last_query',
+		'num_rows',
+		'rows_affected',
+		'suppress_errors',
+	);
 
 	private static ?string $upload_root = null;
 
@@ -28,7 +52,9 @@ final class MediaIngestSurface {
 		$temp_root    = self::make_temp_root( $ctx );
 		$cleanup_ok   = null === $temp_root;
 		$cleanup_path = $temp_root;
-		$rows         = array();
+		$restoration_ok   = false;
+		$restoration_data = array();
+		$rows             = array();
 
 		try {
 			if ( null === $temp_root ) {
@@ -41,10 +67,12 @@ final class MediaIngestSurface {
 				self::prepare_runtime( $temp_root );
 
 				$rows[] = self::check_filename_and_filetype_boundaries( $ctx->fork( 'filename-filetype' ), $temp_root );
+				$rows[] = self::check_prefilter_and_direct_handle_boundaries( $ctx->fork( 'direct-handles' ), $temp_root );
 				foreach ( self::check_successful_ingest_flows( $ctx->fork( 'success' ), $temp_root ) as $row ) {
 					$rows[] = $row;
 				}
 				$rows[] = self::check_rejection_paths( $ctx->fork( 'rejections' ), $temp_root );
+				$rows[] = self::check_download_short_circuits( $ctx->fork( 'download-short-circuit' ), $temp_root );
 				$rows[] = self::check_metadata_failure_paths( $ctx->fork( 'metadata-failures' ), $temp_root );
 			}
 		} catch ( \Throwable $e ) {
@@ -60,14 +88,17 @@ final class MediaIngestSurface {
 				$cleanup_ok = ! is_dir( $temp_root );
 			}
 			self::restore_state( $snapshot );
+			$restoration_data = self::restoration_probe( $snapshot );
+			$restoration_ok   = $restoration_data['restored'];
 		}
 
 		$rows[] = $ctx->result(
 			'media-ingest.cleanup.temp-files-and-globals',
-			$cleanup_ok,
+			$cleanup_ok && $restoration_ok,
 			array(
-				'tempRoot' => $cleanup_path,
-				'cleaned'  => $cleanup_ok,
+				'tempRoot'    => $cleanup_path,
+				'cleaned'     => $cleanup_ok,
+				'restoration' => $restoration_data,
 			)
 		);
 
@@ -96,12 +127,19 @@ final class MediaIngestSurface {
 		$missing = array();
 		foreach (
 			array(
+				'add_filter',
+				'download_url',
 				'get_attached_file',
 				'get_post',
 				'get_post_meta',
+				'has_filter',
+				'is_wp_error',
 				'media_handle_sideload',
 				'media_handle_upload',
+				'remove_filter',
 				'sanitize_file_name',
+				'validate_file',
+				'wp_basename',
 				'wp_check_filetype',
 				'wp_check_filetype_and_ext',
 				'wp_generate_attachment_metadata',
@@ -121,10 +159,14 @@ final class MediaIngestSurface {
 			}
 		}
 
-		foreach ( array( 'WP_Error', 'WP_Post' ) as $class ) {
+		foreach ( array( 'Component_Fuzz_WPDB_Stub', 'WP_Error', 'WP_Post' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global $wpdb Component_Fuzz_WPDB_Stub';
 		}
 
 		return $missing;
@@ -132,83 +174,413 @@ final class MediaIngestSurface {
 
 	private static function check_filename_and_filetype_boundaries( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
 		$failures      = array();
-		$collision_dir = $temp_root . DIRECTORY_SEPARATOR . 'collisions';
+		$case_rows     = array();
+		$collision_dir = ( self::$upload_root ?? $temp_root ) . DIRECTORY_SEPARATOR . 'collisions';
 		\ComponentFuzz\ensure_dir( $collision_dir );
 
-		for ( $i = 0; $i < 12; $i++ ) {
-			$ext       = $ctx->choice( array( 'png', 'jpg', 'txt', 'php', 'tar.gz', '' ) );
-			$filename  = self::client_filename( $ctx->fork( 'name-' . $i ), $ext );
+		foreach ( self::filename_boundary_cases( $ctx ) as $case ) {
+			$filename  = $case['filename'];
 			$sanitized = \sanitize_file_name( $filename );
 			$again     = \sanitize_file_name( $sanitized );
+			$filetype  = \wp_check_filetype( $sanitized, self::allowed_mimes() );
+			$case_rows[] = array(
+				'label'     => $case['label'],
+				'caseSeed'  => $case['caseSeed'],
+				'input'     => self::describe_string( $filename ),
+				'sanitized' => self::describe_string( $sanitized ),
+				'filetype'  => $filetype,
+			);
 
 			self::collect_failure(
 				$failures,
 				'' !== $sanitized
 					&& $sanitized === $again
 					&& false === strpos( $sanitized, chr( 0 ) )
-					&& false === strpbrk( $sanitized, "/\\" ),
-				'sanitize_file_name is idempotent and removes path separators',
+					&& false === strpbrk( $sanitized, "/\\" )
+					&& 0 === \validate_file( $sanitized )
+					&& strlen( $sanitized ) <= 255,
+				'sanitize_file_name is idempotent, path-local, and filesystem-bounded',
 				array(
+					'case'      => $case,
 					'filename'  => self::describe_string( $filename ),
 					'sanitized' => self::describe_string( $sanitized ),
 					'again'     => self::describe_string( $again ),
 				)
 			);
+
+			self::collect_failure(
+				$failures,
+				( $case['allowed'] && $case['expectedType'] === ( $filetype['type'] ?? null ) && $case['expectedExt'] === strtolower( (string) ( $filetype['ext'] ?? '' ) ) )
+					|| ( ! $case['allowed'] && false === ( $filetype['type'] ?? null ) && false === ( $filetype['ext'] ?? null ) ),
+				'wp_check_filetype maps only the configured local MIME allowlist',
+				array(
+					'case'     => $case,
+					'filetype' => $filetype,
+				)
+			);
 		}
 
-		$collision_name = 'component fuzz upload.txt';
-		$existing      = $collision_dir . DIRECTORY_SEPARATOR . \sanitize_file_name( $collision_name );
-		file_put_contents( $existing, 'existing' );
-		$unique = \wp_unique_filename( $collision_dir, '../' . $collision_name );
-		self::collect_failure(
-			$failures,
-			'' !== $unique
-				&& $unique !== \sanitize_file_name( $collision_name )
-				&& false === strpbrk( $unique, "/\\" )
-				&& ! file_exists( $collision_dir . DIRECTORY_SEPARATOR . $unique ),
-			'wp_unique_filename avoids collisions after sanitizing unsafe input',
-			array(
-				'existing' => basename( $existing ),
-				'unique'   => $unique,
-			)
-		);
+		self::check_unique_filename_boundaries( $failures, $collision_dir );
 
 		$fixture_dir = $temp_root . DIRECTORY_SEPARATOR . 'filetype';
 		$png_path    = self::write_fixture( $fixture_dir, 'actual-png.bin', self::png_bytes() );
 		$text_path   = self::write_fixture( $fixture_dir, 'actual-text.bin', "hello component fuzz\n" );
 		$spoof_path  = self::write_fixture( $fixture_dir, 'spoof-image.bin', "<?php echo 'not an image';\n" );
+		$pdf_path    = self::write_fixture( $fixture_dir, 'actual-pdf.bin', "%PDF-1.4\n% component fuzz\n" );
 
-		if ( null === $png_path || null === $text_path || null === $spoof_path ) {
+		if ( null === $png_path || null === $text_path || null === $spoof_path || null === $pdf_path ) {
 			self::collect_failure( $failures, false, 'fixture files are writable for filetype checks' );
 		} else {
-			$png_as_jpg = \wp_check_filetype_and_ext( $png_path, 'unsafe path/../photo.jpg', self::allowed_mimes() );
-			$text       = \wp_check_filetype_and_ext( $text_path, 'notes.txt', self::allowed_mimes() );
-			$php        = \wp_check_filetype_and_ext( $spoof_path, 'payload.php', self::allowed_mimes() );
-
-			self::collect_failure(
-				$failures,
-				'image/png' === ( $png_as_jpg['type'] ?? null )
-					&& 'png' === ( $png_as_jpg['ext'] ?? null )
-					&& 'unsafe path/../photo.png' === ( $png_as_jpg['proper_filename'] ?? null )
-					&& 'text/plain' === ( $text['type'] ?? null )
-					&& 'txt' === ( $text['ext'] ?? null )
-					&& false === ( $php['type'] ?? null )
-					&& false === ( $php['ext'] ?? null ),
-				'wp_check_filetype_and_ext corrects image extensions and rejects disallowed executable extensions',
+			$content_cases = array(
 				array(
-					'pngAsJpg' => $png_as_jpg,
-					'text'     => $text,
-					'php'      => $php,
-				)
+					'label'          => 'png-corrects-jpg',
+					'path'           => $png_path,
+					'name'           => 'unsafe path/../photo.JPG',
+					'expectedExt'    => 'png',
+					'expectedType'   => 'image/png',
+					'properSuffix'   => 'photo.png',
+					'expectedProper' => true,
+				),
+				array(
+					'label'        => 'png-uppercase-ok',
+					'path'         => $png_path,
+					'name'         => 'photo.PNG',
+					'expectedExt'  => 'png',
+					'expectedType' => 'image/png',
+				),
+				array(
+					'label'        => 'text-uppercase-ok',
+					'path'         => $text_path,
+					'name'         => 'NOTES.TXT',
+					'expectedExt'  => 'txt',
+					'expectedType' => 'text/plain',
+				),
+				array(
+					'label'        => 'php-bytes-rejected',
+					'path'         => $spoof_path,
+					'name'         => 'payload.txt',
+					'expectedExt'  => false,
+					'expectedType' => false,
+				),
+				array(
+					'label'        => 'php-extension-rejected',
+					'path'         => $spoof_path,
+					'name'         => 'payload.PhP',
+					'expectedExt'  => false,
+					'expectedType' => false,
+				),
+				array(
+					'label'        => 'pdf-allowed-application',
+					'path'         => $pdf_path,
+					'name'         => 'local-document.PDF',
+					'expectedExt'  => 'pdf',
+					'expectedType' => 'application/pdf',
+				),
+				array(
+					'label'        => 'missing-path-extension-only',
+					'path'         => $fixture_dir . DIRECTORY_SEPARATOR . 'missing.png',
+					'name'         => 'missing.png',
+					'expectedExt'  => 'png',
+					'expectedType' => 'image/png',
+				),
 			);
+
+			foreach ( $content_cases as $content_case ) {
+				$checked = \wp_check_filetype_and_ext( $content_case['path'], $content_case['name'], self::allowed_mimes() );
+				$proper  = $checked['proper_filename'] ?? false;
+
+				self::collect_failure(
+					$failures,
+					$content_case['expectedType'] === ( $checked['type'] ?? null )
+						&& $content_case['expectedExt'] === ( is_string( $checked['ext'] ?? null ) ? strtolower( (string) $checked['ext'] ) : ( $checked['ext'] ?? null ) )
+						&& ( empty( $content_case['expectedProper'] ) || ( is_string( $proper ) && str_ends_with( $proper, $content_case['properSuffix'] ) ) ),
+					'wp_check_filetype_and_ext respects content, extension casing, and image correction boundaries',
+					array(
+						'case'    => $content_case,
+						'checked' => $checked,
+					)
+				);
+			}
 		}
 
 		return $ctx->result(
 			'media-ingest.filename-filetype-boundaries',
 			array() === $failures,
 			array(
-				'cases'    => 15,
+				'cases'    => count( $case_rows ) + 9,
+				'filenames' => array_slice( $case_rows, 0, 8 ),
 				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_prefilter_and_direct_handle_boundaries( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures    = array();
+		$source_dir  = $temp_root . DIRECTORY_SEPARATOR . 'direct-handle-source';
+		$upload_root = self::$upload_root;
+		$events      = array(
+			'handled'    => array(),
+			'moves'      => array(),
+			'overrides'  => array(),
+			'prefilters' => array(),
+			'uploadDirs' => array(),
+		);
+		$before      = self::content_counts();
+		$token       = $ctx->identifier( 4, 9 );
+		$action      = 'component_fuzz_direct_upload';
+
+		$upload_dir_filter = static function ( array $uploads ) use ( &$events ): array {
+			$filtered = MediaIngestSurface::filter_upload_dir( $uploads );
+			$events['uploadDirs'][] = array(
+				'path'   => $filtered['path'] ?? null,
+				'subdir' => $filtered['subdir'] ?? null,
+			);
+			return $filtered;
+		};
+		$handle_filter     = static function ( array $upload, string $context ) use ( &$events ): array {
+			$events['handled'][] = array(
+				'context'  => $context,
+				'basename' => isset( $upload['file'] ) ? basename( (string) $upload['file'] ) : null,
+				'type'     => $upload['type'] ?? null,
+			);
+			return $upload;
+		};
+		$standard_block    = static function ( array $file ) use ( &$events, $token ): array {
+			$events['prefilters'][] = array(
+				'hook' => 'wp_handle_upload_prefilter',
+				'name' => $file['name'] ?? null,
+			);
+			$file['error'] = 'component fuzz upload prefilter blocked ' . $token;
+			return $file;
+		};
+		$upload_prefilter  = static function ( array $file ) use ( &$events, $token ): array {
+			$events['prefilters'][] = array(
+				'hook' => 'component_fuzz_direct_upload_prefilter',
+				'name' => $file['name'] ?? null,
+			);
+			$file['name'] = 'Direct Filtered ' . $token . '.TXT';
+			$file['type'] = 'text/plain';
+			return $file;
+		};
+		$upload_overrides  = static function ( $overrides, array $file ) use ( &$events ) {
+			$events['overrides'][] = array(
+				'hook' => 'component_fuzz_direct_upload_overrides',
+				'name' => $file['name'] ?? null,
+			);
+			$overrides           = is_array( $overrides ) ? $overrides : array();
+			$overrides['mimes']  = MediaIngestSurface::allowed_mimes();
+			$overrides['action'] = 'component_fuzz_direct_upload';
+			return $overrides;
+		};
+		$sideload_prefilter = static function ( array $file ) use ( &$events, $token ): array {
+			$events['prefilters'][] = array(
+				'hook' => 'wp_handle_sideload_prefilter',
+				'name' => $file['name'] ?? null,
+			);
+			$file['name'] = 'Sideload Filtered ' . $token . '.TXT';
+			$file['type'] = 'text/plain';
+			return $file;
+		};
+		$sideload_overrides = static function ( $overrides, array $file ) use ( &$events ) {
+			$events['overrides'][] = array(
+				'hook' => 'wp_handle_sideload_overrides',
+				'name' => $file['name'] ?? null,
+			);
+			$overrides          = is_array( $overrides ) ? $overrides : array();
+			$overrides['mimes'] = MediaIngestSurface::allowed_mimes();
+			return $overrides;
+		};
+		$move_filter       = static function ( $move_new_file, array $file, string $new_file, string $type ) use ( &$events, $action ): ?bool {
+			$events['moves'][] = array(
+				'name'        => $file['name'] ?? null,
+				'newBasename' => basename( $new_file ),
+				'type'        => $type,
+				'short'       => isset( $file['component_fuzz_action'] ) && $action === $file['component_fuzz_action'],
+			);
+
+			if ( ! isset( $file['component_fuzz_action'] ) || $action !== $file['component_fuzz_action'] ) {
+				return $move_new_file;
+			}
+
+			\ComponentFuzz\ensure_dir( dirname( $new_file ) );
+			if ( @copy( $file['tmp_name'], $new_file ) ) {
+				@unlink( $file['tmp_name'] );
+				return true;
+			}
+
+			return false;
+		};
+		$error_handler     = static function ( array &$file, string $message ): array {
+			return array(
+				'error'                 => $message,
+				'component_fuzz_name'   => $file['name'] ?? null,
+				'component_fuzz_tmp'    => isset( $file['tmp_name'] ) ? basename( (string) $file['tmp_name'] ) : null,
+				'component_fuzz_source' => isset( $file['tmp_name'] ) && file_exists( (string) $file['tmp_name'] ),
+			);
+		};
+
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'wp_handle_upload', $handle_filter, 10, 2 );
+		\add_filter( 'wp_handle_upload_prefilter', $standard_block );
+		\add_filter( "{$action}_prefilter", $upload_prefilter );
+		\add_filter( "{$action}_overrides", $upload_overrides, 10, 2 );
+		\add_filter( 'wp_handle_sideload_prefilter', $sideload_prefilter );
+		\add_filter( 'wp_handle_sideload_overrides', $sideload_overrides, 10, 2 );
+		\add_filter( 'pre_move_uploaded_file', $move_filter, 10, 4 );
+
+		try {
+			$blocked_case = array(
+				'label'       => 'standard-upload-prefilter-block',
+				'filename'    => 'blocked-' . $token . '.txt',
+				'fixtureName' => 'blocked.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => 'blocked direct upload ' . $ctx->ascii( 3, 16 ),
+			);
+			$blocked_path = self::write_fixture( $source_dir, 'blocked.txt', $blocked_case['bytes'] );
+			$blocked_file = null === $blocked_path ? array() : self::file_array( $blocked_case, $blocked_path );
+			$blocked      = null === $blocked_path ? null : \wp_handle_upload(
+				$blocked_file,
+				array(
+					'mimes'               => self::allowed_mimes(),
+					'test_form'           => false,
+					'upload_error_handler' => $error_handler,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $blocked )
+					&& isset( $blocked['error'] )
+					&& str_contains( (string) $blocked['error'], 'component fuzz upload prefilter blocked' )
+					&& null !== $blocked_path
+					&& file_exists( $blocked_path ),
+				'wp_handle_upload_prefilter can fail a local temp upload before move or DB effects',
+				array(
+					'case'   => self::case_summary( $blocked_case ),
+					'result' => self::describe_result( $blocked ),
+				)
+			);
+			if ( null !== $blocked_path ) {
+				@unlink( $blocked_path );
+			}
+
+			$upload_case = array(
+				'label'       => 'custom-upload-prefilter-pre-move',
+				'filename'    => '../direct ' . $token . '.TXT',
+				'fixtureName' => 'direct.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => "direct upload\n" . $ctx->ascii( 8, 32 ),
+			);
+			$upload_path = self::write_fixture( $source_dir, 'direct-upload.txt', $upload_case['bytes'] );
+			$upload_file = null === $upload_path ? array() : self::file_array( $upload_case, $upload_path );
+			if ( null !== $upload_path ) {
+				$upload_file['component_fuzz_action'] = $action;
+			}
+			$upload_result = null === $upload_path ? null : \wp_handle_upload(
+				$upload_file,
+				array(
+					'action'               => $action,
+					'mimes'                => self::allowed_mimes(),
+					'test_form'            => false,
+					'upload_error_handler' => $error_handler,
+				)
+			);
+
+			self::assert_direct_handle_success(
+				$failures,
+				$upload_case,
+				$upload_result,
+				$upload_path,
+				$upload_root,
+				'upload',
+				true
+			);
+
+			$sideload_case = array(
+				'label'       => 'sideload-prefilter-core-move',
+				'filename'    => '..\\sideload ' . $token . '.TXT',
+				'fixtureName' => 'sideload.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => "direct sideload\n" . $ctx->ascii( 8, 32 ),
+			);
+			$sideload_path = self::write_fixture( $source_dir, 'direct-sideload.txt', $sideload_case['bytes'] );
+			$sideload_file = null === $sideload_path ? array() : self::file_array( $sideload_case, $sideload_path );
+			$sideload      = null === $sideload_path ? null : \wp_handle_sideload(
+				$sideload_file,
+				array(
+					'mimes'     => self::allowed_mimes(),
+					'test_form' => false,
+				)
+			);
+
+			self::assert_direct_handle_success(
+				$failures,
+				$sideload_case,
+				$sideload,
+				$sideload_path,
+				$upload_root,
+				'sideload',
+				false
+			);
+		} finally {
+			\remove_filter( 'pre_move_uploaded_file', $move_filter, 10 );
+			\remove_filter( 'wp_handle_sideload_overrides', $sideload_overrides, 10 );
+			\remove_filter( 'wp_handle_sideload_prefilter', $sideload_prefilter );
+			\remove_filter( "{$action}_overrides", $upload_overrides, 10 );
+			\remove_filter( "{$action}_prefilter", $upload_prefilter );
+			\remove_filter( 'wp_handle_upload_prefilter', $standard_block );
+			\remove_filter( 'wp_handle_upload', $handle_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+			self::cleanup_leftover_sources( $source_dir );
+		}
+
+		$after = self::content_counts();
+
+		self::collect_failure(
+			$failures,
+			$before === $after
+				&& self::events_include_context( $events['handled'], 'upload' )
+				&& self::events_include_context( $events['handled'], 'sideload' )
+				&& self::upload_events_within_root( $events['uploadDirs'], (string) $upload_root ),
+			'direct wp_handle_* checks move files locally without attachment DB writes',
+			array(
+				'before'     => $before,
+				'after'      => $after,
+				'events'     => $events,
+				'uploadRoot' => $upload_root,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& false === \has_filter( 'wp_handle_upload', $handle_filter )
+				&& false === \has_filter( 'wp_handle_upload_prefilter', $standard_block )
+				&& false === \has_filter( "{$action}_prefilter", $upload_prefilter )
+				&& false === \has_filter( "{$action}_overrides", $upload_overrides )
+				&& false === \has_filter( 'wp_handle_sideload_prefilter', $sideload_prefilter )
+				&& false === \has_filter( 'wp_handle_sideload_overrides', $sideload_overrides )
+				&& false === \has_filter( 'pre_move_uploaded_file', $move_filter ),
+			'direct handle filters are restored after prefilter and move checks',
+			array(
+				'uploadDir'        => \has_filter( 'upload_dir', $upload_dir_filter ),
+				'handle'           => \has_filter( 'wp_handle_upload', $handle_filter ),
+				'standardUpload'   => \has_filter( 'wp_handle_upload_prefilter', $standard_block ),
+				'customUpload'     => \has_filter( "{$action}_prefilter", $upload_prefilter ),
+				'customOverrides'  => \has_filter( "{$action}_overrides", $upload_overrides ),
+				'sideload'         => \has_filter( 'wp_handle_sideload_prefilter', $sideload_prefilter ),
+				'sideloadOverride' => \has_filter( 'wp_handle_sideload_overrides', $sideload_overrides ),
+				'preMove'          => \has_filter( 'pre_move_uploaded_file', $move_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'media-ingest.direct-handle-prefilter-move-boundaries',
+			array() === $failures,
+			array(
+				'cases'    => self::DIRECT_HANDLE_CASES,
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -217,6 +589,7 @@ final class MediaIngestSurface {
 		$failures    = array();
 		$rows        = array();
 		$source_dir  = $temp_root . DIRECTORY_SEPARATOR . 'successful-source';
+		$attachments = array();
 		$events      = array(
 			'contexts'      => array(),
 			'generatedMeta' => array(),
@@ -271,7 +644,7 @@ final class MediaIngestSurface {
 				$result = self::run_ingest_case( $case, $source_path, $parent_id );
 				$after  = self::content_counts();
 
-				self::assert_successful_attachment(
+				$attachment = self::assert_successful_attachment(
 					$failures,
 					$case,
 					$result,
@@ -281,6 +654,9 @@ final class MediaIngestSurface {
 					$after,
 					$upload_root
 				);
+				if ( null !== $attachment ) {
+					$attachments[] = $attachment;
+				}
 			}
 		} finally {
 			\remove_filter( 'wp_generate_attachment_metadata', $metadata_filter, 10 );
@@ -296,6 +672,28 @@ final class MediaIngestSurface {
 				'cases'    => self::SUCCESS_CASES,
 				'events'   => $events,
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $attachments ) === self::SUCCESS_CASES
+				&& self::attachment_basenames_are_unique( $attachments )
+				&& self::success_attachment_expectations_hold( $attachments ),
+			'generated success cases produce unique, expected, locally moved attachments',
+			array(
+				'attachments' => $attachments,
+				'cases'       => array_map( array( __CLASS__, 'case_summary' ), self::successful_cases( $ctx ) ),
+			)
+		);
+
+		$rows[] = $ctx->result(
+			'media-ingest.generated-success-case-cross-invariants',
+			array() === $failures,
+			array(
+				'cases'       => self::SUCCESS_CASES,
+				'attachments' => $attachments,
+				'failures'    => array_slice( $failures, 0, 8 ),
 			)
 		);
 
@@ -324,6 +722,7 @@ final class MediaIngestSurface {
 		$failures      = array();
 		$source_dir    = $temp_root . DIRECTORY_SEPARATOR . 'rejection-source';
 		$upload_events = array();
+		$error_rows    = array();
 
 		$upload_dir_filter = static function ( array $uploads ): array {
 			return MediaIngestSurface::filter_upload_dir( $uploads );
@@ -340,24 +739,7 @@ final class MediaIngestSurface {
 		\add_filter( 'wp_handle_upload', $handle_filter, 10, 2 );
 
 		try {
-			$cases = array(
-				array(
-					'label'       => 'disallowed-php-upload',
-					'mode'        => 'upload',
-					'filename'    => self::client_filename( $ctx->fork( 'php-name' ), 'php' ),
-					'fixtureName' => 'php.txt',
-					'mime'        => 'application/x-php',
-					'bytes'       => "<?php echo 'blocked';\n",
-				),
-				array(
-					'label'       => 'empty-sideload',
-					'mode'        => 'sideload',
-					'filename'    => self::client_filename( $ctx->fork( 'empty-name' ), 'txt' ),
-					'fixtureName' => 'empty.txt',
-					'mime'        => 'text/plain',
-					'bytes'       => '',
-				),
-			);
+			$cases = self::rejection_cases( $ctx );
 
 			foreach ( $cases as $index => $case ) {
 				$source_path = self::write_fixture( $source_dir, 'reject-' . $index . '-' . $case['fixtureName'], $case['bytes'] );
@@ -366,22 +748,34 @@ final class MediaIngestSurface {
 					continue;
 				}
 
-				$before = self::content_counts();
-				$result = self::run_ingest_case( $case, $source_path, 0 );
-				$after  = self::content_counts();
+				if ( ! empty( $case['deleteBeforeHandle'] ) ) {
+					@unlink( $source_path );
+				}
+
+				$before       = self::content_counts();
+				$before_files = self::list_files_recursive( (string) self::$upload_root );
+				$result       = self::run_ingest_case( $case, $source_path, 0 );
+				$after_files  = self::list_files_recursive( (string) self::$upload_root );
+				$after        = self::content_counts();
+				$error_rows[] = array(
+					'case'   => self::case_summary( $case ),
+					'result' => self::describe_error( $result ),
+				);
 
 				self::collect_failure(
 					$failures,
-					\is_wp_error( $result )
-						&& 'upload_error' === $result->get_error_code()
+					self::is_upload_error( $result )
 						&& ( $after['posts'] ?? null ) === ( $before['posts'] ?? null )
-						&& ( $after['post_meta'] ?? null ) === ( $before['post_meta'] ?? null ),
-					'failed ingest returns upload_error without creating attachment rows',
+						&& ( $after['post_meta'] ?? null ) === ( $before['post_meta'] ?? null )
+						&& $before_files === $after_files,
+					'failed ingest returns stable upload_error shape without creating attachment rows or files',
 					array(
-						'case'   => self::case_summary( $case ),
-						'result' => self::describe_error( $result ),
-						'before' => $before,
-						'after'  => $after,
+						'case'        => self::case_summary( $case ),
+						'result'      => self::describe_error( $result ),
+						'before'      => $before,
+						'after'       => $after,
+						'beforeFiles' => $before_files,
+						'afterFiles'  => $after_files,
 					)
 				);
 
@@ -397,9 +791,93 @@ final class MediaIngestSurface {
 			'media-ingest.rejection-paths-no-attachment-side-effects',
 			array() === $failures && array() === $upload_events,
 			array(
-				'cases'        => 2,
+				'cases'        => self::REJECTION_CASES,
+				'errors'       => $error_rows,
 				'uploadEvents' => $upload_events,
 				'failures'     => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_download_short_circuits( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures     = array();
+		$events       = array();
+		$tracked      = array();
+		$before_files = self::list_files_recursive( $temp_root );
+		$url          = 'https://example.test/component-fuzz-media-ingest/' . rawurlencode( $ctx->identifier( 4, 10 ) ) . '.png';
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $request_url ) use ( &$events, &$tracked ) {
+			unset( $preempt );
+			$filename = isset( $parsed_args['filename'] ) ? (string) $parsed_args['filename'] : null;
+			if ( is_string( $filename ) && '' !== $filename ) {
+				$tracked[] = $filename;
+			}
+
+			$events[] = array(
+				'filename' => is_string( $filename ) ? $filename : null,
+				'stream'   => $parsed_args['stream'] ?? null,
+				'timeout'  => $parsed_args['timeout'] ?? null,
+				'url'      => $request_url,
+			);
+
+			return new \WP_Error(
+				'component_fuzz_media_ingest_no_network',
+				'Component fuzz media ingest blocks live HTTP.',
+				array(
+					'filename' => is_string( $filename ) ? basename( $filename ) : null,
+					'url'      => $request_url,
+				)
+			);
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		try {
+			$result = \download_url( $url, 7 );
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $result )
+					&& 'component_fuzz_media_ingest_no_network' === $result->get_error_code()
+					&& 1 === count( $events )
+					&& true === ( $events[0]['stream'] ?? null )
+					&& is_string( $events[0]['filename'] ?? null )
+					&& ! file_exists( (string) $events[0]['filename'] ),
+				'download_url is fully short-circuited through pre_http_request and cleans its temp file',
+				array(
+					'events' => $events,
+					'result' => self::describe_error( $result ),
+				)
+			);
+
+			$no_url = \download_url( '', 7 );
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $no_url ) && 'http_no_url' === $no_url->get_error_code() && 1 === count( $events ),
+				'download_url empty-url validation returns before temp creation or HTTP filters',
+				array( 'result' => self::describe_error( $no_url ) )
+			);
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_http_request', $http_filter )
+				&& self::tracked_paths_absent( $tracked )
+				&& $before_files === self::list_files_recursive( $temp_root ),
+			'download short-circuit filters and tracked temp files are cleaned up',
+			array(
+				'hasFilter' => \has_filter( 'pre_http_request', $http_filter ),
+				'tracked'   => $tracked,
+			)
+		);
+
+		return $ctx->result(
+			'media-ingest.download-url-no-network-short-circuit',
+			array() === $failures,
+			array(
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 6 ),
+				'tracked'  => array_map( 'basename', $tracked ),
 			)
 		);
 	}
@@ -407,6 +885,11 @@ final class MediaIngestSurface {
 	private static function check_metadata_failure_paths( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
 		$failures   = array();
 		$source_dir = $temp_root . DIRECTORY_SEPARATOR . 'metadata-source';
+		$events     = array(
+			'generated' => array(),
+			'get'       => array(),
+			'updated'   => array(),
+		);
 
 		$upload_dir_filter = static function ( array $uploads ): array {
 			return MediaIngestSurface::filter_upload_dir( $uploads );
@@ -414,7 +897,7 @@ final class MediaIngestSurface {
 		\add_filter( 'upload_dir', $upload_dir_filter );
 
 		try {
-			$case        = self::text_success_case( $ctx->fork( 'metadata-text' ), 'sideload' );
+			$case        = self::text_success_case( $ctx->fork( 'metadata-text' ), 'sideload', 'metadata-text' );
 			$source_path = self::write_fixture( $source_dir, 'metadata-' . $case['fixtureName'], $case['bytes'] );
 			if ( null === $source_path ) {
 				self::collect_failure( $failures, false, 'metadata fixture is writable' );
@@ -434,6 +917,24 @@ final class MediaIngestSurface {
 				900000 + $ctx->iteration(),
 				array( 'component_fuzz_missing' => true )
 			);
+
+			$update_filter = static function ( array $data, int $attachment_id_for_filter ) use ( &$events ): array {
+				$events['updated'][] = array(
+					'id'   => $attachment_id_for_filter,
+					'keys' => array_keys( $data ),
+				);
+				$data['component_fuzz_update_filter'] = $attachment_id_for_filter;
+				return $data;
+			};
+			\add_filter( 'wp_update_attachment_metadata', $update_filter, 10, 2 );
+			try {
+				$filtered_update = is_int( $attachment_id )
+					? \wp_update_attachment_metadata( $attachment_id, array( 'component_fuzz_filter_base' => true ) )
+					: null;
+			} finally {
+				\remove_filter( 'wp_update_attachment_metadata', $update_filter, 10 );
+			}
+			$filtered_stored = is_int( $attachment_id ) ? \wp_get_attachment_metadata( $attachment_id, true ) : null;
 
 			$blocked_seen = array();
 			$block_filter = static function ( $check, int $object_id, string $meta_key, $meta_value, $prev_value ) use ( &$blocked_seen, &$attachment_id ) {
@@ -458,6 +959,21 @@ final class MediaIngestSurface {
 
 			self::collect_failure(
 				$failures,
+				false !== $filtered_update
+					&& array( $attachment_id ) === array_column( $events['updated'], 'id' )
+					&& is_array( $filtered_stored )
+					&& (int) ( $filtered_stored['component_fuzz_update_filter'] ?? 0 ) === $attachment_id,
+				'wp_update_attachment_metadata filter can shape valid metadata updates and is then restored',
+				array(
+					'filteredUpdate' => $filtered_update,
+					'filteredStored' => $filtered_stored,
+					'events'         => $events['updated'],
+					'hasFilter'      => \has_filter( 'wp_update_attachment_metadata', $update_filter ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
 				false === $missing_update
 					&& false === $forced_update
 					&& array( $attachment_id ) === $blocked_seen
@@ -471,6 +987,61 @@ final class MediaIngestSurface {
 					'stored'        => $stored,
 				)
 			);
+
+			$generate_filter = static function ( array $metadata, int $attachment_id_for_filter, string $context ) use ( &$events ): array {
+				$events['generated'][] = array(
+					'context' => $context,
+					'id'      => $attachment_id_for_filter,
+					'keys'    => array_keys( $metadata ),
+				);
+				$metadata['component_fuzz_generated_filter'] = $context;
+				return $metadata;
+			};
+			$get_filter      = static function ( array $metadata, int $attachment_id_for_filter ) use ( &$events ): array {
+				$events['get'][] = array(
+					'id'   => $attachment_id_for_filter,
+					'keys' => array_keys( $metadata ),
+				);
+				$metadata['component_fuzz_get_filter'] = $attachment_id_for_filter;
+				return $metadata;
+			};
+
+			\add_filter( 'wp_generate_attachment_metadata', $generate_filter, 10, 3 );
+			\add_filter( 'wp_get_attachment_metadata', $get_filter, 10, 2 );
+			try {
+				$missing_file       = $source_dir . DIRECTORY_SEPARATOR . 'missing-generated-' . $ctx->identifier( 3, 8 ) . '.png';
+				$generated_missing = is_int( $attachment_id ) ? \wp_generate_attachment_metadata( $attachment_id, $missing_file ) : null;
+				$filtered_get      = is_int( $attachment_id ) ? \wp_get_attachment_metadata( $attachment_id ) : null;
+				$unfiltered_get    = is_int( $attachment_id ) ? \wp_get_attachment_metadata( $attachment_id, true ) : null;
+				$missing_get       = \wp_get_attachment_metadata( 900000 + $ctx->iteration(), true );
+			} finally {
+				\remove_filter( 'wp_get_attachment_metadata', $get_filter, 10 );
+				\remove_filter( 'wp_generate_attachment_metadata', $generate_filter, 10 );
+			}
+
+			self::collect_failure(
+				$failures,
+				is_array( $generated_missing )
+					&& 'create' === ( $generated_missing['component_fuzz_generated_filter'] ?? null )
+					&& ! isset( $generated_missing['filesize'] )
+					&& is_array( $filtered_get )
+					&& (int) ( $filtered_get['component_fuzz_get_filter'] ?? 0 ) === $attachment_id
+					&& is_array( $unfiltered_get )
+					&& ! isset( $unfiltered_get['component_fuzz_get_filter'] )
+					&& false === $missing_get
+					&& false === \has_filter( 'wp_generate_attachment_metadata', $generate_filter )
+					&& false === \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+				'attachment metadata helpers keep missing-file, filtered, and unfiltered boundaries distinct',
+				array(
+					'generatedMissing' => $generated_missing,
+					'filteredGet'      => $filtered_get,
+					'unfilteredGet'    => $unfiltered_get,
+					'missingGet'       => $missing_get,
+					'events'           => $events,
+					'generateFilter'   => \has_filter( 'wp_generate_attachment_metadata', $generate_filter ),
+					'getFilter'        => \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+				)
+			);
 		} finally {
 			\remove_filter( 'upload_dir', $upload_dir_filter );
 			self::cleanup_leftover_sources( $source_dir );
@@ -479,7 +1050,10 @@ final class MediaIngestSurface {
 		return $ctx->result(
 			'media-ingest.metadata-update-failure-paths',
 			array() === $failures,
-			array( 'failures' => array_slice( $failures, 0, 6 ) )
+			array(
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
 		);
 	}
 
@@ -512,7 +1086,7 @@ final class MediaIngestSurface {
 		);
 	}
 
-	private static function assert_successful_attachment( array &$failures, array $case, $attachment_id, string $source_path, int $parent_id, array $before, array $after, ?string $upload_root ): void {
+	private static function assert_successful_attachment( array &$failures, array $case, $attachment_id, string $source_path, int $parent_id, array $before, array $after, ?string $upload_root ): ?array {
 		if ( ! is_int( $attachment_id ) || $attachment_id <= 0 ) {
 			self::collect_failure(
 				$failures,
@@ -523,13 +1097,16 @@ final class MediaIngestSurface {
 					'result' => self::describe_result( $attachment_id ),
 				)
 			);
-			return;
+			return null;
 		}
 
 		$post          = \get_post( $attachment_id );
 		$attached_file = \get_attached_file( $attachment_id );
 		$metadata      = \wp_get_attachment_metadata( $attachment_id );
 		$basename      = is_string( $attached_file ) ? basename( $attached_file ) : '';
+		$extension     = strtolower( pathinfo( $basename, PATHINFO_EXTENSION ) );
+		$is_image      = str_starts_with( (string) $case['mime'], 'image/' );
+		$is_text       = 'text/plain' === $case['mime'];
 
 		self::collect_failure(
 			$failures,
@@ -566,12 +1143,14 @@ final class MediaIngestSurface {
 				&& false === strpbrk( $basename, "/\\" )
 				&& false === strpos( $basename, chr( 0 ) )
 				&& $basename === \sanitize_file_name( $basename )
+				&& ( $case['expectedExtension'] ?? $extension ) === $extension
 				&& ! file_exists( $source_path ),
-			'attached file is moved into the filtered upload root with a sanitized basename',
+			'attached file is moved into the filtered upload root with a sanitized expected basename',
 			array(
 				'case'         => self::case_summary( $case ),
 				'attachedFile' => $attached_file,
 				'uploadRoot'   => $upload_root,
+				'extension'    => $extension,
 				'sourceExists' => file_exists( $source_path ),
 			)
 		);
@@ -592,6 +1171,32 @@ final class MediaIngestSurface {
 
 		self::collect_failure(
 			$failures,
+			is_array( $metadata )
+				&& ( ! $is_text || ( ! isset( $metadata['width'], $metadata['height'], $metadata['sizes'] ) ) )
+				&& ( ! $is_image || ( isset( $metadata['width'], $metadata['height'] ) && (int) $metadata['width'] > 0 && (int) $metadata['height'] > 0 ) ),
+			'image and non-image metadata helpers stay on their expected boundaries',
+			array(
+				'case'     => self::case_summary( $case ),
+				'isImage'  => $is_image,
+				'metadata' => $metadata,
+			)
+		);
+
+		if ( isset( $case['forbiddenPostId'] ) ) {
+			self::collect_failure(
+				$failures,
+				$post instanceof \WP_Post && (int) $post->ID !== (int) $case['forbiddenPostId'],
+				'media_handle_* unsets postData ID instead of overwriting an existing attachment ID',
+				array(
+					'case'            => self::case_summary( $case ),
+					'attachmentId'    => $post instanceof \WP_Post ? $post->ID : null,
+					'forbiddenPostId' => $case['forbiddenPostId'],
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
 			( $after['posts'] ?? 0 ) === ( $before['posts'] ?? 0 ) + 1
 				&& ( $after['post_meta'] ?? 0 ) >= ( $before['post_meta'] ?? 0 ) + 2,
 			'successful ingest creates one attachment row and attachment metadata rows',
@@ -601,50 +1206,382 @@ final class MediaIngestSurface {
 				'after'  => $after,
 			)
 		);
+
+		return array(
+			'attachmentId'             => $attachment_id,
+			'basename'                 => $basename,
+			'case'                     => self::case_summary( $case ),
+			'expectedBasenameContains' => $case['expectedBasenameContains'] ?? null,
+			'expectedExtension'        => $case['expectedExtension'] ?? null,
+			'extension'                => $extension,
+			'fileExists'               => is_string( $attached_file ) && file_exists( $attached_file ),
+			'metadataKeys'             => is_array( $metadata ) ? array_keys( $metadata ) : array(),
+			'mime'                     => $post instanceof \WP_Post ? $post->post_mime_type : null,
+			'postDate'                 => $post instanceof \WP_Post ? $post->post_date : null,
+			'postParent'               => $post instanceof \WP_Post ? (int) $post->post_parent : null,
+			'postTitle'                => $post instanceof \WP_Post ? $post->post_title : null,
+			'sourceExists'             => file_exists( $source_path ),
+			'withinUploadRoot'         => is_string( $attached_file ) && null !== $upload_root && self::path_starts_with( $attached_file, $upload_root ),
+		);
+	}
+
+	private static function attachment_basenames_are_unique( array $attachments ): bool {
+		$basenames = array();
+		foreach ( $attachments as $attachment ) {
+			$basename = $attachment['basename'] ?? null;
+			if ( ! is_string( $basename ) || '' === $basename ) {
+				return false;
+			}
+
+			$basenames[] = $basename;
+		}
+
+		return count( $basenames ) === count( array_unique( $basenames ) );
+	}
+
+	private static function success_attachment_expectations_hold( array $attachments ): bool {
+		foreach ( $attachments as $attachment ) {
+			if (
+				true !== ( $attachment['fileExists'] ?? null )
+				|| false !== ( $attachment['sourceExists'] ?? null )
+				|| true !== ( $attachment['withinUploadRoot'] ?? null )
+				|| ! is_string( $attachment['mime'] ?? null )
+			) {
+				return false;
+			}
+
+			if (
+				isset( $attachment['expectedExtension'] )
+				&& $attachment['expectedExtension'] !== ( $attachment['extension'] ?? null )
+			) {
+				return false;
+			}
+
+			if (
+				isset( $attachment['expectedBasenameContains'] )
+				&& (
+					! is_string( $attachment['basename'] ?? null )
+					|| ! str_contains( $attachment['basename'], (string) $attachment['expectedBasenameContains'] )
+				)
+			) {
+				return false;
+			}
+
+			if (
+				! is_array( $attachment['metadataKeys'] ?? null )
+				|| ! in_array( 'component_fuzz_ingest', $attachment['metadataKeys'], true )
+				|| ! in_array( 'filesize', $attachment['metadataKeys'], true )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function events_include_context( array $events, string $context ): bool {
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $context === ( $event['context'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function upload_events_within_root( array $events, string $upload_root ): bool {
+		if ( '' === $upload_root || array() === $events ) {
+			return false;
+		}
+
+		foreach ( $events as $event ) {
+			if (
+				! is_array( $event )
+				|| ! is_string( $event['path'] ?? null )
+				|| ! self::path_starts_with( $event['path'], $upload_root )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function list_files_recursive( string $root ): array {
+		if ( ! is_dir( $root ) ) {
+			return array();
+		}
+
+		$files    = array();
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::SELF_FIRST
+		);
+
+		foreach ( $iterator as $item ) {
+			if ( ! $item->isFile() ) {
+				continue;
+			}
+
+			$path       = wp_normalize_path( $item->getPathname() );
+			$prefix     = trailingslashit( wp_normalize_path( $root ) );
+			$files[]    = str_starts_with( $path, $prefix ) ? substr( $path, strlen( $prefix ) ) : $path;
+		}
+
+		sort( $files, SORT_STRING );
+		return $files;
+	}
+
+	private static function is_upload_error( $result ): bool {
+		if ( \is_wp_error( $result ) ) {
+			return true;
+		}
+
+		return is_int( $result ) && $result <= 0;
+	}
+
+	private static function tracked_paths_absent( array $paths ): bool {
+		foreach ( $paths as $path ) {
+			if ( is_string( $path ) && '' !== $path && file_exists( $path ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function successful_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
-			self::png_success_case( $ctx->fork( 'upload-png' ), 'upload' ),
-			self::text_success_case( $ctx->fork( 'sideload-text' ), 'sideload' ),
-			self::text_success_case( $ctx->fork( 'upload-text' ), 'upload' ),
-			self::png_success_case( $ctx->fork( 'sideload-png' ), 'sideload' ),
+			self::png_success_case( $ctx->fork( 'upload-png-corrected' ), 'upload', 'png-corrected-extension', 'JPG' ),
+			self::text_success_case( $ctx->fork( 'sideload-text' ), 'sideload', 'sideload-text' ),
+			self::text_success_case( $ctx->fork( 'upload-text-postdata' ), 'upload', 'upload-text-postdata' ),
+			self::png_success_case( $ctx->fork( 'sideload-png-date' ), 'sideload', 'sideload-png-post-date', 'png' ),
+			self::text_success_case( $ctx->fork( 'upload-uppercase-text' ), 'upload', 'upload-uppercase-text', 'TXT' ),
+			self::text_success_case( $ctx->fork( 'sideload-collision-one' ), 'sideload', 'sideload-collision-one', 'txt', 'component fuzz collision.txt' ),
+			self::text_success_case( $ctx->fork( 'sideload-collision-two' ), 'sideload', 'sideload-collision-two', 'txt', 'component fuzz collision.txt' ),
+			self::png_success_case( $ctx->fork( 'upload-dimension-like' ), 'upload', 'upload-dimension-like-image', 'PNG', 'component-fuzz-150x150.PNG' ),
 		);
 
 		$cases[2]['postData'] = array(
 			'ID'         => 987000 + $ctx->iteration(),
 			'post_title' => 'Component fuzz text ' . $ctx->identifier( 3, 8 ),
 		);
+		$cases[2]['forbiddenPostId'] = $cases[2]['postData']['ID'];
 		$cases[3]['postData'] = array(
 			'post_date' => sprintf( '2026-%02d-%02d 10:00:00', $ctx->int( 1, 12 ), $ctx->int( 1, 28 ) ),
 		);
 		$cases[3]['desc']     = 'Sideloaded image ' . $ctx->identifier( 3, 8 );
+		$cases[5]['collisionGroup'] = 'text-collision';
+		$cases[6]['collisionGroup'] = 'text-collision';
+		$cases[7]['expectedBasenameContains'] = '-1.';
 
 		return array_slice( $cases, 0, self::SUCCESS_CASES );
 	}
 
-	private static function png_success_case( \ComponentFuzz\FuzzContext $ctx, string $mode ): array {
-		$filename = self::client_filename( $ctx, $ctx->choice( array( 'png', 'jpg' ) ) );
+	private static function png_success_case( \ComponentFuzz\FuzzContext $ctx, string $mode, string $label, string $extension, ?string $filename = null ): array {
+		$filename = $filename ?? self::client_filename( $ctx, $extension );
 
 		return array(
-			'label'       => $mode . '-png',
-			'mode'        => $mode,
-			'filename'    => $filename,
-			'fixtureName' => 'one-pixel.png',
-			'mime'        => 'image/png',
-			'bytes'       => self::png_bytes(),
+			'caseSeed'          => $ctx->seed(),
+			'expectedExtension' => 'png',
+			'fixtureName'       => 'one-pixel.png',
+			'filename'          => $filename,
+			'label'             => $label,
+			'mime'              => 'image/png',
+			'mode'              => $mode,
+			'scenario'          => 'png',
+			'bytes'             => self::png_bytes(),
 		);
 	}
 
-	private static function text_success_case( \ComponentFuzz\FuzzContext $ctx, string $mode ): array {
+	private static function text_success_case( \ComponentFuzz\FuzzContext $ctx, string $mode, string $label, string $extension = 'txt', ?string $filename = null ): array {
 		return array(
-			'label'       => $mode . '-text',
-			'mode'        => $mode,
-			'filename'    => self::client_filename( $ctx, 'txt' ),
-			'fixtureName' => 'notes.txt',
-			'mime'        => 'text/plain',
-			'bytes'       => "component fuzz text\n" . $ctx->ascii( 4, 48 ),
+			'caseSeed'          => $ctx->seed(),
+			'expectedExtension' => 'txt',
+			'fixtureName'       => 'notes.txt',
+			'filename'          => $filename ?? self::client_filename( $ctx, $extension ),
+			'label'             => $label,
+			'mime'              => 'text/plain',
+			'mode'              => $mode,
+			'scenario'          => 'text',
+			'bytes'             => "component fuzz text\n" . $ctx->ascii( 4, 48 ),
 		);
+	}
+
+	private static function filename_boundary_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$raw_cases = array(
+			array( 'label' => 'png-basic', 'filename' => 'component fuzz image.PNG', 'ext' => 'png', 'type' => 'image/png' ),
+			array( 'label' => 'jpg-path', 'filename' => '../escape photo.jpg', 'ext' => 'jpg', 'type' => 'image/jpeg' ),
+			array( 'label' => 'jpeg-backslash', 'filename' => '..\\escape photo.JPEG', 'ext' => 'jpeg', 'type' => 'image/jpeg' ),
+			array( 'label' => 'text-space', 'filename' => 'notes final.txt', 'ext' => 'txt', 'type' => 'text/plain' ),
+			array( 'label' => 'text-alias', 'filename' => 'notes.text', 'ext' => 'text', 'type' => 'text/plain' ),
+			array( 'label' => 'pdf-uppercase', 'filename' => 'report.PDF', 'ext' => 'pdf', 'type' => 'application/pdf' ),
+			array( 'label' => 'php-disallowed', 'filename' => 'payload.php', 'ext' => false, 'type' => false ),
+			array( 'label' => 'svg-disallowed', 'filename' => 'vector.svg', 'ext' => false, 'type' => false ),
+			array( 'label' => 'double-extension-disallowed', 'filename' => 'archive.tar.gz', 'ext' => false, 'type' => false ),
+			array( 'label' => 'no-extension', 'filename' => 'no extension', 'ext' => false, 'type' => false ),
+		);
+
+		$extensions = array( 'png', 'jpg', 'jpeg', 'txt', 'text', 'pdf', 'php', 'svg', 'gz', '' );
+		for ( $i = count( $raw_cases ); $i < self::FILENAME_CASES; ++$i ) {
+			$case_ctx  = $ctx->fork( 'filename-' . $i );
+			$extension = $case_ctx->choice( $extensions );
+			$filename  = self::client_filename( $case_ctx, $extension );
+			$map       = array(
+				'png'  => array( 'png', 'image/png' ),
+				'jpg'  => array( 'jpg', 'image/jpeg' ),
+				'jpeg' => array( 'jpeg', 'image/jpeg' ),
+				'txt'  => array( 'txt', 'text/plain' ),
+				'text' => array( 'text', 'text/plain' ),
+				'pdf'  => array( 'pdf', 'application/pdf' ),
+			);
+
+			$raw_cases[] = array(
+				'label'    => 'generated-' . $i,
+				'filename' => $filename,
+				'ext'      => $map[ strtolower( $extension ) ][0] ?? false,
+				'type'     => $map[ strtolower( $extension ) ][1] ?? false,
+			);
+		}
+
+		return array_map(
+			static function ( array $case ) use ( $ctx ): array {
+				return array(
+					'label'        => $case['label'],
+					'caseSeed'     => $ctx->seed(),
+					'filename'     => $case['filename'],
+					'allowed'      => false !== $case['ext'],
+					'expectedExt'  => $case['ext'],
+					'expectedType' => $case['type'],
+				);
+			},
+			array_slice( $raw_cases, 0, self::FILENAME_CASES )
+		);
+	}
+
+	private static function check_unique_filename_boundaries( array &$failures, string $collision_dir ): void {
+		$names = array(
+			'component fuzz upload.txt',
+			'component fuzz upload-1.txt',
+			'image-150x150.png',
+			'image-150x150-1.png',
+		);
+
+		foreach ( $names as $name ) {
+			$path = $collision_dir . DIRECTORY_SEPARATOR . \sanitize_file_name( $name );
+			if ( ! file_exists( $path ) ) {
+				file_put_contents( $path, 'existing' );
+			}
+		}
+
+		$text_unique = \wp_unique_filename( $collision_dir, '../component fuzz upload.txt' );
+		$image_unique = \wp_unique_filename( $collision_dir, 'image-150x150.png' );
+
+		self::collect_failure(
+			$failures,
+			'' !== $text_unique
+				&& 'component-fuzz-upload.txt' !== $text_unique
+				&& false === strpbrk( $text_unique, "/\\" )
+				&& ! file_exists( $collision_dir . DIRECTORY_SEPARATOR . $text_unique )
+				&& str_ends_with( $text_unique, '.txt' )
+				&& '' !== $image_unique
+				&& 'image-150x150.png' !== $image_unique
+				&& false === strpbrk( $image_unique, "/\\" )
+				&& ! file_exists( $collision_dir . DIRECTORY_SEPARATOR . $image_unique )
+				&& str_ends_with( $image_unique, '.png' ),
+			'wp_unique_filename avoids sanitized and dimension-like collisions',
+			array(
+				'textUnique'  => $text_unique,
+				'imageUnique' => $image_unique,
+				'existing'    => $names,
+			)
+		);
+	}
+
+	private static function assert_direct_handle_success( array &$failures, array $case, $result, ?string $source_path, ?string $upload_root, string $context, bool $used_pre_move ): void {
+		$file = is_array( $result ) ? ( $result['file'] ?? null ) : null;
+		$url  = is_array( $result ) ? ( $result['url'] ?? null ) : null;
+		$type = is_array( $result ) ? ( $result['type'] ?? null ) : null;
+
+		self::collect_failure(
+			$failures,
+			is_array( $result )
+				&& is_string( $file )
+				&& file_exists( $file )
+				&& null !== $upload_root
+				&& self::path_starts_with( $file, $upload_root )
+				&& is_string( $url )
+				&& str_starts_with( $url, 'http://example.test/component-fuzz-media-ingest/' )
+				&& 'text/plain' === $type
+				&& false === strpbrk( basename( $file ), "/\\" )
+				&& basename( $file ) === \sanitize_file_name( basename( $file ) )
+				&& ( null === $source_path || ! file_exists( $source_path ) ),
+			"wp_handle_{$context} returns a local sanitized text upload" . ( $used_pre_move ? ' through pre_move_uploaded_file' : '' ),
+			array(
+				'case'       => self::case_summary( $case ),
+				'result'     => self::describe_result( $result ),
+				'sourcePath' => $source_path,
+				'sourceGone' => null === $source_path || ! file_exists( $source_path ),
+				'uploadRoot' => $upload_root,
+			)
+		);
+	}
+
+	private static function rejection_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'       => 'disallowed-php-extension',
+				'mode'        => 'upload',
+				'filename'    => 'payload.php',
+				'fixtureName' => 'payload.php',
+				'mime'        => 'application/x-php',
+				'bytes'       => "<?php echo 'no';\n",
+			),
+			array(
+				'label'       => 'upload-error',
+				'mode'        => 'upload',
+				'filename'    => 'too-large.txt',
+				'fixtureName' => 'too-large.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => 'too large',
+				'error'       => UPLOAD_ERR_INI_SIZE,
+			),
+			array(
+				'label'              => 'missing-temp-upload',
+				'mode'               => 'upload',
+				'filename'           => 'missing.txt',
+				'fixtureName'        => 'missing.txt',
+				'mime'               => 'text/plain',
+				'bytes'              => 'missing',
+				'deleteBeforeHandle' => true,
+			),
+			array(
+				'label'       => 'disallowed-sideload-svg',
+				'mode'        => 'sideload',
+				'filename'    => 'vector.svg',
+				'fixtureName' => 'vector.svg',
+				'mime'        => 'image/svg+xml',
+				'bytes'       => '<svg></svg>',
+			),
+			array(
+				'label'       => 'empty-extension',
+				'mode'        => 'sideload',
+				'filename'    => 'no-extension',
+				'fixtureName' => 'no-extension',
+				'mime'        => 'application/octet-stream',
+				'bytes'       => 'bytes',
+			),
+			array(
+				'label'       => 'double-extension-gz',
+				'mode'        => 'sideload',
+				'filename'    => 'archive.tar.gz',
+				'fixtureName' => 'archive.tar.gz',
+				'mime'        => 'application/gzip',
+				'bytes'       => 'gzip',
+			),
+		);
+
+		return array_slice( $cases, 0, self::REJECTION_CASES );
 	}
 
 	private static function file_array( array $case, string $source_path ): array {
@@ -652,7 +1589,7 @@ final class MediaIngestSurface {
 			'name'     => $case['filename'],
 			'type'     => $case['mime'],
 			'tmp_name' => $source_path,
-			'error'    => UPLOAD_ERR_OK,
+			'error'    => $case['error'] ?? UPLOAD_ERR_OK,
 			'size'     => file_exists( $source_path ) ? filesize( $source_path ) : strlen( $case['bytes'] ),
 		);
 	}
@@ -803,6 +1740,93 @@ final class MediaIngestSurface {
 
 		$_FILES = $snapshot['files'];
 		$_POST  = $snapshot['post'];
+	}
+
+	private static function restoration_probe( array $snapshot ): array {
+		$failures = array();
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				$failures[] = array(
+					'name'           => 'global-existence',
+					'global'         => $name,
+					'expectedExists' => (bool) $entry['exists'],
+					'actualExists'   => $exists,
+				);
+				continue;
+			}
+
+			if ( $entry['exists'] && self::state_signature( $entry['value'] ) !== self::state_signature( $GLOBALS[ $name ] ) ) {
+				$failures[] = array(
+					'name'     => 'global-signature',
+					'global'   => $name,
+					'expected' => self::state_signature( $entry['value'] ),
+					'actual'   => self::state_signature( $GLOBALS[ $name ] ),
+				);
+			}
+		}
+
+		foreach ( $snapshot['server'] as $name => $entry ) {
+			$exists = array_key_exists( $name, $_SERVER );
+			if ( (bool) $entry['exists'] !== $exists || ( $entry['exists'] && $_SERVER[ $name ] !== $entry['value'] ) ) {
+				$failures[] = array(
+					'name'           => 'server-value',
+					'server'         => $name,
+					'expectedExists' => (bool) $entry['exists'],
+					'actualExists'   => $exists,
+					'expected'       => $entry['value'],
+					'actual'         => $_SERVER[ $name ] ?? null,
+				);
+			}
+		}
+
+		if ( $_FILES !== $snapshot['files'] ) {
+			$failures[] = array( 'name' => 'files-superglobal' );
+		}
+
+		if ( $_POST !== $snapshot['post'] ) {
+			$failures[] = array( 'name' => 'post-superglobal' );
+		}
+
+		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$options = $GLOBALS['wpdb']->component_fuzz_get_options();
+			if ( $options !== $snapshot['options'] ) {
+				$failures[] = array(
+					'name'     => 'wpdb-options',
+					'expected' => array_keys( $snapshot['options'] ),
+					'actual'   => array_keys( $options ),
+				);
+			}
+		}
+
+		return array(
+			'restored'      => array() === $failures,
+			'failures'      => array_slice( $failures, 0, 8 ),
+			'contentCounts' => self::content_counts(),
+		);
+	}
+
+	private static function state_signature( $value ): array {
+		if ( is_array( $value ) ) {
+			return array(
+				'type'  => 'array',
+				'count' => count( $value ),
+				'keys'  => array_slice( array_map( 'strval', array_keys( $value ) ), 0, 20 ),
+			);
+		}
+
+		if ( is_object( $value ) ) {
+			return array(
+				'type'  => 'object',
+				'class' => get_class( $value ),
+			);
+		}
+
+		return array(
+			'type'  => gettype( $value ),
+			'value' => is_scalar( $value ) || null === $value ? $value : null,
+		);
 	}
 
 	private static function content_counts(): array {
