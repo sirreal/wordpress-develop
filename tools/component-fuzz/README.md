@@ -239,7 +239,8 @@ database, network requests, or a configured site.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
   handoff, array and string header parsing, newline-delimited attachments and
-  embeds, success/failure actions, and emoji email body staticization.
+  embeds, reusable mailer cleanup/reset behavior, success/failure actions, and
+  emoji email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,

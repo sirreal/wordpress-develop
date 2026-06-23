@@ -29,6 +29,7 @@ final class MailSurface {
 			$rows[] = self::check_pre_wp_mail_short_circuit( $ctx->fork( 'pre' ) );
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
 			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
+			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
 			$rows[] = self::check_phpmailer_failure_action( $ctx->fork( 'failure' ) );
 			$rows[] = self::check_staticize_emoji_for_email( $ctx->fork( 'emoji' ) );
 		} catch ( \Throwable $e ) {
@@ -347,6 +348,87 @@ final class MailSurface {
 		);
 
 		return self::row( $ctx, 'mail.phpmailer.string-header-and-path-parsing', $failures );
+	}
+
+	private static function check_phpmailer_reuse_resets_message_state( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {
+		$failures = array();
+
+		if ( null === $temp_root ) {
+			return $ctx->skip( 'mail.phpmailer.reuse-resets-message-state', 'Could not create temporary attachment root.' );
+		}
+
+		$attachment = $temp_root . DIRECTORY_SEPARATOR . 'reuse-attachment-' . $ctx->identifier( 4, 8 ) . '.txt';
+		$embed      = $temp_root . DIRECTORY_SEPARATOR . 'reuse-embed-' . $ctx->identifier( 4, 8 ) . '.png';
+		file_put_contents( $attachment, 'first attachment ' . $ctx->text( 0, 16 ) );
+		file_put_contents( $embed, "\x89PNG\r\n\x1A\nreuse-" . $ctx->identifier( 4, 8 ) );
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']    = self::new_mailer();
+
+		$first_subject  = 'Reuse First ' . $ctx->identifier( 4, 8 );
+		$second_subject = 'Reuse Second ' . $ctx->identifier( 4, 8 );
+		$first_result   = \wp_mail(
+			array( 'First Recipient <first@example.test>' ),
+			$first_subject,
+			'<p>first body</p>',
+			array(
+				'From: Reuse Sender <reuse-sender@example.test>',
+				'Cc: Reuse Copy <reuse-copy@example.test>',
+				'Bcc: Reuse Blind <reuse-blind@example.test>',
+				'Reply-To: Reuse Reply <reuse-reply@example.test>',
+				'Content-Type: text/html; charset=UTF-8',
+				'X-Reuse-Token: first',
+			),
+			array( 'reuse-first.txt' => $attachment ),
+			array( 'reuse-image' => $embed )
+		);
+
+		$GLOBALS['phpmailer']->Encoding = \PHPMailer\PHPMailer\PHPMailer::ENCODING_7BIT;
+		$second_result                  = \wp_mail(
+			'second@example.test',
+			$second_subject,
+			'second body',
+			array(),
+			array(),
+			array()
+		);
+
+		$first  = MailSurfaceMailer::$sent[0] ?? array();
+		$second = MailSurfaceMailer::$sent[1] ?? array();
+
+		self::collect_failure(
+			$failures,
+			true === $first_result
+				&& true === $second_result
+				&& 2 === count( MailSurfaceMailer::$sent )
+				&& self::addresses_include( $first['to'] ?? array(), 'first@example.test', 'First Recipient' )
+				&& self::addresses_include( $first['cc'] ?? array(), 'reuse-copy@example.test', 'Reuse Copy' )
+				&& self::addresses_include( $first['bcc'] ?? array(), 'reuse-blind@example.test', 'Reuse Blind' )
+				&& self::addresses_include( $first['replyTo'] ?? array(), 'reuse-reply@example.test', 'Reuse Reply' )
+				&& self::attachments_include( $first['attachments'] ?? array(), 'reuse-first.txt', 'attachment' )
+				&& self::attachments_include( $first['attachments'] ?? array(), basename( $embed ), 'inline', 'reuse-image' )
+				&& self::custom_headers_include( $first['customHeaders'] ?? array(), 'X-Reuse-Token' )
+				&& self::addresses_include( $second['to'] ?? array(), 'second@example.test', '' )
+				&& array() === ( $second['cc'] ?? null )
+				&& array() === ( $second['bcc'] ?? null )
+				&& array() === ( $second['replyTo'] ?? null )
+				&& array() === ( $second['attachments'] ?? null )
+				&& array() === ( $second['customHeaders'] ?? null )
+				&& $second_subject === ( $second['subject'] ?? null )
+				&& 'second body' === ( $second['body'] ?? null )
+				&& 'text/plain' === ( $second['contentType'] ?? null )
+				&& \PHPMailer\PHPMailer\PHPMailer::ENCODING_8BIT === ( $second['encoding'] ?? null ),
+			'reusing the same PHPMailer instance clears stale recipients, headers, attachments, embeds, body, and encoding',
+			array(
+				'firstResult'  => $first_result,
+				'secondResult' => $second_result,
+				'first'        => self::describe_value( $first ),
+				'second'       => self::describe_value( $second ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.reuse-resets-message-state', $failures );
 	}
 
 	private static function check_phpmailer_failure_action( \ComponentFuzz\FuzzContext $ctx ): array {
