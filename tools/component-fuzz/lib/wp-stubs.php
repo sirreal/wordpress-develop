@@ -893,6 +893,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'comment_ID', 'comment_approved' ) );
 			}
 
+			if ( preg_match( '/SELECT\s+comment_ID\s*,\s*comment_agent\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'comment_ID', 'comment_agent' ) );
+			}
+
 			if ( preg_match( '/SELECT\s+comment_ID\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'comment_ID' ) );
 			}

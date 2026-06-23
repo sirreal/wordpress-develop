@@ -110,6 +110,10 @@ database, network requests, or a configured site.
   attribute insertion, and loading optimization attributes.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
+- `import-diff`: importer registry and upload-form helpers, `WP_Importer`
+  imported comment lookup against the in-memory stub, `wp_text_diff()`
+  rendering/escaping/normalization, and `WP_Error` export/merge/remove
+  transfer semantics.
 - `interactivity`: server-side directive processing for context, bind, class,
   style, text, and each directives, unsupported/unbalanced HTML fallbacks,
   derived context/element helpers, and state/config merge serialization.
@@ -280,6 +284,10 @@ The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
 redirects, attachment-page redirects, and paths that call `wp_redirect()` and
 `exit` are intentionally avoided.
+The `import-diff` surface covers importer registry, importer form, imported
+comment lookup, text diff, and error-transfer helpers without invoking WXR
+`export_wp()` headers, remote importer discovery, upload handling, or importer
+dispatch screens.
 The `media-ingest` surface uses local temp files only, routes uploads through a
 filtered temp upload root, and passes a custom upload action for
 `media_handle_upload()` so CLI fixtures use core's readable-file branch instead
