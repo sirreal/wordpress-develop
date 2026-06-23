@@ -43,6 +43,8 @@ final class NavigationSurface {
 			$rows[] = self::check_context_classes( $ctx );
 			$rows[] = self::check_tree_walker_output( $ctx );
 			$rows[] = self::check_wp_nav_menu_rendering( $ctx );
+			$rows[] = self::check_wp_nav_menu_short_circuit_and_fallback( $ctx );
+			$rows[] = self::check_wp_nav_menu_filter_pipeline( $ctx );
 			$rows[] = self::check_depth_class_contracts( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -442,6 +444,312 @@ final class NavigationSurface {
 		);
 	}
 
+	private static function check_wp_nav_menu_short_circuit_and_fallback( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$short_output  = '<nav class="cfz-pre">' . esc_html( $ctx->text( 0, 24 ) ) . '</nav>';
+		$pre_filter    = static function ( $output, object $args ) use ( $short_output ) {
+			return 'cfz-pre' === $args->menu_class ? $short_output : $output;
+		};
+		$fallback_seen = array();
+		$fallback      = static function ( array $args ) use ( &$fallback_seen ): string {
+			$fallback_seen[] = $args;
+			return '<fallback data-menu="' . esc_attr( (string) ( $args['menu'] ?? '' ) ) . '"></fallback>';
+		};
+
+		\add_filter( 'pre_wp_nav_menu', $pre_filter, 10, 2 );
+		try {
+			$returned = \wp_nav_menu(
+				array(
+					'menu'       => 'missing-' . $ctx->identifier( 4, 10 ),
+					'echo'       => false,
+					'menu_class' => 'cfz-pre',
+				)
+			);
+			$captured = self::capture_echo(
+				static function () use ( $ctx ): void {
+					\wp_nav_menu(
+						array(
+							'menu'       => 'missing-' . $ctx->identifier( 4, 10 ),
+							'echo'       => true,
+							'menu_class' => 'cfz-pre',
+						)
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'pre_wp_nav_menu', $pre_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$short_output === $returned
+				&& $short_output === $captured,
+			'pre_wp_nav_menu short-circuits both return and echo modes',
+			array(
+				'returned' => self::describe_string( (string) $returned ),
+				'captured' => self::describe_string( $captured ),
+			)
+		);
+
+		$fallback_result = \wp_nav_menu(
+			array(
+				'menu'         => 'missing-' . $ctx->identifier( 4, 10 ),
+				'echo'         => false,
+				'fallback_cb'  => $fallback,
+				'item_spacing' => 'invalid',
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $fallback_result )
+				&& str_starts_with( $fallback_result, '<fallback ' )
+				&& 1 === count( $fallback_seen )
+				&& 'preserve' === ( $fallback_seen[0]['item_spacing'] ?? null )
+				&& false === \has_filter( 'pre_wp_nav_menu', $pre_filter ),
+			'missing menu invokes fallback callback with normalized args only after pre-filter cleanup',
+			array(
+				'fallbackResult' => self::describe_string( (string) $fallback_result ),
+				'fallbackSeen'   => $fallback_seen,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'navigation.wp-nav-menu.short-circuit-and-fallback',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_wp_nav_menu_filter_pipeline( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$menu     = self::menu_object( $ctx->fork( 'pipeline-menu' ), 61 );
+		$items    = self::menu_items( $ctx->fork( 'pipeline-items' ), 'https://example.test/current-pipeline' );
+		$menu_id  = 'cfz-pipeline-' . substr( hash( 'crc32b', $menu->slug . (string) $ctx->seed() ), 0, 8 );
+		$seen     = array(
+			'orders'       => array(),
+			'argDepths'    => array(),
+			'classDepths'  => array(),
+			'linkDepths'   => array(),
+			'subDepths'    => array(),
+			'finalFilters' => array(),
+		);
+
+		self::$menus[ $menu->term_id ]      = $menu;
+		self::$menu_items[ $menu->term_id ] = $items;
+
+		$_SERVER['HTTP_HOST']   = 'example.test';
+		$_SERVER['REQUEST_URI'] = '/current-pipeline';
+
+		if ( ! \taxonomy_exists( 'nav_menu' ) ) {
+			\register_taxonomy( 'nav_menu', 'nav_menu_item', array( 'public' => false ) );
+		}
+
+		$allowed_tags = static function ( array $tags ): array {
+			$tags[] = 'section';
+			return array_values( array_unique( $tags ) );
+		};
+		$objects_filter = static function ( array $sorted_menu_items, object $args ) use ( &$seen ): array {
+			unset( $args );
+			$seen['orders'][] = array_values(
+				array_map(
+					static fn( object $item ): int => (int) $item->menu_order,
+					$sorted_menu_items
+				)
+			);
+			return $sorted_menu_items;
+		};
+		$item_args_filter = static function ( object $args, object $menu_item, int $depth ) use ( &$seen ): object {
+			unset( $menu_item );
+			$seen['argDepths'][] = $depth;
+			$args->link_before   = '<strong>';
+			$args->link_after    = '</strong>';
+			return $args;
+		};
+		$css_filter = static function ( array $classes, object $menu_item, object $args, int $depth ) use ( &$seen ): array {
+			unset( $menu_item, $args );
+			$seen['classDepths'][] = $depth;
+			$classes[]             = 'cfz-depth-' . $depth;
+			$classes[]             = 'cfz-class-"escaped"';
+			return $classes;
+		};
+		$id_filter = static function ( string $id, object $menu_item ): string {
+			unset( $id );
+			return 'cfz-item-' . $menu_item->ID . '-"<>';
+		};
+		$item_atts_filter = static function ( array $atts, object $menu_item, object $args, int $depth ): array {
+			unset( $menu_item, $args );
+			$atts['data-cfz-li']    = 'li-"<>-' . $depth;
+			$atts['data-cfz-empty'] = '';
+			return $atts;
+		};
+		$title_filter = static function ( string $title, object $menu_item, object $args, int $depth ): string {
+			unset( $title, $args );
+			return 'Filtered ' . $depth . ' #' . $menu_item->ID;
+		};
+		$link_atts_filter = static function ( array $atts, object $menu_item, object $args, int $depth ) use ( &$seen ): array {
+			unset( $menu_item, $args );
+			$seen['linkDepths'][]    = $depth;
+			$atts['data-cfz-link']   = 'link-"<>-' . $depth;
+			$atts['data-cfz-false']  = false;
+			$atts['aria-current']    = $atts['aria-current'] ?? '';
+			return $atts;
+		};
+		$submenu_class_filter = static function ( array $classes, object $args, int $depth ) use ( &$seen ): array {
+			unset( $args );
+			$seen['subDepths'][] = $depth;
+			$classes[]           = 'cfz-submenu-depth-' . $depth;
+			return $classes;
+		};
+		$submenu_atts_filter = static function ( array $atts, object $args, int $depth ): array {
+			unset( $args );
+			$atts['data-cfz-submenu'] = 'submenu-depth-' . $depth;
+			return $atts;
+		};
+		$start_el_filter = static function ( string $item_output, object $menu_item, int $depth, object $args ): string {
+			unset( $menu_item, $args );
+			return $item_output . '<!--start-depth-' . $depth . '-->';
+		};
+		$items_filter = static function ( string $html, object $args ) use ( &$seen ): string {
+			unset( $args );
+			$seen['finalFilters'][] = 'items';
+			return $html . '<!--global-items-->';
+		};
+		$specific_items_filter = static function ( string $html, object $args ) use ( &$seen ): string {
+			unset( $args );
+			$seen['finalFilters'][] = 'specific-items';
+			return $html . '<!--specific-items-->';
+		};
+		$menu_filter = static function ( string $html, object $args ) use ( &$seen ): string {
+			unset( $args );
+			$seen['finalFilters'][] = 'menu';
+			return $html . '<!--final-menu-->';
+		};
+
+		\add_filter( 'wp_nav_menu_container_allowedtags', $allowed_tags, 10, 1 );
+		\add_filter( 'wp_nav_menu_objects', $objects_filter, 10, 2 );
+		\add_filter( 'nav_menu_item_args', $item_args_filter, 10, 3 );
+		\add_filter( 'nav_menu_css_class', $css_filter, 10, 4 );
+		\add_filter( 'nav_menu_item_id', $id_filter, 10, 2 );
+		\add_filter( 'nav_menu_item_attributes', $item_atts_filter, 10, 4 );
+		\add_filter( 'nav_menu_item_title', $title_filter, 10, 4 );
+		\add_filter( 'nav_menu_link_attributes', $link_atts_filter, 10, 4 );
+		\add_filter( 'nav_menu_submenu_css_class', $submenu_class_filter, 10, 3 );
+		\add_filter( 'nav_menu_submenu_attributes', $submenu_atts_filter, 10, 3 );
+		\add_filter( 'walker_nav_menu_start_el', $start_el_filter, 10, 4 );
+		\add_filter( 'wp_nav_menu_items', $items_filter, 10, 2 );
+		\add_filter( 'wp_nav_menu_' . $menu->slug . '_items', $specific_items_filter, 10, 2 );
+		\add_filter( 'wp_nav_menu', $menu_filter, 10, 2 );
+
+		try {
+			$output = \wp_nav_menu(
+				array(
+					'menu'            => $menu->term_id,
+					'echo'            => false,
+					'fallback_cb'     => false,
+					'container'       => 'section',
+					'container_class' => 'cfz-container "quoted"',
+					'container_id'    => 'cfz-container-"quoted"',
+					'menu_class'      => 'cfz-menu "quoted"',
+					'menu_id'         => $menu_id,
+					'item_spacing'    => 'discard',
+					'depth'           => 0,
+				)
+			);
+			$invalid_container_output = \wp_nav_menu(
+				array(
+					'menu'         => $menu->term_id,
+					'echo'         => false,
+					'fallback_cb'  => false,
+					'container'    => 'article',
+					'menu_class'   => 'cfz-invalid-container',
+					'item_spacing' => 'discard',
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_nav_menu_container_allowedtags', $allowed_tags, 10 );
+			\remove_filter( 'wp_nav_menu_objects', $objects_filter, 10 );
+			\remove_filter( 'nav_menu_item_args', $item_args_filter, 10 );
+			\remove_filter( 'nav_menu_css_class', $css_filter, 10 );
+			\remove_filter( 'nav_menu_item_id', $id_filter, 10 );
+			\remove_filter( 'nav_menu_item_attributes', $item_atts_filter, 10 );
+			\remove_filter( 'nav_menu_item_title', $title_filter, 10 );
+			\remove_filter( 'nav_menu_link_attributes', $link_atts_filter, 10 );
+			\remove_filter( 'nav_menu_submenu_css_class', $submenu_class_filter, 10 );
+			\remove_filter( 'nav_menu_submenu_attributes', $submenu_atts_filter, 10 );
+			\remove_filter( 'walker_nav_menu_start_el', $start_el_filter, 10 );
+			\remove_filter( 'wp_nav_menu_items', $items_filter, 10 );
+			\remove_filter( 'wp_nav_menu_' . $menu->slug . '_items', $specific_items_filter, 10 );
+			\remove_filter( 'wp_nav_menu', $menu_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $output )
+				&& str_starts_with( $output, '<section ' )
+				&& str_contains( $output, 'id="cfz-container-&quot;quoted&quot;"' )
+				&& str_contains( $output, 'class="cfz-container &quot;quoted&quot;"' )
+				&& str_contains( $output, 'id="' . $menu_id . '"' )
+				&& str_contains( $output, 'class="cfz-menu &quot;quoted&quot;"' )
+				&& str_contains( $output, 'cfz-depth-0' )
+				&& str_contains( $output, 'cfz-class-&quot;escaped&quot;' )
+				&& str_contains( $output, 'id="cfz-item-' )
+				&& str_contains( $output, '-&quot;&lt;&gt;"' )
+				&& str_contains( $output, 'data-cfz-li="li-&quot;&lt;&gt;-0"' )
+				&& str_contains( $output, 'data-cfz-link="link-&quot;&lt;&gt;-0"' )
+				&& str_contains( $output, 'data-cfz-submenu="submenu-depth-0"' )
+				&& str_contains( $output, 'cfz-submenu-depth-0' )
+				&& str_contains( $output, '<strong>Filtered 0 #' )
+				&& str_contains( $output, '<!--start-depth-0-->' )
+				&& str_contains( $output, '<!--global-items--><!--specific-items-->' )
+				&& str_ends_with( $output, '</section><!--final-menu-->' )
+				&& ! str_contains( $output, 'data-cfz-empty' )
+				&& ! str_contains( $output, 'data-cfz-false' )
+				&& array( 'items', 'specific-items', 'menu' ) === array_slice( $seen['finalFilters'], 0, 3 ),
+			'wp_nav_menu filter pipeline preserves ordering while escaping injected attributes',
+			array(
+				'output' => self::describe_string( (string) $output ),
+				'seen'   => $seen,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $invalid_container_output )
+				&& ! str_starts_with( $invalid_container_output, '<article' )
+				&& str_starts_with( $invalid_container_output, '<ul ' ),
+			'container allowlist rejects disallowed tags without suppressing menu output',
+			array(
+				'invalidContainerOutput' => self::describe_string( (string) $invalid_container_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( array( 1, 2, 3 ), array( 1, 2, 3 ) ) === $seen['orders']
+				&& in_array( 0, $seen['argDepths'], true )
+				&& in_array( 1, $seen['argDepths'], true )
+				&& in_array( 0, $seen['classDepths'], true )
+				&& in_array( 1, $seen['classDepths'], true )
+				&& in_array( 0, $seen['linkDepths'], true )
+				&& in_array( 1, $seen['linkDepths'], true )
+				&& in_array( 0, $seen['subDepths'], true )
+				&& array( 'items', 'specific-items', 'menu', 'items', 'specific-items', 'menu' ) === $seen['finalFilters']
+				&& false === \has_filter( 'wp_nav_menu_container_allowedtags', $allowed_tags )
+				&& false === \has_filter( 'wp_nav_menu_' . $menu->slug . '_items', $specific_items_filter ),
+			'navigation menu filters observe sorted items, depth transitions, and cleanup',
+			array( 'seen' => $seen )
+		);
+
+		return self::row(
+			$ctx,
+			'navigation.wp-nav-menu.filter-pipeline-and-escaping',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_depth_class_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
 		$classes       = array( 'menu-item', 'menu-item-has-children', 'custom-' . $ctx->identifier( 3, 8 ) );
 		$keep_args     = (object) array( 'depth' => 2 );
@@ -575,6 +883,17 @@ final class NavigationSurface {
 			},
 			$items
 		);
+	}
+
+	private static function capture_echo( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
 	}
 
 	private static function install_filters(): void {
