@@ -5,9 +5,9 @@ same operating model as `tools/html-api-fuzz`: deterministic generation from a
 seed, bounded inputs, structured replayable artifacts, and explicit invariants
 instead of one-off example tests.
 
-The harness intentionally boots a no-DB subset of WordPress. Surface modules
-therefore focus on public APIs that can be exercised without live inserts,
-network requests, or a configured site.
+The harness intentionally boots a no-external-DB subset of WordPress. Surface
+modules therefore focus on public APIs that can be exercised without a live
+database, network requests, or a configured site.
 
 ## Surfaces
 
@@ -48,6 +48,10 @@ network requests, or a configured site.
   `map_meta_cap()` mappings.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
+- `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
+  lifecycles, including insert/update/read/delete round trips, duplicate and
+  invalid-input errors, sanitizer agreement, monotonic IDs, cheap hook ordering,
+  cache/count refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, email links, and comment cookies.
 - `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
@@ -202,6 +206,12 @@ it also records explicit skips for the themes and plugins controllers because
 they inspect installed filesystem state, active theme/plugin state, or
 activation/update paths. Block pattern coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
+The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
+recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
+metadata lifecycle APIs; it is not a general SQL engine. Post-to-term
+relationship coverage remains limited to simple recognized term relationship
+queries, and deeper taxonomy assignment behavior is not treated as fully
+covered.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 

@@ -30,6 +30,17 @@ $required_functions = array(
 	'sanitize_title_with_dashes',
 	'sanitize_post_field',
 	'sanitize_term_field',
+	'create_initial_post_types',
+	'create_initial_taxonomies',
+	'get_post',
+	'wp_insert_post',
+	'wp_update_post',
+	'wp_trash_post',
+	'wp_delete_post',
+	'get_term',
+	'get_terms',
+	'term_exists',
+	'wp_insert_term',
 	'maybe_serialize',
 	'maybe_unserialize',
 	'register_meta',
@@ -51,6 +62,9 @@ $required_functions = array(
 	'sanitize_user',
 	'sanitize_email',
 	'is_email',
+	'get_user_by',
+	'get_userdata',
+	'wp_insert_user',
 	'wp_generate_password',
 	'wp_fast_hash',
 	'wp_verify_fast_hash',
@@ -82,6 +96,10 @@ $required_functions = array(
 	'show_admin_bar',
 	'is_admin_bar_showing',
 	'wp_admin_bar_render',
+	'get_comment',
+	'wp_insert_comment',
+	'wp_new_comment',
+	'wp_delete_comment',
 	'get_current_screen',
 	'set_current_screen',
 	'convert_to_screen',
@@ -246,6 +264,10 @@ $required_classes = array(
 	'WP',
 	'WP_Query',
 	'WP_Rewrite',
+	'WP_Term',
+	'WP_User',
+	'WP_Comment',
+	'Component_Fuzz_WPDB_Stub',
 	'WP_Site',
 	'WP_Network',
 	'WP_Site_Query',
@@ -1368,6 +1390,210 @@ if (
 ) {
 	fwrite( STDERR, "Request lifecycle parse smoke invariant failed.\n" );
 	exit( 1 );
+}
+
+$lifecycle_globals = array();
+foreach ( array( 'wp_post_types', 'wp_post_statuses', 'wp_taxonomies', 'wp_rewrite', 'current_user', 'user_ID' ) as $lifecycle_global ) {
+	$lifecycle_globals[ $lifecycle_global ] = array(
+		'exists' => array_key_exists( $lifecycle_global, $GLOBALS ),
+		'value'  => $GLOBALS[ $lifecycle_global ] ?? null,
+	);
+}
+
+$lifecycle_server = array();
+foreach ( array( 'REMOTE_ADDR', 'HTTP_USER_AGENT', 'REQUEST_URI', 'HTTP_HOST', 'SERVER_SOFTWARE' ) as $server_key ) {
+	$lifecycle_server[ $server_key ] = array(
+		'exists' => array_key_exists( $server_key, $_SERVER ),
+		'value'  => $_SERVER[ $server_key ] ?? null,
+	);
+}
+
+$lifecycle_options = $GLOBALS['wpdb']->component_fuzz_get_options();
+$GLOBALS['wpdb']->component_fuzz_reset_content();
+$GLOBALS['wpdb']->component_fuzz_reset_options(
+	array(
+		'admin_email'            => 'admin@example.test',
+		'blog_charset'           => 'UTF-8',
+		'blogname'               => 'Component Fuzz Smoke',
+		'comment_max_links'      => 2,
+		'comment_moderation'     => 0,
+		'comment_registration'   => 0,
+		'default_category'       => 0,
+		'default_comment_status' => 'open',
+		'default_ping_status'    => 'closed',
+		'default_role'           => 'subscriber',
+		'disallowed_keys'        => '',
+		'home'                   => 'http://example.test',
+		'moderation_keys'        => '',
+		'permalink_structure'    => '',
+		'require_name_email'     => 0,
+		'siteurl'                => 'http://example.test',
+	)
+);
+wp_cache_flush();
+
+$GLOBALS['wp_rewrite']       = new WP_Rewrite();
+$GLOBALS['wp_post_types']    = array();
+$GLOBALS['wp_post_statuses'] = array();
+$GLOBALS['wp_taxonomies']    = array();
+create_initial_post_types();
+create_initial_taxonomies();
+wp_set_current_user( 0 );
+
+$_SERVER['REMOTE_ADDR']     = '127.0.0.1';
+$_SERVER['HTTP_USER_AGENT'] = 'ComponentFuzz bootstrap smoke';
+$_SERVER['REQUEST_URI']     = '/component-fuzz/bootstrap-lifecycle/';
+$_SERVER['HTTP_HOST']       = 'example.test';
+$_SERVER['SERVER_SOFTWARE'] = 'ComponentFuzz';
+
+$lifecycle_approve = static function () {
+	return 1;
+};
+add_filter( 'pre_comment_approved', $lifecycle_approve, 10, 2 );
+
+$lifecycle_user_id = wp_insert_user(
+	array(
+		'user_login'   => 'component_fuzz_smoke_user',
+		'user_pass'    => 'component-fuzz-smoke-pass',
+		'user_email'   => 'component-fuzz-smoke-user@example.test',
+		'display_name' => 'Component Fuzz Smoke User',
+		'role'         => 'subscriber',
+	)
+);
+$lifecycle_term    = wp_insert_term(
+	'Component Fuzz Smoke Category',
+	'category',
+	array(
+		'slug'        => 'component-fuzz-smoke-category',
+		'description' => 'Smoke term description',
+	)
+);
+$lifecycle_post_id = wp_insert_post(
+	wp_slash(
+		array(
+			'post_type'      => 'page',
+			'post_title'     => 'Component Fuzz Smoke Post',
+			'post_content'   => '<p>Smoke lifecycle content</p>',
+			'post_status'    => 'draft',
+			'post_author'    => $lifecycle_user_id,
+			'post_name'      => 'component-fuzz-smoke-post',
+			'comment_status' => 'open',
+		)
+	),
+	true,
+	false
+);
+$lifecycle_update  = wp_update_post(
+	wp_slash(
+		array(
+			'ID'           => $lifecycle_post_id,
+			'post_title'   => 'Component Fuzz Smoke Post Updated',
+			'post_status'  => 'publish',
+			'post_content' => 'Updated lifecycle smoke content',
+		)
+	),
+	true,
+	false
+);
+$lifecycle_comment = wp_insert_comment(
+	array(
+		'comment_post_ID'      => $lifecycle_post_id,
+		'comment_author'       => 'Smoke Commenter',
+		'comment_author_email' => 'commenter@example.test',
+		'comment_author_url'   => 'http://example.test/commenter',
+		'comment_content'      => 'Direct smoke comment',
+		'comment_approved'     => '1',
+		'comment_type'         => 'comment',
+	)
+);
+$lifecycle_new_comment = wp_new_comment(
+	array(
+		'comment_post_ID'      => $lifecycle_post_id,
+		'comment_author'       => 'Smoke New Commenter',
+		'comment_author_email' => 'new-commenter@example.test',
+		'comment_author_url'   => 'http://example.test/new-commenter',
+		'comment_content'      => 'wp_new_comment smoke comment',
+	),
+	true
+);
+
+$lifecycle_user       = get_userdata( $lifecycle_user_id );
+$lifecycle_user_email = get_user_by( 'email', 'component-fuzz-smoke-user@example.test' );
+$lifecycle_term_obj   = is_array( $lifecycle_term ) ? get_term( $lifecycle_term['term_id'], 'category' ) : null;
+$lifecycle_terms      = is_array( $lifecycle_term )
+	? get_terms(
+		array(
+			'taxonomy'               => 'category',
+			'include'                => array( (int) $lifecycle_term['term_id'] ),
+			'hide_empty'             => false,
+			'update_term_meta_cache' => false,
+		)
+	)
+	: array();
+$lifecycle_exists     = is_array( $lifecycle_term ) ? term_exists( (int) $lifecycle_term['term_id'], 'category' ) : null;
+$lifecycle_post       = get_post( $lifecycle_post_id );
+$lifecycle_comment_1  = get_comment( $lifecycle_comment );
+$lifecycle_comment_2  = get_comment( $lifecycle_new_comment );
+$lifecycle_count_2    = $lifecycle_post instanceof WP_Post ? (int) get_post( $lifecycle_post_id )->comment_count : null;
+$lifecycle_delete_1   = wp_delete_comment( $lifecycle_comment, true );
+$lifecycle_count_1    = $lifecycle_post instanceof WP_Post ? (int) get_post( $lifecycle_post_id )->comment_count : null;
+$lifecycle_delete_2   = wp_delete_comment( $lifecycle_new_comment, true );
+$lifecycle_count_0    = $lifecycle_post instanceof WP_Post ? (int) get_post( $lifecycle_post_id )->comment_count : null;
+$lifecycle_trash      = wp_trash_post( $lifecycle_post_id );
+$lifecycle_after_trash = get_post( $lifecycle_post_id );
+$lifecycle_delete_post = wp_delete_post( $lifecycle_post_id, true );
+$lifecycle_after_delete = get_post( $lifecycle_post_id );
+
+remove_filter( 'pre_comment_approved', $lifecycle_approve, 10 );
+
+if (
+	! is_int( $lifecycle_user_id )
+	|| ! ( $lifecycle_user instanceof WP_User )
+	|| ! ( $lifecycle_user_email instanceof WP_User )
+	|| $lifecycle_user_id !== $lifecycle_user_email->ID
+	|| ! is_array( $lifecycle_term )
+	|| ! ( $lifecycle_term_obj instanceof WP_Term )
+	|| 'component-fuzz-smoke-category' !== $lifecycle_term_obj->slug
+	|| ! is_array( $lifecycle_terms )
+	|| 1 !== count( $lifecycle_terms )
+	|| ! is_array( $lifecycle_exists )
+	|| ! is_int( $lifecycle_post_id )
+	|| $lifecycle_update !== $lifecycle_post_id
+	|| ! ( $lifecycle_post instanceof WP_Post )
+	|| 'publish' !== $lifecycle_post->post_status
+	|| ! ( $lifecycle_comment_1 instanceof WP_Comment )
+	|| ! ( $lifecycle_comment_2 instanceof WP_Comment )
+	|| 2 !== $lifecycle_count_2
+	|| true !== $lifecycle_delete_1
+	|| 1 !== $lifecycle_count_1
+	|| true !== $lifecycle_delete_2
+	|| 0 !== $lifecycle_count_0
+	|| ! ( $lifecycle_trash instanceof WP_Post )
+	|| ! ( $lifecycle_after_trash instanceof WP_Post )
+	|| 'trash' !== $lifecycle_after_trash->post_status
+	|| ! ( $lifecycle_delete_post instanceof WP_Post )
+	|| null !== $lifecycle_after_delete
+) {
+	fwrite( STDERR, "Lifecycle CRUD smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$GLOBALS['wpdb']->component_fuzz_reset_content();
+$GLOBALS['wpdb']->component_fuzz_reset_options( $lifecycle_options );
+wp_cache_flush();
+foreach ( $lifecycle_globals as $lifecycle_global => $entry ) {
+	if ( $entry['exists'] ) {
+		$GLOBALS[ $lifecycle_global ] = $entry['value'];
+	} else {
+		unset( $GLOBALS[ $lifecycle_global ] );
+	}
+}
+foreach ( $lifecycle_server as $server_key => $entry ) {
+	if ( $entry['exists'] ) {
+		$_SERVER[ $server_key ] = $entry['value'];
+	} else {
+		unset( $_SERVER[ $server_key ] );
+	}
 }
 
 fwrite( STDOUT, "component-fuzz bootstrap smoke passed\n" );
