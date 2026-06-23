@@ -37,10 +37,13 @@ final class ShortcodesSurface {
 			$rows[] = self::check_registry_lifecycle( $ctx->fork( 'registry' ) );
 			$rows[] = self::check_attribute_parsing( $ctx->fork( 'attribute-parsing' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_defaults( $ctx->fork( 'attribute-defaults' ), $attribute_cases );
+			$rows[] = self::check_shortcode_atts_filter_contract( $ctx->fork( 'attribute-filter' ), $attribute_cases );
 			$rows[] = self::check_rendering_contracts( $ctx->fork( 'rendering' ), $attribute_cases );
+			$rows[] = self::check_shortcode_tag_filter_contracts( $ctx->fork( 'tag-filters' ), $attribute_cases );
 			$rows[] = self::check_escaped_shortcodes( $ctx->fork( 'escaping' ), $attribute_cases );
 			$rows[] = self::check_html_attribute_behavior( $ctx->fork( 'html-attributes' ) );
 			$rows[] = self::check_strip_and_has_shortcode( $ctx->fork( 'strip-has' ), $attribute_cases );
+			$rows[] = self::check_tag_discovery_and_apply_alias( $ctx->fork( 'tag-discovery' ), $attribute_cases );
 			$rows[] = self::check_malformed_and_nested_cases( $ctx->fork( 'malformed-nested' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -66,12 +69,16 @@ final class ShortcodesSurface {
 				'add_shortcode',
 				'remove_shortcode',
 				'remove_all_shortcodes',
+				'add_filter',
+				'remove_filter',
 				'shortcode_exists',
 				'get_shortcode_regex',
+				'get_shortcode_tags_in_content',
 				'get_shortcode_atts_regex',
 				'shortcode_parse_atts',
 				'shortcode_atts',
 				'do_shortcode',
+				'apply_shortcodes',
 				'do_shortcodes_in_html_tags',
 				'strip_shortcodes',
 				'has_shortcode',
@@ -284,6 +291,88 @@ final class ShortcodesSurface {
 		);
 	}
 
+	private static function check_shortcode_atts_filter_contract( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$tag        = self::tag( $ctx, 'atts-filter' );
+		$other_tag  = self::tag( $ctx, 'atts-other' );
+		$case       = $cases[4];
+		$known_keys = array_keys( $case['expectedNamed'] );
+		$pairs      = array(
+			$known_keys[0] => 'default-one',
+			$known_keys[1] => 'default-two',
+			'filter_only'  => 'default-filter',
+		);
+		$atts       = $case['expectedNamed'] + array(
+			'unknown_filter' => 'drop-me',
+			0                => 'drop-positional',
+		);
+		$seen       = array();
+		$filter     = static function ( $out, $filter_pairs, $filter_atts, $shortcode ) use ( &$seen ) {
+			$seen[] = array(
+				'out'       => $out,
+				'pairs'     => $filter_pairs,
+				'atts'      => $filter_atts,
+				'shortcode' => $shortcode,
+			);
+
+			$out['filter_only'] = 'filtered-' . (string) $shortcode;
+			$out['added_by_filter'] = count( $filter_atts );
+			return $out;
+		};
+
+		\add_filter( "shortcode_atts_{$tag}", $filter, 10, 4 );
+
+		try {
+			$filtered       = \shortcode_atts( $pairs, $atts, $tag );
+			$unfiltered_tag = \shortcode_atts( $pairs, $atts, $other_tag );
+			$no_tag         = \shortcode_atts( $pairs, $atts, '' );
+		} finally {
+			\remove_filter( "shortcode_atts_{$tag}", $filter, 10 );
+		}
+
+		$base_expected = array(
+			$known_keys[0] => $case['expectedNamed'][ $known_keys[0] ],
+			$known_keys[1] => $case['expectedNamed'][ $known_keys[1] ],
+			'filter_only'  => 'default-filter',
+		);
+		$expected      = $base_expected + array(
+			'added_by_filter' => count( $atts ),
+		);
+		$expected['filter_only'] = 'filtered-' . $tag;
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			$expected === $filtered
+				&& $base_expected === $unfiltered_tag
+				&& $base_expected === $no_tag
+				&& 1 === count( $seen )
+				&& $seen[0]['out'] === $base_expected
+				&& $seen[0]['pairs'] === $pairs
+				&& $seen[0]['atts'] === $atts
+				&& $seen[0]['shortcode'] === $tag,
+			'shortcode_atts dynamic filter receives merged values and remains scoped to its tag',
+			array(
+				'tag'           => $tag,
+				'otherTag'      => $other_tag,
+				'expected'      => $expected,
+				'filtered'      => $filtered,
+				'unfilteredTag' => $unfiltered_tag,
+				'noTag'         => $no_tag,
+				'seen'          => $seen,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.attributes-dynamic-filter-contract',
+			$failures,
+			array(
+				'tag'      => $tag,
+				'caseText' => self::describe_string( $case['text'] ),
+			)
+		);
+	}
+
 	private static function check_rendering_contracts( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
 		$outer       = self::tag( $ctx, 'outer' );
 		$inner       = self::tag( $ctx, 'inner' );
@@ -360,6 +449,95 @@ final class ShortcodesSurface {
 				'source'     => self::describe_string( $source ),
 				'outputSha1' => sha1( $output ),
 				'callCount'  => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_shortcode_tag_filter_contracts( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$pre_tag    = self::tag( $ctx, 'pre-filter' );
+		$normal_tag = self::tag( $ctx, 'post-filter' );
+		$pre_case   = $cases[1];
+		$normal_case = $cases[2];
+		$calls      = array();
+		$pre_seen   = array();
+		$post_seen  = array();
+		$callback   = self::recording_callback( $calls, false );
+		$pre_value  = 'pre-filtered-' . self::safe_fragment( $ctx->fork( 'pre-value' ), 8, false );
+		$source     = 'lead [' . $pre_tag . ' ' . $pre_case['text'] . ']blocked[/' . $pre_tag . '] mid [' . $normal_tag . ' ' . $normal_case['text'] . ' /] tail';
+		$pre_filter = static function ( $return, $tag, $attr, $match ) use ( &$pre_seen, $pre_tag, $pre_value ) {
+			$pre_seen[] = array(
+				'return' => $return,
+				'tag'    => $tag,
+				'attr'   => self::normalize_atts( is_array( $attr ) ? $attr : array() ),
+				'match'  => self::project_shortcode_match( $match ),
+			);
+
+			return $pre_tag === $tag ? $pre_value : $return;
+		};
+		$post_filter = static function ( $output, $tag, $attr, $match ) use ( &$post_seen, $normal_tag ) {
+			$post_seen[] = array(
+				'output' => $output,
+				'tag'    => $tag,
+				'attr'   => self::normalize_atts( is_array( $attr ) ? $attr : array() ),
+				'match'  => self::project_shortcode_match( $match ),
+			);
+
+			return $normal_tag === $tag ? 'post-filtered<' . $output . '>' : $output;
+		};
+		$failures = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $pre_tag, $callback );
+		\add_shortcode( $normal_tag, $callback );
+		\add_filter( 'pre_do_shortcode_tag', $pre_filter, 10, 4 );
+		\add_filter( 'do_shortcode_tag', $post_filter, 10, 4 );
+
+		try {
+			$output = \do_shortcode( $source );
+		} finally {
+			\remove_filter( 'pre_do_shortcode_tag', $pre_filter, 10 );
+			\remove_filter( 'do_shortcode_tag', $post_filter, 10 );
+		}
+
+		$normal_marker = 1 === count( $calls ) ? 'post-filtered<cfz-' . $normal_tag . '-' : '';
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, $pre_value )
+				&& ! str_contains( $output, 'blocked' )
+				&& '' !== $normal_marker
+				&& str_contains( $output, $normal_marker )
+				&& 1 === count( $calls )
+				&& $calls[0]['tag'] === $normal_tag
+				&& $calls[0]['atts'] === self::expected_atts( $normal_case )
+				&& 2 === count( $pre_seen )
+				&& 1 === count( $post_seen )
+				&& $pre_seen[0]['tag'] === $pre_tag
+				&& $pre_seen[0]['return'] === false
+				&& $pre_seen[0]['attr'] === self::expected_atts( $pre_case )
+				&& $pre_seen[1]['tag'] === $normal_tag
+				&& $pre_seen[1]['return'] === false
+				&& $pre_seen[1]['attr'] === self::expected_atts( $normal_case )
+				&& $post_seen[0]['tag'] === $normal_tag
+				&& $post_seen[0]['attr'] === self::expected_atts( $normal_case )
+				&& str_starts_with( $post_seen[0]['output'], 'cfz-' . $normal_tag . '-' ),
+			'pre_do_shortcode_tag short-circuits one tag while do_shortcode_tag filters callback output for another',
+			array(
+				'source'   => self::describe_string( $source ),
+				'output'   => self::describe_string( $output ),
+				'calls'    => self::project_calls( $calls ),
+				'preSeen'  => $pre_seen,
+				'postSeen' => $post_seen,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.rendering-filter-contracts',
+			$failures,
+			array(
+				'tags'       => array( $pre_tag, $normal_tag ),
+				'outputSha1' => sha1( $output ),
 			)
 		);
 	}
@@ -535,6 +713,76 @@ final class ShortcodesSurface {
 			array(
 				'tags'      => array( $outer, $inner ),
 				'callCount' => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_tag_discovery_and_apply_alias( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$outer  = self::tag( $ctx, 'discover-outer' );
+		$inner  = self::tag( $ctx, 'discover-inner' );
+		$solo   = self::tag( $ctx, 'discover-solo' );
+		$absent = self::tag( $ctx, 'discover-absent' );
+		$calls  = array();
+		$callback = self::recording_callback( $calls, true );
+		$source = 'start [' . $outer . ' ' . $cases[0]['text'] . ']A [' . $inner . ' ' . $cases[1]['text'] . ' /] B[/' . $outer . '] [' . $solo . ' ' . $cases[2]['text'] . ' /] [missing /] end';
+		$failures = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $outer, $callback );
+		\add_shortcode( $inner, $callback );
+		\add_shortcode( $solo, $callback );
+
+		$tags       = \get_shortcode_tags_in_content( $source );
+		$plain_tags = \get_shortcode_tags_in_content( 'plain text without brackets' );
+		$has_inner  = \has_shortcode( $source, $inner );
+		$has_absent = \has_shortcode( $source, $absent );
+		$applied    = \apply_shortcodes( $source );
+		$apply_calls = $calls;
+		$calls      = array();
+		$rendered   = \do_shortcode( $source );
+		$do_calls   = $calls;
+
+		self::collect_failure(
+			$failures,
+			array( $outer, $inner, $solo ) === $tags
+				&& array() === $plain_tags
+				&& true === $has_inner
+				&& false === $has_absent,
+			'get_shortcode_tags_in_content reports registered top-level and nested tags in source order',
+			array(
+				'tags'       => $tags,
+				'plainTags'  => $plain_tags,
+				'hasInner'   => $has_inner,
+				'hasAbsent'  => $has_absent,
+				'registered' => array( $outer, $inner, $solo, $absent ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$applied === $rendered
+				&& self::project_calls( $apply_calls ) === self::project_calls( $do_calls )
+				&& self::call_tags( $apply_calls, $outer ) >= 1
+				&& self::call_tags( $apply_calls, $inner ) >= 1
+				&& self::call_tags( $apply_calls, $solo ) >= 1,
+			'apply_shortcodes is a do_shortcode alias for generated nested content and preserves callback observations',
+			array(
+				'source'      => self::describe_string( $source ),
+				'applied'     => self::describe_string( $applied ),
+				'rendered'    => self::describe_string( $rendered ),
+				'applyCalls'  => self::project_calls( $apply_calls ),
+				'doCalls'     => self::project_calls( $do_calls ),
+				'outputDelta' => self::first_value_difference( $rendered, $applied ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.tag-discovery-and-apply-alias',
+			$failures,
+			array(
+				'tags'       => array( $outer, $inner, $solo ),
+				'outputSha1' => sha1( $rendered ),
 			)
 		);
 	}
@@ -756,6 +1004,18 @@ final class ShortcodesSurface {
 		}
 
 		return $projected;
+	}
+
+	private static function project_shortcode_match( array $match ): array {
+		return array(
+			'full'       => self::describe_string( $match[0] ?? '' ),
+			'escapeOpen' => $match[1] ?? null,
+			'tag'        => $match[2] ?? null,
+			'attrs'      => self::describe_string( $match[3] ?? '' ),
+			'selfClose'  => $match[4] ?? null,
+			'content'    => self::describe_string( $match[5] ?? '' ),
+			'escapeClose' => $match[6] ?? null,
+		);
 	}
 
 	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {

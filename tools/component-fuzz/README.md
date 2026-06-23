@@ -359,7 +359,8 @@ database, network requests, or a configured site.
   hidden fields, admin/ajax referer paths, synthetic auth cookies and session
   tokens, redirect sanitization, and safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
-  merging, callback argument contracts, escaped and HTML-attribute rendering,
+  merging and dynamic filters, callback argument and rendering filter
+  contracts, escaped and HTML-attribute rendering, tag discovery, apply aliasing,
   stripping, presence checks, malformed inputs, and exact global restoration.
 - `site-health`: no-DB Site Health/update/HTTPS helper coverage, including
   generated update transients and dismissed core update options, aggregate
