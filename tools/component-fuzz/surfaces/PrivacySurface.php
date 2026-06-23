@@ -1402,6 +1402,8 @@ final class PrivacySurface {
 		\add_filter( 'wp_privacy_personal_data_exporters', array( __CLASS__, 'filter_exporters' ), 10, 1 );
 		\add_filter( 'wp_privacy_personal_data_erasers', array( __CLASS__, 'filter_erasers' ), 10, 1 );
 		\add_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ), 10, 1 );
+		\remove_all_filters( 'wp_privacy_personal_data_export_file' );
+		\remove_all_filters( 'wp_privacy_personal_data_erased' );
 		\add_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ), 10, 1 );
 		\add_action( 'wp_privacy_personal_data_erased', array( __CLASS__, 'record_erased_action' ), 10, 1 );
 	}
