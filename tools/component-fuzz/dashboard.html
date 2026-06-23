@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7609 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7621 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Twenty-four integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Twenty-five integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -276,6 +276,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7609 passed, 64 skipped, 0 failed.</td>
 					<td>Robots meta, sitemap enablement, robots.txt injection, provider filters, query/permalink URL modes.</td>
+				</tr>
+				<tr>
+					<td><code>import-diff</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1050 passed, 0 skipped, 0 failed; latest broad run: 7621 passed, 62 skipped, 0 failed.</td>
+					<td>Importer registry/form helpers, text diff rendering, imported comment lookup, WP_Error transfer and lifecycle ordering.</td>
 				</tr>
 				<tr>
 					<td><code>navigation</code></td>
@@ -597,6 +604,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>46237be00d</code></td>
+					<td><code>import-diff</code></td>
+					<td>1050 passed, 0 skipped, 0 failed.</td>
+					<td>7621 passed, 62 skipped, 0 failed at 2 iterations after WP_Error lifecycle ordering and default-code integration.</td>
+				</tr>
 				<tr>
 					<td><code>57ddcc6ba7</code></td>
 					<td><code>discovery</code></td>
