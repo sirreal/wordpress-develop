@@ -306,6 +306,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_query_insert_option( $this->last_query );
 			}
 
+			if ( preg_match( '/\bUPDATE\s+`?wp_options`?\s+SET\s+`?autoload`?\s*=/i', $this->last_query ) ) {
+				return $this->component_fuzz_query_update_option_autoload( $this->last_query );
+			}
+
 			if ( preg_match( '/\bDELETE\s+FROM\s+`?wp_(post|term|comment)meta`?\s+WHERE\s+`?meta_id`?\s+IN\s*\(([^)]*)\)/i', $this->last_query, $matches ) ) {
 				return $this->component_fuzz_delete_meta_ids( $matches[1], $this->component_fuzz_csv_int_values( $matches[2] ) );
 			}
@@ -600,6 +604,31 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $this->rows_affected;
 		}
 
+		private function component_fuzz_query_update_option_autoload( $query ) {
+			$autoload = $this->component_fuzz_compare_value( $query, 'autoload' );
+			$names    = $this->component_fuzz_in_values( $query, 'option_name' );
+
+			if ( null === $autoload || array() === $names ) {
+				return 0;
+			}
+
+			foreach ( $names as $option ) {
+				$option = (string) $option;
+				if ( ! isset( $this->component_fuzz_options[ $option ] ) ) {
+					continue;
+				}
+
+				if ( (string) $autoload === $this->component_fuzz_options[ $option ]['autoload'] ) {
+					continue;
+				}
+
+				$this->component_fuzz_options[ $option ]['autoload'] = (string) $autoload;
+				++$this->rows_affected;
+			}
+
+			return $this->rows_affected;
+		}
+
 		private function component_fuzz_finish_insert( $id ) {
 			$this->insert_id     = (int) $id;
 			$this->rows_affected = 1;
@@ -707,7 +736,19 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private function component_fuzz_select_options( $query ) {
 			$rows = array();
 
-			if ( preg_match( '/\boption_name\s+IN\s*\(/i', $query ) ) {
+			if ( preg_match_all( '/\bautoload\s*!=\s*(\'{1,2}(?:\\\\.|[^\'\\\\])*\'{1,2}|"[^"]*"|-?\d+)\s+AND\s+`?option_name`?\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				$seen = array();
+				foreach ( $matches as $match ) {
+					$excluded_autoload = (string) $this->component_fuzz_unquote_sql_value( $match[1] );
+					$names             = array_fill_keys( $this->component_fuzz_csv_values( $match[2] ), true );
+					foreach ( $this->component_fuzz_options as $option => $entry ) {
+						if ( isset( $names[ $option ] ) && $excluded_autoload !== (string) $entry['autoload'] && ! isset( $seen[ $option ] ) ) {
+							$rows[]          = $this->component_fuzz_option_row( $option, $entry );
+							$seen[ $option ] = true;
+						}
+					}
+				}
+			} elseif ( preg_match( '/\boption_name\s+IN\s*\(/i', $query ) ) {
 				$names = array_fill_keys( $this->component_fuzz_in_values( $query, 'option_name' ), true );
 				foreach ( $this->component_fuzz_options as $option => $entry ) {
 					if ( isset( $names[ $option ] ) ) {
@@ -1712,6 +1753,9 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_unquote_sql_value( $value ) {
 			$value = trim( (string) $value );
+			if ( strlen( $value ) >= 4 && "''" === substr( $value, 0, 2 ) && "''" === substr( $value, -2 ) ) {
+				return stripslashes( substr( $value, 2, -2 ) );
+			}
 			if ( strlen( $value ) >= 2 && "'" === $value[0] && "'" === $value[ strlen( $value ) - 1 ] ) {
 				return stripslashes( substr( $value, 1, -1 ) );
 			}

@@ -26,8 +26,10 @@ final class OptionsAutoloadSurface {
 			$rows[] = self::check_duplicate_add_preserves_existing_value( $ctx );
 			$rows[] = self::check_update_missing_creates_option_and_clears_notoptions( $ctx );
 			$rows[] = self::check_alloptions_autoload_membership_and_transitions( $ctx );
+			$rows[] = self::check_bulk_autoload_mutators_and_cache_coherence( $ctx );
 			$rows[] = self::check_get_option_filters( $ctx );
 			$rows[] = self::check_pre_update_filters_transform_and_veto( $ctx );
+			$rows[] = self::check_option_lifecycle_actions( $ctx );
 			$rows[] = self::check_prime_option_caches_stability( $ctx );
 			$rows[] = self::check_notoptions_delete_add_lifecycle( $ctx );
 			$rows[] = self::check_serialized_value_cache_shape( $ctx );
@@ -50,12 +52,17 @@ final class OptionsAutoloadSurface {
 			array(
 				'add_filter',
 				'remove_filter',
+				'add_action',
+				'remove_action',
 				'get_option',
 				'add_option',
 				'update_option',
 				'delete_option',
 				'wp_load_alloptions',
 				'wp_prime_option_caches',
+				'wp_set_option_autoload',
+				'wp_set_option_autoload_values',
+				'wp_set_options_autoload',
 				'wp_cache_get',
 				'wp_cache_set',
 				'wp_cache_delete',
@@ -319,6 +326,103 @@ final class OptionsAutoloadSurface {
 		);
 	}
 
+	private static function check_bulk_autoload_mutators_and_cache_coherence( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$already_on  = self::option_name( $ctx, 'bulk-autoload-already-on' );
+		$to_on       = self::option_name( $ctx, 'bulk-autoload-to-on' );
+		$to_off      = self::option_name( $ctx, 'bulk-autoload-to-off' );
+		$already_off = self::option_name( $ctx, 'bulk-autoload-already-off' );
+		$missing     = self::option_name( $ctx, 'bulk-autoload-missing' );
+		$values      = array(
+			$already_on  => self::wrapped_value( 'already-on', self::value( $ctx->fork( 'bulk-already-on' ) ) ),
+			$to_on       => self::wrapped_value( 'to-on', self::value( $ctx->fork( 'bulk-to-on' ) ) ),
+			$to_off      => self::wrapped_value( 'to-off', self::value( $ctx->fork( 'bulk-to-off' ) ) ),
+			$already_off => self::wrapped_value( 'already-off', self::value( $ctx->fork( 'bulk-already-off' ) ) ),
+		);
+
+		add_option( $already_on, $values[ $already_on ], '', true );
+		add_option( $to_on, $values[ $to_on ], '', false );
+		add_option( $to_off, $values[ $to_off ], '', true );
+		add_option( $already_off, $values[ $already_off ], '', false );
+
+		wp_load_alloptions( true );
+
+		$bulk = wp_set_option_autoload_values(
+			array(
+				$already_on  => true,
+				$to_on       => 'yes',
+				$to_off      => false,
+				$already_off => 'no',
+				$missing     => true,
+			)
+		);
+		$after_bulk_store      = self::option_store();
+		$alloptions_after_bulk = wp_cache_get( 'alloptions', 'options' );
+		$to_on_cache          = wp_cache_get( $to_on, 'options' );
+		$reloaded_after_bulk  = wp_load_alloptions( true );
+
+		$multi = wp_set_options_autoload( array( $already_on, $to_on, $to_off ), false );
+		$after_multi_store      = self::option_store();
+		$alloptions_after_multi = wp_cache_get( 'alloptions', 'options' );
+
+		$single = wp_set_option_autoload( $already_off, true );
+		$after_single_store      = self::option_store();
+		$alloptions_after_single = wp_cache_get( 'alloptions', 'options' );
+		$reloaded_after_single   = wp_load_alloptions( true );
+
+		$ok = array(
+			$already_on  => false,
+			$to_on       => true,
+			$to_off      => true,
+			$already_off => false,
+			$missing     => false,
+		) === $bulk
+			&& 'on' === ( $after_bulk_store[ $already_on ]['autoload'] ?? null )
+			&& 'on' === ( $after_bulk_store[ $to_on ]['autoload'] ?? null )
+			&& 'off' === ( $after_bulk_store[ $to_off ]['autoload'] ?? null )
+			&& 'off' === ( $after_bulk_store[ $already_off ]['autoload'] ?? null )
+			&& ! isset( $after_bulk_store[ $missing ] )
+			&& false === $alloptions_after_bulk
+			&& false === $to_on_cache
+			&& isset( $reloaded_after_bulk[ $already_on ], $reloaded_after_bulk[ $to_on ] )
+			&& ! isset( $reloaded_after_bulk[ $to_off ], $reloaded_after_bulk[ $already_off ] )
+			&& self::stored_value( $values[ $already_on ] ) === $reloaded_after_bulk[ $already_on ]
+			&& self::stored_value( $values[ $to_on ] ) === $reloaded_after_bulk[ $to_on ]
+			&& array(
+				$already_on => true,
+				$to_on      => true,
+				$to_off     => false,
+			) === $multi
+			&& 'off' === ( $after_multi_store[ $already_on ]['autoload'] ?? null )
+			&& 'off' === ( $after_multi_store[ $to_on ]['autoload'] ?? null )
+			&& 'off' === ( $after_multi_store[ $to_off ]['autoload'] ?? null )
+			&& is_array( $alloptions_after_multi )
+			&& ! isset( $alloptions_after_multi[ $already_on ], $alloptions_after_multi[ $to_on ], $alloptions_after_multi[ $to_off ] )
+			&& true === $single
+			&& 'on' === ( $after_single_store[ $already_off ]['autoload'] ?? null )
+			&& false === $alloptions_after_single
+			&& isset( $reloaded_after_single[ $already_off ] )
+			&& self::stored_value( $values[ $already_off ] ) === $reloaded_after_single[ $already_off ];
+
+		return $ctx->result(
+			'options-autoload.bulk-autoload-mutators-update-store-and-caches',
+			$ok,
+			array(
+				'bulk'                  => $bulk,
+				'multi'                 => $multi,
+				'single'                => $single,
+				'afterBulkAutoloads'    => self::option_autoloads( $after_bulk_store, array( $already_on, $to_on, $to_off, $already_off, $missing ) ),
+				'afterMultiAutoloads'   => self::option_autoloads( $after_multi_store, array( $already_on, $to_on, $to_off ) ),
+				'afterSingleAutoloads'  => self::option_autoloads( $after_single_store, array( $already_off ) ),
+				'alloptionsAfterBulk'   => self::describe_value( $alloptions_after_bulk ),
+				'alloptionsAfterMulti'  => self::describe_value( $alloptions_after_multi ),
+				'alloptionsAfterSingle' => self::describe_value( $alloptions_after_single ),
+				'toOnCache'             => self::describe_value( $to_on_cache ),
+			)
+		);
+	}
+
 	private static function check_get_option_filters( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -510,6 +614,134 @@ final class OptionsAutoloadSurface {
 				'transformGot'    => self::describe_value( $transform_got ),
 				'vetoGot'         => self::describe_value( $veto_got ),
 				'genericGot'      => self::describe_value( $generic_got ),
+			)
+		);
+	}
+
+	private static function check_option_lifecycle_actions( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$key     = self::option_name( $ctx, 'lifecycle-actions' );
+		$initial = self::wrapped_value( 'lifecycle-initial', self::value( $ctx->fork( 'lifecycle-initial' ) ) );
+		$updated = self::wrapped_value( 'lifecycle-updated', self::value( $ctx->fork( 'lifecycle-updated' ) ) );
+		$events  = array();
+		$record  = static function ( string $hook, array $args ) use ( &$events, $key ): void {
+			$store    = self::option_store();
+			$events[] = array(
+				'hook'     => $hook,
+				'args'     => $args,
+				'stored'   => $store[ $key ] ?? null,
+				'in_store' => isset( $store[ $key ] ),
+			);
+		};
+
+		$add_before = static function ( $option, $value ) use ( $record ): void {
+			$record( 'add_option', array( $option, $value ) );
+		};
+		$add_specific = static function ( $option, $value ) use ( $record, $key ): void {
+			$record( "add_option_{$key}", array( $option, $value ) );
+		};
+		$added = static function ( $option, $value ) use ( $record ): void {
+			$record( 'added_option', array( $option, $value ) );
+		};
+		$update_before = static function ( $option, $old_value, $value ) use ( $record ): void {
+			$record( 'update_option', array( $option, $old_value, $value ) );
+		};
+		$update_specific = static function ( $old_value, $value, $option ) use ( $record, $key ): void {
+			$record( "update_option_{$key}", array( $old_value, $value, $option ) );
+		};
+		$updated_action = static function ( $option, $old_value, $value ) use ( $record ): void {
+			$record( 'updated_option', array( $option, $old_value, $value ) );
+		};
+		$delete_before = static function ( $option ) use ( $record ): void {
+			$record( 'delete_option', array( $option ) );
+		};
+		$delete_specific = static function ( $option ) use ( $record, $key ): void {
+			$record( "delete_option_{$key}", array( $option ) );
+		};
+		$deleted = static function ( $option ) use ( $record ): void {
+			$record( 'deleted_option', array( $option ) );
+		};
+
+		add_action( 'add_option', $add_before, 10, 2 );
+		add_action( "add_option_{$key}", $add_specific, 10, 2 );
+		add_action( 'added_option', $added, 10, 2 );
+		add_action( 'update_option', $update_before, 10, 3 );
+		add_action( "update_option_{$key}", $update_specific, 10, 3 );
+		add_action( 'updated_option', $updated_action, 10, 3 );
+		add_action( 'delete_option', $delete_before, 10, 1 );
+		add_action( "delete_option_{$key}", $delete_specific, 10, 1 );
+		add_action( 'deleted_option', $deleted, 10, 1 );
+
+		try {
+			$add    = add_option( $key, $initial, '', false );
+			$update = update_option( $key, $updated, false );
+			$delete = delete_option( $key );
+		} finally {
+			remove_action( 'add_option', $add_before, 10 );
+			remove_action( "add_option_{$key}", $add_specific, 10 );
+			remove_action( 'added_option', $added, 10 );
+			remove_action( 'update_option', $update_before, 10 );
+			remove_action( "update_option_{$key}", $update_specific, 10 );
+			remove_action( 'updated_option', $updated_action, 10 );
+			remove_action( 'delete_option', $delete_before, 10 );
+			remove_action( "delete_option_{$key}", $delete_specific, 10 );
+			remove_action( 'deleted_option', $deleted, 10 );
+		}
+
+		$hooks = array_map(
+			static function ( array $event ): string {
+				return $event['hook'];
+			},
+			$events
+		);
+
+		$expected_hooks = array(
+			'add_option',
+			"add_option_{$key}",
+			'added_option',
+			'update_option',
+			"update_option_{$key}",
+			'updated_option',
+			'delete_option',
+			"delete_option_{$key}",
+			'deleted_option',
+		);
+
+		$ok = true === $add
+			&& true === $update
+			&& true === $delete
+			&& $expected_hooks === $hooks
+			&& self::event_args_match( $events[0] ?? null, array( $key, $initial ) )
+			&& false === ( $events[0]['in_store'] ?? null )
+			&& self::event_args_match( $events[1] ?? null, array( $key, $initial ) )
+			&& self::stored_value( $initial ) === ( $events[1]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[2] ?? null, array( $key, $initial ) )
+			&& self::stored_value( $initial ) === ( $events[2]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[3] ?? null, array( $key, $initial, $updated ) )
+			&& self::stored_value( $initial ) === ( $events[3]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[4] ?? null, array( $initial, $updated, $key ) )
+			&& self::stored_value( $updated ) === ( $events[4]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[5] ?? null, array( $key, $initial, $updated ) )
+			&& self::stored_value( $updated ) === ( $events[5]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[6] ?? null, array( $key ) )
+			&& self::stored_value( $updated ) === ( $events[6]['stored']['option_value'] ?? null )
+			&& self::event_args_match( $events[7] ?? null, array( $key ) )
+			&& false === ( $events[7]['in_store'] ?? null )
+			&& self::event_args_match( $events[8] ?? null, array( $key ) )
+			&& false === ( $events[8]['in_store'] ?? null );
+
+		return $ctx->result(
+			'options-autoload.lifecycle-actions-preserve-order-payloads-and-storage-boundaries',
+			$ok,
+			array(
+				'key'      => $key,
+				'add'      => $add,
+				'update'   => $update,
+				'delete'   => $delete,
+				'hooks'    => $hooks,
+				'expected' => $expected_hooks,
+				'events'   => self::describe_action_events( $events ),
 			)
 		);
 	}
@@ -805,6 +1037,37 @@ final class OptionsAutoloadSurface {
 		}
 
 		throw new \RuntimeException( 'Missing alloptions transition fixture.' );
+	}
+
+	private static function option_autoloads( array $store, array $options ): array {
+		$out = array();
+		foreach ( $options as $option ) {
+			$out[ $option ] = $store[ $option ]['autoload'] ?? null;
+		}
+
+		return $out;
+	}
+
+	private static function event_args_match( ?array $event, array $expected ): bool {
+		if ( null === $event || ! array_key_exists( 'args', $event ) ) {
+			return false;
+		}
+
+		return self::same_value( $expected, $event['args'] );
+	}
+
+	private static function describe_action_events( array $events ): array {
+		$out = array();
+		foreach ( $events as $event ) {
+			$out[] = array(
+				'hook'     => $event['hook'] ?? null,
+				'args'     => self::describe_value( $event['args'] ?? null ),
+				'inStore'  => $event['in_store'] ?? null,
+				'stored'   => self::describe_value( $event['stored'] ?? null ),
+			);
+		}
+
+		return $out;
 	}
 
 	private static function value_cases( \ComponentFuzz\FuzzContext $ctx ): array {
