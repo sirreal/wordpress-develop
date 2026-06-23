@@ -31,6 +31,7 @@ final class ImportDiffSurface {
 			$rows[] = self::check_import_upload_form( $ctx->fork( 'upload-form' ) );
 			$rows[] = self::check_text_diff_rendering( $ctx->fork( 'text-diff' ) );
 			$rows[] = self::check_error_export_and_merge( $ctx->fork( 'error-export' ) );
+			$rows[] = self::check_error_lifecycle_ordering( $ctx->fork( 'error-lifecycle' ) );
 			$rows[] = self::check_imported_comment_lookup( $ctx->fork( 'comment-lookup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -297,6 +298,69 @@ final class ImportDiffSurface {
 		);
 
 		return self::result( $ctx, 'import-diff.wp-error.export-merge-and-remove', $failures );
+	}
+
+	private static function check_error_lifecycle_ordering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$code_a       = 'component_fuzz_a_' . $ctx->identifier( 4, 10 );
+		$code_b       = 'component_fuzz_b_' . $ctx->identifier( 4, 10 );
+		$message_a    = 'Primary message ' . $ctx->identifier( 3, 7 );
+		$message_a_2  = 'Secondary message ' . $ctx->identifier( 3, 7 );
+		$message_b    = 'Other code message ' . $ctx->identifier( 3, 7 );
+		$data_a       = array( 'phase' => 'construct', 'seed' => $ctx->seed() );
+		$data_a_2     = array( 'phase' => 'add', 'token' => $ctx->identifier( 4, 9 ) );
+		$data_default = array( 'phase' => 'default-code', 'iteration' => $ctx->iteration() );
+		$data_b       = array( 'phase' => 'second-code', 'flag' => true );
+		$error        = new \WP_Error( $code_a, $message_a, $data_a );
+
+		$error->add( $code_a, $message_a_2, $data_a_2 );
+		$error->add_data( $data_default );
+		$error->add( $code_b, $message_b, $data_b );
+
+		self::collect_failure(
+			$failures,
+			array( $code_a, $code_b ) === $error->get_error_codes()
+				&& $code_a === $error->get_error_code()
+				&& array( $message_a, $message_a_2 ) === $error->get_error_messages( $code_a )
+				&& array( $message_b ) === $error->get_error_messages( $code_b )
+				&& array( $message_a, $message_a_2, $message_b ) === $error->get_error_messages()
+				&& $message_a === $error->get_error_message()
+				&& $message_b === $error->get_error_message( $code_b )
+				&& $data_default === $error->get_error_data( $code_a )
+				&& $data_b === $error->get_error_data( $code_b )
+				&& array( $data_a, $data_a_2, $data_default ) === $error->get_all_error_data( $code_a )
+				&& array( $data_b ) === $error->get_all_error_data( $code_b )
+				&& $error->has_errors(),
+			'WP_Error preserves code order, message order, newest data, and all-data history across add/add_data',
+			array(
+				'codeA' => $code_a,
+				'codeB' => $code_b,
+				'error' => self::describe_error( $error ),
+			)
+		);
+
+		$copy = new \WP_Error();
+		$error->export_to( $copy );
+		$error->remove( $code_a );
+
+		self::collect_failure(
+			$failures,
+			array( $code_b ) === $error->get_error_codes()
+				&& $code_b === $error->get_error_code()
+				&& array() === $error->get_error_messages( $code_a )
+				&& array() === $error->get_all_error_data( $code_a )
+				&& $message_b === $error->get_error_message()
+				&& array( $code_a, $code_b ) === $copy->get_error_codes()
+				&& array( $data_a, $data_a_2, $data_default ) === $copy->get_all_error_data( $code_a )
+				&& array( $data_b ) === $copy->get_all_error_data( $code_b ),
+			'WP_Error::remove promotes the remaining first code and export_to creates an independent copy',
+			array(
+				'removed' => self::describe_error( $error ),
+				'copy'    => self::describe_error( $copy ),
+			)
+		);
+
+		return self::result( $ctx, 'import-diff.wp-error.lifecycle-ordering-and-default-code', $failures );
 	}
 
 	private static function check_imported_comment_lookup( \ComponentFuzz\FuzzContext $ctx ): array {

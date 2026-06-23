@@ -546,9 +546,9 @@ local filters only. It loads the single comment/admin walker class files when
 available, but avoids nav menu AJAX quick-search, meta-box pagination, browser
 admin page dispatch, and any DB-backed menu/page/category/comment queries.
 The `import-diff` surface covers importer registry, importer form, imported
-comment lookup, text diff, and error-transfer helpers without remote importer
-discovery, upload handling, or importer dispatch screens. WXR download
-generation is covered separately by `wxr-export`.
+comment lookup, text diff, and WP_Error transfer/lifecycle helpers without
+remote importer discovery, upload handling, or importer dispatch screens. WXR
+download generation is covered separately by `wxr-export`.
 The `wxr-export` surface invokes actual `export_wp()` once per isolated PHP
 subprocess because core defines `wxr_*` helper functions inside that function.
 It uses a surface-local in-memory `wpdb` double and deterministic fixtures only;
