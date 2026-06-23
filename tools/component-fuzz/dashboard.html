@@ -226,24 +226,24 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7621 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7630 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Twenty-five integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Twenty-six integrated rich surfaces passed focused validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Chandrasekhar the 2nd is active on <code>capabilities</code> in <code>_work/component-fuzz-capabilities-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">Chandrasekhar the 2nd completed <code>capabilities</code>; worker changes are integrated and validated on the main worktree.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress plus the next active delegated rich-surface wave.</span>
+			<span class="note">Committed main-tree progress and latest validated rich-surface wave.</span>
 		</div>
 		<table>
 			<thead>
@@ -258,10 +258,10 @@
 			<tbody>
 				<tr>
 					<td><code>capabilities</code></td>
-					<td><span class="status work">delegated active</span></td>
-					<td>Chandrasekhar the 2nd / <code>_work/component-fuzz-capabilities-rich</code></td>
-					<td>Worker assigned focused 100-iteration and broad 2-iteration validation; integration pending.</td>
-					<td>Role registry, user/direct caps, meta-cap mapping, cap filters, state cleanup.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Chandrasekhar the 2nd / main worktree</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7630 passed, 63 skipped, 0 failed.</td>
+					<td>Role registry lifecycle, associative/boundary caps, user mutators, filter locality, meta-cap monotonicity.</td>
 				</tr>
 				<tr>
 					<td><code>images</code></td>
@@ -453,13 +453,6 @@
 					<td>Option CRUD, alloptions/notoptions caches, bulk autoload mutators, lifecycle hooks, wpdb option SQL shapes.</td>
 				</tr>
 				<tr>
-					<td><code>capabilities</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 500 passed, 0 skipped, 0 failed; broad run: 6673 passed, 62 skipped, 0 failed.</td>
-					<td>Roles, direct caps, generated <code>map_meta_cap</code> contexts, <code>user_has_cap</code> filters.</td>
-				</tr>
-				<tr>
 					<td><code>mail</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
@@ -604,6 +597,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>dd69f1c879</code></td>
+					<td><code>capabilities</code></td>
+					<td>900 passed, 0 skipped, 0 failed.</td>
+					<td>7630 passed, 63 skipped, 0 failed at 2 iterations after role lifecycle, user mutation, filter-locality, and meta-cap monotonicity integration.</td>
+				</tr>
+				<tr>
+					<td><code>ec81e176e5</code></td>
+					<td><code>filesystem</code>, <code>formatting</code></td>
+					<td>Filesystem focused: 900 passed, 0 skipped, 0 failed; sanitizeFileName PHPUnit: 21 tests, 29 assertions.</td>
+					<td>7622 passed, 63 skipped, 0 failed at 2 iterations after fixing stream/newline path normalization oracle and malformed UTF-8 filename handling.</td>
+				</tr>
 				<tr>
 					<td><code>46237be00d</code></td>
 					<td><code>import-diff</code></td>
