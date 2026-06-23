@@ -13,6 +13,20 @@ $required_functions = array(
 	'validate_file',
 	'sanitize_file_name',
 	'wp_check_filetype',
+	'get_attachment_fields_to_edit',
+	'get_media_item',
+	'get_compat_media_markup',
+	'image_align_input_fields',
+	'image_link_input_fields',
+	'image_size_input_fields',
+	'media_buttons',
+	'media_upload_flash_bypass',
+	'media_upload_html_bypass',
+	'attachment_submitbox_metadata',
+	'wp_image_editor',
+	'image_edit_apply_changes',
+	'wp_mime_type_icon',
+	'wp_get_attachment_thumb_url',
 	'register_importer',
 	'get_importers',
 	'wp_import_upload_form',
@@ -448,6 +462,9 @@ foreach ( $required_classes as $class ) {
 }
 if ( ! defined( 'WP_POST_REVISIONS' ) ) {
 	$missing[] = 'constant WP_POST_REVISIONS';
+}
+if ( ! defined( 'MEDIA_TRASH' ) ) {
+	$missing[] = 'constant MEDIA_TRASH';
 }
 
 if ( $missing ) {

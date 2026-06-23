@@ -217,6 +217,9 @@ final class WpBootstrap {
 		if ( ! defined( 'EMPTY_TRASH_DAYS' ) ) {
 			define( 'EMPTY_TRASH_DAYS', 30 );
 		}
+		if ( ! defined( 'MEDIA_TRASH' ) ) {
+			define( 'MEDIA_TRASH', false );
+		}
 		if ( ! defined( 'WP_POST_REVISIONS' ) ) {
 			define( 'WP_POST_REVISIONS', true );
 		}
@@ -461,6 +464,7 @@ final class WpBootstrap {
 			'wp-admin/includes/file.php',
 			'wp-admin/includes/image.php',
 			'wp-admin/includes/media.php',
+			'wp-admin/includes/image-edit.php',
 			'wp-admin/includes/import.php',
 			'wp-admin/includes/class-wp-importer.php',
 			'wp-admin/includes/plugin.php',

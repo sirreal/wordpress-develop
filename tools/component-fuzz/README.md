@@ -30,6 +30,10 @@ database, network requests, or a configured site.
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
   pagination/columns/views/bulk actions/row actions/tablenav rendering, and
   safe admin/AJAX nonce checks without process exits.
+- `admin-media-chrome`: no-DB admin media chrome helper coverage, including
+  attachment edit field preparation, media item and compat markup escaping,
+  image form controls, image editor chrome from cache-seeded metadata,
+  thumbnail/icon helper filters, and safe media button/uploader bypass output.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, prompt builder
   ability integration, cache and event adapters, and deterministic in-memory
@@ -263,6 +267,11 @@ guarded skip while still asserting that file enumeration remains confined. The
 `block-widgets` surface exercises `WP_Widget_Block` and sidebars widget option
 mapping without loading the browser widgets editor, performing REST persistence,
 or depending on theme files. The
+Admin Media Chrome surface intentionally avoids upload dispatch, real
+attachments created by browser flows, `wp_media_attach_action()` redirects,
+AJAX image-editor actions, and media modal runtime behavior; it covers direct
+server-side helpers with synthetic attachment rows and cache/filter-backed
+metadata only. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
 existing no-DB option stub. The `media-editor` surface short-circuits attachment
