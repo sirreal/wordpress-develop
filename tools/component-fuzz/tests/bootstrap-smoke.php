@@ -388,6 +388,7 @@ $required_classes = array(
 	'WP_Admin_Bar',
 	'WP_Widget_Block',
 	'WP_Screen',
+	'WP_Community_Events',
 	'WP_List_Table',
 	'IXR_Base64',
 	'IXR_Date',

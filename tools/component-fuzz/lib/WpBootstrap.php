@@ -466,6 +466,7 @@ final class WpBootstrap {
 			'wp-admin/includes/plugin.php',
 			'wp-admin/includes/theme.php',
 			'wp-admin/includes/class-wp-screen.php',
+			'wp-admin/includes/class-wp-community-events.php',
 			'wp-admin/includes/screen.php',
 			'wp-admin/includes/class-wp-list-table.php',
 			'wp-admin/includes/class-wp-list-table-compat.php',

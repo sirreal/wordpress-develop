@@ -72,6 +72,10 @@ database, network requests, or a configured site.
   cache/count refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, email links, and comment cookies.
+- `community-events`: no-network Community Events API client coverage,
+  including IP header selection and anonymization, minimal request bodies,
+  transient key/cache behavior, event trimming and WordCamp pinning, response
+  normalization, and API error contracts.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, moderation short-circuits, update/status transition hooks,
   trash/untrash and spam/unspam restoration, and WP_Error failure paths without
@@ -328,6 +332,10 @@ The `feed-rendering` surface renders core feed templates through synthetic
 `WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
 headers, remote enclosures, DB-backed query execution, and arbitrary invalid
 bytes so XML structure and escaping remain useful oracles.
+The `community-events` surface short-circuits `wp_remote_get()` through
+`pre_http_request`; it never contacts api.wordpress.org and limits coverage to
+request construction, response normalization, cache behavior, and local helper
+contracts rather than dashboard browser rendering.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
