@@ -195,6 +195,10 @@ database, network requests, or a configured site.
   install-package lifecycles, plugin/theme package validation helpers,
   no-update upgrade branches, auto-update decision filters, core version-policy
   decisions, and maintenance-mode writes against a temp filesystem only.
+- `user-preferences`: no-request-dispatch admin UI preference coverage,
+  including sanitized user-setting serialization, hidden column and meta-box
+  preference defaults/saved values, screen option registration, filter locality,
+  and state restoration without redirecting or dying request handlers.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
   cleanup, and status filtering.
@@ -358,6 +362,9 @@ The `editor-helpers` surface exercises classic editor settings and generated
 markup without loading browser editors. It avoids live TinyMCE/Quicktags
 execution, external asset fetching, admin page dispatch, DB-backed link queries,
 and AJAX media-shortcode preview paths.
+The `user-preferences` surface avoids `set_screen_options()` and AJAX
+preference handlers because they redirect or call `wp_die()` in-process; it
+covers the underlying user-setting and screen preference helpers directly.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
