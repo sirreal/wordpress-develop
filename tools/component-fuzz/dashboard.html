@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 10012 passed, 0 failed, 0 errored, 93 skipped at 99 surfaces over 3 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6706 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>capabilities</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>hooks</code>: 900 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">4</div>
-			<div class="note">Four delegated surfaces are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">3</div>
+			<div class="note">Three delegated surfaces are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -355,18 +355,25 @@
 					<td>Roles, direct caps, generated <code>map_meta_cap</code> contexts, <code>user_has_cap</code> filters.</td>
 				</tr>
 				<tr>
+					<td><code>mail</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; broad run: 6690 passed, 62 skipped, 0 failed.</td>
+					<td><code>wp_mail()</code> filters, PHPMailer handoff, string headers, attachments, embeds.</td>
+				</tr>
+				<tr>
+					<td><code>hooks</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; broad run: 6706 passed, 63 skipped, 0 failed.</td>
+					<td><code>WP_Hook</code>, nested dispatch, mutation during dispatch, accepted args, counters.</td>
+				</tr>
+				<tr>
 					<td><code>html-api</code></td>
 					<td><span class="status work">worker active</span></td>
 					<td>Sagan: <code>_work/component-fuzz-html-api-rich</code></td>
 					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
 					<td>HTML Tag/Processor walking, bookmarks, mutation escaping, malformed recovery.</td>
-				</tr>
-				<tr>
-					<td><code>hooks</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Mill: <code>_work/component-fuzz-hooks-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
-					<td><code>WP_Hook</code>, nested dispatch, mutation during dispatch, accepted args, counters.</td>
 				</tr>
 				<tr>
 					<td><code>syndication</code></td>
@@ -401,6 +408,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>7b5eeac0e3</code></td>
+					<td><code>hooks</code></td>
+					<td>900 passed, 0 skipped, 0 failed.</td>
+					<td>6706 passed, 63 skipped, 0 failed at 2 iterations.</td>
+				</tr>
+				<tr>
+					<td><code>b257533f03</code></td>
+					<td><code>mail</code>, <code>privacy</code></td>
+					<td>600 passed, 0 skipped, 0 failed for <code>mail</code>; privacy repro passed.</td>
+					<td>6690 passed, 62 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>1ec4959311</code></td>
 					<td><code>capabilities</code></td>
