@@ -358,6 +358,13 @@ final class WpBootstrap {
 			'wp-includes/class-wp-meta-query.php',
 			'wp-includes/class-wp-tax-query.php',
 			'wp-includes/class-wp-date-query.php',
+			'wp-includes/class-wp-site.php',
+			'wp-includes/class-wp-network.php',
+			'wp-includes/class-wp-site-query.php',
+			'wp-includes/class-wp-network-query.php',
+			'wp-includes/ms-site.php',
+			'wp-includes/ms-network.php',
+			'wp-includes/ms-blogs.php',
 			'wp-includes/class-wp-query.php',
 			'wp-includes/query.php',
 			'wp-includes/class-wp-user-query.php',
@@ -455,6 +462,59 @@ final class WpBootstrap {
 
 		if ( function_exists( 'wp_cache_init' ) && ! isset( $GLOBALS['wp_object_cache'] ) ) {
 			wp_cache_init();
+		}
+
+		if ( ! isset( $GLOBALS['blog_id'] ) ) {
+			$GLOBALS['blog_id'] = 1;
+		}
+		if ( ! isset( $GLOBALS['table_prefix'] ) ) {
+			$GLOBALS['table_prefix'] = 'wp_';
+		}
+		if ( ! isset( $GLOBALS['_wp_switched_stack'] ) || ! is_array( $GLOBALS['_wp_switched_stack'] ) ) {
+			$GLOBALS['_wp_switched_stack'] = array();
+		}
+		if ( ! isset( $GLOBALS['switched'] ) ) {
+			$GLOBALS['switched'] = false;
+		}
+
+		if ( class_exists( 'WP_Site' ) && ! isset( $GLOBALS['current_blog'] ) ) {
+			$default_site = (object) array(
+				'blog_id'      => '1',
+				'domain'       => 'example.test',
+				'path'         => '/',
+				'site_id'      => '1',
+				'registered'   => '2026-06-22 00:00:00',
+				'last_updated' => '2026-06-22 00:00:00',
+				'public'       => '1',
+				'archived'     => '0',
+				'mature'       => '0',
+				'spam'         => '0',
+				'deleted'      => '0',
+				'lang_id'      => '0',
+			);
+
+			$GLOBALS['current_blog'] = new \WP_Site( $default_site );
+
+			if ( function_exists( 'wp_cache_set' ) ) {
+				wp_cache_set( 1, $default_site, 'sites' );
+			}
+		}
+
+		if ( class_exists( 'WP_Network' ) && ! isset( $GLOBALS['current_site'] ) ) {
+			$default_network = (object) array(
+				'id'            => '1',
+				'domain'        => 'example.test',
+				'path'          => '/',
+				'blog_id'       => '1',
+				'cookie_domain' => 'example.test',
+				'site_name'     => 'Component Fuzz Network',
+			);
+
+			$GLOBALS['current_site'] = new \WP_Network( $default_network );
+
+			if ( function_exists( 'wp_cache_set' ) ) {
+				wp_cache_set( 1, $default_network, 'networks' );
+			}
 		}
 
 		if ( class_exists( 'WP_Textdomain_Registry' ) && ! isset( $GLOBALS['wp_textdomain_registry'] ) ) {

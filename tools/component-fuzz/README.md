@@ -97,6 +97,11 @@ network requests, or a configured site.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
   CRUD short-circuits, and lazyloader queue/reset behavior.
+- `multisite`: no-DB multisite/network API coverage, including synthetic
+  `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
+  lookups, blog-switch stack/cache restoration, filter-backed network option
+  reads, stub-backed network option CRUD, pre-query-short-circuited site/network
+  queries, and current/switched URL helpers.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, walker
   output, depth pruning, and filtered no-DB `wp_nav_menu()` rendering.
@@ -164,7 +169,11 @@ persistence, widget persistence, and real post/option storage beyond the
 existing no-DB option stub. The `media-editor` surface short-circuits attachment
 metadata updates and intentionally avoids media paths that insert attachments,
 create cover-image attachments, process audio/video thumbnails, or otherwise
-require real postmeta writes. The Site Health surface avoids loopback,
+require real postmeta writes. The `multisite` surface leaves `MULTISITE`
+disabled for the shared PHP process; true multisite `sitemeta` write paths,
+site creation/update/deletion, and DB-backed query execution are skipped unless
+short-circuited through filters, while non-multisite network-option CRUD remains
+covered by the existing option stub. The Site Health surface avoids loopback,
 WordPress.org, REST availability, update download, mail, cron, and
 filesystem-writing checks unless they are fully short-circuited. The mail
 surface intercepts PHPMailer send calls and never attempts real delivery.

@@ -122,6 +122,19 @@ $required_functions = array(
 	'get_home_url',
 	'get_site_url',
 	'get_admin_url',
+	'network_site_url',
+	'network_home_url',
+	'get_site',
+	'get_sites',
+	'get_network',
+	'get_networks',
+	'wp_normalize_site_data',
+	'get_network_option',
+	'add_network_option',
+	'update_network_option',
+	'delete_network_option',
+	'switch_to_blog',
+	'restore_current_blog',
 	'get_preview_post_link',
 	'get_edit_post_link',
 	'get_delete_post_link',
@@ -208,6 +221,10 @@ $required_classes = array(
 	'WP_Site_Health',
 	'WP_Query',
 	'WP_Rewrite',
+	'WP_Site',
+	'WP_Network',
+	'WP_Site_Query',
+	'WP_Network_Query',
 	'WP_Post',
 	'WP_Image_Editor',
 	'WP_Image_Editor_GD',
@@ -863,5 +880,149 @@ remove_filter( 'pre_option_template_root', $block_template_theme_root_filter );
 remove_filter( 'posts_pre_query', $block_template_posts_pre_query, 10 );
 wp_clean_theme_json_cache();
 $block_template_smoke_remove( $block_template_smoke_root );
+
+$multisite_smoke_site_data = wp_normalize_site_data(
+	array(
+		'domain'     => 'Sub Domain!.Example.TEST',
+		'path'       => 'team/site',
+		'network_id' => '1',
+		'public'     => '1',
+		'archived'   => '0',
+		'mature'     => '0',
+		'spam'       => '0',
+		'deleted'    => '0',
+	)
+);
+$multisite_smoke_site      = new WP_Site(
+	(object) array(
+		'blog_id'      => '90931',
+		'domain'       => $multisite_smoke_site_data['domain'],
+		'path'         => $multisite_smoke_site_data['path'],
+		'site_id'      => (string) $multisite_smoke_site_data['network_id'],
+		'registered'   => '2026-06-22 00:00:00',
+		'last_updated' => '2026-06-22 00:00:00',
+		'public'       => (string) $multisite_smoke_site_data['public'],
+		'archived'     => (string) $multisite_smoke_site_data['archived'],
+		'mature'       => (string) $multisite_smoke_site_data['mature'],
+		'spam'         => (string) $multisite_smoke_site_data['spam'],
+		'deleted'      => (string) $multisite_smoke_site_data['deleted'],
+		'lang_id'      => '0',
+	)
+);
+$multisite_smoke_network   = new WP_Network(
+	(object) array(
+		'id'            => '1',
+		'domain'        => 'https://www.example.test',
+		'path'          => '/',
+		'blog_id'       => '90931',
+		'cookie_domain' => '',
+		'site_name'     => 'Smoke Network',
+	)
+);
+
+$multisite_site_pre_query = static function ( $site_data, WP_Site_Query $query ) use ( $multisite_smoke_site ) {
+	unset( $site_data );
+
+	$query->found_sites   = 1;
+	$query->max_num_pages = 1;
+
+	if ( ! empty( $query->query_vars['count'] ) ) {
+		return 1;
+	}
+
+	if ( 'ids' === $query->query_vars['fields'] ) {
+		return array( $multisite_smoke_site->id );
+	}
+
+	return array( $multisite_smoke_site );
+};
+$multisite_network_pre_query = static function ( $network_data, WP_Network_Query $query ) use ( $multisite_smoke_network ) {
+	unset( $network_data );
+
+	$query->found_networks = 1;
+	$query->max_num_pages  = 1;
+
+	if ( ! empty( $query->query_vars['count'] ) ) {
+		return 1;
+	}
+
+	if ( 'ids' === $query->query_vars['fields'] ) {
+		return array( $multisite_smoke_network->id );
+	}
+
+	return array( $multisite_smoke_network );
+};
+
+add_filter( 'sites_pre_query', $multisite_site_pre_query, 10, 2 );
+add_filter( 'networks_pre_query', $multisite_network_pre_query, 10, 2 );
+$multisite_site_ids        = get_sites(
+	array(
+		'fields'                 => 'ids',
+		'number'                 => 1,
+		'update_site_meta_cache' => false,
+	)
+);
+$multisite_site_objects    = get_sites( array( 'number' => 1 ) );
+$multisite_network_ids     = get_networks(
+	array(
+		'fields' => 'ids',
+		'number' => 1,
+	)
+);
+$multisite_network_objects = get_networks( array( 'number' => 1 ) );
+remove_filter( 'sites_pre_query', $multisite_site_pre_query, 10 );
+remove_filter( 'networks_pre_query', $multisite_network_pre_query, 10 );
+
+$multisite_option_name = 'component_fuzz_smoke_network_option';
+delete_network_option( null, $multisite_option_name );
+$multisite_option_added   = add_network_option( null, $multisite_option_name, 'first' );
+$multisite_option_first   = get_network_option( null, $multisite_option_name );
+$multisite_option_updated = update_network_option( null, $multisite_option_name, 'second' );
+$multisite_option_second  = get_network_option( null, $multisite_option_name );
+$multisite_option_deleted = delete_network_option( null, $multisite_option_name );
+$multisite_option_gone    = get_network_option( null, $multisite_option_name, 'fallback' );
+
+$multisite_original_blog_id = get_current_blog_id();
+$multisite_original_stack   = $GLOBALS['_wp_switched_stack'];
+$multisite_original_switched = $GLOBALS['switched'];
+$multisite_same_switch      = switch_to_blog( $multisite_original_blog_id );
+$multisite_stack_after_same = $GLOBALS['_wp_switched_stack'];
+$multisite_restore_same     = restore_current_blog();
+$multisite_restore_empty    = restore_current_blog();
+
+if (
+	'SubDomain.Example.TEST' !== $multisite_smoke_site_data['domain']
+	|| '/team/site/' !== $multisite_smoke_site_data['path']
+	|| 90931 !== $multisite_smoke_site->id
+	|| 1 !== $multisite_smoke_site->network_id
+	|| ! is_array( $multisite_smoke_site->to_array() )
+	|| 1 !== $multisite_smoke_network->id
+	|| 90931 !== $multisite_smoke_network->site_id
+	|| 'example.test' !== $multisite_smoke_network->cookie_domain
+	|| array( 90931 ) !== $multisite_site_ids
+	|| 1 !== count( $multisite_site_objects )
+	|| ! ( $multisite_site_objects[0] instanceof WP_Site )
+	|| array( 1 ) !== $multisite_network_ids
+	|| 1 !== count( $multisite_network_objects )
+	|| ! ( $multisite_network_objects[0] instanceof WP_Network )
+	|| true !== $multisite_option_added
+	|| 'first' !== $multisite_option_first
+	|| true !== $multisite_option_updated
+	|| 'second' !== $multisite_option_second
+	|| true !== $multisite_option_deleted
+	|| 'fallback' !== $multisite_option_gone
+	|| true !== $multisite_same_switch
+	|| array( $multisite_original_blog_id ) !== $multisite_stack_after_same
+	|| true !== $multisite_restore_same
+	|| false !== $multisite_restore_empty
+	|| $multisite_original_blog_id !== get_current_blog_id()
+	|| $multisite_original_stack !== $GLOBALS['_wp_switched_stack']
+	|| $multisite_original_switched !== $GLOBALS['switched']
+	|| ! str_contains( network_site_url( 'wp-admin/network.php', 'https' ), 'wp-admin/network.php' )
+	|| ! str_contains( network_home_url( 'dashboard/', 'http' ), 'dashboard/' )
+) {
+	fwrite( STDERR, "Multisite smoke invariant failed.\n" );
+	exit( 1 );
+}
 
 fwrite( STDOUT, "component-fuzz bootstrap smoke passed\n" );
