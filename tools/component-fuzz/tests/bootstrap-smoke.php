@@ -37,6 +37,9 @@ $required_functions = array(
 	'wp_update_post',
 	'wp_trash_post',
 	'wp_delete_post',
+	'redirect_canonical',
+	'strip_fragment_from_url',
+	'_remove_qs_args_if_not_in_url',
 	'get_term',
 	'get_terms',
 	'term_exists',
@@ -175,6 +178,14 @@ $required_functions = array(
 	'get_plugin_updates',
 	'get_theme_updates',
 	'wp_get_update_data',
+	'WP_Filesystem',
+	'request_filesystem_credentials',
+	'download_url',
+	'unzip_file',
+	'copy_dir',
+	'move_dir',
+	'wp_is_file_mod_allowed',
+	'wp_is_auto_update_enabled_for_type',
 	'wp_is_using_https',
 	'wp_is_home_url_using_https',
 	'wp_is_site_url_using_https',
@@ -276,6 +287,13 @@ $required_classes = array(
 	'WP_Image_Editor',
 	'WP_Image_Editor_GD',
 	'WP_Image_Editor_Imagick',
+	'WP_Upgrader',
+	'WP_Upgrader_Skin',
+	'Automatic_Upgrader_Skin',
+	'Plugin_Upgrader',
+	'Theme_Upgrader',
+	'Core_Upgrader',
+	'WP_Automatic_Updater',
 );
 
 $missing = array();
@@ -293,6 +311,48 @@ foreach ( $required_classes as $class ) {
 if ( $missing ) {
 	fwrite( STDERR, "Missing bootstrap symbols:\n- " . implode( "\n- ", $missing ) . "\n" );
 	exit( 1 );
+}
+
+$upgrader_installing = wp_installing( true );
+try {
+	$automatic_skin = new Automatic_Upgrader_Skin();
+	$upgrader       = new WP_Upgrader( $automatic_skin );
+	$upgrader->init();
+	$automatic_skin->feedback( '<strong>Smoke</strong><script>alert(1)</script>' );
+	$automatic_skin->feedback( new WP_Error( 'component_fuzz_smoke', 'Error <em>message</em><script>x</script>' ) );
+	$messages = $automatic_skin->get_upgrade_messages();
+
+	$core_upgrader = new Core_Upgrader( new Automatic_Upgrader_Skin() );
+	$core_latest   = $core_upgrader->upgrade(
+		(object) array(
+			'response' => 'latest',
+			'current'  => wp_get_wp_version(),
+		),
+		array( 'pre_check_md5' => false )
+	);
+
+	if (
+		2 !== count( $messages )
+		|| ! str_contains( $messages[0], '<strong>Smoke</strong>' )
+		|| str_contains( strtolower( implode( "\n", $messages ) ), '<script' )
+		|| ! is_wp_error( $core_latest )
+		|| 'up_to_date' !== $core_latest->get_error_code()
+	) {
+		throw new RuntimeException( 'Upgrader smoke invariant failed.' );
+	}
+
+	if (
+		! ( new Plugin_Upgrader( new Automatic_Upgrader_Skin() ) instanceof WP_Upgrader )
+		|| ! ( new Theme_Upgrader( new Automatic_Upgrader_Skin() ) instanceof WP_Upgrader )
+		|| ! is_bool( ( new WP_Automatic_Updater() )->is_disabled() )
+	) {
+		throw new RuntimeException( 'Upgrader class hierarchy smoke invariant failed.' );
+	}
+} catch ( Throwable $e ) {
+	fwrite( STDERR, 'Upgrader smoke invariant failed: ' . get_class( $e ) . ': ' . $e->getMessage() . "\n" );
+	exit( 1 );
+} finally {
+	wp_installing( $upgrader_installing );
 }
 
 try {
@@ -1389,6 +1449,93 @@ if (
 	|| '3' !== ( $request_lifecycle_wp->query_vars['page'] ?? null )
 ) {
 	fwrite( STDERR, "Request lifecycle parse smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$canonical_globals = array();
+foreach ( array( 'wp', 'wp_query', 'wp_rewrite', 'is_IIS' ) as $canonical_global ) {
+	$canonical_globals[ $canonical_global ] = array(
+		'exists' => array_key_exists( $canonical_global, $GLOBALS ),
+		'value'  => $GLOBALS[ $canonical_global ] ?? null,
+	);
+}
+$canonical_server = array();
+foreach ( array( 'REQUEST_METHOD', 'HTTP_HOST', 'REQUEST_URI', 'PHP_SELF', 'SERVER_PROTOCOL' ) as $server_key ) {
+	$canonical_server[ $server_key ] = array(
+		'exists' => array_key_exists( $server_key, $_SERVER ),
+		'value'  => $_SERVER[ $server_key ] ?? null,
+	);
+}
+$canonical_get  = $_GET;
+$canonical_post = $_POST;
+
+$canonical_home = static function () {
+	return 'http://example.test/site-base';
+};
+$canonical_permalink = static function () {
+	return '/%postname%/';
+};
+$canonical_feed = static function () {
+	return 'rss2';
+};
+add_filter( 'pre_option_home', $canonical_home );
+add_filter( 'pre_option_permalink_structure', $canonical_permalink );
+add_filter( 'pre_option_default_feed', $canonical_feed );
+
+$GLOBALS['wp']                  = new WP();
+$GLOBALS['wp_query']            = new WP_Query();
+$GLOBALS['wp_query']->query     = array();
+$GLOBALS['wp_query']->query_vars = array();
+$GLOBALS['wp_query']->is_home   = true;
+$GLOBALS['wp_rewrite']          = new WP_Rewrite();
+$GLOBALS['is_IIS']              = false;
+$_SERVER['REQUEST_METHOD']      = 'GET';
+$_SERVER['HTTP_HOST']           = 'example.test';
+$_SERVER['REQUEST_URI']         = '/site-base/smoke//index.php/%20.?feed=rss';
+$_SERVER['PHP_SELF']            = '/site-base/index.php';
+$_SERVER['SERVER_PROTOCOL']     = 'HTTP/1.1';
+$_GET                           = array();
+$_POST                          = array();
+
+$canonical_requested = 'http://www.example.test/site-base/smoke//index.php/%20.?feed=rss';
+$canonical_redirect  = redirect_canonical( $canonical_requested, false );
+$canonical_parts     = is_string( $canonical_redirect ) ? wp_parse_url( $canonical_redirect ) : array();
+$canonical_query     = array();
+if ( isset( $canonical_parts['query'] ) ) {
+	parse_str( $canonical_parts['query'], $canonical_query );
+}
+$canonical_fragment = strip_fragment_from_url( 'http://example.test/path/?a=1#frag' );
+$canonical_args     = _remove_qs_args_if_not_in_url( 'p=1&page_id=2&keep=3', array( 'p', 'page_id' ), 'http://example.test/?page_id=2' );
+
+remove_filter( 'pre_option_home', $canonical_home );
+remove_filter( 'pre_option_permalink_structure', $canonical_permalink );
+remove_filter( 'pre_option_default_feed', $canonical_feed );
+foreach ( $canonical_globals as $canonical_global => $entry ) {
+	if ( $entry['exists'] ) {
+		$GLOBALS[ $canonical_global ] = $entry['value'];
+	} else {
+		unset( $GLOBALS[ $canonical_global ] );
+	}
+}
+foreach ( $canonical_server as $server_key => $entry ) {
+	if ( $entry['exists'] ) {
+		$_SERVER[ $server_key ] = $entry['value'];
+	} else {
+		unset( $_SERVER[ $server_key ] );
+	}
+}
+$_GET  = $canonical_get;
+$_POST = $canonical_post;
+
+if (
+	! is_string( $canonical_redirect )
+	|| 'example.test' !== ( $canonical_parts['host'] ?? null )
+	|| ! str_ends_with( (string) ( $canonical_parts['path'] ?? '' ), '/smoke/' )
+	|| 'rss2' !== ( $canonical_query['feed'] ?? null )
+	|| 'http://example.test/path/?a=1' !== $canonical_fragment
+	|| 'page_id=2&keep=3' !== $canonical_args
+) {
+	fwrite( STDERR, "Canonical routing smoke invariant failed.\n" );
 	exit( 1 );
 }
 

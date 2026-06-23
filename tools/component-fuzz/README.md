@@ -46,6 +46,10 @@ database, network requests, or a configured site.
 - `capabilities`: role registry mutations, numeric and explicit capability
   grants, role filters, `WP_User` role/direct cap aggregation, and cheap
   `map_meta_cap()` mappings.
+- `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
+  including method/search/preview bailouts, host/path/query cleanup, invalid
+  date redirects, feed/pagination canonicalization, redirect filter
+  cancellation, fragment stripping, and query-argument removal contracts.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
@@ -119,6 +123,13 @@ database, network requests, or a configured site.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
   validation, no-DB plugin dependency metadata, theme headers, parent/child
   relationships, active theme file helpers, screenshots, and broken theme errors.
+- `update-install-upgrader`: no-network update/install/upgrader coverage,
+  including generated core/plugin/theme update transient shapes, aggregate
+  update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
+  output behavior, `WP_Upgrader` local/filtered download and temp-directory
+  install-package lifecycles, plugin/theme package validation helpers,
+  no-update upgrade branches, auto-update decision filters, core version-policy
+  decisions, and maintenance-mode writes against a temp filesystem only.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
   cleanup, and status filtering.
@@ -212,6 +223,17 @@ metadata lifecycle APIs; it is not a general SQL engine. Post-to-term
 relationship coverage remains limited to simple recognized term relationship
 queries, and deeper taxonomy assignment behavior is not treated as fully
 covered.
+The `canonical-routing` surface calls `redirect_canonical()` with
+`do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
+redirects, attachment-page redirects, and paths that call `wp_redirect()` and
+`exit` are intentionally avoided.
+The `update-install-upgrader` surface intentionally avoids live package
+downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
+activation or switching, full plugin/theme/core update execution, core
+`update-core.php` replacement, language-pack updates, automatic updater run
+loops, fatal-error loopback checks, and any process-exit paths. It exercises
+safe class/helper paths directly and only uses filters to short-circuit network
+or external filesystem credentials.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 

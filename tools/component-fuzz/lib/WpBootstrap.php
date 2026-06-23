@@ -373,6 +373,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-rewrite.php',
 			'wp-includes/class-wp-matchesmapregex.php',
 			'wp-includes/rewrite.php',
+			'wp-includes/canonical.php',
 			'wp-includes/template.php',
 			'wp-includes/general-template.php',
 			'wp-includes/link-template.php',
@@ -444,6 +445,7 @@ final class WpBootstrap {
 			'wp-admin/includes/privacy-tools.php',
 			'wp-admin/includes/class-wp-filesystem-base.php',
 			'wp-admin/includes/class-wp-filesystem-direct.php',
+			'wp-admin/includes/class-wp-upgrader.php',
 		);
 
 		foreach ( $files as $file ) {
