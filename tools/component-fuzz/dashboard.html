@@ -220,23 +220,23 @@
 	<div class="grid metrics">
 		<div class="card">
 			<div class="label">Registered Surfaces</div>
-			<div class="metric">92</div>
-			<div class="good">README parity confirmed: 92 documented</div>
+			<div class="metric">93</div>
+			<div class="good">README parity confirmed: 93 documented</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6564 passed, 0 failed, 0 errored, 54 skipped at 92 surfaces.</div>
+			<div class="note">Non-skipped pass rate: 6572 passed, 0 failed, 0 errored, 55 skipped at 93 surfaces.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>bookmark-links</code>: 700 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>image-metadata</code>: 600 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric work">0</div>
-			<div class="note">One worker result is ready for integration. All workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="note">No worker results are waiting for integration. All workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -293,9 +293,9 @@
 				</tr>
 				<tr>
 					<td><code>image-metadata</code></td>
-					<td><span class="status wait">ready to integrate</span></td>
-					<td><code>_work/component-fuzz-image-metadata</code></td>
-					<td>Worker focused run: 600 passed, 0 failed; smoke and diff check passed.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; broad run: 6572 passed, 55 skipped, 0 failed.</td>
 					<td>Admin image metadata parser, EXIF/IPTC availability, local binary fixtures.</td>
 				</tr>
 			</tbody>
@@ -317,6 +317,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>aca1415156</code></td>
+					<td><code>bookmark-links</code></td>
+					<td>700 passed, 0 skipped, 0 failed.</td>
+					<td>6564 passed, 54 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>23cdb7cd1e</code></td>
 					<td><code>rest-site-editor</code></td>

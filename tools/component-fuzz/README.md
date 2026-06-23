@@ -168,6 +168,11 @@ database, network requests, or a configured site.
 - `images`: image constraint and resize math, metadata dimension lookup,
   responsive `srcset`/`sizes` generation, attachment image helpers, image tag
   attribute insertion, and loading optimization attributes.
+- `image-metadata`: local admin image metadata parser coverage over generated
+  bounded JPEG/TIFF/PNG byte fixtures, including `wp_read_image_metadata()`
+  malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
+  extensions are available, XMP alt text extraction, EXIF helper normalization,
+  image metadata filters, temp-file cleanup, and state restoration.
 - `identity`: usernames, emails, capabilities, text/comment filters, comment
   cookies, options, password hashing/checking, parse helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
@@ -416,6 +421,11 @@ surface intercepts PHPMailer send calls and never attempts real delivery. The
 attachments only; it does not download remote media, invoke codecs or external
 binaries, insert real attachments, or enable audio/video cover attachment
 generation. The
+`image-metadata` surface complements that audio/video coverage with generated
+local image byte fixtures only. It does not invoke image codecs, live uploads,
+remote media, or attachment persistence; EXIF/IPTC extraction rows are recorded
+as explicit skips when the PHP build lacks `exif_read_data()` or `iptcparse()`,
+while malformed/no-metadata image paths and filter cleanup still run. The
 `rest-controllers` surface remains registry-backed only. DB-backed posts,
 terms, comments, users, revisions, and attachments are covered by
 `rest-object-controllers` against the in-memory `wpdb` stub. That object
