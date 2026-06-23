@@ -1689,13 +1689,15 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			if ( preg_match_all( '/\'((?:\\\\.|[^\'\\\\])*)\'|"([^"]*)"|(-?\d+)/', (string) $csv, $matches, PREG_SET_ORDER ) ) {
 				return array_map(
 					function ( $match ) {
-						if ( isset( $match[1] ) && '' !== $match[1] ) {
-							return stripslashes( $match[1] );
+						$token = (string) $match[0];
+						if ( "'" === $token[0] ) {
+							return stripslashes( substr( $token, 1, -1 ) );
 						}
-						if ( isset( $match[2] ) && '' !== $match[2] ) {
-							return $match[2];
+						if ( '"' === $token[0] ) {
+							return substr( $token, 1, -1 );
 						}
-						return $match[3];
+
+						return $match[3] ?? $token;
 					},
 					$matches
 				);
