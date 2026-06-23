@@ -123,6 +123,10 @@ network requests, or a configured site.
   parsing, and deterministic global restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior.
+- `request-lifecycle`: no-DB front-controller lifecycle coverage for
+  `WP::parse_request()`, rewrite-rule matching, query-var precedence,
+  `register_globals()`, `handle_404()` status transitions, and `send_headers()`
+  filters/actions with deterministic global restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.

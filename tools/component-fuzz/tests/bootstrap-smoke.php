@@ -120,6 +120,7 @@ $required_functions = array(
 	'get_search_link',
 	'get_feed_link',
 	'get_home_url',
+	'home_url',
 	'get_site_url',
 	'get_admin_url',
 	'network_site_url',
@@ -162,6 +163,7 @@ $required_functions = array(
 	'wp_should_replace_insecure_home_url',
 	'wp_replace_insecure_home_url',
 	'wp_get_https_detection_errors',
+	'status_header',
 );
 
 $required_classes = array(
@@ -219,6 +221,7 @@ $required_classes = array(
 	'WP_Customize_Partial',
 	'WP_Privacy_Policy_Content',
 	'WP_Site_Health',
+	'WP',
 	'WP_Query',
 	'WP_Rewrite',
 	'WP_Site',
@@ -1022,6 +1025,76 @@ if (
 	|| ! str_contains( network_home_url( 'dashboard/', 'http' ), 'dashboard/' )
 ) {
 	fwrite( STDERR, "Multisite smoke invariant failed.\n" );
+	exit( 1 );
+}
+
+$request_lifecycle_globals = array();
+foreach ( array( 'wp_rewrite' ) as $request_lifecycle_global ) {
+	$request_lifecycle_globals[ $request_lifecycle_global ] = array(
+		'exists' => array_key_exists( $request_lifecycle_global, $GLOBALS ),
+		'value'  => $GLOBALS[ $request_lifecycle_global ] ?? null,
+	);
+}
+$request_lifecycle_server = array();
+foreach ( array( 'HTTP_HOST', 'PHP_SELF', 'REQUEST_METHOD', 'REQUEST_URI', 'PATH_INFO' ) as $request_lifecycle_server_key ) {
+	$request_lifecycle_server[ $request_lifecycle_server_key ] = array(
+		'exists' => array_key_exists( $request_lifecycle_server_key, $_SERVER ),
+		'value'  => $_SERVER[ $request_lifecycle_server_key ] ?? null,
+	);
+}
+$request_lifecycle_get  = $_GET;
+$request_lifecycle_post = $_POST;
+
+$request_lifecycle_rules = static function () {
+	return array( '^smoke/([^/]+)/?$' => 'index.php?component_fuzz_smoke=$matches[1]&page=3' );
+};
+$request_lifecycle_home = static function () {
+	return 'http://example.test/site-base';
+};
+add_filter( 'pre_option_rewrite_rules', $request_lifecycle_rules );
+add_filter( 'pre_option_home', $request_lifecycle_home );
+
+$request_lifecycle_wp = new WP();
+$request_lifecycle_wp->add_query_var( 'component_fuzz_smoke' );
+$GLOBALS['wp_rewrite']                      = new WP_Rewrite();
+$GLOBALS['wp_rewrite']->permalink_structure = '/%postname%/';
+$GLOBALS['wp_rewrite']->front               = '/';
+$GLOBALS['wp_rewrite']->root                = '';
+$_SERVER['HTTP_HOST']                       = 'example.test';
+$_SERVER['PHP_SELF']                        = '/site-base/index.php';
+$_SERVER['REQUEST_METHOD']                  = 'GET';
+$_SERVER['REQUEST_URI']                     = '/site-base/smoke/value/';
+$_SERVER['PATH_INFO']                       = '';
+$_GET                                      = array();
+$_POST                                     = array();
+$request_lifecycle_parsed                  = $request_lifecycle_wp->parse_request();
+
+remove_filter( 'pre_option_rewrite_rules', $request_lifecycle_rules );
+remove_filter( 'pre_option_home', $request_lifecycle_home );
+foreach ( $request_lifecycle_globals as $request_lifecycle_global => $entry ) {
+	if ( $entry['exists'] ) {
+		$GLOBALS[ $request_lifecycle_global ] = $entry['value'];
+	} else {
+		unset( $GLOBALS[ $request_lifecycle_global ] );
+	}
+}
+foreach ( $request_lifecycle_server as $request_lifecycle_server_key => $entry ) {
+	if ( $entry['exists'] ) {
+		$_SERVER[ $request_lifecycle_server_key ] = $entry['value'];
+	} else {
+		unset( $_SERVER[ $request_lifecycle_server_key ] );
+	}
+}
+$_GET  = $request_lifecycle_get;
+$_POST = $request_lifecycle_post;
+
+if (
+	true !== $request_lifecycle_parsed
+	|| '^smoke/([^/]+)/?$' !== $request_lifecycle_wp->matched_rule
+	|| 'value' !== ( $request_lifecycle_wp->query_vars['component_fuzz_smoke'] ?? null )
+	|| '3' !== ( $request_lifecycle_wp->query_vars['page'] ?? null )
+) {
+	fwrite( STDERR, "Request lifecycle parse smoke invariant failed.\n" );
 	exit( 1 );
 }
 
