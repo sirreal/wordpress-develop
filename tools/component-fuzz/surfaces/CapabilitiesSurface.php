@@ -32,6 +32,7 @@ final class CapabilitiesSurface {
 			$rows[] = self::check_role_registry_mutations( $ctx );
 			$rows[] = self::check_role_has_cap_filter( $ctx );
 			$rows[] = self::check_user_capability_aggregation( $ctx );
+			$rows[] = self::check_user_has_cap_filter_contracts( $ctx );
 			$rows[] = self::check_meta_cap_mappings( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -321,6 +322,156 @@ final class CapabilitiesSurface {
 				'failures'  => array_slice( $failures, 0, 6 ),
 				'directCap' => $direct_grant,
 				'denyCap'   => $direct_deny,
+			)
+		);
+	}
+
+	private static function check_user_has_cap_filter_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$user         = self::synthetic_user( $ctx->fork( 'filter-user' ) );
+		$meta_cap     = self::cap_name( $ctx->fork( 'meta-cap' ), 'meta' );
+		$required_a   = self::cap_name( $ctx->fork( 'required-a' ), 'required_a' );
+		$required_b   = self::cap_name( $ctx->fork( 'required-b' ), 'required_b' );
+		$object_id    = 90000 + $ctx->int( 0, 9999 );
+		$context      = 'ctx-' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 );
+		$map_calls    = array();
+		$filter_calls = array();
+
+		$user->caps = array(
+			'cfz_reader' => true,
+			$required_a  => true,
+			$required_b  => false,
+		);
+		$user->get_role_caps();
+
+		$map_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $meta_cap, $required_a, $required_b, $object_id, $context, &$map_calls ): array {
+			$map_calls[] = array(
+				'caps'   => $caps,
+				'cap'    => $cap,
+				'userId' => $user_id,
+				'args'   => $args,
+			);
+
+			if ( $meta_cap === $cap && array( $object_id, $context ) === $args ) {
+				return array( $required_a, $required_b );
+			}
+
+			return $caps;
+		};
+
+		$grant_filter = static function ( array $allcaps, array $caps, array $args, \WP_User $filtered_user ) use ( $meta_cap, $required_a, $required_b, $object_id, $context, $user, &$filter_calls ): array {
+			$filter_calls[] = array(
+				'mode'   => 'grant',
+				'caps'   => $caps,
+				'args'   => $args,
+				'userId' => $filtered_user->ID,
+			);
+
+			if (
+				$user->ID === $filtered_user->ID
+				&& array( $required_a, $required_b ) === $caps
+				&& array( $meta_cap, $user->ID, $object_id, $context ) === $args
+			) {
+				$allcaps[ $required_b ] = true;
+			}
+
+			return $allcaps;
+		};
+
+		$deny_filter = static function ( array $allcaps, array $caps, array $args, \WP_User $filtered_user ) use ( $meta_cap, $required_a, $required_b, $object_id, $context, $user, &$filter_calls ): array {
+			$filter_calls[] = array(
+				'mode'   => 'deny',
+				'caps'   => $caps,
+				'args'   => $args,
+				'userId' => $filtered_user->ID,
+			);
+
+			if (
+				$user->ID === $filtered_user->ID
+				&& array( $required_a, $required_b ) === $caps
+				&& array( $meta_cap, $user->ID, $object_id, $context ) === $args
+			) {
+				$allcaps[ $required_a ] = false;
+				$allcaps[ $required_b ] = true;
+			}
+
+			return $allcaps;
+		};
+
+		try {
+			\add_filter( 'map_meta_cap', $map_filter, 10, 4 );
+
+			$before = $user->has_cap( $meta_cap, $object_id, $context );
+
+			\add_filter( 'user_has_cap', $grant_filter, 10, 4 );
+			$granted = $user->has_cap( $meta_cap, $object_id, $context );
+			\remove_filter( 'user_has_cap', $grant_filter, 10 );
+
+			$after_grant_removed = $user->has_cap( $meta_cap, $object_id, $context );
+
+			\add_filter( 'user_has_cap', $deny_filter, 10, 4 );
+			$denied = $user->has_cap( $meta_cap, $object_id, $context );
+			\remove_filter( 'user_has_cap', $deny_filter, 10 );
+
+			$after_deny_removed = $user->has_cap( $meta_cap, $object_id, $context );
+
+			\remove_filter( 'map_meta_cap', $map_filter, 10 );
+			$after_map_removed = $user->has_cap( $meta_cap, $object_id, $context );
+
+			self::collect_failure(
+				$failures,
+				false === $before
+					&& true === $granted
+					&& false === $after_grant_removed
+					&& false === $denied
+					&& false === $after_deny_removed
+					&& false === $after_map_removed,
+				'user_has_cap grants are scoped after generated meta-cap mapping',
+				array(
+					'states' => array(
+						'before'            => $before,
+						'granted'           => $granted,
+						'afterGrantRemoved' => $after_grant_removed,
+						'denied'            => $denied,
+						'afterDenyRemoved'  => $after_deny_removed,
+						'afterMapRemoved'   => $after_map_removed,
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				5 === count( $map_calls )
+					&& 2 === count( $filter_calls )
+					&& array( $required_a, $required_b ) === ( $filter_calls[0]['caps'] ?? null )
+					&& array( $meta_cap, $user->ID, $object_id, $context ) === ( $filter_calls[0]['args'] ?? null )
+					&& array( $required_a, $required_b ) === ( $filter_calls[1]['caps'] ?? null )
+					&& array( $meta_cap, $user->ID, $object_id, $context ) === ( $filter_calls[1]['args'] ?? null ),
+				'map_meta_cap and user_has_cap filters receive expected generated context',
+				array(
+					'mapCallCount'    => count( $map_calls ),
+					'filterCallCount' => count( $filter_calls ),
+					'mapCalls'        => $map_calls,
+					'filterCalls'     => $filter_calls,
+				)
+			);
+		} finally {
+			\remove_filter( 'user_has_cap', $grant_filter, 10 );
+			\remove_filter( 'user_has_cap', $deny_filter, 10 );
+			\remove_filter( 'map_meta_cap', $map_filter, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'capabilities.user-has-cap.filter-contracts',
+			array() === $failures,
+			array(
+				'user'        => self::describe_user( $user ),
+				'metaCap'     => $meta_cap,
+				'requiredCap' => array( $required_a, $required_b ),
+				'objectId'    => $object_id,
+				'context'     => $context,
+				'failures'    => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}

@@ -92,8 +92,8 @@ database, network requests, or a configured site.
   REST preload path normalization with dispatch short-circuited, and global
   restoration.
 - `capabilities`: role registry mutations, numeric and explicit capability
-  grants, role filters, `WP_User` role/direct cap aggregation, and cheap
-  `map_meta_cap()` mappings.
+  grants, role and user capability filters, generated `map_meta_cap()` filter
+  contexts, `WP_User` role/direct cap aggregation, and cheap meta-cap mappings.
 - `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
