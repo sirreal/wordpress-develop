@@ -35,6 +35,8 @@ final class DiscoverySurface {
 
 			$rows[] = self::check_robots_directives( $ctx );
 			$rows[] = self::check_sitemap_registry_and_urls( $ctx );
+			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
+			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
 			$rows[] = self::check_sitemap_renderer_xml( $ctx );
 			$rows[] = self::check_sitemap_max_url_filter( $ctx );
 		} catch ( \Throwable $e ) {
@@ -73,9 +75,12 @@ final class DiscoverySurface {
 		foreach (
 			array(
 				'add_filter',
+				'apply_filters',
 				'esc_attr',
 				'get_sitemap_url',
+				'has_filter',
 				'remove_filter',
+				'wp_get_sitemap_providers',
 				'wp_register_sitemap_provider',
 				'wp_robots',
 				'wp_robots_max_image_preview_large',
@@ -241,6 +246,166 @@ final class DiscoverySurface {
 			'discovery.sitemaps.registry-urls-and-index-entries',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_sitemap_enablement_robots_and_provider_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$server   = \wp_sitemaps_get_server();
+
+		$disabled_filter = static fn( bool $enabled ): bool => false;
+		$enabled_filter  = static fn( bool $enabled ): bool => true;
+
+		$default_enabled = $server->sitemaps_enabled();
+		\add_filter( 'wp_sitemaps_enabled', $disabled_filter, 10, 1 );
+		$disabled = $server->sitemaps_enabled();
+		\remove_filter( 'wp_sitemaps_enabled', $disabled_filter, 10 );
+		\add_filter( 'wp_sitemaps_enabled', $enabled_filter, 10, 1 );
+		$enabled = $server->sitemaps_enabled();
+		\remove_filter( 'wp_sitemaps_enabled', $enabled_filter, 10 );
+
+		$robots_base      = "User-agent: *\n";
+		$robots_public    = $server->add_robots( $robots_base, true );
+		$robots_private   = $server->add_robots( $robots_base, false );
+		$robots_filter    = array( $server, 'add_robots' );
+		\add_filter( 'robots_txt', $robots_filter, 0, 2 );
+		try {
+			$filtered_robots = \apply_filters( 'robots_txt', $robots_base, true );
+		} finally {
+			\remove_filter( 'robots_txt', $robots_filter, 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			true === $default_enabled
+				&& false === $disabled
+				&& true === $enabled
+				&& false === \has_filter( 'wp_sitemaps_enabled', $disabled_filter )
+				&& false === \has_filter( 'wp_sitemaps_enabled', $enabled_filter )
+				&& str_starts_with( $robots_public, $robots_base . "\nSitemap: https://example.test/" )
+				&& str_ends_with( $robots_public, "\n" )
+				&& $robots_base === $robots_private
+				&& $robots_public === $filtered_robots
+				&& false === \has_filter( 'robots_txt', $robots_filter ),
+			'WP_Sitemaps enablement and robots.txt sitemap injection are filterable and removable',
+			array(
+				'defaultEnabled' => $default_enabled,
+				'disabled'       => $disabled,
+				'enabled'        => $enabled,
+				'robotsPublic'   => self::describe_string( $robots_public ),
+				'robotsPrivate'  => self::describe_string( $robots_private ),
+			)
+		);
+
+		$registry = new \WP_Sitemaps_Registry();
+		$base     = self::sitemap_provider( 'base', 'component', array(), array() );
+		$rejected = self::sitemap_provider( 'rejected', 'component', array(), array() );
+		$original = self::sitemap_provider( 'replaced', 'component', array(), array() );
+		$swap     = self::sitemap_provider( 'replaced', 'replacement', array(), array() );
+		$seen     = array();
+		$filter   = static function ( $provider, string $name ) use ( &$seen, $swap ) {
+			$seen[] = array(
+				'name'  => $name,
+				'class' => is_object( $provider ) ? get_class( $provider ) : gettype( $provider ),
+			);
+
+			if ( 'rejected' === $name ) {
+				return false;
+			}
+
+			if ( 'replaced' === $name ) {
+				return $swap;
+			}
+
+			return $provider;
+		};
+
+		\add_filter( 'wp_sitemaps_add_provider', $filter, 10, 2 );
+		try {
+			$base_added     = $registry->add_provider( 'base', $base );
+			$duplicate     = $registry->add_provider( 'base', self::sitemap_provider( 'base', 'duplicate', array(), array() ) );
+			$rejected_added = $registry->add_provider( 'rejected', $rejected );
+			$replaced_added = $registry->add_provider( 'replaced', $original );
+		} finally {
+			\remove_filter( 'wp_sitemaps_add_provider', $filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			true === $base_added
+				&& false === $duplicate
+				&& false === $rejected_added
+				&& true === $replaced_added
+				&& $base === $registry->get_provider( 'base' )
+				&& null === $registry->get_provider( 'rejected' )
+				&& $swap === $registry->get_provider( 'replaced' )
+				&& array( 'base', 'rejected', 'replaced' ) === array_column( $seen, 'name' )
+				&& false === \has_filter( 'wp_sitemaps_add_provider', $filter ),
+			'sitemap registry add-provider filter can reject or replace providers without running for duplicates',
+			array(
+				'baseAdded'     => $base_added,
+				'duplicate'     => $duplicate,
+				'rejectedAdded' => $rejected_added,
+				'replacedAdded' => $replaced_added,
+				'seen'          => $seen,
+				'providers'     => array_keys( $registry->get_providers() ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.enablement-robots-provider-filters',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_sitemap_provider_url_modes( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_rewrite;
+
+		$failures = array();
+		$name     = 'cfzurl' . $ctx->int( 10, 99 );
+		$provider = self::sitemap_provider(
+			$name,
+			'component',
+			array(
+				'alpha_subtype' => array( 'label' => 'Alpha' ),
+			),
+			array()
+		);
+
+		$wp_rewrite = new \WP_Rewrite();
+		$query_url  = $provider->get_sitemap_url( 'alpha_subtype', 2 );
+		$wp_rewrite->permalink_structure = '/%postname%/';
+		$permalink_url = $provider->get_sitemap_url( 'alpha_subtype', 2 );
+		$root_url      = $provider->get_sitemap_url( '', 1 );
+		$type_data     = $provider->get_sitemap_type_data();
+
+		self::collect_failure(
+			$failures,
+			is_string( $query_url )
+				&& str_contains( $query_url, '?sitemap=' )
+				&& str_contains( $query_url, 'sitemap-subtype=alpha_subtype' )
+				&& str_contains( $query_url, 'paged=2' )
+				&& is_string( $permalink_url )
+				&& str_ends_with( $permalink_url, '/wp-sitemap-' . $name . '-alpha_subtype-2.xml' )
+				&& is_string( $root_url )
+				&& str_ends_with( $root_url, '/wp-sitemap-' . $name . '-1.xml' )
+				&& array( array( 'name' => 'alpha_subtype', 'pages' => 1 ) ) === $type_data,
+			'WP_Sitemaps_Provider URL generation switches between query and permalink modes',
+			array(
+				'queryUrl'     => $query_url,
+				'permalinkUrl' => $permalink_url,
+				'rootUrl'      => $root_url,
+				'typeData'     => $type_data,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.provider-url-modes',
+			array() === $failures,
+			array( 'failures' => $failures )
 		);
 	}
 

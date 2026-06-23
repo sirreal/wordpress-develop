@@ -141,7 +141,8 @@ database, network requests, or a configured site.
   `wp_date()`/`DateTimeImmutable` agreement, `date_i18n()` and `mysql2date()`
   timestamp oracles, timezone option filters, GMT/local round trips, ISO8601
   offset parsing, week windows, `current_time()`, and safe human time diffs.
-- `discovery`: robots meta directives, sitemap provider registration, sitemap
+- `discovery`: robots meta directives, sitemap enablement and robots.txt
+  injection, provider registration/replacement filters, query/permalink sitemap
   URL/index expansion, escaped sitemap XML rendering, and sitemap max-URL
   filters without DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
