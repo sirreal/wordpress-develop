@@ -350,6 +350,8 @@ final class WpBootstrap {
 			'wp-includes/class-wp-post-type.php',
 			'wp-includes/post.php',
 			'wp-includes/revision.php',
+			'wp-includes/author-template.php',
+			'wp-includes/category-template.php',
 			'wp-includes/post-template.php',
 			'wp-includes/post-formats.php',
 			'wp-includes/user.php',

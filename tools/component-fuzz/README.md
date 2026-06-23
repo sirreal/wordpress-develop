@@ -82,6 +82,10 @@ database, network requests, or a configured site.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, entity normalization, colors, sizes,
   time strings, UTF-8 helpers, and accent removal.
+- `feed-rendering`: no-DB RSS2, Atom, and comments RSS2 feed template rendering
+  over synthetic query loops, including feed item/entry counts, self links,
+  CDATA terminator escaping, excerpt/content mode switches, enclosure metadata,
+  comment feed escaping, and feed build date selection.
 - `html-api`: HTML tag and tree processor updates, normalization idempotence,
   breadcrumbs, token walking, and modifiable text escaping.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie
@@ -250,6 +254,10 @@ redirects, attachment-page redirects, and paths that call `wp_redirect()` and
 The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.
+The `feed-rendering` surface renders core feed templates through synthetic
+`WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
+headers, remote enclosures, DB-backed query execution, and arbitrary invalid
+bytes so XML structure and escaping remain useful oracles.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
