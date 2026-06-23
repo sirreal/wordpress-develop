@@ -226,24 +226,24 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7597 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7600 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Nineteen integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
+			<div class="note">Twenty integrated rich surfaces passed focused 100-iteration validation; largest was <code>email</code> at 120981 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active delegated worker after integrating Kant the 2nd's <code>l10n</code> commit.</div>
+			<div class="metric work">1</div>
+			<div class="note">Zeno the 2nd is active on <code>images</code> in <code>_work/component-fuzz-images-rich</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress and the latest integrated rich-surface wave.</span>
+			<span class="note">Committed main-tree progress plus the next active delegated rich-surface wave.</span>
 		</div>
 		<table>
 			<thead>
@@ -256,6 +256,20 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>images</code></td>
+					<td><span class="status work">delegated active</span></td>
+					<td>Zeno the 2nd / <code>_work/component-fuzz-images-rich</code></td>
+					<td>Worker assigned focused 100-iteration and broad 2-iteration validation; integration pending.</td>
+					<td>Image helper math, responsive attributes, synthetic metadata, loading/fetchpriority filters.</td>
+				</tr>
+				<tr>
+					<td><code>navigation</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7600 passed, 63 skipped, 0 failed.</td>
+					<td>Nav menu registry, fallback/short-circuit pipeline, walker filters, container and attribute escaping.</td>
+				</tr>
 				<tr>
 					<td><code>l10n</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
@@ -555,6 +569,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>f267c4f0b2</code></td>
+					<td><code>navigation</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>7600 passed, 63 skipped, 0 failed at 2 iterations after fallback, allowlist, and filter-pipeline integration.</td>
+				</tr>
 				<tr>
 					<td><code>5e6efd5c91</code></td>
 					<td><code>l10n</code></td>
