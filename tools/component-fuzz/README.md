@@ -306,6 +306,11 @@ database, network requests, or a configured site.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
   registry query consistency, argument normalization, labels, term
   sanitization, synthetic `WP_Term` behavior, and cheap term-link paths.
+- `taxonomy-relationships`: in-memory wpdb-backed object/term assignment
+  coverage, including `wp_set_object_terms()` replace/append behavior,
+  field-variant agreement, scoped removal, membership/object lookup helpers,
+  invalid-input fail-closed paths, and `get_the_terms()` relationship cache
+  population/invalidation.
 - `template-hierarchy`: no-DB classic PHP template hierarchy coverage,
   including child/parent lookup priority, query-template filters, single
   template ordering, `load_template()` include semantics, template-part hooks

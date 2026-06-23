@@ -371,6 +371,25 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_finish_insert( $id );
 			}
 
+			if ( 'term_relationships' === $table_key ) {
+				if ( ! isset( $data['object_id'], $data['term_taxonomy_id'] ) ) {
+					return false;
+				}
+
+				$key = (int) $data['object_id'] . ':' . (int) $data['term_taxonomy_id'];
+				if ( isset( $this->component_fuzz_term_relationship_rows[ $key ] ) ) {
+					return false;
+				}
+
+				$this->component_fuzz_term_relationship_rows[ $key ] = array(
+					'object_id'        => (int) $data['object_id'],
+					'term_taxonomy_id' => (int) $data['term_taxonomy_id'],
+					'term_order'       => (int) ( $data['term_order'] ?? 0 ),
+				);
+				$this->rows_affected                              = 1;
+				return 1;
+			}
+
 			if ( 'users' === $table_key ) {
 				$id                                = $this->component_fuzz_row_id( $data, 'ID', 'users' );
 				$row                               = array_merge( $this->component_fuzz_user_defaults(), $data, array( 'ID' => $id ) );
@@ -645,6 +664,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_select_comments( $query );
 			}
 
+			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
+				return $this->component_fuzz_select_term_relationships( $query );
+			}
+
 			if ( preg_match( '/\bFROM\s+`?wp_terms`?\b/i', $query ) || preg_match( '/\bFROM\s+`?wp_term_taxonomy`?\b/i', $query ) ) {
 				return $this->component_fuzz_select_terms( $query );
 			}
@@ -916,6 +939,131 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $rows;
 		}
 
+		private function component_fuzz_select_term_relationships( $query ) {
+			$rows = array_values( $this->component_fuzz_term_relationship_rows );
+
+			if (
+				preg_match( '/\bwp_term_taxonomy\b/i', $query )
+				|| preg_match( '/\btt\./i', $query )
+				|| preg_match( '/\bterm_id\b/i', $query )
+				|| preg_match( '/\btaxonomy\b/i', $query )
+			) {
+				$joined = array();
+				foreach ( $rows as $row ) {
+					$tt_id = (int) $row['term_taxonomy_id'];
+					if ( ! isset( $this->component_fuzz_term_taxonomy_rows[ $tt_id ] ) ) {
+						continue;
+					}
+					$joined[] = array_merge( $this->component_fuzz_term_taxonomy_rows[ $tt_id ], $row );
+				}
+				$rows = $joined;
+			}
+
+			$rows = $this->component_fuzz_filter_relationships_by_posts( $query, $rows );
+
+			foreach ( array( 'object_id', 'term_taxonomy_id', 'term_id', 'taxonomy' ) as $column ) {
+				$value = $this->component_fuzz_compare_value( $query, $column );
+				if ( null === $value ) {
+					continue;
+				}
+
+				$rows = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value ) {
+						return array_key_exists( $column, $row ) && (string) $row[ $column ] === (string) $value;
+					}
+				);
+			}
+
+			foreach ( array( 'object_id', 'term_taxonomy_id', 'term_id', 'taxonomy' ) as $column ) {
+				$values = $this->component_fuzz_in_values( $query, $column );
+				if ( array() === $values ) {
+					continue;
+				}
+
+				$value_map = array_fill_keys( array_map( 'strval', $values ), true );
+				$rows      = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value_map ) {
+						return array_key_exists( $column, $row ) && isset( $value_map[ (string) $row[ $column ] ] );
+					}
+				);
+			}
+
+			usort(
+				$rows,
+				static function ( $a, $b ) use ( $query ) {
+					$comparison = (int) $a['object_id'] <=> (int) $b['object_id'];
+					if ( 0 === $comparison ) {
+						$comparison = (int) $a['term_taxonomy_id'] <=> (int) $b['term_taxonomy_id'];
+					}
+
+					if ( preg_match( '/ORDER\s+BY\s+(?:`?tr`?\.)?`?object_id`?\s+DESC/i', $query ) ) {
+						return -$comparison;
+					}
+
+					return $comparison;
+				}
+			);
+
+			$rows = $this->component_fuzz_apply_limit( $query, $rows );
+
+			if ( preg_match( '/SELECT\s+(?:`?[a-z_]+`?\.)?`?object_id`?\s*,\s*(?:`?[a-z_]+`?\.)?`?term_taxonomy_id`?\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'object_id', 'term_taxonomy_id' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+(?:DISTINCT\s+)?(?:`?[a-z_]+`?\.)?`?object_id`?\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'object_id' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+(?:DISTINCT\s+)?(?:`?[a-z_]+`?\.)?`?term_taxonomy_id`?\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'term_taxonomy_id' ) );
+			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_filter_relationships_by_posts( $query, array $rows ) {
+			if ( ! preg_match( '/\bwp_posts\b/i', $query ) ) {
+				return $rows;
+			}
+
+			$post_statuses = $this->component_fuzz_in_values( $query, 'post_status' );
+			$post_types    = $this->component_fuzz_in_values( $query, 'post_type' );
+			$post_status   = $this->component_fuzz_compare_value( $query, 'post_status' );
+			$post_type     = $this->component_fuzz_compare_value( $query, 'post_type' );
+			$status_map    = array_fill_keys( array_map( 'strval', $post_statuses ), true );
+			$type_map      = array_fill_keys( array_map( 'strval', $post_types ), true );
+
+			return array_values(
+				array_filter(
+					$rows,
+					function ( $row ) use ( $post_status, $post_type, $post_statuses, $post_types, $status_map, $type_map ) {
+						$object_id = (int) $row['object_id'];
+						if ( ! isset( $this->component_fuzz_posts[ $object_id ] ) ) {
+							return false;
+						}
+
+						$post = $this->component_fuzz_posts[ $object_id ];
+						if ( null !== $post_status && (string) $post['post_status'] !== (string) $post_status ) {
+							return false;
+						}
+						if ( null !== $post_type && (string) $post['post_type'] !== (string) $post_type ) {
+							return false;
+						}
+						if ( array() !== $post_statuses && ! isset( $status_map[ (string) $post['post_status'] ] ) ) {
+							return false;
+						}
+						if ( array() !== $post_types && ! isset( $type_map[ (string) $post['post_type'] ] ) ) {
+							return false;
+						}
+
+						return true;
+					}
+				)
+			);
+		}
+
 		private function component_fuzz_select_terms( $query ) {
 			$rows = $this->component_fuzz_joined_term_rows();
 
@@ -1113,6 +1261,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private function component_fuzz_count_for_query( $query ) {
 			if ( preg_match( '/\bFROM\s+`?wp_comments`?\b/i', $query ) ) {
 				return count( $this->component_fuzz_select_comments( $query ) );
+			}
+
+			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
+				return count( $this->component_fuzz_select_term_relationships( $query ) );
 			}
 
 			if ( preg_match( '/\bFROM\s+`?wp_terms`?\b/i', $query ) || preg_match( '/\bFROM\s+`?wp_term_taxonomy`?\b/i', $query ) ) {
