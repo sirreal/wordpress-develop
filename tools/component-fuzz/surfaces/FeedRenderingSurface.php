@@ -31,6 +31,9 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_rss2_posts_template( $ctx->fork( 'rss2' ), $case );
 			$rows[] = self::check_atom_posts_template( $ctx->fork( 'atom' ), $case );
 			$rows[] = self::check_comments_rss2_template( $ctx->fork( 'comments-rss2' ), $case );
+			$rows[] = self::check_comments_atom_template( $ctx->fork( 'comments-atom' ), $case );
+			$rows[] = self::check_content_mode_switches( $ctx->fork( 'content-modes' ), $case );
+			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
 			$rows[] = self::check_feed_loop_helpers( $ctx->fork( 'helpers' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -66,10 +69,12 @@ final class FeedRenderingSurface {
 			array(
 				'add_filter',
 				'add_metadata',
+				'add_theme_support',
 				'atom_enclosure',
 				'bloginfo_rss',
 				'comment_author_rss',
 				'comment_guid',
+				'comment_text',
 				'comment_text_rss',
 				'comments_link_feed',
 				'convert_chars',
@@ -77,10 +82,18 @@ final class FeedRenderingSurface {
 				'create_initial_taxonomies',
 				'ent2ncr',
 				'esc_html',
+				'esc_url',
+				'feed_links',
+				'feed_links_extra',
 				'get_comment',
+				'get_comment_author_url',
 				'get_comment_guid',
+				'get_comment_link',
 				'get_feed_build_date',
+				'get_feed_link',
 				'get_post',
+				'get_post_comments_feed_link',
+				'get_self_link',
 				'get_the_content_feed',
 				'have_comments',
 				'have_posts',
@@ -95,6 +108,7 @@ final class FeedRenderingSurface {
 				'the_comment',
 				'the_content_feed',
 				'the_excerpt_rss',
+				'the_guid',
 				'the_permalink_rss',
 				'the_post',
 				'the_title_rss',
@@ -138,7 +152,7 @@ final class FeedRenderingSurface {
 			count( $case['posts'] ) === substr_count( $output, '<item>' )
 				&& str_contains( $output, '<rss version="2.0"' )
 				&& str_contains( $output, 'type="application/rss+xml"' )
-				&& str_contains( $output, self::xml_text( $case['selfLink'] ) ),
+				&& str_contains( $output, self::url_attr( $case['selfLink'] ) ),
 			'RSS2 posts feed renders one item per synthetic post and a self link',
 			array(
 				'itemCount' => substr_count( $output, '<item>' ),
@@ -161,7 +175,7 @@ final class FeedRenderingSurface {
 		);
 		self::collect_failure(
 			$failures,
-			str_contains( $output, '<enclosure url="' . self::xml_attr( $case['enclosure']['url'] ) . '"' )
+			str_contains( $output, '<enclosure url="' . self::url_attr( $case['enclosure']['url'] ) . '"' )
 				&& str_contains( $output, 'length="' . (string) absint( $case['enclosure']['length'] ) . '"' )
 				&& str_contains( $output, 'type="' . self::xml_attr( $case['enclosure']['type'] ) . '"' ),
 			'RSS2 enclosures are rendered from post meta with escaped URL, absint length, and MIME type',
@@ -190,7 +204,7 @@ final class FeedRenderingSurface {
 			$xml['ok']
 				&& str_contains( $output, '<feed' )
 				&& count( $case['posts'] ) === substr_count( $output, '<entry>' )
-				&& str_contains( $output, 'type="application/atom+xml" href="' . self::xml_attr( $case['selfLink'] ) . '"' ),
+				&& str_contains( $output, 'type="application/atom+xml" href="' . self::url_attr( $case['selfLink'] ) . '"' ),
 			'Atom posts feed is parseable and renders one entry per synthetic post with a self link',
 			array(
 				'xml'        => $xml,
@@ -214,8 +228,8 @@ final class FeedRenderingSurface {
 		);
 		self::collect_failure(
 			$failures,
-			str_contains( $output, 'rel="enclosure"')
-				&& str_contains( $output, 'href="' . self::xml_attr( $case['enclosure']['url'] ) . '"' )
+			str_contains( $output, 'rel="enclosure"' )
+				&& str_contains( $output, 'href="' . self::url_attr( $case['enclosure']['url'] ) . '"' )
 				&& str_contains( $output, 'length="' . (string) absint( $case['enclosure']['length'] ) . '"' )
 				&& str_contains( $output, 'type="' . self::xml_attr( $case['enclosure']['type'] ) . '"' ),
 			'Atom enclosures are rendered from post meta with escaped attributes',
@@ -272,6 +286,188 @@ final class FeedRenderingSurface {
 		return self::result( $ctx, 'feed-rendering.rss2-comments-template.structure-and-escaping', $failures, $output );
 	}
 
+	private static function check_comments_atom_template( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::set_posts_query( $case, 'atom', true );
+		$output = self::render_template( 'feed-atom-comments.php' );
+
+		$xml = self::parse_xml( $output );
+		self::collect_failure(
+			$failures,
+			$xml['ok']
+				&& count( $case['comments'] ) === substr_count( $output, '<entry>' )
+				&& str_contains( $output, 'type="application/atom+xml" href="' . self::url_attr( \get_feed_link( 'comments_atom' ) ) . '"' ),
+			'Atom comments feed is parseable and renders one entry per synthetic comment',
+			array(
+				'xml'        => $xml,
+				'entryCount' => substr_count( $output, '<entry>' ),
+				'preview'    => self::preview( $output ),
+			)
+		);
+
+		$parent_comment = $case['comments'][0];
+		$child_comment  = $case['comments'][1];
+		self::collect_failure(
+			$failures,
+			str_contains( $output, '<thr:in-reply-to ref="' . self::url_attr( $case['posts'][0]->guid ) . '"' )
+				&& str_contains( $output, '<thr:in-reply-to ref="' . self::url_attr( \get_comment_guid( $parent_comment ) ) . '"' )
+				&& str_contains( $output, '#comment-' . $child_comment->comment_ID ),
+			'Atom comments feed renders both post-level and parent-comment threading references',
+			array(
+				'parent' => self::comment_summary( $parent_comment ),
+				'child'  => self::comment_summary( $child_comment ),
+			)
+		);
+		foreach ( $case['comments'] as $comment ) {
+			self::collect_failure(
+				$failures,
+				str_contains( $output, '<id>' . self::url_attr( \get_comment_guid( $comment ) ) . '</id>' )
+					&& str_contains( $output, '<name>' . esc_html( ent2ncr( $comment->comment_author ) ) . '</name>' )
+					&& str_contains( $output, '<uri>' . \get_comment_author_url( $comment ) . '</uri>' ),
+				'Atom comments feed includes escaped comment GUID, author, and author URI',
+				array( 'comment' => self::comment_summary( $comment ) )
+			);
+		}
+		self::collect_failure(
+			$failures,
+			count( $case['comments'] ) === substr_count( $output, '<content type="html" xml:base="' )
+				&& ! str_contains( $output, '<script' )
+				&& ! str_contains( $output, ']]> inside comment' ),
+			'Atom comments feed emits one HTML content block per comment without raw script or CDATA terminators',
+			array( 'contentCount' => substr_count( $output, '<content type="html" xml:base="' ) )
+		);
+
+		return self::result( $ctx, 'feed-rendering.atom-comments-template.threading-and-escaping', $failures, $output );
+	}
+
+	private static function check_content_mode_switches( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$output   = '';
+
+		foreach ( array( false, true ) as $use_excerpt ) {
+			\update_option( 'rss_use_excerpt', $use_excerpt ? 1 : 0 );
+
+			self::set_posts_query( $case, 'rss2', false );
+			$rss2_output = self::render_template( 'feed-rss2.php' );
+			$rss2_xml    = self::parse_xml( $rss2_output );
+
+			self::set_posts_query( $case, 'atom', false );
+			$atom_output = self::render_template( 'feed-atom.php' );
+			$atom_xml    = self::parse_xml( $atom_output );
+
+			$output .= $rss2_output . $atom_output;
+
+			$expected_content_count = $use_excerpt ? 0 : count( $case['posts'] );
+			self::collect_failure(
+				$failures,
+				$rss2_xml['ok']
+					&& $atom_xml['ok']
+					&& count( $case['posts'] ) === substr_count( $rss2_output, '<description><![CDATA[' )
+					&& count( $case['posts'] ) === substr_count( $atom_output, '<summary type="html"><![CDATA[' ),
+				'RSS2 and Atom posts feeds stay parseable and keep per-post summaries in both content modes',
+				array(
+					'useExcerpt'          => $use_excerpt,
+					'rss2Xml'             => $rss2_xml,
+					'atomXml'             => $atom_xml,
+					'rss2DescriptionCount' => substr_count( $rss2_output, '<description><![CDATA[' ),
+					'atomSummaryCount'    => substr_count( $atom_output, '<summary type="html"><![CDATA[' ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$expected_content_count === substr_count( $rss2_output, '<content:encoded>' )
+					&& $expected_content_count === substr_count( $atom_output, '<content type="html" ' ),
+				'RSS2 and Atom posts feeds switch full content elements exactly with rss_use_excerpt',
+				array(
+					'useExcerpt'          => $use_excerpt,
+					'expectedContentCount' => $expected_content_count,
+					'rss2ContentCount'    => substr_count( $rss2_output, '<content:encoded>' ),
+					'atomContentCount'    => substr_count( $atom_output, '<content type="html" ' ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$use_excerpt
+					? (
+						! str_contains( $rss2_output, 'CDATA close' )
+						&& ! str_contains( $atom_output, 'CDATA close' )
+					)
+					: (
+						str_contains( $rss2_output, 'CDATA close ]]&gt; marker' )
+						&& str_contains( $atom_output, 'CDATA close ]]&gt; marker' )
+						&& ! str_contains( $rss2_output, 'CDATA close ]]> marker' )
+						&& ! str_contains( $atom_output, 'CDATA close ]]> marker' )
+					),
+				'RSS2 and Atom full-content mode escapes CDATA terminators and excerpt mode omits post content',
+				array( 'useExcerpt' => $use_excerpt )
+			);
+		}
+
+		\update_option( 'rss_use_excerpt', $case['rssUseExcerpt'] ? 1 : 0 );
+
+		return self::result( $ctx, 'feed-rendering.posts-template.content-mode-switches', $failures, $output );
+	}
+
+	private static function check_feed_link_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		\add_theme_support( 'automatic-feed-links' );
+
+		self::set_posts_query( $case, 'rss2', false );
+		$feed_links = self::capture_output(
+			static function (): void {
+				\feed_links(
+					array(
+						'separator' => '&',
+						'feedtitle' => '%1$s %2$s Posts "Feed"',
+						'comstitle' => '%1$s %2$s Comments <Feed>',
+					)
+				);
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === substr_count( $feed_links, '<link rel="alternate"' )
+				&& str_contains( $feed_links, 'type="application/rss+xml"' )
+				&& str_contains( $feed_links, 'href="' . self::url_attr( \get_feed_link() ) . '"' )
+				&& str_contains( $feed_links, 'href="' . self::url_attr( \get_feed_link( 'comments_rss2' ) ) . '"' ),
+			'feed_links renders posts and comments links when automatic feed links are supported',
+			array( 'feedLinks' => self::preview( $feed_links ) )
+		);
+		self::collect_failure(
+			$failures,
+			str_contains( $feed_links, 'title="Component Feed Fuzz &amp; Posts &quot;Feed&quot;"' )
+				&& str_contains( $feed_links, 'title="Component Feed Fuzz &amp; Comments &lt;Feed&gt;"' )
+				&& ! str_contains( $feed_links, 'Comments <Feed>' ),
+			'feed_links escapes generated title attributes',
+			array( 'feedLinks' => self::preview( $feed_links ) )
+		);
+
+		self::set_singular_posts_query( $case, 'rss2' );
+		$extra_links = self::capture_output(
+			static function (): void {
+				\feed_links_extra(
+					array(
+						'separator'   => '&',
+						'singletitle' => '%1$s %2$s %3$s Comments "Feed"',
+					)
+				);
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === substr_count( $extra_links, '<link rel="alternate"' )
+				&& str_contains( $extra_links, 'href="' . self::url_attr( \get_post_comments_feed_link( $case['posts'][0]->ID ) ) . '"' )
+				&& str_contains( $extra_links, 'Comments &quot;Feed&quot;' )
+				&& ! str_contains( $extra_links, '<Title>' ),
+			'feed_links_extra renders a singular post comments feed link with escaped title text',
+			array( 'feedLinksExtra' => self::preview( $extra_links ) )
+		);
+
+		return self::result( $ctx, 'feed-rendering.feed-link-helpers.alternate-links', $failures, $feed_links . $extra_links );
+	}
+
 	private static function check_feed_loop_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		self::set_posts_query( $case, 'rss2', false );
@@ -312,8 +508,8 @@ final class FeedRenderingSurface {
 			$failures,
 			str_contains( $rss_enclosure, '<enclosure ' )
 				&& str_contains( $atom_enclosure, 'rel="enclosure"' )
-				&& str_contains( $rss_enclosure, self::xml_attr( $case['enclosure']['url'] ) )
-				&& str_contains( $atom_enclosure, self::xml_attr( $case['enclosure']['url'] ) ),
+				&& str_contains( $rss_enclosure, self::url_attr( $case['enclosure']['url'] ) )
+				&& str_contains( $atom_enclosure, self::url_attr( $case['enclosure']['url'] ) ),
 			'rss_enclosure and atom_enclosure agree on the current post enclosure URL',
 			array(
 				'rss'  => self::preview( $rss_enclosure ),
@@ -380,6 +576,9 @@ final class FeedRenderingSurface {
 		$posts = array();
 		for ( $i = 0; $i < 2; $i++ ) {
 			$title = 'Feed ' . ( $i + 1 ) . ' <Title> & ' . self::safe_text( $ctx, 3, 18 );
+			if ( 0 === $i ) {
+				$title .= ' CDATA title ]]> marker <script>alert(1)</script>';
+			}
 			$slug  = \sanitize_title_with_dashes( 'feed-' . $token . '-' . $i, '', 'save' );
 			if ( '' === $slug ) {
 				$slug = 'feed-' . substr( hash( 'crc32b', $token . ':' . $i ), 0, 10 );
@@ -416,14 +615,16 @@ final class FeedRenderingSurface {
 		}
 
 		$enclosure = array(
-			'url'    => 'https://media.example.test/' . rawurlencode( $token ) . '/audio-' . $ctx->int( 1, 999 ) . '.mp3?x=' . rawurlencode( self::safe_text( $ctx, 0, 8 ) ),
+			'url'    => 'https://media.example.test/' . rawurlencode( $token ) . '/audio-' . $ctx->int( 1, 999 ) . '.mp3?x=' . rawurlencode( self::safe_text( $ctx, 0, 8 ) ) . '&name=' . rawurlencode( 'clip & ' . $token ),
 			'length' => (string) $ctx->int( 1, 999999 ),
 			'type'   => 'audio/mpeg',
 		);
 		\add_metadata( 'post', $posts[0]->ID, 'enclosure', $enclosure['url'] . "\n" . $enclosure['length'] . "\n" . $enclosure['type'] );
 
-		$comments = array();
-		foreach ( $posts as $index => $post ) {
+		$comments          = array();
+		$parent_comment_id = 0;
+		$comment_posts     = array( $posts[0], $posts[0], $posts[1] );
+		foreach ( $comment_posts as $index => $post ) {
 			$local_hour = sprintf( '%02d', 11 + $index );
 			$gmt_hour   = sprintf( '%02d', 9 + $index );
 			$comment_id = \wp_insert_comment(
@@ -433,22 +634,30 @@ final class FeedRenderingSurface {
 					'comment_author_email' => 'commenter-' . $index . '@example.test',
 					'comment_author_url'   => 'https://commenter.example.test/' . $index,
 					'comment_content'      => 'Comment <b>' . self::safe_text( $ctx, 4, 18 ) . '</b> & escaped',
+					'comment_parent'       => 1 === $index ? (string) $parent_comment_id : '0',
 					'comment_type'         => 'comment',
 					'comment_approved'     => '1',
 					'comment_date'         => '2026-06-22 ' . $local_hour . ':05:00',
 					'comment_date_gmt'     => '2026-06-22 ' . $gmt_hour . ':05:00',
 				)
 			);
+			if ( 0 === $index ) {
+				$parent_comment_id = (int) $comment_id;
+			}
 			$comments[] = \get_comment( $comment_id );
 		}
 
+		$comment_counts = array_fill_keys( wp_list_pluck( $posts, 'ID' ), 0 );
+		foreach ( $comments as $comment ) {
+			$comment_counts[ $comment->comment_post_ID ]++;
+		}
 		foreach ( $posts as $post ) {
-			$wpdb->update( $wpdb->posts, array( 'comment_count' => '1' ), array( 'ID' => $post->ID ) );
+			$wpdb->update( $wpdb->posts, array( 'comment_count' => (string) $comment_counts[ $post->ID ] ), array( 'ID' => $post->ID ) );
 			\wp_cache_delete( $post->ID, 'posts' );
 		}
 		$posts = array_map( 'get_post', wp_list_pluck( $posts, 'ID' ) );
 
-		$_SERVER['REQUEST_URI'] = '/feed/' . rawurlencode( $token ) . '/?q=' . rawurlencode( self::safe_text( $ctx, 0, 12 ) );
+		$_SERVER['REQUEST_URI'] = '/feed/' . rawurlencode( $token ) . '/?q=' . rawurlencode( self::safe_text( $ctx, 0, 12 ) ) . '&view=' . rawurlencode( 'feed & ' . $token );
 
 		return array(
 			'token'                    => $token,
@@ -507,6 +716,21 @@ final class FeedRenderingSurface {
 		$GLOBALS['id']           = isset( $case['posts'][0] ) ? (int) $case['posts'][0]->ID : 0;
 	}
 
+	private static function set_singular_posts_query( array $case, string $feed ): void {
+		self::set_posts_query( $case, $feed, false );
+
+		$post = $case['posts'][0] ?? null;
+		if ( ! $post instanceof \WP_Post || ! $GLOBALS['wp_query'] instanceof \WP_Query ) {
+			return;
+		}
+
+		$GLOBALS['wp_query']->is_home     = false;
+		$GLOBALS['wp_query']->is_single   = true;
+		$GLOBALS['wp_query']->is_singular = true;
+		$GLOBALS['wp_query']->query_vars['p'] = (int) $post->ID;
+		$GLOBALS['wp_the_query']              = $GLOBALS['wp_query'];
+	}
+
 	private static function render_template( string $template ): string {
 		global $authordata, $comment, $id, $more, $post, $wp_query;
 
@@ -518,6 +742,17 @@ final class FeedRenderingSurface {
 		ob_start();
 		try {
 			require $path;
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
+	}
+
+	private static function capture_output( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
 			return (string) ob_get_clean();
 		} catch ( \Throwable $e ) {
 			ob_end_clean();
@@ -596,6 +831,7 @@ final class FeedRenderingSurface {
 		$globals = array();
 		foreach (
 			array(
+				'_wp_theme_features',
 				'authordata',
 				'comment',
 				'id',
@@ -753,6 +989,10 @@ final class FeedRenderingSurface {
 
 	private static function xml_attr( string $text ): string {
 		return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+	}
+
+	private static function url_attr( string $url ): string {
+		return (string) \esc_url( $url );
 	}
 
 	private static function preview( string $value ): array {
