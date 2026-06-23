@@ -30,6 +30,12 @@ database, network requests, or a configured site.
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
   pagination/columns/views/bulk actions/row actions/tablenav rendering, and
   safe admin/AJAX nonce checks without process exits.
+- `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
+  for posts, media, comments, terms, users, plugins, themes, and guarded
+  network sites/users, including columns/hidden/sortable/default-primary logic,
+  views, actions, bulk actions, row URL and HTML escaping, pagination/counts,
+  synthetic object/pre-query fixtures, capability gates, and state/filter
+  restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
@@ -221,6 +227,13 @@ database, network requests, or a configured site.
   block patterns, and block pattern categories, including context/_fields
   filtering, collection params, permission gates, REST links, invalid values,
   and state restoration.
+- `rest-object-controllers`: in-memory wpdb-backed REST object controller
+  coverage for posts, terms, comments, users, revisions, and attachments,
+  including schema/context/_fields filtering, collection-param sanitization,
+  permission gates, REST links, invalid IDs/types, sanitized content/meta
+  fields, safe create/update/delete error paths, upload-no-data paths, and
+  deterministic state restoration without live uploads, remote requests, or a
+  live database.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including revision field/data contracts, autosave and revision
   predicates, revision insert/save/restore/delete helpers, revisioned meta copy
@@ -268,7 +281,14 @@ Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` reques
 dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
 or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list
 table API with synthetic items and referer helpers only where valid nonces or
-`stop=false` avoid exits. The
+`stop=false` avoid exits. The `admin-list-tables` surface complements that base
+coverage by loading concrete `WP_*_List_Table` subclasses with synthetic rows,
+object-cache fixtures, temporary plugin/theme metadata, and `posts_pre_query`,
+`comments_pre_query`, `terms_pre_query`, `users_pre_query`, and
+`sites_pre_query` short-circuits. It intentionally skips full admin dispatch,
+privacy request tables, install/update tables, destructive plugin/theme
+operations, real uploads, and true multisite write paths; network site/user
+rows remain synthetic when the shared PHP process is not in multisite mode. The
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The
@@ -297,12 +317,18 @@ surface intercepts PHPMailer send calls and never attempts real delivery. The
 attachments only; it does not download remote media, invoke codecs or external
 binaries, insert real attachments, or enable audio/video cover attachment
 generation. The
-`rest-controllers` surface intentionally avoids DB-backed object controllers
-such as posts, terms, comments, users, revisions, attachments, and templates;
-it also records explicit skips for the themes and plugins controllers because
-their lifecycle-heavy read and status paths are covered by
-`plugin-theme-lifecycle`, while install/update/delete controller methods are
-still avoided. Block pattern coverage is registry-backed only:
+`rest-controllers` surface remains registry-backed only. DB-backed posts,
+terms, comments, users, revisions, and attachments are covered by
+`rest-object-controllers` against the in-memory `wpdb` stub. That object
+surface records explicit skip rows for template controllers that depend on
+block-theme filesystem state and template CPT queries, and for broad collection
+queries that exceed the small SQL parser in the stub. It documents limits for
+real upload/sideload paths and invalid enum-error formatting branches that are
+not warning-safe under the stripped bootstrap. The registry-backed surface also
+records explicit skips for the themes and plugins controllers because their
+lifecycle-heavy read and status paths are covered by `plugin-theme-lifecycle`,
+while install/update/delete controller methods are still avoided. Block pattern
+coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
 The `block-editor-adjuncts` surface keeps REST preloading on synthetic
 `rest_pre_dispatch` responses and keeps theme styles local to temp fixtures;
