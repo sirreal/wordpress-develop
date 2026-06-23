@@ -316,16 +316,20 @@ final class EmailSurface {
 
 	private static function check_whatwg_examples( \ComponentFuzz\FuzzContext $ctx ): array {
 		$valid = array(
-			array( 'label' => 'ascii-atext-local', 'input' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com' ),
-			array( 'label' => 'single-label-domain', 'input' => 'a@b' ),
-			array( 'label' => 'consecutive-local-dots', 'input' => 'first..last@example.com' ),
-			array( 'label' => 'subdomain-hyphen', 'input' => 'user@sub-domain.example' ),
-			array( 'label' => 'devanagari-local', 'input' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com" ),
+			array( 'label' => 'ascii-atext-local', 'input' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com', 'expected' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-@example.com' ),
+			array( 'label' => 'single-label-domain', 'input' => 'a@b', 'expected' => 'a@b' ),
+			array( 'label' => 'consecutive-local-dots', 'input' => 'first..last@example.com', 'expected' => 'first..last@example.com' ),
+			array( 'label' => 'subdomain-hyphen', 'input' => 'user@sub-domain.example', 'expected' => 'user@sub-domain.example' ),
+			array( 'label' => 'latin-local', 'input' => "jos\u{00E9}@example.com", 'expected' => "jos\u{00E9}@example.com" ),
+			array( 'label' => 'combining-local', 'input' => "jose\u{0301}@example.com", 'expected' => "jose\u{0301}@example.com" ),
+			array( 'label' => 'devanagari-local', 'input' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com", 'expected' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}@example.com" ),
+			array( 'label' => 'arabic-local', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@example.com", 'expected' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@example.com" ),
+			array( 'label' => 'greek-local', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@example.com", 'expected' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@example.com" ),
 		);
 		if ( self::has_idn() ) {
-			$valid[] = array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" );
-			$valid[] = array( 'label' => 'cjk-address', 'input' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
-			$valid[] = array( 'label' => 'greek-address', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" );
+			$valid[] = array( 'label' => 'arabic-address', 'input' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}", 'expected' => "\u{0645}\u{0633}\u{062A}\u{062E}\u{062F}\u{0645}@\u{0645}\u{062B}\u{0627}\u{0644}.\u{0625}\u{062E}\u{062A}\u{0628}\u{0627}\u{0631}" );
+			$valid[] = array( 'label' => 'cjk-address', 'input' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}", 'expected' => "\u{7528}\u{6237}@\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
+			$valid[] = array( 'label' => 'greek-address', 'input' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", 'expected' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}@\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" );
 		}
 		$invalid = array(
 			array( 'label' => 'quoted-rfc5322-local', 'input' => '"quoted"@example.com' ),
@@ -347,19 +351,21 @@ final class EmailSurface {
 			$parsed    = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
 			$is_email  = self::call( static fn() => \is_email( $case['input'] ) );
 			$sanitized = self::call( static fn() => \sanitize_email( $case['input'] ) );
-			$expected  = $parsed['value'] instanceof \WP_Email_Address ? $parsed['value']->get_unicode_address() : null;
+			$expected  = $case['expected'];
 
 			if (
 				$parsed['threw'] ||
 				$is_email['threw'] ||
 				$sanitized['threw'] ||
 				! ( $parsed['value'] instanceof \WP_Email_Address ) ||
+				$expected !== $parsed['value']->get_unicode_address() ||
 				$expected !== $is_email['value'] ||
 				$expected !== $sanitized['value']
 			) {
 				$failures[] = array(
 					'label'         => $case['label'],
 					'input'         => self::describe_string( $case['input'] ),
+					'expected'      => self::describe_string( $expected ),
 					'expectedValid' => true,
 					'parsed'        => self::describe_call( $parsed ),
 					'isEmail'       => self::describe_call( $is_email ),
