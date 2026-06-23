@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 6706 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 6696 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>hooks</code>: 900 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>request-lifecycle</code>: 800 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">5</div>
-			<div class="note">Five delegated surfaces are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">2</div>
+			<div class="note">Two delegated surfaces are active; two completed workers are pending integration. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
@@ -370,23 +370,23 @@
 				</tr>
 				<tr>
 					<td><code>html-api</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">pending integration</span></td>
 					<td>Sagan: <code>_work/component-fuzz-html-api-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Worker focused run: 600 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
 					<td>HTML Tag/Processor walking, bookmarks, mutation escaping, malformed recovery.</td>
 				</tr>
 				<tr>
 					<td><code>syndication</code></td>
-					<td><span class="status work">worker active</span></td>
+					<td><span class="status wait">pending integration</span></td>
 					<td>Arendt: <code>_work/component-fuzz-syndication-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Worker focused run: 500 passed, 0 skipped, 0 failed; smoke and diff check passed.</td>
 					<td>oEmbed providers/handlers, feed helpers, XML/HTML escaping, no-network filters.</td>
 				</tr>
 				<tr>
 					<td><code>request-lifecycle</code></td>
-					<td><span class="status work">worker active</span></td>
-					<td>Lovelace: <code>_work/component-fuzz-request-lifecycle-rich</code></td>
-					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; broad run: 6696 passed, 62 skipped, 0 failed.</td>
 					<td>Front-controller parsing, query vars, 404/header transitions, superglobal restoration.</td>
 				</tr>
 				<tr>
@@ -422,6 +422,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>9c8eb1f52a</code></td>
+					<td><code>request-lifecycle</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>6696 passed, 62 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>7b5eeac0e3</code></td>
 					<td><code>hooks</code></td>
