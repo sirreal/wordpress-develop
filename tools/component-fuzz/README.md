@@ -225,8 +225,10 @@ database, network requests, or a configured site.
 - `kses`: KSES policies, wrapper agreement, protocol filtering, safe CSS,
   attribute/entity/comment handling, no-HTML filtering, custom context locality,
   strict/custom policy monotonicity, and filter/global restoration.
-- `l10n`: translation fallbacks, escaped translation helpers, plural selection,
-  textdomain load/unload state, locale determination, localized numbers/dates.
+- `l10n`: translation fallbacks, escaped translation helpers, plural/nooped
+  selection, textdomain load/unload state, translation path guards, locale and
+  user-locale switching, script translation helpers, malformed string
+  boundaries, localized numbers/dates, and filter/action restoration.
 - `translations`: no-DB POMO and translation-file parsing/loading coverage,
   including generated `Translation_Entry` lookup and merge behavior,
   `NOOP_Translations` identity contracts, MO/PO/PHP translation file round
