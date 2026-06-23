@@ -182,8 +182,10 @@ database, network requests, or a configured site.
   loading and view transitions, including configuration eligibility,
   mode/eagerness filters, generated URL-pattern exclusions, script tag escaping,
   theme support behavior, view-transition CSS enqueueing, and global restoration.
-- `html-api`: HTML tag and tree processor updates, normalization idempotence,
-  breadcrumbs, token walking, and modifiable text escaping.
+- `html-api`: HTML tag and tree processor mutation escaping, deterministic
+  rich HTML generation, normalization/recovery idempotence, token walking,
+  bookmark/seek replay, modifiable text escaping, and namespace/comment/rawtext
+  boundary checks.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie
   parsing, proxy decisions, redirect safety, URL validation, and relative URL
   resolution without live network requests.
