@@ -370,9 +370,10 @@ database, network requests, or a configured site.
 - `rewrite`: rewrite tags, permastruct/rule generation, endpoint expansion,
   query arg helpers, URL parsing, home/site URL helpers, and cheap no-DB
   `url_to_postid()` paths.
-- `security`: salts and HMACs, nonce generation/verification, nonce URLs and
-  hidden fields, admin/ajax referer paths, synthetic auth cookies and session
-  tokens, redirect sanitization, and safe redirect filters.
+- `security`: salts and HMACs, password and fast-hash verification, nonce
+  generation/verification, nonce URLs and hidden fields, admin/ajax referer
+  paths, synthetic auth cookies and session tokens, redirect sanitization, and
+  safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
   merging and dynamic filters, callback argument and rendering filter
   contracts, escaped and HTML-attribute rendering, tag discovery, apply aliasing,

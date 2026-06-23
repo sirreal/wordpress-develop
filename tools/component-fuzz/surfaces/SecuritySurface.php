@@ -49,6 +49,7 @@ final class SecuritySurface {
 			self::install_scoped_filters();
 
 			$rows[] = self::check_salts_and_hashes( $ctx );
+			$rows[] = self::check_password_hashing_contracts( $ctx );
 			$rows[] = self::check_nonce_metamorphic_behavior( $ctx );
 			$rows[] = self::check_nonce_url_and_fields( $ctx );
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
@@ -197,12 +198,16 @@ final class SecuritySurface {
 				'remove_query_arg',
 				'update_user_caches',
 				'wp_create_nonce',
+				'wp_check_password',
+				'wp_fast_hash',
 				'wp_generate_auth_cookie',
 				'wp_hash',
+				'wp_hash_password',
 				'wp_nonce_field',
 				'wp_nonce_url',
 				'wp_original_referer_field',
 				'wp_parse_auth_cookie',
+				'wp_password_needs_rehash',
 				'wp_redirect',
 				'wp_referer_field',
 				'wp_safe_redirect',
@@ -212,6 +217,7 @@ final class SecuritySurface {
 				'wp_validate_auth_cookie',
 				'wp_validate_redirect',
 				'wp_verify_nonce',
+				'wp_verify_fast_hash',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -317,6 +323,129 @@ final class SecuritySurface {
 				'dataCases'  => count( $data_cases ),
 				'failures'   => array_slice( $failures, 0, 5 ),
 			)
+		);
+	}
+
+	private static function check_password_hashing_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$user_id  = 70000 + $ctx->int( 0, 9999 );
+
+		$algorithm_filter = static function ( string $algorithm ): string {
+			unset( $algorithm );
+			return PASSWORD_BCRYPT;
+		};
+		$cheap_options_filter = static function ( array $options, string $algorithm ): array {
+			if ( PASSWORD_BCRYPT === $algorithm ) {
+				$options['cost'] = 4;
+			}
+			return $options;
+		};
+		$rehash_options_filter = static function ( array $options, string $algorithm ): array {
+			if ( PASSWORD_BCRYPT === $algorithm ) {
+				$options['cost'] = 5;
+			}
+			return $options;
+		};
+
+		\add_filter( 'wp_hash_password_algorithm', $algorithm_filter );
+		\add_filter( 'wp_hash_password_options', $cheap_options_filter, 10, 2 );
+		try {
+			$passwords = array(
+				'',
+				'plain-' . self::token( $ctx->fork( 'password-plain' ), 10 ),
+				"unicode-\xC3\xA9-\xE2\x98\x83-" . self::token( $ctx->fork( 'password-unicode' ), 6 ),
+				"binary-\x00-\x80-\xFF-" . self::token( $ctx->fork( 'password-binary' ), 6 ),
+				str_repeat( 'long-pass-', 40 ) . self::token( $ctx->fork( 'password-long' ), 10 ),
+			);
+
+			foreach ( $passwords as $index => $password ) {
+				$hash       = \wp_hash_password( $password );
+				$mutated    = $password . '|mutated';
+				$valid      = \wp_check_password( $password, $hash, $user_id );
+				$invalid    = \wp_check_password( $mutated, $hash, $user_id );
+				$needs_same = \wp_password_needs_rehash( $hash, $user_id );
+
+				\remove_filter( 'wp_hash_password_options', $cheap_options_filter, 10 );
+				\add_filter( 'wp_hash_password_options', $rehash_options_filter, 10, 2 );
+				$needs_higher_cost = \wp_password_needs_rehash( $hash, $user_id );
+				\remove_filter( 'wp_hash_password_options', $rehash_options_filter, 10 );
+				\add_filter( 'wp_hash_password_options', $cheap_options_filter, 10, 2 );
+
+				self::collect_failure(
+					$failures,
+					str_starts_with( $hash, '$wp$' )
+						&& true === $valid
+						&& false === $invalid
+						&& false === $needs_same
+						&& true === $needs_higher_cost,
+					"wp_hash_password case {$index}",
+					array(
+						'password'        => self::describe_string( $password ),
+						'hash'            => self::describe_string( $hash ),
+						'valid'           => $valid,
+						'invalid'         => $invalid,
+						'needsSame'       => $needs_same,
+						'needsHigherCost' => $needs_higher_cost,
+					)
+				);
+			}
+
+			$too_long = str_repeat( 'x', 4097 );
+			self::collect_failure(
+				$failures,
+				'*' === \wp_hash_password( $too_long )
+					&& false === \wp_check_password( $too_long, '*', $user_id ),
+				'password hashing rejects unsupported long passwords',
+				array(
+					'bytes' => strlen( $too_long ),
+					'hash'  => \wp_hash_password( $too_long ),
+					'check' => \wp_check_password( $too_long, '*', $user_id ),
+				)
+			);
+
+			$md5_password = 'legacy-' . self::token( $ctx->fork( 'password-md5' ), 8 );
+			$md5_hash     = md5( $md5_password );
+			self::collect_failure(
+				$failures,
+				true === \wp_check_password( $md5_password, $md5_hash, $user_id )
+					&& false === \wp_check_password( $md5_password . '-wrong', $md5_hash, $user_id )
+					&& true === \wp_password_needs_rehash( $md5_hash, $user_id ),
+				'wp_check_password keeps legacy md5 compatibility and rehash signal',
+				array(
+					'password' => self::describe_string( $md5_password ),
+					'hash'     => $md5_hash,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_hash_password_options', $cheap_options_filter, 10 );
+			\remove_filter( 'wp_hash_password_options', $rehash_options_filter, 10 );
+			\remove_filter( 'wp_hash_password_algorithm', $algorithm_filter );
+		}
+
+		foreach ( array_slice( self::data_cases( $ctx->fork( 'fast-hash-data' ) ), 0, 8 ) as $index => $message ) {
+			$hash         = \wp_fast_hash( $message );
+			$mutated_hash = substr( $hash, 0, -1 ) . ( 'A' === substr( $hash, -1 ) ? 'B' : 'A' );
+
+			self::collect_failure(
+				$failures,
+				str_starts_with( $hash, '$generic$' )
+					&& true === \wp_verify_fast_hash( $message, $hash )
+					&& false === \wp_verify_fast_hash( $message . '|mutated', $hash )
+					&& false === \wp_verify_fast_hash( $message, $mutated_hash ),
+				"wp_fast_hash case {$index}",
+				array(
+					'message'     => self::describe_string( $message ),
+					'hash'        => self::describe_string( $hash ),
+					'mutatedHash' => self::describe_string( $mutated_hash ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'security.password-and-fast-hash.verification-and-rehash',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
 	}
 
