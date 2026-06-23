@@ -240,6 +240,10 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder APIs, including meta/tax/date query tree
   sanitization, SQL fragment generation, relation normalization, query-var
   parsing, and deterministic global restoration.
+- `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
+  `posts_pre_query` fixtures, including loop wrapper delegation,
+  setup/reset postdata globals, single/page flag behavior, found/max-page coherence,
+  empty-result events, and deterministic state restoration.
 - `registries`: no-DB modern registry coverage for connectors, icons, and
   speculation rules, including lifecycle validation, helper oracles, manifest
   sanitization/caching, allowlist behavior, rule serialization, and state
