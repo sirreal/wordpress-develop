@@ -92,6 +92,11 @@ database, network requests, or a configured site.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` IDN/punycode views, invalid UTF-8,
   malformed address structure, and boundary lengths.
+- `editor-helpers`: no-browser classic editor helper coverage for
+  `_WP_Editors` settings/state normalization, default editor selection filters,
+  teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
+  TinyMCE translation snippets, media-view stylesheet helpers, and global
+  restoration.
 - `fonts`: font-face CSS serialization and validation, font directory filters,
   Font Library collection registration/JSON loading, and font utility
   sanitization for family lists, face slugs, schemas, and MIME maps.
@@ -336,6 +341,10 @@ The `community-events` surface short-circuits `wp_remote_get()` through
 `pre_http_request`; it never contacts api.wordpress.org and limits coverage to
 request construction, response normalization, cache behavior, and local helper
 contracts rather than dashboard browser rendering.
+The `editor-helpers` surface exercises classic editor settings and generated
+markup without loading browser editors. It avoids live TinyMCE/Quicktags
+execution, external asset fetching, admin page dispatch, DB-backed link queries,
+and AJAX media-shortcode preview paths.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
