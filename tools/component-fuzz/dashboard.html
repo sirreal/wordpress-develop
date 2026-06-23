@@ -231,7 +231,7 @@
 		<div class="card">
 			<div class="label">Current Focused Run</div>
 			<div class="metric good">100%</div>
-			<div class="note"><code>email</code>: 110184 passed, 0 skipped, 0 failed at 100 iterations.</div>
+			<div class="note"><code>capabilities</code>: 500 passed, 0 skipped, 0 failed at 100 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -348,6 +348,13 @@
 					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups.</td>
 				</tr>
 				<tr>
+					<td><code>capabilities</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; broad run: 6673 passed, 62 skipped, 0 failed.</td>
+					<td>Roles, direct caps, generated <code>map_meta_cap</code> contexts, <code>user_has_cap</code> filters.</td>
+				</tr>
+				<tr>
 					<td><code>html-api</code></td>
 					<td><span class="status work">worker active</span></td>
 					<td>Sagan: <code>_work/component-fuzz-html-api-rich</code></td>
@@ -394,6 +401,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>1ec4959311</code></td>
+					<td><code>capabilities</code></td>
+					<td>500 passed, 0 skipped, 0 failed.</td>
+					<td>6673 passed, 62 skipped, 0 failed at 2 iterations.</td>
+				</tr>
 				<tr>
 					<td><code>ba642bf12d</code></td>
 					<td><code>email</code></td>
