@@ -228,6 +228,10 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder APIs, including meta/tax/date query tree
   sanitization, SQL fragment generation, relation normalization, query-var
   parsing, and deterministic global restoration.
+- `registries`: no-DB modern registry coverage for connectors, icons, and
+  speculation rules, including lifecycle validation, helper oracles, manifest
+  sanitization/caching, allowlist behavior, rule serialization, and state
+  restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
