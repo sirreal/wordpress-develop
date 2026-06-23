@@ -29,11 +29,15 @@ final class CapabilitiesSurface {
 		try {
 			self::install_roles( $ctx );
 
+			$rows[] = self::check_role_registry_lifecycle( $ctx );
 			$rows[] = self::check_role_registry_mutations( $ctx );
 			$rows[] = self::check_role_has_cap_filter( $ctx );
 			$rows[] = self::check_user_capability_aggregation( $ctx );
+			$rows[] = self::check_user_capability_mutations( $ctx );
 			$rows[] = self::check_user_has_cap_filter_contracts( $ctx );
 			$rows[] = self::check_meta_cap_mappings( $ctx );
+			$rows[] = self::check_primitive_meta_cap_monotonicity( $ctx );
+			$rows[] = self::check_capability_key_boundaries( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -59,9 +63,13 @@ final class CapabilitiesSurface {
 
 		foreach (
 			array(
+				'add_role',
 				'add_filter',
 				'current_user_can',
+				'get_role',
+				'has_filter',
 				'map_meta_cap',
+				'remove_role',
 				'remove_filter',
 				'sanitize_key',
 				'user_can',
@@ -76,15 +84,106 @@ final class CapabilitiesSurface {
 		return $missing;
 	}
 
+	private static function check_role_registry_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$roles          = \wp_roles();
+		$failures       = array();
+		$original_site  = $roles->get_site_id();
+		$original_names = $roles->get_names();
+		$original_shape = self::role_registry_shape( $roles );
+		$wrapper_role   = 'cfz_wrapper_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 );
+		$wrapper_cap    = self::cap_name( $ctx->fork( 'wrapper-cap' ), 'wrapper' );
+
+		self::collect_failure(
+			$failures,
+			$roles === \wp_roles()
+				&& false === $roles->use_db
+				&& isset( $original_names['cfz_reader'], $original_names['cfz_author'], $original_names['cfz_editor'] )
+				&& \get_role( 'cfz_reader' ) === $roles->get_role( 'cfz_reader' ),
+			'wp_roles returns stable in-memory seeded registry',
+			array(
+				'useDb' => $roles->use_db,
+				'names' => $original_names,
+				'shape' => $original_shape,
+			)
+		);
+
+		$empty = $roles->add_role( '', 'Empty Component Fuzz Role', array( $wrapper_cap => true ) );
+		self::collect_failure(
+			$failures,
+			null === $empty && $original_shape === self::role_registry_shape( $roles ),
+			'empty role add is a registry no-op',
+			array(
+				'empty'       => self::describe_value( $empty ),
+				'beforeShape' => $original_shape,
+				'afterShape'  => self::role_registry_shape( $roles ),
+			)
+		);
+
+		$wrapper = \add_role( $wrapper_role, 'Component Fuzz Wrapper', array( $wrapper_cap ) );
+		$again   = \add_role( $wrapper_role, 'Component Fuzz Wrapper Duplicate', array( 'cfz_shared' => true ) );
+		\remove_role( $wrapper_role );
+		\remove_role( $wrapper_role );
+
+		self::collect_failure(
+			$failures,
+			$wrapper instanceof \WP_Role
+				&& null === $again
+				&& true === $wrapper->has_cap( $wrapper_cap )
+				&& ! $roles->is_role( $wrapper_role )
+				&& null === \get_role( $wrapper_role ),
+			'add_role/remove_role wrappers are idempotent against global registry',
+			array(
+				'role'        => $wrapper_role,
+				'cap'         => $wrapper_cap,
+				'wrapper'     => $wrapper instanceof \WP_Role ? $wrapper->capabilities : self::describe_value( $wrapper ),
+				'duplicate'   => self::describe_value( $again ),
+				'afterRemove' => self::role_registry_shape( $roles ),
+			)
+		);
+
+		$roles->init_roles();
+		$roles->for_site( $original_site + 1000 );
+		$alternate_site = $roles->get_site_id();
+		$roles->for_site( $original_site );
+
+		self::collect_failure(
+			$failures,
+			$original_names === $roles->get_names()
+				&& $original_site === $roles->get_site_id()
+				&& $original_shape['roleCount'] === self::role_registry_shape( $roles )['roleCount']
+				&& $original_shape['nameCount'] === self::role_registry_shape( $roles )['nameCount']
+				&& $original_site + 1000 === $alternate_site,
+			'init_roles and for_site preserve no-DB role maps',
+			array(
+				'originalSite'  => $original_site,
+				'alternateSite' => $alternate_site,
+				'names'         => $roles->get_names(),
+				'shape'         => self::role_registry_shape( $roles ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'capabilities.roles.registry-lifecycle-no-db',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 6 ),
+				'shape'    => self::role_registry_shape( $roles ),
+			)
+		);
+	}
+
 	private static function check_role_registry_mutations( \ComponentFuzz\FuzzContext $ctx ): array {
 		$roles    = \wp_roles();
 		$failures = array();
 
 		foreach ( self::role_cases( $ctx->fork( 'registry' ) ) as $index => $case ) {
-			$role_name = $case['role'];
-			$cap_a     = $case['caps'][0];
-			$cap_b     = $case['caps'][1];
-			$cap_c     = $case['caps'][2];
+			$role_name       = $case['role'];
+			$assoc_role_name = $case['assocRole'];
+			$cap_a           = $case['caps'][0];
+			$cap_b           = $case['caps'][1];
+			$cap_c           = $case['caps'][2];
+			$missing_cap     = $case['missingCap'];
 
 			$role      = $roles->add_role( $role_name, 'Component Fuzz ' . $index, array( $cap_a, $cap_b ) );
 			$duplicate = $roles->add_role( $role_name, 'Duplicate', array( $cap_c => true ) );
@@ -109,6 +208,23 @@ final class CapabilitiesSurface {
 			);
 
 			if ( $role instanceof \WP_Role ) {
+				$before_missing_remove = $role->capabilities;
+				$role->remove_cap( $missing_cap );
+				self::collect_failure(
+					$failures,
+					$before_missing_remove === $role->capabilities
+						&& $before_missing_remove === ( $roles->roles[ $role_name ]['capabilities'] ?? null ),
+					"removing absent role cap is idempotent case {$index}",
+					array(
+						'role'         => $role_name,
+						'missingCap'   => $missing_cap,
+						'before'       => $before_missing_remove,
+						'capabilities' => $role->capabilities,
+						'registry'     => $roles->roles[ $role_name ]['capabilities'] ?? null,
+					)
+				);
+
+				$role->add_cap( $cap_c, false );
 				$role->add_cap( $cap_c, false );
 				self::collect_failure(
 					$failures,
@@ -127,6 +243,7 @@ final class CapabilitiesSurface {
 
 				$role->add_cap( $cap_c, true );
 				$role->remove_cap( $cap_a );
+				$role->remove_cap( $cap_a );
 				self::collect_failure(
 					$failures,
 					true === $role->has_cap( $cap_c )
@@ -144,6 +261,7 @@ final class CapabilitiesSurface {
 			}
 
 			$roles->remove_role( $role_name );
+			$roles->remove_role( $role_name );
 			self::collect_failure(
 				$failures,
 				! $roles->is_role( $role_name )
@@ -156,6 +274,29 @@ final class CapabilitiesSurface {
 					'names' => $roles->get_names(),
 				)
 			);
+
+			$assoc_role      = $roles->add_role( $assoc_role_name, 'Component Fuzz Associative ' . $index, $case['assocCaps'] );
+			$assoc_duplicate = $roles->add_role( $assoc_role_name, 'Duplicate Associative', array( $missing_cap ) );
+			self::collect_failure(
+				$failures,
+				$assoc_role instanceof \WP_Role
+					&& null === $assoc_duplicate
+					&& $case['assocCaps'] === $assoc_role->capabilities
+					&& $case['assocCaps'] === ( $roles->roles[ $assoc_role_name ]['capabilities'] ?? null )
+					&& true === $assoc_role->has_cap( $cap_a )
+					&& false === $assoc_role->has_cap( $cap_b )
+					&& $case['assocCaps'][ $cap_c ] === $assoc_role->has_cap( $cap_c ),
+				"associative capability role add preserves grants case {$index}",
+				array(
+					'role'        => $assoc_role_name,
+					'caps'        => $case['assocCaps'],
+					'roleShape'   => $assoc_role instanceof \WP_Role ? $assoc_role->capabilities : null,
+					'registry'    => $roles->roles[ $assoc_role_name ]['capabilities'] ?? null,
+					'duplicate'   => self::describe_value( $assoc_duplicate ),
+					'capCGranted' => $assoc_role instanceof \WP_Role ? $assoc_role->has_cap( $cap_c ) : null,
+				)
+			);
+			$roles->remove_role( $assoc_role_name );
 		}
 
 		return self::row(
@@ -173,6 +314,7 @@ final class CapabilitiesSurface {
 		$roles    = \wp_roles();
 		$failures = array();
 		$role     = $roles->get_role( 'cfz_author' );
+		$other    = $roles->get_role( 'cfz_reader' );
 		$grant    = self::cap_name( $ctx->fork( 'filter-grant' ), 'grant' );
 		$deny     = 'cfz_publish';
 
@@ -205,7 +347,8 @@ final class CapabilitiesSurface {
 			$before_deny  = $role->has_cap( $deny );
 
 			\add_filter( 'role_has_cap', $grant_filter, 10, 3 );
-			$during_grant = $role->has_cap( $grant );
+			$during_grant       = $role->has_cap( $grant );
+			$other_during_grant = $other instanceof \WP_Role ? $other->has_cap( $grant ) : null;
 			\remove_filter( 'role_has_cap', $grant_filter, 10 );
 			$after_grant = $role->has_cap( $grant );
 
@@ -218,6 +361,7 @@ final class CapabilitiesSurface {
 				$failures,
 				false === $before_grant
 					&& true === $during_grant
+					&& false === $other_during_grant
 					&& false === $after_grant
 					&& true === $before_deny
 					&& false === $during_deny
@@ -229,6 +373,7 @@ final class CapabilitiesSurface {
 					'states'   => array(
 						'beforeGrant' => $before_grant,
 						'duringGrant' => $during_grant,
+						'otherGrant'  => $other_during_grant,
 						'afterGrant'  => $after_grant,
 						'beforeDeny'  => $before_deny,
 						'duringDeny'  => $during_deny,
@@ -240,6 +385,17 @@ final class CapabilitiesSurface {
 			\remove_filter( 'role_has_cap', $grant_filter, 10 );
 			\remove_filter( 'role_has_cap', $deny_filter, 10 );
 		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'role_has_cap', $grant_filter )
+				&& false === \has_filter( 'role_has_cap', $deny_filter ),
+			'role_has_cap filters are removed from hook stack',
+			array(
+				'grantFilter' => \has_filter( 'role_has_cap', $grant_filter ),
+				'denyFilter'  => \has_filter( 'role_has_cap', $deny_filter ),
+			)
+		);
 
 		return self::row(
 			$ctx,
@@ -253,6 +409,7 @@ final class CapabilitiesSurface {
 		$failures     = array();
 		$direct_grant = self::cap_name( $ctx->fork( 'direct-grant' ), 'direct' );
 		$direct_deny  = self::cap_name( $ctx->fork( 'direct-deny' ), 'deny' );
+		$direct_level = 'level_' . $ctx->int( 0, 10 );
 		$unknown      = self::cap_name( $ctx->fork( 'unknown' ), 'unknown' );
 		$user         = self::synthetic_user( $ctx->fork( 'user' ) );
 
@@ -262,7 +419,7 @@ final class CapabilitiesSurface {
 			$direct_grant => true,
 			$direct_deny  => false,
 			'cfz_shared'  => false,
-			'level_7'     => true,
+			$direct_level => true,
 		);
 		$user->get_role_caps();
 		$GLOBALS['current_user'] = $user;
@@ -277,7 +434,8 @@ final class CapabilitiesSurface {
 			'unknown'         => array( 'cap' => $unknown, 'expected' => false ),
 			'exist'           => array( 'cap' => 'exist', 'expected' => true ),
 			'do-not-allow'    => array( 'cap' => 'do_not_allow', 'expected' => false ),
-			'level'           => array( 'cap' => 'level_7', 'expected' => true ),
+			'level'           => array( 'cap' => $direct_level, 'expected' => true ),
+			'numeric-level'   => array( 'cap' => (int) substr( $direct_level, 6 ), 'expected' => true ),
 		);
 
 		foreach ( $checks as $label => $check ) {
@@ -313,6 +471,23 @@ final class CapabilitiesSurface {
 			)
 		);
 
+		self::collect_failure(
+			$failures,
+			array( 'cfz_editor', 'cfz_author' ) === $user->roles
+				&& false === $user->allcaps['cfz_shared']
+				&& true === $user->allcaps[ $direct_grant ]
+				&& false === $user->allcaps[ $direct_deny ],
+			'WP_User role list and direct caps preserve overlay order',
+			array(
+				'user'          => self::describe_user( $user ),
+				'directGrant'   => $direct_grant,
+				'directDeny'    => $direct_deny,
+				'directLevel'   => $direct_level,
+				'overlayShared' => $user->allcaps['cfz_shared'] ?? null,
+				'allcaps'       => $user->allcaps,
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'capabilities.user.role-direct-cap-aggregation',
@@ -322,20 +497,172 @@ final class CapabilitiesSurface {
 				'failures'  => array_slice( $failures, 0, 6 ),
 				'directCap' => $direct_grant,
 				'denyCap'   => $direct_deny,
+				'levelCap'  => $direct_level,
+			)
+		);
+	}
+
+	private static function check_user_capability_mutations( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$user     = self::synthetic_user( $ctx->fork( 'mutation-user' ) );
+		$grant    = self::cap_name( $ctx->fork( 'mutation-grant' ), 'mutation_grant' );
+		$deny     = self::cap_name( $ctx->fork( 'mutation-deny' ), 'mutation_deny' );
+
+		$user->caps = array(
+			'cfz_reader' => true,
+			$deny        => false,
+		);
+		$user->get_role_caps();
+
+		try {
+			$user->add_cap( $grant, true );
+			$after_add_cap = array(
+				'hasGrant'  => $user->has_cap( $grant ),
+				'inCaps'    => $user->caps[ $grant ] ?? null,
+				'inAllcaps' => $user->allcaps[ $grant ] ?? null,
+			);
+
+			$user->add_cap( $deny, true );
+			$after_overwrite = array(
+				'hasDeny' => $user->has_cap( $deny ),
+				'inCaps'  => $user->caps[ $deny ] ?? null,
+			);
+
+			$user->remove_cap( $grant );
+			$user->remove_cap( $grant );
+			$after_remove_cap = array(
+				'hasGrant'  => $user->has_cap( $grant ),
+				'inCaps'    => array_key_exists( $grant, $user->caps ),
+				'inAllcaps' => array_key_exists( $grant, $user->allcaps ),
+			);
+
+			$user->add_role( 'cfz_author' );
+			$user->add_role( 'cfz_author' );
+			$after_add_role = array(
+				'roles'        => $user->roles,
+				'authorCount'  => count( array_keys( $user->roles, 'cfz_author', true ) ),
+				'canPublish'   => $user->has_cap( 'cfz_publish' ),
+				'readerInCaps' => $user->caps['cfz_reader'] ?? null,
+				'authorInCaps' => $user->caps['cfz_author'] ?? null,
+			);
+
+			$user->remove_role( 'cfz_reader' );
+			$user->remove_role( 'cfz_reader' );
+			$after_remove_role = array(
+				'roles'        => $user->roles,
+				'canPublish'   => $user->has_cap( 'cfz_publish' ),
+				'readerInCaps' => array_key_exists( 'cfz_reader', $user->caps ),
+			);
+
+			$user->set_role( 'cfz_editor' );
+			$after_set_role = array(
+				'roles'       => $user->roles,
+				'canEdit'     => $user->has_cap( 'cfz_edit' ),
+				'canPublish'  => $user->has_cap( 'cfz_publish' ),
+				'directGrant' => $user->has_cap( $deny ),
+			);
+
+			$user->set_role( '' );
+			$after_clear_role = array(
+				'roles'       => $user->roles,
+				'canEdit'     => $user->has_cap( 'cfz_edit' ),
+				'directGrant' => $user->has_cap( $deny ),
+			);
+
+			$user->remove_all_caps();
+			$after_remove_all = array(
+				'caps'       => $user->caps,
+				'roles'      => $user->roles,
+				'allcaps'    => $user->allcaps,
+				'exists'     => $user->has_cap( 'exist' ),
+				'directDeny' => $user->has_cap( $deny ),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $after_add_cap['hasGrant']
+					&& true === $after_add_cap['inCaps']
+					&& true === $after_add_cap['inAllcaps']
+					&& true === $after_overwrite['hasDeny']
+					&& true === $after_overwrite['inCaps']
+					&& false === $after_remove_cap['hasGrant']
+					&& false === $after_remove_cap['inCaps']
+					&& false === $after_remove_cap['inAllcaps'],
+				'WP_User direct cap add/remove mutations are synchronized',
+				array(
+					'grant'          => $grant,
+					'deny'           => $deny,
+					'afterAddCap'    => $after_add_cap,
+					'afterOverwrite' => $after_overwrite,
+					'afterRemoveCap' => $after_remove_cap,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				array( 'cfz_reader', 'cfz_author' ) === $after_add_role['roles']
+					&& 1 === $after_add_role['authorCount']
+					&& true === $after_add_role['canPublish']
+					&& true === $after_add_role['readerInCaps']
+					&& true === $after_add_role['authorInCaps']
+					&& array( 'cfz_author' ) === $after_remove_role['roles']
+					&& true === $after_remove_role['canPublish']
+					&& false === $after_remove_role['readerInCaps'],
+				'WP_User role add/remove mutations are idempotent',
+				array(
+					'afterAddRole'    => $after_add_role,
+					'afterRemoveRole' => $after_remove_role,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				array( 'cfz_editor' ) === $after_set_role['roles']
+					&& true === $after_set_role['canEdit']
+					&& false === $after_set_role['canPublish']
+					&& true === $after_set_role['directGrant']
+					&& array() === $after_clear_role['roles']
+					&& false === $after_clear_role['canEdit']
+					&& true === $after_clear_role['directGrant']
+					&& array() === $after_remove_all['caps']
+					&& array() === $after_remove_all['roles']
+					&& array() === $after_remove_all['allcaps']
+					&& true === $after_remove_all['exists']
+					&& false === $after_remove_all['directDeny'],
+				'WP_User set_role and remove_all_caps keep role/direct caps distinct',
+				array(
+					'afterSetRole'    => $after_set_role,
+					'afterClearRole'  => $after_clear_role,
+					'afterRemoveAll'  => $after_remove_all,
+				)
+			);
+		} finally {
+			$user->remove_all_caps();
+		}
+
+		return self::row(
+			$ctx,
+			'capabilities.user.mutation-idempotence',
+			array() === $failures,
+			array(
+				'user'     => self::describe_user( $user ),
+				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
 
 	private static function check_user_has_cap_filter_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures     = array();
-		$user         = self::synthetic_user( $ctx->fork( 'filter-user' ) );
-		$meta_cap     = self::cap_name( $ctx->fork( 'meta-cap' ), 'meta' );
-		$required_a   = self::cap_name( $ctx->fork( 'required-a' ), 'required_a' );
-		$required_b   = self::cap_name( $ctx->fork( 'required-b' ), 'required_b' );
-		$object_id    = 90000 + $ctx->int( 0, 9999 );
-		$context      = 'ctx-' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 );
-		$map_calls    = array();
-		$filter_calls = array();
+		$failures      = array();
+		$user          = self::synthetic_user( $ctx->fork( 'filter-user' ) );
+		$other_user    = self::synthetic_user( $ctx->fork( 'filter-other-user' ) );
+		$meta_cap      = self::cap_name( $ctx->fork( 'meta-cap' ), 'meta' );
+		$required_a    = self::cap_name( $ctx->fork( 'required-a' ), 'required_a' );
+		$required_b    = self::cap_name( $ctx->fork( 'required-b' ), 'required_b' );
+		$object_id     = 90000 + $ctx->int( 0, 9999 );
+		$context       = 'ctx-' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 );
+		$other_context = $context . '-other';
+		$map_calls     = array();
+		$filter_calls  = array();
 
 		$user->caps = array(
 			'cfz_reader' => true,
@@ -343,6 +670,8 @@ final class CapabilitiesSurface {
 			$required_b  => false,
 		);
 		$user->get_role_caps();
+		$other_user->caps = $user->caps;
+		$other_user->get_role_caps();
 
 		$map_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $meta_cap, $required_a, $required_b, $object_id, $context, &$map_calls ): array {
 			$map_calls[] = array(
@@ -404,7 +733,9 @@ final class CapabilitiesSurface {
 			$before = $user->has_cap( $meta_cap, $object_id, $context );
 
 			\add_filter( 'user_has_cap', $grant_filter, 10, 4 );
-			$granted = $user->has_cap( $meta_cap, $object_id, $context );
+			$granted             = $user->has_cap( $meta_cap, $object_id, $context );
+			$other_user_granted  = $other_user->has_cap( $meta_cap, $object_id, $context );
+			$other_context_grant = $user->has_cap( $meta_cap, $object_id, $other_context );
 			\remove_filter( 'user_has_cap', $grant_filter, 10 );
 
 			$after_grant_removed = $user->has_cap( $meta_cap, $object_id, $context );
@@ -422,6 +753,8 @@ final class CapabilitiesSurface {
 				$failures,
 				false === $before
 					&& true === $granted
+					&& false === $other_user_granted
+					&& false === $other_context_grant
 					&& false === $after_grant_removed
 					&& false === $denied
 					&& false === $after_deny_removed
@@ -431,6 +764,8 @@ final class CapabilitiesSurface {
 					'states' => array(
 						'before'            => $before,
 						'granted'           => $granted,
+						'otherUserGranted'  => $other_user_granted,
+						'otherContextGrant' => $other_context_grant,
 						'afterGrantRemoved' => $after_grant_removed,
 						'denied'            => $denied,
 						'afterDenyRemoved'  => $after_deny_removed,
@@ -441,12 +776,16 @@ final class CapabilitiesSurface {
 
 			self::collect_failure(
 				$failures,
-				5 === count( $map_calls )
-					&& 2 === count( $filter_calls )
+				7 === count( $map_calls )
+					&& 4 === count( $filter_calls )
 					&& array( $required_a, $required_b ) === ( $filter_calls[0]['caps'] ?? null )
 					&& array( $meta_cap, $user->ID, $object_id, $context ) === ( $filter_calls[0]['args'] ?? null )
 					&& array( $required_a, $required_b ) === ( $filter_calls[1]['caps'] ?? null )
-					&& array( $meta_cap, $user->ID, $object_id, $context ) === ( $filter_calls[1]['args'] ?? null ),
+					&& array( $meta_cap, $other_user->ID, $object_id, $context ) === ( $filter_calls[1]['args'] ?? null )
+					&& array( $meta_cap ) === ( $filter_calls[2]['caps'] ?? null )
+					&& array( $meta_cap, $user->ID, $object_id, $other_context ) === ( $filter_calls[2]['args'] ?? null )
+					&& array( $required_a, $required_b ) === ( $filter_calls[3]['caps'] ?? null )
+					&& array( $meta_cap, $user->ID, $object_id, $context ) === ( $filter_calls[3]['args'] ?? null ),
 				'map_meta_cap and user_has_cap filters receive expected generated context',
 				array(
 					'mapCallCount'    => count( $map_calls ),
@@ -461,17 +800,31 @@ final class CapabilitiesSurface {
 			\remove_filter( 'map_meta_cap', $map_filter, 10 );
 		}
 
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'user_has_cap', $grant_filter )
+				&& false === \has_filter( 'user_has_cap', $deny_filter )
+				&& false === \has_filter( 'map_meta_cap', $map_filter ),
+			'user_has_cap and map_meta_cap filters are removed from hook stack',
+			array(
+				'grantFilter' => \has_filter( 'user_has_cap', $grant_filter ),
+				'denyFilter'  => \has_filter( 'user_has_cap', $deny_filter ),
+				'mapFilter'   => \has_filter( 'map_meta_cap', $map_filter ),
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'capabilities.user-has-cap.filter-contracts',
 			array() === $failures,
 			array(
-				'user'        => self::describe_user( $user ),
-				'metaCap'     => $meta_cap,
-				'requiredCap' => array( $required_a, $required_b ),
-				'objectId'    => $object_id,
-				'context'     => $context,
-				'failures'    => array_slice( $failures, 0, 6 ),
+				'user'         => self::describe_user( $user ),
+				'metaCap'      => $meta_cap,
+				'requiredCap'  => array( $required_a, $required_b ),
+				'objectId'     => $object_id,
+				'context'      => $context,
+				'otherContext' => $other_context,
+				'failures'     => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
@@ -489,6 +842,17 @@ final class CapabilitiesSurface {
 			array( 'cap' => 'edit_user', 'user' => $user_id, 'args' => array( $user_id ), 'expected' => array() ),
 			array( 'cap' => 'remove_user', 'user' => $user_id, 'args' => array( $user_id ), 'expected' => array( 'do_not_allow' ) ),
 			array( 'cap' => 'remove_user', 'user' => $user_id, 'args' => array( $user_id + 1 ), 'expected' => array( 'remove_users' ) ),
+			array( 'cap' => 'delete_user', 'user' => $user_id, 'args' => array( $user_id + 1 ), 'expected' => array( 'delete_users' ) ),
+			array( 'cap' => 'customize', 'user' => $user_id, 'args' => array(), 'expected' => array( 'edit_theme_options' ) ),
+			array( 'cap' => 'setup_network', 'user' => $user_id, 'args' => array(), 'expected' => array( 'manage_options' ) ),
+			array( 'cap' => 'update_php', 'user' => $user_id, 'args' => array(), 'expected' => array( 'update_core' ) ),
+			array( 'cap' => 'update_https', 'user' => $user_id, 'args' => array(), 'expected' => array( 'manage_options', 'update_core' ) ),
+			array( 'cap' => 'manage_privacy_options', 'user' => $user_id, 'args' => array(), 'expected' => array( 'manage_options' ) ),
+			array( 'cap' => 'create_app_password', 'user' => $user_id, 'args' => array( $user_id ), 'expected' => array() ),
+			array( 'cap' => 'manage_post_tags', 'user' => $user_id, 'args' => array(), 'expected' => array( 'manage_categories' ) ),
+			array( 'cap' => 'assign_post_tags', 'user' => $user_id, 'args' => array(), 'expected' => array( 'edit_posts' ) ),
+			array( 'cap' => 'edit_blocks', 'user' => $user_id, 'args' => array(), 'expected' => array( 'edit_posts' ) ),
+			array( 'cap' => 'publish_blocks', 'user' => $user_id, 'args' => array(), 'expected' => array( 'publish_posts' ) ),
 			array( 'cap' => $custom, 'user' => $user_id, 'args' => array(), 'expected' => array( $custom ) ),
 		);
 
@@ -532,6 +896,199 @@ final class CapabilitiesSurface {
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_primitive_meta_cap_monotonicity( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures  = array();
+		$user_base = self::synthetic_user( $ctx->fork( 'monotonic-user' ) );
+		$primitive = self::cap_name( $ctx->fork( 'monotonic-primitive' ), 'primitive' );
+
+		$cases = array(
+			array( 'cap' => 'add_users', 'args' => array(), 'required' => array( 'promote_users' ) ),
+			array( 'cap' => 'customize', 'args' => array(), 'required' => array( 'edit_theme_options' ) ),
+			array( 'cap' => 'setup_network', 'args' => array(), 'required' => array( 'manage_options' ) ),
+			array( 'cap' => 'update_php', 'args' => array(), 'required' => array( 'update_core' ) ),
+			array( 'cap' => 'update_https', 'args' => array(), 'required' => array( 'manage_options', 'update_core' ) ),
+			array( 'cap' => 'manage_privacy_options', 'args' => array(), 'required' => array( 'manage_options' ) ),
+			array( 'cap' => 'manage_post_tags', 'args' => array(), 'required' => array( 'manage_categories' ) ),
+			array( 'cap' => 'assign_post_tags', 'args' => array(), 'required' => array( 'edit_posts' ) ),
+			array( 'cap' => 'edit_blocks', 'args' => array(), 'required' => array( 'edit_posts' ) ),
+			array( 'cap' => 'publish_blocks', 'args' => array(), 'required' => array( 'publish_posts' ) ),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$user       = new \WP_User( $user_base );
+			$user->ID  = $user_base->ID + $index + 1;
+			$all_grant = array_fill_keys( $case['required'], true );
+
+			$user->caps = $all_grant;
+			$user->get_role_caps();
+			$allowed = $user->has_cap( $case['cap'], ...$case['args'] );
+
+			$denied_cap                = $case['required'][ $index % count( $case['required'] ) ];
+			$user->caps[ $denied_cap ] = false;
+			$user->get_role_caps();
+			$denied = $user->has_cap( $case['cap'], ...$case['args'] );
+
+			$user->caps[ $denied_cap ] = true;
+			$user->caps[ $primitive ]  = false;
+			$user->get_role_caps();
+			$restored_with_unrelated_deny = $user->has_cap( $case['cap'], ...$case['args'] );
+
+			self::collect_failure(
+				$failures,
+				true === $allowed
+					&& false === $denied
+					&& true === $restored_with_unrelated_deny,
+				"primitive/meta cap monotonicity case {$index}",
+				array(
+					'case'           => $case,
+					'deniedCap'      => $denied_cap,
+					'unrelatedDeny'  => $primitive,
+					'allowed'        => $allowed,
+					'denied'         => $denied,
+					'restored'       => $restored_with_unrelated_deny,
+					'finalAllcaps'   => $user->allcaps,
+				)
+			);
+		}
+
+		$primitive_user = new \WP_User( $user_base );
+		$primitive_user->ID++;
+		$primitive_user->caps = array( $primitive => true );
+		$primitive_user->get_role_caps();
+		$primitive_allowed = $primitive_user->has_cap( $primitive );
+		$primitive_user->caps[ $primitive ] = false;
+		$primitive_user->get_role_caps();
+		$primitive_denied = $primitive_user->has_cap( $primitive );
+
+		self::collect_failure(
+			$failures,
+			true === $primitive_allowed && false === $primitive_denied,
+			'primitive direct capability grants are monotonic',
+			array(
+				'primitive' => $primitive,
+				'allowed'   => $primitive_allowed,
+				'denied'    => $primitive_denied,
+				'allcaps'   => $primitive_user->allcaps,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'capabilities.primitive-meta-cap.monotonicity',
+			array() === $failures,
+			array(
+				'cases'     => count( $cases ) + 1,
+				'primitive' => $primitive,
+				'failures'  => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_capability_key_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$roles     = \wp_roles();
+		$failures  = array();
+		$role_name = 'cfz_boundary_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 );
+		$raw_cases = self::capability_boundary_cases( $ctx->fork( 'boundary-cases' ) );
+		$cap_cases = array();
+		$role_caps = array();
+
+		foreach ( $raw_cases as $index => $raw ) {
+			$sanitized = \sanitize_key( $raw );
+			$cap       = self::cap_from_raw( $raw, 'boundary_' . $index, $ctx->fork( 'boundary-cap-' . $index ) );
+			$grant     = 1 !== $index % 3;
+
+			$cap_cases[] = array(
+				'raw'       => $raw,
+				'sanitized' => $sanitized,
+				'cap'       => $cap,
+				'grant'     => $grant,
+			);
+			$role_caps[ $cap ] = $grant;
+
+			self::collect_failure(
+				$failures,
+				is_string( $sanitized )
+					&& 1 === preg_match( '/^[a-z0-9_-]*$/', $sanitized )
+					&& '' !== $cap
+					&& strlen( $cap ) <= 96
+					&& 1 === preg_match( '/^cfz_[a-z0-9_-]+$/', $cap ),
+				"capability key sanitization boundary case {$index}",
+				array(
+					'raw'       => $raw,
+					'sanitized' => $sanitized,
+					'cap'       => $cap,
+					'grant'     => $grant,
+				)
+			);
+		}
+
+		$role = $roles->add_role( $role_name, 'Component Fuzz Boundary', $role_caps );
+		if ( $role instanceof \WP_Role ) {
+			foreach ( $cap_cases as $index => $case ) {
+				self::collect_failure(
+					$failures,
+					$case['grant'] === $role->has_cap( $case['cap'] )
+						&& $case['grant'] === ( $roles->roles[ $role_name ]['capabilities'][ $case['cap'] ] ?? null ),
+					"boundary role capability grant case {$index}",
+					array(
+						'case'     => $case,
+						'roleCaps' => $role->capabilities,
+						'registry' => $roles->roles[ $role_name ]['capabilities'] ?? null,
+					)
+				);
+			}
+		} else {
+			self::collect_failure(
+				$failures,
+				false,
+				'boundary role could be added',
+				array(
+					'role' => $role_name,
+					'caps' => $role_caps,
+				)
+			);
+		}
+
+		$user       = self::synthetic_user( $ctx->fork( 'boundary-user' ) );
+		$user->caps = array_merge( array( 'cfz_reader' => true ), $role_caps );
+		$user->get_role_caps();
+
+		foreach ( $cap_cases as $index => $case ) {
+			self::collect_failure(
+				$failures,
+				$case['grant'] === $user->has_cap( $case['cap'] ),
+				"boundary user direct capability grant case {$index}",
+				array(
+					'case'    => $case,
+					'user'    => self::describe_user( $user ),
+					'allcaps' => $user->allcaps,
+				)
+			);
+		}
+
+		$roles->remove_role( $role_name );
+		self::collect_failure(
+			$failures,
+			! $roles->is_role( $role_name )
+				&& null === $roles->get_role( $role_name ),
+			'boundary role cleanup removes generated role',
+			array(
+				'role'  => $role_name,
+				'names' => $roles->get_names(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'capabilities.capability-key.boundaries',
+			array() === $failures,
+			array(
+				'cases'    => count( $cap_cases ),
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
@@ -594,17 +1151,37 @@ final class CapabilitiesSurface {
 	private static function role_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 		for ( $i = 0; $i < self::GENERATED_CASES; ++$i ) {
-			$case = $ctx->fork( 'case-' . $i );
-			$role = 'cfz_role_' . substr( hash( 'sha1', $case->seed() . '|role|' . $i ), 0, 10 );
-			$caps = array(
-				self::cap_name( $case->fork( 'cap-a' ), 'a' ),
-				self::cap_name( $case->fork( 'cap-b' ), 'b' ),
-				self::cap_name( $case->fork( 'cap-c' ), 'c' ),
-			);
+			$case        = $ctx->fork( 'case-' . $i );
+			$role        = 'cfz_role_' . substr( hash( 'sha1', $case->seed() . '|role|' . $i ), 0, 10 );
+			$caps        = array();
+			$missing_cap = self::cap_name( $case->fork( 'missing-cap' ), 'missing' );
+
+			foreach ( array( 'a', 'b', 'c' ) as $cap_prefix ) {
+				$cap    = self::cap_name( $case->fork( 'cap-' . $cap_prefix ), $cap_prefix );
+				$base   = $cap;
+				$suffix = 1;
+				while ( in_array( $cap, $caps, true ) ) {
+					$cap = $base . '_' . $suffix++;
+				}
+				$caps[] = $cap;
+			}
+
+			$missing_base   = $missing_cap;
+			$missing_suffix = 1;
+			while ( in_array( $missing_cap, $caps, true ) ) {
+				$missing_cap = $missing_base . '_missing_' . $missing_suffix++;
+			}
 
 			$cases[] = array(
-				'role' => $role,
-				'caps' => array_values( array_unique( $caps ) ),
+				'role'       => $role,
+				'assocRole'  => $role . '_assoc',
+				'caps'       => $caps,
+				'missingCap' => $missing_cap,
+				'assocCaps'  => array(
+					$caps[0] => true,
+					$caps[1] => false,
+					$caps[2] => $case->bool() ? true : false,
+				),
 			);
 		}
 
@@ -613,13 +1190,62 @@ final class CapabilitiesSurface {
 
 	private static function cap_name( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
 		$raw = $prefix . '_' . $ctx->text( 1, 32 ) . '_' . hash( 'crc32b', (string) $ctx->seed() );
-		$cap = \sanitize_key( $raw );
+		return self::cap_from_raw( $raw, $prefix, $ctx );
+	}
 
-		if ( '' === $cap ) {
-			return 'cfz_' . $prefix . '_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 8 );
+	private static function cap_from_raw( string $raw, string $prefix, \ComponentFuzz\FuzzContext $ctx ): string {
+		$prefix    = \sanitize_key( $prefix );
+		$sanitized = \sanitize_key( $raw );
+
+		if ( '' === $prefix ) {
+			$prefix = 'cap';
 		}
 
-		return 'cfz_' . $cap;
+		if ( '' === $sanitized ) {
+			$sanitized = 'empty_' . substr( hash( 'sha1', $raw . '|' . $ctx->seed() ), 0, 8 );
+		}
+
+		if ( strlen( $sanitized ) > 48 ) {
+			$sanitized = substr( $sanitized, 0, 48 );
+		}
+
+		return 'cfz_' . $prefix . '_' . $sanitized . '_' . hash( 'crc32b', $raw . '|' . $ctx->seed() );
+	}
+
+	private static function capability_boundary_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'',
+			'   ',
+			"caps\nline\tbreak",
+			'UPPER-Mixed_123',
+			'cap.with.dot/slash\\backslash',
+			str_repeat( 'long-capability-segment_', 8 ),
+			$ctx->ascii( 0, 96 ),
+			$ctx->text( 0, 96 ),
+			$ctx->bytes( 0, 32 ),
+			$ctx->identifier( 1, 32 ),
+		);
+	}
+
+	private static function role_registry_shape( \WP_Roles $roles ): array {
+		$role_keys        = array_keys( (array) $roles->roles );
+		$role_object_keys = array_keys( (array) $roles->role_objects );
+		$role_name_keys   = array_keys( (array) $roles->role_names );
+		sort( $role_keys );
+		sort( $role_object_keys );
+		sort( $role_name_keys );
+
+		return array(
+			'useDb'          => $roles->use_db,
+			'siteId'         => $roles->get_site_id(),
+			'roleKey'        => $roles->role_key,
+			'roleCount'      => count( $role_keys ),
+			'objectCount'    => count( $role_object_keys ),
+			'nameCount'      => count( $role_name_keys ),
+			'roles'          => $role_keys,
+			'roleObjects'    => $role_object_keys,
+			'roleNames'      => $role_name_keys,
+		);
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {

@@ -92,9 +92,11 @@ database, network requests, or a configured site.
   merged editor settings, local theme style helpers, iframe asset collection,
   REST preload path normalization with dispatch short-circuited, and global
   restoration.
-- `capabilities`: role registry mutations, numeric and explicit capability
-  grants, role and user capability filters, generated `map_meta_cap()` filter
-  contexts, `WP_User` role/direct cap aggregation, and cheap meta-cap mappings.
+- `capabilities`: no-DB role registry lifecycle and mutation idempotence,
+  numeric/associative and boundary capability grants, `WP_User` role/direct cap
+  aggregation and mutators, role and user capability filter locality, generated
+  `map_meta_cap()` filter contexts, cheap meta-cap mappings, and primitive/meta
+  cap monotonicity.
 - `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
