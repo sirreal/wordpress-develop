@@ -138,6 +138,12 @@ database, network requests, or a configured site.
   boundaries, sanitized unique filenames, attachment row and postmeta creation
   in the in-memory wpdb stub, metadata update failure paths, and cleanup
   restoration.
+- `media-metadata`: local audio/video metadata parser coverage over generated
+  bounded byte fixtures, including `wp_read_audio_metadata()` and
+  `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
+  sanitization, creation timestamp extraction, audio/video extension and ID3 key
+  filters, `wp_attachment_is()` MIME/extension branches, and
+  `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   sanitize/auth/protected-meta filters, cache-backed lookup shape, filtered
   CRUD short-circuits, and lazyloader queue/reset behavior.
@@ -252,6 +258,10 @@ covered by the existing option stub. The Site Health surface avoids loopback,
 WordPress.org, REST availability, update download, mail, cron, and
 filesystem-writing checks unless they are fully short-circuited. The mail
 surface intercepts PHPMailer send calls and never attempts real delivery. The
+`media-metadata` surface uses malformed local fixtures and cache-seeded
+attachments only; it does not download remote media, invoke codecs or external
+binaries, insert real attachments, or enable audio/video cover attachment
+generation. The
 `rest-controllers` surface intentionally avoids DB-backed object controllers
 such as posts, terms, comments, users, revisions, attachments, and templates;
 it also records explicit skips for the themes and plugins controllers because
