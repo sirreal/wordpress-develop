@@ -48,6 +48,14 @@ final class BookmarkLinksSurface {
 			self::restore_state( $snapshot );
 		}
 
+		$state_restored = self::state_matches( $snapshot );
+		$rows[]         = self::row(
+			$ctx,
+			'bookmark-links.state-restored',
+			$state_restored,
+			array( 'restored' => $state_restored )
+		);
+
 		return $rows;
 	}
 
@@ -1071,17 +1079,12 @@ final class BookmarkLinksSurface {
 			'server'  => $server,
 			'get'     => $_GET,
 			'post'    => $_POST,
-			'options' => isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
-				? $GLOBALS['wpdb']->component_fuzz_get_options()
-				: array(),
+			'wpdb'    => self::snapshot_wpdb(),
 		);
 	}
 
 	private static function restore_state( array $snapshot ): void {
-		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
-			$GLOBALS['wpdb']->component_fuzz_reset_content();
-			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
-		}
+		self::restore_wpdb( $snapshot['wpdb'] );
 
 		if ( function_exists( 'wp_cache_flush' ) ) {
 			\wp_cache_flush();
@@ -1105,6 +1108,60 @@ final class BookmarkLinksSurface {
 
 		$_GET  = $snapshot['get'];
 		$_POST = $snapshot['post'];
+
+		self::restore_wpdb( $snapshot['wpdb'] );
+	}
+
+	private static function snapshot_wpdb(): ?array {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return null;
+		}
+
+		$wpdb       = $GLOBALS['wpdb'];
+		$reflection = new \ReflectionClass( $wpdb );
+		$state      = array(
+			'public'  => array(
+				'insert_id'     => $wpdb->insert_id,
+				'last_error'    => $wpdb->last_error,
+				'last_query'    => $wpdb->last_query,
+				'num_rows'      => $wpdb->num_rows,
+				'rows_affected' => $wpdb->rows_affected,
+			),
+			'private' => array(),
+		);
+
+		foreach ( $reflection->getProperties() as $property ) {
+			$name = $property->getName();
+			if ( str_starts_with( $name, 'component_fuzz_' ) ) {
+				$state['private'][ $name ] = $property->getValue( $wpdb );
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_wpdb( ?array $snapshot ): void {
+		if ( null === $snapshot || ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return;
+		}
+
+		$wpdb = $GLOBALS['wpdb'];
+		foreach ( $snapshot['public'] as $name => $value ) {
+			$wpdb->{$name} = $value;
+		}
+
+		$reflection = new \ReflectionClass( $wpdb );
+		foreach ( $snapshot['private'] as $name => $value ) {
+			if ( ! $reflection->hasProperty( $name ) ) {
+				continue;
+			}
+			$property = $reflection->getProperty( $name );
+			$property->setValue( $wpdb, $value );
+		}
+	}
+
+	private static function state_matches( array $snapshot ): bool {
+		return $snapshot === self::snapshot_state();
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array() ): array {
