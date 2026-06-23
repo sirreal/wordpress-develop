@@ -100,6 +100,10 @@ database, network requests, or a configured site.
   over synthetic query loops, including feed item/entry counts, self links,
   CDATA terminator escaping, excerpt/content mode switches, enclosure metadata,
   comment feed escaping, and feed build date selection.
+- `frontend-features`: no-DB frontend feature helper coverage for speculative
+  loading and view transitions, including configuration eligibility,
+  mode/eagerness filters, generated URL-pattern exclusions, script tag escaping,
+  theme support behavior, view-transition CSS enqueueing, and global restoration.
 - `html-api`: HTML tag and tree processor updates, normalization idempotence,
   breadcrumbs, token walking, and modifiable text escaping.
 - `http`: synthetic HTTP response arrays, response objects, header/cookie

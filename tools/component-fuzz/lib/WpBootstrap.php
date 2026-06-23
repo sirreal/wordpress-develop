@@ -152,6 +152,14 @@ final class WpBootstrap {
 		if ( ! defined( 'WP_DEBUG_LOG' ) ) {
 			define( 'WP_DEBUG_LOG', false );
 		}
+		if ( ! defined( 'SCRIPT_DEBUG' ) ) {
+			$wp_version  = '';
+			$version_file = $src . 'wp-includes/version.php';
+			if ( file_exists( $version_file ) ) {
+				require $version_file;
+			}
+			define( 'SCRIPT_DEBUG', is_string( $wp_version ) && str_contains( $wp_version, '-src' ) );
+		}
 		if ( ! defined( 'WP_DEVELOPMENT_MODE' ) ) {
 			define( 'WP_DEVELOPMENT_MODE', '' );
 		}
@@ -277,6 +285,9 @@ final class WpBootstrap {
 			'wp-includes/connectors.php',
 			'wp-includes/class-wp-icons-registry.php',
 			'wp-includes/class-wp-speculation-rules.php',
+			'wp-includes/class-wp-url-pattern-prefixer.php',
+			'wp-includes/speculative-loading.php',
+			'wp-includes/view-transitions.php',
 			'wp-includes/wp-diff.php',
 			'wp-includes/shortcodes.php',
 			'wp-includes/class-wp-block-template.php',
