@@ -235,15 +235,15 @@
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">All delegated worker patches from this wave are integrated and closed. Workers used priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric work">5</div>
+			<div class="note">Five delegated rich-surface workers are active. Workers use priority/fast, <code>gpt-5.5</code> xhigh.</div>
 		</div>
 	</div>
 
 	<section>
 		<div class="section-head">
 			<h2>Current Work</h2>
-			<span class="note">Committed main-tree progress; no active delegated surfaces.</span>
+			<span class="note">Committed main-tree progress plus the next active delegated rich-surface wave.</span>
 		</div>
 		<table>
 			<thead>
@@ -402,6 +402,41 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 700 passed, 100 skipped, 0 failed; broad run: 6720 passed, 62 skipped, 0 failed.</td>
 					<td>User settings, hidden columns, meta boxes, screen options, admin preference filters.</td>
+				</tr>
+				<tr>
+					<td><code>rest-controllers</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Boole the 2nd: <code>_work/component-fuzz-rest-controllers-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>REST controller registries, schemas, context filtering, permissions, state restoration.</td>
+				</tr>
+				<tr>
+					<td><code>query-loop</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Leibniz the 2nd: <code>_work/component-fuzz-query-loop-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td><code>WP_Query</code>, loop state, conditional flags, cache/filter restoration.</td>
+				</tr>
+				<tr>
+					<td><code>media-ingest</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Euclid the 2nd: <code>_work/component-fuzz-media-ingest-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Upload/sideload helpers, MIME checks, unique filenames, local temp cleanup.</td>
+				</tr>
+				<tr>
+					<td><code>multisite</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>Ramanujan the 2nd: <code>_work/component-fuzz-multisite-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Network/site helpers, switch/restore stack, cache groups, URL/path normalization.</td>
+				</tr>
+				<tr>
+					<td><code>taxonomy-relationships</code></td>
+					<td><span class="status work">worker active</span></td>
+					<td>James the 2nd: <code>_work/component-fuzz-taxonomy-relationships-rich</code></td>
+					<td>Target: focused 100 iterations, smoke, standards, diff check, commit.</td>
+					<td>Object-term assignment, append/replace, counts, duplicate/invalid inputs, state restoration.</td>
 				</tr>
 			</tbody>
 		</table>
