@@ -27,6 +27,7 @@ final class CronSurface {
 
 			$rows = array_merge( $rows, self::check_schedules( $ctx ) );
 			$rows = array_merge( $rows, self::check_rejection_contracts( $ctx ) );
+			$rows = array_merge( $rows, self::check_schedule_filters( $ctx, $store ) );
 
 			foreach ( self::cases( $ctx ) as $case_index => $case ) {
 				$store = array( 'version' => 2 );
@@ -54,7 +55,9 @@ final class CronSurface {
 			array(
 				'add_filter',
 				'apply_filters',
+				'has_filter',
 				'remove_all_filters',
+				'remove_filter',
 				'wp_get_schedules',
 				'wp_schedule_event',
 				'wp_schedule_single_event',
@@ -131,6 +134,162 @@ final class CronSurface {
 				array( 'result' => self::describe_call( $invalid_single_plain ) )
 			),
 		);
+	}
+
+	private static function check_schedule_filters( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$rows  = array();
+		$store = array( 'version' => 2 );
+		$now   = time();
+
+		$pre_events      = array();
+		$pre_short_hook  = 'component_fuzz_pre_schedule';
+		$pre_short_args  = array( 'kind' => 'pre-short' );
+		$pre_short_value = 'component-fuzz-short-circuit';
+		$pre_filter      = static function ( $pre, object $event, bool $wp_error ) use ( &$pre_events, $pre_short_hook, $pre_short_value ) {
+			$pre_events[] = array(
+				'hook'    => $event->hook,
+				'args'    => $event->args,
+				'error'   => $wp_error,
+				'preType' => gettype( $pre ),
+			);
+
+			return $pre_short_hook === $event->hook ? $pre_short_value : $pre;
+		};
+
+		\add_filter( 'pre_schedule_event', $pre_filter, 10, 3 );
+		try {
+			$pre_result = self::call( static fn() => \wp_schedule_event( $now + 300, 'hourly', $pre_short_hook, $pre_short_args, true ) );
+			$pre_after  = self::call( static fn() => \wp_get_scheduled_event( $pre_short_hook, $pre_short_args, $now + 300 ) );
+		} finally {
+			\remove_filter( 'pre_schedule_event', $pre_filter, 10 );
+		}
+
+		$rows[] = $ctx->result(
+			'cron.filters.pre-schedule-short-circuits-without-storage',
+			! $pre_result['threw']
+				&& $pre_short_value === $pre_result['value']
+				&& ! $pre_after['threw']
+				&& false === $pre_after['value']
+				&& 1 === count( $pre_events )
+				&& $pre_short_hook === ( $pre_events[0]['hook'] ?? null )
+				&& $pre_short_args === ( $pre_events[0]['args'] ?? null )
+				&& true === ( $pre_events[0]['error'] ?? null )
+				&& false === \has_filter( 'pre_schedule_event', $pre_filter ),
+			array(
+				'preResult' => self::describe_call( $pre_result ),
+				'after'     => self::describe_call( $pre_after ),
+				'events'    => self::describe_value( $pre_events ),
+				'store'     => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store          = array( 'version' => 2 );
+		$mutate_events  = array();
+		$mutate_hook    = 'component_fuzz_schedule_mutate';
+		$mutated_hook   = 'component_fuzz_schedule_mutated';
+		$mutate_args    = array( 'kind' => 'before' );
+		$mutated_args   = array( 'kind' => 'after', 'token' => self::safe_hook_fragment( $ctx->text( 0, 12 ) ) );
+		$mutated_time   = $now + 900;
+		$schedule_filter = static function ( object $event ) use ( &$mutate_events, $mutate_hook, $mutated_hook, $mutated_args, $mutated_time ): object {
+			$mutate_events[] = array(
+				'hook'      => $event->hook,
+				'timestamp' => $event->timestamp,
+				'args'      => $event->args,
+				'schedule'  => $event->schedule,
+			);
+
+			if ( $mutate_hook === $event->hook ) {
+				$event->hook      = $mutated_hook;
+				$event->timestamp = $mutated_time;
+				$event->args      = $mutated_args;
+			}
+
+			return $event;
+		};
+
+		\add_filter( 'schedule_event', $schedule_filter );
+		try {
+			$mutate_result = self::call( static fn() => \wp_schedule_event( $now + 600, 'hourly', $mutate_hook, $mutate_args, true ) );
+			$old_event     = self::call( static fn() => \wp_get_scheduled_event( $mutate_hook, $mutate_args, $now + 600 ) );
+			$new_event     = self::call( static fn() => \wp_get_scheduled_event( $mutated_hook, $mutated_args, $mutated_time ) );
+		} finally {
+			\remove_filter( 'schedule_event', $schedule_filter );
+		}
+
+		$event = $new_event['value'] ?? null;
+		$rows[] = $ctx->result(
+			'cron.filters.schedule-event-mutates-stored-event',
+			! $mutate_result['threw']
+				&& true === $mutate_result['value']
+				&& ! $old_event['threw']
+				&& false === $old_event['value']
+				&& ! $new_event['threw']
+				&& $event instanceof \stdClass
+				&& $mutated_hook === $event->hook
+				&& $mutated_time === $event->timestamp
+				&& $mutated_args === $event->args
+				&& 1 === count( $mutate_events )
+				&& $mutate_hook === ( $mutate_events[0]['hook'] ?? null )
+				&& false === \has_filter( 'schedule_event', $schedule_filter ),
+			array(
+				'result' => self::describe_call( $mutate_result ),
+				'old'    => self::describe_call( $old_event ),
+				'new'    => self::describe_call( $new_event ),
+				'events' => self::describe_value( $mutate_events ),
+				'store'  => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store           = array( 'version' => 2 );
+		$unschedule_hook = 'component_fuzz_pre_unschedule';
+		$unschedule_args = array( 'kind' => 'keep' );
+		$unschedule_time = $now + 1200;
+		$unschedule_seen = array();
+		\wp_schedule_single_event( $unschedule_time, $unschedule_hook, $unschedule_args, true );
+
+		$unschedule_filter = static function ( $pre, int $timestamp, string $hook, array $args, bool $wp_error ) use ( &$unschedule_seen, $unschedule_hook ) {
+			$unschedule_seen[] = array(
+				'pre'       => $pre,
+				'timestamp' => $timestamp,
+				'hook'      => $hook,
+				'args'      => $args,
+				'error'     => $wp_error,
+			);
+
+			return $unschedule_hook === $hook ? true : $pre;
+		};
+
+		\add_filter( 'pre_unschedule_event', $unschedule_filter, 10, 5 );
+		try {
+			$unschedule = self::call( static fn() => \wp_unschedule_event( $unschedule_time, $unschedule_hook, $unschedule_args, true ) );
+			$kept       = self::call( static fn() => \wp_get_scheduled_event( $unschedule_hook, $unschedule_args, $unschedule_time ) );
+		} finally {
+			\remove_filter( 'pre_unschedule_event', $unschedule_filter, 10 );
+		}
+
+		$kept_event = $kept['value'] ?? null;
+		$rows[] = $ctx->result(
+			'cron.filters.pre-unschedule-short-circuits-and-preserves-event',
+			! $unschedule['threw']
+				&& true === $unschedule['value']
+				&& ! $kept['threw']
+				&& $kept_event instanceof \stdClass
+				&& $unschedule_hook === $kept_event->hook
+				&& $unschedule_args === $kept_event->args
+				&& 1 === count( $unschedule_seen )
+				&& $unschedule_time === ( $unschedule_seen[0]['timestamp'] ?? null )
+				&& $unschedule_hook === ( $unschedule_seen[0]['hook'] ?? null )
+				&& true === ( $unschedule_seen[0]['error'] ?? null )
+				&& false === \has_filter( 'pre_unschedule_event', $unschedule_filter ),
+			array(
+				'unschedule' => self::describe_call( $unschedule ),
+				'kept'       => self::describe_call( $kept ),
+				'events'     => self::describe_value( $unschedule_seen ),
+				'store'      => self::describe_cron_store( $store ),
+			)
+		);
+
+		return $rows;
 	}
 
 	private static function check_case( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, array &$store ): array {

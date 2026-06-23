@@ -119,8 +119,9 @@ database, network requests, or a configured site.
   decisions, moderation short-circuits, update/status transition hooks,
   trash/untrash and spam/unspam restoration, and WP_Error failure paths without
   process exits.
-- `cron`: in-memory cron scheduling, recurrence lookup, ready-job partitioning,
-  unscheduling and rescheduling contracts.
+- `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
+  filter contracts, ready-job partitioning, unscheduling and rescheduling
+  contracts.
 - `default-widgets`: classic default widget subclass coverage, including
   constructor/options contracts, update sanitization, form escaping, filtered
   rendering for text/custom HTML/search/meta/list widgets, cache-backed
