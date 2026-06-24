@@ -701,7 +701,9 @@ final class AdminWorkflowsSurface {
 				'_GET',
 				'_POST',
 				'_REQUEST',
+				'_wp_post_type_features',
 				'current_screen',
+				'post_type_meta_caps',
 				'wp_actions',
 				'wp_current_filter',
 				'wp_filter',
@@ -718,7 +720,7 @@ final class AdminWorkflowsSurface {
 			array(
 				'bulk_actions' => array(
 					'trash'                         => \esc_html( 'Trash ' . $hostile_label ),
-					'Change ' . $ctx->identifier( 3, 8 ) => array(
+					'Change ' . $hostile_label => array(
 						'feature' => \esc_html( 'Feature ' . $hostile_label ),
 						'archive' => \esc_html( 'Archive ' . $hostile_label ),
 					),
@@ -830,7 +832,10 @@ final class AdminWorkflowsSurface {
 				&& false === \has_filter( 'pre_months_dropdown_query', $pre_months );
 
 			self::restore_globals( $local_snapshot );
-			$restored = self::globals_match( $local_snapshot, array( '_GET', '_POST', '_REQUEST', 'current_screen', 'wp_post_types' ) );
+			$restored = self::globals_match(
+				$local_snapshot,
+				array( '_GET', '_POST', '_REQUEST', '_wp_post_type_features', 'current_screen', 'post_type_meta_caps', 'wp_post_types' )
+			);
 		}
 
 		self::collect_failure(
@@ -850,7 +855,7 @@ final class AdminWorkflowsSurface {
 				&& str_contains( (string) ( $result['bulk_bottom_html'] ?? '' ), 'name="action2"' )
 				&& str_contains( (string) ( $result['bulk_bottom_html'] ?? '' ), 'bulk-action-selector-bottom' )
 				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['bulk_top_html'] ?? '' ) . (string) ( $result['bulk_bottom_html'] ?? '' ) ),
-			'bulk_actions renders first and second dropdown names, optgroups, compact buttons, and escaped labels',
+			'bulk_actions renders first and second dropdown names, escaped optgroup labels, pre-escaped action labels, and compact buttons',
 			array(
 				'top'    => self::describe_string( (string) ( $result['bulk_top_html'] ?? '' ) ),
 				'bottom' => self::describe_string( (string) ( $result['bulk_bottom_html'] ?? '' ) ),
