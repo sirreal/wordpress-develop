@@ -671,6 +671,15 @@ final class BlocksSurface {
 				'first_child' => array( $case['firstName'] ),
 				'last_child'  => array( $case['lastName'] ),
 			);
+			$expected_ignored       = array(
+				$case['beforeName'],
+				$case['ignoredBeforeName'],
+				$case['filterName'],
+				$case['afterName'],
+				$case['singleName'],
+				$case['firstName'],
+				$case['lastName'],
+			);
 
 			self::collect_failure(
 				$failures,
@@ -735,16 +744,7 @@ final class BlocksSurface {
 
 			self::collect_failure(
 				$failures,
-				is_array( $ignored )
-					&& in_array( $case['beforeName'], $ignored, true )
-					&& in_array( $case['ignoredBeforeName'], $ignored, true )
-					&& in_array( $case['filterName'], $ignored, true )
-					&& in_array( $case['afterName'], $ignored, true )
-					&& in_array( $case['singleName'], $ignored, true )
-					&& in_array( $case['firstName'], $ignored, true )
-					&& in_array( $case['lastName'], $ignored, true )
-					&& ! in_array( $case['suppressedName'], $ignored, true )
-					&& count( $ignored ) === count( array_unique( $ignored ) )
+				self::string_lists_match_unordered( $ignored, $expected_ignored )
 					&& 0 === self::block_comment_count( $metadata_content, $case['beforeName'] )
 					&& 0 === self::block_comment_count( $metadata_content, $case['ignoredBeforeName'] )
 					&& 0 === self::block_comment_count( $metadata_content, $case['filterName'] )
@@ -756,6 +756,7 @@ final class BlocksSurface {
 				'set_ignored_hooked_blocks_metadata records hookable block types without emitting hooked markup',
 				array(
 					'metadataContent' => $metadata_content,
+					'expectedIgnored' => $expected_ignored,
 					'ignored'         => $ignored,
 				)
 			);
@@ -1442,6 +1443,18 @@ final class BlocksSurface {
 	private static function hooked_blocks_match( array $actual, array $expected ): bool {
 		ksort( $actual );
 		ksort( $expected );
+		return $expected === $actual;
+	}
+
+	private static function string_lists_match_unordered( $actual, array $expected ): bool {
+		if ( ! is_array( $actual ) ) {
+			return false;
+		}
+
+		$actual   = array_values( $actual );
+		$expected = array_values( $expected );
+		sort( $actual, SORT_STRING );
+		sort( $expected, SORT_STRING );
 		return $expected === $actual;
 	}
 
