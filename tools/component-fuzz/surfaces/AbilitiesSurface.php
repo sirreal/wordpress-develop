@@ -31,6 +31,7 @@ final class AbilitiesSurface {
 				self::check_category_registry( $ctx ),
 				self::check_ability_registration_and_queries( $ctx ),
 				self::check_execution_pipeline( $ctx ),
+				self::check_validation_filter_and_exception_paths( $ctx ),
 				self::check_invalid_registration_paths( $ctx ),
 			);
 		} catch ( \Throwable $e ) {
@@ -710,6 +711,167 @@ final class AbilitiesSurface {
 			'abilities.execution-pipeline',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_validation_filter_and_exception_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$category = self::category_cases( $ctx->fork( 'filter-category' ) )[0];
+		$input    = 'filter-input-' . self::slug_piece( $ctx->fork( 'filter-input' ), 10 );
+		$names    = array(
+			'success'          => self::ability_name( $ctx->fork( 'filter-success' ), 'success' ),
+			'normalize-error'  => self::ability_name( $ctx->fork( 'filter-normalize-error' ), 'normalize-error' ),
+			'input-false'      => self::ability_name( $ctx->fork( 'filter-input-false' ), 'input-false' ),
+			'input-error'      => self::ability_name( $ctx->fork( 'filter-input-error' ), 'input-error' ),
+			'output-false'     => self::ability_name( $ctx->fork( 'filter-output-false' ), 'output-false' ),
+			'output-error'     => self::ability_name( $ctx->fork( 'filter-output-error' ), 'output-error' ),
+			'permission-throw' => self::ability_name( $ctx->fork( 'filter-permission-throw' ), 'permission-throw' ),
+			'execute-throw'    => self::ability_name( $ctx->fork( 'filter-execute-throw' ), 'execute-throw' ),
+		);
+		$calls    = array(
+			'permission' => array(),
+			'execute'    => array(),
+			'after'      => array(),
+			'normalize'  => array(),
+			'input'      => array(),
+			'output'     => array(),
+		);
+
+		self::reset_registries();
+		$category_action = self::install_category_action( array( $category ) );
+
+		$register_action = static function () use ( $category, $names, &$calls ): void {
+			foreach ( $names as $key => $name ) {
+				\wp_register_ability(
+					$name,
+					self::ability_args(
+						'Filter and exception matrix ' . $key,
+						$category['slug'],
+						static function ( string $value ) use ( $key, &$calls ): string {
+							$calls['execute'][] = $key;
+							if ( 'execute-throw' === $key ) {
+								throw new \RuntimeException( 'component fuzz execute exception' );
+							}
+							return 'ok:' . $value;
+						},
+						static function ( string $value ) use ( $key, &$calls ): bool {
+							$calls['permission'][] = $key . ':' . $value;
+							if ( 'permission-throw' === $key ) {
+								throw new \RuntimeException( 'component fuzz permission exception' );
+							}
+							return true;
+						},
+						array( 'type' => 'string' ),
+						array( 'type' => 'string' )
+					)
+				);
+			}
+		};
+
+		\add_action( 'wp_abilities_api_init', $register_action );
+		\WP_Abilities_Registry::get_instance();
+		\remove_action( 'wp_abilities_api_init', $register_action );
+		\remove_action( 'wp_abilities_api_categories_init', $category_action );
+
+		$normalizer = static function ( $value, string $name ) use ( $names, &$calls ) {
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['normalize'][ $key ] = $value;
+			}
+			if ( $names['normalize-error'] === $name ) {
+				return new \WP_Error( 'component_fuzz_normalize', 'Normalize filter stopped execution.' );
+			}
+			return $value;
+		};
+		$input_filter = static function ( $validity, $value, string $name ) use ( $names, &$calls ) {
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['input'][ $key ] = $value;
+			}
+			if ( $names['input-false'] === $name ) {
+				return false;
+			}
+			if ( $names['input-error'] === $name ) {
+				return new \WP_Error( 'component_fuzz_input_gate', 'Input filter stopped execution.' );
+			}
+			return $validity;
+		};
+		$output_filter = static function ( $validity, $value, string $name ) use ( $names, &$calls ) {
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['output'][ $key ] = $value;
+			}
+			if ( $names['output-false'] === $name ) {
+				return false;
+			}
+			if ( $names['output-error'] === $name ) {
+				return new \WP_Error( 'component_fuzz_output_gate', 'Output filter stopped execution.' );
+			}
+			return $validity;
+		};
+		$after = static function ( string $name ) use ( $names, &$calls ): void {
+			$key = array_search( $name, $names, true );
+			if ( false !== $key ) {
+				$calls['after'][] = $key;
+			}
+		};
+
+		\add_filter( 'wp_ability_normalize_input', $normalizer, 10, 3 );
+		\add_filter( 'wp_ability_validate_input', $input_filter, 10, 3 );
+		\add_filter( 'wp_ability_validate_output', $output_filter, 10, 3 );
+		\add_action( 'wp_after_execute_ability', $after, 10, 4 );
+
+		try {
+			$results = array();
+			foreach ( $names as $key => $name ) {
+				$ability          = \wp_get_ability( $name );
+				$results[ $key ] = $ability instanceof \WP_Ability ? $ability->execute( $input ) : null;
+			}
+		} finally {
+			\remove_filter( 'wp_ability_normalize_input', $normalizer, 10 );
+			\remove_filter( 'wp_ability_validate_input', $input_filter, 10 );
+			\remove_filter( 'wp_ability_validate_output', $output_filter, 10 );
+			\remove_action( 'wp_after_execute_ability', $after, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			'ok:' . $input === $results['success']
+				&& self::is_error_code( $results['normalize-error'], 'component_fuzz_normalize' )
+				&& self::is_error_code( $results['input-false'], 'ability_invalid_input' )
+				&& self::is_error_code( $results['input-error'], 'component_fuzz_input_gate' )
+				&& self::is_error_code( $results['output-false'], 'ability_invalid_output' )
+				&& self::is_error_code( $results['output-error'], 'component_fuzz_output_gate' )
+				&& self::is_error_code( $results['permission-throw'], 'ability_invalid_permissions' )
+				&& self::is_error_code( $results['execute-throw'], 'ability_callback_exception' ),
+			'ability validation filters and callback exceptions return stable error codes',
+			array(
+				'results' => array_map( array( __CLASS__, 'describe_error' ), $results ),
+				'calls'   => $calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( 'success:' . $input, 'output-false:' . $input, 'output-error:' . $input, 'permission-throw:' . $input, 'execute-throw:' . $input ) === $calls['permission']
+				&& array( 'success', 'output-false', 'output-error', 'execute-throw' ) === $calls['execute']
+				&& array( 'success' ) === $calls['after']
+				&& ! array_key_exists( 'normalize-error', $calls['input'] )
+				&& ! in_array( 'normalize-error:' . $input, $calls['permission'], true )
+				&& ! in_array( 'input-false:' . $input, $calls['permission'], true )
+				&& ! in_array( 'input-error:' . $input, $calls['permission'], true ),
+			'ability execution stops at the earliest failing pipeline stage',
+			array( 'calls' => $calls )
+		);
+
+		return self::result(
+			$ctx,
+			'abilities.validation-filters-and-exception-paths',
+			array() === $failures,
+			array(
+				'cases'    => count( $names ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
 		);
 	}
 

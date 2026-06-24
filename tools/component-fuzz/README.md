@@ -13,7 +13,8 @@ database, network requests, or a configured site.
 
 - `abilities`: Abilities API category and ability registry lifecycles,
   action-gated registration, metadata/default preparation, filtered discovery,
-  schema validation, permission checks, execution, and unregister behavior.
+  schema validation, permission checks, execution, validation filters, callback
+  exception handling, and unregister behavior.
 - `account-security`: no-DB account recovery and security APIs, including
   application password lifecycle/hash behavior, recovery key/cookie validation,
   and paused extension storage transitions.
