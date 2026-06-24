@@ -55,6 +55,7 @@ final class FilesystemSurface {
 				$rows[] = self::check_wp_unique_filename( $ctx, $filename_cases, $unique_dir );
 				$rows[] = self::check_wp_tempnam( $ctx, $filename_cases, $temp_dir );
 				$rows[] = self::check_wp_filesystem_direct( $ctx, $filename_cases, $direct_dir );
+				$rows[] = self::check_wp_filesystem_direct_metadata( $ctx, $filename_cases, $direct_dir );
 			}
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1009,6 +1010,152 @@ final class FilesystemSurface {
 				'sandbox' => self::describe_string( $dir ),
 				'leaf'    => self::describe_string( $leaf ),
 				'method'  => isset( $fs->method ) ? $fs->method : null,
+			)
+		);
+	}
+
+	private static function check_wp_filesystem_direct_metadata( \ComponentFuzz\FuzzContext $ctx, array $cases, string $dir ): array {
+		if ( ! class_exists( 'WP_Filesystem_Direct' ) ) {
+			return $ctx->skip( 'filesystem.WP_Filesystem_Direct.metadata-available', 'WP_Filesystem_Direct is unavailable.' );
+		}
+
+		$failures = array();
+		$fs       = new \WP_Filesystem_Direct( null );
+		$leaf     = self::safe_leaf_name( $cases[ $ctx->int( 0, count( $cases ) - 1 ) ]['value'], 'metadata.txt' );
+		$subdir   = $dir . DIRECTORY_SEPARATOR . 'metadata-' . $ctx->iteration();
+		$file     = $subdir . DIRECTORY_SEPARATOR . $leaf;
+		$missing  = $subdir . DIRECTORY_SEPARATOR . 'missing-' . $leaf;
+		$contents = "alpha=" . $ctx->seed() . "\n"
+			. "beta=" . $ctx->iteration() . "\n"
+			. "gamma=" . self::trim_bytes( $ctx->text( 0, 48 ), 48 ) . "\n";
+		$mtime    = 946684800 + $ctx->int( 0, 86400 * 365 );
+		$atime    = $mtime + $ctx->int( 1, 3600 );
+		$case     = array(
+			'value'    => $file,
+			'source'   => 'generated',
+			'features' => array( 'direct', 'metadata' ),
+		);
+
+		self::ensure_dir( $subdir );
+
+		$missing_size  = self::call( static function () use ( $fs, $missing ) {
+			return $fs->size( $missing );
+		} );
+		$missing_mtime = self::call( static function () use ( $fs, $missing ) {
+			return $fs->mtime( $missing );
+		} );
+		$missing_atime = self::call( static function () use ( $fs, $missing ) {
+			return $fs->atime( $missing );
+		} );
+
+		if (
+			$missing_size['threw']
+			|| $missing_mtime['threw']
+			|| $missing_atime['threw']
+			|| false !== $missing_size['value']
+			|| false !== $missing_mtime['value']
+			|| false !== $missing_atime['value']
+			|| '0' !== $fs->getchmod( $missing )
+			|| $fs->exists( $missing )
+		) {
+			self::record_failure(
+				$failures,
+				'WP_Filesystem_Direct.missing-file-metadata-fails-closed',
+				$case,
+				array(
+					'size'    => self::describe_call( $missing_size ),
+					'mtime'   => self::describe_call( $missing_mtime ),
+					'atime'   => self::describe_call( $missing_atime ),
+					'chmod'   => $fs->getchmod( $missing ),
+					'exists'  => $fs->exists( $missing ),
+					'missing' => self::describe_string( $missing ),
+				)
+			);
+		}
+
+		$put = self::call( static function () use ( $fs, $file, $contents ) {
+			return $fs->put_contents( $file, $contents, 0644 );
+		} );
+		clearstatcache( true, $file );
+
+		$array = self::call( static function () use ( $fs, $file ) {
+			return $fs->get_contents_array( $file );
+		} );
+		if (
+			$put['threw']
+			|| true !== $put['value']
+			|| $array['threw']
+			|| ! is_array( $array['value'] )
+			|| implode( '', $array['value'] ) !== $contents
+			|| $fs->size( $file ) !== strlen( $contents )
+			|| ! $fs->is_readable( $file )
+			|| ! $fs->is_writable( $file )
+		) {
+			self::record_failure(
+				$failures,
+				'WP_Filesystem_Direct.contents-array-size-readability',
+				$case,
+				array(
+					'put'      => self::describe_call( $put ),
+					'array'    => self::describe_call( $array ),
+					'size'     => $fs->size( $file ),
+					'expected' => strlen( $contents ),
+					'readable' => $fs->is_readable( $file ),
+					'writable' => $fs->is_writable( $file ),
+				)
+			);
+		}
+
+		$touch = self::call( static function () use ( $fs, $file, $mtime, $atime ) {
+			return $fs->touch( $file, $mtime, $atime );
+		} );
+		clearstatcache( true, $file );
+
+		if (
+			$touch['threw']
+			|| true !== $touch['value']
+			|| abs( (int) $fs->mtime( $file ) - $mtime ) > 2
+			|| abs( (int) $fs->atime( $file ) - $atime ) > 2
+		) {
+			self::record_failure(
+				$failures,
+				'WP_Filesystem_Direct.touch-updates-times',
+				$case,
+				array(
+					'touch'         => self::describe_call( $touch ),
+					'expectedMtime' => $mtime,
+					'actualMtime'   => $fs->mtime( $file ),
+					'expectedAtime' => $atime,
+					'actualAtime'   => $fs->atime( $file ),
+				)
+			);
+		}
+
+		$chmod = self::call( static function () use ( $fs, $file ) {
+			return $fs->chmod( $file, 0640 );
+		} );
+		clearstatcache( true, $file );
+
+		if ( $chmod['threw'] || true !== $chmod['value'] || '640' !== $fs->getchmod( $file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Filesystem_Direct.chmod-getchmod-roundtrip',
+				$case,
+				array(
+					'chmod'  => self::describe_call( $chmod ),
+					'actual' => $fs->getchmod( $file ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'filesystem.WP_Filesystem_Direct.metadata-and-times',
+			array( $case ),
+			$failures,
+			array(
+				'sandbox' => self::describe_string( $dir ),
+				'leaf'    => self::describe_string( $leaf ),
 			)
 		);
 	}

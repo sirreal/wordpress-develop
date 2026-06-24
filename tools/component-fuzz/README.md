@@ -179,7 +179,8 @@ database, network requests, or a configured site.
   Font Library collection registration/JSON loading, and font utility
   sanitization for family lists, face slugs, schemas, and MIME maps.
 - `filesystem`: path normalization and joining, file validation classes,
-  filename sanitization/uniqueness, temp names, direct filesystem sandboxing.
+  filename sanitization/uniqueness, temp names, direct filesystem sandboxing,
+  metadata/time/chmod round trips, and missing-file failure values.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
   normalization, colors, sizes, time strings, UTF-8 helpers, and accent removal.
