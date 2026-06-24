@@ -45,6 +45,7 @@ final class AssetsSurface {
 			$rows[] = self::check_inline_styles( $ctx, $case );
 			$rows[] = self::check_script_data_args( $ctx, $case );
 			$rows[] = self::check_printed_output_escaping( $ctx, $case );
+			$rows[] = self::check_loader_tag_filters( $ctx, $case );
 			$rows[] = self::check_script_modules( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -82,6 +83,11 @@ final class AssetsSurface {
 
 		foreach (
 			array(
+				'add_action',
+				'add_filter',
+				'has_filter',
+				'remove_action',
+				'remove_filter',
 				'wp_scripts',
 				'wp_styles',
 				'wp_register_script',
@@ -619,6 +625,91 @@ final class AssetsSurface {
 				'decodedStyleUrl'    => $decoded_style_url,
 				'scriptOutputPreview' => self::preview( $script_print['output'] ),
 				'styleOutputPreview' => self::preview( $style_print['output'] ),
+			)
+		);
+	}
+
+	private static function check_loader_tag_filters( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_scripts_global();
+		self::reset_styles_global();
+
+		$script_handle = self::handle( $ctx, 'loader-script-filter' );
+		$style_handle  = self::handle( $ctx, 'loader-style-filter' );
+		$script_src    = 'assets/filter-script.js?profile=' . rawurlencode( $case['profile'] );
+		$style_src     = 'assets/filter-style.css?profile=' . rawurlencode( $case['profile'] );
+		$style_media   = 'screen and (orientation: landscape)';
+		$script_seen   = array();
+		$style_seen    = array();
+
+		$script_filter = static function ( string $tag, string $handle, string $src ) use ( &$script_seen, $script_handle ): string {
+			$script_seen[] = array(
+				'handle' => $handle,
+				'src'    => $src,
+			);
+
+			if ( $script_handle !== $handle ) {
+				return $tag;
+			}
+
+			return str_replace( '<script ', '<script data-cfz-script="' . esc_attr( $handle ) . '" ', $tag );
+		};
+		$style_filter  = static function ( string $html, string $handle, string $href, string $media ) use ( &$style_seen, $style_handle ): string {
+			$style_seen[] = array(
+				'handle' => $handle,
+				'href'   => $href,
+				'media'  => $media,
+			);
+
+			if ( $style_handle !== $handle ) {
+				return $html;
+			}
+
+			return str_replace( '<link ', '<link data-cfz-style="' . esc_attr( $handle ) . '" ', $html );
+		};
+
+		\wp_register_script( $script_handle, $script_src, array(), 'filter-1' );
+		\wp_enqueue_script( $script_handle );
+		\wp_register_style( $style_handle, $style_src, array(), 'filter-1', $style_media );
+		\wp_enqueue_style( $style_handle );
+
+		\add_filter( 'script_loader_tag', $script_filter, 10, 3 );
+		\add_filter( 'style_loader_tag', $style_filter, 10, 4 );
+		try {
+			$script_print = self::capture_output( static fn() => \wp_print_scripts() );
+			$style_print  = self::capture_output( static fn() => \wp_print_styles() );
+		} finally {
+			\remove_filter( 'script_loader_tag', $script_filter, 10 );
+			\remove_filter( 'style_loader_tag', $style_filter, 10 );
+		}
+
+		$script_srcs = array_column( $script_seen, 'src', 'handle' );
+		$style_hrefs = array_column( $style_seen, 'href', 'handle' );
+		$style_media_seen = array_column( $style_seen, 'media', 'handle' );
+
+		$ok = ! $script_print['threw']
+			&& ! $style_print['threw']
+			&& array( $script_handle ) === array_column( $script_seen, 'handle' )
+			&& array( $style_handle ) === array_column( $style_seen, 'handle' )
+			&& str_contains( (string) ( $script_srcs[ $script_handle ] ?? '' ), 'assets/filter-script.js' )
+			&& str_contains( (string) ( $style_hrefs[ $style_handle ] ?? '' ), 'assets/filter-style.css' )
+			&& $style_media === ( $style_media_seen[ $style_handle ] ?? null )
+			&& str_contains( $script_print['output'], 'data-cfz-script="' . $script_handle . '"' )
+			&& str_contains( $style_print['output'], 'data-cfz-style="' . $style_handle . '"' )
+			&& false === \has_filter( 'script_loader_tag', $script_filter )
+			&& false === \has_filter( 'style_loader_tag', $style_filter );
+
+		return $ctx->result(
+			'assets.loader-tag-filters.scoped-attributes',
+			$ok,
+			self::case_data( $case ) + array(
+				'scriptHandle'        => $script_handle,
+				'styleHandle'         => $style_handle,
+				'scriptSeen'          => $script_seen,
+				'styleSeen'           => $style_seen,
+				'scriptOutputPreview' => self::preview( $script_print['output'] ),
+				'styleOutputPreview'  => self::preview( $style_print['output'] ),
+				'scriptCall'          => self::describe_call( $script_print ),
+				'styleCall'           => self::describe_call( $style_print ),
 			)
 		);
 	}

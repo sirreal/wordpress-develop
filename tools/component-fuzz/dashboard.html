@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7898 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7902 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>media-editor</code> at 700 passed and 100 skipped, <code>filesystem</code> at 1000 passed, <code>classic-walkers</code> at 1100 passed and 100 skipped, and <code>admin-ajax</code> at 800 passed.</div>
+			<div class="note">Latest focused validations: <code>assets</code> at 1300 passed, <code>media-editor</code> at 700 passed and 100 skipped, <code>filesystem</code> at 1000 passed, <code>classic-walkers</code> at 1100 passed and 100 skipped, and <code>admin-ajax</code> at 800 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; media-editor and filesystem work are integrated in main.</div>
+			<div class="metric">2</div>
+			<div class="note">Meitner the 2nd is extending <code>mail</code> in <code>/private/tmp/component-fuzz-worker-mail</code>; Fermat the 2nd remains assigned to <code>fonts</code> in <code>/private/tmp/component-fuzz-worker-fonts</code>.</div>
 		</div>
 	</div>
 
@@ -257,17 +257,24 @@
 			</thead>
 			<tbody>
 				<tr>
+					<td><code>assets</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 7902 passed, 64 skipped, 0 failed.</td>
+					<td>Script/style dependency ordering, inline assets, strategy/fetchpriority/module data, source/version escaping, scoped loader-tag filters, and script modules.</td>
+				</tr>
+				<tr>
 					<td><code>media-editor</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 700 passed, 100 skipped, 0 failed; latest broad run: 7898 passed, 62 skipped, 0 failed.</td>
+					<td>Main focused run: 700 passed, 100 skipped, 0 failed; latest broad run: 7902 passed, 64 skipped, 0 failed.</td>
 					<td>Editor selection, GD/Imagick availability, output format filters, resize/save metadata, intermediate/generated sub-sizes, missing sub-size detection, cache/filter-backed attachment metadata.</td>
 				</tr>
 				<tr>
 					<td><code>filesystem</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7898 passed, 62 skipped, 0 failed.</td>
+					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7902 passed, 64 skipped, 0 failed.</td>
 					<td>Path normalization/joining, validation classes, filename sanitization/uniqueness, temp names, direct filesystem sandboxing, metadata/time/chmod round trips, missing-file failure values.</td>
 				</tr>
 				<tr>
