@@ -564,9 +564,9 @@ final class EditorHelpersSurface {
 				&& $default_queue['scripts']['jquery-ui-autocomplete']
 				&& $default_queue['scripts']['media-upload']
 				&& ! $default_queue['scripts']['wp-embed']
-				&& ! $default_queue['scripts']['thickbox']
+				&& $default_queue['scripts']['thickbox']
 				&& ! $default_queue['styles']['thickbox'],
-			'enqueue_scripts default mode loads editor/link/media-upload handles without forcing thickbox or embeds',
+			'enqueue_scripts default mode loads editor/link/media-upload handles, including script dependencies, without forcing embeds or Thickbox styles',
 			array(
 				'seen'  => $default_seen,
 				'queue' => $default_queue,
@@ -1129,9 +1129,10 @@ final class EditorHelpersSurface {
 		$scripts = \wp_scripts();
 		$styles  = \wp_styles();
 
-		foreach ( array( 'editor', 'quicktags', 'wplink', 'jquery-ui-autocomplete', 'media-upload', 'wp-embed', 'thickbox' ) as $handle ) {
+		foreach ( array( 'editor', 'quicktags', 'wplink', 'jquery-ui-autocomplete', 'wp-embed', 'thickbox', 'shortcode' ) as $handle ) {
 			$scripts->add( $handle, false );
 		}
+		$scripts->add( 'media-upload', false, array( 'thickbox', 'shortcode' ) );
 
 		foreach ( array( 'buttons', 'thickbox' ) as $handle ) {
 			$styles->add( $handle, false );
