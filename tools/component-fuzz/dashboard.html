@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7959 passed, 0 failed, 0 errored, 67 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7981 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; empty admin-list-tables, media-remote, icons-connectors, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
+			<div class="metric">1</div>
+			<div class="note">Goodall the 2nd is active in <code>/private/tmp/component-fuzz-worker-appearance-media-followup</code> on an appearance-media follow-up; empty admin-list-tables, media-remote, icons-connectors, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
 		</div>
 	</div>
 
@@ -517,10 +517,10 @@
 				</tr>
 				<tr>
 					<td><code>block-widgets</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7618 passed, 62 skipped, 0 failed.</td>
-					<td><code>WP_Widget_Block</code>, legacy class matrix, malformed/unknown block fallbacks, sidebar widget mapping.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Nash the 2nd findings fixed through <code>e6d2b6b02d</code>, follow-up review found no actionable issues</td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7981 passed, 66 skipped, 0 failed.</td>
+					<td><code>WP_Widget_Block</code>, legacy class matrix, malformed/unknown block fallbacks, update/form escaping, <code>the_widget()</code> display/action/content ordering, rendered block output, registered control rendering, and sidebar widget mapping.</td>
 				</tr>
 				<tr>
 					<td><code>l10n</code></td>
@@ -933,6 +933,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>23cf0ded2c</code> / <code>e6d2b6b02d</code></td>
+					<td><code>block-widgets</code></td>
+					<td>700 passed, 0 skipped, 0 failed after review fixes.</td>
+					<td>7981 passed, 66 skipped, 0 failed at 2 iterations after <code>the_widget()</code> dispatch callback/action/content ordering, rendered block output, registered control escaping, and sidebars state isolation.</td>
+				</tr>
 				<tr>
 					<td><code>90161ef07f</code> / <code>0700329bba</code></td>
 					<td><code>import-diff</code></td>
@@ -1428,7 +1434,7 @@
 				<tr>
 					<td><code>d744e80b6b</code></td>
 					<td><code>block-widgets</code></td>
-					<td>600 passed, 0 skipped, 0 failed.</td>
+					<td>600 passed, 0 skipped, 0 failed before the dispatch-control follow-up.</td>
 					<td>7618 passed, 62 skipped, 0 failed at 2 iterations after legacy class matrix integration.</td>
 				</tr>
 				<tr>
