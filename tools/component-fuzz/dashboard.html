@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7936 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7939 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>identity</code> at 100 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale fonts, identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -290,6 +290,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 800 passed, 100 skipped, 0 failed; latest broad run: 7936 passed, 63 skipped, 0 failed.</td>
 					<td>Subprocess-isolated <code>export_wp()</code>, selection arguments, title/content/excerpt export filters, XML/CDATA/UTF-8 safety, meta skip filters, author/term ordering, and state restoration.</td>
+				</tr>
+				<tr>
+					<td><code>identity</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 100 passed, 0 skipped, 0 failed; latest broad run: 7939 passed, 62 skipped, 0 failed.</td>
+					<td>Username/email sanitization, identity sanitizer filters, capability keys, URLs, text/comment helpers, comment cookies/filtering, options, passwords, and parse helpers.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -814,6 +821,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>f8a6444fd2</code></td>
+					<td><code>identity</code></td>
+					<td>100 passed, 0 skipped, 0 failed.</td>
+					<td>7939 passed, 62 skipped, 0 failed at 2 iterations after sanitizer filter-contract coverage.</td>
+				</tr>
 				<tr>
 					<td><code>eff9136132</code></td>
 					<td><code>wxr-export</code></td>
