@@ -56,6 +56,7 @@ final class SecuritySurface {
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
 			$rows[] = self::check_redirect_filters_without_headers( $ctx );
+			$rows[] = self::check_validate_redirect_matrix( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -994,6 +995,109 @@ final class SecuritySurface {
 			'security.redirect.filters-and-safe-fallback-no-headers',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_validate_redirect_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$fallback = 'http://example.test/wp/wp-admin/fallback.php?from=validate';
+		$token    = self::token( $ctx->fork( 'redirect-token' ), 8 );
+
+		$_SERVER['REQUEST_URI'] = '/wp-admin/admin.php?page=component-fuzz&token=' . rawurlencode( $token );
+
+		$self_host_path = 'http://example.test/wp-admin/dashboard.php?x=' . rawurlencode( $ctx->text( 0, 24 ) );
+		$raw_crlf       = "http://example.test/path with spaces?x=1%0d%0aInjected:bad&token={$token}";
+		$cases          = array(
+			array(
+				'label'    => 'relative-path-expanded-beside-current-admin-request',
+				'input'    => 'settings.php?updated=1&token=' . rawurlencode( $token ),
+				'expected' => '/wp-admin/settings.php?updated=1&token=' . rawurlencode( $token ),
+			),
+			array(
+				'label'    => 'root-relative-path-preserved',
+				'input'    => '/wp-admin/options.php?x=1&pipe=|',
+				'expected' => \wp_sanitize_redirect( '/wp-admin/options.php?x=1&pipe=|' ),
+			),
+			array(
+				'label'    => 'same-home-host-allowed',
+				'input'    => $self_host_path,
+				'expected' => \wp_sanitize_redirect( $self_host_path ),
+			),
+			array(
+				'label'    => 'protocol-relative-same-host-normalized-to-http',
+				'input'    => '//example.test/wp-admin/profile.php?x=1',
+				'expected' => 'http://example.test/wp-admin/profile.php?x=1',
+			),
+			array(
+				'label'    => 'disallowed-host-falls-back',
+				'input'    => 'https://evil.test/wp-admin/?x=1',
+				'expected' => $fallback,
+			),
+			array(
+				'label'    => 'disallowed-scheme-falls-back',
+				'input'    => 'data:text/html,<script>alert(1)</script>',
+				'expected' => $fallback,
+			),
+			array(
+				'label'    => 'hostless-scheme-falls-back',
+				'input'    => 'https:example.test/wp-admin/',
+				'expected' => $fallback,
+			),
+			array(
+				'label'    => 'sanitize-crlf-and-space-on-allowed-host',
+				'input'    => $raw_crlf,
+				'expected' => \wp_sanitize_redirect( $raw_crlf ),
+			),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$actual = \wp_validate_redirect( $case['input'], $fallback );
+			self::collect_failure(
+				$failures,
+				$case['expected'] === $actual
+					&& false === str_contains( strtolower( $actual ), '%0d' )
+					&& false === str_contains( strtolower( $actual ), '%0a' )
+					&& false === str_contains( $actual, ' ' ),
+				"wp_validate_redirect matrix case {$index}: {$case['label']}",
+				array(
+					'input'    => self::describe_string( $case['input'] ),
+					'expected' => self::describe_string( $case['expected'] ),
+					'actual'   => self::describe_string( $actual ),
+				)
+			);
+		}
+
+		self::$allowed_redirect_hosts = array( 'allowed.example' );
+		\add_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10, 2 );
+		try {
+			$allowed_location = 'https://allowed.example/wp-admin/?token=' . rawurlencode( $token );
+			$allowed_actual   = \wp_validate_redirect( $allowed_location, $fallback );
+		} finally {
+			\remove_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10 );
+			self::$allowed_redirect_hosts = array();
+		}
+
+		self::collect_failure(
+			$failures,
+			$allowed_location === $allowed_actual
+				&& false === \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+			'wp_validate_redirect honors scoped allowed_redirect_hosts filters and removes them',
+			array(
+				'allowedLocation' => self::describe_string( $allowed_location ),
+				'actual'          => self::describe_string( $allowed_actual ),
+				'filter'          => \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.redirect.validate-location-matrix',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ) + 1,
+				'fallback' => self::describe_string( $fallback ),
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 

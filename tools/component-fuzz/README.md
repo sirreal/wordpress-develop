@@ -398,8 +398,8 @@ database, network requests, or a configured site.
   and cheap no-DB `url_to_postid()` paths.
 - `security`: salts and HMACs, password and fast-hash verification, nonce
   generation/verification, nonce URLs and hidden fields, admin/ajax referer
-  paths, synthetic auth cookies and session tokens, redirect sanitization, and
-  safe redirect filters.
+  paths, synthetic auth cookies and session tokens, redirect sanitization,
+  redirect validation matrices, and safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
   merging and dynamic filters, invalid registration and non-callable callback
   guards, callback argument and rendering filter contracts, escaped and
