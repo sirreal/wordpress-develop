@@ -77,6 +77,7 @@ final class TranslationsSurface {
 				self::check_translation_entry_lookup( $ctx->fork( 'entries' ) ),
 				self::check_gettext_plural_rules( $ctx->fork( 'plural-rules' ) ),
 				self::check_pomo_file_round_trips( $ctx->fork( 'pomo-files' ) ),
+				self::check_translation_api_metadata_updates( $ctx->fork( 'api-metadata-updates' ) ),
 				self::check_load_textdomain_paths( $ctx->fork( 'load-textdomain' ) ),
 				self::check_malformed_files_fail_closed( $ctx->fork( 'malformed-files' ) ),
 			);
@@ -690,6 +691,373 @@ final class TranslationsSurface {
 		);
 	}
 
+	private static function check_translation_api_metadata_updates( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_optional_translation_install();
+
+		$missing_functions = self::missing_functions(
+			array(
+				'add_filter',
+				'current_user_can',
+				'get_available_languages',
+				'has_filter',
+				'is_wp_error',
+				'remove_filter',
+				'translations_api',
+				'wp_can_install_language_pack',
+				'wp_download_language_pack',
+				'wp_dropdown_languages',
+				'wp_get_available_translations',
+				'wp_get_installed_translations',
+				'wp_get_l10n_php_file_data',
+				'wp_get_pomo_file_data',
+				'wp_get_translation_updates',
+				'wp_get_update_data',
+				'wp_is_file_mod_allowed',
+			)
+		);
+		$missing_classes   = self::missing_classes( array( 'WP_Error' ) );
+
+		if ( $missing_functions || $missing_classes ) {
+			return $ctx->skip(
+				'translations.api-metadata-update-helpers',
+				'Translation installation, update, or filter APIs are unavailable.',
+				array(
+					'missingFunctions' => $missing_functions,
+					'missingClasses'   => $missing_classes,
+				)
+			);
+		}
+
+		$temp_dir       = self::make_temp_dir( $ctx, 'api-metadata' );
+		$snapshot       = self::snapshot_global_state();
+		$restored       = false;
+		$created_dirs   = array();
+		$added_filters  = array();
+		$failures       = array();
+		$locale_core    = 'es_ES';
+		$locale_plugin  = 'fr_FR';
+		$locale_theme   = 'de_DE';
+		$locale_missing = 'it_IT';
+		$plugin_domain  = self::generated_safe_domain( $ctx, 'api-plugin' );
+		$theme_domain   = self::generated_safe_domain( $ctx, 'api-theme' );
+		$api_records    = self::translation_api_records( $ctx, array( $locale_core, $locale_plugin, $locale_theme ) );
+		$api_by_locale  = self::key_records_by_language( $api_records );
+		$update_entries = self::translation_update_entries( $plugin_domain, $theme_domain, $locale_core, $locale_plugin, $locale_theme );
+		$metadata       = array(
+			'core'   => self::translation_file_metadata( $ctx, 'core' ),
+			'plugin' => self::translation_file_metadata( $ctx, 'plugin' ),
+			'theme'  => self::translation_file_metadata( $ctx, 'theme' ),
+		);
+
+		try {
+			self::ensure_runtime_globals();
+
+			$core_mo       = $temp_dir . DIRECTORY_SEPARATOR . $locale_core . '.mo';
+			$core_po       = $temp_dir . DIRECTORY_SEPARATOR . $locale_core . '.po';
+			$core_php      = $temp_dir . DIRECTORY_SEPARATOR . $locale_core . '.l10n.php';
+			$plugin_dir    = $temp_dir . DIRECTORY_SEPARATOR . 'plugins';
+			$theme_dir     = $temp_dir . DIRECTORY_SEPARATOR . 'themes';
+			$plugin_mo     = $plugin_dir . DIRECTORY_SEPARATOR . $plugin_domain . '-' . $locale_plugin . '.mo';
+			$plugin_po     = $plugin_dir . DIRECTORY_SEPARATOR . $plugin_domain . '-' . $locale_plugin . '.po';
+			$theme_php     = $theme_dir . DIRECTORY_SEPARATOR . $theme_domain . '-' . $locale_theme . '.l10n.php';
+			$excluded_mo   = $temp_dir . DIRECTORY_SEPARATOR . 'admin-' . $locale_core . '.mo';
+			$multisite_mo  = $temp_dir . DIRECTORY_SEPARATOR . 'ms-' . $locale_core . '.mo';
+			$continents_mo = $temp_dir . DIRECTORY_SEPARATOR . 'continents-cities-' . $locale_core . '.mo';
+
+			\ComponentFuzz\ensure_dir( $plugin_dir );
+			\ComponentFuzz\ensure_dir( $theme_dir );
+			$created_dirs = self::ensure_language_helper_dirs();
+
+			$files_written = self::write_marker_file( $core_mo )
+				&& self::write_marker_file( $core_php )
+				&& self::write_marker_file( $excluded_mo )
+				&& self::write_marker_file( $multisite_mo )
+				&& self::write_marker_file( $continents_mo )
+				&& self::write_marker_file( $plugin_mo )
+				&& self::write_po_metadata_file( $core_po, $metadata['core'] )
+				&& self::write_po_metadata_file( $plugin_po, $metadata['plugin'] )
+				&& self::write_l10n_php_metadata_file( $theme_php, $metadata['theme'] );
+
+			if ( ! $files_written ) {
+				return $ctx->skip(
+					'translations.api-metadata-update-helpers',
+					'Could not write temporary translation metadata fixtures.',
+					array( 'dir' => self::preview_path( $temp_dir ) )
+				);
+			}
+
+			$language_file_calls = array();
+			$language_file_map   = array(
+				self::normalize_dir( WP_LANG_DIR )                   => array( $core_mo, $core_php, $excluded_mo, $multisite_mo, $continents_mo ),
+				self::normalize_dir( WP_LANG_DIR . '/plugins' )      => array( $plugin_mo ),
+				self::normalize_dir( WP_LANG_DIR . '/themes' )       => array( $theme_php ),
+			);
+			$language_filter     = static function ( $files, $path ) use ( &$language_file_calls, $language_file_map ) {
+				$normalized            = self::normalize_dir( (string) $path );
+				$language_file_calls[] = $normalized;
+				return $language_file_map[ $normalized ] ?? $files;
+			};
+
+			$http_calls = array();
+			$http_guard = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls ) {
+				$http_calls[] = $url;
+				return new \WP_Error( 'component_fuzz_no_network', 'Unexpected translation HTTP request.' );
+			};
+
+			$api_filter_calls = array();
+			$api_filter       = static function ( $result, string $type, $args ) use ( &$api_filter_calls, $api_records ) {
+				$api_filter_calls[] = array(
+					'type' => $type,
+					'args' => (array) $args,
+				);
+				if ( 'core' === $type ) {
+					return array( 'translations' => $api_records );
+				}
+				return $result;
+			};
+
+			$api_result_calls = array();
+			$api_result_filter = static function ( $result, string $type, $args ) use ( &$api_result_calls ) {
+				$api_result_calls[] = array(
+					'type' => $type,
+					'args' => (array) $args,
+				);
+				if ( is_array( $result ) ) {
+					$result['component_fuzz_marker'] = $type . '-filtered';
+				}
+				return $result;
+			};
+
+			$available_cache_calls = array();
+			$available_cache_filter = static function ( $pre, string $transient ) use ( &$available_cache_calls, $api_by_locale ) {
+				$available_cache_calls[] = $transient;
+				return $api_by_locale;
+			};
+
+			$update_transients = array(
+				'update_core'    => (object) array( 'translations' => array( $update_entries[0] ) ),
+				'update_plugins' => (object) array(
+					'response'     => array(),
+					'translations' => array( $update_entries[1] ),
+				),
+				'update_themes'  => (object) array(
+					'response'     => array(),
+					'translations' => array( $update_entries[2] ),
+				),
+			);
+			$update_transient_calls = array();
+			$update_transient_filter = static function ( $pre, string $transient ) use ( &$update_transient_calls, $update_transients ) {
+				$update_transient_calls[] = $transient;
+				return $update_transients[ $transient ] ?? $pre;
+			};
+
+			$file_mod_contexts = array();
+			$file_mod_filter   = static function ( bool $allowed, string $context ) use ( &$file_mod_contexts ): bool {
+				$file_mod_contexts[] = $context;
+				if ( in_array( $context, array( 'can_install_language_pack', 'download_language_pack' ), true ) ) {
+					return false;
+				}
+				return $allowed;
+			};
+
+			$capability_checks = array();
+			$user_cap_filter   = static function ( array $allcaps, array $caps, array $args ) use ( &$capability_checks ): array {
+				$requested           = (string) ( $args[0] ?? '' );
+				$capability_checks[] = $requested;
+				if ( 'update_plugins' === $requested ) {
+					foreach ( $caps as $cap ) {
+						$allcaps[ $cap ] = true;
+					}
+				}
+				return $allcaps;
+			};
+
+			$added_filters[] = self::add_tracked_filter( 'pre_get_language_files_from_path', $language_filter, 10, 2 );
+			$added_filters[] = self::add_tracked_filter( 'pre_http_request', $http_guard, 10, 3 );
+			$added_filters[] = self::add_tracked_filter( 'translations_api', $api_filter, 10, 3 );
+			$added_filters[] = self::add_tracked_filter( 'translations_api_result', $api_result_filter, 10, 3 );
+			$added_filters[] = self::add_tracked_filter( 'pre_site_transient_available_translations', $available_cache_filter, 10, 2 );
+			foreach ( array_keys( $update_transients ) as $transient ) {
+				$added_filters[] = self::add_tracked_filter( "pre_site_transient_{$transient}", $update_transient_filter, 10, 2 );
+			}
+			$added_filters[] = self::add_tracked_filter( 'file_mod_allowed', $file_mod_filter, 10, 2 );
+			$added_filters[] = self::add_tracked_filter( 'user_has_cap', $user_cap_filter, 10, 3 );
+
+			$api_result           = \translations_api( 'core', array( 'version' => $api_records[0]['version'] ) );
+			$api_invalid          = \translations_api( 'invalid-' . $ctx->identifier( 4, 8 ), array() );
+			$available_cached     = \wp_get_available_translations();
+			$available_languages  = \get_available_languages();
+			$core_headers         = \wp_get_pomo_file_data( $core_po );
+			$theme_headers        = \wp_get_l10n_php_file_data( $theme_php );
+			$core_installed       = \wp_get_installed_translations( 'core' );
+			$plugin_installed     = \wp_get_installed_translations( 'plugins' );
+			$theme_installed      = \wp_get_installed_translations( 'themes' );
+			$invalid_installed    = \wp_get_installed_translations( 'invalid-type' );
+			$download_installed   = \wp_download_language_pack( $locale_core );
+			$download_missing     = \wp_download_language_pack( $locale_missing );
+			$can_install_language = \wp_can_install_language_pack();
+			$translation_updates  = \wp_get_translation_updates();
+			$update_data          = \wp_get_update_data();
+			$dropdown             = \wp_dropdown_languages(
+				array(
+					'id'                         => 'component-fuzz-language',
+					'name'                       => 'component_fuzz_language',
+					'languages'                  => array( $locale_core, $locale_plugin, 'zz_ZZ' ),
+					'translations'               => $api_by_locale,
+					'selected'                   => $locale_plugin,
+					'echo'                       => false,
+					'show_option_site_default'   => true,
+					'explicit_option_en_us'      => true,
+					'show_available_translations' => true,
+				)
+			);
+
+			self::remove_tracked_filters( $added_filters );
+			$cleanup_state = self::tracked_filter_state( $added_filters );
+
+			self::collect_failure(
+				$failures,
+				is_array( $api_result )
+					&& isset( $api_result['translations'][0]['language'] )
+					&& $api_result['translations'][0]['language'] === $locale_core
+					&& ( $api_result['component_fuzz_marker'] ?? null ) === 'core-filtered'
+					&& 1 === count( $api_filter_calls )
+					&& 1 === count( $api_result_calls ),
+				'translations_api short-circuit and result filters preserve generated translation payload',
+				array(
+					'apiResult'       => self::describe_value( $api_result ),
+					'apiFilterCalls'  => $api_filter_calls,
+					'apiResultCalls'  => $api_result_calls,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$api_invalid instanceof \WP_Error && 'invalid_type' === $api_invalid->get_error_code(),
+				'translations_api rejects invalid translation types before network',
+				array( 'actual' => self::describe_value( $api_invalid ) )
+			);
+			self::collect_failure(
+				$failures,
+				array() === $http_calls,
+				'translation availability helpers did not attempt HTTP',
+				array( 'httpCalls' => $http_calls )
+			);
+			self::collect_failure(
+				$failures,
+				$available_cached === $api_by_locale && array( 'available_translations' ) === $available_cache_calls,
+				'wp_get_available_translations returns the cached filtered locale map without API fallback',
+				array(
+					'expectedKeys' => array_keys( $api_by_locale ),
+					'actualKeys'   => is_array( $available_cached ) ? array_keys( $available_cached ) : self::describe_value( $available_cached ),
+					'cacheCalls'   => $available_cache_calls,
+				)
+			);
+
+			self::assert_metadata_headers( $failures, $core_headers, $metadata['core'], 'wp_get_pomo_file_data core PO headers' );
+			self::assert_metadata_headers( $failures, $theme_headers, $metadata['theme'], 'wp_get_l10n_php_file_data theme PHP headers' );
+			self::assert_metadata_headers( $failures, $core_installed['default'][ $locale_core ] ?? array(), $metadata['core'], 'wp_get_installed_translations core headers' );
+			self::assert_metadata_headers( $failures, $plugin_installed[ $plugin_domain ][ $locale_plugin ] ?? array(), $metadata['plugin'], 'wp_get_installed_translations plugin headers' );
+			self::assert_metadata_headers( $failures, $theme_installed[ $theme_domain ][ $locale_theme ] ?? array(), $metadata['theme'], 'wp_get_installed_translations theme PHP headers' );
+
+			self::collect_failure(
+				$failures,
+				array() === $invalid_installed,
+				'wp_get_installed_translations rejects invalid translation types',
+				array( 'actual' => $invalid_installed )
+			);
+			self::collect_failure(
+				$failures,
+				1 === count( array_keys( $available_languages, $locale_core, true ) )
+					&& ! in_array( 'admin-' . $locale_core, $available_languages, true )
+					&& ! in_array( 'ms-' . $locale_core, $available_languages, true )
+					&& ! in_array( 'continents-cities-' . $locale_core, $available_languages, true ),
+				'get_available_languages normalizes duplicate PHP/MO locales and excludes reserved language files',
+				array(
+					'languages' => $available_languages,
+					'calls'     => $language_file_calls,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$download_installed === $locale_core
+					&& false === $download_missing
+					&& false === $can_install_language
+					&& in_array( 'download_language_pack', $file_mod_contexts, true )
+					&& in_array( 'can_install_language_pack', $file_mod_contexts, true ),
+				'language pack install helpers stay local and honor file modification guards',
+				array(
+					'downloadInstalled' => $download_installed,
+					'downloadMissing'   => $download_missing,
+					'canInstall'        => $can_install_language,
+					'contexts'          => $file_mod_contexts,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				self::translation_update_signature( $translation_updates ) === self::translation_update_signature( $update_entries )
+					&& isset( $update_data['counts']['translations'], $update_data['counts']['total'] )
+					&& 1 === $update_data['counts']['translations']
+					&& 1 === $update_data['counts']['total']
+					&& in_array( 'update_plugins', $capability_checks, true ),
+				'translation update helpers aggregate transient translations and update-count state',
+				array(
+					'updates'           => self::translation_update_signature( $translation_updates ),
+					'expectedUpdates'   => self::translation_update_signature( $update_entries ),
+					'counts'            => $update_data['counts'] ?? null,
+					'transientCalls'    => $update_transient_calls,
+					'capabilityChecks'  => $capability_checks,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				is_string( $dropdown )
+					&& str_contains( $dropdown, 'value="en_US"' )
+					&& str_contains( $dropdown, 'value="' . $locale_core . '" lang="' . $api_by_locale[ $locale_core ]['iso'][0] . '" data-installed="1"' )
+					&& str_contains( $dropdown, 'value="' . $locale_plugin . '" lang="' . $api_by_locale[ $locale_plugin ]['iso'][0] . '" selected=' )
+					&& str_contains( $dropdown, 'value="zz_ZZ" lang="" data-installed="1">zz_ZZ</option>' )
+					&& str_contains( $dropdown, 'value="' . $locale_theme . '" lang="' . $api_by_locale[ $locale_theme ]['iso'][0] . '"' ),
+				'wp_dropdown_languages keeps installed, fallback, selected, and available locale markup distinct',
+				array( 'dropdown' => self::describe_value( $dropdown ) )
+			);
+			self::collect_failure(
+				$failures,
+				array() === $cleanup_state,
+				'translation API helper filters are removed exactly',
+				array( 'activeFilters' => $cleanup_state )
+			);
+
+			self::restore_global_state( $snapshot );
+			$restored = true;
+		} catch ( \Throwable $e ) {
+			return self::throwable_row( $ctx, 'translations.api-metadata-update-helpers', $e );
+		} finally {
+			if ( $added_filters ) {
+				self::remove_tracked_filters( $added_filters );
+			}
+			if ( ! $restored ) {
+				self::restore_global_state( $snapshot );
+			}
+			self::remove_created_dirs( $created_dirs );
+			self::remove_temp_dir( $temp_dir );
+		}
+
+		return $ctx->result(
+			'translations.api-metadata-update-helpers',
+			array() === $failures,
+			array(
+				'locales'      => array( $locale_core, $locale_plugin, $locale_theme ),
+				'pluginDomain' => $plugin_domain,
+				'themeDomain'  => $theme_domain,
+				'metadata'     => array(
+					'core'   => $metadata['core']['Project-Id-Version'],
+					'plugin' => $metadata['plugin']['Project-Id-Version'],
+					'theme'  => $metadata['theme']['Project-Id-Version'],
+				),
+				'failures'     => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
 	private static function check_malformed_files_fail_closed( \ComponentFuzz\FuzzContext $ctx ): array {
 		$temp_dir     = self::make_temp_dir( $ctx, 'malformed' );
 		$failures     = array();
@@ -1087,6 +1455,213 @@ final class TranslationsSurface {
 		);
 	}
 
+	private static function translation_api_records( \ComponentFuzz\FuzzContext $ctx, array $locales ): array {
+		$names = array(
+			'es_ES' => array( 'english' => 'Spanish (Spain)', 'native' => 'Espanol', 'iso' => 'es' ),
+			'fr_FR' => array( 'english' => 'French (France)', 'native' => 'Francais', 'iso' => 'fr' ),
+			'de_DE' => array( 'english' => 'German', 'native' => 'Deutsch', 'iso' => 'de' ),
+		);
+
+		$records = array();
+		foreach ( $locales as $index => $locale ) {
+			$name      = $names[ $locale ] ?? array( 'english' => $locale, 'native' => $locale, 'iso' => strtolower( substr( $locale, 0, 2 ) ) );
+			$suffix    = substr( sha1( $ctx->seed() . ':' . $ctx->iteration() . ':' . $locale ), 0, 8 );
+			$records[] = array(
+				'language'     => $locale,
+				'version'      => '6.9.' . $index,
+				'updated'      => '2026-01-0' . ( $index + 1 ) . ' 00:00:00',
+				'english_name' => $name['english'],
+				'native_name'  => $name['native'] . ' ' . $suffix,
+				'package'      => 'https://example.invalid/component-fuzz/' . rawurlencode( $locale ) . '-' . $suffix . '.zip',
+				'iso'          => array( $name['iso'] ),
+				'strings'      => array( 'continue' => 'Continue ' . $locale ),
+			);
+		}
+
+		return $records;
+	}
+
+	private static function key_records_by_language( array $records ): array {
+		$keyed = array();
+		foreach ( $records as $record ) {
+			$keyed[ $record['language'] ] = $record;
+		}
+
+		return $keyed;
+	}
+
+	private static function translation_update_entries( string $plugin_domain, string $theme_domain, string $locale_core, string $locale_plugin, string $locale_theme ): array {
+		return array(
+			array(
+				'type'     => 'core',
+				'slug'     => 'default',
+				'language' => $locale_core,
+				'version'  => '6.9.0',
+				'updated'  => '2026-02-01 00:00:00',
+				'package'  => 'https://example.invalid/core-' . rawurlencode( $locale_core ) . '.zip',
+			),
+			array(
+				'type'     => 'plugin',
+				'slug'     => $plugin_domain,
+				'language' => $locale_plugin,
+				'version'  => '1.2.3',
+				'updated'  => '2026-02-02 00:00:00',
+				'package'  => 'https://example.invalid/plugin-' . rawurlencode( $locale_plugin ) . '.zip',
+			),
+			array(
+				'type'     => 'theme',
+				'slug'     => $theme_domain,
+				'language' => $locale_theme,
+				'version'  => '4.5.6',
+				'updated'  => '2026-02-03 00:00:00',
+				'package'  => 'https://example.invalid/theme-' . rawurlencode( $locale_theme ) . '.zip',
+			),
+		);
+	}
+
+	private static function translation_file_metadata( \ComponentFuzz\FuzzContext $ctx, string $label ): array {
+		$suffix = substr( sha1( $ctx->seed() . ':' . $ctx->iteration() . ':metadata:' . $label ), 0, 10 );
+
+		return array(
+			'POT-Creation-Date'  => '2026-03-01 00:00+0000',
+			'PO-Revision-Date'   => '2026-03-02 00:00+0000',
+			'Project-Id-Version' => 'component-fuzz-' . $label . '-' . $suffix,
+			'X-Generator'        => 'component-fuzz/' . $suffix,
+		);
+	}
+
+	private static function write_marker_file( string $path ): bool {
+		return false !== file_put_contents( $path, "component-fuzz\n" );
+	}
+
+	private static function write_po_metadata_file( string $path, array $metadata ): bool {
+		$lines = array(
+			'msgid ""',
+			'msgstr ""',
+		);
+
+		foreach ( $metadata as $header => $value ) {
+			$escaped = str_replace( array( '\\', '"' ), array( '\\\\', '\\"' ), (string) $value );
+			$lines[] = '"' . $header . ': ' . $escaped . '\n"';
+		}
+
+		return false !== file_put_contents( $path, implode( "\n", $lines ) . "\n" );
+	}
+
+	private static function write_l10n_php_metadata_file( string $path, array $metadata ): bool {
+		$data = array(
+			'pot-creation-date'  => $metadata['POT-Creation-Date'],
+			'po-revision-date'   => $metadata['PO-Revision-Date'],
+			'project-id-version' => $metadata['Project-Id-Version'],
+			'x-generator'        => $metadata['X-Generator'],
+			'messages'           => array(
+				'component-fuzz-source' => 'component-fuzz-target',
+			),
+		);
+
+		return false !== file_put_contents( $path, "<?php\nreturn " . var_export( $data, true ) . ";\n" );
+	}
+
+	private static function assert_metadata_headers( array &$failures, array $actual, array $expected, string $label ): void {
+		foreach ( $expected as $header => $value ) {
+			self::collect_failure(
+				$failures,
+				isset( $actual[ $header ] ) && $actual[ $header ] === $value,
+				$label . ' preserve ' . $header,
+				array(
+					'expected' => self::describe_value( $value ),
+					'actual'   => isset( $actual[ $header ] ) ? self::describe_value( $actual[ $header ] ) : null,
+					'headers'  => array_keys( $actual ),
+				)
+			);
+		}
+	}
+
+	private static function translation_update_signature( array $updates ): array {
+		$signature = array();
+		foreach ( $updates as $update ) {
+			$update      = (array) $update;
+			$signature[] = implode(
+				':',
+				array(
+					(string) ( $update['type'] ?? '' ),
+					(string) ( $update['slug'] ?? '' ),
+					(string) ( $update['language'] ?? '' ),
+					(string) ( $update['version'] ?? '' ),
+				)
+			);
+		}
+
+		sort( $signature );
+		return $signature;
+	}
+
+	private static function ensure_language_helper_dirs(): array {
+		$created = array();
+		foreach ( array( WP_LANG_DIR, WP_LANG_DIR . '/plugins', WP_LANG_DIR . '/themes' ) as $dir ) {
+			if ( is_dir( $dir ) ) {
+				continue;
+			}
+
+			\ComponentFuzz\ensure_dir( $dir );
+			if ( is_dir( $dir ) ) {
+				$created[] = $dir;
+			}
+		}
+
+		return $created;
+	}
+
+	private static function remove_created_dirs( array $dirs ): void {
+		usort(
+			$dirs,
+			static function ( string $a, string $b ): int {
+				return strlen( $b ) <=> strlen( $a );
+			}
+		);
+
+		foreach ( $dirs as $dir ) {
+			if ( is_dir( $dir ) ) {
+				@rmdir( $dir );
+			}
+		}
+	}
+
+	private static function normalize_dir( string $dir ): string {
+		return rtrim( str_replace( '\\', '/', $dir ), '/' ) . '/';
+	}
+
+	private static function add_tracked_filter( string $tag, callable $callback, int $priority, int $accepted_args ): array {
+		\add_filter( $tag, $callback, $priority, $accepted_args );
+
+		return array(
+			'tag'      => $tag,
+			'callback' => $callback,
+			'priority' => $priority,
+		);
+	}
+
+	private static function remove_tracked_filters( array $filters ): void {
+		foreach ( array_reverse( $filters ) as $filter ) {
+			\remove_filter( $filter['tag'], $filter['callback'], $filter['priority'] );
+		}
+	}
+
+	private static function tracked_filter_state( array $filters ): array {
+		$active = array();
+		foreach ( $filters as $filter ) {
+			$priority = \has_filter( $filter['tag'], $filter['callback'] );
+			if ( false !== $priority ) {
+				$active[] = array(
+					'tag'      => $filter['tag'],
+					'priority' => $priority,
+				);
+			}
+		}
+
+		return $active;
+	}
+
 	private static function write_mo_file( string $path, array $case ): bool {
 		$mo = new \MO();
 		$mo->set_headers(
@@ -1252,6 +1827,21 @@ final class TranslationsSurface {
 		return class_exists( 'PO' );
 	}
 
+	private static function load_optional_translation_install(): bool {
+		if ( function_exists( 'translations_api' ) ) {
+			return true;
+		}
+
+		if ( defined( 'ABSPATH' ) ) {
+			$path = ABSPATH . 'wp-admin/includes/translation-install.php';
+			if ( is_readable( $path ) ) {
+				require_once $path;
+			}
+		}
+
+		return function_exists( 'translations_api' );
+	}
+
 	private static function ensure_runtime_globals(): void {
 		if ( ! isset( $GLOBALS['l10n'] ) || ! is_array( $GLOBALS['l10n'] ) ) {
 			$GLOBALS['l10n'] = array();
@@ -1350,6 +1940,7 @@ final class TranslationsSurface {
 
 	private static function snapshot_global_state(): array {
 		$names    = array(
+			'current_user',
 			'l10n',
 			'l10n_unloaded',
 			'locale',

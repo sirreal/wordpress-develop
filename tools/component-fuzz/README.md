@@ -244,10 +244,12 @@ database, network requests, or a configured site.
 - `translations`: no-DB POMO and translation-file parsing/loading coverage,
   including generated `Translation_Entry` lookup and merge behavior,
   `NOOP_Translations` identity contracts, MO/PO/PHP translation file round
-  trips, explicit plural-rule oracles, textdomain load/unload cycles, helper
-  agreement with loaded domain entries, malformed-file closed failures, and
-  state restoration across `$l10n`, `$l10n_unloaded`, registry, and controller
-  globals.
+  trips, explicit plural-rule oracles, short-circuited translation API,
+  available/installed language metadata, dropdown language normalization,
+  guarded language-pack helpers, transient-backed translation update helpers,
+  textdomain load/unload cycles, helper agreement with loaded domain entries,
+  malformed-file closed failures, and state restoration across `$l10n`,
+  `$l10n_unloaded`, registry, controller, current-user, and filter globals.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
   handoff, array and string header parsing, newline-delimited attachments and
