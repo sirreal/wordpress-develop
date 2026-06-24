@@ -24,7 +24,7 @@ class Tests_Compat_mbOrd extends WP_UnitTestCase {
 			 */
 			$char = mb_chr( $code_point );
 
-			if ( false !== $char && $code_point !== _mb_ord( $char ) ) {
+			if ( false !== $char && _mb_ord( $char ) !== $code_point ) {
 				$hex_char = strtoupper( str_pad( dechex( $code_point ), 4, '0', STR_PAD_LEFT ) );
 				$this->fail( "Failed to properly decode U+{$hex_char} from the string." );
 			}

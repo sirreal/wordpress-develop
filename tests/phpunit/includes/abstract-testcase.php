@@ -24,11 +24,12 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 
 	protected static $hooks_saved = array();
 	protected static $ignore_files;
-	protected static $expected_annotations_cache = array();
-	protected static $core_registration_snapshots = array();
-	protected static $db_autocommit_is_disabled = false;
+
+	protected static $expected_annotations_cache    = array();
+	protected static $core_registration_snapshots   = array();
+	protected static $db_autocommit_is_disabled     = false;
 	protected static $test_context_hooks_registered = false;
-	protected static $deprecation_tracking_test          = null;
+	protected static $deprecation_tracking_test     = null;
 
 	/**
 	 * Fixture factory.
@@ -607,24 +608,24 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		global $wp, $wp_rewrite, $wp_post_types, $wp_taxonomies, $wp_post_statuses, $_wp_post_type_features, $post_type_meta_caps;
 
 		return array(
-			'wp_post_types'         => self::clone_core_registration_objects( $wp_post_types ),
-			'wp_taxonomies'         => self::clone_core_registration_objects( $wp_taxonomies ),
-			'wp_post_statuses'      => self::clone_core_registration_objects( $wp_post_statuses ),
-			'post_type_features'    => $_wp_post_type_features,
-			'post_type_meta_caps'   => $post_type_meta_caps,
-			'public_query_vars'     => $wp->public_query_vars,
-			'private_query_vars'    => $wp->private_query_vars,
-			'extra_query_vars'      => $wp->extra_query_vars,
-			'rewritecode'           => $wp_rewrite->rewritecode,
-			'rewritereplace'        => $wp_rewrite->rewritereplace,
-			'queryreplace'          => $wp_rewrite->queryreplace,
-			'rules'                 => $wp_rewrite->rules,
-			'matches'               => $wp_rewrite->matches,
-			'extra_rules'           => $wp_rewrite->extra_rules,
-			'extra_rules_top'       => $wp_rewrite->extra_rules_top,
-			'extra_permastructs'    => $wp_rewrite->extra_permastructs,
-			'non_wp_rules'          => $wp_rewrite->non_wp_rules,
-			'endpoints'             => $wp_rewrite->endpoints,
+			'wp_post_types'          => self::clone_core_registration_objects( $wp_post_types ),
+			'wp_taxonomies'          => self::clone_core_registration_objects( $wp_taxonomies ),
+			'wp_post_statuses'       => self::clone_core_registration_objects( $wp_post_statuses ),
+			'post_type_features'     => $_wp_post_type_features,
+			'post_type_meta_caps'    => $post_type_meta_caps,
+			'public_query_vars'      => $wp->public_query_vars,
+			'private_query_vars'     => $wp->private_query_vars,
+			'extra_query_vars'       => $wp->extra_query_vars,
+			'rewritecode'            => $wp_rewrite->rewritecode,
+			'rewritereplace'         => $wp_rewrite->rewritereplace,
+			'queryreplace'           => $wp_rewrite->queryreplace,
+			'rules'                  => $wp_rewrite->rules,
+			'matches'                => $wp_rewrite->matches,
+			'extra_rules'            => $wp_rewrite->extra_rules,
+			'extra_rules_top'        => $wp_rewrite->extra_rules_top,
+			'extra_permastructs'     => $wp_rewrite->extra_permastructs,
+			'non_wp_rules'           => $wp_rewrite->non_wp_rules,
+			'endpoints'              => $wp_rewrite->endpoints,
 			'use_verbose_page_rules' => $wp_rewrite->use_verbose_page_rules,
 		);
 	}
