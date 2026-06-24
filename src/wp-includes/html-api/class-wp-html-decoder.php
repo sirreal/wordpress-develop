@@ -60,17 +60,23 @@ class WP_HTML_Decoder {
 				continue;
 			}
 
-			// If there is a character reference, then the decoded value must exactly match what follows in the search string.
-			if ( 0 !== substr_compare( $search_text, $next_chunk, $search_at, strlen( $next_chunk ), $loose_case ) ) {
+			/*
+			 * If there is a character reference, then the decoded value must
+			 * match what follows in the search string. The search string may
+			 * end within a multi-code-point replacement, such as `&nvlt;`
+			 * decoding to `<⃒`, and still be a prefix match.
+			 */
+			$match_length = min( strlen( $next_chunk ), $search_length - $search_at );
+			if ( 0 !== substr_compare( $search_text, $next_chunk, $search_at, $match_length, $loose_case ) ) {
 				return false;
 			}
 
 			// The character reference matched, so continue checking.
 			$haystack_at += $token_length;
-			$search_at   += strlen( $next_chunk );
+			$search_at   += $match_length;
 		}
 
-		return true;
+		return $search_at === $search_length;
 	}
 
 	/**
@@ -361,7 +367,7 @@ class WP_HTML_Decoder {
 
 		$name_length = 0;
 		$replacement = $html5_named_character_references->read_token( $text, $name_at, $name_length );
-		if ( false === $replacement ) {
+		if ( null === $replacement ) {
 			return null;
 		}
 
@@ -378,12 +384,14 @@ class WP_HTML_Decoder {
 		 * character reference table but the match doesn't end in `;`.
 		 * It may be allowed if it's followed by something unambiguous.
 		 */
+		$follower_byte       = $after_name < $length ? ord( $text[ $after_name ] ) : null;
 		$ambiguous_follower = (
-			$after_name < $length &&
-			$name_at < $length &&
+			null !== $follower_byte &&
 			(
-				ctype_alnum( $text[ $after_name ] ) ||
-				'=' === $text[ $after_name ]
+				( $follower_byte >= 0x30 && $follower_byte <= 0x39 ) ||
+				( $follower_byte >= 0x41 && $follower_byte <= 0x5A ) ||
+				( $follower_byte >= 0x61 && $follower_byte <= 0x7A ) ||
+				0x3D === $follower_byte
 			)
 		);
 

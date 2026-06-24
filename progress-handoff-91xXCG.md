@@ -1,0 +1,279 @@
+# Progress for handoff-91xXCG
+
+Source handoff: `/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/handoff-91xXCG.md`
+
+## Status
+
+- [x] Confirmed no active `html-decoder-fuzz` run before editing.
+- [x] Tier 1 item 1: run both decoder contexts per generated case.
+- [x] Tier 1 item 2: add oracle-free arbitrary byte-space lane.
+- [x] Tier 1 item 3: add reference-at-EOF generation strategy.
+- [x] Tier 1 item 4: add `attribute_starts_with()` monotonicity invariants.
+- [x] Tier 1 item 5: exercise multi-code-point `attribute_starts_with()` prefix paths.
+- [x] Tier 1 item 6: add range-based numeric code point generation.
+- [x] Tier 2 item 7: add exhaustive deterministic name sweep lane.
+- [x] Tier 2 item 8: add edit-distance-1 lookalike generation.
+- [x] Tier 2 item 9: add full follower-byte sweep after legacy names.
+- [x] Tier 2 item 10: add prefix-family stress generation.
+- [x] Tier 2 item 11: add digit-count numeric boundary stress generation.
+- [x] Tier 2 item 12: add strategy composition and generalized attribute-prefix encoding.
+- [x] Tier 2 item 13: add mutation/corpus mode.
+- [x] Tier 2 item 14: add reader compositionality invariant.
+- [x] Tier 2 item 15: add case-mangled valid-name near-misses.
+- [x] Tier 3 item 16: assert null reader matches leave `match_byte_length` untouched.
+- [x] Tier 3 item 17: assert non-ampersand reader offsets never match.
+- [x] Tier 3 item 18: assert attribute no-amp identity in oracle mode.
+- [x] Tier 3 item 19: add tab, LF, and FF to the oracle-safe generator alphabet.
+- [x] Tier 3 item 20: assert reader reconstruction walks input without gaps or overlaps.
+- [x] Tier 3 item 21: assert invalid numeric references decode to exactly U+FFFD.
+- [x] Tier 3 item 22: assert C1 remapping applies only to numeric references while raw C1 bytes pass through unchanged.
+- [x] Tier 3 item 23: add `html_entity_decode( ENT_HTML5 | ENT_QUOTES )` as a secondary text-context oracle.
+- [x] Tier 3 item 24: add token-map structure-aware deterministic inputs.
+- [x] Tier 3 item 25: add pcov-backed coverage-guided lane with new-edge corpus retention.
+- [x] Tier 3 item 26: assert documented single-level decoding for nested ampersand references.
+- [x] Cross-cutting concerns: sort derived name lists deterministically and document DOM oracle throughput limits.
+
+## Verification
+
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` passed.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 20 --progress-every 20` passed and reported `by_context: {"both":20}`.
+- 2026-06-11: `php -l` passed for `Generator.php`, `Checks.php`, `Targets.php`, `worker.php`, `runner.php`, `replay.php`, `minimize.php`, and `tests/harness-smoke.php`.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200` passed.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=byte-no-amp-identity php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200` reported findings as expected.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode bytes --lanes 1 --duration-seconds 0 --max-cases 200 --cases-per-batch 200 --summary-mode none --output-dir /tmp/html-decoder-fuzz-byte-check` passed.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=byte-no-amp-identity php tools/html-decoder-fuzz/runner.php --mode bytes --lanes 1 --duration-seconds 0 --max-cases 200 --cases-per-batch 200 --max-artifacts-per-signature 1 --output-dir /tmp/html-decoder-fuzz-byte-fault-runner` reported findings as expected.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode bytes --seed 1 --case 0` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after byte-space lane coverage was added.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding mode-aware artifact separation, oracle-trap, and bogus-mode malformed-record coverage.
+- 2026-06-11: `git diff --check` passed.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` passed after adding the reference-at-EOF strategy.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed and reported `reference-at-eof: 46`.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding reference-at-EOF coverage.
+- 2026-06-11: Documented that adding the new weighted strategy intentionally changes generated-case `--seed --case` payload mapping; failure-manifest replay remains payload-stable.
+- 2026-06-11: Verified `reference-at-eof` still ends in a reference for `max-bytes` 1, 2, 3, 4, 5, and 8 after reserving suffix space.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after tightening EOF suffix-shape coverage.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Checks.php`, `php -l tools/html-decoder-fuzz/lib/Targets.php`, and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding `attribute_starts_with()` prefix, extension, case monotonicity, and fault-target coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `git diff --check` passed after adding `attribute_starts_with()` monotonicity checks.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Checks.php`, `php -l tools/html-decoder-fuzz/lib/Generator.php`, `php -l tools/html-decoder-fuzz/lib/Targets.php`, and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding multi-code-point `attribute_starts_with()` prefix coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding byte-slice search probes, multi-code-point generator cases, and the `attribute-multicodepoint-prefix` fault target.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding multi-code-point prefix coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 681 --cases 1 --progress-every 1` reported findings as expected and verified invalid-UTF-8 search details remain JSON-safe.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/replay.php --seed 1 --case 681` reproduced the multi-code-point prefix finding.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-multicodepoint-prefix php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-multicodepoint-fault-681/failure-seed1-case681/failure.json` minimized the finding from 18 to 6 bytes.
+- 2026-06-11: `git diff --check` passed after adding multi-code-point prefix coverage.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding range-based numeric code point generation.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting numeric range buckets, all 32 C1 remap rows, and all 16 noncharacter planes.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding range-based numeric code points.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=skip-c1-remap php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 128 --cases 1 --progress-every 1` reported findings as expected after the range generator shifted the deterministic C1 fault case from 170 to 128.
+- 2026-06-11: `git diff --check` passed after adding range-based numeric code points.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after addressing reviewer feedback on post-surrogate BMP coverage and multi-reference numeric smoke classification.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed after adding explicit BMP terminal noncharacter coverage for `0xFFFE` and `0xFFFF`.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, `minimize.php`, and `tests/harness-smoke.php` after adding the deterministic name-sweep lane.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding full-period name-sweep generator coverage plus worker, runner, and replay smoke checks for `--mode names`.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode names --seed 1 --cases 1000 --progress-every 1000` passed and reported `by_strategy: {"name-sweep":1000}` and `by_context: {"both":1000}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` passed for the deterministic `&Aacutex` case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` reproduced the expected attribute decode mismatch for `&Aacutex`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-name-fault-11593/failure-seed1-case11593/failure.json` minimized the finding from 8 to 7 bytes.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding reviewer-requested checks for distinct `names` runner start-case windows and the faulted name-sweep worker/replay/minimize pipeline.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding edit-distance-1 lookalike generation.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting lookalike samples produce edit-distance-1 name misses and a sparse-name corpus exercises delete, insert, substitute, and transpose branches.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed with no real-target findings after adding dynamic lookalikes.
+- 2026-06-11: `git diff --check` passed after adding dynamic lookalikes.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, `tests/harness-smoke.php`, `class-wp-html-decoder.php`, and `wpHtmlDecoder.php` after adding the legacy-follower sweep and ASCII-only ambiguous follower fix.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode legacy-followers --seed 1 --case 124` initially reproduced a real attribute decode mismatch for `&Aacute\xC2\x80`; after replacing locale-sensitive `ctype_alnum()` with ASCII byte checks, the replay passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php`, `php tools/html-decoder-fuzz/worker.php --mode legacy-followers --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode legacy-followers --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-legacy-followers-check-fixed`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `runner.php`, `replay.php`, and `tests/harness-smoke.php` after adding the prefix-family sweep mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting prefix-family full-period mapping over the exact expected reference set, reference splits, and ambiguous followers plus worker, runner, replay, seed-replay fault, and failure-manifest fault-pipeline coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode prefix-families --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-prefix-families-runner-check`, `php tools/html-decoder-fuzz/replay.php --mode prefix-families --seed 1 --case 37`, `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/worker.php --mode prefix-families --seed 1 --start-case 37 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-prefix-families-fault-check`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `replay.php`, and `tests/harness-smoke.php` after adding the numeric-boundary sweep mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting numeric-boundary full-period mapping over 6/7 hex and 7/8 decimal significant digit counts, leading-zero variants, semicolon variants, mixed-case hex digits, worker, runner, replay, seed-replay fault, and failure-manifest fault-pipeline coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --cases 300 --progress-every 300`, `php tools/html-decoder-fuzz/runner.php --mode numeric-boundaries --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-numeric-boundaries-runner-check`, `php tools/html-decoder-fuzz/replay.php --mode numeric-boundaries --seed 1 --case 25`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/worker.php --mode numeric-boundaries --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-numeric-boundaries-fault-check`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/replay.php --failure /tmp/html-decoder-fuzz-numeric-boundaries-fault-check/failure-seed1-case0/failure.json`, `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/minimize.php --failure /tmp/html-decoder-fuzz-numeric-boundaries-fault-check/failure-seed1-case0/failure.json`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, and `git diff --check` passed.
+- 2026-06-11: After reviewer feedback, exact-max numeric-boundary cases now use in-range payloads (`&#1114111` and `&#x10ffee` casing variants) while max-plus-one cases remain invalid; `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/replay.php --mode numeric-boundaries --seed 1 --case 25`, the refreshed fault-manifest replay/minimize, default 500-case worker, and `git diff --check` passed.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding the weighted composition strategy and generalized attribute-prefix encoder.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting all 12 weighted strategies appear, composition generates multi-reference splices, generalized attribute-prefix encoding covers every target string and literal/decimal/leading-zero/hex/semicolonless forms, and the skip-C1 fault artifact checks use the new deterministic case 157 after generator weighting shifted seed/case mapping.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` passed after adding strategy composition and reported `by_strategy` including `"composition":30`; `git diff --check` passed.
+- 2026-06-11: After reviewer feedback, semicolonless numeric boundary protection now treats `;` as a reference-extending follower, composition inserts explicit fragment separators, and smoke asserts the exact weighted strategy set plus 2-3 separated composition fragments; `php tools/html-decoder-fuzz/tests/harness-smoke.php` and `git diff --check` passed.
+- 2026-06-11: After follow-up reviewer feedback, composition now keeps separated fragments nonempty under small public `max-bytes` values; a targeted probe for max bytes 3, 5, 7, and 12, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Cli.php`, `Generator.php`, `worker.php`, `replay.php`, and `tests/harness-smoke.php` after adding the corpus mutation mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting corpus seed-corpus size, retained html5lib text and attribute vectors, all four mutation strategies, semicolon-toggle/reference-duplication shapes, UTF-8-safe splice/perturb mutations, oracle-safe diversified payloads, worker, runner start windows, seed replay, faulted seed replay, and failure-manifest replay/minimize coverage.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 300 --progress-every 300` passed and reported all corpus mutation strategies with `by_context: {"both":300}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode corpus --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-corpus-runner-check-20260611-2` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 0` passed for the deterministic `corpus-byte-perturb` case with hex preview `67262335383b`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=match-length-off-by-one php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-corpus-fault-check-20260611-2` reported the expected `reader-overran-input` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500` and `git diff --check` passed after adding corpus mutation mode.
+- 2026-06-11: After reviewer feedback, html5lib tree-construction entity rows now normalize simple `<div bar=...>` and `<div>...</div>` fixtures into decoder payloads before oracle-safety filtering, corpus mutations choose splice/edit offsets on UTF-8 boundaries, and smoke asserts retained WPT attribute sentinels plus mutation helper shapes; `php tools/html-decoder-fuzz/tests/harness-smoke.php`, the refreshed corpus worker/runner/replay/fault-manifest checks, default 500-case worker, and `git diff --check` passed.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the reader compositionality invariant.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed after asserting empty reader chunks, one-byte matches, and non-compositional local-slice reads are detected by fault targets.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/replay.php --seed 1 --case 31`, and `git diff --check` passed after adding reader compositionality checks.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 31 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-reader-composition-fault-20260611-1` reported `reader-composition-mismatch` findings; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: After reviewer feedback, `php tools/html-decoder-fuzz/tests/harness-smoke.php` passed with automated worker, failure-manifest, replay, and minimize coverage for `reader-empty-chunk`, `reader-short-match-length`, and `reader-substring-composition`.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding the case-mangled named-reference strategy.
+- 2026-06-11: A targeted probe over 2,000 seeds produced 115 distinct `case-mangled-name` candidates with zero invalid shape/collision samples, including both lowercase-to-uppercase and uppercase-to-lowercase flips.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=skip-c1-remap php tools/html-decoder-fuzz/worker.php --seed 2 --start-case 36 --cases 1 --progress-every 1`, `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 57 --cases 1 --progress-every 1`, and `HTML_DECODER_FUZZ_FAULT=reader-substring-composition php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 97 --cases 1 --progress-every 1` reported the expected findings after the weighted strategy shifted generated-case mappings.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding case-mangled valid-name near-misses.
+- 2026-06-11: After reviewer feedback, case-mangled smoke coverage now directly invokes `case_mangle_name_base()` against lowercase and uppercase source names; `php -l tools/html-decoder-fuzz/lib/Generator.php`, `php -l tools/html-decoder-fuzz/tests/harness-smoke.php`, a direct helper probe reporting `errors=0`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed.
+- 2026-06-11: Adding the null-return `match_byte_length` sentinel invariant exposed a real `WP_HTML_Decoder::read_character_reference()` issue for unmatched named references in `data` context; `WP_Token_Map::read_token()` returns `null`, and the decoder now checks for `null` instead of `false`.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, `tests/harness-smoke.php`, `class-wp-html-decoder.php`, and `wpHtmlDecoder.php` after adding the null-return match-length invariant and decoder regression test.
+- 2026-06-11: `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php` passed with the unmatched named-reference match-length regression coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-null-mutates-match-length php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 7 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-null-match-fault-check` reported `reader-mutated-match-length-on-null` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after fixing the decoder and adding the invariant.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, `tests/harness-smoke.php`, and `wpHtmlDecoder.php` after adding non-ampersand reader-offset probes.
+- 2026-06-11: `vendor/bin/phpunit --group html-api tests/phpunit/tests/html-api/wpHtmlDecoder.php` passed with non-ampersand offset match-length regression coverage.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-non-amp-match php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-non-amp-fault-check` reported `reader-non-amp-match` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding non-ampersand reader-offset probes.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after generalizing no-amp identity checks to attribute context.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-no-amp-identity php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 38 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-attr-no-amp-fault-check-item18` reported `attribute-without-ampersand-not-identity` findings; replaying the failure manifest reproduced the findings and minimizing it completed successfully.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding attribute no-amp identity coverage.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after adding tab, LF, and FF to the oracle-safe generator alphabet.
+- 2026-06-11: A reflection probe confirmed the generator alphabet contains space, tab, LF, and FF and remains `Generator::is_oracle_safe_payload()` safe.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 0` passed with the refreshed deterministic corpus byte-perturb preview `64262335383b`, and `php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --cases 300 --progress-every 300` passed.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after expanding the generator alphabet with tab, LF, and FF.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the gapless reader-walk invariant.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=reader-gapless-drop-span php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-gapless-fault-check` reported `reader-walk-not-gapless` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding gapless reader-walk coverage.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the invalid numeric replacement invariant.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=numeric-invalid-not-replacement php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 0 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-invalid-numeric-fault-check` reported `numeric-invalid-not-replacement` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding invalid numeric replacement coverage.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Targets.php`, and `tests/harness-smoke.php` after adding numeric C1 remap and raw C1 pass-through invariants.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=numeric-c1-not-remapped php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 2 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-c1-fault-check` reported `numeric-c1-not-remapped` findings; replaying the failure manifest reproduced the findings and minimizing it preserved the signature.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=raw-c1-not-pass-through php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --start-case 3 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-raw-c1-fault-check` reported `raw-c1-not-pass-through` findings; replaying the failure manifest reproduced the findings and minimizing it with `--signature raw-c1-not-pass-through:text` preserved the raw-C1-specific signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding C1 remap-only-for-numeric coverage.
+- 2026-06-11: `php -l` passed for `Oracles.php`, `Checks.php`, `Targets.php`, `worker.php`, and `tests/harness-smoke.php` after adding the secondary text oracle.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=text-secondary-oracle php tools/html-decoder-fuzz/worker.php --seed 1 --start-case 4 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-secondary-fault-check` reported `text-secondary-oracle-mismatch` findings; replaying the failure manifest reproduced the findings and minimizing it with `--signature text-secondary-oracle-mismatch:text` preserved the secondary-oracle signature.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding the secondary text oracle and tightening it to known semicolon-terminated names.
+- 2026-06-11: `php -l` passed for `Bootstrap.php`, `Cli.php`, `Generator.php`, `worker.php`, `replay.php`, and `tests/harness-smoke.php` after adding the token-map structure-aware sweep mode.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --cases 764 --progress-every 764` passed for one full token-map period and reported `by_strategy: {"token-map-structure-sweep":764}` and `by_context: {"both":764}`.
+- 2026-06-11: `php tools/html-decoder-fuzz/runner.php --mode token-map --lanes 2 --duration-seconds 0 --max-cases 200 --cases-per-batch 100 --summary-mode all --output-dir /tmp/html-decoder-fuzz-token-map-runner-check` passed with distinct start-case windows.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode token-map --seed 1 --case 0` passed for the deterministic `&AEaQQ;` large-prefix divergent case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=attribute-semicolonless php tools/html-decoder-fuzz/worker.php --mode token-map --seed 1 --start-case 631 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-token-map-fault-check` reported the expected `decode-mismatch:attribute` finding; replaying and minimizing the resulting failure manifest with the same fault both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, `php tools/html-decoder-fuzz/tests/harness-smoke.php`, and `git diff --check` passed after adding the token-map mode, smoke coverage, and docs.
+- 2026-06-11: Local PHP did not have the `pcov` extension installed (`php --ri pcov` reported `Extension 'pcov' not present`), so coverage-mode smoke coverage used the explicit `HTML_DECODER_FUZZ_FAKE_COVERAGE=1` provider while the real mode reports a fatal error when pcov is unavailable.
+- 2026-06-11: `php -l` passed for `CoverageGuidance.php`, `Cli.php`, `worker.php`, `runner.php`, `replay.php`, and `tests/harness-smoke.php` after adding coverage mode.
+- 2026-06-11: `HTML_DECODER_FUZZ_DISABLE_PCOV=1 HTML_DECODER_FUZZ_FAKE_COVERAGE=0 php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --cases 1 --progress-every 1` exited `2` with the expected fatal `coverage mode requires pcov`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --cases 8 --progress-every 8 --output-dir /tmp/html-decoder-fuzz-coverage-worker-check` passed and retained fake new-edge payloads under `coverage-corpus/`.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 php tools/html-decoder-fuzz/runner.php --mode coverage --lanes 2 --duration-seconds 0 --max-cases 40 --cases-per-batch 20 --summary-mode failures --output-dir /tmp/html-decoder-fuzz-coverage-runner-check` passed and wrote coverage state with `cases=40`, `edges=76`, `payloads=40`, and `40` coverage corpus manifests.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode coverage --seed 1 --case 0` passed for the deterministic coverage-mode generated case.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAKE_COVERAGE=1 HTML_DECODER_FUZZ_FAULT=reader-empty-chunk php tools/html-decoder-fuzz/worker.php --mode coverage --seed 1 --start-case 57 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-coverage-fault-check` reported the expected reader findings; replaying and minimizing the resulting coverage-mode failure manifest with `HTML_DECODER_FUZZ_FAULT=reader-empty-chunk` both succeeded.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding coverage mode, fake-provider smoke coverage, and docs.
+- 2026-06-11: `php -l` passed for `Checks.php`, `Oracles.php`, `Targets.php`, and `tests/harness-smoke.php` after adding the single-level decode invariant and `single-level-overdecode` fault target.
+- 2026-06-11: A direct real-target probe over `pre&amp;amp;post` returned no failures, and `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 11875` passed for the deterministic `&amp;amp;Z` corpus-splice fixture.
+- 2026-06-11: `HTML_DECODER_FUZZ_FAULT=single-level-overdecode php tools/html-decoder-fuzz/worker.php --mode corpus --seed 1 --start-case 11875 --cases 1 --progress-every 1 --output-dir /tmp/html-decoder-fuzz-single-level-fault-check` reported `single-level-decode-overdecoded` findings in text and attribute contexts; replaying the manifest reproduced the findings and minimizing it with `--signature single-level-decode-overdecoded:text` reduced the payload to `&amp;amp;`.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after adding single-level decode checks, smoke coverage, and docs.
+- 2026-06-11: `php -l tools/html-decoder-fuzz/lib/Generator.php` and `php -l tools/html-decoder-fuzz/tests/harness-smoke.php` passed after sorting derived named-reference lists.
+- 2026-06-11: `php tools/html-decoder-fuzz/replay.php --mode corpus --seed 1 --case 11875` and `php tools/html-decoder-fuzz/replay.php --mode names --seed 1 --case 11593` still passed with the expected deterministic payloads after adding explicit generator list sorting.
+- 2026-06-11: `php tools/html-decoder-fuzz/tests/harness-smoke.php`, `php tools/html-decoder-fuzz/worker.php --seed 1 --cases 500 --progress-every 500`, `php tools/html-decoder-fuzz/worker.php --mode bytes --seed 1 --cases 200 --progress-every 200`, and `git diff --check` passed after addressing the cross-cutting determinism and throughput notes.
+
+## Review Log
+
+- Tier 1 item 1:
+  - Curie: APPROVE, determinism/API behavior.
+  - Dewey: APPROVE, harness and fault-injection coverage.
+  - Mencius: APPROVE, runtime/replay compatibility.
+- Tier 1 item 2:
+  - Jason: APPROVE, byte generator/check semantics.
+  - Rawls: APPROVE, CLI/artifact compatibility after mode-aware artifact keying fix.
+  - Sartre: APPROVE, tests and documentation after oracle-trap and bogus-mode coverage.
+- Tier 1 item 3:
+  - Hegel: APPROVE, generator semantics after max-bytes suffix reservation fix.
+  - Lovelace: APPROVE, smoke coverage after strict EOF suffix-shape checks.
+  - Erdos: APPROVE, docs/replay compatibility after documenting generated-case mapping drift.
+- Tier 1 item 4:
+  - Copernicus: APPROVE, invariant semantics and exception handling.
+  - Maxwell: APPROVE, fault-target and smoke coverage.
+  - Poincare: APPROVE, integration/runtime compatibility.
+- Tier 1 item 5:
+  - Banach: APPROVE, generator and fault-target coverage.
+  - Meitner: APPROVE, byte-slice search semantics and JSON-safe failure details.
+  - Carver: APPROVE, worker/replay/minimize integration and runtime compatibility.
+- Tier 1 item 6:
+  - Kepler: APPROVE, numeric generator ranges after post-surrogate BMP coverage fix.
+  - Pascal: APPROVE, numeric smoke coverage after BMP noncharacter and multi-reference fixes.
+  - Beauvoir: APPROVE, integration/runtime compatibility after explicit `0xFFFE`/`0xFFFF` coverage.
+- Tier 2 item 7:
+  - Mendel: APPROVE, generator semantics and deterministic mapping after smoke additions.
+  - Pasteur: APPROVE, CLI/worker/replay/minimize/runner integration and mode handling.
+  - Popper: APPROVE, smoke and fault-pipeline coverage after requested start-window and name-fault checks.
+- Tier 2 item 8:
+  - Hilbert: APPROVE, generator semantics and single-edit mutation filtering after sparse smoke fix.
+  - Sagan: APPROVE, smoke rigor after branch-specific sparse corpus coverage replaced inferred operation coverage.
+  - Turing: APPROVE, runtime/integration compatibility and deterministic replay behavior.
+- Tier 2 item 9:
+  - Chandrasekhar: APPROVE, `legacy-followers` generator/mode semantics and deterministic sharding.
+  - Linnaeus: APPROVE, ASCII-only ambiguous follower decoder fix and PHPUnit coverage.
+  - Leibniz: APPROVE, smoke/integration coverage for full-period sweep, runner windows, and fault pipeline.
+- Tier 2 item 10:
+  - Gauss: APPROVE, prefix-family generator semantics after exact reference-set and replay smoke tightening.
+  - Peirce: APPROVE, CLI/worker/replay/runner integration and oracle-backed deterministic sharding.
+  - Noether: APPROVE, smoke coverage after requested exact reference and seed/case replay checks.
+- Tier 2 item 11:
+  - Plato: APPROVE, numeric-boundary generator semantics after in-range exact-max correction and decode-outcome smoke tightening.
+  - Socrates: APPROVE, CLI/worker/replay/runner integration and artifact replay after the mixed-case case update.
+  - Volta: APPROVE, smoke/docs/progress coverage after exact-max and max-plus-one replacement assertions.
+- Tier 2 item 12:
+  - Lagrange: APPROVE, generator semantics after semicolon follower protection and small-`max-bytes` composition fixes.
+  - Pauli: APPROVE, smoke coverage after exact strategy-set and delimiter-based composition assertions.
+  - Locke: APPROVE, integration/docs/progress accuracy after weighted composition and generalized encoder changes.
+- Tier 2 item 13:
+  - Russell: APPROVE, corpus generator semantics after WPT attribute retention and UTF-8 boundary fixes.
+  - Ramanujan: APPROVE, CLI/worker/replay/runner integration and deterministic corpus replay.
+  - Zeno: APPROVE, smoke/docs/progress coverage after WPT sentinel and mutation-shape assertions.
+- Tier 2 item 14:
+  - Boyle: APPROVE, reader compositionality invariant semantics and deterministic cases after pipeline coverage.
+  - Kuhn: APPROVE, fault-target and smoke coverage after automated worker/replay/minimize pipelines.
+  - Bohr: APPROVE, integration/runtime/docs/progress coverage after shared reader-path verification.
+- Tier 2 item 15:
+  - Anscombe: APPROVE, generator semantics after independent generated-candidate and raw-helper probes.
+  - Cicero: APPROVE, smoke and deterministic fault fixture coverage after direct lowercase/uppercase helper checks replaced ambiguous source inference.
+  - Parfit: APPROVE, integration/docs/progress scope and generated-case mapping drift notes.
+- Tier 3 item 16:
+  - Singer: APPROVE, production decoder semantics and PHPUnit regression coverage.
+  - Darwin: APPROVE, fuzzer invariant, fault target, and smoke pipeline coverage.
+  - Harvey: APPROVE, integration/docs/progress scope including the decoder fix exposed by the invariant.
+- Tier 3 item 17:
+  - Lorentz: APPROVE, non-ampersand reader-offset invariant semantics and byte-safety.
+  - Arendt: APPROVE, fault target, smoke pipeline, and PHPUnit coverage.
+  - Gibbs: APPROVE, integration/docs/progress scope and commit boundaries.
+- Tier 3 item 18:
+  - Wegener: APPROVE, no-amp identity invariant semantics after README wording correction.
+  - Descartes: APPROVE, attribute no-amp fault target, smoke pipeline, and docs after stale Checks doc fix.
+  - Hypatia: APPROVE, integration/progress scope and commit boundaries after README wording correction.
+- Tier 3 item 19:
+  - Galileo: APPROVE, generator alphabet semantics and oracle-safety after explicit whitespace wording.
+  - Bacon: APPROVE, smoke coverage and docs after replacing broad HTML-whitespace wording.
+  - Euclid: APPROVE, integration/progress scope and commit boundaries after explicit tab/LF/FF wording.
+- Tier 3 item 20:
+  - Carson: APPROVE, gapless reader-walk invariant semantics and failure signature stability.
+  - Herschel: APPROVE, span-drop fault target, smoke pipeline, and docs.
+  - Bernoulli: APPROVE, integration/progress scope and commit boundaries.
+- Tier 3 item 21:
+  - Einstein: APPROVE, invalid numeric replacement invariant semantics and signature stability.
+  - Confucius: APPROVE, invalid numeric fault target, smoke pipeline, and docs.
+  - Aristotle: APPROVE, integration/progress scope and commit boundaries.
+- Tier 3 item 22:
+  - McClintock: APPROVE, numeric C1 remap and raw C1 pass-through invariant semantics.
+  - Averroes: APPROVE, fault targets and smoke coverage after adding raw-C1 byte worker/replay/signature-pinned minimize coverage.
+  - Heisenberg: APPROVE, docs/progress scope and commit boundaries.
+- Tier 3 item 23:
+  - Boole: APPROVE, secondary text oracle semantics and support gating.
+  - Ampere: APPROVE, secondary-oracle check, fault target, and smoke pipeline coverage.
+  - Feynman: APPROVE, docs/progress scope and commit boundaries.
+- Tier 3 item 24:
+  - Hooke: APPROVE, token-map extraction and generator semantics after verifying name extraction, deterministic coverage, oracle-safety, and default mapping stability.
+  - Nash: APPROVE, CLI/worker/replay/runner integration and mode-aware failure artifact behavior.
+  - Goodall: APPROVE, smoke/docs/progress coverage and commit scope after full smoke and targeted token-map verification.
+- Tier 3 item 25:
+  - Helmholtz: APPROVE, coverage-guidance and pcov semantics after static pcov-path review plus fake-provider verification on this no-pcov runtime.
+  - Laplace: APPROVE, worker/runner/replay/minimize integration and coverage-corpus artifact safety after duplicate-pruning verification.
+  - Nietzsche: APPROVE, smoke/docs/progress scope with explicit no-pcov residual-risk note and fake-provider coverage checks.
+- Tier 3 item 26:
+  - Fermat: APPROVE, single-level decode invariant semantics and oracle-free byte-mode narrowness.
+  - Newton: APPROVE, fault target and worker/replay/minimize integration after README fault-target docs fix.
+  - Euler: APPROVE, docs/progress scope after README self-test and fault-target list updates.
+- Cross-cutting concerns:
+  - Ohm: APPROVE, generator derived-list sorting and default mapping stability.
+  - Archimedes: APPROVE, injected-order smoke coverage and verification scope.
+  - Faraday: APPROVE, README throughput note, progress accuracy, and commit scope.
