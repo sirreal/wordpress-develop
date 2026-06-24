@@ -142,9 +142,10 @@ database, network requests, or a configured site.
   HTML/search/meta/list widgets, cache-backed calendar/archive output, and
   local RSS fixtures without network requests.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
-  setting sanitize/validate/post value flows, multidimensional option previewing,
-  container/control JSON exports, active callbacks, and selective refresh partial
-  registration/rendering without changeset persistence.
+  setting sanitize/validate/post value flows, slashed customized JSON ingestion
+  and programmatic post-value merge precedence, multidimensional option
+  previewing, container/control JSON exports, active callbacks, and selective
+  refresh partial registration/rendering without changeset persistence.
 - `customizer-persistence`: no-live-DB Customizer persistence coverage for
   changeset UUID/data normalization, stub-backed `customize_changeset` post
   content parsing, transactional changeset saves, Custom CSS setting

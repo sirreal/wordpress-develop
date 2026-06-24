@@ -29,6 +29,7 @@ final class CustomizerSurface {
 
 			$rows[] = self::check_registry_lifecycle_and_ordering( $ctx->fork( 'registry' ) );
 			$rows[] = self::check_setting_callbacks_and_post_values( $ctx->fork( 'settings' ) );
+			$rows[] = self::check_manager_post_value_merging( $ctx->fork( 'post-values' ) );
 			$rows[] = self::check_multidimensional_values( $ctx->fork( 'multidimensional' ) );
 			$rows[] = self::check_json_and_active_callbacks( $ctx->fork( 'json-active' ) );
 			$rows[] = self::check_selective_refresh_partials( $ctx->fork( 'partials' ) );
@@ -73,16 +74,20 @@ final class CustomizerSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'apply_filters',
 				'current_user_can',
 				'esc_attr',
 				'get_option',
+				'has_action',
 				'has_filter',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'update_option',
 				'wp_json_encode',
+				'wp_slash',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -509,6 +514,199 @@ final class CustomizerSurface {
 		return self::row(
 			$ctx,
 			'customizer.settings.callbacks-post-values',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_manager_post_value_merging( \ComponentFuzz\FuzzContext $ctx ): array {
+		$manager      = self::manager( $ctx );
+		$failures     = array();
+		$posted_id    = self::id( $ctx, 'posted' );
+		$program_id   = self::id( $ctx->fork( 'program' ), 'posted' );
+		$unknown_id   = self::id( $ctx->fork( 'unknown' ), 'posted' );
+		$posted_value = array(
+			'source' => 'post',
+			'value'  => self::non_null_value( $ctx->fork( 'posted-value' ) ),
+		);
+		$program_from_post = array(
+			'source' => 'post-before-programmatic',
+			'value'  => self::non_null_value( $ctx->fork( 'program-posted' ) ),
+		);
+		$program_override = array(
+			'source' => 'programmatic',
+			'value'  => self::non_null_value( $ctx->fork( 'program-override' ) ),
+		);
+		$sanitize_calls   = array();
+		$post_value_events = array();
+		$expected_sanitized = static function ( string $setting_id, $value ): array {
+			return array(
+				'setting' => $setting_id,
+				'value'   => $value,
+				'encoded' => self::stringify_value( $value ),
+			);
+		};
+		$sanitize_callback = static function ( $value, \WP_Customize_Setting $setting ) use ( &$sanitize_calls, $expected_sanitized ): array {
+			$sanitize_calls[] = array(
+				'setting' => $setting->id,
+				'value'   => self::describe_value( $value ),
+			);
+			return $expected_sanitized( $setting->id, $value );
+		};
+
+		$posted_setting = $manager->add_setting(
+			$posted_id,
+			array(
+				'type'              => 'option',
+				'capability'        => self::CAPABILITY,
+				'default'           => 'posted-default',
+				'sanitize_callback' => $sanitize_callback,
+			)
+		);
+		$program_setting = $manager->add_setting(
+			$program_id,
+			array(
+				'type'              => 'option',
+				'capability'        => self::CAPABILITY,
+				'default'           => 'program-default',
+				'sanitize_callback' => $sanitize_callback,
+			)
+		);
+
+		$customized = \wp_json_encode(
+			array(
+				$posted_id  => $posted_value,
+				$program_id => $program_from_post,
+			)
+		);
+		if ( ! is_string( $customized ) ) {
+			throw new \RuntimeException( 'Could not encode Customizer posted values.' );
+		}
+		$decoded_customized = json_decode( $customized, true );
+		if ( ! is_array( $decoded_customized ) ) {
+			throw new \RuntimeException( 'Could not decode Customizer posted values.' );
+		}
+		$posted_value_from_json       = $decoded_customized[ $posted_id ] ?? null;
+		$program_from_post_from_json  = $decoded_customized[ $program_id ] ?? null;
+
+		$_POST['customized']    = \wp_slash( $customized );
+		$_REQUEST['customized'] = $_POST['customized'];
+		self::set_object_property( $manager, '_post_values', null );
+
+		$from_post = self::with_capabilities(
+			static function () use ( $manager ): array {
+				return $manager->unsanitized_post_values(
+					array(
+						'exclude_changeset' => true,
+						'exclude_post_data' => false,
+					)
+				);
+			}
+		);
+
+		$dynamic_action = static function ( $value, \WP_Customize_Manager $seen_manager ) use ( &$post_value_events, $manager ): void {
+			$post_value_events[] = array(
+				'hook'        => 'dynamic',
+				'value'       => self::describe_value( $value ),
+				'sameManager' => $seen_manager === $manager,
+			);
+		};
+		$global_action  = static function ( string $setting_id, $value, \WP_Customize_Manager $seen_manager ) use ( &$post_value_events, $manager ): void {
+			$post_value_events[] = array(
+				'hook'        => 'global',
+				'setting'     => $setting_id,
+				'value'       => self::describe_value( $value ),
+				'sameManager' => $seen_manager === $manager,
+			);
+		};
+
+		\add_action( "customize_post_value_set_{$program_id}", $dynamic_action, 10, 2 );
+		\add_action( 'customize_post_value_set', $global_action, 10, 3 );
+		try {
+			$manager->set_post_value( $program_id, $program_override );
+		} finally {
+			\remove_action( 'customize_post_value_set', $global_action, 10 );
+			\remove_action( "customize_post_value_set_{$program_id}", $dynamic_action, 10 );
+		}
+
+		$merged = self::with_capabilities(
+			static function () use ( $manager ): array {
+				return $manager->unsanitized_post_values(
+					array(
+						'exclude_changeset' => true,
+						'exclude_post_data' => false,
+					)
+				);
+			}
+		);
+		$posted_post_value  = $manager->post_value( $posted_setting, 'posted-fallback' );
+		$program_post_value = $manager->post_value( $program_setting, 'program-fallback' );
+		$validities         = $manager->validate_setting_values(
+			array(
+				$posted_id  => $posted_value_from_json,
+				$program_id => $program_override,
+				$unknown_id => 'unknown',
+			),
+			array( 'validate_existence' => true )
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				$posted_id  => $posted_value_from_json,
+				$program_id => $program_from_post_from_json,
+			) === $from_post
+				&& $posted_value_from_json === ( $merged[ $posted_id ] ?? null )
+				&& $program_override === ( $merged[ $program_id ] ?? null ),
+			'unsanitized_post_values parses slashed customized JSON and programmatic values override posted values',
+			array(
+				'fromPost' => $from_post,
+				'merged'   => $merged,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_sanitized( $posted_id, $posted_value_from_json ) === $posted_post_value
+				&& $expected_sanitized( $program_id, $program_override ) === $program_post_value
+				&& true === ( $validities[ $posted_id ] ?? null )
+				&& true === ( $validities[ $program_id ] ?? null )
+				&& isset( $validities[ $unknown_id ] )
+				&& \is_wp_error( $validities[ $unknown_id ] )
+				&& 'unrecognized' === $validities[ $unknown_id ]->get_error_code(),
+			'post_value sanitizes merged values and validate_setting_values reports unknown settings',
+			array(
+				'postedPostValue'  => $posted_post_value,
+				'programPostValue' => $program_post_value,
+				'validities'       => self::describe_value( $validities ),
+				'sanitizeCalls'    => $sanitize_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'hook'        => 'dynamic',
+					'value'       => self::describe_value( $program_override ),
+					'sameManager' => true,
+				),
+				array(
+					'hook'        => 'global',
+					'setting'     => $program_id,
+					'value'       => self::describe_value( $program_override ),
+					'sameManager' => true,
+				),
+			) === $post_value_events
+				&& false === \has_action( "customize_post_value_set_{$program_id}", $dynamic_action )
+				&& false === \has_action( 'customize_post_value_set', $global_action ),
+			'set_post_value fires scoped and global events and removes temporary hooks',
+			array( 'events' => $post_value_events )
+		);
+
+		return self::row(
+			$ctx,
+			'customizer.manager.post-value-json-merge-events',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
