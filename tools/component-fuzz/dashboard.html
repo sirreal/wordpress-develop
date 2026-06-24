@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7853 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7876 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>post-types</code> at 700 passed, <code>style</code> at 1200 passed, and <code>site-health-debug</code> at 600 passed.</div>
+			<div class="note">Latest focused validations: <code>admin-bar</code> at 500 passed, <code>post-types</code> at 700 passed, and <code>style</code> at 1200 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -437,6 +437,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>admin-bar</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; clean broad run: 7876 passed, 63 skipped, 0 failed.</td>
+					<td>Toolbar node lifecycle, root/submenu binding, raw/escaped render contracts, <code>show_admin_bar()</code> filters, default menu hook priorities and action firing.</td>
 				</tr>
 				<tr>
 					<td><code>post-types</code></td>
@@ -688,6 +695,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>d5de86ecd5</code></td>
+					<td><code>admin-bar</code></td>
+					<td>500 passed, 0 skipped, 0 failed.</td>
+					<td>7876 passed, 63 skipped, 0 failed at 2 iterations in a clean worktree after default menu hook registration coverage.</td>
+				</tr>
 				<tr>
 					<td><code>5b99565f57</code></td>
 					<td><code>post-types</code></td>
