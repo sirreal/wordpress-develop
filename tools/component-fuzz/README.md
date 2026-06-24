@@ -33,10 +33,10 @@ database, network requests, or a configured site.
   safe recent draft/comment output helpers, explicit skips for redirect/remote
   paths, and filter/global/superglobal/output-buffer restoration.
 - `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
-  `WP_Screen` normalization/current-screen globals, column header filter
-  locality, settings registry/default/sanitize callbacks, escaped settings
-  field and nonce output, meta-box ordering/removal/callback args, and
-  accordion section rendering.
+  `WP_Screen` normalization/current-screen globals, help tabs and screen
+  options, column header filter locality, settings registry/default/sanitize
+  callbacks, escaped settings field and nonce output, meta-box
+  ordering/removal/callback args, and accordion section rendering.
 - `admin-workflows`: no-DB admin menu, list-table, and referer-helper
   workflows, including menu/submenu global registration and removal, hook suffix
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`

@@ -26,6 +26,7 @@ final class AdminScreenSurface {
 
 		try {
 			$rows[] = self::check_screen_normalization( $ctx->fork( 'screen-normalization' ) );
+			$rows[] = self::check_help_tabs_and_screen_options( $ctx->fork( 'help-screen-options' ) );
 			$rows[] = self::check_column_headers( $ctx->fork( 'column-headers' ) );
 			$rows[] = self::check_settings_registry( $ctx->fork( 'settings-registry' ) );
 			$rows[] = self::check_settings_rendering( $ctx->fork( 'settings-rendering' ) );
@@ -79,6 +80,7 @@ final class AdminScreenSurface {
 				'remove_filter',
 				'remove_meta_box',
 				'sanitize_key',
+				'sanitize_html_class',
 				'sanitize_option',
 				'sanitize_text_field',
 				'set_current_screen',
@@ -86,6 +88,7 @@ final class AdminScreenSurface {
 				'taxonomy_exists',
 				'unregister_setting',
 				'wp_kses_post',
+				'wp_parse_args',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -262,6 +265,171 @@ final class AdminScreenSurface {
 			'admin-screen.screen.normalization-and-current',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_help_tabs_and_screen_options( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$screen   = \convert_to_screen( self::id( $ctx->fork( 'screen' ), 'cfz_help_screen', 40 ) );
+		$tab_high = self::id( $ctx->fork( 'high-tab' ), 'cfz_help_high', 32 );
+		$tab_mid  = self::id( $ctx->fork( 'mid-tab' ), 'cfz_help_mid', 32 );
+		$tab_low  = self::id( $ctx->fork( 'low-tab' ), 'cfz_help_low', 32 );
+
+		$screen->add_help_tab(
+			array(
+				'id'       => $tab_low,
+				'title'    => 'Low ' . self::fuzz_label( $ctx->fork( 'low-title' ) ),
+				'content'  => '<p>Low ' . \esc_html( self::fuzz_label( $ctx->fork( 'low-content' ) ) ) . '</p>',
+				'priority' => 30,
+			)
+		);
+		$screen->add_help_tab(
+			array(
+				'id'       => $tab_high,
+				'title'    => 'High ' . self::fuzz_label( $ctx->fork( 'high-title' ) ),
+				'content'  => '<p>High ' . \esc_html( self::fuzz_label( $ctx->fork( 'high-content' ) ) ) . '</p>',
+				'priority' => 5,
+			)
+		);
+		$screen->add_help_tab(
+			array(
+				'id'       => $tab_mid,
+				'title'    => 'Original ' . self::fuzz_label( $ctx->fork( 'mid-title-old' ) ),
+				'content'  => '<p>Original</p>',
+				'priority' => 20,
+			)
+		);
+		$screen->add_help_tab(
+			array(
+				'id'       => $tab_mid,
+				'title'    => 'Override ' . self::fuzz_label( $ctx->fork( 'mid-title-new' ) ),
+				'content'  => '<p>Override ' . \esc_html( self::fuzz_label( $ctx->fork( 'mid-content' ) ) ) . '</p>',
+				'priority' => 15,
+			)
+		);
+		$screen->add_help_tab(
+			array(
+				'id'       => self::id( $ctx->fork( 'invalid-tab' ), 'cfz_help_invalid', 32 ),
+				'content'  => '<p>Missing title</p>',
+				'priority' => 1,
+			)
+		);
+
+		$tabs_before_remove = $screen->get_help_tabs();
+		$mid_tab            = $screen->get_help_tab( $tab_mid );
+		$missing_tab        = $screen->get_help_tab( 'cfz_missing_tab' );
+		$screen->remove_help_tab( $tab_high );
+		$tabs_after_remove = $screen->get_help_tabs();
+		$screen->remove_help_tabs();
+		$tabs_after_clear = $screen->get_help_tabs();
+
+		self::collect_failure(
+			$failures,
+			array( $tab_high, $tab_mid, $tab_low ) === array_keys( $tabs_before_remove )
+				&& is_array( $mid_tab )
+				&& 15 === ( $mid_tab['priority'] ?? null )
+				&& str_starts_with( (string) ( $mid_tab['title'] ?? '' ), 'Override ' )
+				&& null === $missing_tab
+				&& array( $tab_mid, $tab_low ) === array_keys( $tabs_after_remove )
+				&& array() === $tabs_after_clear,
+			'WP_Screen help tabs sort by priority, override duplicate IDs, and remove cleanly',
+			array(
+				'screen'           => self::describe_screen( $screen ),
+				'tabsBeforeRemove' => $tabs_before_remove,
+				'midTab'           => $mid_tab,
+				'tabsAfterRemove'  => $tabs_after_remove,
+				'tabsAfterClear'   => $tabs_after_clear,
+			)
+		);
+
+		$per_page = array(
+			'label'   => 'Per page ' . self::fuzz_label( $ctx->fork( 'per-page-label' ) ),
+			'default' => $ctx->int( 5, 99 ),
+			'option'  => self::id( $ctx->fork( 'per-page-option' ), 'cfz_per_page', 32 ),
+		);
+		$layout   = array(
+			'max'     => $ctx->int( 2, 6 ),
+			'default' => $ctx->int( 1, 2 ),
+		);
+
+		$screen->add_option( 'per_page', $per_page );
+		$screen->add_option( 'layout_columns', $layout );
+		$options_before_remove = $screen->get_options();
+		$per_page_default      = $screen->get_option( 'per_page', 'default' );
+		$missing_option        = $screen->get_option( 'cfz_missing_option' );
+		$screen->remove_option( 'layout_columns' );
+		$options_after_remove = $screen->get_options();
+
+		$settings_calls = array();
+		$show_calls     = array();
+		$settings_filter = static function ( string $settings, \WP_Screen $seen_screen ) use ( &$settings_calls, $screen ): string {
+			$settings_calls[] = array(
+				'sameScreen' => $seen_screen === $screen,
+				'incoming'   => $settings,
+			);
+
+			return $settings . '<p class="cfz-screen-settings">settings</p>';
+		};
+		$show_filter     = static function ( bool $show_screen, \WP_Screen $seen_screen ) use ( &$show_calls, $screen ): bool {
+			$show_calls[] = array(
+				'sameScreen' => $seen_screen === $screen,
+				'incoming'   => $show_screen,
+			);
+
+			return $show_screen;
+		};
+
+		\add_filter( 'screen_settings', $settings_filter, 10, 2 );
+		\add_filter( 'screen_options_show_screen', $show_filter, 10, 2 );
+		try {
+			$show_first  = $screen->show_screen_options();
+			$show_second = $screen->show_screen_options();
+		} finally {
+			\remove_filter( 'screen_options_show_screen', $show_filter, 10 );
+			\remove_filter( 'screen_settings', $settings_filter, 10 );
+		}
+
+		$screen->remove_options();
+		$options_after_clear = $screen->get_options();
+
+		self::collect_failure(
+			$failures,
+			isset( $options_before_remove['per_page'], $options_before_remove['layout_columns'] )
+				&& $per_page_default === $per_page['default']
+				&& null === $missing_option
+				&& isset( $options_after_remove['per_page'] )
+				&& ! isset( $options_after_remove['layout_columns'] )
+				&& array() === $options_after_clear
+				&& true === $show_first
+				&& true === $show_second
+				&& 1 === count( $settings_calls )
+				&& 1 === count( $show_calls )
+				&& true === ( $settings_calls[0]['sameScreen'] ?? null )
+				&& true === ( $show_calls[0]['sameScreen'] ?? null )
+				&& true === ( $show_calls[0]['incoming'] ?? null )
+				&& false === \has_filter( 'screen_settings', $settings_filter )
+				&& false === \has_filter( 'screen_options_show_screen', $show_filter ),
+			'WP_Screen options store values, remove cleanly, show options once, and restore filters',
+			array(
+				'perPage'             => $per_page,
+				'layout'              => $layout,
+				'optionsBeforeRemove' => $options_before_remove,
+				'optionsAfterRemove'  => $options_after_remove,
+				'optionsAfterClear'   => $options_after_clear,
+				'showFirst'           => $show_first,
+				'showSecond'          => $show_second,
+				'settingsCalls'       => $settings_calls,
+				'showCalls'           => $show_calls,
+				'settingsHasFilter'   => \has_filter( 'screen_settings', $settings_filter ),
+				'showHasFilter'       => \has_filter( 'screen_options_show_screen', $show_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-screen.help-tabs-and-screen-options',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
 	}
 
