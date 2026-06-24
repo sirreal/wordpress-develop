@@ -1170,7 +1170,7 @@ final class AdminListTablesSurface {
 		$failures         = array();
 		$filters          = array();
 		$current_user     = self::synthetic_user( $ctx->fork( 'current-user' ), 54500, 'app-passwords' );
-		$screen           = self::screen( 'application-passwords-user' );
+		$screen           = self::screen( 'application-passwords-user-' . $ctx->iteration() . '-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ) );
 		$first_password   = self::synthetic_application_password( $ctx->fork( 'first-password' ), 0 );
 		$second_password  = self::synthetic_application_password( $ctx->fork( 'second-password' ), 1 );
 		$passwords        = array( $first_password, $second_password );
