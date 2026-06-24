@@ -34,6 +34,7 @@ final class NetworkMediaSurface {
 
 		try {
 			self::exercise_url_apis( $rng, $result );
+			self::exercise_url_scheme_apis( $rng, $result );
 			self::exercise_path_apis( $rng, $result );
 			self::exercise_filename_apis( $rng, $result );
 			self::exercise_multisite_quota_apis( $rng, $result );
@@ -275,6 +276,90 @@ final class NetworkMediaSurface {
 				}
 			}
 		}
+	}
+
+	private static function exercise_url_scheme_apis( array &$rng, array &$result ): void {
+		$required = array( 'set_url_scheme', 'add_filter', 'remove_filter', 'has_filter' );
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'set_url_scheme', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		$filter_calls = array();
+		$filter       = static function ( string $url, string $scheme, $orig_scheme ) use ( &$filter_calls ): string {
+			$filter_calls[] = array(
+				'url'        => $url,
+				'scheme'     => $scheme,
+				'origScheme' => $orig_scheme,
+			);
+
+			return $url;
+		};
+		$cases        = self::set_url_scheme_cases( $rng );
+		$before       = \has_filter( 'set_url_scheme', $filter );
+
+		\add_filter( 'set_url_scheme', $filter, 10, 3 );
+		try {
+			foreach ( $cases as $case ) {
+				++$result['caseCount'];
+				self::feature( $result, 'set_url_scheme' );
+
+				$expected          = self::expected_set_url_scheme( $case['url'], $case['scheme'] );
+				$filter_call_index = count( $filter_calls );
+				$actual            = self::call_api(
+					$result,
+					'set_url_scheme',
+					$case,
+					static function () use ( $case ) {
+						return set_url_scheme( $case['url'], $case['scheme'] );
+					}
+				);
+
+				if ( ! $actual['ok'] ) {
+					continue;
+				}
+
+				self::check_invariant(
+					$result,
+					is_string( $actual['value'] ) && $expected === $actual['value'],
+					'set_url_scheme:scheme-normalization',
+					$case,
+					array(
+						'expected' => $expected,
+						'actual'   => $actual['value'],
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					isset( $filter_calls[ $filter_call_index ] )
+						&& $expected === $filter_calls[ $filter_call_index ]['url']
+						&& $case['scheme'] === $filter_calls[ $filter_call_index ]['scheme']
+						&& $case['scheme'] === $filter_calls[ $filter_call_index ]['origScheme'],
+					'set_url_scheme:filter-payload',
+					$case,
+					array(
+						'expectedUrl' => $expected,
+						'filterCall'  => $filter_calls[ $filter_call_index ] ?? null,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'set_url_scheme', $filter, 10 );
+		}
+
+		self::check_invariant(
+			$result,
+			$before === \has_filter( 'set_url_scheme', $filter ),
+			'set_url_scheme:filter-restored',
+			'set_url_scheme',
+			array(
+				'before' => $before,
+				'after'  => \has_filter( 'set_url_scheme', $filter ),
+			)
+		);
 	}
 
 	private static function check_parse_url_components( string $url, $parts, array &$result ): void {
@@ -1522,6 +1607,49 @@ final class NetworkMediaSurface {
 		}
 
 		return $scheme . "://\t" . $auth . $tail;
+	}
+
+	private static function set_url_scheme_cases( array &$rng ): array {
+		$cases = array(
+			array( 'url' => '//example.com/path?x=1', 'scheme' => 'https' ),
+			array( 'url' => 'http://example.com/a/b?c=1#frag', 'scheme' => 'https' ),
+			array( 'url' => 'https://example.com/a/b?c=1#frag', 'scheme' => 'http' ),
+			array( 'url' => 'ftp://example.com/file.txt', 'scheme' => 'https' ),
+			array( 'url' => 'http://example.com//double//slash', 'scheme' => 'relative' ),
+			array( 'url' => ' https://example.com/path with spaces ', 'scheme' => 'relative' ),
+			array( 'url' => '/already/relative?x=1', 'scheme' => 'relative' ),
+			array( 'url' => 'mailto:user@example.com', 'scheme' => 'relative' ),
+			array( 'url' => 'HTTPS://EXAMPLE.com/Mixed', 'scheme' => 'http' ),
+			array( 'url' => "http://example.com/control\x01path", 'scheme' => 'relative' ),
+		);
+
+		$schemes = array( 'http', 'https', 'relative' );
+		for ( $i = 0; $i < 16; ++$i ) {
+			$cases[] = array(
+				'url'    => self::generated_url( $rng ),
+				'scheme' => self::rng_choice( $rng, $schemes ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function expected_set_url_scheme( string $url, string $scheme ): string {
+		$url = trim( $url );
+		if ( str_starts_with( $url, '//' ) ) {
+			$url = 'http:' . $url;
+		}
+
+		if ( 'relative' === $scheme ) {
+			$url = ltrim( (string) preg_replace( '#^\w+://[^/]*#', '', $url ) );
+			if ( '' !== $url && '/' === $url[0] ) {
+				$url = '/' . ltrim( $url, "/ \t\n\r\0\x0B" );
+			}
+
+			return $url;
+		}
+
+		return (string) preg_replace( '#^\w+://#', $scheme . '://', $url );
 	}
 
 	private static function path_cases( array &$rng ): array {
