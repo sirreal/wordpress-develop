@@ -82,9 +82,9 @@ database, network requests, or a configured site.
   attribute merging.
 - `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
-  fallbacks, content sanitization on update, form escaping, widgets block
-  editor support toggles, and sidebars widget mapping for block widget
-  instances.
+  fallbacks, content sanitization on update, form escaping, `the_widget()`
+  display callback/action flow, registered control rendering, widgets block
+  editor support toggles, and sidebars widget mapping for block widget instances.
 - `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
   including in-memory link rows and link categories for `get_bookmark()`,
   `get_bookmarks()`, `wp_list_bookmarks()` escaping, edit bookmark links,

@@ -31,6 +31,7 @@ final class BlockWidgetsSurface {
 			$rows[] = self::check_block_widget_rendering( $ctx->fork( 'render' ) );
 			$rows[] = self::check_update_and_form_escaping( $ctx->fork( 'update-form' ) );
 			$rows[] = self::check_widgets_block_editor_support( $ctx->fork( 'support' ) );
+			$rows[] = self::check_the_widget_and_control_rendering( $ctx->fork( 'the-widget-control' ) );
 			$rows[] = self::check_sidebars_widget_mapping( $ctx->fork( 'mapping' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -66,6 +67,7 @@ final class BlockWidgetsSurface {
 			array(
 				'_wp_remove_unregistered_widgets',
 				'add_filter',
+				'add_action',
 				'add_theme_support',
 				'current_user_can',
 				'do_blocks',
@@ -76,6 +78,7 @@ final class BlockWidgetsSurface {
 				'register_sidebar',
 				'register_widget',
 				'remove_filter',
+				'remove_action',
 				'remove_theme_support',
 				'retrieve_widgets',
 				'the_widget',
@@ -87,6 +90,7 @@ final class BlockWidgetsSurface {
 				'wp_map_sidebars_widgets',
 				'wp_parse_widget_id',
 				'wp_render_widget',
+				'wp_render_widget_control',
 				'wp_set_current_user',
 				'wp_set_sidebars_widgets',
 				'wp_setup_widgets_block_editor',
@@ -358,8 +362,138 @@ final class BlockWidgetsSurface {
 		return self::result( $ctx, 'block-widgets.editor-support.theme-filter-and-width-guard', $failures );
 	}
 
+	private static function check_the_widget_and_control_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_registered_widget_controls, $wp_registered_widgets, $wp_widget_factory;
+
+		$failures        = array();
+		$number          = $ctx->int( 10, 99 );
+		$cancel_token    = 'cancel-' . $ctx->identifier( 4, 9 );
+		$marker          = 'marker-' . $ctx->identifier( 4, 9 );
+		$paragraph_text  = 'Widget ' . $ctx->identifier( 4, 10 ) . ' & <unsafe>';
+		$control_token   = $ctx->identifier( 4, 10 );
+		$render_content  = '<!-- wp:paragraph --><p>' . \esc_html( $paragraph_text ) . '</p><!-- /wp:paragraph -->';
+		$control_content = '<!-- wp:html --><textarea>' . $control_token . '</textarea><script>alert(1)</script><!-- /wp:html -->';
+		$widget_id       = 'block-' . $number;
+		$seen            = array(
+			'display' => array(),
+			'actions' => array(),
+		);
+
+		$display_filter = static function ( $instance, \WP_Widget $widget, array $args ) use ( &$seen, $cancel_token, $marker ) {
+			$seen['display'][] = array(
+				'idBase'       => $widget->id_base,
+				'content'      => $instance['content'] ?? null,
+				'beforeWidget' => $args['before_widget'] ?? null,
+			);
+
+			if ( str_contains( (string) ( $instance['content'] ?? '' ), $cancel_token ) ) {
+				return false;
+			}
+
+			$instance['content'] .= '<!-- wp:paragraph --><p>' . \esc_html( $marker ) . '</p><!-- /wp:paragraph -->';
+			return $instance;
+		};
+		$the_widget_action = static function ( string $widget, array $instance, array $args ) use ( &$seen ): void {
+			$seen['actions'][] = array(
+				'widget'       => $widget,
+				'content'      => $instance['content'] ?? null,
+				'beforeWidget' => $args['before_widget'] ?? null,
+			);
+		};
+
+		\register_widget( 'WP_Widget_Block' );
+		\update_option(
+			'widget_block',
+			array(
+				$number        => array( 'content' => $control_content ),
+				'_multiwidget' => 1,
+			)
+		);
+		$wp_widget_factory->_register_widgets();
+
+		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
+		\add_action( 'the_widget', $the_widget_action, 10, 3 );
+		try {
+			ob_start();
+			\the_widget(
+				'WP_Widget_Block',
+				array( 'content' => $render_content ),
+				array(
+					'before_widget' => '<aside class="%s component-fuzz-the-widget">',
+					'after_widget'  => '</aside>',
+				)
+			);
+			$rendered = ob_get_clean();
+
+			ob_start();
+			\the_widget(
+				'WP_Widget_Block',
+				array( 'content' => '<!-- wp:paragraph --><p>' . \esc_html( $cancel_token ) . '</p><!-- /wp:paragraph -->' ),
+				array(
+					'before_widget' => '<aside class="%s component-fuzz-cancelled">',
+					'after_widget'  => '</aside>',
+				)
+			);
+			$cancelled = ob_get_clean();
+		} finally {
+			\remove_action( 'the_widget', $the_widget_action, 10 );
+			\remove_filter( 'widget_display_callback', $display_filter, 10 );
+		}
+
+		$control_output = \wp_render_widget_control( $widget_id );
+		$missing_output = \wp_render_widget_control( 'block-' . ( $number + 1000 ) );
+		\unregister_widget( 'WP_Widget_Block' );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $rendered, '<aside class="widget_block widget_text component-fuzz-the-widget">' )
+				&& str_contains( $rendered, \esc_html( $paragraph_text ) )
+				&& str_contains( $rendered, \esc_html( $marker ) )
+				&& '' === $cancelled
+				&& 2 === count( $seen['display'] )
+				&& 1 === count( $seen['actions'] )
+				&& 'block' === ( $seen['display'][0]['idBase'] ?? null )
+				&& str_contains( (string) ( $seen['display'][0]['beforeWidget'] ?? '' ), 'widget_block' )
+				&& str_contains( (string) ( $seen['display'][1]['content'] ?? '' ), $cancel_token )
+				&& 'WP_Widget_Block' === ( $seen['actions'][0]['widget'] ?? null )
+				&& str_contains( (string) ( $seen['actions'][0]['content'] ?? '' ), $marker ),
+			'the_widget applies display callbacks before action/rendering and honors cancellation',
+			array(
+				'rendered'  => self::preview( $rendered ),
+				'cancelled' => self::preview( $cancelled ),
+				'seen'      => $seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			isset( $wp_registered_widgets[ $widget_id ], $wp_registered_widget_controls[ $widget_id ] )
+				&& $number === ( $wp_registered_widget_controls[ $widget_id ]['params'][0]['number'] ?? null )
+				&& 400 === ( $wp_registered_widget_controls[ $widget_id ]['width'] ?? null )
+				&& 350 === ( $wp_registered_widget_controls[ $widget_id ]['height'] ?? null )
+				&& is_string( $control_output )
+				&& str_contains( $control_output, 'name="widget-block[' . $number . '][content]"' )
+				&& str_contains( $control_output, '&lt;textarea&gt;' )
+				&& str_contains( $control_output, '&lt;script&gt;alert(1)&lt;/script&gt;' )
+				&& ! str_contains( $control_output, '<textarea>' . $control_token . '</textarea>' )
+				&& ! str_contains( $control_output, '<script>alert' )
+				&& null === $missing_output,
+			'registered block widget controls retain number/dimensions and escape stored block HTML',
+			array(
+				'widgetId'       => $widget_id,
+				'registered'     => $wp_registered_widgets[ $widget_id ] ?? null,
+				'control'        => $wp_registered_widget_controls[ $widget_id ] ?? null,
+				'controlOutput'  => self::preview( is_string( $control_output ) ? $control_output : '' ),
+				'missingOutput'  => $missing_output,
+			)
+		);
+
+		return self::result( $ctx, 'block-widgets.the-widget-and-control-rendering', $failures );
+	}
+
 	private static function check_sidebars_widget_mapping( \ComponentFuzz\FuzzContext $ctx ): array {
 		global $wp_widget_factory, $wp_registered_widgets;
+
+		self::reset_runtime();
 
 		$failures = array();
 		$primary  = 'sidebar-primary-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 6 );
