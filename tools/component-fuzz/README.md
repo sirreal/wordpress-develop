@@ -23,7 +23,8 @@ database, network requests, or a configured site.
   superglobal/output-buffer restoration.
 - `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
   group/container behavior, render escaping/raw HTML contracts, and
-  `show_admin_bar()` filter/global restoration.
+  `show_admin_bar()` filter/global restoration plus default menu hook
+  registration.
 - `admin-dashboard`: no-live-DB admin dashboard API coverage, including
   dashboard widget registration/control callbacks, meta-box context and
   priority normalization, dashboard container rendering across column counts,

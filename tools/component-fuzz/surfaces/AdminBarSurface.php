@@ -30,6 +30,7 @@ final class AdminBarSurface {
 				self::check_parent_child_rendering( $ctx->fork( 'parent-child-rendering' ) ),
 				self::check_render_escaping_contracts( $ctx->fork( 'render-escaping' ) ),
 				self::check_show_admin_bar_filters( $ctx->fork( 'show-admin-bar-filters' ) ),
+				self::check_default_menu_hook_registration( $ctx->fork( 'default-menu-hooks' ) ),
 			);
 		} catch ( \Throwable $e ) {
 			return array(
@@ -56,6 +57,7 @@ final class AdminBarSurface {
 		foreach (
 			array(
 				'add_filter',
+				'add_action',
 				'did_action',
 				'esc_attr',
 				'esc_attr_e',
@@ -65,7 +67,10 @@ final class AdminBarSurface {
 				'is_admin',
 				'is_admin_bar_showing',
 				'is_embed',
+				'is_network_admin',
+				'is_user_admin',
 				'is_user_logged_in',
+				'remove_action',
 				'remove_filter',
 				'sanitize_title',
 				'show_admin_bar',
@@ -755,6 +760,88 @@ final class AdminBarSurface {
 		);
 	}
 
+	private static function check_default_menu_hook_registration( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$snapshot = self::snapshot_state();
+
+		$after_action_calls = array();
+		$after_action       = static function () use ( &$after_action_calls ): void {
+			$after_action_calls[] = array(
+				'wpMenuPriority'      => \has_action( 'admin_bar_menu', 'wp_admin_bar_wp_menu' ),
+				'secondaryPriority'   => \has_action( 'admin_bar_menu', 'wp_admin_bar_add_secondary_groups' ),
+				'commentsPriority'    => \has_action( 'admin_bar_menu', 'wp_admin_bar_comments_menu' ),
+				'newContentPriority'  => \has_action( 'admin_bar_menu', 'wp_admin_bar_new_content_menu' ),
+				'registeredCallbacks' => array_keys( AdminBarSurface::admin_bar_menu_callback_map() ),
+			);
+		};
+
+		try {
+			$bar                    = new \WP_Admin_Bar();
+			$before_add_menu_action = \did_action( 'add_admin_bar_menus' );
+			\add_action( 'add_admin_bar_menus', $after_action, 10, 0 );
+
+			$bar->add_menus();
+			$after_first_action = \did_action( 'add_admin_bar_menus' );
+			$first_map          = self::admin_bar_menu_callback_map();
+
+			$bar->add_menus();
+			$after_second_action = \did_action( 'add_admin_bar_menus' );
+			$second_map          = self::admin_bar_menu_callback_map();
+
+			$after_action_removed = \remove_action( 'add_admin_bar_menus', $after_action, 10 );
+			$expected             = self::expected_default_admin_bar_menu_priorities();
+
+			self::collect_failure(
+				$failures,
+				self::callback_priorities_match( $expected, $first_map )
+					&& self::callback_priorities_match( $expected, $second_map ),
+				'WP_Admin_Bar::add_menus registers expected default callbacks and priorities',
+				array(
+					'expected' => $expected,
+					'first'    => $first_map,
+					'second'   => $second_map,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$first_map === $second_map
+					&& $after_first_action === $before_add_menu_action + 1
+					&& $after_second_action === $before_add_menu_action + 2
+					&& 2 === count( $after_action_calls ),
+				'repeated add_menus calls fire add_admin_bar_menus but keep callback registration idempotent',
+				array(
+					'beforeAction' => $before_add_menu_action,
+					'afterFirst'   => $after_first_action,
+					'afterSecond'  => $after_second_action,
+					'afterCalls'   => $after_action_calls,
+					'first'        => $first_map,
+					'second'       => $second_map,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$after_action_removed && false === \has_filter( 'add_admin_bar_menus', $after_action ),
+				'local add_admin_bar_menus observer is removed after probing',
+				array(
+					'removed'  => $after_action_removed,
+					'hasAfter' => \has_filter( 'add_admin_bar_menus', $after_action ),
+				)
+			);
+		} finally {
+			\remove_action( 'add_admin_bar_menus', $after_action, 10 );
+			self::restore_state( $snapshot );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-bar.default-menu-hook-registration',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function render_bar( \WP_Admin_Bar $bar ): string {
 		ob_start();
 		try {
@@ -814,6 +901,66 @@ final class AdminBarSurface {
 		}
 		ksort( $shape );
 		return $shape;
+	}
+
+	private static function expected_default_admin_bar_menu_priorities(): array {
+		$expected = array(
+			'wp_admin_bar_my_account_menu'       => 0,
+			'wp_admin_bar_my_account_item'       => 9991,
+			'wp_admin_bar_recovery_mode_menu'    => 9992,
+			'wp_admin_bar_search_menu'           => 9999,
+			'wp_admin_bar_sidebar_toggle'        => 0,
+			'wp_admin_bar_wp_menu'               => 10,
+			'wp_admin_bar_my_sites_menu'         => 20,
+			'wp_admin_bar_site_menu'             => 30,
+			'wp_admin_bar_edit_site_menu'        => 40,
+			'wp_admin_bar_customize_menu'        => 40,
+			'wp_admin_bar_updates_menu'          => 50,
+			'wp_admin_bar_command_palette_menu'  => 55,
+			'wp_admin_bar_edit_menu'             => 80,
+			'wp_admin_bar_add_secondary_groups'  => 200,
+		);
+
+		if ( ! \is_network_admin() && ! \is_user_admin() ) {
+			$expected['wp_admin_bar_comments_menu']    = 60;
+			$expected['wp_admin_bar_new_content_menu'] = 70;
+		}
+
+		ksort( $expected );
+		return $expected;
+	}
+
+	private static function admin_bar_menu_callback_map(): array {
+		$hook = $GLOBALS['wp_filter']['admin_bar_menu'] ?? null;
+		if ( ! is_object( $hook ) || ! isset( $hook->callbacks ) || ! is_array( $hook->callbacks ) ) {
+			return array();
+		}
+
+		$map = array();
+		foreach ( $hook->callbacks as $priority => $callbacks ) {
+			if ( ! is_array( $callbacks ) ) {
+				continue;
+			}
+			foreach ( $callbacks as $callback ) {
+				$function = $callback['function'] ?? null;
+				if ( is_string( $function ) ) {
+					$map[ $function ] = (int) $priority;
+				}
+			}
+		}
+
+		ksort( $map );
+		return $map;
+	}
+
+	private static function callback_priorities_match( array $expected, array $actual ): bool {
+		foreach ( $expected as $function => $priority ) {
+			if ( ( $actual[ $function ] ?? null ) !== $priority ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
