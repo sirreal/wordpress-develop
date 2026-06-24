@@ -6,20 +6,42 @@ abstract class WP_Test_REST_Controller_Testcase extends WP_Test_REST_TestCase {
 
 	public function set_up() {
 		parent::set_up();
+
+		if ( ! $this->should_register_rest_routes() ) {
+			return;
+		}
+
 		add_filter( 'rest_url', array( $this, 'filter_rest_url_for_leading_slash' ), 10, 2 );
 		/** @var WP_REST_Server $wp_rest_server */
 		global $wp_rest_server;
 		$wp_rest_server = new Spy_REST_Server();
-		do_action( 'rest_api_init', $wp_rest_server );
+		if ( $this->should_create_initial_rest_routes() ) {
+			do_action( 'rest_api_init', $wp_rest_server );
+		} else {
+			$this->do_rest_api_init_without_initial_routes();
+			$this->register_initial_rest_routes_for_test();
+		}
 	}
 
 	public function tear_down() {
-		remove_filter( 'rest_url', array( $this, 'test_rest_url_for_leading_slash' ), 10, 2 );
-		/** @var WP_REST_Server $wp_rest_server */
-		global $wp_rest_server;
-		$wp_rest_server = null;
+		if ( $this->should_register_rest_routes() ) {
+			remove_filter( 'rest_url', array( $this, 'filter_rest_url_for_leading_slash' ), 10, 2 );
+			/** @var WP_REST_Server $wp_rest_server */
+			global $wp_rest_server;
+			$wp_rest_server = null;
+		}
 		parent::tear_down();
 	}
+
+	protected function should_register_rest_routes() {
+		return true;
+	}
+
+	protected function should_create_initial_rest_routes() {
+		return true;
+	}
+
+	protected function register_initial_rest_routes_for_test() {}
 
 	abstract public function test_register_routes();
 
