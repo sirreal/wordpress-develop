@@ -199,9 +199,10 @@ database, network requests, or a configured site.
   CDATA terminator escaping, excerpt/content mode switches, enclosure metadata,
   comment feed escaping, and feed build date selection.
 - `frontend-features`: no-DB frontend feature helper coverage for speculative
-  loading and view transitions, including configuration eligibility,
-  mode/eagerness filters, generated URL-pattern exclusions, script tag escaping,
-  theme support behavior, view-transition CSS enqueueing, and global restoration.
+  loading and view transitions, including direct speculation rule validation,
+  configuration eligibility, mode/eagerness filters, generated URL-pattern
+  exclusions, script tag escaping, theme support behavior, view-transition CSS
+  enqueueing, and global restoration.
 - `html-api`: HTML tag and tree processor mutation escaping, deterministic
   rich HTML generation, normalization/recovery idempotence, token walking,
   bookmark/seek replay, modifiable text escaping, and namespace/comment/rawtext

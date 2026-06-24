@@ -28,6 +28,7 @@ final class FrontendFeaturesSurface {
 
 		try {
 			$rows[] = self::check_speculation_configuration( $ctx->fork( 'configuration' ) );
+			$rows[] = self::check_speculation_rules_class_validation( $ctx->fork( 'rules-class' ) );
 			$rows[] = self::check_speculation_rule_shapes( $ctx->fork( 'rules' ) );
 			$rows[] = self::check_speculation_printed_tag( $ctx->fork( 'printed-tag' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'url-prefixer' ) );
@@ -73,6 +74,7 @@ final class FrontendFeaturesSurface {
 				'current_theme_supports',
 				'did_action',
 				'get_option',
+				'has_action',
 				'home_url',
 				'is_user_logged_in',
 				'remove_action',
@@ -162,6 +164,113 @@ final class FrontendFeaturesSurface {
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
+		);
+	}
+
+	private static function check_speculation_rules_class_validation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$rules    = new \WP_Speculation_Rules();
+		$slug     = self::slug( $ctx, 'rules-class' );
+		$list_id  = 'list-' . str_replace( '-', '_', $slug );
+		$doc_id   = 'document-' . str_replace( '-', '_', $slug );
+		$list_url = '/valid-list-' . $slug . '?q=<tag>&close=</script>';
+		$where    = array(
+			'and' => array(
+				array( 'href_matches' => '/docs/' . $slug . '/*' ),
+				array( 'not' => array( 'selector_matches' => '.no-prerender, .no-prerender a' ) ),
+			),
+		);
+
+		$diagnostics = array();
+		$diag_action = static function ( string $function_name, string $message, string $version ) use ( &$diagnostics ): void {
+			$diagnostics[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+
+		\add_action( 'doing_it_wrong_run', $diag_action, 10, 3 );
+		try {
+			$valid_list      = $rules->add_rule(
+				'prefetch',
+				$list_id,
+				array(
+					'source'    => 'list',
+					'urls'      => array( $list_url ),
+					'eagerness' => 'immediate',
+				)
+			);
+			$duplicate_list  = $rules->add_rule(
+				'prefetch',
+				$list_id,
+				array(
+					'source' => 'list',
+					'urls'   => array( '/duplicate-' . $slug ),
+				)
+			);
+			$valid_document  = $rules->add_rule(
+				'prerender',
+				$doc_id,
+				array(
+					'source'    => 'document',
+					'where'     => $where,
+					'eagerness' => 'moderate',
+				)
+			);
+			$invalid_results = array(
+				'bad-mode'            => $rules->add_rule( 'fetch', 'bad-mode-' . $slug, array( 'urls' => array( '/bad' ) ) ),
+				'bad-id'              => $rules->add_rule( 'prefetch', '1bad-' . $slug, array( 'urls' => array( '/bad' ) ) ),
+				'missing-where-urls'  => $rules->add_rule( 'prefetch', 'missing-' . $slug, array( 'source' => 'list' ) ),
+				'where-and-urls'      => $rules->add_rule( 'prefetch', 'both-' . $slug, array( 'where' => array(), 'urls' => array( '/bad' ) ) ),
+				'list-with-where'     => $rules->add_rule( 'prefetch', 'list-where-' . $slug, array( 'source' => 'list', 'where' => array() ) ),
+				'document-with-urls'  => $rules->add_rule( 'prerender', 'doc-urls-' . $slug, array( 'source' => 'document', 'urls' => array( '/bad' ) ) ),
+				'bad-eagerness'       => $rules->add_rule( 'prefetch', 'bad-eager-' . $slug, array( 'urls' => array( '/bad' ), 'eagerness' => 'lazy' ) ),
+				'immediate-document'  => $rules->add_rule( 'prerender', 'immediate-doc-' . $slug, array( 'where' => $where, 'eagerness' => 'immediate' ) ),
+			);
+		} finally {
+			\remove_action( 'doing_it_wrong_run', $diag_action, 10 );
+		}
+
+		$serialized = $rules->jsonSerialize();
+		$json       = \wp_json_encode( $rules );
+
+		self::collect_failure(
+			$failures,
+			true === $valid_list
+				&& false === $duplicate_list
+				&& true === $valid_document
+				&& array_fill_keys( array_keys( $invalid_results ), false ) === $invalid_results
+				&& $rules->has_rule( 'prefetch', $list_id )
+				&& $rules->has_rule( 'prerender', $doc_id )
+				&& ! $rules->has_rule( 'prefetch', 'missing-' . $slug )
+				&& isset( $serialized['prefetch'][0], $serialized['prerender'][0] )
+				&& 1 === count( $serialized['prefetch'] )
+				&& 1 === count( $serialized['prerender'] )
+				&& $list_url === ( $serialized['prefetch'][0]['urls'][0] ?? null )
+				&& $where === ( $serialized['prerender'][0]['where'] ?? null )
+				&& ! str_contains( (string) $json, $list_id )
+				&& ! str_contains( (string) $json, $doc_id )
+				&& count( $diagnostics ) >= count( $invalid_results ) + 1
+				&& false === \has_action( 'doing_it_wrong_run', $diag_action ),
+			'WP_Speculation_Rules accepts valid list/document rules, rejects invalid and duplicate rules, and omits IDs from JSON',
+			array(
+				'validList'       => $valid_list,
+				'duplicateList'   => $duplicate_list,
+				'validDocument'   => $valid_document,
+				'invalidResults'  => $invalid_results,
+				'serialized'      => $serialized,
+				'json'            => $json,
+				'diagnosticCount' => count( $diagnostics ),
+				'diagnostics'     => array_slice( $diagnostics, 0, 10 ),
+				'hasAction'       => \has_action( 'doing_it_wrong_run', $diag_action ),
+			)
+		);
+
+		return $ctx->result(
+			'frontend-features.speculation.rules-class-validation',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 4 ) )
 		);
 	}
 
