@@ -38,6 +38,7 @@ final class CommunityEventsSurface {
 			$rows[] = self::check_client_ip_anonymization( $ctx->fork( 'client-ip' ) );
 			$rows[] = self::check_request_arg_minimization( $ctx->fork( 'request-args' ) );
 			$rows[] = self::check_cache_keys_and_event_trimming( $ctx->fork( 'cache-trim' ) );
+			$rows[] = self::check_coordinates_and_cache_expiration( $ctx->fork( 'coordinates-cache-expiration' ) );
 			$rows[] = self::check_successful_api_fetch_and_cache_hit( $ctx->fork( 'success-cache' ) );
 			$rows[] = self::check_api_failure_paths( $ctx->fork( 'failure-paths' ) );
 		} catch ( \Throwable $e ) {
@@ -75,6 +76,7 @@ final class CommunityEventsSurface {
 				'add_filter',
 				'remove_filter',
 				'get_site_transient',
+				'has_filter',
 				'set_site_transient',
 				'wp_cache_flush',
 				'wp_http_supports',
@@ -338,6 +340,129 @@ final class CommunityEventsSurface {
 		);
 	}
 
+	private static function check_coordinates_and_cache_expiration( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$coords   = self::coordinate_location( $ctx->fork( 'coords' ), 'Coordinate Match' );
+		$probe    = self::probe( 7100 + $ctx->iteration(), $coords );
+
+		$same             = $probe->fuzz_coordinates_match( $coords, $coords );
+		$same_numeric     = $probe->fuzz_coordinates_match(
+			$coords,
+			array(
+				'latitude'  => (float) $coords['latitude'],
+				'longitude' => (float) $coords['longitude'],
+			)
+		);
+		$missing_longitude = $probe->fuzz_coordinates_match(
+			$coords,
+			array(
+				'latitude' => $coords['latitude'],
+			)
+		);
+		$different         = $probe->fuzz_coordinates_match(
+			$coords,
+			array(
+				'latitude'  => $coords['latitude'],
+				'longitude' => number_format( ( (float) $coords['longitude'] ) + 0.0001, 4, '.', '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $same
+				&& false === $same_numeric
+				&& false === $missing_longitude
+				&& false === $different,
+			'coordinate matching is strict and rejects missing or drifted longitude pairs',
+			array(
+				'coords'           => $coords,
+				'same'             => $same,
+				'sameNumeric'      => $same_numeric,
+				'missingLongitude' => $missing_longitude,
+				'different'        => $different,
+			)
+		);
+
+		$key = $probe->fuzz_transient_key( $coords );
+		if ( false === $key ) {
+			return $ctx->fail(
+				'community-events.coordinates-and-cache-expiration',
+				array(
+					'coords' => $coords,
+					'key'    => $key,
+				)
+			);
+		}
+
+		$expiration_events = array();
+		$expiration_filter = static function ( int $expiration, $value, string $transient ) use ( &$expiration_events ): int {
+			$expiration_events[] = array(
+				'expiration' => $expiration,
+				'transient'  => $transient,
+				'eventCount' => isset( $value['events'] ) && is_array( $value['events'] ) ? count( $value['events'] ) : null,
+			);
+
+			return $expiration;
+		};
+		$hook              = 'expiration_of_site_transient_' . $key;
+		$events            = array(
+			'location' => $coords,
+			'events'   => self::event_corpus( $ctx->fork( 'expiration-events' ) ),
+		);
+		$negative_events   = $events;
+		$negative_events['expiration_marker'] = 'negative-' . $ctx->seed();
+		$negative_expire   = -1 * $ctx->int( 1, 7200 );
+		$expected_default  = HOUR_IN_SECONDS * 12;
+		$expected_negative = abs( $negative_expire );
+
+		\add_filter( $hook, $expiration_filter, 10, 3 );
+		try {
+			$default_set  = $probe->fuzz_cache_events( $events, false );
+			$negative_set = $probe->fuzz_cache_events( $negative_events, $negative_expire );
+		} finally {
+			$removed = \remove_filter( $hook, $expiration_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			true === $default_set
+				&& true === $negative_set
+				&& array(
+					array(
+						'expiration' => $expected_default,
+						'transient'  => $key,
+						'eventCount' => 5,
+					),
+					array(
+						'expiration' => $expected_negative,
+						'transient'  => $key,
+						'eventCount' => 5,
+					),
+				) === $expiration_events
+				&& $removed
+				&& false === \has_filter( $hook, $expiration_filter ),
+			'cache_events uses the default half-day expiration and absint-normalizes explicit expirations',
+			array(
+				'key'                => $key,
+				'negativeExpiration' => $negative_expire,
+				'events'             => $expiration_events,
+				'defaultSet'         => $default_set,
+				'negativeSet'        => $negative_set,
+				'removed'            => $removed ?? null,
+				'hasAfter'           => \has_filter( $hook, $expiration_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'community-events.coordinates-and-cache-expiration',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'key'      => $key,
+			)
+		);
+	}
+
 	private static function check_successful_api_fetch_and_cache_hit( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$cases    = array(
@@ -580,6 +705,10 @@ final class CommunityEventsSurface {
 
 			public function fuzz_trim_events( array $events ): array {
 				return $this->trim_events( $events );
+			}
+
+			public function fuzz_coordinates_match( array $a, array $b ): bool {
+				return $this->coordinates_match( $a, $b );
 			}
 		};
 	}

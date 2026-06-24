@@ -119,8 +119,9 @@ database, network requests, or a configured site.
   helpers, and comment cookies.
 - `community-events`: no-network Community Events API client coverage,
   including IP header selection and anonymization, minimal request bodies,
-  transient key/cache behavior, event trimming and WordCamp pinning, response
-  normalization, and API error contracts.
+  transient key/cache behavior, strict coordinate matching, cache expiration
+  normalization, event trimming and WordCamp pinning, response normalization,
+  and API error contracts.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, moderation short-circuits, update/status transition hooks,
   trash/untrash and spam/unspam restoration, and WP_Error failure paths without
