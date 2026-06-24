@@ -16,8 +16,8 @@ database, network requests, or a configured site.
   schema validation, permission checks, execution, validation filters, callback
   exception handling, and unregister behavior.
 - `account-security`: no-DB account recovery and security APIs, including
-  application password lifecycle/hash behavior, recovery key/cookie validation,
-  and paused extension storage transitions.
+  application password lifecycle/hash/authentication behavior, recovery
+  key/cookie validation, and paused extension storage transitions.
 - `admin-ajax`: bounded admin-AJAX response helper coverage, including
   captured `wp_die()` handlers, JSON response helpers, `WP_Ajax_Response`
   XML boundaries, nonce/capability failures, selected safe AJAX handlers,

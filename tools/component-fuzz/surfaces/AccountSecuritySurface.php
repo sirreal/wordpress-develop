@@ -33,6 +33,7 @@ final class AccountSecuritySurface {
 
 			$rows[] = self::check_application_password_lifecycle( $ctx->fork( 'application-password-lifecycle' ) );
 			$rows[] = self::check_application_password_chunking_and_hashes( $ctx->fork( 'application-password-hashes' ) );
+			$rows[] = self::check_application_password_authentication( $ctx->fork( 'application-password-authentication' ) );
 			$rows[] = self::check_recovery_key_service( $ctx->fork( 'recovery-key-service' ) );
 			$rows[] = self::check_recovery_cookie_service( $ctx->fork( 'recovery-cookie-service' ) );
 			$rows[] = self::check_paused_extension_storage( $ctx->fork( 'paused-extension-storage' ) );
@@ -94,23 +95,33 @@ final class AccountSecuritySurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'delete_option',
+				'get_user_by',
 				'get_network_option',
 				'get_option',
 				'get_user_meta',
+				'has_filter',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'sanitize_text_field',
 				'update_network_option',
 				'update_option',
 				'update_user_meta',
 				'wp_check_password',
+				'wp_authenticate_application_password',
+				'wp_cache_delete',
 				'wp_fast_hash',
 				'wp_generate_password',
 				'wp_generate_uuid4',
 				'wp_hash_password',
+				'wp_insert_user',
+				'wp_is_application_passwords_available',
+				'wp_is_application_passwords_available_for_user',
 				'wp_recovery_mode',
+				'wp_validate_application_password',
 				'wp_verify_fast_hash',
 			) as $function
 		) {
@@ -454,6 +465,266 @@ final class AccountSecuritySurface {
 			array(
 				'cases'    => count( $passwords ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_application_password_authentication( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = self::token( $ctx->fork( 'user-token' ), 10 );
+		$login    = 'cfz_app_auth_' . $ctx->iteration() . '_' . $token;
+		$email    = $login . '@example.test';
+		$user_id  = \wp_insert_user(
+			array(
+				'user_login' => $login,
+				'user_pass'  => 'component-fuzz-pass',
+				'user_email' => $email,
+				'role'       => 'subscriber',
+			)
+		);
+
+		if ( ! is_int( $user_id ) ) {
+			return self::row(
+				$ctx,
+				'account-security.application-password.authentication-flow',
+				false,
+				array(
+					'stage'  => 'insert-user',
+					'result' => self::describe_value( $user_id ),
+				)
+			);
+		}
+
+		$self_ip            = self::ip_case( $ctx->fork( 'success-ip' ) );
+		$api_request        = false;
+		$site_available     = true;
+		$user_available     = true;
+		$reject_valid_match = false;
+		$did_authenticate   = array();
+		$failed_auth        = array();
+		$password_checks    = array();
+		$added_email_filter = false;
+
+		$api_request_filter = static function () use ( &$api_request ): bool {
+			return $api_request;
+		};
+		$site_available_filter = static function () use ( &$site_available ): bool {
+			return $site_available;
+		};
+		$user_available_filter = static function ( $available, $user ) use ( &$user_available, $user_id ): bool {
+			unset( $available );
+			return $user instanceof \WP_User && $user->ID === $user_id && $user_available;
+		};
+		$did_authenticate_action = static function ( $user, $item ) use ( &$did_authenticate ): void {
+			$did_authenticate[] = array(
+				'userId' => $user instanceof \WP_User ? $user->ID : null,
+				'uuid'   => is_array( $item ) ? ( $item['uuid'] ?? null ) : null,
+			);
+		};
+		$failed_auth_action = static function ( $error ) use ( &$failed_auth ): void {
+			$failed_auth[] = \is_wp_error( $error ) ? $error->get_error_code() : get_debug_type( $error );
+		};
+		$password_error_action = static function ( $error, $user, $item, $password ) use ( &$password_checks, &$reject_valid_match, $user_id ): void {
+			$password_checks[] = array(
+				'userId'   => $user instanceof \WP_User ? $user->ID : null,
+				'uuid'     => is_array( $item ) ? ( $item['uuid'] ?? null ) : null,
+				'password' => $password,
+			);
+
+			if ( $reject_valid_match && $error instanceof \WP_Error && $user instanceof \WP_User && $user->ID === $user_id ) {
+				$error->add( 'component_fuzz_rejected', 'Synthetic application password constraint rejected the login.' );
+			}
+		};
+
+		\add_filter( 'application_password_is_api_request', $api_request_filter );
+		\add_filter( 'wp_is_application_passwords_available', $site_available_filter );
+		\add_filter( 'wp_is_application_passwords_available_for_user', $user_available_filter, 10, 2 );
+		\add_action( 'application_password_did_authenticate', $did_authenticate_action, 10, 2 );
+		\add_action( 'application_password_failed_authentication', $failed_auth_action );
+		\add_action( 'wp_authenticate_application_password_errors', $password_error_action, 10, 4 );
+
+		try {
+			if ( false === \has_filter( 'is_email', 'wp_is_ascii_email' ) && false === \has_filter( 'is_email', 'wp_is_unicode_email' ) ) {
+				\add_filter( 'is_email', 'wp_is_ascii_email', 10, 3 );
+				$added_email_filter = true;
+			}
+
+			self::$application_passwords[ $user_id ] = array();
+			\delete_option( \WP_Application_Passwords::OPTION_KEY_IN_USE );
+			\wp_cache_delete( \WP_Application_Passwords::OPTION_KEY_IN_USE, 'options' );
+
+			$created = \WP_Application_Passwords::create_new_application_password(
+				$user_id,
+				array(
+					'name'   => self::name_case( $ctx->fork( 'auth-app-name' ) )['raw'],
+					'app_id' => self::app_id_case( $ctx->fork( 'auth-app-id' ) ),
+				)
+			);
+
+			$plain_password = is_array( $created ) && isset( $created[0] ) ? (string) $created[0] : '';
+			$item           = is_array( $created ) && isset( $created[1] ) && is_array( $created[1] ) ? $created[1] : array();
+			$uuid           = (string) ( $item['uuid'] ?? '' );
+			$chunked        = \WP_Application_Passwords::chunk_password( $plain_password );
+			$spaced         = " \t" . $chunked . "\n ";
+			$wrong_password = self::mutate_secret( $plain_password );
+
+			self::collect_failure(
+				$failures,
+				'' !== $plain_password && '' !== $uuid && \WP_Application_Passwords::is_in_use(),
+				'application password fixture is created and marks application passwords in use',
+				array(
+					'created' => self::describe_value( $created ),
+					'inUse'   => \WP_Application_Passwords::is_in_use(),
+				)
+			);
+
+			$non_api = \wp_authenticate_application_password( null, $login, $spaced );
+			self::collect_failure(
+				$failures,
+				null === $non_api && array() === $did_authenticate && array() === $failed_auth && array() === $password_checks,
+				'non-API requests return the incoming null user without checking stored passwords or firing auth hooks',
+				array(
+					'result'         => self::describe_value( $non_api ),
+					'didAuthenticate' => self::describe_value( $did_authenticate ),
+					'failedAuth'     => self::describe_value( $failed_auth ),
+					'passwordChecks' => self::describe_value( $password_checks ),
+				)
+			);
+
+			$api_request            = true;
+			$_SERVER['REMOTE_ADDR'] = $self_ip;
+			$auth_start             = time();
+			$success                = \wp_authenticate_application_password( null, $login, $spaced );
+			$auth_finished          = time();
+			$used_item              = \WP_Application_Passwords::get_user_application_password( $user_id, $uuid );
+			$first_did_count        = count( $did_authenticate );
+			$first_failed_count     = count( $failed_auth );
+
+			self::collect_failure(
+				$failures,
+				$success instanceof \WP_User
+					&& $success->ID === $user_id
+					&& 1 === $first_did_count
+					&& 0 === $first_failed_count
+					&& isset( $did_authenticate[0]['uuid'] )
+					&& $uuid === $did_authenticate[0]['uuid']
+					&& isset( $password_checks[0]['password'] )
+					&& $plain_password === $password_checks[0]['password']
+					&& is_array( $used_item )
+					&& is_int( $used_item['last_used'] ?? null )
+					&& $used_item['last_used'] >= $auth_start
+					&& $used_item['last_used'] <= $auth_finished
+					&& $self_ip === ( $used_item['last_ip'] ?? null ),
+				'API authentication strips readable chunking, fires success hooks, and records first-use IP/time',
+				array(
+					'success'         => self::describe_value( $success ),
+					'uuid'            => $uuid,
+					'didAuthenticate' => self::describe_value( $did_authenticate ),
+					'failedAuth'      => self::describe_value( $failed_auth ),
+					'passwordChecks'  => self::describe_value( $password_checks ),
+					'usedItem'        => self::describe_value( $used_item ),
+					'authStart'       => $auth_start,
+					'authFinished'    => $auth_finished,
+				)
+			);
+
+			$wrong = \wp_authenticate_application_password( null, $login, $wrong_password );
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $wrong, 'incorrect_password' )
+					&& in_array( 'incorrect_password', $failed_auth, true )
+					&& $first_did_count === count( $did_authenticate ),
+				'incorrect passwords fail closed and fire only the failure hook',
+				array(
+					'wrong'           => self::describe_value( $wrong ),
+					'didAuthenticate' => self::describe_value( $did_authenticate ),
+					'failedAuth'      => self::describe_value( $failed_auth ),
+				)
+			);
+
+			$reject_valid_match = true;
+			$rejected           = \wp_authenticate_application_password( null, $login, $spaced );
+			$reject_valid_match = false;
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $rejected, 'component_fuzz_rejected' )
+					&& in_array( 'component_fuzz_rejected', $failed_auth, true )
+					&& $first_did_count === count( $did_authenticate ),
+				'constraint hook can reject a matched password before usage is accepted',
+				array(
+					'rejected'        => self::describe_value( $rejected ),
+					'didAuthenticate' => self::describe_value( $did_authenticate ),
+					'failedAuth'      => self::describe_value( $failed_auth ),
+					'passwordChecks'  => self::describe_value( $password_checks ),
+				)
+			);
+
+			$site_available = false;
+			$site_disabled  = \wp_authenticate_application_password( null, $login, $spaced );
+			$site_available = true;
+			$user_available = false;
+			$user_disabled  = \wp_authenticate_application_password( null, $login, $spaced );
+			$user_available = true;
+			$unknown_email  = \wp_authenticate_application_password( null, 'missing@example.com', $spaced );
+			$unknown_login  = \wp_authenticate_application_password( null, 'missing account', $spaced );
+
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $site_disabled, 'application_passwords_disabled' )
+					&& self::is_error_code( $user_disabled, 'application_passwords_disabled_for_user' )
+					&& self::is_error_code( $unknown_email, 'invalid_email' )
+					&& self::is_error_code( $unknown_login, 'invalid_username' ),
+				'availability and identity failures return their documented error codes',
+				array(
+					'siteDisabled' => self::describe_value( $site_disabled ),
+					'userDisabled' => self::describe_value( $user_disabled ),
+					'unknownEmail' => self::describe_value( $unknown_email ),
+					'unknownLogin' => self::describe_value( $unknown_login ),
+					'failedAuth'   => self::describe_value( $failed_auth ),
+				)
+			);
+
+			$_SERVER['PHP_AUTH_USER'] = $login;
+			$_SERVER['PHP_AUTH_PW']   = $spaced;
+			$validated                = \wp_validate_application_password( false );
+			$already_validated        = \wp_validate_application_password( $user_id );
+			unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] );
+
+			self::collect_failure(
+				$failures,
+				$user_id === $validated && $user_id === $already_validated && $first_did_count + 1 === count( $did_authenticate ),
+				'server Basic Auth credentials validate to the user ID and non-empty input users short-circuit',
+				array(
+					'validated'        => self::describe_value( $validated ),
+					'alreadyValidated' => self::describe_value( $already_validated ),
+					'didAuthenticate'  => self::describe_value( $did_authenticate ),
+					'failedAuth'       => self::describe_value( $failed_auth ),
+				)
+			);
+		} finally {
+			\remove_filter( 'application_password_is_api_request', $api_request_filter );
+			\remove_filter( 'wp_is_application_passwords_available', $site_available_filter );
+			\remove_filter( 'wp_is_application_passwords_available_for_user', $user_available_filter, 10 );
+			\remove_action( 'application_password_did_authenticate', $did_authenticate_action, 10 );
+			\remove_action( 'application_password_failed_authentication', $failed_auth_action, 10 );
+			\remove_action( 'wp_authenticate_application_password_errors', $password_error_action, 10 );
+			if ( $added_email_filter ) {
+				\remove_filter( 'is_email', 'wp_is_ascii_email', 10 );
+			}
+			unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] );
+		}
+
+		return self::row(
+			$ctx,
+			'account-security.application-password.authentication-flow',
+			array() === $failures,
+			array(
+				'userId'          => $user_id,
+				'login'           => $login,
+				'failures'        => array_slice( $failures, 0, 5 ),
+				'successEvents'   => count( $did_authenticate ),
+				'failureEvents'   => $failed_auth,
+				'constraintCalls' => count( $password_checks ),
 			)
 		);
 	}
