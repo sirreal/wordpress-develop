@@ -38,6 +38,7 @@ final class DiscoverySurface {
 			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
 			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
 			$rows[] = self::check_sitemap_renderer_xml( $ctx );
+			$rows[] = self::check_sitemap_renderer_stylesheet_filters( $ctx );
 			$rows[] = self::check_sitemap_max_url_filter( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -462,6 +463,119 @@ final class DiscoverySurface {
 			array() === $failures,
 			array(
 				'urlCount' => count( $urls ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_sitemap_renderer_stylesheet_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$token              = substr( hash( 'sha1', self::NAME . ':stylesheet:' . $ctx->seed() ), 0, 12 );
+		$sitemap_style_base = 'https://example.test/styles/sitemap-' . $token . '.xsl';
+		$index_style_base   = 'https://example.test/styles/index-' . $token . '.xsl';
+		$sitemap_style_url  = $sitemap_style_base . '?unsafe=<tag>&quote="&q=' . rawurlencode( $ctx->text( 0, 20 ) );
+		$index_style_url    = $index_style_base . '?unsafe=<tag>&quote="&q=' . rawurlencode( $ctx->fork( 'index-style' )->text( 0, 20 ) );
+		$seen               = array();
+
+		$sitemap_filter = static function ( string $stylesheet_url ) use ( $sitemap_style_url, &$seen ): string {
+			$seen[] = array(
+				'hook' => 'sitemap',
+				'url'  => $stylesheet_url,
+			);
+
+			return $sitemap_style_url;
+		};
+
+		$index_filter = static function ( string $stylesheet_url ) use ( $index_style_url, &$seen ): string {
+			$seen[] = array(
+				'hook' => 'index',
+				'url'  => $stylesheet_url,
+			);
+
+			return $index_style_url;
+		};
+
+		\remove_filter( 'wp_sitemaps_stylesheet_url', '__return_false', 0 );
+		\remove_filter( 'wp_sitemaps_stylesheet_index_url', '__return_false', 0 );
+
+		try {
+			\add_filter( 'wp_sitemaps_stylesheet_url', $sitemap_filter, 10, 1 );
+			\add_filter( 'wp_sitemaps_stylesheet_index_url', $index_filter, 10, 1 );
+
+			$renderer = new \WP_Sitemaps_Renderer();
+			$xml      = $renderer->get_sitemap_xml(
+				array(
+					array(
+						'loc'     => 'https://example.test/content/style?unsafe=<tag>&ok=1',
+						'lastmod' => '2026-06-24T00:00:00+00:00',
+					),
+				)
+			);
+			$index    = $renderer->get_sitemap_index_xml(
+				array(
+					array(
+						'loc'     => 'https://example.test/wp-sitemap-posts-post-1.xml',
+						'lastmod' => '2026-06-24T00:00:00+00:00',
+					),
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_sitemaps_stylesheet_url', $sitemap_filter, 10 );
+			\remove_filter( 'wp_sitemaps_stylesheet_index_url', $index_filter, 10 );
+			\add_filter( 'wp_sitemaps_stylesheet_url', '__return_false', 0 );
+			\add_filter( 'wp_sitemaps_stylesheet_index_url', '__return_false', 0 );
+		}
+
+		$parsed_xml   = is_string( $xml ) ? @simplexml_load_string( $xml ) : false;
+		$parsed_index = is_string( $index ) ? @simplexml_load_string( $index ) : false;
+
+		self::collect_failure(
+			$failures,
+			array( 'sitemap', 'index' ) === array_column( $seen, 'hook' )
+				&& is_string( $xml )
+				&& false !== $parsed_xml
+				&& 1 === substr_count( $xml, '<?xml-stylesheet' )
+				&& str_contains( $xml, $sitemap_style_base )
+				&& ! str_contains( $xml, $index_style_base )
+				&& ! str_contains( $xml, '<tag>' )
+				&& ! str_contains( $xml, 'quote="' ),
+			'sitemap renderer includes filtered stylesheet processing instruction with escaped URL',
+			array(
+				'seen'      => $seen,
+				'styleBase' => $sitemap_style_base,
+				'xml'       => self::describe_string( is_string( $xml ) ? $xml : '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $index )
+				&& false !== $parsed_index
+				&& 1 === substr_count( $index, '<?xml-stylesheet' )
+				&& str_contains( $index, $index_style_base )
+				&& ! str_contains( $index, $sitemap_style_base )
+				&& ! str_contains( $index, '<tag>' )
+				&& ! str_contains( $index, 'quote="' )
+				&& false === \has_filter( 'wp_sitemaps_stylesheet_url', $sitemap_filter )
+				&& false === \has_filter( 'wp_sitemaps_stylesheet_index_url', $index_filter )
+				&& false !== \has_filter( 'wp_sitemaps_stylesheet_url', '__return_false' )
+				&& false !== \has_filter( 'wp_sitemaps_stylesheet_index_url', '__return_false' ),
+			'sitemap index renderer includes its own filtered stylesheet and restores no-stylesheet filters',
+			array(
+				'styleBase'      => $index_style_base,
+				'index'          => self::describe_string( is_string( $index ) ? $index : '' ),
+				'sitemapFilter'  => \has_filter( 'wp_sitemaps_stylesheet_url', '__return_false' ),
+				'indexFilter'    => \has_filter( 'wp_sitemaps_stylesheet_index_url', '__return_false' ),
+				'customSitemap'  => \has_filter( 'wp_sitemaps_stylesheet_url', $sitemap_filter ),
+				'customIndex'    => \has_filter( 'wp_sitemaps_stylesheet_index_url', $index_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.renderer-stylesheet-filters',
+			array() === $failures,
+			array(
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
