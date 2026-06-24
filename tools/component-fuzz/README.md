@@ -335,8 +335,9 @@ database, network requests, or a configured site.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen
-  option registration/rendering, filter locality, and state restoration without
-  redirecting or dying request handlers.
+  option registration/rendering, layout column rendering and legacy filters,
+  filter locality, and state restoration without redirecting or dying request
+  handlers.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
   cleanup, archive/feed link filters, and status filtering.

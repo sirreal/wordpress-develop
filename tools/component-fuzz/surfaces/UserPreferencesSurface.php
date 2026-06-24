@@ -33,6 +33,7 @@ final class UserPreferencesSurface {
 			$rows[] = self::check_hidden_meta_box_preferences( $ctx->fork( 'hidden-metaboxes' ) );
 			$rows[] = self::check_meta_box_order_preferences( $ctx->fork( 'metabox-order' ) );
 			$rows[] = self::check_screen_option_registration( $ctx->fork( 'screen-options' ) );
+			$rows[] = self::check_screen_layout_rendering( $ctx->fork( 'screen-layout' ) );
 			$rows[] = $ctx->skip(
 				'user-preferences.exiting-request-handlers',
 				'set_screen_options() redirects and AJAX preference handlers call wp_die(); lower-level helpers are covered directly.'
@@ -737,6 +738,146 @@ final class UserPreferencesSurface {
 		);
 	}
 
+	private static function check_screen_layout_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$user_id        = self::seed_user( $ctx );
+		$max_columns    = 4;
+		$default_column = $ctx->int( 1, $max_columns );
+		$saved_column   = $default_column === $max_columns ? 1 : $max_columns;
+		$registered_id  = 'cfz_user_prefs_layout_' . self::slug( $ctx, 'registered' );
+		$saved_id       = 'cfz_user_prefs_saved_layout_' . self::slug( $ctx, 'saved' );
+		$legacy_id      = 'cfz_user_prefs_legacy_layout_' . self::slug( $ctx, 'legacy' );
+		$legacy_max     = 3;
+		$legacy_saved   = $ctx->int( 1, $legacy_max );
+		$legacy_events  = array();
+		$legacy_filter  = static function ( array $columns, string $screen_id, \WP_Screen $screen ) use ( &$legacy_events, $legacy_id, $legacy_max ): array {
+			$legacy_events[] = array(
+				'id'     => $screen_id,
+				'screen' => $screen->id,
+			);
+
+			if ( $legacy_id === $screen_id ) {
+				$columns[ $legacy_id ] = $legacy_max;
+			}
+
+			return $columns;
+		};
+
+		\wp_set_current_user( $user_id );
+
+		\set_current_screen( $registered_id );
+		$registered_screen = \get_current_screen();
+		\add_screen_option(
+			'layout_columns',
+			array(
+				'max'     => $max_columns,
+				'default' => $default_column,
+			)
+		);
+		$registered_output  = self::capture_output(
+			static function () use ( $registered_screen ): void {
+				$registered_screen->render_screen_meta();
+			}
+		);
+		$registered_columns = $registered_screen->get_columns();
+
+		\update_user_option( $user_id, 'screen_layout_' . $saved_id, $saved_column, false );
+		\wp_set_current_user( $user_id );
+		\set_current_screen( $saved_id );
+		$saved_screen = \get_current_screen();
+		\add_screen_option(
+			'layout_columns',
+			array(
+				'max'     => $max_columns,
+				'default' => $default_column,
+			)
+		);
+		$saved_output  = self::capture_output(
+			static function () use ( $saved_screen ): void {
+				$saved_screen->render_screen_meta();
+			}
+		);
+		$saved_columns = $saved_screen->get_columns();
+
+		\update_user_option( $user_id, 'screen_layout_' . $legacy_id, $legacy_saved, false );
+		\wp_set_current_user( $user_id );
+		\add_filter( 'screen_layout_columns', $legacy_filter, 10, 3 );
+		try {
+			\set_current_screen( $legacy_id );
+			$legacy_screen = \get_current_screen();
+			$legacy_output = self::capture_output(
+				static function () use ( $legacy_screen ): void {
+					$legacy_screen->render_screen_meta();
+				}
+			);
+			$legacy_columns = $legacy_screen->get_columns();
+		} finally {
+			\remove_filter( 'screen_layout_columns', $legacy_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$registered_screen instanceof \WP_Screen
+				&& $default_column === $registered_columns
+				&& range( 1, $max_columns ) === self::screen_layout_radio_values( $registered_output )
+				&& array( $default_column ) === self::screen_layout_checked_values( $registered_output )
+				&& str_contains( $registered_output, "class='columns-prefs'" )
+				&& ! str_contains( $registered_output, '<script' ),
+			'WP_Screen::render_screen_meta() renders registered layout column defaults with bounded radio choices',
+			array(
+				'screenId'   => $registered_id,
+				'default'    => $default_column,
+				'columns'    => $registered_columns,
+				'values'     => self::screen_layout_radio_values( $registered_output ),
+				'checked'    => self::screen_layout_checked_values( $registered_output ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$saved_column === $saved_columns
+				&& range( 1, $max_columns ) === self::screen_layout_radio_values( $saved_output )
+				&& array( $saved_column ) === self::screen_layout_checked_values( $saved_output ),
+			'WP_Screen::render_screen_meta() prefers saved user layout columns over registered defaults',
+			array(
+				'screenId' => $saved_id,
+				'default'  => $default_column,
+				'saved'    => $saved_column,
+				'columns'  => $saved_columns,
+				'values'   => self::screen_layout_radio_values( $saved_output ),
+				'checked'  => self::screen_layout_checked_values( $saved_output ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array( $legacy_saved ) === self::screen_layout_checked_values( $legacy_output )
+				&& range( 1, $legacy_max ) === self::screen_layout_radio_values( $legacy_output )
+				&& $legacy_saved === $legacy_columns
+				&& array( array( 'id' => $legacy_id, 'screen' => $legacy_id ) ) === $legacy_events
+				&& false === \has_filter( 'screen_layout_columns', $legacy_filter ),
+			'legacy screen_layout_columns filters provision layout columns and are removed after rendering',
+			array(
+				'screenId' => $legacy_id,
+				'saved'    => $legacy_saved,
+				'columns'  => $legacy_columns,
+				'values'   => self::screen_layout_radio_values( $legacy_output ),
+				'checked'  => self::screen_layout_checked_values( $legacy_output ),
+				'events'   => $legacy_events,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'user-preferences.screen-layout.rendering-and-legacy-filter',
+			$failures,
+			array(
+				'userId'       => $user_id,
+				'registeredId' => $registered_id,
+				'savedId'      => $saved_id,
+				'legacyId'     => $legacy_id,
+			)
+		);
+	}
+
 	private static function seed_user( \ComponentFuzz\FuzzContext $ctx, array $overrides = array() ): int {
 		$login = 'cfz_pref_' . self::slug( $ctx, 'user' );
 		$id    = \wp_insert_user(
@@ -849,6 +990,39 @@ final class UserPreferencesSurface {
 		}
 
 		return null;
+	}
+
+	private static function screen_layout_radio_values( string $html ): array {
+		if ( ! preg_match_all( "/<input[^>]+name='screen_columns'[^>]+>/", $html, $matches ) ) {
+			return array();
+		}
+
+		$values = array();
+		foreach ( $matches[0] as $tag ) {
+			if ( preg_match( "/value='([0-9]+)'/", $tag, $value_match ) ) {
+				$values[] = (int) $value_match[1];
+			}
+		}
+
+		return $values;
+	}
+
+	private static function screen_layout_checked_values( string $html ): array {
+		if ( ! preg_match_all( "/<input[^>]+name='screen_columns'[^>]+>/", $html, $matches ) ) {
+			return array();
+		}
+
+		$values = array();
+		foreach ( $matches[0] as $tag ) {
+			if (
+				( str_contains( $tag, "checked='checked'" ) || str_contains( $tag, 'checked="checked"' ) )
+				&& preg_match( "/value='([0-9]+)'/", $tag, $value_match )
+			) {
+				$values[] = (int) $value_match[1];
+			}
+		}
+
+		return $values;
 	}
 
 	private static function contains_class( string $class_string, string $class ): bool {
