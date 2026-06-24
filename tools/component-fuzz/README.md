@@ -258,10 +258,10 @@ database, network requests, or a configured site.
   `$l10n_unloaded`, registry, controller, current-user, and filter globals.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
-  handoff, UTF-8 local-part recipient/display-name preservation, array and
-  string header parsing, newline-delimited attachments and embeds, reusable
-  mailer cleanup/reset behavior, success/failure actions, and emoji email body
-  staticization.
+  handoff, UTF-8 local-part recipient/display-name preservation, IDN domain
+  punycode handoff, array and string header parsing, newline-delimited
+  attachments and embeds, reusable mailer cleanup/reset behavior,
+  success/failure actions, and emoji email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,

@@ -30,6 +30,7 @@ final class MailSurface {
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
 			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
 			$rows[] = self::check_unicode_recipient_handoff( $ctx->fork( 'unicode' ) );
+			$rows[] = self::check_unicode_domain_recipient_handoff( $ctx->fork( 'unicode-domain' ) );
 			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
 			$rows[] = self::check_phpmailer_failure_action( $ctx->fork( 'failure' ) );
 			$rows[] = self::check_staticize_emoji_for_email( $ctx->fork( 'emoji' ) );
@@ -460,6 +461,158 @@ final class MailSurface {
 		return self::row( $ctx, 'mail.phpmailer.unicode-recipient-handoff', $failures );
 	}
 
+	private static function check_unicode_domain_recipient_handoff( \ComponentFuzz\FuzzContext $ctx ): array {
+		if (
+			! function_exists( 'is_email' )
+			|| ! function_exists( 'idn_to_ascii' )
+			|| ! function_exists( 'idn_to_utf8' )
+			|| ! function_exists( 'wp_is_unicode_email' )
+			|| ! class_exists( 'WP_Email_Address' )
+		) {
+			return $ctx->skip( 'mail.phpmailer.unicode-domain-recipient-handoff', 'Unicode email or IDN APIs are unavailable.' );
+		}
+
+		$failures       = array();
+		$token          = preg_replace( '/[^a-z0-9-]+/', '-', strtolower( $ctx->identifier( 4, 8 ) ) );
+		$token          = trim( (string) $token, '-' );
+		$token          = '' === $token ? 'idn' . ( $ctx->seed() % 10000 ) : $token;
+		$unicode_domain = "gr\u{00E5}.org";
+		$ascii_domain   = idn_to_ascii( $unicode_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+		$decoded_domain = false === $ascii_domain ? false : idn_to_utf8( $ascii_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+
+		if ( false === $ascii_domain || false === $decoded_domain ) {
+			return $ctx->skip(
+				'mail.phpmailer.unicode-domain-recipient-handoff',
+				'IDN conversion failed for the generated domain.',
+				array( 'domain' => self::describe_string( $unicode_domain ) )
+			);
+		}
+
+		$unicode_local   = "m\u{00F8}de-{$token}";
+		$punycode_local  = 'books-' . $token;
+		$reply_local     = "svar-{$token}";
+		$unicode_email   = $unicode_local . '@' . $unicode_domain;
+		$punycode_email  = $punycode_local . '@' . $ascii_domain;
+		$reply_email     = $reply_local . '@' . $unicode_domain;
+		$unicode_name    = "\u{00C5}sa Domain";
+		$punycode_name   = "B\u{00FC}cher Copy";
+		$reply_name      = "Gr\u{00E5} Reply";
+		$subject         = "Unicode Domain Subject \u{2603} {$token}";
+		$message         = "Unicode domain body {$unicode_domain} {$ascii_domain} \u{2603}";
+		$succeeded       = array();
+		$had_unicode     = false !== \has_filter( 'is_email', 'wp_is_unicode_email' );
+		$previous_validator = \PHPMailer\PHPMailer\PHPMailer::$validator;
+		$success_action  = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+
+		if ( ! $had_unicode ) {
+			\add_filter( 'is_email', 'wp_is_unicode_email', 10, 3 );
+		}
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']    = self::new_mailer();
+		\PHPMailer\PHPMailer\PHPMailer::$validator = static function ( $email ): bool {
+			return (bool) \is_email( $email );
+		};
+
+		$unicode_address = \WP_Email_Address::from_string( $unicode_email, 'unicode' );
+		$punycode_address = \WP_Email_Address::from_string( $punycode_email, 'unicode' );
+		$reply_address   = \WP_Email_Address::from_string( $reply_email, 'unicode' );
+		$unicode_is      = \is_email( $unicode_email );
+		$punycode_is     = \is_email( $punycode_email );
+		$reply_is        = \is_email( $reply_email );
+
+		\add_action( 'wp_mail_succeeded', $success_action );
+		try {
+			$result = \wp_mail(
+				array( $unicode_name . ' <' . $unicode_email . '>' ),
+				$subject,
+				$message,
+				array(
+					'From: Unicode Domain Sender <sender@example.test>',
+					'Cc: ' . $punycode_name . ' <' . $punycode_email . '>',
+					'Reply-To: ' . $reply_name . ' <' . $reply_email . '>',
+					'Content-Type: text/plain; charset=UTF-8',
+					'X-IDN-Token: ' . $token,
+				)
+			);
+		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+			\PHPMailer\PHPMailer\PHPMailer::$validator = $previous_validator;
+			if ( ! $had_unicode ) {
+				\remove_filter( 'is_email', 'wp_is_unicode_email', 10 );
+			}
+		}
+
+		$sent         = MailSurfaceMailer::$sent[0] ?? array();
+		$succeeded_to = (array) ( $succeeded[0]['to'] ?? array() );
+		$unicode_handoff = $unicode_address instanceof \WP_Email_Address ? $unicode_address->get_ascii_address() : $unicode_email;
+		$punycode_handoff = $punycode_address instanceof \WP_Email_Address ? $punycode_address->get_ascii_address() : $punycode_email;
+		$reply_handoff   = $reply_address instanceof \WP_Email_Address ? $reply_address->get_ascii_address() : $reply_email;
+
+		self::collect_failure(
+			$failures,
+			$unicode_address instanceof \WP_Email_Address
+				&& $punycode_address instanceof \WP_Email_Address
+				&& $reply_address instanceof \WP_Email_Address
+				&& $ascii_domain === $unicode_address->get_ascii_domain()
+				&& $unicode_domain === $unicode_address->get_unicode_domain()
+				&& $unicode_local . '@' . $ascii_domain === $unicode_address->get_ascii_address()
+				&& $unicode_email === $unicode_address->get_unicode_address()
+				&& $ascii_domain === $punycode_address->get_ascii_domain()
+				&& $unicode_domain === $punycode_address->get_unicode_domain()
+				&& $punycode_local . '@' . $unicode_domain === $punycode_address->get_unicode_address()
+				&& $unicode_email === $unicode_is
+				&& $punycode_local . '@' . $unicode_domain === $punycode_is
+				&& $reply_email === $reply_is,
+			'Unicode-domain and punycode-domain addresses expose stable machine/readable views before wp_mail handoff',
+			array(
+				'unicode' => self::describe_value( $unicode_address ),
+				'punycode' => self::describe_value( $punycode_address ),
+				'reply'   => self::describe_value( $reply_address ),
+				'isEmail' => array(
+					'unicode' => self::describe_value( $unicode_is ),
+					'punycode' => self::describe_value( $punycode_is ),
+					'reply'   => self::describe_value( $reply_is ),
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $result
+				&& 1 === count( MailSurfaceMailer::$sent )
+				&& self::addresses_include( $sent['to'] ?? array(), $unicode_handoff, $unicode_name )
+				&& self::addresses_include( $sent['cc'] ?? array(), $punycode_handoff, $punycode_name )
+				&& self::addresses_include( $sent['replyTo'] ?? array(), $reply_handoff, $reply_name )
+				&& ! self::addresses_include( $sent['to'] ?? array(), $unicode_email, $unicode_name )
+				&& ! self::addresses_include( $sent['replyTo'] ?? array(), $reply_email, $reply_name )
+				&& $subject === ( $sent['subject'] ?? null )
+				&& $message === ( $sent['body'] ?? null )
+				&& 'text/plain' === ( $sent['contentType'] ?? null )
+				&& 'UTF-8' === ( $sent['charset'] ?? null )
+				&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-IDN-Token' )
+				&& 1 === count( $succeeded )
+				&& in_array( $unicode_name . ' <' . $unicode_email . '>', $succeeded_to, true )
+				&& false === \has_filter( 'wp_mail_succeeded', $success_action ),
+			'wp_mail hands UTF-8 local parts and display names to PHPMailer with SMTP-safe IDN domains',
+			array(
+				'result'    => $result,
+				'handoff'   => array(
+					'to'      => self::describe_string( $unicode_handoff ),
+					'cc'      => self::describe_string( $punycode_handoff ),
+					'replyTo' => self::describe_string( $reply_handoff ),
+				),
+				'sent'      => self::describe_value( $sent ),
+				'succeeded' => self::describe_value( $succeeded ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.unicode-domain-recipient-handoff', $failures );
+	}
+
 	private static function check_phpmailer_reuse_resets_message_state( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {
 		$failures = array();
 
@@ -494,7 +647,7 @@ final class MailSurface {
 			array( 'reuse-image' => $embed )
 		);
 
-		$GLOBALS['phpmailer']->Encoding = \PHPMailer\PHPMailer\PHPMailer::ENCODING_7BIT;
+		$GLOBALS['phpmailer']->Encoding = \PHPMailer\PHPMailer\PHPMailer::ENCODING_BASE64;
 		$second_result                  = \wp_mail(
 			'second@example.test',
 			$second_subject,
@@ -528,8 +681,8 @@ final class MailSurface {
 				&& $second_subject === ( $second['subject'] ?? null )
 				&& 'second body' === ( $second['body'] ?? null )
 				&& 'text/plain' === ( $second['contentType'] ?? null )
-				&& \PHPMailer\PHPMailer\PHPMailer::ENCODING_8BIT === ( $second['encoding'] ?? null ),
-			'reusing the same PHPMailer instance clears stale recipients, headers, attachments, embeds, body, and encoding',
+				&& \PHPMailer\PHPMailer\PHPMailer::ENCODING_7BIT === ( $second['encoding'] ?? null ),
+			'reusing the same PHPMailer instance clears stale recipients, headers, attachments, embeds, body, and lets PHPMailer normalize encoding',
 			array(
 				'firstResult'  => $first_result,
 				'secondResult' => $second_result,
@@ -801,6 +954,7 @@ final class MailSurface {
 					throw new \PHPMailer\PHPMailer\Exception( 'Component fuzz forced mail failure.', 123 );
 				}
 
+				$this->preSend();
 				MailSurfaceMailer::$sent[] = array(
 					'to'            => $this->getToAddresses(),
 					'cc'            => $this->getCcAddresses(),
