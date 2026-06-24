@@ -33,6 +33,7 @@ final class FontsSurface {
 			$rows[] = self::check_font_library_lifecycle( $ctx->fork( 'font-library' ) );
 			$rows[] = self::check_font_collection_json_sources( $ctx->fork( 'font-collection-json' ) );
 			$rows[] = self::check_font_utils_normalization( $ctx->fork( 'font-utils' ) );
+			$rows[] = self::check_font_utils_schema_sanitization( $ctx->fork( 'font-utils-schema' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -705,6 +706,124 @@ final class FontsSurface {
 			array() === $failures,
 			array(
 				'cases'    => count( $families ) + 3,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_font_utils_schema_sanitization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = self::slug( $ctx, 'schema' );
+		$tree     = array(
+			'name'       => '<b>Component Schema ' . $token . '</b>',
+			'raw'        => 'Raw <em>Value</em> ' . $token,
+			'empty'      => '',
+			'unknownTop' => 'remove-me',
+			'metadata'   => array(
+				'label'   => "Label\n" . $token,
+				'rawList' => array( 'Alpha ' . $token, 'Beta ' . $token ),
+				'unknown' => 'remove-me',
+			),
+			'families'   => array(
+				array(
+					'name'    => '<i>Family Alpha ' . $token . '</i>',
+					'slug'    => 'Family Alpha ' . $token,
+					'faces'   => array(
+						array(
+							'fontWeight' => ' 700 ',
+							'src'        => 'https://example.test/fonts/' . $token . '.woff2',
+							'unknown'    => 'remove-me',
+						),
+						array(
+							'fontWeight' => '',
+							'src'        => 'https://example.test/fonts/' . $token . '-italic.woff',
+						),
+					),
+					'unknown' => 'remove-me',
+				),
+			),
+			'badNested'  => 'not-an-array',
+		);
+		$schema   = array(
+			'name'      => 'sanitize_text_field',
+			'raw'       => null,
+			'metadata'  => array(
+				'label'   => 'sanitize_textarea_field',
+				'rawList' => array( null ),
+			),
+			'families'  => array(
+				array(
+					'name'  => 'sanitize_text_field',
+					'slug'  => 'sanitize_title',
+					'faces' => array(
+						array(
+							'fontWeight' => 'sanitize_text_field',
+							'src'        => 'esc_url_raw',
+						),
+					),
+				),
+			),
+			'badNested' => array( 'name' => 'sanitize_text_field' ),
+		);
+
+		$sanitized = \WP_Font_Utils::sanitize_from_schema( $tree, $schema );
+
+		self::collect_failure(
+			$failures,
+			! isset( $sanitized['unknownTop'], $sanitized['empty'], $sanitized['badNested'] )
+				&& ! isset( $sanitized['metadata']['unknown'] )
+				&& ! isset( $sanitized['families'][0]['unknown'], $sanitized['families'][0]['faces'][0]['unknown'] ),
+			'WP_Font_Utils::sanitize_from_schema removes unknown, empty, and structurally invalid values',
+			array(
+				'sanitized' => $sanitized,
+				'tree'      => $tree,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			'Component Schema ' . $token === ( $sanitized['name'] ?? null )
+				&& $tree['raw'] === ( $sanitized['raw'] ?? null )
+				&& $tree['metadata']['label'] === ( $sanitized['metadata']['label'] ?? null )
+				&& $tree['metadata']['rawList'] === ( $sanitized['metadata']['rawList'] ?? null ),
+			'WP_Font_Utils::sanitize_from_schema applies callables and preserves null-sanitizer values',
+			array(
+				'sanitized' => $sanitized,
+				'expected'  => array(
+					'name'    => 'Component Schema ' . $token,
+					'raw'     => $tree['raw'],
+					'label'   => $tree['metadata']['label'],
+					'rawList' => $tree['metadata']['rawList'],
+				),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			isset( $sanitized['families'][0]['faces'][0]['src'], $sanitized['families'][0]['faces'][1]['src'] )
+				&& 'Family Alpha ' . $token === ( $sanitized['families'][0]['name'] ?? null )
+				&& \sanitize_title( 'Family Alpha ' . $token ) === ( $sanitized['families'][0]['slug'] ?? null )
+				&& '700' === ( $sanitized['families'][0]['faces'][0]['fontWeight'] ?? null )
+				&& ! isset( $sanitized['families'][0]['faces'][1]['fontWeight'] ),
+			'WP_Font_Utils::sanitize_from_schema recursively sanitizes nested numeric arrays',
+			array(
+				'sanitized' => $sanitized,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array() === \WP_Font_Utils::sanitize_from_schema( 'not-array', $schema )
+				&& array() === \WP_Font_Utils::sanitize_from_schema( $tree, 'not-array' ),
+			'WP_Font_Utils::sanitize_from_schema fails closed for non-array roots or schemas',
+			array(
+				'nonArrayTree'   => \WP_Font_Utils::sanitize_from_schema( 'not-array', $schema ),
+				'nonArraySchema' => \WP_Font_Utils::sanitize_from_schema( $tree, 'not-array' ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'fonts.utils.schema-sanitization',
+			array() === $failures,
+			array(
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
