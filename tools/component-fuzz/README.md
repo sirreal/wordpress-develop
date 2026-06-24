@@ -104,7 +104,8 @@ database, network requests, or a configured site.
 - `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
-  cancellation, fragment stripping, and query-argument removal contracts.
+  cancellation and same-host replacement cascades, fragment stripping, and
+  query-argument removal contracts.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu

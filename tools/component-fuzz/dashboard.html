@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7897 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7913 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>xmlrpc</code> at 900 passed, <code>assets</code> at 1300 passed, <code>media-editor</code> at 700 passed and 100 skipped, <code>filesystem</code> at 1000 passed, and <code>classic-walkers</code> at 1100 passed and 100 skipped.</div>
+			<div class="note">Latest focused validations: <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, <code>assets</code> at 1300 passed, <code>media-editor</code> at 700 passed and 100 skipped, and <code>filesystem</code> at 1000 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; stale mail and fonts workers were retired after producing no commits or local changes.</div>
+			<div class="metric">1</div>
+			<div class="note">Carver the 2nd is extending <code>query-loop</code> in <code>/private/tmp/component-fuzz-worker-query-loop</code>.</div>
 		</div>
 	</div>
 
@@ -735,9 +735,9 @@
 				<tr>
 					<td><code>rewrite</code>, <code>canonical-routing</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
-					<td>Tesla the 2nd / main worktree</td>
-					<td>Rewrite main focused run: 1800 passed, 0 skipped, 0 failed; latest broad run: 7692 passed, 62 skipped, 0 failed.</td>
-					<td>Rewrite tags, permastructs, endpoints, rule precedence, query substitution, match maps, build/parse helpers, canonical path/query normalization.</td>
+					<td>Tesla the 2nd / main worktree; latest canonical update in main</td>
+					<td>Canonical main focused run: 1100 passed, 0 skipped, 0 failed; rewrite main focused run: 1800 passed, 0 skipped, 0 failed; latest broad run: 7913 passed, 62 skipped, 0 failed.</td>
+					<td>Rewrite tags, permastructs, endpoints, rule precedence, query substitution, match maps, build/parse helpers, canonical path/query normalization, redirect filter cancellation, and safe same-host replacement cascades.</td>
 				</tr>
 				<tr>
 					<td><code>rest-object-controllers</code></td>

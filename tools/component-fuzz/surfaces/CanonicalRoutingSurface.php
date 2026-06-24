@@ -35,6 +35,7 @@ final class CanonicalRoutingSurface {
 			$rows[] = self::check_invalid_date_redirect( $ctx->fork( 'date' ), $case );
 			$rows[] = self::check_feed_and_paged_redirect( $ctx->fork( 'feed' ), $case );
 			$rows[] = self::check_redirect_filter_contract( $ctx->fork( 'filter' ), $case );
+			$rows[] = self::check_safe_redirect_replacement_is_returned( $ctx->fork( 'safe-filter' ), $case );
 			$rows[] = self::check_unsafe_redirect_replacement_is_cancelled( $ctx->fork( 'unsafe-filter' ), $case );
 			$rows[] = self::check_trailing_slash_modes( $ctx->fork( 'slashes' ), $case );
 			$rows[] = self::check_canonical_helpers( $ctx->fork( 'helpers' ), $case );
@@ -104,6 +105,7 @@ final class CanonicalRoutingSurface {
 			array(
 				'_remove_qs_args_if_not_in_url',
 				'add_filter',
+				'add_query_arg',
 				'get_day_link',
 				'get_month_link',
 				'get_query_var',
@@ -392,6 +394,72 @@ final class CanonicalRoutingSurface {
 				'requested' => $requested,
 				'result'    => $result,
 				'seen'      => $seen,
+			)
+		);
+	}
+
+	private static function check_safe_redirect_replacement_is_returned( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_request( array(), array( 'is_home' => true ) );
+
+		$seen         = array();
+		$replacement  = self::HOME_URL . '/filtered/' . rawurlencode( $case['token'] ) . '/?keep=' . rawurlencode( $case['keep'] );
+		$final_marker = 'filtered-' . $ctx->identifier( 4, 10 );
+		$replace      = static function ( $redirect_url, $requested_url ) use ( &$seen, $replacement ) {
+			$seen[] = array(
+				'priority'  => 9,
+				'redirect'  => $redirect_url,
+				'requested' => $requested_url,
+			);
+
+			return $replacement;
+		};
+		$append       = static function ( $redirect_url, $requested_url ) use ( &$seen, $final_marker ) {
+			$seen[] = array(
+				'priority'  => 11,
+				'redirect'  => $redirect_url,
+				'requested' => $requested_url,
+			);
+
+			return add_query_arg( 'cfz', $final_marker, $redirect_url );
+		};
+
+		$requested = self::HOME_URL . '/' . $case['dirtyPath'] . '?feed=rss&keep=' . rawurlencode( $case['keep'] );
+		\add_filter( 'redirect_canonical', $replace, 9, 2 );
+		\add_filter( 'redirect_canonical', $append, 11, 2 );
+		try {
+			$result = \redirect_canonical( $requested, false );
+		} finally {
+			\remove_filter( 'redirect_canonical', $replace, 9 );
+			\remove_filter( 'redirect_canonical', $append, 11 );
+		}
+
+		$parts = is_string( $result ) ? \wp_parse_url( $result ) : array();
+		$query = self::parse_query_from_parts( $parts );
+		$ok    = is_string( $result )
+			&& 2 === count( $seen )
+			&& array( 9, 11 ) === array_column( $seen, 'priority' )
+			&& is_string( $seen[0]['redirect'] ?? null )
+			&& $replacement === ( $seen[1]['redirect'] ?? null )
+			&& self::lowercase_octets( $requested ) === ( $seen[0]['requested'] ?? null )
+			&& self::lowercase_octets( $requested ) === ( $seen[1]['requested'] ?? null )
+			&& 'example.test' === ( $parts['host'] ?? null )
+			&& '/site-base/filtered/' . rawurlencode( $case['token'] ) . '/' === ( $parts['path'] ?? null )
+			&& $case['keep'] === ( $query['keep'] ?? null )
+			&& $final_marker === ( $query['cfz'] ?? null )
+			&& false === \has_filter( 'redirect_canonical', $replace )
+			&& false === \has_filter( 'redirect_canonical', $append );
+
+		return $ctx->result(
+			'canonical-routing.redirect-filter-safe-replacement-cascade',
+			$ok,
+			array(
+				'requested'    => $requested,
+				'replacement'  => $replacement,
+				'result'       => $result,
+				'parts'        => $parts,
+				'query'        => $query,
+				'seen'         => $seen,
+				'finalMarker'  => $final_marker,
 			)
 		);
 	}
