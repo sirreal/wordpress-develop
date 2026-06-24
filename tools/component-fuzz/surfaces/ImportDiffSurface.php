@@ -387,40 +387,44 @@ final class ImportDiffSurface {
 		$importer_name = 'component_fuzz_' . $ctx->identifier( 4, 9 );
 		$blog_id       = (string) $ctx->int( 2, 20 );
 		$other_blog_id = (string) ( (int) $blog_id + 200 );
-		$post_ids      = array();
-		$permalinks    = array(
-			'https://example.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ),
-			'https://example.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ) . '?q=' . rawurlencode( 'x&y' ),
-			'https://other.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ),
-		);
+		$expected      = array();
+		$matching_ids  = array();
 
 		try {
-			$post_ids[] = self::insert_imported_post_meta( $importer_name, $blog_id, $permalinks[0], 'first' );
-			$post_ids[] = self::insert_imported_post_meta( $importer_name, $blog_id, $permalinks[1], 'second' );
-			$post_ids[] = self::insert_imported_post_meta( $importer_name, $other_blog_id, $permalinks[2], 'other-blog' );
-			self::insert_imported_post_meta( $importer_name . '_other', $blog_id, $permalinks[0], 'other-importer' );
+			for ( $i = 0; $i < 105; ++$i ) {
+				$permalink      = 'https://example.test/imported/' . $i . '-' . rawurlencode( $ctx->identifier( 4, 10 ) );
+				$matching_ids[] = self::insert_imported_post_meta( $importer_name, $blog_id, $permalink, 'match-' . $i );
+				$expected[ $permalink ] = end( $matching_ids );
+			}
+
+			$duplicate_permalink              = array_key_first( $expected );
+			$duplicate_id                     = self::insert_imported_post_meta( $importer_name, $blog_id, (string) $duplicate_permalink, 'duplicate' );
+			$expected[ $duplicate_permalink ] = $duplicate_id;
+			$other_permalink                  = 'https://other.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$other_id                         = self::insert_imported_post_meta( $importer_name, $other_blog_id, $other_permalink, 'other-blog' );
+			self::insert_imported_post_meta( $importer_name . '_other', $blog_id, (string) $duplicate_permalink, 'other-importer' );
 
 			$importer = new \WP_Importer();
 			$lookup   = $importer->get_imported_posts( $importer_name, $blog_id );
+			$lookup_query = (string) $wpdb->last_query;
 			$count    = $importer->count_imported_posts( $importer_name, $blog_id );
 			$other    = $importer->get_imported_posts( $importer_name, $other_blog_id );
 
 			self::collect_failure(
 				$failures,
-				array(
-					$permalinks[0] => $post_ids[0],
-					$permalinks[1] => $post_ids[1],
-				) === $lookup
-					&& 2 === $count
-					&& array( $permalinks[2] => $post_ids[2] ) === $other,
-				'WP_Importer maps imported post permalinks to local post IDs by importer and blog meta key',
+				$expected === $lookup
+					&& 106 === $count
+					&& array( $other_permalink => $other_id ) === $other
+					&& str_contains( $lookup_query, "LIMIT '100','100'" ),
+				'WP_Importer maps imported post permalinks to local post IDs by importer/blog meta key across chunks',
 				array(
 					'blogId'       => $blog_id,
 					'importerName' => $importer_name,
-					'lookup'       => $lookup,
-					'otherLookup'  => $other,
+					'lookupCount'  => count( $lookup ),
+					'lookupQuery'  => $lookup_query,
 					'count'        => $count,
-					'postIds'      => $post_ids,
+					'expectedCount' => count( $expected ),
+					'otherLookup'  => $other,
 				)
 			);
 		} finally {
