@@ -335,11 +335,12 @@ final class AppearanceMediaSurface {
 		$bg_color     = \get_background_color();
 		$text_color   = \get_header_textcolor();
 		$display_text = \display_header_text();
+		$expected_header_image = \set_url_scheme( 'http://example.test/header-image.jpg?x=tag' );
 
 		self::collect_failure(
 			$failures,
-			'http://example.test/header-image.jpg?x=tag' === $header_image
-				&& str_contains( $header_tag, 'src="http://example.test/header-image.jpg?x=tag"' )
+			$expected_header_image === $header_image
+				&& str_contains( $header_tag, 'src="' . \esc_attr( $expected_header_image ) . '"' )
 				&& str_contains( $header_tag, 'alt="Header &lt;alt&gt;"' )
 				&& ! str_contains( $header_tag, 'loading=' )
 				&& ! str_contains( $header_tag, 'decoding=' )
@@ -350,6 +351,7 @@ final class AppearanceMediaSurface {
 			'frontend header/background helpers sanitize URLs, escape markup attributes, and expose theme mods consistently',
 			array(
 				'headerImage' => self::preview( (string) $header_image ),
+				'expectedHeaderImage' => self::preview( $expected_header_image ),
 				'headerTag'   => self::preview( $header_tag ),
 				'bgImage'     => self::preview( (string) $bg_image ),
 				'bgColor'     => $bg_color,
@@ -389,6 +391,7 @@ final class AppearanceMediaSurface {
 		$expected_mime   = str_contains( $expected_video, 'youtube.com/watch' ) || str_contains( $expected_video, 'youtu.be/' )
 			? 'video/x-youtube'
 			: ( str_contains( $expected_video, '.webm' ) ? 'video/webm' : 'video/mp4' );
+		$expected_header = \set_url_scheme( 'http://example.test/header-' . rawurlencode( $token ) . '.jpg?unsafe=tag' );
 		$active_callback = static fn (): bool => true;
 		$force_inactive  = static fn (): bool => false;
 
@@ -452,13 +455,13 @@ final class AppearanceMediaSurface {
 				&& false === $active_after_filter
 				&& true === $has_header_filtered
 				&& str_contains( $markup, 'id="wp-custom-header"' )
-				&& str_contains( $markup, 'src="http://example.test/header-' )
+				&& str_contains( $markup, 'src="' . \esc_attr( $expected_header ) . '"' )
 				&& str_contains( $markup, 'unsafe=tag' )
 				&& ! str_contains( $markup, '<tag>' )
 				&& str_contains( $markup_filtered, 'id="wp-custom-header"' )
 				&& $expected_video === ( $settings['videoUrl'] ?? null )
 				&& $expected_mime === ( $settings['mimeType'] ?? null )
-				&& 'http://example.test/header-' . rawurlencode( $token ) . '.jpg?unsafe=tag' === ( $settings['posterUrl'] ?? null )
+				&& $expected_header === ( $settings['posterUrl'] ?? null )
 				&& 1200 === (int) ( $settings['width'] ?? 0 )
 				&& 300 === (int) ( $settings['height'] ?? 0 )
 				&& 900 === (int) ( $settings['minWidth'] ?? 0 )
@@ -473,6 +476,7 @@ final class AppearanceMediaSurface {
 				'inputVideo'          => $video_url,
 				'expectedVideo'       => $expected_video,
 				'expectedMime'        => $expected_mime,
+				'expectedHeader'      => $expected_header,
 				'header'              => self::describe_value( $header ),
 				'video'               => self::preview( (string) $video ),
 				'videoEcho'           => self::preview( $video_echo ),
