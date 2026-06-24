@@ -563,11 +563,15 @@ final class ClassicWalkersSurface {
 
 		self::collect_failure(
 			$failures,
-			self::has_children_by_id( $walk_all->start_events() ) === self::expected_has_children( $nodes ),
+			self::same_bool_map( self::expected_has_children( $nodes ), self::has_children_by_id( $walk_all->start_events() ) ),
 			'generated has_children flags match parent buckets at every rendered depth',
 			array(
-				'expected' => self::expected_has_children( $nodes ),
-				'actual'   => self::has_children_by_id( $walk_all->start_events() ),
+				'mismatches' => self::has_children_mismatches(
+					self::expected_has_children( $nodes ),
+					self::has_children_by_id( $walk_all->start_events() )
+				),
+				'events'     => self::compact_event_summary( $walk_all->start_events() ),
+				'nodes'      => self::compact_node_summary( $nodes ),
 			)
 		);
 
@@ -1636,6 +1640,18 @@ final class ClassicWalkersSurface {
 		);
 	}
 
+	private static function compact_node_summary( array $nodes ): string {
+		return implode(
+			',',
+			array_map(
+				static function ( object $node ): string {
+					return (int) $node->id . '>' . (int) $node->parent;
+				},
+				$nodes
+			)
+		);
+	}
+
 	private static function menu_item(
 		int $id,
 		int $order,
@@ -2064,6 +2080,48 @@ final class ClassicWalkersSurface {
 		}
 
 		return $actual;
+	}
+
+	private static function same_bool_map( array $expected, array $actual ): bool {
+		$expected = array_map( 'boolval', $expected );
+		$actual   = array_map( 'boolval', $actual );
+		ksort( $expected );
+		ksort( $actual );
+
+		return $expected === $actual;
+	}
+
+	private static function has_children_mismatches( array $expected, array $actual ): string {
+		$mismatches = array();
+		$ids        = array_unique( array_merge( array_keys( $expected ), array_keys( $actual ) ) );
+		sort( $ids, SORT_NUMERIC );
+
+		foreach ( $ids as $id ) {
+			if ( ! array_key_exists( $id, $expected ) || ! array_key_exists( $id, $actual ) ) {
+				$mismatches[] = (int) $id . ':e' . ( array_key_exists( $id, $expected ) ? '1' : '?' ) . '/a' . ( array_key_exists( $id, $actual ) ? '1' : '?' );
+				continue;
+			}
+
+			$expected_value = $expected[ $id ];
+			$actual_value = (bool) ( $actual[ $id ] ?? false );
+			if ( (bool) $expected_value !== $actual_value ) {
+				$mismatches[] = (int) $id . ':e' . ( (bool) $expected_value ? '1' : '0' ) . '/a' . ( $actual_value ? '1' : '0' );
+			}
+		}
+
+		return implode( ',', $mismatches );
+	}
+
+	private static function compact_event_summary( array $events ): string {
+		return implode(
+			',',
+			array_map(
+				static function ( array $event ): string {
+					return (int) $event['id'] . '@' . (int) $event['depth'] . ':h' . ( ! empty( $event['hasChildren'] ) ? '1' : '0' ) . '/a' . ( ! empty( $event['argsHasChildren'] ) ? '1' : '0' );
+				},
+				$events
+			)
+		);
 	}
 
 	private static function event_ids( array $events ): array {
