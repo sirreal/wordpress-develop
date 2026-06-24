@@ -47,6 +47,8 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_normalization_sensitive_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_author_email_filters( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
+			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_extension_address_views( $ctx ) );
@@ -1350,6 +1352,296 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_user_email_indexes_distinct_domains( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.distinct-domains-preserved',
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		if ( ! self::has_idn() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.distinct-domains-preserved',
+					'idn_to_ascii() or idn_to_utf8() is unavailable.'
+				),
+			);
+		}
+
+		$inputs = array(
+			'mail@gra.org',
+			"mail@gr\u{00E5}.org",
+			'mail@bucher.de',
+			"mail@b\u{00FC}cher.de",
+			"jos\u{00E9}@example.org",
+			"jos\u{00E9}@gr\u{00E5}.org",
+		);
+		$inserted = array();
+		$lookups  = array();
+		$failures = array();
+
+		self::reset_stub_content();
+		try {
+			foreach ( $inputs as $index => $input ) {
+				$insert = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => 'cfz_domain_email_' . $ctx->iteration() . '_' . $index . '_' . substr( sha1( $input ), 0, 10 ),
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $input,
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$user_id = $insert['value'] ?? null;
+				$inserted[] = $user_id;
+
+				if ( $insert['threw'] || array() !== $insert['warnings'] || ! is_int( $user_id ) ) {
+					$failures[] = array(
+						'label'  => 'insert-failed-or-warned',
+						'input'  => self::describe_string( $input ),
+						'insert' => self::describe_captured_call( $insert ),
+					);
+					continue;
+				}
+
+				$exists  = self::capture_warnings( static fn() => \email_exists( $input ) );
+				$by_email = self::capture_warnings( static fn() => \get_user_by( 'email', $input ) );
+				$user     = $by_email['value'] ?? null;
+				$lookups[] = array(
+					'input'    => self::describe_string( $input ),
+					'userId'   => $user_id,
+					'exists'   => $exists['value'] ?? null,
+					'byEmail'  => $user instanceof \WP_User ? $user->ID : self::describe_value( $user ),
+					'warnings' => count( $exists['warnings'] ) + count( $by_email['warnings'] ),
+				);
+
+				if (
+					$exists['threw'] ||
+					$by_email['threw'] ||
+					array() !== $exists['warnings'] ||
+					array() !== $by_email['warnings'] ||
+					$exists['value'] !== $user_id ||
+					! ( $user instanceof \WP_User ) ||
+					$user->ID !== $user_id ||
+					$user->user_email !== $input
+				) {
+					$failures[] = array(
+						'label'   => 'lookup-mismatch-or-warning',
+						'input'   => self::describe_string( $input ),
+						'userId'  => $user_id,
+						'exists'  => self::describe_captured_call( $exists ),
+						'byEmail' => self::describe_captured_call( $by_email ),
+					);
+				}
+			}
+
+			$ids = array_values( array_filter( $inserted, 'is_int' ) );
+			if ( count( $ids ) !== count( $inputs ) || count( array_unique( $ids, SORT_REGULAR ) ) !== count( $inputs ) ) {
+				$failures[] = array(
+					'label'    => 'inserted-ids-not-distinct',
+					'inserted' => self::describe_value( $inserted ),
+				);
+			}
+
+			$duplicate = self::capture_warnings(
+				static fn() => \wp_insert_user(
+					array(
+						'user_login' => 'cfz_domain_email_duplicate_' . $ctx->iteration(),
+						'user_pass'  => 'component-fuzz-pass',
+						'user_email' => $inputs[1],
+						'role'       => 'subscriber',
+					)
+				)
+			);
+			$missing   = self::capture_warnings( static fn() => \email_exists( "missing@gr\u{00E5}.org" ) );
+
+			if (
+				$duplicate['threw'] ||
+				array() !== $duplicate['warnings'] ||
+				! \is_wp_error( $duplicate['value'] ?? null ) ||
+				'existing_user_email' !== $duplicate['value']->get_error_code()
+			) {
+				$failures[] = array(
+					'label'     => 'exact-duplicate-not-rejected-cleanly',
+					'duplicate' => self::describe_captured_call( $duplicate ),
+				);
+			}
+
+			if ( $missing['threw'] || array() !== $missing['warnings'] || false !== $missing['value'] ) {
+				$failures[] = array(
+					'label'   => 'missing-unicode-domain-lookup-not-false-cleanly',
+					'missing' => self::describe_captured_call( $missing ),
+				);
+			}
+		} finally {
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				'email.user-email-indexes.distinct-domains-preserved',
+				array() === $failures,
+				array(
+					'inputs'   => array_map( array( self::class, 'describe_string' ), $inputs ),
+					'inserted' => self::describe_value( $inserted ),
+					'lookups'  => self::describe_value( $lookups ),
+					'failures' => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function check_password_reset_unicode_email_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					'email.password-reset.unicode-email-paths',
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$required = array(
+			'retrieve_password',
+			'wp_mail',
+			'add_filter',
+			'remove_filter',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return array(
+					$ctx->skip(
+						'email.password-reset.unicode-email-paths',
+						'Required password reset APIs are unavailable.',
+						array( 'missing' => 'function ' . $function )
+					),
+				);
+			}
+		}
+
+		$cases = array(
+			array(
+				'label' => 'unicode-local',
+				'email' => "jos\u{00E9}.reset@example.org",
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$cases[] = array(
+				'label' => 'unicode-domain',
+				'email' => "reset@gr\u{00E5}.org",
+			);
+			$cases[] = array(
+				'label' => 'unicode-local-and-domain',
+				'email' => "jos\u{00E9}.reset@gr\u{00E5}.org",
+			);
+		}
+
+		$failures        = array();
+		$observed        = array();
+		$hook_snapshot   = self::snapshot_hook_globals();
+		$server_snapshot = array_key_exists( 'REMOTE_ADDR', $_SERVER )
+			? array( 'exists' => true, 'value' => $_SERVER['REMOTE_ADDR'] )
+			: array( 'exists' => false, 'value' => null );
+
+		self::reset_stub_content();
+		try {
+			$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+
+			foreach ( $cases as $index => $case ) {
+				$mail_calls = array();
+				$mail_filter = static function ( $return, $atts ) use ( &$mail_calls ) {
+					$mail_calls[] = $atts;
+					return true;
+				};
+
+				\add_filter( 'pre_wp_mail', $mail_filter, 10, 2 );
+				try {
+					$login  = 'cfz_reset_' . $ctx->iteration() . '_' . $index . '_' . substr( sha1( $case['email'] ), 0, 8 );
+					$insert = self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => $login,
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $case['email'],
+								'role'       => 'subscriber',
+							)
+						)
+					);
+					$user_id = $insert['value'] ?? null;
+					$reset   = is_int( $user_id )
+						? self::capture_warnings( static fn() => \retrieve_password( $case['email'] ) )
+						: array(
+							'threw'    => false,
+							'value'    => null,
+							'warnings' => array(),
+						);
+					$mail    = $mail_calls[0] ?? null;
+
+					$ok = ! $insert['threw']
+						&& array() === $insert['warnings']
+						&& is_int( $user_id )
+						&& ! $reset['threw']
+						&& array() === $reset['warnings']
+						&& true === $reset['value']
+						&& 1 === count( $mail_calls )
+						&& is_array( $mail )
+						&& $case['email'] === ( $mail['to'] ?? null )
+						&& is_string( $mail['subject'] ?? null )
+						&& '' !== ( $mail['subject'] ?? '' )
+						&& is_string( $mail['message'] ?? null )
+						&& str_contains( $mail['message'], rawurlencode( $login ) );
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'label'     => $case['label'],
+							'email'     => self::describe_string( $case['email'] ),
+							'login'     => $login,
+							'insert'    => self::describe_captured_call( $insert ),
+							'reset'     => self::describe_captured_call( $reset ),
+							'mailCalls' => self::describe_value( $mail_calls ),
+						);
+					}
+
+					$observed[] = array(
+						'label'     => $case['label'],
+						'email'     => self::describe_string( $case['email'] ),
+						'userId'    => $user_id,
+						'reset'     => self::describe_value( $reset['value'] ?? null ),
+						'mailCalls' => count( $mail_calls ),
+						'mailTo'    => isset( $mail['to'] ) && is_string( $mail['to'] ) ? self::describe_string( $mail['to'] ) : null,
+						'warnings'  => count( $insert['warnings'] ) + count( $reset['warnings'] ),
+					);
+				} finally {
+					\remove_filter( 'pre_wp_mail', $mail_filter, 10 );
+				}
+			}
+		} finally {
+			if ( $server_snapshot['exists'] ) {
+				$_SERVER['REMOTE_ADDR'] = $server_snapshot['value'];
+			} else {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			}
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				'email.password-reset.unicode-email-paths',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
 	private static function check_punycode_views( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! self::has_idn() ) {
 			return array(
@@ -2126,6 +2418,37 @@ final class EmailSurface {
 		}
 	}
 
+	private static function capture_warnings( callable $callback ): array {
+		$warnings = array();
+		set_error_handler(
+			static function ( int $severity, string $message, string $file, int $line ) use ( &$warnings ): bool {
+				$warnings[] = array(
+					'severity' => $severity,
+					'message'  => $message,
+					'file'     => $file,
+					'line'     => $line,
+				);
+				return true;
+			}
+		);
+
+		try {
+			return array(
+				'threw'    => false,
+				'value'    => $callback(),
+				'warnings' => $warnings,
+			);
+		} catch ( \Throwable $e ) {
+			return array(
+				'threw'     => true,
+				'throwable' => self::describe_throwable( $e ),
+				'warnings'  => $warnings,
+			);
+		} finally {
+			restore_error_handler();
+		}
+	}
+
 	private static function case_result( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $invariant, bool $ok, array $data = array() ): array {
 		return $ctx->result(
 			$invariant,
@@ -2159,6 +2482,13 @@ final class EmailSurface {
 			'threw' => false,
 			'value' => self::describe_value( $call['value'] ),
 		);
+	}
+
+	private static function describe_captured_call( array $call ): array {
+		$description = self::describe_call( $call );
+		$description['warnings'] = self::describe_value( $call['warnings'] ?? array() );
+
+		return $description;
 	}
 
 	private static function describe_value( $value ) {
