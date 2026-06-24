@@ -27,6 +27,7 @@ final class CommentWorkflowSurface {
 			$case = self::case_for_context( $ctx );
 
 			$rows[] = self::check_handle_submission( $ctx->fork( 'submission' ), $case );
+			$rows[] = self::check_new_comment_pipeline( $ctx->fork( 'new-comment' ), $case );
 			$rows[] = self::check_allow_comment_decisions( $ctx->fork( 'allow' ), $case );
 			$rows[] = self::check_update_and_status_transitions( $ctx->fork( 'status' ), $case );
 			$rows[] = self::check_trash_spam_restore_helpers( $ctx->fork( 'trash-spam' ), $case );
@@ -63,11 +64,14 @@ final class CommentWorkflowSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'create_initial_post_types',
 				'get_comment',
 				'get_post',
+				'has_action',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'wp_allow_comment',
 				'wp_delete_comment',
@@ -145,6 +149,160 @@ final class CommentWorkflowSurface {
 		return self::result(
 			$ctx,
 			'comment-workflow.handle-submission.success-sanitizes-and-counts',
+			$failures,
+			array( 'postId' => $post_id )
+		);
+	}
+
+	private static function check_new_comment_pipeline( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures       = array();
+		$post_id        = self::insert_post( $case, 'open' );
+		$parent_id      = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Parent ' . $case['token'],
+				'comment_author_email' => 'parent-' . $case['token'] . '@example.test',
+				'comment_content'      => 'parent ' . $case['token'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+			)
+		);
+		$preprocess_seen = array();
+		$insert_seen     = array();
+		$post_seen       = array();
+		$prefilter_user  = 0;
+		$filtered_user   = 0;
+		$agent           = 'ComponentFuzz-Agent-' . str_repeat( $case['token'], 40 );
+		$expected_agent  = substr( $agent, 0, 254 );
+		$expected_ip     = '203.0.113.' . $ctx->int( 1, 200 );
+		$expected_author = 'Pipeline Author ' . $case['token'];
+		$expected_body   = 'Pipeline body ' . $case['token'];
+		$preprocess      = static function ( array $commentdata ) use ( &$preprocess_seen, $expected_author, $expected_body, $expected_ip, $filtered_user ): array {
+			$preprocess_seen[] = array(
+				'userID' => $commentdata['user_ID'] ?? null,
+				'userId' => $commentdata['user_id'] ?? null,
+				'ip'     => $commentdata['comment_author_IP'] ?? null,
+				'agent'  => $commentdata['comment_agent'] ?? null,
+			);
+
+			$commentdata['user_ID']              = $filtered_user;
+			$commentdata['comment_author']       = $expected_author;
+			$commentdata['comment_author_IP']    = $expected_ip . 'zz!';
+			$commentdata['comment_author_email'] = 'pipeline-filtered@example.test';
+			$commentdata['comment_content']      = $expected_body;
+			return $commentdata;
+		};
+		$approve         = static function () {
+			return 0;
+		};
+		$insert_action   = static function ( int $comment_id, \WP_Comment $comment ) use ( &$insert_seen ): void {
+			$insert_seen[] = array(
+				'id'       => (int) $comment_id,
+				'approved' => (string) $comment->comment_approved,
+				'parent'   => (int) $comment->comment_parent,
+			);
+		};
+		$post_action     = static function ( int $comment_id, $approved, array $commentdata ) use ( &$post_seen ): void {
+			$post_seen[] = array(
+				'id'       => (int) $comment_id,
+				'approved' => (string) $approved,
+				'userId'   => isset( $commentdata['user_id'] ) ? (int) $commentdata['user_id'] : null,
+				'filtered' => true === ( $commentdata['filtered'] ?? null ),
+			);
+		};
+
+		\add_filter( 'preprocess_comment', $preprocess );
+		\add_filter( 'pre_comment_approved', $approve, 10, 2 );
+		\add_action( 'wp_insert_comment', $insert_action, 10, 2 );
+		\add_action( 'comment_post', $post_action, 10, 3 );
+		try {
+			$comment_id = \wp_new_comment(
+				array(
+					'comment_post_ID'      => $post_id,
+					'comment_parent'       => $parent_id,
+					'comment_author'       => 'Raw Author ' . $case['token'],
+					'comment_author_email' => $case['email'],
+					'comment_author_url'   => $case['url'],
+					'comment_content'      => 'Raw body ' . $case['token'],
+					'comment_agent'        => $agent,
+					'user_ID'              => $prefilter_user,
+				),
+				true
+			);
+		} finally {
+			\remove_action( 'comment_post', $post_action, 10 );
+			\remove_action( 'wp_insert_comment', $insert_action, 10 );
+			\remove_filter( 'pre_comment_approved', $approve, 10 );
+			\remove_filter( 'preprocess_comment', $preprocess );
+		}
+
+		$comment = is_int( $comment_id ) ? \get_comment( $comment_id ) : null;
+		$post    = \get_post( $post_id );
+
+		self::collect_failure(
+			$failures,
+			is_int( $parent_id )
+				&& is_int( $comment_id )
+				&& $comment instanceof \WP_Comment
+				&& (string) $post_id === (string) $comment->comment_post_ID
+				&& (string) $parent_id === (string) $comment->comment_parent
+				&& (string) $filtered_user === (string) $comment->user_id
+				&& $expected_author === $comment->comment_author
+				&& 'pipeline-filtered@example.test' === $comment->comment_author_email
+				&& $expected_body === $comment->comment_content
+				&& $expected_ip === $comment->comment_author_IP
+				&& $expected_agent === $comment->comment_agent
+				&& '0' === (string) $comment->comment_approved,
+			'wp_new_comment preprocesses, normalizes, filters, and stores a pending child comment without live user lookup',
+			array(
+				'parentId' => $parent_id,
+				'comment'  => self::comment_summary( $comment ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'userID' => $prefilter_user,
+					'userId' => $prefilter_user,
+					'ip'     => '127.0.0.1',
+					'agent'  => $agent,
+				),
+			) === $preprocess_seen
+				&& array(
+					array(
+						'id'       => (int) $comment_id,
+						'approved' => '0',
+						'parent'   => (int) $parent_id,
+					),
+				) === $insert_seen
+				&& array(
+					array(
+						'id'       => (int) $comment_id,
+						'approved' => '0',
+						'userId'   => (int) $filtered_user,
+						'filtered' => true,
+					),
+				) === $post_seen
+				&& false === \has_action( 'comment_post', $post_action )
+				&& false === \has_action( 'wp_insert_comment', $insert_action ),
+			'wp_new_comment fires preprocess, insert, and comment_post hooks with normalized data and removes hooks',
+			array(
+				'preprocess' => $preprocess_seen,
+				'insert'     => $insert_seen,
+				'post'       => $post_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$post instanceof \WP_Post && 1 === (int) $post->comment_count,
+			'pending wp_new_comment child does not increment approved comment count beyond approved parent',
+			array( 'count' => $post instanceof \WP_Post ? $post->comment_count : null )
+		);
+
+		return self::result(
+			$ctx,
+			'comment-workflow.new-comment.preprocess-hooks-and-parent-normalization',
 			$failures,
 			array( 'postId' => $post_id )
 		);
@@ -453,9 +611,11 @@ final class CommentWorkflowSurface {
 		);
 
 		\wp_cache_flush();
-		$GLOBALS['wp_rewrite']       = new \WP_Rewrite();
-		$GLOBALS['wp_post_types']    = array();
-		$GLOBALS['wp_post_statuses'] = array();
+		$GLOBALS['wp_rewrite']              = new \WP_Rewrite();
+		$GLOBALS['wp_post_types']           = array();
+		$GLOBALS['wp_post_statuses']        = array();
+		$GLOBALS['_wp_post_type_features']  = array();
+		$GLOBALS['post_type_meta_caps']     = array();
 		\create_initial_post_types();
 		\wp_set_current_user( 0 );
 
@@ -565,7 +725,7 @@ final class CommentWorkflowSurface {
 
 	private static function snapshot_state(): array {
 		$globals = array();
-		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wp_post_types', 'wp_post_statuses', 'wp_rewrite', 'current_user', 'user_ID' ) as $name ) {
+		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wp_post_types', 'wp_post_statuses', '_wp_post_type_features', 'post_type_meta_caps', 'wp_rewrite', 'current_user', 'user_ID' ) as $name ) {
 			$globals[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => $GLOBALS[ $name ] ?? null,

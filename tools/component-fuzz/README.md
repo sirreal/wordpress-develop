@@ -130,9 +130,9 @@ database, network requests, or a configured site.
   normalization, event trimming and WordCamp pinning, response normalization,
   and API error contracts.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
-  decisions, moderation short-circuits, update/status transition hooks,
-  trash/untrash and spam/unspam restoration, and WP_Error failure paths without
-  process exits.
+  decisions, direct `wp_new_comment()` preprocessing and insert hooks,
+  moderation short-circuits, update/status transition hooks, trash/untrash and
+  spam/unspam restoration, and WP_Error failure paths without process exits.
 - `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
   and next-scheduled filter contracts, duplicate single-event windows,
   ready-job partitioning, unscheduling and rescheduling contracts.
