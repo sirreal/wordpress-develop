@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7871 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7853 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>style</code> at 1200 passed, <code>site-health-debug</code> at 600 passed, and <code>blocks</code> at 500 passed.</div>
+			<div class="note">Latest focused validations: <code>post-types</code> at 700 passed, <code>style</code> at 1200 passed, and <code>site-health-debug</code> at 600 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">No active delegated workers; Hooke the 2nd's style work has been integrated in main.</div>
+			<div class="metric">1</div>
+			<div class="note">Peirce the 2nd is strengthening <code>taxonomy</code> coverage; post-types archive helper work is integrated in main.</div>
 		</div>
 	</div>
 
@@ -437,6 +437,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>post-types</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7853 passed, 64 skipped, 0 failed.</td>
+					<td>Post type/status registries, supports, capabilities, query/rewrite state, unregister cleanup, archive/feed link helpers and filters.</td>
 				</tr>
 				<tr>
 					<td><code>style</code></td>
@@ -681,6 +688,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>5b99565f57</code></td>
+					<td><code>post-types</code></td>
+					<td>700 passed, 0 skipped, 0 failed.</td>
+					<td>7853 passed, 64 skipped, 0 failed at 2 iterations after archive/feed link helper, query branch, and filter-locality coverage.</td>
+				</tr>
 				<tr>
 					<td><code>1329011c91</code></td>
 					<td><code>style</code></td>
