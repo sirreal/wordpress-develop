@@ -156,7 +156,9 @@ final class RestSurface {
 			'number_format_i18n',
 			'rest_convert_error_to_response',
 			'rest_ensure_response',
+			'rest_get_server',
 			'rest_sanitize_value_from_schema',
+			'rest_send_allow_header',
 			'rest_validate_value_from_schema',
 			'rest_url',
 			'sanitize_hex_color',
@@ -1085,6 +1087,28 @@ final class RestSurface {
 		$server       = new \WP_REST_Server();
 		$embed_hits   = 0;
 		$envelope_hits = 0;
+		$target_hint_permission_hits = 0;
+
+		$item_route = '/' . $namespace . '/items/(?P<id>[0-9]+)';
+		$server->register_route(
+			$namespace,
+			$item_route,
+			array(
+				array(
+					'methods'             => 'GET, POST',
+					'permission_callback' => function () use ( &$target_hint_permission_hits ) {
+						++$target_hint_permission_hits;
+						return true;
+					},
+					'callback'            => function ( $request ) {
+						return array(
+							'id'      => $request['id'],
+							'context' => $request['context'],
+						);
+					},
+				),
+			)
+		);
 
 		$embedded_route = '/' . $namespace . '/embedded/(?P<id>[0-9]+)';
 		$server->register_route(
@@ -1120,6 +1144,7 @@ final class RestSurface {
 		);
 
 		$self_href       = \rest_url( $namespace . '/items/' . $id );
+		$self_auto_href  = $self_href;
 		$collection_href = \rest_url( $namespace . '/items' );
 		$temp_href       = \rest_url( $namespace . '/items/temp-' . $id );
 		$embedded_href   = \rest_url( $namespace . '/embedded/' . $id );
@@ -1146,6 +1171,13 @@ final class RestSurface {
 				'href'        => 'ignored-by-add-link',
 				'title'       => 'Self ' . $token,
 				'targetHints' => array( 'allow' => array( 'GET', 'HEAD' ) ),
+			)
+		);
+		$response->add_link(
+			'self',
+			$self_auto_href,
+			array(
+				'title' => 'Self Auto ' . $token,
 			)
 		);
 		$response->add_link( 'collection', $temp_href, array( 'title' => 'Removed ' . $token ) );
@@ -1180,6 +1212,10 @@ final class RestSurface {
 			return $envelope;
 		};
 
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+		$GLOBALS['wp_rest_server'] = $server;
+
 		\add_filter( 'rest_envelope_response', $envelope_filter, 10, 2 );
 		try {
 			$links          = \WP_REST_Server::get_response_links( $response );
@@ -1190,9 +1226,17 @@ final class RestSurface {
 			$envelope_data  = $enveloped->get_data();
 		} finally {
 			\remove_filter( 'rest_envelope_response', $envelope_filter, 10 );
+			if ( $had_rest_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_rest_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
 		}
 
 		$filter_removed = false === \has_filter( 'rest_envelope_response', $envelope_filter );
+		$rest_server_restored = $had_rest_server
+			? $previous_rest_server === ( $GLOBALS['wp_rest_server'] ?? null )
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
 		$headers         = $response->get_headers();
 		$ensured_same    = \rest_ensure_response( $response );
 		$http_response   = new \WP_HTTP_Response( array( 'converted' => $token ), 206, array( 'X-Converted' => $token ) );
@@ -1211,8 +1255,11 @@ final class RestSurface {
 		);
 		$links_ok   = array(
 			'selfHref'          => $self_href === ( $links['self'][0]['href'] ?? null ),
+			'selfAutoHref'      => $self_auto_href === ( $links['self'][1]['href'] ?? null ),
 			'selfRecordFlattened' => ! isset( $links['self'][0]['attributes'] ),
 			'selfTargetHints'   => array( 'GET', 'HEAD' ) === ( $links['self'][0]['targetHints']['allow'] ?? null ),
+			'selfAutomaticTargetHints' => array( 'GET', 'POST' ) === ( $links['self'][1]['targetHints']['allow'] ?? null )
+				&& $target_hint_permission_hits >= 2,
 			'collectionRemoved' => array( $collection_href ) === array_column( $links['collection'] ?? array(), 'href' ),
 			'curieCompacted'    => isset( $compact_links['wp:term'], $compact_links['curies'][0] )
 				&& ! isset( $compact_links['https://api.w.org/term'] )
@@ -1242,6 +1289,7 @@ final class RestSurface {
 				&& $token === ( $envelope_headers['X-Envelope-Token'] ?? null )
 				&& $token === ( $envelope_body['envelopeToken'] ?? null ),
 			'filterRemoved'         => $filter_removed,
+			'restServerRestored'    => $rest_server_restored,
 			'headersPreserved'      => 'replacement' === ( $envelope_headers['X-Fuzz-Header'] ?? null )
 				&& 'one, two' === ( $envelope_headers['X-Fuzz-Trace'] ?? null )
 				&& isset( $envelope_headers['Link'] ),
@@ -1282,6 +1330,7 @@ final class RestSurface {
 				'compactLinks' => $compact_links,
 				'embedAll'     => $data_embed_all,
 				'envelope'     => $envelope_data,
+				'targetHintPermissionHits' => $target_hint_permission_hits,
 			),
 		);
 	}
