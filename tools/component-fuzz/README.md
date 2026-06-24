@@ -40,8 +40,9 @@ database, network requests, or a configured site.
 - `admin-workflows`: no-DB admin menu, list-table, and referer-helper
   workflows, including menu/submenu global registration and removal, hook suffix
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
-  pagination/columns/views/bulk actions/row actions/tablenav rendering, and
-  safe admin/AJAX nonce checks without process exits.
+  pagination/columns/views/bulk actions/row actions/tablenav rendering, direct
+  bulk-action/month-dropdown helper contracts, and safe admin/AJAX nonce checks
+  without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
   for posts, media, comments, terms, users, plugins, themes, and guarded
   network sites/users, including columns/hidden/sortable/default-primary logic,

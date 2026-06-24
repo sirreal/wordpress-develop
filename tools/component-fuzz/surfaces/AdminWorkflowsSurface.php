@@ -28,6 +28,7 @@ final class AdminWorkflowsSurface {
 		try {
 			$rows[] = self::check_menu_globals( $ctx->fork( 'menu-globals' ) );
 			$rows[] = self::check_synthetic_list_table( $ctx->fork( 'list-table' ) );
+			$rows[] = self::check_list_table_action_and_month_helpers( $ctx->fork( 'list-table-helpers' ) );
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
 			$rows[] = self::skipped_core_list_table_subclasses( $ctx->fork( 'core-list-table-skips' ) );
 			$rows[] = self::skipped_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrapper-skips' ) );
@@ -86,6 +87,7 @@ final class AdminWorkflowsSurface {
 				'remove_submenu_page',
 				'sanitize_key',
 				'sanitize_title',
+				'selected',
 				'set_url_scheme',
 				'submit_button',
 				'wp_create_nonce',
@@ -692,6 +694,208 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
+	private static function check_list_table_action_and_month_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$local_snapshot  = self::snapshot_globals(
+			array(
+				'_GET',
+				'_POST',
+				'_REQUEST',
+				'current_screen',
+				'wp_actions',
+				'wp_current_filter',
+				'wp_filter',
+				'wp_filters',
+				'wp_post_types',
+			)
+		);
+		$screen_id       = self::screen_id( $ctx->fork( 'screen' ) );
+		$screen          = \convert_to_screen( $screen_id );
+		$hostile_label   = self::hostile_label( $ctx->fork( 'bulk-label' ) );
+		$month_seen      = array();
+		$disable_seen    = array();
+		$table           = self::new_helper_list_table(
+			array(
+				'bulk_actions' => array(
+					'trash'                         => \esc_html( 'Trash ' . $hostile_label ),
+					'Change ' . $ctx->identifier( 3, 8 ) => array(
+						'feature' => \esc_html( 'Feature ' . $hostile_label ),
+						'archive' => \esc_html( 'Archive ' . $hostile_label ),
+					),
+				),
+				'screen'       => $screen,
+			)
+		);
+		$pre_months      = static function ( $months, string $post_type ) use ( &$month_seen ): array {
+			$month_seen[] = array(
+				'filter'   => 'pre',
+				'postType' => $post_type,
+				'input'    => $months,
+			);
+
+			return array(
+				(object) array(
+					'year'  => 2026,
+					'month' => 6,
+				),
+				(object) array(
+					'year'  => 2025,
+					'month' => 12,
+				),
+				(object) array(
+					'year'  => 0,
+					'month' => 0,
+				),
+			);
+		};
+		$month_results   = static function ( array $months, string $post_type ) use ( &$month_seen ): array {
+			$month_seen[] = array(
+				'filter'   => 'results',
+				'postType' => $post_type,
+				'count'    => count( $months ),
+			);
+
+			return $months;
+		};
+		$disable_months  = static function ( bool $disabled, string $post_type ) use ( &$disable_seen ): bool {
+			$disable_seen[] = array(
+				'disabled' => $disabled,
+				'postType' => $post_type,
+			);
+
+			return 'page' === $post_type;
+		};
+		$result          = array();
+		$filters_removed = false;
+		$restored        = false;
+
+		if ( function_exists( 'create_initial_post_types' ) ) {
+			\create_initial_post_types();
+		}
+
+		\add_filter( 'pre_months_dropdown_query', $pre_months, 10, 2 );
+		\add_filter( 'months_dropdown_results', $month_results, 10, 2 );
+		\add_filter( 'disable_months_dropdown', $disable_months, 10, 2 );
+
+		try {
+			$_REQUEST = array(
+				'action'        => 'trash',
+				'action2'       => 'archive',
+				'filter_action' => 'Filter',
+			);
+			$filter_action = $table->current_action();
+
+			$_REQUEST = array(
+				'action'  => 'trash',
+				'action2' => 'archive',
+			);
+			$top_action = $table->current_action();
+
+			$_REQUEST = array(
+				'action'  => '-1',
+				'action2' => 'archive',
+			);
+			$bottom_ignored = $table->current_action();
+
+			$bulk_top_html    = $table->expose_bulk_actions( 'top' );
+			$bulk_bottom_html = $table->expose_bulk_actions( 'bottom' );
+
+			$_GET     = array( 'm' => '202606' );
+			$_POST    = array();
+			$_REQUEST = $_GET;
+			$months_html = $table->expose_months_dropdown( 'post' );
+
+			$_GET     = array();
+			$_REQUEST = array();
+			$disabled_months_html = $table->expose_months_dropdown( 'page' );
+
+			$result = compact(
+				'bulk_bottom_html',
+				'bulk_top_html',
+				'bottom_ignored',
+				'disabled_months_html',
+				'disable_seen',
+				'filter_action',
+				'month_seen',
+				'months_html',
+				'top_action'
+			);
+		} finally {
+			\remove_filter( 'disable_months_dropdown', $disable_months, 10 );
+			\remove_filter( 'months_dropdown_results', $month_results, 10 );
+			\remove_filter( 'pre_months_dropdown_query', $pre_months, 10 );
+
+			$filters_removed = false === \has_filter( 'disable_months_dropdown', $disable_months )
+				&& false === \has_filter( 'months_dropdown_results', $month_results )
+				&& false === \has_filter( 'pre_months_dropdown_query', $pre_months );
+
+			self::restore_globals( $local_snapshot );
+			$restored = self::globals_match( $local_snapshot, array( '_GET', '_POST', '_REQUEST', 'current_screen', 'wp_post_types' ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === ( $result['filter_action'] ?? null )
+				&& 'trash' === ( $result['top_action'] ?? null )
+				&& false === ( $result['bottom_ignored'] ?? null ),
+			'current_action honors filter_action suppression and top bulk action precedence',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( (string) ( $result['bulk_top_html'] ?? '' ), 'name="action"' )
+				&& str_contains( (string) ( $result['bulk_top_html'] ?? '' ), 'bulk-action-selector-top' )
+				&& str_contains( (string) ( $result['bulk_top_html'] ?? '' ), '<optgroup label="Change ' )
+				&& str_contains( (string) ( $result['bulk_bottom_html'] ?? '' ), 'name="action2"' )
+				&& str_contains( (string) ( $result['bulk_bottom_html'] ?? '' ), 'bulk-action-selector-bottom' )
+				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['bulk_top_html'] ?? '' ) . (string) ( $result['bulk_bottom_html'] ?? '' ) ),
+			'bulk_actions renders first and second dropdown names, optgroups, compact buttons, and escaped labels',
+			array(
+				'top'    => self::describe_string( (string) ( $result['bulk_top_html'] ?? '' ) ),
+				'bottom' => self::describe_string( (string) ( $result['bulk_bottom_html'] ?? '' ) ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( (string) ( $result['months_html'] ?? '' ), 'id="filter-by-date"' )
+				&& str_contains( (string) ( $result['months_html'] ?? '' ), "value='202606'" )
+				&& str_contains( (string) ( $result['months_html'] ?? '' ), "selected='selected'" )
+				&& str_contains( (string) ( $result['months_html'] ?? '' ), 'June 2026' )
+				&& str_contains( (string) ( $result['months_html'] ?? '' ), 'December 2025' )
+				&& ! str_contains( (string) ( $result['months_html'] ?? '' ), "value='000000'" )
+				&& '' === (string) ( $result['disabled_months_html'] ?? '' )
+				&& array( 'post' ) === array_column( array_filter( $result['month_seen'] ?? array(), static fn( array $entry ): bool => 'pre' === $entry['filter'] ), 'postType' )
+				&& array( 'post' ) === array_column( array_filter( $result['month_seen'] ?? array(), static fn( array $entry ): bool => 'results' === $entry['filter'] ), 'postType' )
+				&& array( 'post', 'page' ) === array_column( $result['disable_seen'] ?? array(), 'postType' ),
+			'months_dropdown uses filter-provided months, selected request state, zero-year skipping, and disable short-circuit',
+			array(
+				'months'      => self::describe_string( (string) ( $result['months_html'] ?? '' ) ),
+				'disabled'    => self::describe_string( (string) ( $result['disabled_months_html'] ?? '' ) ),
+				'monthSeen'   => $result['month_seen'] ?? array(),
+				'disableSeen' => $result['disable_seen'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $restored,
+			'list table helper filters and request globals are restored',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'restored'       => $restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.list-table.actions-and-month-filters',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
 	private static function check_referer_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures       = array();
 		$local_snapshot = self::snapshot_globals(
@@ -929,6 +1133,56 @@ final class AdminWorkflowsSurface {
 				echo '<input class="cfz-extra-filter" id="cfz-extra-filter-' . \esc_attr( $which ) . '" ';
 				echo 'name="cfz_extra_' . \esc_attr( $which ) . '" value="' . \esc_attr( $this->config['extra_label'] ) . '" />';
 				echo '</div>';
+			}
+		};
+	}
+
+	private static function new_helper_list_table( array $config ): \WP_List_Table {
+		return new class( $config ) extends \WP_List_Table {
+			private array $config;
+
+			public function __construct( array $config ) {
+				$this->config = $config;
+				parent::__construct(
+					array(
+						'ajax'     => false,
+						'plural'   => 'cfz_helper_items',
+						'screen'   => $config['screen'],
+						'singular' => 'cfz_helper_item',
+					)
+				);
+			}
+
+			protected function get_bulk_actions(): array {
+				return $this->config['bulk_actions'];
+			}
+
+			public function expose_bulk_actions( string $which ): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->bulk_actions( $which );
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
+			}
+
+			public function expose_months_dropdown( string $post_type ): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->months_dropdown( $post_type );
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
 			}
 		};
 	}
