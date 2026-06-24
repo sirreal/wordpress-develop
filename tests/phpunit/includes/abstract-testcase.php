@@ -24,6 +24,11 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 
 	protected static $hooks_saved = array();
 	protected static $ignore_files;
+	protected static $expected_annotations_cache = array();
+	protected static $core_registration_snapshots = array();
+	protected static $db_autocommit_is_disabled = false;
+	protected static $test_context_hooks_registered = false;
+	protected static $deprecation_tracking_test          = null;
 
 	/**
 	 * Fixture factory.
@@ -71,12 +76,19 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		$wpdb->suppress_errors = false;
 		$wpdb->show_errors     = true;
 		$wpdb->db_connect();
+		self::$db_autocommit_is_disabled = false;
 		ini_set( 'display_errors', 1 );
 
 		$class = get_called_class();
 
 		if ( method_exists( $class, 'wpSetUpBeforeClass' ) ) {
-			call_user_func( array( $class, 'wpSetUpBeforeClass' ), static::factory() );
+			add_filter( 'wp_hash_password_options', array( __CLASS__, 'wp_hash_password_options_for_tests' ), 1, 2 );
+
+			try {
+				call_user_func( array( $class, 'wpSetUpBeforeClass' ), static::factory() );
+			} finally {
+				remove_filter( 'wp_hash_password_options', array( __CLASS__, 'wp_hash_password_options_for_tests' ), 1 );
+			}
 		}
 
 		self::commit_transaction();
@@ -116,6 +128,8 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 			self::$ignore_files = $this->scan_user_uploads();
 		}
 
+		self::register_test_context_hooks();
+
 		if ( ! self::$hooks_saved ) {
 			$this->_backup_hooks();
 		}
@@ -129,9 +143,7 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		 * taxonomies at 'init'.
 		 */
 		if ( defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS ) {
-			$this->reset_post_types();
-			$this->reset_taxonomies();
-			$this->reset_post_statuses();
+			$this->reset_core_registrations();
 			$this->reset__SERVER();
 
 			if ( $wp_rewrite->permalink_structure ) {
@@ -141,8 +153,6 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 
 		$this->start_transaction();
 		$this->expectDeprecated();
-		add_filter( 'wp_die_handler', array( $this, 'get_wp_die_handler' ) );
-		add_filter( 'wp_hash_password_options', array( $this, 'wp_hash_password_options' ), 1, 2 );
 	}
 
 	/**
@@ -152,8 +162,18 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	 * @param string $algorithm The algorithm to use for hashing.
 	 */
 	public function wp_hash_password_options( array $options, string $algorithm ): array {
+		return self::wp_hash_password_options_for_tests( $options, $algorithm );
+	}
+
+	/**
+	 * Sets the bcrypt cost option for password hashing during tests.
+	 *
+	 * @param array  $options   The options for password hashing.
+	 * @param string $algorithm The algorithm to use for hashing.
+	 */
+	public static function wp_hash_password_options_for_tests( array $options, string $algorithm ): array {
 		if ( PASSWORD_BCRYPT === $algorithm ) {
-			$options['cost'] = 5;
+			$options['cost'] = 4;
 		}
 
 		return $options;
@@ -170,64 +190,68 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	public function tear_down() {
 		global $wpdb, $wp_the_query, $wp_query, $wp;
 
-		$wpdb->query( 'ROLLBACK' );
+		try {
+			$wpdb->query( 'ROLLBACK' );
 
-		if ( is_multisite() ) {
-			while ( ms_is_switched() ) {
-				restore_current_blog();
+			if ( is_multisite() ) {
+				while ( ms_is_switched() ) {
+					restore_current_blog();
+				}
 			}
+
+			// Reset query, main query, and WP globals similar to wp-settings.php.
+			$wp_the_query = new WP_Query();
+			$wp_query     = $wp_the_query;
+			$wp           = new WP();
+
+			// Reset globals related to the post loop and `setup_postdata()`.
+			$post_globals = array( 'post', 'id', 'authordata', 'currentday', 'currentmonth', 'page', 'pages', 'multipage', 'more', 'numpages' );
+			foreach ( $post_globals as $global ) {
+				$GLOBALS[ $global ] = null;
+			}
+
+			/*
+			 * Reset globals related to current screen to provide a consistent global starting state
+			 * for tests that interact with admin screens. Replaces the need for individual tests
+			 * to invoke `set_current_screen( 'front' )` (or an alternative implementation) as a reset.
+			 *
+			 * The globals are from `WP_Screen::set_current_screen()`.
+			 *
+			 * Why not invoke `set_current_screen( 'front' )`?
+			 * Performance (faster test runs with less memory usage). How so? For each test,
+			 * it saves creating an instance of WP_Screen, making two method calls,
+			 * and firing of the `current_screen` action.
+			 */
+			$current_screen_globals = array( 'current_screen', 'taxnow', 'typenow' );
+			foreach ( $current_screen_globals as $global ) {
+				$GLOBALS[ $global ] = null;
+			}
+
+			// Reset comment globals.
+			$comment_globals = array( 'comment_alt', 'comment_depth', 'comment_thread_alt' );
+			foreach ( $comment_globals as $global ) {
+				$GLOBALS[ $global ] = null;
+			}
+
+			/*
+			 * Reset $wp_sitemap global so that sitemap-related dynamic $wp->public_query_vars
+			 * are added when the next test runs.
+			 */
+			$GLOBALS['wp_sitemaps'] = null;
+
+			// Reset template globals.
+			$GLOBALS['wp_stylesheet_path'] = null;
+			$GLOBALS['wp_template_path']   = null;
+
+			$this->unregister_all_meta_keys();
+			remove_theme_support( 'html5' );
+			remove_filter( 'query', array( $this, '_create_temporary_tables' ) );
+			remove_filter( 'query', array( $this, '_drop_temporary_tables' ) );
+			$this->_restore_hooks();
+		} finally {
+			self::$deprecation_tracking_test = null;
 		}
 
-		// Reset query, main query, and WP globals similar to wp-settings.php.
-		$wp_the_query = new WP_Query();
-		$wp_query     = $wp_the_query;
-		$wp           = new WP();
-
-		// Reset globals related to the post loop and `setup_postdata()`.
-		$post_globals = array( 'post', 'id', 'authordata', 'currentday', 'currentmonth', 'page', 'pages', 'multipage', 'more', 'numpages' );
-		foreach ( $post_globals as $global ) {
-			$GLOBALS[ $global ] = null;
-		}
-
-		/*
-		 * Reset globals related to current screen to provide a consistent global starting state
-		 * for tests that interact with admin screens. Replaces the need for individual tests
-		 * to invoke `set_current_screen( 'front' )` (or an alternative implementation) as a reset.
-		 *
-		 * The globals are from `WP_Screen::set_current_screen()`.
-		 *
-		 * Why not invoke `set_current_screen( 'front' )`?
-		 * Performance (faster test runs with less memory usage). How so? For each test,
-		 * it saves creating an instance of WP_Screen, making two method calls,
-		 * and firing of the `current_screen` action.
-		 */
-		$current_screen_globals = array( 'current_screen', 'taxnow', 'typenow' );
-		foreach ( $current_screen_globals as $global ) {
-			$GLOBALS[ $global ] = null;
-		}
-
-		// Reset comment globals.
-		$comment_globals = array( 'comment_alt', 'comment_depth', 'comment_thread_alt' );
-		foreach ( $comment_globals as $global ) {
-			$GLOBALS[ $global ] = null;
-		}
-
-		/*
-		 * Reset $wp_sitemap global so that sitemap-related dynamic $wp->public_query_vars
-		 * are added when the next test runs.
-		 */
-		$GLOBALS['wp_sitemaps'] = null;
-
-		// Reset template globals.
-		$GLOBALS['wp_stylesheet_path'] = null;
-		$GLOBALS['wp_template_path']   = null;
-
-		$this->unregister_all_meta_keys();
-		remove_theme_support( 'html5' );
-		remove_filter( 'query', array( $this, '_create_temporary_tables' ) );
-		remove_filter( 'query', array( $this, '_drop_temporary_tables' ) );
-		remove_filter( 'wp_die_handler', array( $this, 'get_wp_die_handler' ) );
-		$this->_restore_hooks();
 		wp_set_current_user( 0 );
 
 		$this->reset_lazyload_queue();
@@ -463,6 +487,216 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	}
 
 	/**
+	 * Resets core post type, taxonomy, and post status registrations.
+	 */
+	protected function reset_core_registrations() {
+		if ( ! $this->can_cache_core_registration_reset() ) {
+			$this->reset_post_types();
+			$this->reset_taxonomies();
+			$this->reset_post_statuses();
+			return;
+		}
+
+		$cache_key = $this->get_core_registration_cache_key();
+
+		if ( isset( self::$core_registration_snapshots[ $cache_key ] ) ) {
+			$this->restore_core_registration_snapshot( self::$core_registration_snapshots[ $cache_key ] );
+			return;
+		}
+
+		$this->reset_post_types();
+		$this->reset_taxonomies();
+		$this->reset_post_statuses();
+
+		self::$core_registration_snapshots[ $cache_key ] = $this->capture_core_registration_snapshot();
+	}
+
+	/**
+	 * Determines whether the registration reset can use cached snapshots.
+	 *
+	 * @return bool Whether caching is safe for the current global state.
+	 */
+	protected function can_cache_core_registration_reset() {
+		global $wp_rewrite;
+
+		/*
+		 * Base setup clears active permalink structures immediately after the
+		 * registration reset. Avoid caching this transient pre-clear state, as
+		 * rewrite-heavy tests rebuild their rules explicitly after setup.
+		 */
+		if ( $wp_rewrite->permalink_structure ) {
+			return false;
+		}
+
+		/*
+		 * Preserve registration-time hooks and filters for tests that explicitly
+		 * observe them. These hooks are rare and bypassing the cache keeps their
+		 * behavior identical to the existing reset path.
+		 */
+		if (
+			has_filter( 'post_format_rewrite_base' ) ||
+			has_action( 'registered_post_type' ) ||
+			has_action( 'unregistered_post_type' ) ||
+			has_action( 'registered_taxonomy' ) ||
+			has_action( 'unregistered_taxonomy' ) ||
+			has_action( 'registered_taxonomy_for_object_type' ) ||
+			has_action( 'unregistered_taxonomy_for_object_type' )
+		) {
+			return false;
+		}
+
+		foreach ( array_keys( (array) $GLOBALS['wp_post_types'] ) as $post_type ) {
+			if (
+				has_action( "registered_post_type_{$post_type}" ) ||
+				has_filter( "post_type_labels_{$post_type}" )
+			) {
+				return false;
+			}
+
+			if ( ! empty( $GLOBALS['wp_post_types'][ $post_type ]->tests_no_auto_unregister ) ) {
+				return false;
+			}
+		}
+
+		foreach ( array_keys( (array) $GLOBALS['wp_taxonomies'] ) as $taxonomy ) {
+			if (
+				has_action( "registered_taxonomy_{$taxonomy}" ) ||
+				has_filter( "taxonomy_labels_{$taxonomy}" )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Builds a cache key for the current registration defaults.
+	 *
+	 * @return string Cache key.
+	 */
+	protected function get_core_registration_cache_key() {
+		global $wp_rewrite;
+
+		return md5(
+			serialize(
+				array(
+					'is_admin'                    => is_admin(),
+					'did_init'                    => did_action( 'init' ),
+					'locale'                      => get_locale(),
+					'category_base'               => get_option( 'category_base' ),
+					'tag_base'                    => get_option( 'tag_base' ),
+					'wp_attachment_pages_enabled' => get_option( 'wp_attachment_pages_enabled' ),
+					'post_formats'                => current_theme_supports( 'post-formats' ),
+					'permalink_structure'         => $wp_rewrite->permalink_structure,
+					'using_index_permalinks'      => $wp_rewrite->using_index_permalinks(),
+					'front'                       => $wp_rewrite->front,
+					'root'                        => $wp_rewrite->root,
+					'index'                       => $wp_rewrite->index,
+				)
+			)
+		);
+	}
+
+	/**
+	 * Captures the registration globals after the normal reset path runs.
+	 *
+	 * @return array Snapshot of registration-related globals.
+	 */
+	protected function capture_core_registration_snapshot() {
+		global $wp, $wp_rewrite, $wp_post_types, $wp_taxonomies, $wp_post_statuses, $_wp_post_type_features, $post_type_meta_caps;
+
+		return array(
+			'wp_post_types'         => self::clone_core_registration_objects( $wp_post_types ),
+			'wp_taxonomies'         => self::clone_core_registration_objects( $wp_taxonomies ),
+			'wp_post_statuses'      => self::clone_core_registration_objects( $wp_post_statuses ),
+			'post_type_features'    => $_wp_post_type_features,
+			'post_type_meta_caps'   => $post_type_meta_caps,
+			'public_query_vars'     => $wp->public_query_vars,
+			'private_query_vars'    => $wp->private_query_vars,
+			'extra_query_vars'      => $wp->extra_query_vars,
+			'rewritecode'           => $wp_rewrite->rewritecode,
+			'rewritereplace'        => $wp_rewrite->rewritereplace,
+			'queryreplace'          => $wp_rewrite->queryreplace,
+			'rules'                 => $wp_rewrite->rules,
+			'matches'               => $wp_rewrite->matches,
+			'extra_rules'           => $wp_rewrite->extra_rules,
+			'extra_rules_top'       => $wp_rewrite->extra_rules_top,
+			'extra_permastructs'    => $wp_rewrite->extra_permastructs,
+			'non_wp_rules'          => $wp_rewrite->non_wp_rules,
+			'endpoints'             => $wp_rewrite->endpoints,
+			'use_verbose_page_rules' => $wp_rewrite->use_verbose_page_rules,
+		);
+	}
+
+	/**
+	 * Restores a cached registration snapshot.
+	 *
+	 * @param array $snapshot Snapshot of registration-related globals.
+	 */
+	protected function restore_core_registration_snapshot( array $snapshot ) {
+		global $wp, $wp_rewrite, $wp_post_types, $wp_taxonomies, $wp_post_statuses, $_wp_post_type_features, $post_type_meta_caps;
+
+		WP_Post_Type::reset_default_labels();
+		WP_Taxonomy::reset_default_labels();
+
+		$wp_post_types          = self::clone_core_registration_objects( $snapshot['wp_post_types'] );
+		$wp_taxonomies          = self::clone_core_registration_objects( $snapshot['wp_taxonomies'] );
+		$wp_post_statuses       = self::clone_core_registration_objects( $snapshot['wp_post_statuses'] );
+		$_wp_post_type_features = $snapshot['post_type_features'];
+		$post_type_meta_caps    = $snapshot['post_type_meta_caps'];
+
+		$wp->public_query_vars  = $snapshot['public_query_vars'];
+		$wp->private_query_vars = $snapshot['private_query_vars'];
+		$wp->extra_query_vars   = $snapshot['extra_query_vars'];
+
+		$wp_rewrite->rewritecode            = $snapshot['rewritecode'];
+		$wp_rewrite->rewritereplace         = $snapshot['rewritereplace'];
+		$wp_rewrite->queryreplace           = $snapshot['queryreplace'];
+		$wp_rewrite->rules                  = $snapshot['rules'];
+		$wp_rewrite->matches                = $snapshot['matches'];
+		$wp_rewrite->extra_rules            = $snapshot['extra_rules'];
+		$wp_rewrite->extra_rules_top        = $snapshot['extra_rules_top'];
+		$wp_rewrite->extra_permastructs     = $snapshot['extra_permastructs'];
+		$wp_rewrite->non_wp_rules           = $snapshot['non_wp_rules'];
+		$wp_rewrite->endpoints              = $snapshot['endpoints'];
+		$wp_rewrite->use_verbose_page_rules = $snapshot['use_verbose_page_rules'];
+	}
+
+	/**
+	 * Clones registration objects so cached snapshots cannot be mutated by tests.
+	 *
+	 * @param array $objects Registration objects.
+	 * @return array Cloned registration objects.
+	 */
+	protected static function clone_core_registration_objects( array $objects ) {
+		$clones = array();
+
+		foreach ( $objects as $name => $object ) {
+			if ( ! is_object( $object ) ) {
+				$clones[ $name ] = $object;
+				continue;
+			}
+
+			$clones[ $name ] = clone $object;
+
+			foreach ( array( 'labels', 'cap', 'label_count' ) as $property ) {
+				if ( isset( $clones[ $name ]->$property ) && is_object( $clones[ $name ]->$property ) ) {
+					$clones[ $name ]->$property = clone $clones[ $name ]->$property;
+				}
+			}
+
+			foreach ( array( 'rest_controller', 'revisions_rest_controller', 'autosave_rest_controller' ) as $property ) {
+				if ( property_exists( $clones[ $name ], $property ) ) {
+					$clones[ $name ]->$property = null;
+				}
+			}
+		}
+
+		return $clones;
+	}
+
+	/**
 	 * Cleans up any registered meta keys.
 	 *
 	 * @since 5.1.0
@@ -493,7 +727,11 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	public function start_transaction() {
 		global $wpdb;
 
-		$wpdb->query( 'SET autocommit = 0;' );
+		if ( ! self::$db_autocommit_is_disabled ) {
+			$wpdb->query( 'SET autocommit = 0;' );
+			self::$db_autocommit_is_disabled = true;
+		}
+
 		$wpdb->query( 'START TRANSACTION;' );
 
 		add_filter( 'query', array( $this, '_create_temporary_tables' ) );
@@ -584,46 +822,153 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	 * @since 3.7.0
 	 */
 	public function expectDeprecated() {
-		if ( method_exists( $this, 'getAnnotations' ) ) {
-			// PHPUnit < 9.5.0.
-			$annotations = $this->getAnnotations();
-		} else {
-			// PHPUnit >= 9.5.0.
-			$annotations = \PHPUnit\Util\Test::parseTestMethodAnnotations(
-				static::class,
-				$this->getName( false )
+		self::$deprecation_tracking_test = $this;
+
+		$cache_key = static::class . '::' . $this->getName( false );
+
+		if ( ! isset( self::$expected_annotations_cache[ $cache_key ] ) ) {
+			if ( method_exists( $this, 'getAnnotations' ) ) {
+				// PHPUnit < 9.5.0.
+				$annotations = $this->getAnnotations();
+			} else {
+				// PHPUnit >= 9.5.0.
+				$annotations = \PHPUnit\Util\Test::parseTestMethodAnnotations(
+					static::class,
+					$this->getName( false )
+				);
+			}
+
+			$expected_deprecated     = array();
+			$expected_doing_it_wrong = array();
+
+			foreach ( array( 'class', 'method' ) as $depth ) {
+				if ( ! empty( $annotations[ $depth ]['expectedDeprecated'] ) ) {
+					$expected_deprecated = array_merge(
+						$expected_deprecated,
+						$annotations[ $depth ]['expectedDeprecated']
+					);
+				}
+
+				if ( ! empty( $annotations[ $depth ]['expectedIncorrectUsage'] ) ) {
+					$expected_doing_it_wrong = array_merge(
+						$expected_doing_it_wrong,
+						$annotations[ $depth ]['expectedIncorrectUsage']
+					);
+				}
+			}
+
+			self::$expected_annotations_cache[ $cache_key ] = array(
+				'expected_deprecated'     => $expected_deprecated,
+				'expected_doing_it_wrong' => $expected_doing_it_wrong,
 			);
 		}
 
-		foreach ( array( 'class', 'method' ) as $depth ) {
-			if ( ! empty( $annotations[ $depth ]['expectedDeprecated'] ) ) {
-				$this->expected_deprecated = array_merge(
-					$this->expected_deprecated,
-					$annotations[ $depth ]['expectedDeprecated']
-				);
-			}
+		$this->expected_deprecated = array_merge(
+			$this->expected_deprecated,
+			self::$expected_annotations_cache[ $cache_key ]['expected_deprecated']
+		);
 
-			if ( ! empty( $annotations[ $depth ]['expectedIncorrectUsage'] ) ) {
-				$this->expected_doing_it_wrong = array_merge(
-					$this->expected_doing_it_wrong,
-					$annotations[ $depth ]['expectedIncorrectUsage']
-				);
-			}
+		$this->expected_doing_it_wrong = array_merge(
+			$this->expected_doing_it_wrong,
+			self::$expected_annotations_cache[ $cache_key ]['expected_doing_it_wrong']
+		);
+	}
+
+	/**
+	 * Registers persistent hooks for detecting deprecated and incorrect usage calls during tests.
+	 */
+	protected static function register_test_context_hooks() {
+		if ( self::$test_context_hooks_registered ) {
+			return;
 		}
 
-		add_action( 'deprecated_function_run', array( $this, 'deprecated_function_run' ), 10, 3 );
-		add_action( 'deprecated_argument_run', array( $this, 'deprecated_function_run' ), 10, 3 );
-		add_action( 'deprecated_class_run', array( $this, 'deprecated_function_run' ), 10, 3 );
-		add_action( 'deprecated_file_included', array( $this, 'deprecated_function_run' ), 10, 4 );
-		add_action( 'deprecated_hook_run', array( $this, 'deprecated_function_run' ), 10, 4 );
-		add_action( 'doing_it_wrong_run', array( $this, 'doing_it_wrong_run' ), 10, 3 );
+		add_action( 'deprecated_function_run', array( __CLASS__, 'deprecated_function_run_for_current_test' ), 10, 3 );
+		add_action( 'deprecated_argument_run', array( __CLASS__, 'deprecated_function_run_for_current_test' ), 10, 3 );
+		add_action( 'deprecated_class_run', array( __CLASS__, 'deprecated_function_run_for_current_test' ), 10, 3 );
+		add_action( 'deprecated_file_included', array( __CLASS__, 'deprecated_function_run_for_current_test' ), 10, 4 );
+		add_action( 'deprecated_hook_run', array( __CLASS__, 'deprecated_function_run_for_current_test' ), 10, 4 );
+		add_action( 'doing_it_wrong_run', array( __CLASS__, 'doing_it_wrong_run_for_current_test' ), 10, 3 );
 
-		add_action( 'deprecated_function_trigger_error', '__return_false' );
-		add_action( 'deprecated_argument_trigger_error', '__return_false' );
-		add_action( 'deprecated_class_trigger_error', '__return_false' );
-		add_action( 'deprecated_file_trigger_error', '__return_false' );
-		add_action( 'deprecated_hook_trigger_error', '__return_false' );
-		add_action( 'doing_it_wrong_trigger_error', '__return_false' );
+		add_filter( 'deprecated_function_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'deprecated_argument_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'deprecated_class_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'deprecated_file_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'deprecated_hook_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'doing_it_wrong_trigger_error', array( __CLASS__, 'deprecation_trigger_error_for_current_test' ) );
+		add_filter( 'wp_die_handler', array( __CLASS__, 'wp_die_handler_for_current_test' ) );
+		add_filter( 'wp_hash_password_options', array( __CLASS__, 'wp_hash_password_options_for_current_test' ), 1, 2 );
+
+		self::$test_context_hooks_registered = true;
+	}
+
+	/**
+	 * Retrieves the `wp_die()` handler for the currently running test.
+	 *
+	 * @param callable $handler The current die handler.
+	 * @return callable The test die handler.
+	 */
+	public static function wp_die_handler_for_current_test( $handler ) {
+		if ( self::$deprecation_tracking_test instanceof self ) {
+			return array( self::$deprecation_tracking_test, 'wp_die_handler' );
+		}
+
+		return $handler;
+	}
+
+	/**
+	 * Sets the password hashing options for the currently running test.
+	 *
+	 * @param array  $options   The options for password hashing.
+	 * @param string $algorithm The algorithm to use for hashing.
+	 * @return array Password hashing options.
+	 */
+	public static function wp_hash_password_options_for_current_test( array $options, string $algorithm ): array {
+		if ( self::$deprecation_tracking_test instanceof self ) {
+			return self::$deprecation_tracking_test->wp_hash_password_options( $options, $algorithm );
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Records deprecated calls for the currently running test.
+	 *
+	 * @param string $function_name Name of the deprecated function, class, file, or hook.
+	 * @param string $replacement   Replacement.
+	 * @param string $version       Version.
+	 * @param string $message       Optional message.
+	 */
+	public static function deprecated_function_run_for_current_test( $function_name, $replacement, $version, $message = '' ) {
+		if ( self::$deprecation_tracking_test instanceof self ) {
+			self::$deprecation_tracking_test->deprecated_function_run( $function_name, $replacement, $version, $message );
+		}
+	}
+
+	/**
+	 * Records incorrect usage calls for the currently running test.
+	 *
+	 * @param string $function_name Function name.
+	 * @param string $message       Message.
+	 * @param string $version       Version.
+	 */
+	public static function doing_it_wrong_run_for_current_test( $function_name, $message, $version ) {
+		if ( self::$deprecation_tracking_test instanceof self ) {
+			self::$deprecation_tracking_test->doing_it_wrong_run( $function_name, $message, $version );
+		}
+	}
+
+	/**
+	 * Suppresses PHP notices for deprecated and incorrect usage calls only while a test is running.
+	 *
+	 * @param bool $trigger Whether to trigger the PHP notice.
+	 * @return bool Whether to trigger the PHP notice.
+	 */
+	public static function deprecation_trigger_error_for_current_test( $trigger ) {
+		if ( self::$deprecation_tracking_test instanceof self ) {
+			return false;
+		}
+
+		return $trigger;
 	}
 
 	/**
