@@ -32,6 +32,7 @@ final class ImportDiffSurface {
 			$rows[] = self::check_text_diff_rendering( $ctx->fork( 'text-diff' ) );
 			$rows[] = self::check_error_export_and_merge( $ctx->fork( 'error-export' ) );
 			$rows[] = self::check_error_lifecycle_ordering( $ctx->fork( 'error-lifecycle' ) );
+			$rows[] = self::check_imported_post_lookup( $ctx->fork( 'post-lookup' ) );
 			$rows[] = self::check_imported_comment_lookup( $ctx->fork( 'comment-lookup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -363,6 +364,72 @@ final class ImportDiffSurface {
 		return self::result( $ctx, 'import-diff.wp-error.lifecycle-ordering-and-default-code', $failures );
 	}
 
+	private static function check_imported_post_lookup( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! method_exists( $wpdb, 'component_fuzz_content_counts' ) ) {
+			return $ctx->skip(
+				'import-diff.importer.imported-post-lookup',
+				'The in-memory wpdb content stub is unavailable.'
+			);
+		}
+
+		$before = $wpdb->component_fuzz_content_counts();
+		if ( array_sum( $before ) !== 0 ) {
+			return $ctx->skip(
+				'import-diff.importer.imported-post-lookup',
+				'The content stub was not empty before the importer post lookup case.',
+				array( 'counts' => $before )
+			);
+		}
+
+		$failures      = array();
+		$importer_name = 'component_fuzz_' . $ctx->identifier( 4, 9 );
+		$blog_id       = (string) $ctx->int( 2, 20 );
+		$other_blog_id = (string) ( (int) $blog_id + 200 );
+		$post_ids      = array();
+		$permalinks    = array(
+			'https://example.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ),
+			'https://example.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ) . '?q=' . rawurlencode( 'x&y' ),
+			'https://other.test/imported/' . rawurlencode( $ctx->identifier( 4, 10 ) ),
+		);
+
+		try {
+			$post_ids[] = self::insert_imported_post_meta( $importer_name, $blog_id, $permalinks[0], 'first' );
+			$post_ids[] = self::insert_imported_post_meta( $importer_name, $blog_id, $permalinks[1], 'second' );
+			$post_ids[] = self::insert_imported_post_meta( $importer_name, $other_blog_id, $permalinks[2], 'other-blog' );
+			self::insert_imported_post_meta( $importer_name . '_other', $blog_id, $permalinks[0], 'other-importer' );
+
+			$importer = new \WP_Importer();
+			$lookup   = $importer->get_imported_posts( $importer_name, $blog_id );
+			$count    = $importer->count_imported_posts( $importer_name, $blog_id );
+			$other    = $importer->get_imported_posts( $importer_name, $other_blog_id );
+
+			self::collect_failure(
+				$failures,
+				array(
+					$permalinks[0] => $post_ids[0],
+					$permalinks[1] => $post_ids[1],
+				) === $lookup
+					&& 2 === $count
+					&& array( $permalinks[2] => $post_ids[2] ) === $other,
+				'WP_Importer maps imported post permalinks to local post IDs by importer and blog meta key',
+				array(
+					'blogId'       => $blog_id,
+					'importerName' => $importer_name,
+					'lookup'       => $lookup,
+					'otherLookup'  => $other,
+					'count'        => $count,
+					'postIds'      => $post_ids,
+				)
+			);
+		} finally {
+			$wpdb->component_fuzz_reset_content();
+		}
+
+		return self::result( $ctx, 'import-diff.importer.imported-post-lookup', $failures );
+	}
+
 	private static function check_imported_comment_lookup( \ComponentFuzz\FuzzContext $ctx ): array {
 		global $wpdb;
 
@@ -415,6 +482,50 @@ final class ImportDiffSurface {
 		}
 
 		return self::result( $ctx, 'import-diff.importer.imported-comment-lookup', $failures );
+	}
+
+	private static function insert_imported_post_meta( string $importer_name, string $blog_id, string $permalink, string $label ): int {
+		global $wpdb;
+
+		$wpdb->insert(
+			$wpdb->posts,
+			array(
+				'post_author'           => 0,
+				'post_date'             => '2026-06-24 00:00:00',
+				'post_date_gmt'         => '2026-06-24 00:00:00',
+				'post_content'          => 'Imported post ' . $label,
+				'post_title'            => 'Imported ' . $label,
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'imported-' . $label,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-24 00:00:00',
+				'post_modified_gmt'     => '2026-06-24 00:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => $permalink,
+				'menu_order'            => 0,
+				'post_type'             => 'post',
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+			)
+		);
+		$post_id = (int) $wpdb->insert_id;
+
+		$wpdb->insert(
+			$wpdb->postmeta,
+			array(
+				'post_id'    => $post_id,
+				'meta_key'   => $importer_name . '_' . $blog_id . '_permalink',
+				'meta_value' => $permalink,
+			)
+		);
+
+		return $post_id;
 	}
 
 	private static function insert_comment_agent( string $comment_agent, string $label ): int {

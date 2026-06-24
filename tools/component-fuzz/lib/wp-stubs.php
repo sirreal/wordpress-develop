@@ -1517,12 +1517,20 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				}
 			);
 
+			if ( preg_match( '/SELECT\s+COUNT\(\s*' . preg_quote( $object_key, '/' ) . '\s*\)\s+AS\s+cnt\b/i', $query ) ) {
+				return array( array( 'cnt' => count( $rows ) ) );
+			}
+
 			if ( preg_match( '/SELECT\s+' . preg_quote( $id_column, '/' ) . '\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( $id_column ) );
 			}
 
 			if ( preg_match( '/SELECT\s+' . preg_quote( $object_key, '/' ) . '\s*,\s*meta_key\s*,\s*meta_value\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( $object_key, 'meta_key', 'meta_value' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+' . preg_quote( $object_key, '/' ) . '\s*,\s*meta_value\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( $object_key, 'meta_value' ) );
 			}
 
 			if ( preg_match( '/SELECT\s+' . preg_quote( $object_key, '/' ) . '\b/i', $query ) ) {
