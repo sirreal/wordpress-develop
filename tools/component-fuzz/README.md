@@ -382,10 +382,10 @@ database, network requests, or a configured site.
   paths, synthetic auth cookies and session tokens, redirect sanitization, and
   safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
-  merging and dynamic filters, callback argument and rendering filter
-  contracts, escaped and HTML-attribute rendering, tag discovery, apply aliasing,
-  stripping and strip filters, presence checks, malformed inputs, and exact
-  global restoration.
+  merging and dynamic filters, invalid registration and non-callable callback
+  guards, callback argument and rendering filter contracts, escaped and
+  HTML-attribute rendering, tag discovery, apply aliasing, stripping and strip
+  filters, presence checks, malformed inputs, and exact global restoration.
 - `site-health`: no-DB Site Health/update/HTTPS helper coverage, including
   generated update transients and dismissed core update options, aggregate
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS

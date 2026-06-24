@@ -35,6 +35,7 @@ final class ShortcodesSurface {
 			$attribute_cases = self::attribute_cases( $ctx->fork( 'attribute-cases' ) );
 
 			$rows[] = self::check_registry_lifecycle( $ctx->fork( 'registry' ) );
+			$rows[] = self::check_invalid_registration_and_callback_guards( $ctx->fork( 'invalid-registry' ) );
 			$rows[] = self::check_attribute_parsing( $ctx->fork( 'attribute-parsing' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_defaults( $ctx->fork( 'attribute-defaults' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_filter_contract( $ctx->fork( 'attribute-filter' ), $attribute_cases );
@@ -67,10 +68,12 @@ final class ShortcodesSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_shortcode',
 				'remove_shortcode',
 				'remove_all_shortcodes',
 				'add_filter',
+				'remove_action',
 				'remove_filter',
 				'shortcode_exists',
 				'get_shortcode_regex',
@@ -188,6 +191,111 @@ final class ShortcodesSurface {
 			$failures,
 			array(
 				'tags' => array( $tag_a, $tag_b ),
+			)
+		);
+	}
+
+	private static function check_invalid_registration_and_callback_guards( \ComponentFuzz\FuzzContext $ctx ): array {
+		$valid_tag       = self::tag( $ctx, 'valid-registry' );
+		$noncallable_tag = self::tag( $ctx, 'noncallable' );
+		$start           = array(
+			'preexisting_shortcode' => static function () {
+				return 'preexisting';
+			},
+		);
+		$invalid_tags    = array(
+			'',
+			' ',
+			"bad\n" . $ctx->identifier( 3, 8 ),
+			'bad tag ' . $ctx->identifier( 3, 8 ),
+			'bad<tag' . $ctx->identifier( 3, 8 ),
+			'bad>tag' . $ctx->identifier( 3, 8 ),
+			'bad[tag' . $ctx->identifier( 3, 8 ) . ']',
+			'bad/tag' . $ctx->identifier( 3, 8 ),
+			'bad=tag' . $ctx->identifier( 3, 8 ),
+			'bad&tag' . $ctx->identifier( 3, 8 ),
+			"bad\x00tag" . $ctx->identifier( 3, 8 ),
+		);
+		$events          = array();
+		$listener        = static function ( string $function_name, string $message, string $version ) use ( &$events ): void {
+			$events[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+		$suppress_error  = static function (): bool {
+			return false;
+		};
+		$valid_callback  = static function () {
+			return 'valid';
+		};
+		$failures        = array();
+
+		self::replace_registry( $start );
+		\add_action( 'doing_it_wrong_run', $listener, 10, 3 );
+		\add_filter( 'doing_it_wrong_trigger_error', $suppress_error, 10, 4 );
+		try {
+			foreach ( $invalid_tags as $tag ) {
+				\add_shortcode( $tag, $valid_callback );
+			}
+
+			$after_invalid = $GLOBALS['shortcode_tags'];
+			\add_shortcode( $valid_tag, $valid_callback );
+			\add_shortcode( $noncallable_tag, 'component_fuzz_missing_shortcode_callback_' . $ctx->identifier( 4, 10 ) );
+
+			$noncallable_source = 'before [' . $noncallable_tag . ' alpha="1"]body[/' . $noncallable_tag . '] after';
+			$noncallable_output = \do_shortcode( $noncallable_source );
+		} finally {
+			\remove_filter( 'doing_it_wrong_trigger_error', $suppress_error, 10 );
+			\remove_action( 'doing_it_wrong_run', $listener, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$start === $after_invalid
+				&& isset( $GLOBALS['shortcode_tags'][ $valid_tag ], $GLOBALS['shortcode_tags'][ $noncallable_tag ] )
+				&& $valid_callback === $GLOBALS['shortcode_tags'][ $valid_tag ],
+			'add_shortcode rejects empty/reserved tag names without mutating the registry but still accepts valid generated tags',
+			array(
+				'invalidTags'  => array_map( array( self::class, 'describe_string' ), $invalid_tags ),
+				'afterInvalid' => array_keys( $after_invalid ),
+				'registryKeys' => array_keys( $GLOBALS['shortcode_tags'] ),
+				'validTag'     => $valid_tag,
+				'noncallable'  => $noncallable_tag,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$noncallable_source === $noncallable_output,
+			'do_shortcode leaves non-callable registered shortcode text unchanged',
+			array(
+				'source' => self::describe_string( $noncallable_source ),
+				'output' => self::describe_string( $noncallable_output ),
+			)
+		);
+
+		$event_functions = array_count_values( array_map( static fn( array $event ): string => $event['function'], $events ) );
+		self::collect_failure(
+			$failures,
+			count( $invalid_tags ) === ( $event_functions['add_shortcode'] ?? 0 )
+				&& 1 === ( $event_functions['do_shortcode_tag'] ?? 0 )
+				&& count( $invalid_tags ) + 1 === count( $events ),
+			'invalid registration and non-callable rendering report scoped doing_it_wrong events',
+			array(
+				'eventFunctions' => $event_functions,
+				'events'         => $events,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.invalid-registration-and-callback-guards',
+			$failures,
+			array(
+				'invalidCount' => count( $invalid_tags ),
+				'validTag'     => $valid_tag,
+				'noncallable'  => $noncallable_tag,
 			)
 		);
 	}
