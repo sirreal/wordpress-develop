@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7907 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7910 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>mail</code> at 800 passed, <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, <code>assets</code> at 1300 passed, and <code>media-editor</code> at 700 passed and 100 skipped.</div>
+			<div class="note">Latest focused validations: <code>query-loop</code> at 7500 passed, <code>mail</code> at 800 passed, <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, and <code>assets</code> at 1300 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; the query-loop worker was retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; the stale fonts worker was retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -700,9 +700,9 @@
 				<tr>
 					<td><code>query-loop</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree from Leibniz the 2nd</td>
-					<td>Main focused run: 7400 passed, 0 skipped, 0 failed; latest broad run: 7565 passed, 62 skipped, 0 failed.</td>
-					<td><code>WP_Query</code>, loop state, conditional flags, cache/filter restoration.</td>
+					<td>Main worktree</td>
+					<td>Main focused run: 7500 passed, 0 skipped, 0 failed; latest broad run: 7910 passed, 62 skipped, 0 failed.</td>
+					<td><code>WP_Query</code>, loop state, conditional flags, offset/no-found-rows field windows, count oracles, cache/filter restoration.</td>
 				</tr>
 				<tr>
 					<td><code>media-ingest</code></td>

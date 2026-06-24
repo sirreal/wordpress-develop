@@ -40,6 +40,7 @@ final class QueryLoopSurface {
 			$rows[] = self::check_query_flags_and_selected_posts( $ctx->fork( 'flags' ) );
 			$rows[] = self::check_empty_query_events( $ctx->fork( 'empty' ) );
 			$rows   = array_merge( $rows, self::check_generated_query_cases( $ctx->fork( 'generated-cases' ) ) );
+			$rows[] = self::check_offset_no_found_rows_field_shapes( $ctx->fork( 'offset-fields' ) );
 			$rows[] = self::check_filter_and_cache_locality( $ctx->fork( 'filter-cache-locality' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -554,6 +555,123 @@ final class QueryLoopSurface {
 		return $rows;
 	}
 
+	private static function check_offset_no_found_rows_field_shapes( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label' => 'ids-offset-overrides-paged-no-found-rows',
+				'args'  => self::query_args(
+					array(
+						'post_type'      => 'post',
+						'fields'         => 'ids',
+						'posts_per_page' => 2,
+						'paged'          => 2,
+						'offset'         => 1,
+						'orderby'        => 'ID',
+						'order'          => 'ASC',
+						'no_found_rows'  => true,
+					)
+				),
+			),
+			array(
+				'label' => 'id-parent-paged-window-with-found-rows',
+				'args'  => self::query_args(
+					array(
+						'post_type'      => array( 'post', 'page' ),
+						'fields'         => 'id=>parent',
+						'posts_per_page' => 2,
+						'paged'          => 2,
+						'orderby'        => 'ID',
+						'order'          => 'ASC',
+						'no_found_rows'  => false,
+					)
+				),
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$events = array();
+			$hooks  = array();
+
+			try {
+				$query  = self::run_pre_query( $case['args'], $events, $hooks );
+				$expect = self::expected_query_observation( $query, array( 'args' => $case['args'] ) );
+				$actual = self::query_result_observation( $query );
+				$loop   = self::observe_query_loop( $query );
+				$checks = array(
+					'ids'          => $expect['pageIds'] === $actual['ids'],
+					'loopSeen'     => $expect['pageIds'] === $loop['seen'],
+					'postCount'    => count( $expect['pageIds'] ) === $actual['postCount'],
+					'foundPosts'   => $expect['foundPosts'] === $actual['foundPosts'],
+					'maxNumPages'  => $expect['maxNumPages'] === $actual['maxNumPages'],
+					'fieldShape'   => self::post_field_shape_matches( $query ),
+					'parentShape'  => self::field_parent_shape_matches( $query ),
+					'loopAligned'  => true === $loop['aligned'],
+					'loopSequence' => self::loop_observation_matches( $query, $loop, $events, $expect ),
+				);
+
+				self::collect_failure(
+					$failures,
+					! in_array( false, $checks, true ),
+					'offset/paged field query returns exact window, counts, shape, and loop events',
+					array(
+						'label'        => $case['label'],
+						'failedChecks' => implode( ',', array_keys( array_filter( $checks, static fn ( bool $ok ): bool => ! $ok ) ) ),
+						'ids'          => self::diagnostic_json(
+							array(
+								'expected' => $expect['pageIds'],
+								'actual'   => $actual['ids'],
+								'loop'     => $loop['seen'],
+							)
+						),
+						'counts'       => self::diagnostic_json(
+							array(
+								'expected' => array(
+									'postCount'   => count( $expect['pageIds'] ),
+									'foundPosts'  => $expect['foundPosts'],
+									'maxNumPages' => $expect['maxNumPages'],
+								),
+								'actual'   => array(
+									'postCount'   => $actual['postCount'],
+									'foundPosts'  => $actual['foundPosts'],
+									'maxNumPages' => $actual['maxNumPages'],
+								),
+							)
+						),
+						'events'       => implode( ',', $events ),
+						'loopState'    => self::diagnostic_json(
+							array(
+								'currentPost' => $loop['currentPost'],
+								'inTheLoop'   => $loop['inTheLoop'],
+								'beforeLoop'  => $loop['beforeLoop'],
+								'aligned'     => $loop['aligned'],
+							)
+						),
+					)
+				);
+			} catch ( \Throwable $e ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'offset/paged field-shape case does not throw',
+					array(
+						'label'     => $case['label'],
+						'throwable' => self::describe_throwable( $e ),
+					)
+				);
+			} finally {
+				self::remove_scoped_hooks( $hooks );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'query-loop.offset-no-found-rows-field-shapes',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
 	private static function check_filter_and_cache_locality( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures       = array();
 		$events         = array();
@@ -666,6 +784,15 @@ final class QueryLoopSurface {
 		$loop_no_results = static function () use ( &$events ): void {
 			$events[] = 'loop_no_results';
 		};
+		$found_posts = static function ( $found_posts, \WP_Query $query ): int {
+			unset( $found_posts );
+
+			if ( (bool) ( $query->query_vars['no_found_rows'] ?? false ) ) {
+				return 0;
+			}
+
+			return count( self::matching_posts_for_query( $query ) );
+		};
 		$options = array_merge(
 			array(
 				'comments_per_page' => 50,
@@ -681,9 +808,11 @@ final class QueryLoopSurface {
 		\add_action( 'loop_start', $loop_start, 10, 1 );
 		\add_action( 'loop_end', $loop_end, 10, 1 );
 		\add_action( 'loop_no_results', $loop_no_results, 10, 1 );
+		\add_filter( 'found_posts', $found_posts, 10, 2 );
 		$hooks[] = array( 'action', 'loop_start', $loop_start, 10 );
 		$hooks[] = array( 'action', 'loop_end', $loop_end, 10 );
 		$hooks[] = array( 'action', 'loop_no_results', $loop_no_results, 10 );
+		$hooks[] = array( 'filter', 'found_posts', $found_posts, 10 );
 
 		foreach ( $options as $option => $value ) {
 			$hook     = 'pre_option_' . $option;
@@ -1571,6 +1700,29 @@ final class QueryLoopSurface {
 		return true;
 	}
 
+	private static function field_parent_shape_matches( \WP_Query $query ): bool {
+		if ( 'id=>parent' !== ( $query->query_vars['fields'] ?? 'all' ) ) {
+			return true;
+		}
+
+		$parents = array();
+		foreach ( self::$posts as $post ) {
+			$parents[ (int) $post->ID ] = (int) $post->post_parent;
+		}
+
+		foreach ( $query->posts as $post ) {
+			if ( ! is_object( $post ) || ! isset( $post->ID, $post->post_parent ) ) {
+				return false;
+			}
+
+			if ( ( $parents[ (int) $post->ID ] ?? null ) !== (int) $post->post_parent ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function query_result_observation( \WP_Query $query ): array {
 		return array(
 			'ids'         => self::post_ids( $query->posts ),
@@ -2034,8 +2186,13 @@ final class QueryLoopSurface {
 
 		$failures[] = array(
 			'label'   => $label,
-			'details' => self::describe_value( $details ),
+			'details' => $details,
 		);
+	}
+
+	private static function diagnostic_json( array $data ): string {
+		$json = json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+		return false === $json ? '[unencodable]' : $json;
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array(), ?string $status = null ): array {

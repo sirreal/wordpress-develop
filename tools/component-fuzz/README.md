@@ -350,7 +350,8 @@ database, network requests, or a configured site.
 - `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
   `posts_pre_query` fixtures, including loop wrapper delegation,
   setup/reset postdata globals, single/page flag behavior, found/max-page coherence,
-  empty-result events, and deterministic state restoration.
+  empty-result events, offset/no-found-rows field-shape windows for `ids` and
+  `id=>parent`, and deterministic state restoration.
 - `registries`: no-DB modern registry coverage for connectors, icons, and
   speculation rules, including lifecycle validation, helper oracles, manifest
   sanitization/caching, allowlist behavior, rule serialization, and state
