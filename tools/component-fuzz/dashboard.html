@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7838 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7842 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validation: <code>network-media</code> at 100 aggregate iterations with 1752 assertions in the sampled result; largest remains <code>email</code> at 183696 passed.</div>
+			<div class="note">Latest focused validation: <code>revisions-autosaves</code> at 900 passed, 300 skipped, 0 failed; largest remains <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric work">1</div>
-			<div class="note">Helmholtz the 2nd is active on <code>revisions-autosaves</code> in <code>_work/component-fuzz-revisions-autosaves-deep</code> using priority/fast, <code>gpt-5.5</code> xhigh.</div>
+			<div class="metric good">0</div>
+			<div class="note">No active delegated workers; Helmholtz the 2nd's revisions/autosaves work has been integrated in main.</div>
 		</div>
 	</div>
 
@@ -475,10 +475,10 @@
 				</tr>
 				<tr>
 					<td><code>revisions-autosaves</code></td>
-					<td><span class="status work">delegated follow-up active</span></td>
-					<td>Helmholtz the 2nd / <code>_work/component-fuzz-revisions-autosaves-deep</code></td>
-					<td>Worker assigned 100-iteration revisions/autosaves validation.</td>
-					<td>Revision field copying/diffing, autosave and restore decisions, post type support, capability/error paths.</td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Helmholtz the 2nd / main worktree</td>
+					<td>Main focused run: 900 passed, 300 skipped, 0 failed; latest broad run: 7842 passed, 64 skipped, 0 failed.</td>
+					<td>Protected revision field filters, autosave create/update/delete, post locks, restore/title/list helpers, post type support, capability/error paths.</td>
 				</tr>
 				<tr>
 					<td><code>options-autoload</code></td>
@@ -639,6 +639,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>4841e86db6</code></td>
+					<td><code>revisions-autosaves</code></td>
+					<td>900 passed, 300 skipped, 0 failed.</td>
+					<td>7842 passed, 64 skipped, 0 failed at 2 iterations after protected field filters, autosave/post-lock, restore/title/list, and support-gate coverage.</td>
+				</tr>
 				<tr>
 					<td><code>e77aa7c74a</code></td>
 					<td><code>network-media</code></td>
