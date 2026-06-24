@@ -148,6 +148,8 @@ final class BlockTemplatesSurface {
 		$registry = \WP_Block_Templates_Registry::get_instance();
 		$name     = $case['registry']['name'];
 		$slug     = $case['registry']['slug'];
+		$allowed_post_type = $case['registry']['postTypes'][0];
+		$other_post_type   = 'page' === $allowed_post_type ? 'post' : 'page';
 
 		$registered = \register_block_template(
 			$name,
@@ -175,6 +177,17 @@ final class BlockTemplatesSurface {
 			static function () use ( $slug ) {
 				return \register_block_template( 'ComponentFuzz//' . $slug, array() );
 			}
+		);
+		$collision_description = 'Registered collision template ' . $case['registry']['description'];
+		$collision_name        = $case['registry']['namespace'] . '//' . $case['templates']['prioritySlug'];
+		$collision             = \register_block_template(
+			$collision_name,
+			array(
+				'title'       => 'Registered collision ' . $case['registry']['title'],
+				'description' => $collision_description,
+				'content'     => $case['registry']['content'],
+				'post_types'  => array( 'page', 'post' ),
+			)
 		);
 
 		self::assert_template_object(
@@ -230,7 +243,82 @@ final class BlockTemplatesSurface {
 			)
 		);
 
+		$registered_list = \get_block_templates(
+			array(
+				'slug__in'  => array( $slug ),
+				'post_type' => $allowed_post_type,
+			),
+			'wp_template'
+		);
+		$filtered_list   = \get_block_templates(
+			array(
+				'slug__in'  => array( $slug ),
+				'post_type' => $other_post_type,
+			),
+			'wp_template'
+		);
+		$listed_plugin   = self::templates_by_slug( $registered_list )[ $slug ] ?? null;
+		$filtered_plugin = self::templates_by_slug( $filtered_list )[ $slug ] ?? null;
+
+		self::assert_template_object(
+			$failures,
+			'registry.public-list-includes-plugin-template',
+			$listed_plugin,
+			array(
+				'id'              => $case['theme']['childSlug'] . '//' . $slug,
+				'theme'           => $case['theme']['childSlug'],
+				'slug'            => $slug,
+				'type'            => 'wp_template',
+				'source'          => 'plugin',
+				'origin'          => 'plugin',
+				'plugin'          => $case['registry']['namespace'],
+				'post_types'      => $case['registry']['postTypes'],
+				'contentContains' => $case['registry']['marker'],
+			)
+		);
+		self::record_if_false(
+			$failures,
+			$listed_plugin instanceof \WP_Block_Template && null === $filtered_plugin,
+			'registry.public-list-honors-post-type-filter-for-plugin-template',
+			array(
+				'allowedPostType' => $allowed_post_type,
+				'otherPostType'   => $other_post_type,
+				'allowedSlugs'    => array_keys( self::templates_by_slug( $registered_list ) ),
+				'otherSlugs'      => array_keys( self::templates_by_slug( $filtered_list ) ),
+			)
+		);
+
+		$collision_list    = \get_block_templates( array( 'slug__in' => array( $case['templates']['prioritySlug'] ) ), 'wp_template' );
+		$collision_matches = array_values(
+			array_filter(
+				$collision_list,
+				static function ( $template ) use ( $case ): bool {
+					return $template instanceof \WP_Block_Template && $case['templates']['prioritySlug'] === $template->slug;
+				}
+			)
+		);
+		$collision_listed  = $collision_matches[0] ?? null;
+		self::record_if_false(
+			$failures,
+			$collision instanceof \WP_Block_Template
+				&& 1 === count( $collision_matches )
+				&& $collision_listed instanceof \WP_Block_Template
+				&& 'theme' === $collision_listed->source
+				&& $case['registry']['namespace'] === $collision_listed->plugin
+				&& $collision_description === $collision_listed->description
+				&& str_contains( $collision_listed->content, $case['templates']['priorityChildMarker'] )
+				&& ! str_contains( $collision_listed->content, $case['registry']['marker'] ),
+			'registry.public-list-enriches-theme-file-collisions-without-duplicates',
+			array(
+				'registeredCollision' => self::template_summary( $collision ),
+				'listedCollision'     => self::template_summary( $collision_listed ),
+				'matchCount'          => count( $collision_matches ),
+				'listedSlugs'         => array_keys( self::templates_by_slug( $collision_list ) ),
+			)
+		);
+
 		$unregistered = \unregister_block_template( $name );
+		$unregistered_collision = \unregister_block_template( $collision_name );
 		$missing      = self::call_silenced(
 			static function () use ( $name ) {
 				return \unregister_block_template( $name );
@@ -241,16 +329,22 @@ final class BlockTemplatesSurface {
 			$failures,
 			$registered instanceof \WP_Block_Template
 				&& $unregistered === $registered
+				&& $collision instanceof \WP_Block_Template
+				&& $unregistered_collision === $collision
 				&& null === $registry->get_registered( $name )
+				&& null === $registry->get_registered( $collision_name )
 				&& null === $registry->get_by_slug( $slug )
+				&& null === $registry->get_by_slug( $case['templates']['prioritySlug'] )
 				&& ! $missing['threw']
 				&& \is_wp_error( $missing['value'] )
 				&& in_array( 'template_not_registered', $missing['value']->get_error_codes(), true ),
 			'registry.unregister-removes-exact-template-and-missing-errors',
 			array(
-				'name'         => $name,
-				'unregistered' => self::template_summary( $unregistered ),
-				'missing'      => self::describe_call( $missing ),
+				'name'                  => $name,
+				'collisionName'         => $collision_name,
+				'unregistered'          => self::template_summary( $unregistered ),
+				'unregisteredCollision' => self::template_summary( $unregistered_collision ),
+				'missing'               => self::describe_call( $missing ),
 			)
 		);
 
