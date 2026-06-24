@@ -437,6 +437,14 @@ final class AppearanceMediaSurface {
 		\remove_theme_mod( 'header_image_data' );
 		$fallback_markup = \get_custom_header_markup();
 		$fallback_header = \has_custom_header();
+		\set_theme_mod( 'header_image', 'remove-header' );
+		\add_filter( 'is_header_video_active', $force_inactive );
+		try {
+			$video_only_inactive_header = \has_custom_header();
+			$video_only_inactive_markup = \get_custom_header_markup();
+		} finally {
+			\remove_filter( 'is_header_video_active', $force_inactive );
+		}
 		\remove_theme_mod( 'external_header_video' );
 		\remove_theme_support( 'custom-header' );
 		$unsupported_active = \is_header_video_active();
@@ -470,6 +478,8 @@ final class AppearanceMediaSurface {
 				&& str_contains( $fallback_markup, 'id="wp-custom-header"' )
 				&& str_contains( $fallback_markup, '/images/default-header.jpg' )
 				&& true === $fallback_header
+				&& false === $video_only_inactive_header
+				&& '' === $video_only_inactive_markup
 				&& false === $unsupported_active,
 			'custom header markup and video helpers sanitize URLs, classify video MIME, and respect active/support gates',
 			array(
@@ -490,6 +500,8 @@ final class AppearanceMediaSurface {
 				'settings'            => self::describe_value( $settings ),
 				'fallbackMarkup'      => self::preview( $fallback_markup ),
 				'fallbackHeader'      => $fallback_header,
+				'videoOnlyInactiveHeader' => $video_only_inactive_header,
+				'videoOnlyInactiveMarkup' => self::preview( $video_only_inactive_markup ),
 				'unsupportedActive'   => $unsupported_active,
 			)
 		);
