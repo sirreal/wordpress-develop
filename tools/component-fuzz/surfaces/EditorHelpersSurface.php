@@ -33,6 +33,7 @@ final class EditorHelpersSurface {
 			$rows[] = self::check_default_editor_selection( $ctx->fork( 'default-editor' ), $case );
 			$rows[] = self::check_full_editor_settings( $ctx->fork( 'full-settings' ), $case );
 			$rows[] = self::check_teeny_editor_settings( $ctx->fork( 'teeny-settings' ), $case );
+			$rows[] = self::check_enqueue_scripts( $ctx->fork( 'enqueue-scripts' ), $case );
 			$rows[] = self::check_editor_markup( $ctx->fork( 'editor-markup' ), $case );
 			$rows[] = self::check_mce_translation( $ctx->fork( 'mce-translation' ), $case );
 			$rows[] = self::check_media_view_styles( $ctx->fork( 'media-view-styles' ) );
@@ -72,17 +73,24 @@ final class EditorHelpersSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
+				'add_thickbox',
 				'esc_attr',
 				'has_filter',
+				'remove_action',
 				'remove_filter',
 				'user_can_richedit',
 				'wp_default_editor',
 				'wp_editor',
+				'wp_enqueue_script',
+				'wp_enqueue_style',
 				'wp_parse_url',
 				'wp_print_scripts',
 				'wp_print_styles',
+				'wp_script_is',
 				'wp_scripts',
+				'wp_style_is',
 				'wp_styles',
 				'wpview_media_sandbox_styles',
 			) as $function
@@ -471,6 +479,112 @@ final class EditorHelpersSurface {
 		);
 	}
 
+	private static function check_enqueue_scripts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures       = array();
+		$targeted_seen  = array();
+		$default_seen   = array();
+		$expects_wplink = 'wplink' === $case['enqueuePlugin'] || 'link' === $case['enqueueQuicktag'];
+		$targeted_hook  = static function ( array $to_load ) use ( &$targeted_seen ): void {
+			$targeted_seen[] = $to_load;
+		};
+		$default_hook   = static function ( array $to_load ) use ( &$default_seen ): void {
+			$default_seen[] = $to_load;
+		};
+
+		self::reset_scripts_and_styles();
+		self::register_editor_enqueue_handles();
+		self::reset_editor_statics();
+		self::set_editor_static_property( 'has_tinymce', true );
+		self::set_editor_static_property( 'has_quicktags', true );
+		self::set_editor_static_property( 'has_medialib', $case['enqueueMedia'] );
+		self::set_editor_static_property( 'plugins', array( $case['enqueuePlugin'] ) );
+		self::set_editor_static_property( 'qt_buttons', array( $case['enqueueQuicktag'] ) );
+
+		\add_action( 'wp_enqueue_editor', $targeted_hook );
+		try {
+			\_WP_Editors::enqueue_scripts( false );
+			$targeted_queue = self::editor_enqueue_state();
+		} finally {
+			\remove_action( 'wp_enqueue_editor', $targeted_hook );
+		}
+
+		self::reset_scripts_and_styles();
+		self::register_editor_enqueue_handles();
+		self::reset_editor_statics();
+
+		\add_action( 'wp_enqueue_editor', $default_hook );
+		try {
+			\_WP_Editors::enqueue_scripts( true );
+			$default_queue = self::editor_enqueue_state();
+		} finally {
+			\remove_action( 'wp_enqueue_editor', $default_hook );
+		}
+
+		self::record_if_false(
+			$failures,
+			array(
+				array(
+					'tinymce'   => true,
+					'quicktags' => true,
+				),
+			) === $targeted_seen
+				&& $targeted_queue['scripts']['editor']
+				&& $targeted_queue['scripts']['quicktags']
+				&& $targeted_queue['styles']['buttons']
+				&& $expects_wplink === $targeted_queue['scripts']['wplink']
+				&& $expects_wplink === $targeted_queue['scripts']['jquery-ui-autocomplete']
+				&& $case['enqueueMedia'] === $targeted_queue['scripts']['media-upload']
+				&& $case['enqueueMedia'] === $targeted_queue['scripts']['wp-embed']
+				&& $case['enqueueMedia'] === $targeted_queue['scripts']['thickbox']
+				&& $case['enqueueMedia'] === $targeted_queue['styles']['thickbox'],
+			'enqueue_scripts loads targeted editor, link, and optional media handles from editor static state',
+			array(
+				'seen'   => $targeted_seen,
+				'queue'  => $targeted_queue,
+				'case'   => array(
+					'media'     => $case['enqueueMedia'],
+					'plugin'    => $case['enqueuePlugin'],
+					'quicktag'  => $case['enqueueQuicktag'],
+					'wplink'    => $expects_wplink,
+				),
+			)
+		);
+		self::record_if_false(
+			$failures,
+			array(
+				array(
+					'tinymce'   => true,
+					'quicktags' => true,
+				),
+			) === $default_seen
+				&& $default_queue['scripts']['editor']
+				&& $default_queue['scripts']['quicktags']
+				&& $default_queue['styles']['buttons']
+				&& $default_queue['scripts']['wplink']
+				&& $default_queue['scripts']['jquery-ui-autocomplete']
+				&& $default_queue['scripts']['media-upload']
+				&& ! $default_queue['scripts']['wp-embed']
+				&& ! $default_queue['scripts']['thickbox']
+				&& ! $default_queue['styles']['thickbox'],
+			'enqueue_scripts default mode loads editor/link/media-upload handles without forcing thickbox or embeds',
+			array(
+				'seen'  => $default_seen,
+				'queue' => $default_queue,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'editor-helpers.enqueue-scripts.handle-selection-and-action-payload',
+			$failures,
+			array(
+				'media'    => $case['enqueueMedia'],
+				'targeted' => $targeted_queue,
+				'default'  => $default_queue,
+			)
+		);
+	}
+
 	private static function check_editor_markup( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures           = array();
 		$the_editor_seen    = array();
@@ -844,6 +958,9 @@ final class EditorHelpersSurface {
 			'defaultOverride'     => $ctx->choice( array( 'tinymce', 'html', 'test' ) ),
 			'dfw'                 => $ctx->bool(),
 			'dragDropUpload'      => $ctx->bool(),
+			'enqueueMedia'        => $ctx->bool(),
+			'enqueuePlugin'       => $ctx->choice( array( 'wplink', 'lists' ) ),
+			'enqueueQuicktag'     => $ctx->choice( array( 'link', 'strong' ) ),
 			'editorClass'         => 'cf-class-' . $slug . ' quoted',
 			'editorId'            => 'cf_editor_' . $slug,
 			'externalPlugin'      => 'cf_external_' . $slug,
@@ -1006,6 +1123,49 @@ final class EditorHelpersSurface {
 			$statics[ $property ] = self::get_editor_static_property( $property );
 		}
 		return $statics;
+	}
+
+	private static function register_editor_enqueue_handles(): void {
+		$scripts = \wp_scripts();
+		$styles  = \wp_styles();
+
+		foreach ( array( 'editor', 'quicktags', 'wplink', 'jquery-ui-autocomplete', 'media-upload', 'wp-embed', 'thickbox' ) as $handle ) {
+			$scripts->add( $handle, false );
+		}
+
+		foreach ( array( 'buttons', 'thickbox' ) as $handle ) {
+			$styles->add( $handle, false );
+		}
+	}
+
+	private static function editor_enqueue_state(): array {
+		$scripts = array(
+			'editor',
+			'quicktags',
+			'wplink',
+			'jquery-ui-autocomplete',
+			'media-upload',
+			'wp-embed',
+			'thickbox',
+		);
+		$styles  = array(
+			'buttons',
+			'thickbox',
+		);
+		$state   = array(
+			'scripts' => array(),
+			'styles'  => array(),
+		);
+
+		foreach ( $scripts as $handle ) {
+			$state['scripts'][ $handle ] = \wp_script_is( $handle, 'enqueued' );
+		}
+
+		foreach ( $styles as $handle ) {
+			$state['styles'][ $handle ] = \wp_style_is( $handle, 'enqueued' );
+		}
+
+		return $state;
 	}
 
 	private static function get_editor_static_property_raw( string $property ) {

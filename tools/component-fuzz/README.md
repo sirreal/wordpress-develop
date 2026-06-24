@@ -178,8 +178,8 @@ database, network requests, or a configured site.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
-  TinyMCE translation snippets, media-view stylesheet helpers, and global
-  restoration.
+  editor script enqueue decisions, TinyMCE translation snippets, media-view
+  stylesheet helpers, and global restoration.
 - `fonts`: font-face CSS serialization and validation, font directory filters,
   Font Library collection registration/JSON loading, and font utility
   sanitization for family lists, face slugs, schemas, and MIME maps.
