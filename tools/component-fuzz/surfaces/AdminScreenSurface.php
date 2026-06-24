@@ -360,18 +360,18 @@ final class AdminScreenSurface {
 		$screen->remove_option( 'layout_columns' );
 		$options_after_remove = $screen->get_options();
 
-		$settings_calls = array();
-		$show_calls     = array();
-		$settings_filter = static function ( string $settings, \WP_Screen $seen_screen ) use ( &$settings_calls, $screen ): string {
-			$settings_calls[] = array(
+		$options_settings_calls = array();
+		$options_show_calls     = array();
+		$options_settings_filter = static function ( string $settings, \WP_Screen $seen_screen ) use ( &$options_settings_calls, $screen ): string {
+			$options_settings_calls[] = array(
 				'sameScreen' => $seen_screen === $screen,
 				'incoming'   => $settings,
 			);
 
-			return $settings . '<p class="cfz-screen-settings">settings</p>';
+			return $settings;
 		};
-		$show_filter     = static function ( bool $show_screen, \WP_Screen $seen_screen ) use ( &$show_calls, $screen ): bool {
-			$show_calls[] = array(
+		$options_show_filter     = static function ( bool $show_screen, \WP_Screen $seen_screen ) use ( &$options_show_calls, $screen ): bool {
+			$options_show_calls[] = array(
 				'sameScreen' => $seen_screen === $screen,
 				'incoming'   => $show_screen,
 			);
@@ -379,18 +379,50 @@ final class AdminScreenSurface {
 			return $show_screen;
 		};
 
-		\add_filter( 'screen_settings', $settings_filter, 10, 2 );
-		\add_filter( 'screen_options_show_screen', $show_filter, 10, 2 );
+		\add_filter( 'screen_settings', $options_settings_filter, 10, 2 );
+		\add_filter( 'screen_options_show_screen', $options_show_filter, 10, 2 );
 		try {
 			$show_first  = $screen->show_screen_options();
 			$show_second = $screen->show_screen_options();
 		} finally {
-			\remove_filter( 'screen_options_show_screen', $show_filter, 10 );
-			\remove_filter( 'screen_settings', $settings_filter, 10 );
+			\remove_filter( 'screen_options_show_screen', $options_show_filter, 10 );
+			\remove_filter( 'screen_settings', $options_settings_filter, 10 );
+			self::reset_screen_options_cache( $screen );
 		}
 
 		$screen->remove_options();
 		$options_after_clear = $screen->get_options();
+
+		$settings_screen = \convert_to_screen( self::id( $ctx->fork( 'settings-screen' ), 'cfz_settings_screen', 40 ) );
+		$settings_calls  = array();
+		$settings_show_calls = array();
+		$settings_filter = static function ( string $settings, \WP_Screen $seen_screen ) use ( &$settings_calls, $settings_screen ): string {
+			$settings_calls[] = array(
+				'sameScreen' => $seen_screen === $settings_screen,
+				'incoming'   => $settings,
+			);
+
+			return $settings . '<p class="cfz-screen-settings">settings</p>';
+		};
+		$settings_show_filter = static function ( bool $show_screen, \WP_Screen $seen_screen ) use ( &$settings_show_calls, $settings_screen ): bool {
+			$settings_show_calls[] = array(
+				'sameScreen' => $seen_screen === $settings_screen,
+				'incoming'   => $show_screen,
+			);
+
+			return $show_screen;
+		};
+
+		\add_filter( 'screen_settings', $settings_filter, 10, 2 );
+		\add_filter( 'screen_options_show_screen', $settings_show_filter, 10, 2 );
+		try {
+			$settings_show_first  = $settings_screen->show_screen_options();
+			$settings_show_second = $settings_screen->show_screen_options();
+		} finally {
+			\remove_filter( 'screen_options_show_screen', $settings_show_filter, 10 );
+			\remove_filter( 'screen_settings', $settings_filter, 10 );
+			self::reset_screen_options_cache( $settings_screen );
+		}
 
 		self::collect_failure(
 			$failures,
@@ -402,13 +434,25 @@ final class AdminScreenSurface {
 				&& array() === $options_after_clear
 				&& true === $show_first
 				&& true === $show_second
+				&& 1 === count( $options_settings_calls )
+				&& 1 === count( $options_show_calls )
+				&& true === ( $options_settings_calls[0]['sameScreen'] ?? null )
+				&& '' === ( $options_settings_calls[0]['incoming'] ?? null )
+				&& true === ( $options_show_calls[0]['sameScreen'] ?? null )
+				&& true === ( $options_show_calls[0]['incoming'] ?? null )
+				&& array() === $settings_screen->get_options()
+				&& true === $settings_show_first
+				&& true === $settings_show_second
 				&& 1 === count( $settings_calls )
-				&& 1 === count( $show_calls )
+				&& 1 === count( $settings_show_calls )
 				&& true === ( $settings_calls[0]['sameScreen'] ?? null )
-				&& true === ( $show_calls[0]['sameScreen'] ?? null )
-				&& true === ( $show_calls[0]['incoming'] ?? null )
+				&& '' === ( $settings_calls[0]['incoming'] ?? null )
+				&& true === ( $settings_show_calls[0]['sameScreen'] ?? null )
+				&& true === ( $settings_show_calls[0]['incoming'] ?? null )
+				&& false === \has_filter( 'screen_settings', $options_settings_filter )
+				&& false === \has_filter( 'screen_options_show_screen', $options_show_filter )
 				&& false === \has_filter( 'screen_settings', $settings_filter )
-				&& false === \has_filter( 'screen_options_show_screen', $show_filter ),
+				&& false === \has_filter( 'screen_options_show_screen', $settings_show_filter ),
 			'WP_Screen options store values, remove cleanly, show options once, and restore filters',
 			array(
 				'perPage'             => $per_page,
@@ -418,10 +462,17 @@ final class AdminScreenSurface {
 				'optionsAfterClear'   => $options_after_clear,
 				'showFirst'           => $show_first,
 				'showSecond'          => $show_second,
+				'optionsSettingsCalls'=> $options_settings_calls,
+				'optionsShowCalls'    => $options_show_calls,
+				'settingsScreen'      => self::describe_screen( $settings_screen ),
+				'settingsShowFirst'   => $settings_show_first,
+				'settingsShowSecond'  => $settings_show_second,
 				'settingsCalls'       => $settings_calls,
-				'showCalls'           => $show_calls,
+				'settingsShowCalls'   => $settings_show_calls,
+				'optionsSettingsHasFilter' => \has_filter( 'screen_settings', $options_settings_filter ),
+				'optionsShowHasFilter' => \has_filter( 'screen_options_show_screen', $options_show_filter ),
 				'settingsHasFilter'   => \has_filter( 'screen_settings', $settings_filter ),
-				'showHasFilter'       => \has_filter( 'screen_options_show_screen', $show_filter ),
+				'settingsShowHasFilter' => \has_filter( 'screen_options_show_screen', $settings_show_filter ),
 			)
 		);
 
@@ -866,6 +917,19 @@ final class AdminScreenSurface {
 		return ! str_contains( $lower, '<script' )
 			&& ! str_contains( $lower, ' onclick="' )
 			&& ! str_contains( $lower, " onclick='" );
+	}
+
+	private static function reset_screen_options_cache( \WP_Screen $screen ): void {
+		$reset = \Closure::bind(
+			static function () use ( $screen ): void {
+				$screen->_show_screen_options = null;
+				$screen->_screen_settings     = null;
+			},
+			null,
+			\WP_Screen::class
+		);
+
+		$reset();
 	}
 
 	private static function strings_in_order( string $haystack, array $needles ): bool {
