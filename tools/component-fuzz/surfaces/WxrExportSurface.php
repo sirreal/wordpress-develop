@@ -9,6 +9,8 @@ final class WxrExportSurface {
 
 	private const PREVIEW_BYTES = 220;
 	private const WXR_NS        = 'http://wordpress.org/export/1.2/';
+	private const CONTENT_NS    = 'http://purl.org/rss/1.0/modules/content/';
+	private const EXCERPT_NS    = 'http://wordpress.org/export/1.2/excerpt/';
 	private const INVALID_MARK  = '__COMPONENT_FUZZ_INVALID_UTF8__';
 	private const INVALID_BYTES = "\xC3\x28";
 
@@ -40,6 +42,7 @@ final class WxrExportSurface {
 
 				$rows[] = self::check_xml_safety( $ctx->fork( 'xml' ), $case, $run, $xml, $parsed );
 				$rows[] = self::check_selection_filters( $ctx->fork( 'selection' ), $case, $details );
+				$rows[] = self::check_export_content_filters( $ctx->fork( 'content-filters' ), $case, $run, $details );
 				$rows[] = self::check_meta_filters( $ctx->fork( 'meta' ), $case, $run, $details, $xml );
 				$rows[] = self::check_authors_and_terms( $ctx->fork( 'authors-terms' ), $case, $details );
 				$rows[] = self::check_header_capture( $ctx->fork( 'headers' ), $case, $run );
@@ -252,6 +255,68 @@ final class WxrExportSurface {
 		);
 
 		return self::result( $ctx, 'wxr-export.selection-arguments-and-auto-draft', $failures );
+	}
+
+	private static function check_export_content_filters( \ComponentFuzz\FuzzContext $ctx, array $case, array $run, array $details ): array {
+		$failures = array();
+		$events   = is_array( $run['result'] ) ? ( $run['result']['filterEvents'] ?? array() ) : array();
+		$markers  = $case['exportFilterMarkers'];
+		$count    = count( $details['postIds'] );
+
+		self::collect_failure(
+			$failures,
+			$count === count( $events['title'] ?? array() )
+				&& $count === count( $events['content'] ?? array() )
+				&& $count === count( $events['excerpt'] ?? array() ),
+			'title, content, and excerpt export filters run once for each emitted item',
+			array(
+				'postIds' => $details['postIds'],
+				'events'  => array(
+					'title'   => count( $events['title'] ?? array() ),
+					'content' => count( $events['content'] ?? array() ),
+					'excerpt' => count( $events['excerpt'] ?? array() ),
+				),
+			)
+		);
+
+		$mismatches = array();
+		foreach ( $details['postIds'] as $post_id ) {
+			$post = $case['posts'][ $post_id ] ?? null;
+			if ( ! is_array( $post ) ) {
+				$mismatches[] = array( 'postId' => $post_id, 'reason' => 'missing fixture post' );
+				continue;
+			}
+
+			$title   = $details['titles'][ $post_id ] ?? null;
+			$content = $details['contents'][ $post_id ] ?? null;
+			$excerpt = $details['excerpts'][ $post_id ] ?? null;
+
+			if (
+				$markers['titlePrefix'] . $post['post_title'] !== $title
+				|| ! is_string( $content )
+				|| ! str_ends_with( $content, $markers['contentSuffix'] )
+				|| $post['post_excerpt'] . $markers['excerptSuffix'] !== $excerpt
+			) {
+				$mismatches[] = array(
+					'postId'  => $post_id,
+					'title'   => $title,
+					'content' => is_string( $content ) ? self::preview( $content ) : $content,
+					'excerpt' => $excerpt,
+				);
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $mismatches,
+			'filtered titles, contents, and excerpts are emitted in the parsed WXR item payloads',
+			array(
+				'markers'    => $markers,
+				'mismatches' => array_slice( $mismatches, 0, 8 ),
+			)
+		);
+
+		return self::result( $ctx, 'wxr-export.item-content-export-filters', $failures );
 	}
 
 	private static function check_meta_filters( \ComponentFuzz\FuzzContext $ctx, array $case, array $run, array $details, string $xml ): array {
@@ -529,6 +594,11 @@ final class WxrExportSurface {
 			'comments'          => $comments,
 			'commentmeta'       => $commentmeta,
 			'relationships'     => $relationships,
+			'exportFilterMarkers' => array(
+				'titlePrefix'   => '[wxr-title-' . $token . '] ',
+				'contentSuffix' => ' [wxr-content-' . $token . ']',
+				'excerptSuffix' => ' [wxr-excerpt-' . $token . ']',
+			),
 			'keepKeys'          => array(
 				'post'    => 'keep_post_' . $token,
 				'term'    => 'keep_term_' . $token,
@@ -740,6 +810,9 @@ final class WxrExportSurface {
 			'postMetaKeys'    => array(),
 			'termMetaKeys'    => array(),
 			'commentMetaKeys' => array(),
+			'titles'          => array(),
+			'contents'        => array(),
+			'excerpts'        => array(),
 		);
 
 		if ( ! $xml instanceof \SimpleXMLElement ) {
@@ -767,8 +840,12 @@ final class WxrExportSurface {
 
 		foreach ( $channel->item as $item ) {
 			$item_wp = $item->children( self::WXR_NS );
-			$details['postIds'][]  = (int) $item_wp->post_id;
+			$post_id               = (int) $item_wp->post_id;
+			$details['postIds'][]  = $post_id;
 			$details['statuses'][] = (string) $item_wp->status;
+			$details['titles'][ $post_id ]   = (string) $item->title;
+			$details['contents'][ $post_id ] = (string) $item->children( self::CONTENT_NS )->encoded;
+			$details['excerpts'][ $post_id ] = (string) $item->children( self::EXCERPT_NS )->encoded;
 			foreach ( $item_wp->postmeta as $meta ) {
 				$details['postMetaKeys'][] = (string) $meta->children( self::WXR_NS )->meta_key;
 			}
@@ -1537,6 +1614,9 @@ function component_fuzz_wxr_prepare_runtime( array $fixture ): void {
 		'termmeta'    => array(),
 		'commentmeta' => array(),
 		'filename'    => array(),
+		'title'       => array(),
+		'content'     => array(),
+		'excerpt'     => array(),
 	);
 
 	add_filter(
@@ -1562,6 +1642,27 @@ function component_fuzz_wxr_prepare_runtime( array $fixture ): void {
 		static function (): string {
 			$post = get_post();
 			return $post ? 'http://example.test/?p=' . (int) $post->ID : 'http://example.test/';
+		}
+	);
+	add_filter(
+		'the_title_export',
+		static function ( string $title ) use ( $fixture, &$component_fuzz_wxr_events ): string {
+			$component_fuzz_wxr_events['title'][] = $title;
+			return $fixture['exportFilterMarkers']['titlePrefix'] . $title;
+		}
+	);
+	add_filter(
+		'the_content_export',
+		static function ( string $content ) use ( $fixture, &$component_fuzz_wxr_events ): string {
+			$component_fuzz_wxr_events['content'][] = strlen( $content );
+			return $content . $fixture['exportFilterMarkers']['contentSuffix'];
+		}
+	);
+	add_filter(
+		'the_excerpt_export',
+		static function ( string $excerpt ) use ( $fixture, &$component_fuzz_wxr_events ): string {
+			$component_fuzz_wxr_events['excerpt'][] = $excerpt;
+			return $excerpt . $fixture['exportFilterMarkers']['excerptSuffix'];
 		}
 	);
 	add_filter(
