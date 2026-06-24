@@ -45,6 +45,7 @@ final class NavigationSurface {
 			$rows[] = self::check_wp_nav_menu_rendering( $ctx );
 			$rows[] = self::check_wp_nav_menu_short_circuit_and_fallback( $ctx );
 			$rows[] = self::check_wp_nav_menu_filter_pipeline( $ctx );
+			$rows[] = self::check_wp_nav_menu_args_and_items_wrap( $ctx );
 			$rows[] = self::check_depth_class_contracts( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -745,6 +746,101 @@ final class NavigationSurface {
 		return self::row(
 			$ctx,
 			'navigation.wp-nav-menu.filter-pipeline-and-escaping',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_wp_nav_menu_args_and_items_wrap( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$menu     = self::menu_object( $ctx->fork( 'args-menu' ), 71 );
+		$items    = self::menu_items( $ctx->fork( 'args-items' ), 'https://example.test/args-current' );
+		$location = self::location_id( $ctx->fork( 'args-location' ) );
+		$menu_id  = 'cfz-args-"<>-' . substr( hash( 'crc32b', $location . (string) $ctx->seed() ), 0, 8 );
+
+		self::$menus[ $menu->term_id ]      = $menu;
+		self::$menu_items[ $menu->term_id ] = $items;
+		self::$locations                    = array( $location => $menu->term_id );
+
+		\register_nav_menu( $location, 'Args location ' . $ctx->text( 0, 20 ) );
+		if ( ! \taxonomy_exists( 'nav_menu' ) ) {
+			\register_taxonomy( 'nav_menu', 'nav_menu_item', array( 'public' => false ) );
+		}
+
+		$seen        = array();
+		$args_filter = static function ( array $args ) use ( &$seen, $location, $menu_id ): array {
+			$seen[] = array(
+				'themeLocation' => $args['theme_location'] ?? null,
+				'itemSpacing'   => $args['item_spacing'] ?? null,
+				'menu'          => $args['menu'] ?? null,
+				'fallbackCb'    => $args['fallback_cb'] ?? null,
+			);
+
+			if ( $location === ( $args['theme_location'] ?? null ) ) {
+				$args['container']    = false;
+				$args['depth']        = 1;
+				$args['items_wrap']   = '<ol id="%1$s" class="%2$s" data-cfz-wrap="args">%3$s</ol>';
+				$args['menu_class']   = 'cfz-args "quoted" <bad>';
+				$args['menu_id']      = $menu_id;
+				$args['fallback_cb']  = false;
+				$args['link_before']  = '<span class="arg-link">';
+				$args['link_after']   = '</span>';
+			}
+
+			return $args;
+		};
+
+		\add_filter( 'wp_nav_menu_args', $args_filter, 10, 1 );
+		try {
+			$output = \wp_nav_menu(
+				array(
+					'theme_location' => $location,
+					'echo'           => false,
+					'item_spacing'   => 'invalid',
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_nav_menu_args', $args_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $output )
+				&& str_starts_with( $output, '<ol ' )
+				&& str_ends_with( $output, '</ol>' )
+				&& str_contains( $output, 'id="' . \esc_attr( $menu_id ) . '"' )
+				&& str_contains( $output, 'class="' . \esc_attr( 'cfz-args "quoted" <bad>' ) . '"' )
+				&& str_contains( $output, 'data-cfz-wrap="args"' )
+				&& str_contains( $output, '<span class="arg-link">' )
+				&& 2 === substr_count( $output, '<li ' )
+				&& ! str_contains( $output, '<ul class="sub-menu">' )
+				&& ! str_contains( strtolower( $output ), '<script' )
+				&& ! str_contains( strtolower( $output ), 'javascript:' ),
+			'wp_nav_menu_args can rewrite wrappers/classes while items_wrap escapes IDs/classes and depth=1 omits child lists',
+			array(
+				'output' => self::describe_string( is_string( $output ) ? $output : '' ),
+				'menuId' => $menu_id,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $seen )
+				&& $location === $seen[0]['themeLocation']
+				&& 'preserve' === $seen[0]['itemSpacing']
+				&& '' === $seen[0]['menu']
+				&& 'wp_page_menu' === $seen[0]['fallbackCb']
+				&& false === \has_filter( 'wp_nav_menu_args', $args_filter, 10 ),
+			'wp_nav_menu_args receives normalized defaults before theme-location lookup and is removed locally',
+			array(
+				'seen'         => $seen,
+				'filterActive' => \has_filter( 'wp_nav_menu_args', $args_filter, 10 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'navigation.wp-nav-menu.args-filter-and-items-wrap',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);

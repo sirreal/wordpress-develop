@@ -297,8 +297,9 @@ database, network requests, or a configured site.
   queries, and current/switched URL helpers.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, walker
-  output, depth pruning, short-circuit/fallback behavior, container allowlists,
-  attribute filter escaping, and filtered no-DB `wp_nav_menu()` rendering.
+  output, depth pruning, short-circuit/fallback behavior, args/items-wrap
+  normalization, container allowlists, attribute filter escaping, and filtered
+  no-DB `wp_nav_menu()` rendering.
 - `network-media`: URL parsing/sanitization/validation, path normalization,
   filename sanitization, filetype checks, unique filenames, sideload handling,
   multisite upload quota, remaining-space, size-limit, and over-quota helpers.
