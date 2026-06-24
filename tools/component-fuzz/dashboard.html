@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7887 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7898 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>filesystem</code> at 1000 passed, <code>classic-walkers</code> at 1100 passed and 100 skipped, <code>admin-ajax</code> at 800 passed, and <code>update-install-upgrader</code> at 1200 passed.</div>
+			<div class="note">Latest focused validations: <code>media-editor</code> at 700 passed and 100 skipped, <code>filesystem</code> at 1000 passed, <code>classic-walkers</code> at 1100 passed and 100 skipped, and <code>admin-ajax</code> at 800 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -257,10 +257,17 @@
 			</thead>
 			<tbody>
 				<tr>
+					<td><code>media-editor</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 100 skipped, 0 failed; latest broad run: 7898 passed, 62 skipped, 0 failed.</td>
+					<td>Editor selection, GD/Imagick availability, output format filters, resize/save metadata, intermediate/generated sub-sizes, missing sub-size detection, cache/filter-backed attachment metadata.</td>
+				</tr>
+				<tr>
 					<td><code>filesystem</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7887 passed, 64 skipped, 0 failed.</td>
+					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7898 passed, 62 skipped, 0 failed.</td>
 					<td>Path normalization/joining, validation classes, filename sanitization/uniqueness, temp names, direct filesystem sandboxing, metadata/time/chmod round trips, missing-file failure values.</td>
 				</tr>
 				<tr>
@@ -759,10 +766,16 @@
 			</thead>
 			<tbody>
 				<tr>
+					<td><code>b69f6b0fbd</code></td>
+					<td><code>media-editor</code></td>
+					<td>700 passed, 100 skipped, 0 failed.</td>
+					<td>7898 passed, 62 skipped, 0 failed at 2 iterations after missing sub-size helper coverage.</td>
+				</tr>
+				<tr>
 					<td><code>e6864cfb09</code></td>
 					<td><code>filesystem</code></td>
 					<td>1000 passed, 0 skipped, 0 failed.</td>
-					<td>7887 passed, 64 skipped, 0 failed at 2 iterations after direct filesystem metadata/time/chmod coverage.</td>
+					<td>7898 passed, 62 skipped, 0 failed at 2 iterations after direct filesystem metadata/time/chmod coverage and media-editor integration.</td>
 				</tr>
 				<tr>
 					<td><code>2370d0b086</code></td>
