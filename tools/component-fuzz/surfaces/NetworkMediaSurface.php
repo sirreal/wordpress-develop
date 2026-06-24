@@ -279,7 +279,7 @@ final class NetworkMediaSurface {
 	}
 
 	private static function exercise_url_scheme_apis( array &$rng, array &$result ): void {
-		$required = array( 'set_url_scheme', 'add_filter', 'remove_filter', 'has_filter' );
+		$required = array( 'set_url_scheme', 'add_filter', 'remove_filter', 'has_filter', 'force_ssl_admin' );
 		foreach ( $required as $function ) {
 			if ( ! function_exists( $function ) ) {
 				self::skip_once( $result, 'set_url_scheme', "Function {$function} is unavailable." );
@@ -306,16 +306,25 @@ final class NetworkMediaSurface {
 				++$result['caseCount'];
 				self::feature( $result, 'set_url_scheme' );
 
-				$expected          = self::expected_set_url_scheme( $case['url'], $case['scheme'] );
+				$server_snapshot   = self::snapshot_server_keys( array( 'HTTPS', 'SERVER_PORT' ) );
+				$previous_force    = \force_ssl_admin( (bool) $case['forceSslAdmin'] );
+				$expected          = self::expected_set_url_scheme( $case['url'], $case['scheme'], (bool) $case['ssl'], (bool) $case['forceSslAdmin'] );
 				$filter_call_index = count( $filter_calls );
-				$actual            = self::call_api(
-					$result,
-					'set_url_scheme',
-					$case,
-					static function () use ( $case ) {
-						return set_url_scheme( $case['url'], $case['scheme'] );
-					}
-				);
+
+				try {
+					self::configure_ssl_server_state( (bool) $case['ssl'] );
+					$actual = self::call_api(
+						$result,
+						'set_url_scheme',
+						$case,
+						static function () use ( $case ) {
+							return set_url_scheme( $case['url'], $case['scheme'] );
+						}
+					);
+				} finally {
+					self::restore_server_keys( $server_snapshot );
+					\force_ssl_admin( $previous_force );
+				}
 
 				if ( ! $actual['ok'] ) {
 					continue;
@@ -323,7 +332,7 @@ final class NetworkMediaSurface {
 
 				self::check_invariant(
 					$result,
-					is_string( $actual['value'] ) && $expected === $actual['value'],
+					is_string( $actual['value'] ) && $expected['url'] === $actual['value'],
 					'set_url_scheme:scheme-normalization',
 					$case,
 					array(
@@ -335,14 +344,27 @@ final class NetworkMediaSurface {
 				self::check_invariant(
 					$result,
 					isset( $filter_calls[ $filter_call_index ] )
-						&& $expected === $filter_calls[ $filter_call_index ]['url']
-						&& $case['scheme'] === $filter_calls[ $filter_call_index ]['scheme']
+						&& $expected['url'] === $filter_calls[ $filter_call_index ]['url']
+						&& $expected['scheme'] === $filter_calls[ $filter_call_index ]['scheme']
 						&& $case['scheme'] === $filter_calls[ $filter_call_index ]['origScheme'],
 					'set_url_scheme:filter-payload',
 					$case,
 					array(
-						'expectedUrl' => $expected,
-						'filterCall'  => $filter_calls[ $filter_call_index ] ?? null,
+						'expected'   => $expected,
+						'filterCall' => $filter_calls[ $filter_call_index ] ?? null,
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					self::server_snapshot_matches( $server_snapshot ) && $previous_force === \force_ssl_admin(),
+					'set_url_scheme:ssl-state-restored',
+					$case,
+					array(
+						'serverSnapshot' => $server_snapshot,
+						'serverAfter'    => self::snapshot_server_keys( array( 'HTTPS', 'SERVER_PORT' ) ),
+						'forceBefore'    => $previous_force,
+						'forceAfter'     => \force_ssl_admin(),
 					)
 				);
 			}
@@ -1611,30 +1633,43 @@ final class NetworkMediaSurface {
 
 	private static function set_url_scheme_cases( array &$rng ): array {
 		$cases = array(
-			array( 'url' => '//example.com/path?x=1', 'scheme' => 'https' ),
-			array( 'url' => 'http://example.com/a/b?c=1#frag', 'scheme' => 'https' ),
-			array( 'url' => 'https://example.com/a/b?c=1#frag', 'scheme' => 'http' ),
-			array( 'url' => 'ftp://example.com/file.txt', 'scheme' => 'https' ),
-			array( 'url' => 'http://example.com//double//slash', 'scheme' => 'relative' ),
-			array( 'url' => ' https://example.com/path with spaces ', 'scheme' => 'relative' ),
-			array( 'url' => '/already/relative?x=1', 'scheme' => 'relative' ),
-			array( 'url' => 'mailto:user@example.com', 'scheme' => 'relative' ),
-			array( 'url' => 'HTTPS://EXAMPLE.com/Mixed', 'scheme' => 'http' ),
-			array( 'url' => "http://example.com/control\x01path", 'scheme' => 'relative' ),
+			array( 'url' => '//example.com/path?x=1', 'scheme' => 'https', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/a/b?c=1#frag', 'scheme' => 'https', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'https://example.com/a/b?c=1#frag', 'scheme' => 'http', 'ssl' => true, 'forceSslAdmin' => false ),
+			array( 'url' => 'ftp://example.com/file.txt', 'scheme' => 'https', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com//double//slash', 'scheme' => 'relative', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => ' https://example.com/path with spaces ', 'scheme' => 'relative', 'ssl' => true, 'forceSslAdmin' => false ),
+			array( 'url' => '/already/relative?x=1', 'scheme' => 'relative', 'ssl' => false, 'forceSslAdmin' => true ),
+			array( 'url' => 'mailto:user@example.com', 'scheme' => 'relative', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'HTTPS://EXAMPLE.com/Mixed', 'scheme' => 'http', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => "http://example.com/control\x01path", 'scheme' => 'relative', 'ssl' => true, 'forceSslAdmin' => true ),
+			array( 'url' => 'http://example.com/default-scheme', 'scheme' => null, 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/default-ssl', 'scheme' => null, 'ssl' => true, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/admin-http', 'scheme' => 'admin', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/admin-forced', 'scheme' => 'admin', 'ssl' => false, 'forceSslAdmin' => true ),
+			array( 'url' => 'http://example.com/login-ssl', 'scheme' => 'login', 'ssl' => true, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/login-post-forced', 'scheme' => 'login_post', 'ssl' => false, 'forceSslAdmin' => true ),
+			array( 'url' => 'http://example.com/rpc-http', 'scheme' => 'rpc', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'https://example.com/rest-invalid', 'scheme' => 'rest', 'ssl' => false, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/custom-invalid', 'scheme' => 'component-fuzz', 'ssl' => true, 'forceSslAdmin' => false ),
+			array( 'url' => 'http://example.com/empty-invalid', 'scheme' => '', 'ssl' => false, 'forceSslAdmin' => true ),
 		);
 
-		$schemes = array( 'http', 'https', 'relative' );
+		$schemes = array( 'http', 'https', 'relative', null, 'admin', 'login', 'login_post', 'rpc', 'rest', 'component-fuzz', '' );
 		for ( $i = 0; $i < 16; ++$i ) {
 			$cases[] = array(
-				'url'    => self::generated_url( $rng ),
-				'scheme' => self::rng_choice( $rng, $schemes ),
+				'url'           => self::generated_url( $rng ),
+				'scheme'        => self::rng_choice( $rng, $schemes ),
+				'ssl'           => 1 === self::rng_int( $rng, 0, 1 ),
+				'forceSslAdmin' => 1 === self::rng_int( $rng, 0, 1 ),
 			);
 		}
 
 		return $cases;
 	}
 
-	private static function expected_set_url_scheme( string $url, string $scheme ): string {
+	private static function expected_set_url_scheme( string $url, $orig_scheme, bool $ssl, bool $force_ssl_admin ): array {
+		$scheme = self::expected_normalized_url_scheme( $orig_scheme, $ssl, $force_ssl_admin );
 		$url = trim( $url );
 		if ( str_starts_with( $url, '//' ) ) {
 			$url = 'http:' . $url;
@@ -1646,10 +1681,80 @@ final class NetworkMediaSurface {
 				$url = '/' . ltrim( $url, "/ \t\n\r\0\x0B" );
 			}
 
-			return $url;
+			return array(
+				'url'        => $url,
+				'scheme'     => $scheme,
+				'origScheme' => $orig_scheme,
+			);
 		}
 
-		return (string) preg_replace( '#^\w+://#', $scheme . '://', $url );
+		return array(
+			'url'        => (string) preg_replace( '#^\w+://#', $scheme . '://', $url ),
+			'scheme'     => $scheme,
+			'origScheme' => $orig_scheme,
+		);
+	}
+
+	private static function expected_normalized_url_scheme( $scheme, bool $ssl, bool $force_ssl_admin ): string {
+		if ( ! $scheme ) {
+			return $ssl ? 'https' : 'http';
+		}
+
+		if ( in_array( $scheme, array( 'admin', 'login', 'login_post', 'rpc' ), true ) ) {
+			return $ssl || $force_ssl_admin ? 'https' : 'http';
+		}
+
+		if ( ! in_array( $scheme, array( 'http', 'https', 'relative' ), true ) ) {
+			return $ssl ? 'https' : 'http';
+		}
+
+		return $scheme;
+	}
+
+	private static function configure_ssl_server_state( bool $ssl ): void {
+		if ( $ssl ) {
+			$_SERVER['HTTPS']      = 'on';
+			$_SERVER['SERVER_PORT'] = '443';
+		} else {
+			unset( $_SERVER['HTTPS'] );
+			$_SERVER['SERVER_PORT'] = '80';
+		}
+	}
+
+	private static function snapshot_server_keys( array $keys ): array {
+		$snapshot = array();
+		foreach ( $keys as $key ) {
+			$snapshot[ $key ] = array(
+				'exists' => array_key_exists( $key, $_SERVER ),
+				'value'  => array_key_exists( $key, $_SERVER ) ? $_SERVER[ $key ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_server_keys( array $snapshot ): void {
+		foreach ( $snapshot as $key => $entry ) {
+			if ( $entry['exists'] ) {
+				$_SERVER[ $key ] = $entry['value'];
+			} else {
+				unset( $_SERVER[ $key ] );
+			}
+		}
+	}
+
+	private static function server_snapshot_matches( array $snapshot ): bool {
+		foreach ( $snapshot as $key => $entry ) {
+			$exists = array_key_exists( $key, $_SERVER );
+			if ( $exists !== $entry['exists'] ) {
+				return false;
+			}
+			if ( $exists && $_SERVER[ $key ] !== $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function path_cases( array &$rng ): array {
