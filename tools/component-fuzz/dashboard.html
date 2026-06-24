@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7930 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7929 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>user-preferences</code> at 800 passed and 100 skipped, and <code>discovery</code> at 700 passed.</div>
+			<div class="note">Latest focused validations: <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, and <code>user-preferences</code> at 800 passed and 100 skipped.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; stale admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="metric">1</div>
+			<div class="note">Lorentz the 2nd is active in <code>/private/tmp/component-fuzz-worker-default-widgets</code>; stale admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -262,6 +262,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7930 passed, 62 skipped, 0 failed.</td>
 					<td>Abilities API categories and abilities, action-gated registration, discovery filters, schema validation, execution filters, callback exceptions, and registry restoration.</td>
+				</tr>
+				<tr>
+					<td><code>registries</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; latest broad run: 7929 passed, 63 skipped, 0 failed.</td>
+					<td>Connector registry lifecycle, helper oracles, unregister/override replacement, icon manifest sanitization/caching, speculation rule allowlists, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -1434,7 +1441,7 @@
 		<div class="deps">
 			<div class="dep">
 				<strong>Bootstrap Core</strong>
-				<code>WpBootstrap</code>, hooks, options, cache, roles, post types, taxonomies.
+				<code>WpBootstrap</code>, hooks, options, cache, roles, post types, taxonomies, connector/icon registries.
 			</div>
 			<div class="dep">
 				<strong>In-memory DB Stub</strong>

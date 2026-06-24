@@ -247,6 +247,45 @@ final class RegistriesSurface {
 			)
 		);
 
+		$override_args                   = is_array( $removed ) ? $removed : array();
+		$override_args['name']           = 'Override ' . $ctx->identifier( 4, 10 );
+		$override_args['description']    = 'Re-registered connector replacement.';
+		$override_args['authentication'] = array( 'method' => 'none' );
+		$override_args['plugin']         = array(
+			'is_active' => static fn(): bool => false,
+		);
+		$override_registered             = $registry->register( $cases[0]['id'], $override_args );
+		$override_public                 = \wp_get_connector( $cases[0]['id'] );
+		$after_override                  = \wp_get_connectors();
+		$override_plugin                 = is_array( $override_registered ) ? $override_registered['plugin'] : array();
+		$override_is_active              = isset( $override_plugin['is_active'] ) && is_callable( $override_plugin['is_active'] )
+			? (bool) call_user_func( $override_plugin['is_active'] )
+			: null;
+
+		self::collect_failure(
+			$failures,
+			is_array( $override_registered )
+				&& $override_registered === $override_public
+				&& isset( $after_override[ $cases[0]['id'] ] )
+				&& $override_registered === $after_override[ $cases[0]['id'] ]
+				&& count( $registered ) === count( $after_override )
+				&& array_key_last( $after_override ) === $cases[0]['id']
+				&& $override_args['name'] === $override_registered['name']
+				&& $override_args['description'] === $override_registered['description']
+				&& array( 'method' => 'none' ) === $override_registered['authentication']
+				&& false === $override_is_active,
+			'unregistered connector data can be modified and re-registered as a replacement',
+			array(
+				'id'         => $cases[0]['id'],
+				'override'   => self::describe_value( $override_registered ),
+				'public'     => self::describe_value( $override_public ),
+				'keys'       => array_keys( $after_override ),
+				'isActive'   => $override_is_active,
+				'registered' => count( $registered ),
+				'actual'     => count( $after_override ),
+			)
+		);
+
 		self::set_connector_registry( null );
 		self::collect_failure(
 			$failures,
