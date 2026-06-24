@@ -41,6 +41,7 @@ final class QueryLoopSurface {
 			$rows[] = self::check_empty_query_events( $ctx->fork( 'empty' ) );
 			$rows   = array_merge( $rows, self::check_generated_query_cases( $ctx->fork( 'generated-cases' ) ) );
 			$rows[] = self::check_offset_no_found_rows_field_shapes( $ctx->fork( 'offset-fields' ) );
+			$rows[] = self::check_the_posts_filter_finalization( $ctx->fork( 'the-posts' ) );
 			$rows[] = self::check_filter_and_cache_locality( $ctx->fork( 'filter-cache-locality' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -667,6 +668,141 @@ final class QueryLoopSurface {
 		return self::row(
 			$ctx,
 			'query-loop.offset-no-found-rows-field-shapes',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_the_posts_filter_finalization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$events             = array();
+		$hooks              = array();
+		$filter_calls       = array();
+		$page               = self::first_post_of_type( 'page' );
+		$expected_input_ids = self::ids_for_type( 'post' );
+		$filtered_ids       = array( 91003, 91001, (int) $page->ID );
+		$before_filter      = false;
+
+		$the_posts = static function ( array $posts, \WP_Query $query ) use ( &$filter_calls, $page ): array {
+			$filter_calls[] = array(
+				'ids'           => self::post_ids( $posts ),
+				'queryObjectId' => spl_object_id( $query ),
+				'postCount'     => (int) $query->post_count,
+			);
+
+			return array(
+				(int) $posts[2]->ID,
+				$posts[0],
+				(int) $page->ID,
+			);
+		};
+
+		try {
+			$before_filter = \has_filter( 'the_posts', $the_posts );
+			\add_filter( 'the_posts', $the_posts, 10, 2 );
+
+			$query = self::run_pre_query(
+				array(
+					'post_type'              => 'post',
+					'posts_per_page'         => 4,
+					'paged'                  => 1,
+					'orderby'                => 'ID',
+					'order'                  => 'ASC',
+					'ignore_sticky_posts'    => true,
+					'no_found_rows'          => false,
+					'cache_results'          => false,
+					'update_post_meta_cache' => false,
+					'update_post_term_cache' => false,
+				),
+				$events,
+				$hooks
+			);
+			$loop  = self::observe_query_loop( $query );
+			$posts = $query->posts;
+
+			$all_wp_posts = array() !== $posts;
+			foreach ( $posts as $post ) {
+				$all_wp_posts = $all_wp_posts && $post instanceof \WP_Post;
+			}
+
+			self::collect_failure(
+				$failures,
+				1 === count( $filter_calls )
+					&& $expected_input_ids === ( $filter_calls[0]['ids'] ?? array() )
+					&& spl_object_id( $query ) === ( $filter_calls[0]['queryObjectId'] ?? null )
+					&& 0 === ( $filter_calls[0]['postCount'] ?? null ),
+				'the_posts filter receives the WP_Post window and query by reference before final post_count recalculation',
+				array(
+					'expectedInputIds' => $expected_input_ids,
+					'filterCalls'      => $filter_calls,
+					'queryObjectId'    => spl_object_id( $query ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$filtered_ids === self::post_ids( $posts )
+					&& $all_wp_posts
+					&& count( $filtered_ids ) === (int) $query->post_count
+					&& count( $expected_input_ids ) === (int) $query->found_posts
+					&& 1 === (int) $query->max_num_pages
+					&& $query->post instanceof \WP_Post
+					&& (int) $query->post->ID === $filtered_ids[0],
+				'the_posts mixed ID/object return is remapped through get_post with post_count recalculated and found counts preserved',
+				array(
+					'expectedFilteredIds' => $filtered_ids,
+					'actualIds'           => self::post_ids( $posts ),
+					'postTypes'           => array_map(
+						static fn ( $post ): string => $post instanceof \WP_Post ? $post->post_type : gettype( $post ),
+						$posts
+					),
+					'postCount'           => (int) $query->post_count,
+					'foundPosts'          => (int) $query->found_posts,
+					'maxNumPages'         => (int) $query->max_num_pages,
+					'currentPost'         => self::describe_post( $query->post ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$filtered_ids === $loop['seen']
+					&& true === $loop['aligned']
+					&& array( 'loop_start', 'loop_end' ) === $events
+					&& -1 === $loop['currentPost']
+					&& false === $loop['inTheLoop']
+					&& false === $loop['beforeLoop'],
+				'the_posts-filtered result set drives loop iteration and final rewind state',
+				array(
+					'expectedFilteredIds' => $filtered_ids,
+					'loop'                => $loop,
+					'events'              => $events,
+				)
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'the_posts filter finalization probe does not throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			\remove_filter( 'the_posts', $the_posts, 10 );
+			self::remove_scoped_hooks( $hooks );
+		}
+
+		self::collect_failure(
+			$failures,
+			$before_filter === \has_filter( 'the_posts', $the_posts ),
+			'the_posts filter registration is restored after scoped query construction',
+			array(
+				'before' => $before_filter,
+				'after'  => \has_filter( 'the_posts', $the_posts ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'query-loop.the-posts-filter.final-shape-counts',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);

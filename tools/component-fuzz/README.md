@@ -364,7 +364,8 @@ database, network requests, or a configured site.
   `posts_pre_query` fixtures, including loop wrapper delegation,
   setup/reset postdata globals, single/page flag behavior, found/max-page coherence,
   empty-result events, offset/no-found-rows field-shape windows for `ids` and
-  `id=>parent`, and deterministic state restoration.
+  `id=>parent`, `the_posts` result-filter finalization, and deterministic state
+  restoration.
 - `registries`: no-DB modern registry coverage for connectors, icons, and
   speculation rules, including lifecycle validation, helper oracles, manifest
   sanitization/caching, connector override re-registration, allowlist behavior,
