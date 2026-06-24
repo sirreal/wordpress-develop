@@ -679,9 +679,24 @@ final class QueryLoopSurface {
 		$hooks              = array();
 		$filter_calls       = array();
 		$page               = self::first_post_of_type( 'page' );
-		$expected_input_ids = self::ids_for_type( 'post' );
-		$filtered_ids       = array( 91003, 91001, (int) $page->ID );
 		$before_filter      = false;
+		$ordered_posts      = array_values(
+			array_filter(
+				self::$posts,
+				static fn ( \WP_Post $post ): bool => 'post' === $post->post_type
+			)
+		);
+
+		usort(
+			$ordered_posts,
+			static function ( \WP_Post $a, \WP_Post $b ): int {
+				$result = (int) $a->menu_order <=> (int) $b->menu_order;
+				return 0 === $result ? (int) $a->ID <=> (int) $b->ID : $result;
+			}
+		);
+
+		$expected_input_ids = self::post_ids( $ordered_posts );
+		$filtered_ids       = array( $expected_input_ids[2], $expected_input_ids[0], (int) $page->ID );
 
 		$the_posts = static function ( array $posts, \WP_Query $query ) use ( &$filter_calls, $page ): array {
 			$filter_calls[] = array(
@@ -706,7 +721,7 @@ final class QueryLoopSurface {
 					'post_type'              => 'post',
 					'posts_per_page'         => 4,
 					'paged'                  => 1,
-					'orderby'                => 'ID',
+					'orderby'                => 'menu_order',
 					'order'                  => 'ASC',
 					'ignore_sticky_posts'    => true,
 					'no_found_rows'          => false,
