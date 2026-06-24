@@ -52,6 +52,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_extension_address_views( $ctx ) );
+			$rows = array_merge( $rows, self::check_make_clickable_email_rendering( $ctx ) );
 			$rows = array_merge( $rows, self::check_length_boundaries( $ctx ) );
 
 			self::install_email_filters( 'ascii' );
@@ -85,6 +86,7 @@ final class EmailSurface {
 				'get_user_by',
 				'is_email',
 				'is_wp_error',
+				'make_clickable',
 				'sanitize_email',
 				'wp_is_unicode_email',
 				'wp_sanitize_unicode_email',
@@ -1898,6 +1900,193 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_make_clickable_email_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$samples = array(
+			array(
+				'label'   => 'ascii-baseline',
+				'address' => 'user@example.com',
+				'valid'   => true,
+			),
+			array(
+				'label'   => 'plus-tag',
+				'address' => 'USER+tag@example.com',
+				'valid'   => true,
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$samples[] = array(
+				'label'   => 'ascii-local-punycode-domain',
+				'address' => 'mail@xn--bcher-kva.de',
+				'valid'   => true,
+			);
+		}
+
+		foreach ( self::extension_view_cases( $ctx->fork( 'make-clickable' ) ) as $sample ) {
+			$input  = $sample['local'] . '@' . $sample['domain'];
+			$parsed = self::call( static fn() => \WP_Email_Address::from_string( $input, 'unicode' ) );
+			$email  = $parsed['value'] ?? null;
+
+			if ( ! $parsed['threw'] && $email instanceof \WP_Email_Address ) {
+				$samples[] = array(
+					'label'   => $sample['label'] . '-machine',
+					'address' => $email->get_ascii_address(),
+					'valid'   => true,
+				);
+
+				if ( $email->get_unicode_address() !== $email->get_ascii_address() ) {
+					$samples[] = array(
+						'label'   => $sample['label'] . '-readable',
+						'address' => $email->get_unicode_address(),
+						'valid'   => true,
+					);
+				}
+			}
+		}
+
+		$samples = array_merge(
+			$samples,
+			array(
+				array(
+					'label'   => 'unicode-local-valid-address',
+					'address' => "jos\u{00E9}@example.com",
+					'valid'   => true,
+				),
+				array(
+					'label'   => 'emoji-local-invalid-address',
+					'address' => "emoji\u{1F600}@example.com",
+					'valid'   => false,
+				),
+				array(
+					'label'   => 'invalid-utf8-local-address',
+					'address' => "bad\x80@example.com",
+					'valid'   => false,
+				),
+				array(
+					'label'   => 'double-at-address',
+					'address' => 'bad@@example.com',
+					'valid'   => false,
+				),
+				array(
+					'label'   => 'double-dot-domain-address',
+					'address' => 'user@example..com',
+					'valid'   => false,
+				),
+			)
+		);
+
+		$failures         = array();
+		$observed         = array();
+		$known_boundaries = array();
+
+		foreach ( $samples as $case ) {
+			$address      = $case['address'];
+			$wrapped      = 'Contact ' . $address . ' now';
+			$rendered     = self::call( static fn() => \make_clickable( $wrapped ) );
+			$parse        = self::call( static fn() => \WP_Email_Address::from_string( $address, 'unicode' ) );
+			$email        = $parse['value'] ?? null;
+			$anchors      = ! $rendered['threw'] && is_string( $rendered['value'] )
+				? self::mailto_anchors( $rendered['value'] )
+				: array();
+			$expect_link  = true === $case['valid'] && self::make_clickable_email_pattern_matches( $address );
+			$actual_link  = 1 === count( $anchors );
+			$anchor       = $anchors[0] ?? array();
+			$href_address = (string) ( $anchor['href'] ?? '' );
+			$text_address = (string) ( $anchor['text'] ?? '' );
+			$href_parse   = '' === $href_address
+				? array( 'threw' => false, 'value' => null )
+				: self::call( static fn() => \WP_Email_Address::from_string( $href_address, 'unicode' ) );
+			$text_parse   = '' === $text_address
+				? array( 'threw' => false, 'value' => null )
+				: self::call( static fn() => \WP_Email_Address::from_string( $text_address, 'unicode' ) );
+			$href_email   = $href_parse['value'] ?? null;
+			$text_email   = $text_parse['value'] ?? null;
+
+			if (
+				! $expect_link
+				&& array() !== $anchors
+				&& self::make_clickable_known_partial_email_boundary( $address, $anchors )
+			) {
+				$known_boundaries[] = array(
+					'label'    => $case['label'],
+					'address'  => self::describe_string( $address ),
+					'rendered' => self::describe_call( $rendered ),
+					'anchors'  => self::describe_value( $anchors ),
+				);
+				$observed[]         = array(
+					'label'         => $case['label'],
+					'address'       => self::describe_string( $address ),
+					'valid'         => $case['valid'],
+					'expectLink'    => $expect_link,
+					'linked'        => $actual_link,
+					'knownBoundary' => true,
+				);
+				continue;
+			}
+
+			if ( $expect_link ) {
+				$ok = ! $rendered['threw']
+					&& $email instanceof \WP_Email_Address
+					&& $actual_link
+					&& $address === $href_address
+					&& $address === $text_address
+					&& $href_email instanceof \WP_Email_Address
+					&& $text_email instanceof \WP_Email_Address
+					&& $href_email->get_unicode_address() === $email->get_unicode_address()
+					&& $text_email->get_unicode_address() === $email->get_unicode_address()
+					&& str_contains( $rendered['value'], '<a href="mailto:' . $address . '">' . $address . '</a>' );
+			} else {
+				$ok = ! $rendered['threw']
+					&& array() === $anchors
+					&& $wrapped === $rendered['value'];
+			}
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'      => $case['label'],
+					'address'    => self::describe_string( $address ),
+					'valid'      => $case['valid'],
+					'expectLink' => $expect_link,
+					'rendered'   => self::describe_call( $rendered ),
+					'parse'      => self::describe_call( $parse ),
+					'anchors'    => self::describe_value( $anchors ),
+					'hrefParse'  => self::describe_call( $href_parse ),
+					'textParse'  => self::describe_call( $text_parse ),
+				);
+			}
+
+			$observed[] = array(
+				'label'      => $case['label'],
+				'address'    => self::describe_string( $address ),
+				'valid'      => $case['valid'],
+				'expectLink' => $expect_link,
+				'linked'     => $actual_link,
+			);
+		}
+
+		$rows = array(
+			$ctx->result(
+				'email.make-clickable.mailto-rendering-boundaries',
+				array() === $failures,
+				array(
+					'caseCount' => count( $samples ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
+		);
+
+		if ( array() !== $known_boundaries ) {
+			$rows[] = $ctx->skip(
+				'email.make-clickable.punycode-tld-partial-link-boundary',
+				'Core make_clickable() currently uses an ASCII email regex that can partially link punycode TLD labels.',
+				array( 'cases' => $known_boundaries )
+			);
+		}
+
+		return $rows;
+	}
+
 	private static function check_length_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
 		$address_254 = str_repeat( 'a', 64 ) . '@' . str_repeat( 'b', 63 ) . '.' . str_repeat( 'c', 63 ) . '.' . str_repeat( 'd', 57 ) . '.com';
 		$address_255 = str_repeat( 'a', 64 ) . '@' . str_repeat( 'b', 63 ) . '.' . str_repeat( 'c', 63 ) . '.' . str_repeat( 'd', 58 ) . '.com';
@@ -2053,6 +2242,49 @@ final class EmailSurface {
 
 		return str_contains( $email->get_ascii_address(), '@' )
 			&& str_contains( $email->get_unicode_address(), '@' );
+	}
+
+	private static function mailto_anchors( string $html ): array {
+		$count = preg_match_all( '#<a href="mailto:([^"]+)">([^<]+)</a>#', $html, $matches, PREG_SET_ORDER );
+		if ( false === $count || 0 === $count ) {
+			return array();
+		}
+
+		$anchors = array();
+		foreach ( $matches as $match ) {
+			$anchors[] = array(
+				'href' => $match[1],
+				'text' => $match[2],
+			);
+		}
+
+		return $anchors;
+	}
+
+	private static function make_clickable_email_pattern_matches( string $address ): bool {
+		return 1 === preg_match( '/\A[.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+[0-9a-z]{2,}\z/i', $address );
+	}
+
+	private static function make_clickable_known_partial_email_boundary( string $address, array $anchors ): bool {
+		if ( ! str_contains( $address, '.xn--' ) ) {
+			return false;
+		}
+
+		foreach ( $anchors as $anchor ) {
+			$href = $anchor['href'] ?? null;
+			$text = $anchor['text'] ?? null;
+			if (
+				is_string( $href )
+				&& is_string( $text )
+				&& $href === $text
+				&& $href !== $address
+				&& str_starts_with( $address, $href )
+			) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function address_round_trip_ok( \WP_Email_Address $email ): bool {
