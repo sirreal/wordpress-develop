@@ -464,11 +464,11 @@ class Tests_Sitemaps_Sitemaps extends WP_UnitTestCase {
 
 	/**
 	 * @ticket 50643
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_disable_sitemap_should_return_404() {
 		add_filter( 'wp_sitemaps_enabled', '__return_false' );
+
+		wp_sitemaps_get_server();
 
 		$this->go_to( home_url( '/?sitemap=index' ) );
 
@@ -481,8 +481,6 @@ class Tests_Sitemaps_Sitemaps extends WP_UnitTestCase {
 
 	/**
 	 * @ticket 50643
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_empty_url_list_should_return_404() {
 		wp_register_sitemap_provider( 'foo', new WP_Sitemaps_Empty_Test_Provider( 'foo' ) );
