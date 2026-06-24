@@ -25,6 +25,7 @@ final class BlocksSurface {
 		try {
 			return array(
 				self::check_block_type_registry( $ctx ),
+				self::check_parser_detection_and_rendering( $ctx ),
 				self::check_style_pattern_binding_registries( $ctx ),
 				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_supports( $ctx ),
@@ -53,6 +54,7 @@ final class BlocksSurface {
 				'WP_Block_Patterns_Registry',
 				'WP_Block_Styles_Registry',
 				'WP_Block_Supports',
+				'WP_Block',
 				'WP_Block_Type',
 				'WP_Block_Type_Registry',
 			) as $class
@@ -64,14 +66,22 @@ final class BlocksSurface {
 
 		foreach (
 			array(
+				'add_filter',
 				'block_has_support',
 				'get_all_registered_block_bindings_sources',
 				'get_block_bindings_source',
 				'get_block_wrapper_attributes',
+				'has_block',
+				'has_blocks',
+				'parse_blocks',
 				'register_block_bindings_source',
 				'register_block_style',
 				'register_block_type',
 				'register_block_type_from_metadata',
+				'remove_filter',
+				'render_block',
+				'serialize_block',
+				'serialize_blocks',
 				'unregister_block_bindings_source',
 				'unregister_block_style',
 				'unregister_block_type',
@@ -149,6 +159,198 @@ final class BlocksSurface {
 		return self::result(
 			$ctx,
 			'blocks.registry.block-type-lifecycle',
+			array() === $failures,
+			array(
+				'cases'    => self::CASES,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_parser_detection_and_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		foreach ( self::parser_render_cases( $ctx->fork( 'parser-render' ) ) as $index => $case ) {
+			$render_log = array();
+			$filter_log = array(
+				'pre'     => array(),
+				'data'    => array(),
+				'context' => array(),
+			);
+
+			$render_callback = static function ( array $attributes, string $content, \WP_Block $block ) use ( $case, &$render_log ): string {
+				$render_log[] = array(
+					'name'          => $block->name,
+					'filteredToken' => $attributes['filteredToken'] ?? null,
+					'contextToken'  => $block->context['componentFuzz/token'] ?? null,
+					'contextParent' => $block->context['componentFuzz/parent'] ?? null,
+					'contentLength' => strlen( $content ),
+				);
+
+				return '<div data-cfz-block="' . esc_attr( (string) $block->name ) . '" data-cfz-token="' . esc_attr( (string) ( $attributes['token'] ?? '' ) ) . '" data-cfz-filtered="' . esc_attr( (string) ( $attributes['filteredToken'] ?? '' ) ) . '" data-cfz-context="' . esc_attr( (string) ( $block->context['componentFuzz/token'] ?? '' ) ) . '">' . esc_html( (string) ( $attributes['unsafe'] ?? '' ) ) . $content . '</div>';
+			};
+
+			$pre_render_filter = static function ( $pre_render, array $parsed_block, $parent_block ) use ( $case, &$filter_log ) {
+				$name = $parsed_block['blockName'] ?? null;
+				$filter_log['pre'][] = array(
+					'name'   => $name,
+					'parent' => $parent_block instanceof \WP_Block ? $parent_block->name : null,
+					'empty'  => null === $pre_render,
+				);
+
+				if ( $case['shortName'] === $name ) {
+					return '<mark data-cfz-short="' . esc_attr( $case['token'] ) . '">' . esc_html( $case['unsafe'] ) . '</mark>';
+				}
+
+				return $pre_render;
+			};
+
+			$render_block_data_filter = static function ( array $parsed_block, array $source_block, $parent_block ) use ( $case, &$filter_log ): array {
+				$name = $parsed_block['blockName'] ?? null;
+				$filter_log['data'][] = array(
+					'name'              => $name,
+					'parent'            => $parent_block instanceof \WP_Block ? $parent_block->name : null,
+					'sourceName'        => $source_block['blockName'] ?? null,
+					'sourceHasFiltered' => isset( $source_block['attrs']['filteredToken'] ),
+				);
+
+				if ( in_array( $name, array( $case['outerName'], $case['childName'] ), true ) ) {
+					$parsed_block['attrs']['filteredToken'] = $case['filteredToken'];
+				}
+
+				return $parsed_block;
+			};
+
+			$render_block_context_filter = static function ( array $context, array $parsed_block, $parent_block ) use ( $case, &$filter_log ): array {
+				$name = $parsed_block['blockName'] ?? null;
+				$filter_log['context'][] = array(
+					'name'        => $name,
+					'parent'      => $parent_block instanceof \WP_Block ? $parent_block->name : null,
+					'hasFiltered' => isset( $parsed_block['attrs']['filteredToken'] ),
+				);
+
+				$context['componentFuzz/token']  = $case['token'];
+				$context['componentFuzz/parent'] = $parent_block instanceof \WP_Block ? (string) $parent_block->name : 'root';
+
+				return $context;
+			};
+
+			$registered_outer = \register_block_type(
+				$case['outerName'],
+				array(
+					'title'            => 'Component Fuzz Render Outer',
+					'attributes'       => self::parser_render_attributes(),
+					'uses_context'     => array( 'componentFuzz/token', 'componentFuzz/parent' ),
+					'render_callback'  => $render_callback,
+					'skip_inner_blocks' => false,
+				)
+			);
+			$registered_child = \register_block_type(
+				$case['childName'],
+				array(
+					'title'           => 'Component Fuzz Render Child',
+					'attributes'      => self::parser_render_attributes(),
+					'uses_context'    => array( 'componentFuzz/token', 'componentFuzz/parent' ),
+					'render_callback' => $render_callback,
+				)
+			);
+
+			\add_filter( 'pre_render_block', $pre_render_filter, 99, 3 );
+			\add_filter( 'render_block_data', $render_block_data_filter, 99, 3 );
+			\add_filter( 'render_block_context', $render_block_context_filter, 99, 3 );
+
+			try {
+				$serialized   = \serialize_blocks( $case['blocks'] );
+				$parsed       = \parse_blocks( $serialized );
+				$joined       = implode( '', array_map( 'serialize_block', $parsed ) );
+				$reserialized = \serialize_blocks( $parsed );
+				$reparsed     = \parse_blocks( $reserialized );
+				$rendered     = isset( $parsed[0] ) && is_array( $parsed[0] ) ? \render_block( $parsed[0] ) : '';
+
+				$shape_before = self::block_tree_shape( $parsed );
+				$shape_after  = self::block_tree_shape( $reparsed );
+				$first_block  = $parsed[0] ?? array();
+				$inner_blocks = is_array( $first_block ) && isset( $first_block['innerBlocks'] ) && is_array( $first_block['innerBlocks'] ) ? $first_block['innerBlocks'] : array();
+				$inner_names  = array();
+				foreach ( $inner_blocks as $inner_block ) {
+					$inner_names[] = is_array( $inner_block ) ? ( $inner_block['blockName'] ?? null ) : null;
+				}
+
+				self::collect_failure(
+					$failures,
+					$registered_outer instanceof \WP_Block_Type
+						&& $registered_child instanceof \WP_Block_Type
+						&& $serialized === $reserialized
+						&& $reserialized === $joined
+						&& $shape_before === $shape_after
+						&& 1 === count( $parsed )
+						&& is_array( $first_block )
+						&& $case['outerName'] === ( $first_block['blockName'] ?? null )
+						&& array( $case['childName'], 'core/paragraph', $case['shortName'] ) === $inner_names
+						&& 3 === self::null_marker_count( $first_block['innerContent'] ?? array() )
+						&& ! str_contains( $serialized, $case['unsafe'] )
+						&& \has_blocks( $serialized )
+						&& \has_block( $case['outerName'], $serialized )
+						&& \has_block( $case['childName'], $serialized )
+						&& \has_block( $case['shortName'], $serialized )
+						&& \has_block( 'core/paragraph', $serialized )
+						&& \has_block( 'paragraph', $serialized )
+						&& ! \has_block( $case['missingName'], $serialized )
+						&& ! \has_blocks( $case['plainText'] ),
+					"parse/serialize and has_block detection contracts case {$index}",
+					array(
+						'case'               => $case,
+						'serializedLength'   => strlen( $serialized ),
+						'reserializedLength' => strlen( $reserialized ),
+						'innerNames'         => $inner_names,
+						'shapeDifference'    => self::first_value_difference( $shape_before, $shape_after ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_string( $rendered )
+						&& strlen( $rendered ) < 8192
+						&& str_contains( $rendered, 'data-cfz-block="' . esc_attr( $case['outerName'] ) . '"' )
+						&& str_contains( $rendered, 'data-cfz-block="' . esc_attr( $case['childName'] ) . '"' )
+						&& str_contains( $rendered, 'data-cfz-filtered="' . esc_attr( $case['filteredToken'] ) . '"' )
+						&& str_contains( $rendered, 'data-cfz-context="' . esc_attr( $case['token'] ) . '"' )
+						&& str_contains( $rendered, 'data-cfz-short="' . esc_attr( $case['token'] ) . '"' )
+						&& str_contains( $rendered, esc_html( $case['unsafe'] ) )
+						&& ! str_contains( $rendered, $case['unsafe'] )
+						&& self::log_contains( $filter_log['pre'], $case['outerName'], null )
+						&& self::log_contains( $filter_log['pre'], $case['childName'], $case['outerName'] )
+						&& self::log_contains( $filter_log['pre'], 'core/paragraph', $case['outerName'] )
+						&& self::log_contains( $filter_log['pre'], $case['shortName'], $case['outerName'] )
+						&& self::log_contains( $filter_log['data'], $case['outerName'], null )
+						&& self::log_contains( $filter_log['data'], $case['childName'], $case['outerName'] )
+						&& ! self::log_contains( $filter_log['data'], $case['shortName'], $case['outerName'] )
+						&& self::log_contains( $filter_log['context'], $case['outerName'], null )
+						&& self::log_contains( $filter_log['context'], $case['childName'], $case['outerName'] )
+						&& self::log_contains( $filter_log['context'], 'core/paragraph', $case['outerName'] )
+						&& ! self::log_contains( $filter_log['context'], $case['shortName'], $case['outerName'] )
+						&& self::render_log_contains( $render_log, $case['outerName'], $case['filteredToken'], $case['token'], 'root' )
+						&& self::render_log_contains( $render_log, $case['childName'], $case['filteredToken'], $case['token'], $case['outerName'] ),
+					"render_block dynamic callbacks and filter locality case {$index}",
+					array(
+						'case'      => $case,
+						'rendered'  => $rendered,
+						'filters'   => $filter_log,
+						'renderLog' => $render_log,
+					)
+				);
+			} finally {
+				\remove_filter( 'render_block_context', $render_block_context_filter, 99 );
+				\remove_filter( 'render_block_data', $render_block_data_filter, 99 );
+				\remove_filter( 'pre_render_block', $pre_render_filter, 99 );
+				\unregister_block_type( $case['childName'] );
+				\unregister_block_type( $case['outerName'] );
+			}
+		}
+
+		return self::result(
+			$ctx,
+			'blocks.parser-detection-render-filters',
 			array() === $failures,
 			array(
 				'cases'    => self::CASES,
@@ -533,6 +735,120 @@ final class BlocksSurface {
 		return $cases;
 	}
 
+	private static function parser_render_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+		for ( $i = 0; $i < self::CASES; ++$i ) {
+			$case           = $ctx->fork( 'parser-render-' . $i );
+			$token          = self::slug( $case, 'token' );
+			$filtered_token = self::slug( $case, 'filtered' );
+			$outer_name     = 'component-fuzz/' . self::slug( $case, 'outer' );
+			$child_name     = 'component-fuzz/' . self::slug( $case, 'child' );
+			$short_name     = 'component-fuzz/' . self::slug( $case, 'short' );
+			$unsafe         = '<script data-token="' . $token . '">alert(1)</script>&"';
+
+			$child = self::parsed_block(
+				$child_name,
+				array(
+					'token'  => $token,
+					'unsafe' => $unsafe,
+				),
+				array(),
+				array(
+					'<span data-cfz-child="' . esc_attr( $token ) . '">Child ' . esc_html( $token ) . '</span>',
+				)
+			);
+
+			$core_paragraph = self::parsed_block(
+				'core/paragraph',
+				array(
+					'placeholder' => $token,
+				),
+				array(),
+				array(
+					'<p>Paragraph ' . esc_html( $token ) . '</p>',
+				)
+			);
+
+			$short_circuited = self::parsed_block(
+				$short_name,
+				array(
+					'token'  => $token,
+					'unsafe' => $unsafe,
+				),
+				array(),
+				array(
+					'<p>Short fallback ' . esc_html( $token ) . '</p>',
+				)
+			);
+
+			$outer = self::parsed_block(
+				$outer_name,
+				array(
+					'token'  => $token,
+					'unsafe' => $unsafe,
+				),
+				array( $child, $core_paragraph, $short_circuited ),
+				array(
+					'<section data-cfz-before="' . esc_attr( $token ) . '">',
+					null,
+					'<hr data-cfz-mid="' . esc_attr( $token ) . '">',
+					null,
+					'<div data-cfz-after-core="' . esc_attr( $token ) . '"></div>',
+					null,
+					'</section>',
+				)
+			);
+
+			$cases[] = array(
+				'outerName'     => $outer_name,
+				'childName'     => $child_name,
+				'shortName'     => $short_name,
+				'missingName'   => 'component-fuzz/' . self::slug( $case, 'missing' ),
+				'token'         => $token,
+				'filteredToken' => $filtered_token,
+				'unsafe'        => $unsafe,
+				'plainText'     => 'Plain generated text without block delimiters ' . $token,
+				'blocks'        => array( $outer ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function parsed_block( ?string $name, array $attrs, array $inner_blocks, array $inner_content ): array {
+		$inner_html = '';
+		foreach ( $inner_content as $chunk ) {
+			if ( is_string( $chunk ) ) {
+				$inner_html .= $chunk;
+			}
+		}
+
+		return array(
+			'blockName'    => $name,
+			'attrs'        => $attrs,
+			'innerBlocks'  => $inner_blocks,
+			'innerHTML'    => $inner_html,
+			'innerContent' => $inner_content,
+		);
+	}
+
+	private static function parser_render_attributes(): array {
+		return array(
+			'token'         => array(
+				'type'    => 'string',
+				'default' => '',
+			),
+			'filteredToken' => array(
+				'type'    => 'string',
+				'default' => '',
+			),
+			'unsafe'        => array(
+				'type'    => 'string',
+				'default' => '',
+			),
+		);
+	}
+
 	private static function registry_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 		for ( $i = 0; $i < self::CASES; ++$i ) {
@@ -683,6 +999,141 @@ final class BlocksSurface {
 		$raw = preg_replace( '/[^a-z0-9-]+/', '-', $raw );
 		$raw = trim( (string) $raw, '-' );
 		return '' === $raw ? 'fuzz-' . dechex( $ctx->seed() & 0xffff ) : substr( $raw, 0, 48 );
+	}
+
+	private static function block_tree_shape( array $blocks ): array {
+		$shape = array();
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				$shape[] = array( 'invalid' => gettype( $block ) );
+				continue;
+			}
+
+			$inner_content = array();
+			foreach ( (array) ( $block['innerContent'] ?? array() ) as $chunk ) {
+				$inner_content[] = is_string( $chunk ) ? array(
+					'length' => strlen( $chunk ),
+					'sha1'   => sha1( $chunk ),
+				) : null;
+			}
+
+			$shape[] = array(
+				'blockName'    => $block['blockName'] ?? null,
+				'attrs'        => self::sort_value( is_array( $block['attrs'] ?? null ) ? $block['attrs'] : array() ),
+				'innerHTML'    => array(
+					'length' => is_string( $block['innerHTML'] ?? null ) ? strlen( $block['innerHTML'] ) : null,
+					'sha1'   => is_string( $block['innerHTML'] ?? null ) ? sha1( $block['innerHTML'] ) : null,
+				),
+				'innerContent' => $inner_content,
+				'innerBlocks'  => self::block_tree_shape( is_array( $block['innerBlocks'] ?? null ) ? $block['innerBlocks'] : array() ),
+			);
+		}
+
+		return $shape;
+	}
+
+	private static function sort_value( $value ) {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		$sorted = array();
+		foreach ( $value as $key => $item ) {
+			$sorted[ $key ] = self::sort_value( $item );
+		}
+		ksort( $sorted );
+
+		return $sorted;
+	}
+
+	private static function null_marker_count( $value ): int {
+		if ( ! is_array( $value ) ) {
+			return 0;
+		}
+
+		$count = 0;
+		foreach ( $value as $item ) {
+			if ( null === $item ) {
+				++$count;
+			}
+		}
+
+		return $count;
+	}
+
+	private static function log_contains( array $log, ?string $name, ?string $parent ): bool {
+		foreach ( $log as $entry ) {
+			if ( $name === ( $entry['name'] ?? null ) && $parent === ( $entry['parent'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function render_log_contains( array $log, string $name, string $filtered_token, string $context_token, string $context_parent ): bool {
+		foreach ( $log as $entry ) {
+			if (
+				$name === ( $entry['name'] ?? null )
+				&& $filtered_token === ( $entry['filteredToken'] ?? null )
+				&& $context_token === ( $entry['contextToken'] ?? null )
+				&& $context_parent === ( $entry['contextParent'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function first_value_difference( $expected, $actual, string $path = '$' ): ?array {
+		if ( gettype( $expected ) !== gettype( $actual ) ) {
+			return array(
+				'path'     => $path,
+				'expected' => gettype( $expected ),
+				'actual'   => gettype( $actual ),
+			);
+		}
+
+		if ( is_array( $expected ) ) {
+			foreach ( $expected as $key => $expected_value ) {
+				if ( ! array_key_exists( $key, $actual ) ) {
+					return array(
+						'path'     => $path . '[' . var_export( $key, true ) . ']',
+						'expected' => 'present',
+						'actual'   => 'missing',
+					);
+				}
+
+				$difference = self::first_value_difference( $expected_value, $actual[ $key ], $path . '[' . var_export( $key, true ) . ']' );
+				if ( null !== $difference ) {
+					return $difference;
+				}
+			}
+
+			foreach ( $actual as $key => $actual_value ) {
+				unset( $actual_value );
+				if ( ! array_key_exists( $key, $expected ) ) {
+					return array(
+						'path'     => $path . '[' . var_export( $key, true ) . ']',
+						'expected' => 'missing',
+						'actual'   => 'present',
+					);
+				}
+			}
+
+			return null;
+		}
+
+		if ( $expected !== $actual ) {
+			return array(
+				'path'     => $path,
+				'expected' => is_scalar( $expected ) || null === $expected ? $expected : gettype( $expected ),
+				'actual'   => is_scalar( $actual ) || null === $actual ? $actual : gettype( $actual ),
+			);
+		}
+
+		return null;
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {

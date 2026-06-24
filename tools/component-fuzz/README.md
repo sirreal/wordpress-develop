@@ -70,9 +70,10 @@ database, network requests, or a configured site.
   sign-on cookie actions with cookie sending short-circuited, auth cookie
   validation hooks/default parsing, current-user and cookie global restoration,
   and session token lifecycle operations.
-- `blocks`: block type metadata, variations, hooks, style, pattern/category,
-  bindings, and supports registries, including dynamic block attribute
-  preparation and wrapper attribute merging.
+- `blocks`: block parser/serializer round trips, optimized block detection,
+  dynamic render filters, block type metadata, variations, hooks, style,
+  pattern/category, bindings, and supports registries, including dynamic block
+  attribute preparation and wrapper attribute merging.
 - `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
   fallbacks, content sanitization on update, form escaping, widgets block
