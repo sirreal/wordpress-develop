@@ -639,6 +639,7 @@ final class BlocksSurface {
 			$anchor_after  = self::find_first_block( $augmented_tree, $case['anchorName'] );
 			$inner_names   = is_array( $anchor_after ) ? self::block_names( $anchor_after['innerBlocks'] ?? array() ) : array();
 			$top_names     = self::block_names( $augmented_tree );
+			$before_block  = self::find_first_block( $augmented_tree, $case['beforeName'] );
 			$after_block   = self::find_first_block( $augmented_tree, $case['afterName'] );
 			$single_block  = self::find_first_block( $augmented_tree, $case['singleName'] );
 			$first_block   = self::find_first_block( $augmented_tree, $case['firstName'] );
@@ -668,6 +669,7 @@ final class BlocksSurface {
 					$hooked_blocks[ $case['anchorName'] ]['last_child']
 				)
 					&& in_array( $case['beforeName'], $hooked_blocks[ $case['anchorName'] ]['before'], true )
+					&& in_array( $case['ignoredBeforeName'], $hooked_blocks[ $case['anchorName'] ]['before'], true )
 					&& in_array( $case['afterName'], $hooked_blocks[ $case['anchorName'] ]['after'], true )
 					&& in_array( $case['singleName'], $hooked_blocks[ $case['anchorName'] ]['after'], true )
 					&& in_array( $case['firstName'], $hooked_blocks[ $case['anchorName'] ]['first_child'], true )
@@ -681,14 +683,16 @@ final class BlocksSurface {
 
 			self::collect_failure(
 				$failures,
-				! str_contains( $augmented, '<!-- wp:' . $case['beforeName'] )
+				! str_contains( $augmented, '<!-- wp:' . $case['ignoredBeforeName'] )
 					&& ! str_contains( $augmented, '<!-- wp:' . $case['suppressedName'] )
-					&& array( $case['anchorName'], $case['afterName'], $case['singleName'] ) === $top_names
+					&& array( $case['beforeName'], $case['anchorName'], $case['afterName'], $case['singleName'] ) === $top_names
 					&& array( $case['firstName'], 'core/paragraph', $case['lastName'] ) === $inner_names
+					&& 1 === self::block_comment_count( $augmented, $case['beforeName'] )
 					&& 1 === self::block_comment_count( $augmented, $case['afterName'] )
 					&& 1 === self::block_comment_count( $augmented, $case['singleName'] )
 					&& 1 === self::block_comment_count( $augmented, $case['firstName'] )
 					&& 1 === self::block_comment_count( $augmented, $case['lastName'] )
+					&& self::hooked_block_attrs_match( $before_block, $case, 'before' )
 					&& self::hooked_block_attrs_match( $after_block, $case, 'after' )
 					&& self::hooked_block_attrs_match( $single_block, $case, 'after' )
 					&& self::hooked_block_attrs_match( $first_block, $case, 'first_child' )
@@ -700,6 +704,7 @@ final class BlocksSurface {
 					'topNames'      => $top_names,
 					'innerNames'    => $inner_names,
 					'parsedAttrs'   => array(
+						'before' => is_array( $before_block ) ? ( $before_block['attrs'] ?? array() ) : null,
 						'after'  => is_array( $after_block ) ? ( $after_block['attrs'] ?? array() ) : null,
 						'single' => is_array( $single_block ) ? ( $single_block['attrs'] ?? array() ) : null,
 						'first'  => is_array( $first_block ) ? ( $first_block['attrs'] ?? array() ) : null,
@@ -725,6 +730,7 @@ final class BlocksSurface {
 				$failures,
 				is_array( $ignored )
 					&& in_array( $case['beforeName'], $ignored, true )
+					&& in_array( $case['ignoredBeforeName'], $ignored, true )
 					&& in_array( $case['afterName'], $ignored, true )
 					&& in_array( $case['singleName'], $ignored, true )
 					&& in_array( $case['firstName'], $ignored, true )
@@ -732,6 +738,7 @@ final class BlocksSurface {
 					&& ! in_array( $case['suppressedName'], $ignored, true )
 					&& count( $ignored ) === count( array_unique( $ignored ) )
 					&& 0 === self::block_comment_count( $metadata_content, $case['beforeName'] )
+					&& 0 === self::block_comment_count( $metadata_content, $case['ignoredBeforeName'] )
 					&& 0 === self::block_comment_count( $metadata_content, $case['afterName'] )
 					&& 0 === self::block_comment_count( $metadata_content, $case['singleName'] )
 					&& 0 === self::block_comment_count( $metadata_content, $case['firstName'] )
@@ -1083,6 +1090,7 @@ final class BlocksSurface {
 		$token           = self::slug( $ctx, 'hook-token' );
 		$anchor_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'anchor' ), 'hook-anchor' );
 		$before_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'before' ), 'hook-before' );
+		$ignored_before_name = 'component-fuzz/' . self::slug( $ctx->fork( 'ignored-before' ), 'hook-ignored-before' );
 		$after_name      = 'component-fuzz/' . self::slug( $ctx->fork( 'after' ), 'hook-after' );
 		$first_name      = 'component-fuzz/' . self::slug( $ctx->fork( 'first' ), 'hook-first' );
 		$last_name       = 'component-fuzz/' . self::slug( $ctx->fork( 'last' ), 'hook-last' );
@@ -1093,7 +1101,7 @@ final class BlocksSurface {
 			$anchor_name,
 			array(
 				'metadata' => array(
-					'ignoredHookedBlocks' => array( $before_name ),
+					'ignoredHookedBlocks' => array( $ignored_before_name ),
 				),
 				'token'    => $token,
 			),
@@ -1125,6 +1133,11 @@ final class BlocksSurface {
 			),
 			$before_name     => array(
 				'title'       => 'Component Fuzz Hook Before',
+				'api_version' => 3,
+				'block_hooks' => array( $anchor_name => 'before' ),
+			),
+			$ignored_before_name => array(
+				'title'       => 'Component Fuzz Hook Ignored Before',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'before' ),
 			),
@@ -1164,6 +1177,7 @@ final class BlocksSurface {
 			'token'          => $token,
 			'anchorName'     => $anchor_name,
 			'beforeName'     => $before_name,
+			'ignoredBeforeName' => $ignored_before_name,
 			'afterName'      => $after_name,
 			'firstName'      => $first_name,
 			'lastName'       => $last_name,
