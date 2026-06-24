@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7854 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7871 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>blocks</code> at 500 passed, <code>date-time</code> at 1200 passed, and <code>template-hierarchy</code> at 700 passed.</div>
+			<div class="note">Latest focused validations: <code>style</code> at 1200 passed, <code>site-health-debug</code> at 600 passed, and <code>blocks</code> at 500 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">1</div>
-			<div class="note">Hooke the 2nd is strengthening <code>style</code> coverage; Blocks worker output has been integrated in main.</div>
+			<div class="metric good">0</div>
+			<div class="note">No active delegated workers; Hooke the 2nd's style work has been integrated in main.</div>
 		</div>
 	</div>
 
@@ -437,6 +437,20 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>style</code></td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Hooke the 2nd / main worktree</td>
+					<td>Main focused run: 1200 passed, 100 skipped, 0 failed; latest broad run: 7871 passed, 62 skipped, 0 failed.</td>
+					<td>Style engine preset class/CSS-var boundaries, block selector helpers, theme.json variable resolution, block editor theme style filters, stylesheet serialization and cleanup.</td>
+				</tr>
+				<tr>
+					<td><code>site-health-debug</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 600 passed, 200 skipped, 0 failed; latest broad run: 7871 passed, 62 skipped, 0 failed.</td>
+					<td><code>WP_Debug_Data</code> formatting, <code>debug_information</code> filter locality, database size, scoped <code>SHOW TABLE STATUS</code>/<code>SHOW VARIABLES</code> wpdb doubles, MySQL variable fallbacks.</td>
 				</tr>
 				<tr>
 					<td><code>blocks</code></td>
@@ -667,6 +681,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>1329011c91</code></td>
+					<td><code>style</code></td>
+					<td>1200 passed, 100 skipped, 0 failed.</td>
+					<td>7871 passed, 62 skipped, 0 failed at 2 iterations after preset classname/CSS-var, block selector, theme.json variable, and editor theme-style filter coverage.</td>
+				</tr>
+				<tr>
+					<td><code>7fbad6f455</code></td>
+					<td><code>site-health-debug</code></td>
+					<td>600 passed, 200 skipped, 0 failed.</td>
+					<td>7871 passed, 62 skipped, 0 failed at 2 iterations after MySQL variable lookup and scoped <code>SHOW VARIABLES</code> wpdb-double coverage.</td>
+				</tr>
 				<tr>
 					<td><code>48bfee1d39</code></td>
 					<td><code>blocks</code></td>
