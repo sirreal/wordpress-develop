@@ -419,6 +419,14 @@ final class SiteHealthDebugSurface {
 	private static function check_sizes( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
+		if ( ! function_exists( 'ini_set' ) ) {
+			return $ctx->skip(
+				'site-health-debug.sizes.directory-database-total',
+				'Skipped deprecated get_sizes() directory aggregation because ini_set() is unavailable and the harness cannot raise max_execution_time for long all-surface runs.',
+				array( 'elapsedSeconds' => self::elapsed_since_start() )
+			);
+		}
+
 		\wp_upload_dir( null, false, true );
 		\ComponentFuzz\ensure_dir( WP_CONTENT_DIR . '/uploads' );
 		\ComponentFuzz\ensure_dir( WP_CONTENT_DIR . '/uploads/fonts' );
@@ -471,6 +479,13 @@ final class SiteHealthDebugSurface {
 			'value'  => $GLOBALS['_wp_using_ext_object_cache'] ?? null,
 		);
 		$previous_max_execution_time = self::raise_max_execution_time_for_size_scan();
+		if ( false === $previous_max_execution_time ) {
+			return $ctx->skip(
+				'site-health-debug.sizes.directory-database-total',
+				'Skipped deprecated get_sizes() directory aggregation because max_execution_time could not be raised for long all-surface runs.',
+				array( 'elapsedSeconds' => self::elapsed_since_start() )
+			);
+		}
 		$removed          = array(
 			'size'       => false,
 			'deprecated' => false,
@@ -921,11 +936,13 @@ final class SiteHealthDebugSurface {
 			return false;
 		}
 
-		$elapsed = defined( 'WP_START_TIMESTAMP' )
+		return @ini_set( 'max_execution_time', (string) max( 60, self::elapsed_since_start() + 60 ) );
+	}
+
+	private static function elapsed_since_start(): int {
+		return defined( 'WP_START_TIMESTAMP' )
 			? max( 0, (int) ceil( microtime( true ) - WP_START_TIMESTAMP ) )
 			: 0;
-
-		return @ini_set( 'max_execution_time', (string) max( 60, $elapsed + 60 ) );
 	}
 
 	private static function restore_max_execution_time( $previous ): void {
