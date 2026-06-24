@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7853 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7861 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>shortcodes</code> at 1400 passed, <code>email</code> Unicode follow-up at 24570 passed, and <code>xmlrpc</code> at 800 passed.</div>
+			<div class="note">Latest focused validations: <code>template-hierarchy</code> at 700 passed, <code>shortcodes</code> at 1400 passed, and <code>email</code> Unicode follow-up at 24570 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -544,6 +544,13 @@
 					<td>Front-controller parsing, query vars, 404/header transitions, superglobal restoration.</td>
 				</tr>
 				<tr>
+					<td><code>template-hierarchy</code></td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Raman the 2nd / main worktree</td>
+					<td>Main focused run: 700 passed, 100 skipped, 0 failed; latest broad run: 7861 passed, 63 skipped, 0 failed.</td>
+					<td>Child/parent template lookup, direct archive/page/search/404/embed helpers, root/path precedence, filter locality, load/no-load behavior.</td>
+				</tr>
+				<tr>
 					<td><code>widgets</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
@@ -646,6 +653,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>0b1c9674a6</code></td>
+					<td><code>template-hierarchy</code></td>
+					<td>700 passed, 100 skipped, 0 failed.</td>
+					<td>7861 passed, 63 skipped, 0 failed at 2 iterations after direct template helper, path precedence, and no-load locate coverage.</td>
+				</tr>
 				<tr>
 					<td><code>63f21f64d0</code></td>
 					<td><code>shortcodes</code></td>
