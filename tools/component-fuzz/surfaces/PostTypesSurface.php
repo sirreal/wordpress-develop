@@ -35,6 +35,7 @@ final class PostTypesSurface {
 			$rows[] = self::check_invalid_post_type_names_do_not_leak( $ctx );
 			$rows[] = self::check_support_feature_mutation( $ctx );
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
+			$rows[] = self::check_post_type_archive_link_helpers( $ctx );
 			$rows[] = self::check_post_status_defaults_and_filters( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -84,7 +85,11 @@ final class PostTypesSurface {
 			array(
 				'add_filter',
 				'add_post_type_support',
+				'add_query_arg',
+				'get_post_type_archive_feed_link',
+				'get_post_type_archive_link',
 				'get_all_post_type_supports',
+				'home_url',
 				'get_object_taxonomies',
 				'get_post_stati',
 				'get_post_status_object',
@@ -100,10 +105,13 @@ final class PostTypesSurface {
 				'register_post_status',
 				'register_post_type',
 				'register_taxonomy',
+				'remove_filter',
 				'remove_post_type_support',
 				'sanitize_key',
 				'sanitize_title_with_dashes',
+				'trailingslashit',
 				'unregister_post_type',
+				'user_trailingslashit',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -577,6 +585,183 @@ final class PostTypesSurface {
 			'post-types.unregister.cleans-registries',
 			array() === $failures,
 			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_post_type_archive_link_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_registries();
+
+		$failures       = array();
+		$token          = self::safe_token( $ctx->identifier( 4, 10 ) );
+		$pretty_type    = self::post_type_name( $ctx->fork( 'pretty-type' ), 'arch' );
+		$plain_type     = self::post_type_name( $ctx->fork( 'plain-type' ), 'plain' );
+		$no_archive     = self::post_type_name( $ctx->fork( 'no-archive' ), 'noarch' );
+		$pretty_slug    = 'library/' . $token;
+		$archive_slug   = $ctx->bool() ? true : 'archive-' . $token;
+		$archive_struct = true === $archive_slug ? $pretty_slug : $archive_slug;
+		$archive_filter_calls = array();
+		$feed_filter_calls    = array();
+
+		$pretty = \register_post_type(
+			$pretty_type,
+			array(
+				'public'      => true,
+				'has_archive' => $archive_slug,
+				'rewrite'     => array(
+					'slug'       => $pretty_slug,
+					'with_front' => false,
+					'feeds'      => true,
+					'pages'      => true,
+				),
+				'query_var'   => true,
+				'supports'    => array( 'title' ),
+			)
+		);
+		$plain  = \register_post_type(
+			$plain_type,
+			array(
+				'public'      => true,
+				'has_archive' => true,
+				'rewrite'     => false,
+				'query_var'   => true,
+				'supports'    => false,
+			)
+		);
+		$none   = \register_post_type(
+			$no_archive,
+			array(
+				'public'      => true,
+				'has_archive' => false,
+				'rewrite'     => true,
+				'query_var'   => true,
+				'supports'    => false,
+			)
+		);
+
+		$expected_pretty_link = \home_url( \user_trailingslashit( $archive_struct, 'post_type_archive' ) );
+		$expected_plain_link  = \home_url( '?post_type=' . $plain_type );
+		$raw_pretty_link      = \get_post_type_archive_link( $pretty_type );
+		$raw_plain_link       = \get_post_type_archive_link( $plain_type );
+		$no_archive_link      = \get_post_type_archive_link( $no_archive );
+		$missing_link         = \get_post_type_archive_link( 'cfz_missing_' . $token );
+
+		$archive_filter = static function ( string $link, string $post_type ) use ( &$archive_filter_calls, $token ): string {
+			$archive_filter_calls[] = array(
+				'link'     => $link,
+				'postType' => $post_type,
+			);
+
+			return \add_query_arg( 'cfz_archive_filter', $token, $link );
+		};
+		$feed_filter    = static function ( string $link, string $feed ) use ( &$feed_filter_calls, $token ): string {
+			$feed_filter_calls[] = array(
+				'link' => $link,
+				'feed' => $feed,
+			);
+
+			return \add_query_arg( 'cfz_feed_filter', $token, $link );
+		};
+
+		\add_filter( 'post_type_archive_link', $archive_filter, 10, 2 );
+		$filtered_archive_link = \get_post_type_archive_link( $pretty_type );
+		$archive_removed       = \remove_filter( 'post_type_archive_link', $archive_filter, 10 );
+
+		$expected_pretty_default_feed = \trailingslashit( $raw_pretty_link ) . 'feed/';
+		$expected_pretty_atom_feed    = \trailingslashit( $raw_pretty_link ) . 'feed/atom/';
+		$expected_plain_rss_feed      = \add_query_arg( 'feed', 'rss2', $raw_plain_link );
+
+		\add_filter( 'post_type_archive_feed_link', $feed_filter, 10, 2 );
+		$pretty_default_feed = \get_post_type_archive_feed_link( $pretty_type, '' );
+		$pretty_atom_feed    = \get_post_type_archive_feed_link( $pretty_type, 'atom' );
+		$plain_rss_feed      = \get_post_type_archive_feed_link( $plain_type, 'rss2' );
+		$no_archive_feed     = \get_post_type_archive_feed_link( $no_archive, 'atom' );
+		$feed_removed        = \remove_filter( 'post_type_archive_feed_link', $feed_filter, 10 );
+
+		self::collect_failure(
+			$failures,
+			$pretty instanceof \WP_Post_Type
+				&& $plain instanceof \WP_Post_Type
+				&& $none instanceof \WP_Post_Type
+				&& $expected_pretty_link === $raw_pretty_link
+				&& $expected_plain_link === $raw_plain_link
+				&& false === $no_archive_link
+				&& false === $missing_link,
+			'post type archive links follow has_archive and rewrite branches',
+			array(
+				'prettyType'     => $pretty_type,
+				'plainType'      => $plain_type,
+				'noArchiveType'  => $no_archive,
+				'archiveSlug'    => $archive_slug,
+				'expectedPretty' => $expected_pretty_link,
+				'actualPretty'   => $raw_pretty_link,
+				'expectedPlain'  => $expected_plain_link,
+				'actualPlain'    => $raw_plain_link,
+				'noArchive'      => $no_archive_link,
+				'missing'        => $missing_link,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			\add_query_arg( 'cfz_archive_filter', $token, $raw_pretty_link ) === $filtered_archive_link
+				&& array(
+					array(
+						'link'     => $raw_pretty_link,
+						'postType' => $pretty_type,
+					),
+				) === $archive_filter_calls
+				&& $archive_removed
+				&& false === \has_filter( 'post_type_archive_link', $archive_filter ),
+			'post_type_archive_link filter receives raw link and post type and is removable',
+			array(
+				'filtered' => $filtered_archive_link,
+				'calls'    => $archive_filter_calls,
+				'removed'  => $archive_removed,
+				'hasAfter' => \has_filter( 'post_type_archive_link', $archive_filter ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			\add_query_arg( 'cfz_feed_filter', $token, $expected_pretty_default_feed ) === $pretty_default_feed
+				&& \add_query_arg( 'cfz_feed_filter', $token, $expected_pretty_atom_feed ) === $pretty_atom_feed
+				&& \add_query_arg( 'cfz_feed_filter', $token, $expected_plain_rss_feed ) === $plain_rss_feed
+				&& false === $no_archive_feed
+				&& array(
+					array(
+						'link' => $expected_pretty_default_feed,
+						'feed' => 'rss2',
+					),
+					array(
+						'link' => $expected_pretty_atom_feed,
+						'feed' => 'atom',
+					),
+					array(
+						'link' => $expected_plain_rss_feed,
+						'feed' => 'rss2',
+					),
+				) === $feed_filter_calls
+				&& $feed_removed
+				&& false === \has_filter( 'post_type_archive_feed_link', $feed_filter ),
+			'post type archive feed links use pretty/feed and query branches with filter locality',
+			array(
+				'prettyDefault' => $pretty_default_feed,
+				'prettyAtom'    => $pretty_atom_feed,
+				'plainRss'      => $plain_rss_feed,
+				'noArchive'     => $no_archive_feed,
+				'calls'         => $feed_filter_calls,
+				'removed'       => $feed_removed,
+				'hasAfter'      => \has_filter( 'post_type_archive_feed_link', $feed_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.archive-link-helpers.filters-and-feed-branches',
+			array() === $failures,
+			array(
+				'prettyType' => $pretty_type,
+				'plainType'  => $plain_type,
+				'failures'   => array_slice( $failures, 0, 6 ),
+			)
 		);
 	}
 

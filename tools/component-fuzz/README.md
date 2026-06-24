@@ -325,7 +325,7 @@ database, network requests, or a configured site.
   redirecting or dying request handlers.
 - `post-types`: post type and post status registry defaults, support feature
   registration, capability generation, query/archive normalization, unregister
-  cleanup, and status filtering.
+  cleanup, archive/feed link filters, and status filtering.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
   confirmation descriptions, request-key hash/expiration validation, export
