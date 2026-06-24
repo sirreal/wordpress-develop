@@ -439,6 +439,10 @@ final class SiteHealthDebugSurface {
 		foreach ( $db_rows as $row ) {
 			$db_size += $row['Data_length'] + $row['Index_length'];
 		}
+		if ( 0 === $db_size ) {
+			$db_rows[0]['Data_length'] = 1;
+			$db_size                   = 1;
+		}
 
 		$size_calls       = array();
 		$deprecated_calls = array();
@@ -462,12 +466,17 @@ final class SiteHealthDebugSurface {
 		};
 		$wpdb             = new SiteHealthDebugWpdbDouble( $db_rows );
 		$actual           = array();
-		$previous_ext     = \wp_using_ext_object_cache( true );
+		$previous_ext     = array(
+			'exists' => array_key_exists( '_wp_using_ext_object_cache', $GLOBALS ),
+			'value'  => $GLOBALS['_wp_using_ext_object_cache'] ?? null,
+		);
+		$previous_max_execution_time = self::raise_max_execution_time_for_size_scan();
 		$removed          = array(
 			'size'       => false,
 			'deprecated' => false,
 		);
 
+		\wp_using_ext_object_cache( true );
 		\wp_cache_delete( 'dirsize_cache', 'transient' );
 
 		try {
@@ -484,7 +493,8 @@ final class SiteHealthDebugSurface {
 			$removed['size']       = \remove_filter( 'pre_recurse_dirsize', $size_filter, 10 );
 			$removed['deprecated'] = \remove_filter( 'deprecated_function_run', $deprecated_hook, 10 );
 			\wp_cache_delete( 'dirsize_cache', 'transient' );
-			\wp_using_ext_object_cache( $previous_ext );
+			self::restore_max_execution_time( $previous_max_execution_time );
+			self::restore_ext_object_cache_flag( $previous_ext );
 		}
 
 		$expected_total = $db_size + array_sum( $dir_sizes );
@@ -574,7 +584,9 @@ final class SiteHealthDebugSurface {
 						'version'     => '5.6.0',
 					),
 				) === $deprecated_calls
-				&& $wpdb->restored,
+				&& $wpdb->restored
+				&& self::ext_object_cache_flag_matches( $previous_ext )
+				&& self::max_execution_time_matches( $previous_max_execution_time ),
 			'get_sizes emits its deprecation hook once and temporary filters plus $wpdb are restored',
 			array(
 				'removed'          => $removed,
@@ -582,6 +594,17 @@ final class SiteHealthDebugSurface {
 				'afterSizeFilter'  => \has_filter( 'pre_recurse_dirsize', $size_filter ),
 				'afterDeprecated'  => \has_filter( 'deprecated_function_run', $deprecated_hook ),
 				'wpdbRestored'     => $wpdb->restored,
+				'extObjectCache'   => array(
+					'previous' => $previous_ext,
+					'current'  => array(
+						'exists' => array_key_exists( '_wp_using_ext_object_cache', $GLOBALS ),
+						'value'  => $GLOBALS['_wp_using_ext_object_cache'] ?? null,
+					),
+				),
+				'maxExecutionTime' => array(
+					'previous' => $previous_max_execution_time,
+					'current'  => function_exists( 'ini_get' ) ? ini_get( 'max_execution_time' ) : null,
+				),
 				'databaseLastCall' => array(
 					'query'  => $wpdb->last_query,
 					'output' => $wpdb->last_output,
@@ -891,6 +914,46 @@ final class SiteHealthDebugSurface {
 				$ctx->int( 1024 * 1024, 6 * 1024 * 1024 ),
 			)
 		);
+	}
+
+	private static function raise_max_execution_time_for_size_scan() {
+		if ( ! function_exists( 'ini_set' ) ) {
+			return false;
+		}
+
+		$elapsed = defined( 'WP_START_TIMESTAMP' )
+			? max( 0, (int) ceil( microtime( true ) - WP_START_TIMESTAMP ) )
+			: 0;
+
+		return @ini_set( 'max_execution_time', (string) max( 60, $elapsed + 60 ) );
+	}
+
+	private static function restore_max_execution_time( $previous ): void {
+		if ( false === $previous || ! function_exists( 'ini_set' ) ) {
+			return;
+		}
+
+		@ini_set( 'max_execution_time', (string) $previous );
+	}
+
+	private static function max_execution_time_matches( $previous ): bool {
+		return false === $previous
+			|| ! function_exists( 'ini_get' )
+			|| (string) $previous === (string) ini_get( 'max_execution_time' );
+	}
+
+	private static function restore_ext_object_cache_flag( array $previous ): void {
+		if ( $previous['exists'] ) {
+			$GLOBALS['_wp_using_ext_object_cache'] = $previous['value'];
+		} else {
+			unset( $GLOBALS['_wp_using_ext_object_cache'] );
+		}
+	}
+
+	private static function ext_object_cache_flag_matches( array $previous ): bool {
+		$exists = array_key_exists( '_wp_using_ext_object_cache', $GLOBALS );
+		return $exists === $previous['exists']
+			&& ( ! $exists || $GLOBALS['_wp_using_ext_object_cache'] === $previous['value'] );
 	}
 
 	private static function with_wpdb( SiteHealthDebugWpdbDouble $wpdb, callable $callback ) {
