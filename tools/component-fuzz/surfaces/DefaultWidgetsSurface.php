@@ -29,6 +29,7 @@ final class DefaultWidgetsSurface {
 
 			$rows[] = self::check_constructor_contracts( $ctx->fork( 'constructors' ) );
 			$rows[] = self::check_update_sanitization( $ctx->fork( 'updates' ) );
+			$rows[] = self::check_widget_callback_lifecycle( $ctx->fork( 'callbacks' ) );
 			$rows[] = self::check_form_escaping( $ctx->fork( 'forms' ) );
 			$rows[] = self::check_text_and_html_rendering( $ctx->fork( 'text-html' ) );
 			$rows[] = self::check_simple_widget_rendering( $ctx->fork( 'simple-render' ) );
@@ -87,15 +88,20 @@ final class DefaultWidgetsSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_user_can',
+				'delete_option',
 				'fetch_feed',
 				'get_calendar',
+				'get_option',
 				'get_search_form',
+				'remove_action',
 				'remove_filter',
 				'sanitize_text_field',
+				'update_option',
 				'wp_cache_flush',
 				'wp_cache_get_last_changed',
 				'wp_cache_set',
@@ -366,6 +372,200 @@ final class DefaultWidgetsSurface {
 		);
 
 		return self::result( $ctx, 'default-widgets.update.sanitization-and-normalization', $failures );
+	}
+
+	private static function check_widget_callback_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$number          = $ctx->int( 60, 95 );
+		$blocked_number  = $number + 100;
+		$token           = $ctx->identifier( 4, 9 );
+		$widget          = new \WP_Widget_Text();
+		$display_seen    = array();
+		$form_seen       = array();
+		$update_seen     = array();
+		$original_post   = $_POST;
+		$saved_instances = array(
+			$number         => array(
+				'title'  => 'Saved ' . $token,
+				'text'   => '<p>Saved body ' . $token . '</p>',
+				'filter' => true,
+				'visual' => true,
+			),
+			$blocked_number => array(
+				'title'  => 'Blocked ' . $token,
+				'text'   => '<p>Blocked body ' . $token . '</p>',
+				'filter' => true,
+				'visual' => true,
+			),
+		);
+
+		$display_filter = static function ( $instance, \WP_Widget $current_widget, array $args ) use ( &$display_seen, $token, $blocked_number ) {
+			$display_seen[] = array(
+				'idBase'   => $current_widget->id_base,
+				'number'   => $current_widget->number,
+				'title'    => $instance['title'] ?? null,
+				'widgetId' => $args['widget_id'] ?? null,
+			);
+
+			if ( $blocked_number === (int) $current_widget->number ) {
+				return false;
+			}
+
+			$instance['title'] .= ' filtered';
+			$instance['text']  .= '<span data-display-token="' . \esc_attr( $token ) . '"></span>';
+			return $instance;
+		};
+		$form_filter    = static function ( $instance, \WP_Widget $current_widget ) use ( &$form_seen, $token ) {
+			$form_seen[] = array(
+				'idBase' => $current_widget->id_base,
+				'number' => $current_widget->number,
+				'title'  => $instance['title'] ?? null,
+			);
+
+			$instance['title'] = ( $instance['title'] ?? '' ) . ' form-filtered';
+			$instance['text']  = ( $instance['text'] ?? '' ) . "\nForm " . $token;
+			return $instance;
+		};
+		$form_action    = static function ( \WP_Widget $current_widget, &$return, array $instance ) use ( &$form_seen ): void {
+			$form_seen[] = array(
+				'action' => 'in_widget_form',
+				'idBase' => $current_widget->id_base,
+				'number' => $current_widget->number,
+				'return' => $return,
+				'title'  => $instance['title'] ?? null,
+			);
+		};
+		$update_filter  = static function ( $instance, array $new_instance, array $old_instance, \WP_Widget $current_widget ) use ( &$update_seen ) {
+			$update_seen[] = array(
+				'idBase' => $current_widget->id_base,
+				'number' => $current_widget->number,
+				'new'    => $new_instance,
+				'old'    => $old_instance,
+				'saved'  => $instance,
+			);
+
+			if ( is_array( $instance ) ) {
+				$instance['title'] .= ' update-filtered';
+			}
+
+			return $instance;
+		};
+
+		$widget->save_settings( $saved_instances );
+		$widget->_set( $number );
+		$display_args = self::widget_args( $widget );
+
+		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
+		\add_filter( 'widget_form_callback', $form_filter, 10, 2 );
+		\add_action( 'in_widget_form', $form_action, 10, 3 );
+		\add_filter( 'widget_update_callback', $update_filter, 10, 4 );
+		try {
+			$display_output = self::capture_callback_output(
+				static function () use ( $widget, $display_args, $number ): void {
+					$widget->display_callback( $display_args, array( 'number' => $number ) );
+				}
+			);
+
+			$widget->_set( $blocked_number );
+			$blocked_args    = self::widget_args( $widget );
+			$blocked_output  = self::capture_callback_output(
+				static function () use ( $widget, $blocked_args, $blocked_number ): void {
+					$widget->display_callback( $blocked_args, $blocked_number );
+				}
+			);
+			$form_output     = self::capture_callback_output(
+				static function () use ( $widget, $number ): void {
+					$widget->form_callback( array( 'number' => $number ) );
+				}
+			);
+			$template_output = self::capture_callback_output(
+				static function () use ( $widget ): void {
+					$widget->form_callback( array( 'number' => -1 ) );
+				}
+			);
+
+			$_POST = array(
+				'widget-text' => array(
+					$number => array(
+						'title'  => '<b>Updated ' . $token . '</b><script>bad</script>',
+						'text'   => '<p>Updated ' . $token . '</p><script>bad</script>',
+						'filter' => 'content',
+						'visual' => '1',
+					),
+				),
+			);
+			$widget->update_callback();
+			$settings_after_update = $widget->get_settings();
+		} finally {
+			$_POST = $original_post;
+			\remove_filter( 'widget_update_callback', $update_filter, 10 );
+			\remove_action( 'in_widget_form', $form_action, 10 );
+			\remove_filter( 'widget_form_callback', $form_filter, 10 );
+			\remove_filter( 'widget_display_callback', $display_filter, 10 );
+		}
+
+		$updated = $settings_after_update[ $number ] ?? array();
+
+		self::collect_failure(
+			$failures,
+			str_contains( $display_output, '<section id="text-' . $number . '" class="widget widget_text">' )
+				&& str_contains( $display_output, 'Saved ' . $token . ' filtered' )
+				&& str_contains( $display_output, 'data-display-token="' . \esc_attr( $token ) . '"' )
+				&& '' === $blocked_output
+				&& 2 === count( $display_seen )
+				&& $number === (int) ( $display_seen[0]['number'] ?? 0 )
+				&& $blocked_number === (int) ( $display_seen[1]['number'] ?? 0 ),
+			'display_callback loads saved instances, applies display filter mutations, and honors false short-circuit',
+			array(
+				'display' => self::preview( $display_output ),
+				'blocked' => self::preview( $blocked_output ),
+				'seen'    => $display_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			str_contains( $form_output, 'Saved ' . $token . ' form-filtered' )
+				&& str_contains( $form_output, 'Form ' . $token )
+				&& str_contains( $template_output, 'widget-text[__i__]' )
+				&& isset( $form_seen[0], $form_seen[1], $form_seen[2], $form_seen[3] )
+				&& $number === (int) ( $form_seen[0]['number'] ?? 0 )
+				&& 'in_widget_form' === ( $form_seen[1]['action'] ?? null )
+				&& '__i__' === (string) ( $form_seen[2]['number'] ?? '' )
+				&& 'in_widget_form' === ( $form_seen[3]['action'] ?? null ),
+			'form_callback filters saved and template instances and fires in_widget_form action',
+			array(
+				'form'     => self::preview( $form_output ),
+				'template' => self::preview( $template_output ),
+				'seen'     => $form_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			1 === count( $update_seen )
+				&& $number === (int) ( $update_seen[0]['number'] ?? 0 )
+				&& 'Saved ' . $token === ( $update_seen[0]['old']['title'] ?? null )
+				&& str_contains( $updated['title'] ?? '', 'Updated ' . $token )
+				&& str_contains( $updated['title'] ?? '', 'update-filtered' )
+				&& ! str_contains( $updated['title'] ?? '', '<script' )
+				&& str_contains( $updated['text'] ?? '', '<p>Updated ' . $token . '</p>' )
+				&& ! str_contains( $updated['text'] ?? '', '<script' )
+				&& true === ( $updated['filter'] ?? null )
+				&& true === ( $updated['visual'] ?? null )
+				&& isset( $settings_after_update[ $blocked_number ] ),
+			'update_callback sanitizes one posted instance, runs update filter, and preserves sibling instances',
+			array(
+				'updated'  => $updated,
+				'settings' => $settings_after_update,
+				'seen'     => $update_seen,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'default-widgets.callbacks.display-form-update-lifecycle',
+			$failures,
+			array( 'number' => $number )
+		);
 	}
 
 	private static function check_form_escaping( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -986,6 +1186,20 @@ final class DefaultWidgetsSurface {
 		ob_start();
 		try {
 			$widget->widget( self::widget_args( $widget ), $instance );
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			throw $e;
+		}
+	}
+
+	private static function capture_callback_output( callable $callback ): string {
+		$level = ob_get_level();
+		ob_start();
+		try {
+			$callback();
 			return (string) ob_get_clean();
 		} catch ( \Throwable $e ) {
 			while ( ob_get_level() > $level ) {

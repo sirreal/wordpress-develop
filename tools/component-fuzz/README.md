@@ -136,9 +136,10 @@ database, network requests, or a configured site.
   and next-scheduled filter contracts, duplicate single-event windows,
   ready-job partitioning, unscheduling and rescheduling contracts.
 - `default-widgets`: classic default widget subclass coverage, including
-  constructor/options contracts, update sanitization, form escaping, filtered
-  rendering for text/custom HTML/search/meta/list widgets, cache-backed
-  calendar/archive output, and local RSS fixtures without network requests.
+  constructor/options contracts, saved-instance callback lifecycles, update
+  sanitization, form escaping, filtered rendering for text/custom
+  HTML/search/meta/list widgets, cache-backed calendar/archive output, and
+  local RSS fixtures without network requests.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
   setting sanitize/validate/post value flows, multidimensional option previewing,
   container/control JSON exports, active callbacks, and selective refresh partial
