@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7981 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7971 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -545,10 +545,10 @@
 				</tr>
 				<tr>
 					<td><code>appearance-media</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 500 passed, 100 skipped; broad run: 6527 passed, 50 skipped, 0 failed.</td>
-					<td>Theme mods, theme support globals, site icon filters, post type/status bootstrap.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Tesla the 3rd findings fixed through <code>8ec4cfb4aa</code>, follow-up review found no actionable issues</td>
+					<td>Main focused run: 600 passed, 100 skipped, 0 failed; HTTPS smoke: 30 passed, 5 skipped, 0 failed; latest broad run: 7971 passed, 66 skipped, 0 failed.</td>
+					<td>Theme mods, theme support globals, custom background/header helpers, custom header video URL/settings/markup active gates, request-scheme-aware header oracles, site icon filters, and post type/status bootstrap.</td>
 				</tr>
 				<tr>
 					<td><code>customizer-persistence</code></td>
@@ -933,6 +933,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>ca8db4d687</code> / <code>8ec4cfb4aa</code></td>
+					<td><code>appearance-media</code></td>
+					<td>600 passed, 100 skipped, 0 failed after review fixes; HTTPS smoke run: 30 passed, 5 skipped, 0 failed.</td>
+					<td>7971 passed, 66 skipped, 0 failed at 2 iterations after custom-header video URL/settings/markup coverage, request-scheme oracle hardening, and video-only active-gate checks.</td>
+				</tr>
 				<tr>
 					<td><code>23cf0ded2c</code> / <code>e6d2b6b02d</code></td>
 					<td><code>block-widgets</code></td>
@@ -1704,7 +1710,7 @@
 				<tr>
 					<td><code>3205dbbf0d</code></td>
 					<td><code>appearance-media</code>, dashboard</td>
-					<td>500 passed, 100 skipped, 0 failed.</td>
+					<td>500 passed, 100 skipped, 0 failed before the custom-header video follow-up.</td>
 					<td>6527 passed, 50 skipped, 0 failed at 2 iterations.</td>
 				</tr>
 				<tr>
