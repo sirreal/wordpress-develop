@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7939 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7942 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>fonts</code> at 700 passed, <code>identity</code> at 100 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>identity</code> at 100 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale media-metadata, fonts, identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale plugin-theme, media-metadata, fonts, identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -256,6 +256,13 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>media-metadata</code></td>
+					<td><span class="status good">reviewed validation passed</span></td>
+					<td>Main worktree; reviewer Newton the 2nd found no actionable issues</td>
+					<td>Main focused runs: 500 passed, 0 skipped, 0 failed at seeds 112233 and 987654; latest broad run: 7942 passed, 63 skipped, 0 failed.</td>
+					<td>Local parser fixtures, ID3 helpers, timestamp extraction, audio/video extension and key filters, attachment MIME/extension classification, image/document wrappers, MIME/extension disagreement, metadata generation branches, and state restoration.</td>
+				</tr>
 				<tr>
 					<td><code>abilities</code></td>
 					<td><span class="status good">local validation passed</span></td>
@@ -828,6 +835,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>55387b1acf</code></td>
+					<td><code>media-metadata</code></td>
+					<td>500 passed, 0 skipped, 0 failed at seeds 112233 and 987654.</td>
+					<td>7942 passed, 63 skipped, 0 failed at 2 iterations after attachment classification and MIME/extension disagreement coverage.</td>
+				</tr>
 				<tr>
 					<td><code>4c499bd966</code></td>
 					<td><code>fonts</code></td>
