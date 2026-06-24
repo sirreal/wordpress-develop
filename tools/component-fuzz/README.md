@@ -229,8 +229,8 @@ database, network requests, or a configured site.
   extensions are available, XMP alt text extraction, EXIF helper normalization,
   image metadata filters, temp-file cleanup, and state restoration.
 - `identity`: usernames, emails, identity sanitizer filter contracts,
-  capabilities, text/comment filters, comment cookies, options, password
-  hashing/checking, parse helpers.
+  capabilities, text/comment filters, comment cookies/current-commenter
+  payloads, options, password hashing/checking, parse helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
   imported comment lookup against the in-memory stub, `wp_text_diff()`
   rendering/escaping/normalization, and `WP_Error` export/merge/remove

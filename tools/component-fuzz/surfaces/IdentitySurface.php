@@ -35,6 +35,7 @@ final class IdentitySurface {
 			self::exercise_urls( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
 			self::exercise_comment_cookies( $result, $rng );
+			self::exercise_current_commenter( $result, $rng );
 			self::exercise_comment_filtering( $result, $rng );
 			self::exercise_options( $result, $rng );
 			self::exercise_passwords( $result, $rng );
@@ -424,6 +425,78 @@ final class IdentitySurface {
 					foreach ( array_keys( $cookies ) as $name ) {
 						self::check( $result, 'sanitize_comment_cookies.idempotent', $once[ $name ] === ( $_COOKIE[ $name ] ?? null ), $cookies, $once[ $name ], $_COOKIE[ $name ] ?? null );
 					}
+				}
+			}
+		);
+	}
+
+	private static function exercise_current_commenter( array &$result, array &$rng ): void {
+		if ( ! defined( 'COOKIEHASH' ) ) {
+			$result['skips'][] = 'current_commenter:missing_COOKIEHASH';
+			return;
+		}
+		if ( ! self::have_functions( array( 'add_filter', 'has_filter', 'remove_filter', 'sanitize_comment_cookies', 'wp_get_current_commenter' ), $result, 'current_commenter' ) ) {
+			return;
+		}
+
+		$hash  = (string) constant( 'COOKIEHASH' );
+		$cases = array(
+			array(
+				'comment_author_' . $hash       => "Alice <b>Identity</b> O\\'Reilly",
+				'comment_author_email_' . $hash => ' alice.identity@example.test ',
+				'comment_author_url_' . $hash   => 'https://example.test/commenter?x=1&y=2',
+			),
+			array(
+				'comment_author_' . $hash       => self::random_string( $rng, 48 ),
+				'comment_author_email_' . $hash => 'generated-' . self::rand_int( $rng, 100, 999 ) . '@example.test',
+			),
+			array(),
+		);
+
+		self::run_case(
+			$result,
+			'current_commenter',
+			static function () use ( &$result, $cases, $hash ): void {
+				foreach ( $cases as $cookies ) {
+					unset(
+						$_COOKIE[ 'comment_author_' . $hash ],
+						$_COOKIE[ 'comment_author_email_' . $hash ],
+						$_COOKIE[ 'comment_author_url_' . $hash ]
+					);
+
+					foreach ( $cookies as $name => $value ) {
+						$_COOKIE[ $name ] = $value;
+					}
+
+					\sanitize_comment_cookies();
+					$expected = array(
+						'comment_author'       => $_COOKIE[ 'comment_author_' . $hash ] ?? '',
+						'comment_author_email' => $_COOKIE[ 'comment_author_email_' . $hash ] ?? '',
+						'comment_author_url'   => $_COOKIE[ 'comment_author_url_' . $hash ] ?? '',
+					);
+					$plain    = \wp_get_current_commenter();
+
+					self::check( $result, 'wp_get_current_commenter.reads_sanitized_cookie_triplet', $expected === $plain, $cookies, $expected, $plain );
+
+					$filter_events = array();
+					$filter        = static function ( array $commenter ) use ( &$filter_events ): array {
+						$filter_events[] = $commenter;
+
+						$commenter['comment_author'] .= '|filtered';
+						return $commenter;
+					};
+					$before_filter = \has_filter( 'wp_get_current_commenter', $filter );
+
+					\add_filter( 'wp_get_current_commenter', $filter, 999, 1 );
+					try {
+						$filtered = \wp_get_current_commenter();
+					} finally {
+						\remove_filter( 'wp_get_current_commenter', $filter, 999 );
+					}
+
+					self::check( $result, 'wp_get_current_commenter.filter_receives_sanitized_payload', 1 === count( $filter_events ) && $expected === $filter_events[0], $cookies, $expected, $filter_events );
+					self::check( $result, 'wp_get_current_commenter.filter_can_override_payload', is_array( $filtered ) && ( $expected['comment_author'] . '|filtered' ) === ( $filtered['comment_author'] ?? null ) && $expected['comment_author_email'] === ( $filtered['comment_author_email'] ?? null ) && $expected['comment_author_url'] === ( $filtered['comment_author_url'] ?? null ), $cookies, 'filtered author with preserved email/url', $filtered );
+					self::check( $result, 'wp_get_current_commenter.filter_restored', $before_filter === \has_filter( 'wp_get_current_commenter', $filter ), $cookies, $before_filter, \has_filter( 'wp_get_current_commenter', $filter ) );
 				}
 			}
 		);
