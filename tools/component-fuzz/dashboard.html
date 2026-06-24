@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7971 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7984 passed, 0 failed, 0 errored, 67 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -482,10 +482,10 @@
 				</tr>
 				<tr>
 					<td><code>images</code></td>
-					<td><span class="status good">integrated validation passed</span></td>
-					<td>Zeno the 2nd / main worktree</td>
-					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7620 passed, 62 skipped, 0 failed.</td>
-					<td>Image helper math, synthetic metadata, responsive/filter boundaries, attachment attrs, filetype helpers.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Zeno the 2nd / main worktree; rounding-drift oracle fix in <code>5f0eb0a4cc</code> reviewed by Chandrasekhar the 3rd</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; exact failing seed run: 18 passed, 0 skipped, 0 failed; latest broad run: 7984 passed, 67 skipped, 0 failed.</td>
+					<td>Image helper math, synthetic metadata, responsive/filter boundaries, attachment attrs, filetype helpers, and bounded <code>wp_constrain_dimensions()</code> rounding/idempotence behavior.</td>
 				</tr>
 				<tr>
 					<td><code>discovery</code></td>
@@ -699,10 +699,10 @@
 				</tr>
 				<tr>
 					<td><code>site-health-debug</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 600 passed, 200 skipped, 0 failed; latest broad run: 7871 passed, 62 skipped, 0 failed.</td>
-					<td><code>WP_Debug_Data</code> formatting, <code>debug_information</code> filter locality, database size, scoped <code>SHOW TABLE STATUS</code>/<code>SHOW VARIABLES</code> wpdb doubles, MySQL variable fallbacks.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Chandrasekhar the 3rd findings fixed through <code>e11ee9a6a7</code></td>
+					<td>Main focused run: 700 passed, 200 skipped, 0 failed; old-start timeout smoke: 35 passed, 10 skipped, 0 failed; disabled-<code>ini_set</code> smoke: 30 passed, 15 skipped, 0 failed; latest broad run: 7984 passed, 67 skipped, 0 failed.</td>
+					<td><code>WP_Debug_Data</code> formatting, <code>debug_information</code> filter locality, database size, generated directory/database/total size aggregation, timeout-control skip behavior, scoped <code>SHOW TABLE STATUS</code>/<code>SHOW VARIABLES</code> wpdb doubles, and MySQL variable fallbacks.</td>
 				</tr>
 				<tr>
 					<td><code>blocks</code></td>
@@ -933,6 +933,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>7d8adb7f93</code> / <code>e11ee9a6a7</code></td>
+					<td><code>site-health-debug</code></td>
+					<td>700 passed, 200 skipped, 0 failed after review fixes; timeout-control smoke: 35 passed, 10 skipped, 0 failed; disabled-<code>ini_set</code> smoke: 30 passed, 15 skipped, 0 failed.</td>
+					<td>7984 passed, 67 skipped, 0 failed at 2 iterations after bounded <code>WP_Debug_Data::get_sizes()</code> directory/database/total aggregation, timeout hardening, and final review.</td>
+				</tr>
+				<tr>
+					<td><code>5f0eb0a4cc</code></td>
+					<td><code>images</code></td>
+					<td>900 passed, 0 skipped, 0 failed; exact exposed seed: 18 passed, 0 skipped, 0 failed.</td>
+					<td>7984 passed, 67 skipped, 0 failed at 2 iterations after allowing documented <code>wp_constrain_dimensions()</code> one-pixel rounding drift while preserving bounds and idempotence checks.</td>
+				</tr>
 				<tr>
 					<td><code>ca8db4d687</code> / <code>8ec4cfb4aa</code></td>
 					<td><code>appearance-media</code></td>
