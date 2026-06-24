@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7922 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7931 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>syndication</code> at 600 passed, <code>admin-bar</code> at 600 passed, <code>icons-connectors</code> at 500 passed, <code>media-remote</code> at 500 passed, and <code>classic-walkers</code> at 1100 passed and 100 skipped.</div>
+			<div class="note">Latest focused validations: <code>template-links</code> at 900 passed, <code>syndication</code> at 600 passed, <code>admin-bar</code> at 600 passed, <code>icons-connectors</code> at 500 passed, and <code>media-remote</code> at 500 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -423,6 +423,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 800 passed, 0 skipped, 0 failed; broad run: 9859 passed, 81 skipped, 0 failed.</td>
 					<td>Link/bookmark APIs, optional narrow wpdb link-table support, template links.</td>
+				</tr>
+				<tr>
+					<td><code>template-links</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7931 passed, 63 skipped, 0 failed.</td>
+					<td>Body/language attributes, document titles, resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and shortlink head output, synthetic post helpers, and bookmark rendering.</td>
 				</tr>
 				<tr>
 					<td><code>image-metadata</code></td>

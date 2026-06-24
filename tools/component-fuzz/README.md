@@ -443,8 +443,9 @@ database, network requests, or a configured site.
   guarded comments-template state handling.
 - `template-links`: no-DB public template and link helpers, including body and
   language attributes, document title stability, resource hints/preloads,
-  pagination/search/feed/site/admin URLs, synthetic post preview/edit/delete/
-  shortlink/permalink helpers, and cached bookmark field/list rendering.
+  pagination/search/feed/site/admin URLs, canonical and shortlink head output,
+  synthetic post preview/edit/delete/shortlink/permalink helpers, and cached
+  bookmark field/list rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, direct widget/control callbacks, generated sidebars, widget ID
   parsing, sidebar option cache/filter behavior, sidebar assignment

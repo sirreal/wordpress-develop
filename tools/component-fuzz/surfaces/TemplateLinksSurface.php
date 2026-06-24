@@ -44,6 +44,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_page_and_paginate_links( $ctx );
 			$rows[] = self::check_search_feed_site_and_admin_links( $ctx );
 			$rows[] = self::check_post_link_helpers( $ctx );
+			$rows[] = self::check_canonical_and_shortlink_outputs( $ctx );
 			$rows[] = self::check_bookmark_fields_and_lists( $ctx );
 			$rows[] = self::check_restoration_probe( $ctx, $snapshot );
 		} catch ( \Throwable $e ) {
@@ -201,18 +202,22 @@ final class TemplateLinksSurface {
 				'get_site_url',
 				'language_attributes',
 				'paginate_links',
+				'rel_canonical',
 				'remove_filter',
 				'remove_post_type_support',
 				'sanitize_html_class',
 				'sanitize_title_with_dashes',
+				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
 				'wp_check_invalid_utf8',
+				'wp_get_canonical_url',
 				'wp_get_document_title',
 				'wp_get_shortlink',
 				'wp_list_bookmarks',
 				'wp_preload_resources',
 				'wp_resource_hints',
+				'wp_shortlink_wp_head',
 				'wp_title',
 			) as $function
 		) {
@@ -620,6 +625,140 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.links.synthetic-post-helpers',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_canonical_and_shortlink_outputs( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$post     = self::current_post();
+		$marker   = 'cfz-' . strtolower( $ctx->identifier( 4, 10 ) );
+
+		$canonical_calls = array();
+		$canonical_filter = static function ( string $url, \WP_Post $filtered_post ) use ( &$canonical_calls, $marker ): string {
+			$canonical_calls[] = array(
+				'url'  => $url,
+				'post' => $filtered_post->ID,
+			);
+
+			return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . 'cfz=' . rawurlencode( $marker );
+		};
+
+		$shortlink_calls = array();
+		$shortlink_filter = static function (
+			string $shortlink,
+			int $id,
+			string $context,
+			bool $allow_slugs
+		) use ( &$shortlink_calls, $marker ): string {
+			$shortlink_calls[] = compact( 'shortlink', 'id', 'context', 'allow_slugs' );
+
+			return $shortlink . ( str_contains( $shortlink, '?' ) ? '&' : '?' ) . 'short=<script>' . rawurlencode( $marker );
+		};
+
+		$draft_id = $post->ID + 30000 + $ctx->int( 10, 999 );
+		$draft    = new \WP_Post(
+			(object) array_merge(
+				$post->to_array(),
+				array(
+					'ID'          => $draft_id,
+					'post_name'   => 'draft-' . $marker,
+					'post_status' => 'draft',
+				)
+			)
+		);
+		wp_cache_set( $draft_id, (object) $draft->to_array(), 'posts' );
+
+		self::with_permalink_structure(
+			'',
+			static function () use ( $post, $draft_id, $marker, $canonical_filter, $shortlink_filter, &$canonical_calls, &$shortlink_calls, &$failures ): void {
+				$query      = $GLOBALS['wp_query'] ?? null;
+				$query_vars = $query instanceof \WP_Query ? $query->query_vars : null;
+				$page_exists = array_key_exists( 'page', $GLOBALS );
+				$page        = $GLOBALS['page'] ?? null;
+
+				\add_filter( 'get_canonical_url', $canonical_filter, 10, 2 );
+				\add_filter( 'get_shortlink', $shortlink_filter, 10, 4 );
+				$buffer_level = ob_get_level();
+				try {
+					if ( $query instanceof \WP_Query ) {
+						$query->query_vars['page']  = 3;
+						$query->query_vars['cpage'] = 0;
+					}
+					$GLOBALS['page'] = 3;
+
+					$canonical = \wp_get_canonical_url( $post->ID );
+
+					ob_start();
+					\rel_canonical();
+					$canonical_output = (string) ob_get_clean();
+
+					ob_start();
+					\wp_shortlink_wp_head();
+					$shortlink_output = (string) ob_get_clean();
+
+					$draft_canonical = \wp_get_canonical_url( $draft_id );
+				} finally {
+					if ( ob_get_level() > $buffer_level ) {
+						ob_end_clean();
+					}
+					\remove_filter( 'get_canonical_url', $canonical_filter, 10 );
+					\remove_filter( 'get_shortlink', $shortlink_filter, 10 );
+					if ( $query instanceof \WP_Query && null !== $query_vars ) {
+						$query->query_vars = $query_vars;
+					}
+					if ( $page_exists ) {
+						$GLOBALS['page'] = $page;
+					} else {
+						unset( $GLOBALS['page'] );
+					}
+				}
+
+				self::collect_failure(
+					$failures,
+					is_string( $canonical ?? null )
+						&& str_contains( $canonical, '?p=' . $post->ID )
+						&& str_contains( $canonical, 'page=3' )
+						&& str_contains( $canonical, 'cfz=' . rawurlencode( $marker ) )
+						&& str_contains( $canonical_output ?? '', '<link rel="canonical" href="' . \esc_url( $canonical ) . '" />' )
+						&& false === $draft_canonical,
+					'canonical helpers include current page arguments, apply filters, escape rel output, and reject drafts',
+					array(
+						'canonical'       => $canonical ?? null,
+						'canonicalOutput' => self::describe_string( is_string( $canonical_output ?? null ) ? $canonical_output : '' ),
+						'draftCanonical'  => $draft_canonical ?? null,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_string( $shortlink_output ?? null )
+						&& str_contains( $shortlink_output, "<link rel='shortlink' href='" )
+						&& str_contains( $shortlink_output, '?p=' . $post->ID )
+						&& str_contains( $shortlink_output, rawurlencode( $marker ) )
+						&& ! str_contains( strtolower( $shortlink_output ), '<script' )
+						&& 2 === count( $canonical_calls )
+						&& 1 === count( $shortlink_calls )
+						&& $post->ID === $canonical_calls[0]['post']
+						&& 'query' === $shortlink_calls[0]['context']
+						&& false === \has_filter( 'get_canonical_url', $canonical_filter, 10 )
+						&& false === \has_filter( 'get_shortlink', $shortlink_filter, 10 ),
+					'shortlink head output escapes filtered links and canonical/shortlink filters stay local',
+					array(
+						'shortlinkOutput' => self::describe_string( is_string( $shortlink_output ?? null ) ? $shortlink_output : '' ),
+						'canonicalCalls'  => $canonical_calls,
+						'shortlinkCalls'  => $shortlink_calls,
+					)
+				);
+			}
+		);
+
+		wp_cache_delete( $draft_id, 'posts' );
+
+		return self::row(
+			$ctx,
+			'template-links.links.canonical-and-shortlink-output',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
