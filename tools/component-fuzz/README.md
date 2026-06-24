@@ -461,7 +461,8 @@ database, network requests, or a configured site.
 - `wpdb-sql`: no-connection real `wpdb` SQL formatting coverage, including
   placeholder count/type handling, `%i` identifier containment, literal percent
   and LIKE escaping, malformed placeholders, and captured insert/update/delete/
-  replace builder SQL shape.
+  replace builder SQL shape, including null values across string, integer, and
+  float builder formats.
 - `wxr-export`: subprocess-isolated WXR export coverage over deterministic
   synthetic posts, terms, authors, comments, and meta, including export
   argument filtering, title/content/excerpt export filters, XML/CDATA/UTF-8

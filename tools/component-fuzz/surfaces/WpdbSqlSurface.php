@@ -36,6 +36,7 @@ final class WpdbSqlSurface {
 			$rows[] = self::check_esc_like_wildcard_protection( $ctx, $db, self::generate_like_cases( $ctx->fork( 'esc-like' ) ) );
 			$rows[] = self::check_malformed_placeholders_fail_closed( $ctx, $db, self::malformed_prepare_cases( $ctx->fork( 'malformed' ) ) );
 			$rows[] = self::check_sql_builders_are_capturable( $ctx, $db, self::generate_builder_cases( $ctx->fork( 'builders' ) ) );
+			$rows[] = self::check_builder_null_formats_are_type_agnostic( $ctx->fork( 'builder-nulls' ), $db );
 		} finally {
 			self::restore_globals( $snapshot );
 		}
@@ -497,6 +498,65 @@ final class WpdbSqlSurface {
 		);
 	}
 
+	private static function check_builder_null_formats_are_type_agnostic( \ComponentFuzz\FuzzContext $ctx, WpdbSqlNoConnectionWpdb $db ): array {
+		$failures = array();
+		$case     = self::generate_builder_null_case( $ctx );
+
+		$builder_calls = array(
+			'insert'  => static function () use ( $db, $case ) {
+				return $db->insert( $case['table'], $case['data'], $case['formats'] );
+			},
+			'replace' => static function () use ( $db, $case ) {
+				return $db->replace( $case['table'], $case['data'], $case['formats'] );
+			},
+			'update'  => static function () use ( $db, $case ) {
+				return $db->update( $case['table'], $case['updateData'], $case['where'], $case['updateFormats'], $case['whereFormats'] );
+			},
+			'delete'  => static function () use ( $db, $case ) {
+				return $db->delete( $case['table'], $case['where'], $case['whereFormats'] );
+			},
+		);
+
+		foreach ( $builder_calls as $method => $callback ) {
+			$db->reset_capture();
+			$call = self::call( 'builder-null-' . $method, $callback );
+
+			if ( ! $call['ok'] || 1 !== $call['value'] ) {
+				$failures[] = self::call_failure(
+					'builder-null-call-failed',
+					"wpdb::{$method}() failed to build a capturable null-format query.",
+					array( $call ),
+					0,
+					array_merge( $case, array( 'method' => $method ) )
+				);
+				continue;
+			}
+
+			$sql        = $db->captured_queries()[0] ?? '';
+			$violations = self::builder_null_format_violations( $method, $sql, $case );
+			if ( array() !== $violations ) {
+				$failures[] = array(
+					'name'       => 'builder-null-format-violation',
+					'message'    => "wpdb::{$method}() did not render null values independently of string/integer/float formats.",
+					'method'     => $method,
+					'case'       => self::describe_builder_null_case( $case ),
+					'sql'        => self::describe_sql( $sql ),
+					'violations' => $violations,
+				);
+			}
+		}
+
+		return self::check_row(
+			$ctx,
+			'builders.null_values_ignore_string_integer_float_formats',
+			$failures,
+			array(
+				'methods' => array_keys( $builder_calls ),
+				'formats' => array( '%s', '%d', '%f' ),
+			)
+		);
+	}
+
 	private static function builder_query_violations( string $method, string $sql, array $case ): array {
 		$violations = array();
 
@@ -593,6 +653,89 @@ final class WpdbSqlSurface {
 				$format = $case['whereFormatByField'][ $field ];
 				if ( ! self::sql_contains_builder_value( $matches[2], $field, $value, $format, 'condition' ) ) {
 					$violations[] = 'delete-where-format-mismatch';
+					break;
+				}
+			}
+		}
+
+		return array_values( array_unique( $violations ) );
+	}
+
+	private static function builder_null_format_violations( string $method, string $sql, array $case ): array {
+		$violations = array();
+
+		if ( '' === $sql ) {
+			return array( 'query-not-captured' );
+		}
+
+		if ( preg_match( '/\{[a-f0-9]{64}\}/', $sql ) ) {
+			$violations[] = 'placeholder-escape-token-left-in-captured-query';
+		}
+
+		if ( self::contains_placeholder_outside_literals( $sql ) ) {
+			$violations[] = 'printf-placeholder-left-outside-literals';
+		}
+
+		if ( in_array( $method, array( 'insert', 'replace' ), true ) ) {
+			$verb = 'insert' === $method ? 'INSERT' : 'REPLACE';
+			if ( ! preg_match( '/^' . $verb . ' INTO `([^`]*)` \((.*)\) VALUES \((.*)\)$/s', $sql, $matches ) ) {
+				return array_merge( $violations, array( 'unexpected-insert-replace-shape' ) );
+			}
+
+			if ( $matches[1] !== $case['table'] ) {
+				$violations[] = 'unexpected-table';
+			}
+
+			if ( self::sql_backtick_identifiers( $matches[2] ) !== array_keys( $case['data'] ) ) {
+				$violations[] = 'unexpected-insert-fields';
+			}
+
+			$values = array_map( 'trim', explode( ',', $matches[3] ) );
+			if ( array_fill( 0, count( $case['data'] ), 'NULL' ) !== $values ) {
+				$violations[] = 'null-insert-values-not-all-null-literals';
+			}
+
+			return array_values( array_unique( $violations ) );
+		}
+
+		if ( 'update' === $method ) {
+			if ( ! preg_match( '/^UPDATE `([^`]*)` SET (.*) WHERE (.*)$/s', $sql, $matches ) ) {
+				return array_merge( $violations, array( 'unexpected-update-shape' ) );
+			}
+
+			if ( $matches[1] !== $case['table'] ) {
+				$violations[] = 'unexpected-table';
+			}
+
+			foreach ( array_keys( $case['updateData'] ) as $field ) {
+				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s*=\s*NULL(?:\b|$)/', $matches[2] ) ) {
+					$violations[] = 'update-null-set-not-null-literal';
+					break;
+				}
+			}
+
+			foreach ( array_keys( $case['where'] ) as $field ) {
+				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s+IS NULL(?:\b|$)/', $matches[3] ) ) {
+					$violations[] = 'update-null-where-not-is-null';
+					break;
+				}
+			}
+
+			return array_values( array_unique( $violations ) );
+		}
+
+		if ( 'delete' === $method ) {
+			if ( ! preg_match( '/^DELETE FROM `([^`]*)` WHERE (.*)$/s', $sql, $matches ) ) {
+				return array_merge( $violations, array( 'unexpected-delete-shape' ) );
+			}
+
+			if ( $matches[1] !== $case['table'] ) {
+				$violations[] = 'unexpected-table';
+			}
+
+			foreach ( array_keys( $case['where'] ) as $field ) {
+				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s+IS NULL(?:\b|$)/', $matches[2] ) ) {
+					$violations[] = 'delete-null-where-not-is-null';
 					break;
 				}
 			}
@@ -862,6 +1005,35 @@ final class WpdbSqlSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function generate_builder_null_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$table       = self::safe_identifier( $ctx->fork( 'null-table' ), 'cfz_builder_nulls' );
+		$data        = array(
+			self::safe_identifier( $ctx->fork( 'insert-string-col' ), 'cfz_null_insert_s' ) => null,
+			self::safe_identifier( $ctx->fork( 'insert-int-col' ), 'cfz_null_insert_d' )    => null,
+			self::safe_identifier( $ctx->fork( 'insert-float-col' ), 'cfz_null_insert_f' )  => null,
+		);
+		$update_data = array(
+			self::safe_identifier( $ctx->fork( 'update-string-col' ), 'cfz_null_update_s' ) => null,
+			self::safe_identifier( $ctx->fork( 'update-int-col' ), 'cfz_null_update_d' )    => null,
+			self::safe_identifier( $ctx->fork( 'update-float-col' ), 'cfz_null_update_f' )  => null,
+		);
+		$where       = array(
+			self::safe_identifier( $ctx->fork( 'where-string-col' ), 'cfz_null_where_s' ) => null,
+			self::safe_identifier( $ctx->fork( 'where-int-col' ), 'cfz_null_where_d' )    => null,
+			self::safe_identifier( $ctx->fork( 'where-float-col' ), 'cfz_null_where_f' )  => null,
+		);
+
+		return array(
+			'table'         => $table,
+			'data'          => $data,
+			'formats'       => array( '%s', '%d', '%f' ),
+			'updateData'    => $update_data,
+			'updateFormats' => array( '%s', '%d', '%f' ),
+			'where'         => $where,
+			'whereFormats'  => array( '%s', '%d', '%f' ),
+		);
 	}
 
 	private static function safe_identifier( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
@@ -1260,6 +1432,18 @@ final class WpdbSqlSurface {
 			'updateColumns' => array_keys( $case['updateData'] ),
 			'whereColumns'  => array_keys( $case['where'] ),
 			'formats'       => $case['formats'],
+			'whereFormats'  => $case['whereFormats'],
+		);
+	}
+
+	private static function describe_builder_null_case( array $case ): array {
+		return array(
+			'table'         => $case['table'],
+			'dataColumns'   => array_keys( $case['data'] ),
+			'updateColumns' => array_keys( $case['updateData'] ),
+			'whereColumns'  => array_keys( $case['where'] ),
+			'formats'       => $case['formats'],
+			'updateFormats' => $case['updateFormats'],
 			'whereFormats'  => $case['whereFormats'],
 		);
 	}
