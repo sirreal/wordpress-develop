@@ -57,12 +57,15 @@ final class ClassicWalkersSurface {
 
 			$rows[] = self::check_base_walk_and_display( $ctx );
 			$rows[] = self::check_paged_walk( $ctx );
+			$rows[] = self::check_generated_tree_walk_and_reverse_paging( $ctx );
 			$rows[] = self::check_nav_menu_walker( $ctx );
 			$rows[] = self::check_page_walker( $ctx );
 			$rows[] = self::check_category_walker( $ctx );
+			$rows[] = self::check_dropdown_walkers_and_filters( $ctx );
 
 			if ( $comment_available ) {
 				$rows[] = self::check_comment_walker( $ctx );
+				$rows[] = self::check_comment_walker_callbacks( $ctx );
 			} else {
 				$rows[] = $ctx->skip(
 					'classic-walkers.comment.available',
@@ -199,7 +202,9 @@ final class ClassicWalkersSurface {
 			'Walker',
 			'Walker_Nav_Menu',
 			'Walker_Page',
+			'Walker_PageDropdown',
 			'Walker_Category',
+			'Walker_CategoryDropdown',
 			'WP_Query',
 			'WP_Rewrite',
 		);
@@ -481,10 +486,141 @@ final class ClassicWalkersSurface {
 		);
 	}
 
+	private static function check_generated_tree_walk_and_reverse_paging( \ComponentFuzz\FuzzContext $ctx ): array {
+		$nodes       = self::generated_connected_nodes( $ctx->fork( 'generated-tree' ) );
+		$root_ids    = self::root_ids( $nodes );
+		$failures    = array();
+		$walk_all    = self::test_walker();
+		$walk_depth2 = self::test_walker();
+		$reverse     = self::test_walker();
+		$flat        = self::test_walker();
+		$mutator     = self::test_walker();
+
+		$walk_all->walk( $nodes, 0, array( 'marker' => 'generated-all' ) );
+		$walk_depth2->walk( $nodes, 2, array( 'marker' => 'generated-depth2' ) );
+		$reverse->paged_walk(
+			$nodes,
+			0,
+			1,
+			count( $root_ids ),
+			array(
+				'marker'            => 'generated-reverse',
+				'reverse_top_level' => true,
+				'reverse_children'  => true,
+			)
+		);
+		$flat->paged_walk(
+			$nodes,
+			-1,
+			1,
+			count( $nodes ),
+			array(
+				'marker'            => 'generated-flat-reverse',
+				'reverse_top_level' => true,
+			)
+		);
+
+		$children_elements = self::children_buckets( $nodes );
+		$first_root        = self::root_nodes( $nodes )[0];
+		$removed_ids       = array_merge(
+			array( (int) $first_root->id ),
+			self::descendant_ids( $nodes, (int) $first_root->id )
+		);
+		$mutator->unset_children( $first_root, $children_elements );
+		$remaining_parent_ids = array_map( 'intval', array_keys( $children_elements ) );
+
+		self::collect_failure(
+			$failures,
+			count( $root_ids ) === $mutator->get_number_of_root_elements( $nodes ),
+			'get_number_of_root_elements() matches generated root count',
+			array(
+				'expectedRoots' => $root_ids,
+				'actualCount'   => $mutator->get_number_of_root_elements( $nodes ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::event_id_depths( $walk_all->start_events() )
+				=== self::expected_connected_walk_events( $nodes, 0 ),
+			'walk(0) preserves generated hierarchical preorder and computed depths',
+			array(
+				'expected' => self::expected_connected_walk_events( $nodes, 0 ),
+				'actual'   => self::event_id_depths( $walk_all->start_events() ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::event_id_depths( $walk_depth2->start_events() )
+				=== self::expected_connected_walk_events( $nodes, 2 ),
+			'walk(2) cuts generated trees at the second rendered level without reordering siblings',
+			array(
+				'expected' => self::expected_connected_walk_events( $nodes, 2 ),
+				'actual'   => self::event_id_depths( $walk_depth2->start_events() ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::has_children_by_id( $walk_all->start_events() ) === self::expected_has_children( $nodes ),
+			'generated has_children flags match parent buckets at every rendered depth',
+			array(
+				'expected' => self::expected_has_children( $nodes ),
+				'actual'   => self::has_children_by_id( $walk_all->start_events() ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::event_id_depths( $reverse->start_events() )
+				=== self::expected_connected_walk_events( $nodes, 0, true, true ),
+			'paged_walk() honors reverse_top_level and reverse_children together',
+			array(
+				'expected' => self::expected_connected_walk_events( $nodes, 0, true, true ),
+				'actual'   => self::event_id_depths( $reverse->start_events() ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::event_ids( $flat->start_events() ) === array_reverse( array_column( $nodes, 'id' ) )
+				&& self::all_events_have_depth( $flat->start_events(), 0 ),
+			'paged_walk(-1) reverses generated flat input without changing depth',
+			array( 'actual' => $flat->start_events() )
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === array_values( array_intersect( $removed_ids, $remaining_parent_ids ) )
+				&& array() !== $remaining_parent_ids,
+			'unset_children() removes every descendant bucket for one generated root and leaves siblings intact',
+			array(
+				'removedIds'          => $removed_ids,
+				'remainingParentIds'  => $remaining_parent_ids,
+				'childrenBucketCount' => count( $children_elements ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.base.generated-tree-reverse-oracles',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'nodeIds'  => array_column( $nodes, 'id' ),
+				'rootIds'  => $root_ids,
+			)
+		);
+	}
+
 	private static function check_nav_menu_walker( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
-		$base_id  = self::base_id( $ctx, 'nav' );
-		$items    = array(
+		$failures        = array();
+		$base_id         = self::base_id( $ctx, 'nav' );
+		$item_arg_calls  = array();
+		$link_attr_calls = array();
+		$start_el_calls  = array();
+		$items           = array(
 			self::menu_item( $base_id + 1, 1, 0, 'Current nav ' . $ctx->identifier( 3, 8 ), 'javascript:alert(1)', true ),
 			self::menu_item(
 				$base_id + 2,
@@ -503,7 +639,70 @@ final class ClassicWalkersSurface {
 			'item_spacing' => $ctx->choice( array( 'preserve', 'discard' ) ),
 		);
 
-		$output = ( new \Walker_Nav_Menu() )->walk( $items, 0, $args );
+		$item_args_filter = static function ( $args, $menu_item, int $depth ) use ( &$item_arg_calls ) {
+			$item_arg_calls[] = array(
+				'id'    => (int) $menu_item->ID,
+				'depth' => $depth,
+			);
+
+			$args->link_before = '<span class="cfz-nav-label">';
+			$args->link_after  = '</span>';
+
+			return $args;
+		};
+
+		$link_attrs_filter = static function ( array $atts, $menu_item, $args, int $depth ) use ( &$link_attr_calls ): array {
+			unset( $args );
+
+			$link_attr_calls[] = array(
+				'id'          => (int) $menu_item->ID,
+				'depth'       => $depth,
+				'ariaCurrent' => (string) ( $atts['aria-current'] ?? '' ),
+			);
+
+			$atts['data-cfz-nav']  = '"<nav-' . (int) $menu_item->ID . '>';
+			$atts['data-cfz-drop'] = array( 'not scalar' );
+
+			return $atts;
+		};
+
+		$start_el_filter = static function ( string $item_output, $menu_item, int $depth, $args ) use ( &$start_el_calls ): string {
+			unset( $args );
+
+			$start_el_calls[] = array(
+				'id'      => (int) $menu_item->ID,
+				'depth'   => $depth,
+				'wrapped' => str_contains( $item_output, 'cfz-nav-label' ),
+			);
+
+			return $item_output;
+		};
+
+		$output = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'nav_menu_item_args',
+					'callback'     => $item_args_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 3,
+				),
+				array(
+					'hook'         => 'nav_menu_link_attributes',
+					'callback'     => $link_attrs_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+				array(
+					'hook'         => 'walker_nav_menu_start_el',
+					'callback'     => $start_el_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+			),
+			static function () use ( $items, $args ): string {
+				return ( new \Walker_Nav_Menu() )->walk( $items, 0, $args );
+			}
+		);
 
 		self::collect_failure(
 			$failures,
@@ -524,6 +723,27 @@ final class ClassicWalkersSurface {
 			array( 'output' => self::describe_string( $output ) )
 		);
 
+		self::collect_failure(
+			$failures,
+			array_column( $item_arg_calls, 'id' ) === array_column( $items, 'ID' )
+				&& array_column( $link_attr_calls, 'id' ) === array_column( $items, 'ID' )
+				&& array_column( $start_el_calls, 'id' ) === array_column( $items, 'ID' )
+				&& array( 0, 1 ) === array_column( $item_arg_calls, 'depth' )
+				&& array( 0, 1 ) === array_column( $link_attr_calls, 'depth' )
+				&& array( 0, 1 ) === array_column( $start_el_calls, 'depth' )
+				&& array( true, true ) === array_column( $start_el_calls, 'wrapped' )
+				&& str_contains( $output, '<span class="cfz-nav-label">' )
+				&& str_contains( $output, 'data-cfz-nav="&quot;&lt;nav-' )
+				&& ! str_contains( $output, 'data-cfz-drop' ),
+			'Walker_Nav_Menu filter callbacks receive item/depth state and escaped scalar attributes',
+			array(
+				'itemArgCalls'  => $item_arg_calls,
+				'linkAttrCalls' => $link_attr_calls,
+				'startElCalls'  => $start_el_calls,
+				'output'        => self::describe_string( $output ),
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'classic-walkers.public.nav-menu-rendering',
@@ -536,12 +756,13 @@ final class ClassicWalkersSurface {
 	}
 
 	private static function check_page_walker( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
-		$base_id  = self::base_id( $ctx, 'page' );
-		$root     = self::page_post( $base_id + 1, 0, 'Root page ' . $ctx->identifier( 3, 8 ) );
-		$child    = self::page_post( $base_id + 2, $root->ID, 'Child page ' . $ctx->identifier( 3, 8 ) );
-		$sibling  = self::page_post( $base_id + 3, 0, 'Sibling page ' . $ctx->identifier( 3, 8 ) );
-		$pages    = array( $root, $child, $sibling );
+		$failures        = array();
+		$base_id         = self::base_id( $ctx, 'page' );
+		$link_attr_calls = array();
+		$root            = self::page_post( $base_id + 1, 0, 'Root page ' . $ctx->identifier( 3, 8 ) );
+		$child           = self::page_post( $base_id + 2, $root->ID, 'Child page ' . $ctx->identifier( 3, 8 ) );
+		$sibling         = self::page_post( $base_id + 3, 0, 'Sibling page ' . $ctx->identifier( 3, 8 ) );
+		$pages           = array( $root, $child, $sibling );
 
 		foreach ( $pages as $page ) {
 			self::cache_post( $page );
@@ -558,7 +779,40 @@ final class ClassicWalkersSurface {
 			'date_format'         => 'Y-m-d',
 		);
 
-		$output = ( new \Walker_Page() )->walk( $pages, 0, $args, (int) $child->ID );
+		$link_attrs_filter = static function (
+			array $atts,
+			\WP_Post $page,
+			int $depth,
+			array $args,
+			int $current_page_id
+		) use ( &$link_attr_calls ): array {
+			$link_attr_calls[] = array(
+				'id'                  => (int) $page->ID,
+				'depth'               => $depth,
+				'currentPageId'       => $current_page_id,
+				'hasNormalizedBefore' => array_key_exists( 'link_before', $args ),
+				'hasNormalizedAfter'  => array_key_exists( 'link_after', $args ),
+			);
+
+			$atts['data-cfz-page'] = '"<page-' . (int) $page->ID . '>';
+			$atts['data-cfz-drop'] = array( 'not scalar' );
+
+			return $atts;
+		};
+
+		$output = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'page_menu_link_attributes',
+					'callback'     => $link_attrs_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 5,
+				),
+			),
+			static function () use ( $pages, $args, $child ): string {
+				return ( new \Walker_Page() )->walk( $pages, 0, $args, (int) $child->ID );
+			}
+		);
 
 		self::collect_failure(
 			$failures,
@@ -580,6 +834,23 @@ final class ClassicWalkersSurface {
 			array( 'output' => self::describe_string( $output ) )
 		);
 
+		self::collect_failure(
+			$failures,
+			array_column( $link_attr_calls, 'id' ) === array_column( $pages, 'ID' )
+				&& array( 0, 1, 0 ) === array_column( $link_attr_calls, 'depth' )
+				&& array( (int) $child->ID, (int) $child->ID, (int) $child->ID )
+					=== array_column( $link_attr_calls, 'currentPageId' )
+				&& array( true, true, true ) === array_column( $link_attr_calls, 'hasNormalizedBefore' )
+				&& array( true, true, true ) === array_column( $link_attr_calls, 'hasNormalizedAfter' )
+				&& str_contains( $output, 'data-cfz-page="&quot;&lt;page-' )
+				&& ! str_contains( $output, 'data-cfz-drop' ),
+			'Walker_Page link-attribute filters receive normalized args/current state and escape attributes',
+			array(
+				'linkAttrCalls' => $link_attr_calls,
+				'output'        => self::describe_string( $output ),
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'classic-walkers.public.page-rendering',
@@ -592,19 +863,20 @@ final class ClassicWalkersSurface {
 	}
 
 	private static function check_category_walker( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
-		$base_id  = self::base_id( $ctx, 'category' );
-		$root     = self::category_term(
+		$failures        = array();
+		$base_id         = self::base_id( $ctx, 'category' );
+		$link_attr_calls = array();
+		$root            = self::category_term(
 			$base_id + 1,
 			0,
 			'Root <script>alert(1)</script> ' . $ctx->identifier( 3, 8 )
 		);
-		$child    = self::category_term(
+		$child           = self::category_term(
 			$base_id + 2,
 			(int) $root->term_id,
 			'Child <script>alert(2)</script> ' . $ctx->identifier( 3, 8 )
 		);
-		$terms    = array( $root, $child );
+		$terms           = array( $root, $child );
 
 		foreach ( $terms as $term ) {
 			self::cache_term( $term );
@@ -623,7 +895,39 @@ final class ClassicWalkersSurface {
 			'current_category'   => array( (int) $child->term_id ),
 		);
 
-		$output = ( new \Walker_Category() )->walk( $terms, 0, $args );
+		$link_attrs_filter = static function (
+			array $atts,
+			\WP_Term $category,
+			int $depth,
+			array $args,
+			int $current_object_id
+		) use ( &$link_attr_calls ): array {
+			$link_attr_calls[] = array(
+				'id'              => (int) $category->term_id,
+				'depth'           => $depth,
+				'currentObjectId' => $current_object_id,
+				'currentCategory' => array_map( 'intval', (array) ( $args['current_category'] ?? array() ) ),
+			);
+
+			$atts['data-cfz-category'] = '"<category-' . (int) $category->term_id . '>';
+			$atts['data-cfz-false']    = false;
+
+			return $atts;
+		};
+
+		$output = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'category_list_link_attributes',
+					'callback'     => $link_attrs_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 5,
+				),
+			),
+			static function () use ( $terms, $args ): string {
+				return ( new \Walker_Category() )->walk( $terms, 0, $args );
+			}
+		);
 
 		self::collect_failure(
 			$failures,
@@ -645,6 +949,20 @@ final class ClassicWalkersSurface {
 			array( 'output' => self::describe_string( $output ) )
 		);
 
+		self::collect_failure(
+			$failures,
+			array_column( $link_attr_calls, 'id' ) === array_map( 'intval', array_column( $terms, 'term_id' ) )
+				&& array( 0, 1 ) === array_column( $link_attr_calls, 'depth' )
+				&& array( 0, 0 ) === array_column( $link_attr_calls, 'currentObjectId' )
+				&& str_contains( $output, 'data-cfz-category="&quot;&lt;category-' )
+				&& ! str_contains( $output, 'data-cfz-false' ),
+			'Walker_Category link-attribute filters receive generated args/depth and escape scalar attributes',
+			array(
+				'linkAttrCalls' => $link_attr_calls,
+				'output'        => self::describe_string( $output ),
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'classic-walkers.public.category-rendering',
@@ -653,6 +971,159 @@ final class ClassicWalkersSurface {
 				'failures'  => $failures,
 				'currentId' => (int) $child->term_id,
 			)
+		);
+	}
+
+	private static function check_dropdown_walkers_and_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$base_id        = self::base_id( $ctx, 'dropdown' );
+		$page_calls     = array();
+		$category_calls = array();
+		$page_root      = self::page_post( $base_id + 1, 0, 'Dropdown root & ' . $ctx->identifier( 3, 8 ) );
+		$page_child     = self::page_post( $base_id + 2, (int) $page_root->ID, '' );
+		$page_deep      = self::page_post( $base_id + 3, (int) $page_child->ID, 'Dropdown deep ' . $ctx->identifier( 3, 8 ) );
+		$pages          = array( $page_root, $page_child, $page_deep );
+		$term_root      = self::category_term( $base_id + 4, 0, 'Dropdown root & ' . $ctx->identifier( 3, 8 ) );
+		$term_child     = self::category_term(
+			$base_id + 5,
+			(int) $term_root->term_id,
+			'Dropdown child & ' . $ctx->identifier( 3, 8 )
+		);
+		$terms          = array( $term_root, $term_child );
+
+		$page_title_filter = static function ( string $title, \WP_Post $page ) use ( &$page_calls ): string {
+			$page_calls[] = array(
+				'id'    => (int) $page->ID,
+				'title' => $title,
+			);
+
+			return $title . ' <script>alert(11)</script>';
+		};
+
+		$category_name_filter = static function ( string $name, \WP_Term $category ) use ( &$category_calls ): string {
+			$category_calls[] = array(
+				'id'   => (int) $category->term_id,
+				'name' => $name,
+			);
+
+			return esc_html( $name . ' & filtered' );
+		};
+
+		$outputs = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'list_pages',
+					'callback'     => $page_title_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 2,
+				),
+				array(
+					'hook'         => 'list_cats',
+					'callback'     => $category_name_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 2,
+				),
+			),
+			static function () use ( $pages, $terms, $page_child, $term_child ): array {
+				$page_output = ( new \Walker_PageDropdown() )->walk(
+					$pages,
+					0,
+					array(
+						'selected'    => (int) $page_child->ID,
+						'value_field' => 'missing_field',
+					)
+				);
+
+				$category_output = ( new \Walker_CategoryDropdown() )->walk(
+					$terms,
+					0,
+					array(
+						'selected'    => (string) $term_child->slug,
+						'show_count'  => true,
+						'value_field' => 'slug',
+					)
+				);
+
+				$fallback_category_output = ( new \Walker_CategoryDropdown() )->walk(
+					array( $term_child ),
+					-1,
+					array(
+						'selected'    => (int) $term_child->term_id,
+						'show_count'  => false,
+						'value_field' => 'missing_field',
+					)
+				);
+
+				return array(
+					'page'             => $page_output,
+					'category'         => $category_output,
+					'categoryFallback' => $fallback_category_output,
+				);
+			}
+		);
+
+		$page_output              = $outputs['page'];
+		$category_output          = $outputs['category'];
+		$fallback_category_output = $outputs['categoryFallback'];
+
+		self::collect_failure(
+			$failures,
+			self::balanced_enough( $page_output, array( 'option' ) )
+				&& 3 === substr_count( $page_output, '<option' )
+				&& str_contains( $page_output, 'class="level-2"' )
+				&& str_contains( $page_output, 'value="' . (int) $page_child->ID . '" selected="selected"' )
+				&& str_contains( $page_output, '&lt;script&gt;alert(11)&lt;/script&gt;' )
+				&& ! str_contains( strtolower( $page_output ), '<script' ),
+			'Walker_PageDropdown falls back to ID values, marks selected pages, and escapes filtered titles',
+			array(
+				'pageCalls' => $page_calls,
+				'output'    => self::describe_string( $page_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array_column( $page_calls, 'id' ) === array_column( $pages, 'ID' )
+				&& str_contains( $page_calls[1]['title'] ?? '', '(no title)' ),
+			'Walker_PageDropdown list_pages filter sees generated page IDs including untitled fallbacks',
+			array( 'pageCalls' => $page_calls )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::balanced_enough( $category_output, array( 'option' ) )
+				&& 2 === substr_count( $category_output, '<option' )
+				&& str_contains( $category_output, 'value="' . esc_attr( $term_child->slug ) . '" selected="selected"' )
+				&& str_contains( $category_output, 'class="level-1"' )
+				&& str_contains( $category_output, '&amp; filtered' )
+				&& str_contains( $category_output, '&nbsp;&nbsp;(3)' )
+				&& str_contains( $fallback_category_output, 'value="' . (int) $term_child->term_id . '" selected="selected"' ),
+			'Walker_CategoryDropdown uses requested value fields, string selected matching, counts, and fallback IDs',
+			array(
+				'categoryCalls'   => $category_calls,
+				'output'          => self::describe_string( $category_output ),
+				'fallbackOutput'  => self::describe_string( $fallback_category_output ),
+				'selectedTermId'  => (int) $term_child->term_id,
+				'selectedTermSlug' => (string) $term_child->slug,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array_column( $category_calls, 'id' ) === array(
+				(int) $term_root->term_id,
+				(int) $term_child->term_id,
+				(int) $term_child->term_id,
+			),
+			'Walker_CategoryDropdown list_cats filter fires for hierarchical and flat fallback passes',
+			array( 'categoryCalls' => $category_calls )
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.public.dropdown-filter-normalization',
+			array() === $failures,
+			array( 'failures' => $failures )
 		);
 	}
 
@@ -727,10 +1198,113 @@ final class ClassicWalkersSurface {
 		);
 	}
 
+	private static function check_comment_walker_callbacks( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$base_id     = self::base_id( $ctx, 'comment-callback' );
+		$post        = self::page_post( $base_id + 1, 0, 'Callback host ' . $ctx->identifier( 3, 8 ) );
+		$root        = self::comment_object( $base_id + 2, (int) $post->ID, 0, 'Root callback <script>alert(12)</script>' );
+		$child       = self::comment_object(
+			$base_id + 3,
+			(int) $post->ID,
+			(int) $root->comment_ID,
+			'Child callback <script>alert(13)</script>'
+		);
+		$comments    = array( $root, $child );
+		$start_calls = array();
+		$end_calls   = array();
+
+		self::cache_post( $post );
+		foreach ( $comments as $comment ) {
+			self::cache_comment( $comment );
+		}
+
+		$callback = static function ( \WP_Comment $comment, array $args, int $depth ) use ( &$start_calls ): void {
+			$global_comment = $GLOBALS['comment'] ?? null;
+
+			$start_calls[] = array(
+				'id'          => (int) $comment->comment_ID,
+				'depth'       => $depth,
+				'globalId'    => is_object( $global_comment ) ? (int) $global_comment->comment_ID : 0,
+				'globalDepth' => (int) ( $GLOBALS['comment_depth'] ?? -1 ),
+				'style'       => (string) ( $args['style'] ?? '' ),
+			);
+
+			echo '<li class="cfz-comment-callback" data-comment-id="' . (int) $comment->comment_ID . '" data-depth="' . (int) $depth . '">';
+			echo esc_html( $comment->comment_content );
+		};
+
+		$end_callback = static function ( \WP_Comment $comment, array $args, int $depth ) use ( &$end_calls ): void {
+			$end_calls[] = array(
+				'id'    => (int) $comment->comment_ID,
+				'depth' => $depth,
+				'style' => (string) ( $args['style'] ?? '' ),
+			);
+
+			echo '</li>';
+		};
+
+		$output = ( new \Walker_Comment() )->walk(
+			$comments,
+			0,
+			array(
+				'style'        => 'ul',
+				'format'       => 'html5',
+				'avatar_size'  => 0,
+				'short_ping'   => false,
+				'max_depth'    => 3,
+				'callback'     => $callback,
+				'end-callback' => $end_callback,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::balanced_enough( $output, array( 'li', 'ul' ) )
+				&& 2 === substr_count( $output, 'class="cfz-comment-callback"' )
+				&& str_contains( $output, '<ul class="children">' )
+				&& str_contains( $output, '&lt;script&gt;alert(12)&lt;/script&gt;' )
+				&& str_contains( $output, '&lt;script&gt;alert(13)&lt;/script&gt;' )
+				&& ! str_contains( strtolower( $output ), '<script' ),
+			'Walker_Comment callback output is captured, nested, balanced, and callback-escaped',
+			array( 'output' => self::describe_string( $output ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			array_column( $start_calls, 'id' ) === array_map( 'intval', array_column( $comments, 'comment_ID' ) )
+				&& array( 1, 2 ) === array_column( $start_calls, 'depth' )
+				&& array_column( $start_calls, 'id' ) === array_column( $start_calls, 'globalId' )
+				&& array_column( $start_calls, 'depth' ) === array_column( $start_calls, 'globalDepth' )
+				&& array( 'ul', 'ul' ) === array_column( $start_calls, 'style' ),
+			'Walker_Comment start callbacks receive one-based depth and synchronized globals',
+			array( 'startCalls' => $start_calls )
+		);
+
+		self::collect_failure(
+			$failures,
+			array_column( $end_calls, 'id' ) === array( (int) $child->comment_ID, (int) $root->comment_ID )
+				&& array( 1, 0 ) === array_column( $end_calls, 'depth' )
+				&& array( 'ul', 'ul' ) === array_column( $end_calls, 'style' ),
+			'Walker_Comment end-callback receives zero-based display depths in close order',
+			array( 'endCalls' => $end_calls )
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.public.comment-callbacks',
+			array() === $failures,
+			array(
+				'failures'   => $failures,
+				'commentIds' => array_map( 'intval', array_column( $comments, 'comment_ID' ) ),
+			)
+		);
+	}
+
 	private static function check_admin_nav_menu_walkers( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
-		$base_id  = self::base_id( $ctx, 'admin-nav' );
-		$parent   = self::menu_item(
+		$failures           = array();
+		$base_id            = self::base_id( $ctx, 'admin-nav' );
+		$custom_field_calls = array();
+		$parent             = self::menu_item(
 			$base_id + 1,
 			1,
 			0,
@@ -738,7 +1312,7 @@ final class ClassicWalkersSurface {
 			'javascript:alert(5)',
 			false
 		);
-		$child    = self::menu_item(
+		$child              = self::menu_item(
 			$base_id + 2,
 			2,
 			$base_id + 1,
@@ -746,7 +1320,7 @@ final class ClassicWalkersSurface {
 			'https://example.test/admin-child',
 			false
 		);
-		$items    = array( $parent, $child );
+		$items              = array( $parent, $child );
 
 		$GLOBALS['_nav_menu_placeholder']   = 0;
 		$GLOBALS['nav_menu_selected_id']    = $base_id + 50;
@@ -754,8 +1328,43 @@ final class ClassicWalkersSurface {
 		$GLOBALS['_wp_nav_menu_max_depth']  = 0;
 		$_GET                              = array();
 
+		$custom_fields_action = static function (
+			string $item_id,
+			$menu_item,
+			int $depth,
+			$args,
+			int $current_object_id
+		) use ( &$custom_field_calls ): void {
+			unset( $args );
+
+			$custom_field_calls[] = array(
+				'itemId'          => $item_id,
+				'menuItemId'      => (int) $menu_item->ID,
+				'depth'           => $depth,
+				'currentObjectId' => $current_object_id,
+			);
+
+			echo '<input type="hidden" class="cfz-custom-field" name="cfz-custom['
+				. esc_attr( $item_id )
+				. ']" value="'
+				. esc_attr( (string) $depth )
+				. '" />';
+		};
+
 		$checklist_output = ( new \Walker_Nav_Menu_Checklist() )->walk( $items, 0, (object) array() );
-		$edit_output      = ( new \Walker_Nav_Menu_Edit() )->walk( $items, 0, (object) array() );
+		$edit_output      = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'wp_nav_menu_item_custom_fields',
+					'callback'     => $custom_fields_action,
+					'priority'     => 10,
+					'acceptedArgs' => 5,
+				),
+			),
+			static function () use ( $items ): string {
+				return ( new \Walker_Nav_Menu_Edit() )->walk( $items, 0, (object) array() );
+			}
+		);
 
 		$object_id = (int) $parent->object_id;
 		$item_id   = (int) $parent->ID;
@@ -798,6 +1407,21 @@ final class ClassicWalkersSurface {
 			)
 		);
 
+		self::collect_failure(
+			$failures,
+			array_column( $custom_field_calls, 'menuItemId' ) === array_column( $items, 'ID' )
+				&& array( 0, 1 ) === array_column( $custom_field_calls, 'depth' )
+				&& array( 0, 0 ) === array_column( $custom_field_calls, 'currentObjectId' )
+				&& 2 === substr_count( $edit_output, 'class="cfz-custom-field"' )
+				&& str_contains( $edit_output, 'name="cfz-custom[' . (int) $parent->ID . ']" value="0"' )
+				&& str_contains( $edit_output, 'name="cfz-custom[' . (int) $child->ID . ']" value="1"' ),
+			'Walker_Nav_Menu_Edit fires custom field callbacks with generated item IDs and depths',
+			array(
+				'customFieldCalls' => $custom_field_calls,
+				'length'           => strlen( $edit_output ),
+			)
+		);
+
 		return self::row(
 			$ctx,
 			'classic-walkers.admin-nav.checklist-edit-rendering',
@@ -834,6 +1458,175 @@ final class ClassicWalkersSurface {
 			self::node( $base + 2, $base + 1 ),
 			self::node( $base + 3, $base + 50 ),
 		);
+	}
+
+	/**
+	 * @return array<int,object>
+	 */
+	private static function generated_connected_nodes( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base           = self::base_id( $ctx, 'generated-connected-tree' );
+		$nodes          = array();
+		$next_offset    = 1;
+		$root_count     = $ctx->int( 2, 4 );
+		$first_child_id = null;
+		$has_grandchild = false;
+
+		for ( $root_index = 0; $root_index < $root_count; $root_index++ ) {
+			$root_id = $base + $next_offset;
+			++$next_offset;
+			$nodes[] = self::node( $root_id, 0 );
+
+			$child_count = $ctx->int( 1, 3 );
+			for ( $child_index = 0; $child_index < $child_count; $child_index++ ) {
+				$child_id = $base + $next_offset;
+				++$next_offset;
+				$nodes[] = self::node( $child_id, $root_id );
+
+				if ( null === $first_child_id ) {
+					$first_child_id = $child_id;
+				}
+
+				$grandchild_count = $ctx->int( 0, 2 );
+				for ( $grandchild_index = 0; $grandchild_index < $grandchild_count; $grandchild_index++ ) {
+					$grandchild_id = $base + $next_offset;
+					++$next_offset;
+					$nodes[]        = self::node( $grandchild_id, $child_id );
+					$has_grandchild = true;
+				}
+			}
+		}
+
+		if ( ! $has_grandchild && null !== $first_child_id ) {
+			$nodes[] = self::node( $base + $next_offset, $first_child_id );
+		}
+
+		return $nodes;
+	}
+
+	/**
+	 * @param array<int,object> $nodes Nodes with id and parent properties.
+	 * @return int[]
+	 */
+	private static function root_ids( array $nodes ): array {
+		return array_map(
+			static function ( object $node ): int {
+				return (int) $node->id;
+			},
+			self::root_nodes( $nodes )
+		);
+	}
+
+	/**
+	 * @param array<int,object> $nodes Nodes with id and parent properties.
+	 * @return array<int,object>
+	 */
+	private static function root_nodes( array $nodes ): array {
+		$roots = array();
+		foreach ( $nodes as $node ) {
+			if ( empty( $node->parent ) ) {
+				$roots[] = $node;
+			}
+		}
+
+		return $roots;
+	}
+
+	/**
+	 * @param array<int,object> $nodes Nodes with id and parent properties.
+	 * @return array<int,array<int,object>>
+	 */
+	private static function children_buckets( array $nodes ): array {
+		$children = array();
+		foreach ( $nodes as $node ) {
+			$parent = (int) $node->parent;
+			if ( 0 !== $parent ) {
+				$children[ $parent ][] = $node;
+			}
+		}
+
+		return $children;
+	}
+
+	/**
+	 * @param array<int,object> $nodes Nodes with id and parent properties.
+	 * @return int[]
+	 */
+	private static function descendant_ids( array $nodes, int $parent_id ): array {
+		$children    = self::children_buckets( $nodes );
+		$descendants = array();
+
+		self::collect_descendant_ids( $parent_id, $children, $descendants );
+
+		return $descendants;
+	}
+
+	/**
+	 * @param array<int,array<int,object>> $children Children grouped by parent ID.
+	 * @param int[]                       $descendants Descendant IDs.
+	 */
+	private static function collect_descendant_ids( int $parent_id, array $children, array &$descendants ): void {
+		foreach ( $children[ $parent_id ] ?? array() as $child ) {
+			$child_id      = (int) $child->id;
+			$descendants[] = $child_id;
+			self::collect_descendant_ids( $child_id, $children, $descendants );
+		}
+	}
+
+	/**
+	 * @param array<int,object> $nodes Nodes with id and parent properties.
+	 * @return array<int,array{id:int,depth:int}>
+	 */
+	private static function expected_connected_walk_events(
+		array $nodes,
+		int $max_depth,
+		bool $reverse_top_level = false,
+		bool $reverse_children = false
+	): array {
+		$children = self::children_buckets( $nodes );
+		$roots    = self::root_nodes( $nodes );
+		$events   = array();
+
+		if ( $reverse_top_level ) {
+			$roots = array_reverse( $roots );
+		}
+
+		foreach ( $roots as $root ) {
+			self::append_expected_connected_walk_events( $root, $children, $max_depth, 0, $reverse_children, $events );
+		}
+
+		return $events;
+	}
+
+	/**
+	 * @param array<int,array<int,object>> $children Children grouped by parent ID.
+	 * @param array<int,array{id:int,depth:int}> $events Expected event records.
+	 */
+	private static function append_expected_connected_walk_events(
+		object $node,
+		array $children,
+		int $max_depth,
+		int $depth,
+		bool $reverse_children,
+		array &$events
+	): void {
+		$node_id  = (int) $node->id;
+		$events[] = array(
+			'id'    => $node_id,
+			'depth' => $depth,
+		);
+
+		if ( 0 !== $max_depth && $max_depth <= $depth + 1 ) {
+			return;
+		}
+
+		$child_nodes = $children[ $node_id ] ?? array();
+		if ( $reverse_children ) {
+			$child_nodes = array_reverse( $child_nodes );
+		}
+
+		foreach ( $child_nodes as $child ) {
+			self::append_expected_connected_walk_events( $child, $children, $max_depth, $depth + 1, $reverse_children, $events );
+		}
 	}
 
 	private static function node( int $id, int $parent ): object {
@@ -1064,6 +1857,20 @@ final class ClassicWalkersSurface {
 		);
 	}
 
+	private static function with_temporary_filters( array $filters, callable $callback ) {
+		foreach ( $filters as $filter ) {
+			\add_filter( $filter['hook'], $filter['callback'], $filter['priority'], $filter['acceptedArgs'] );
+		}
+
+		try {
+			return $callback();
+		} finally {
+			for ( $i = count( $filters ) - 1; $i >= 0; $i-- ) {
+				\remove_filter( $filters[ $i ]['hook'], $filters[ $i ]['callback'], $filters[ $i ]['priority'] );
+			}
+		}
+	}
+
 	private static function reset_runtime(): void {
 		self::$terms_by_id       = array();
 		self::$page_links        = array();
@@ -1263,6 +2070,18 @@ final class ClassicWalkersSurface {
 		return array_map(
 			static function ( array $event ): int {
 				return (int) $event['id'];
+			},
+			$events
+		);
+	}
+
+	private static function event_id_depths( array $events ): array {
+		return array_map(
+			static function ( array $event ): array {
+				return array(
+					'id'    => (int) $event['id'],
+					'depth' => (int) $event['depth'],
+				);
 			},
 			$events
 		);
