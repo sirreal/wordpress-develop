@@ -36,7 +36,7 @@ final class WpdbSqlSurface {
 			$rows[] = self::check_esc_like_wildcard_protection( $ctx, $db, self::generate_like_cases( $ctx->fork( 'esc-like' ) ) );
 			$rows[] = self::check_malformed_placeholders_fail_closed( $ctx, $db, self::malformed_prepare_cases( $ctx->fork( 'malformed' ) ) );
 			$rows[] = self::check_sql_builders_are_capturable( $ctx, $db, self::generate_builder_cases( $ctx->fork( 'builders' ) ) );
-			$rows[] = self::check_builder_null_formats_are_type_agnostic( $ctx->fork( 'builder-nulls' ), $db );
+			$rows[] = self::check_builder_null_formats_are_type_agnostic( $ctx, $db );
 		} finally {
 			self::restore_globals( $snapshot );
 		}
@@ -500,7 +500,7 @@ final class WpdbSqlSurface {
 
 	private static function check_builder_null_formats_are_type_agnostic( \ComponentFuzz\FuzzContext $ctx, WpdbSqlNoConnectionWpdb $db ): array {
 		$failures = array();
-		$case     = self::generate_builder_null_case( $ctx );
+		$case     = self::generate_builder_null_case( $ctx->fork( 'builder-nulls' ) );
 
 		$builder_calls = array(
 			'insert'  => static function () use ( $db, $case ) {
@@ -707,16 +707,36 @@ final class WpdbSqlSurface {
 				$violations[] = 'unexpected-table';
 			}
 
-			foreach ( array_keys( $case['updateData'] ) as $field ) {
-				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s*=\s*NULL(?:\b|$)/', $matches[2] ) ) {
-					$violations[] = 'update-null-set-not-null-literal';
+			$update_fields = array_keys( $case['updateData'] );
+			$set_clauses   = self::comma_clauses( $matches[2] );
+			if ( count( $update_fields ) !== count( $set_clauses ) ) {
+				$violations[] = 'update-set-clause-count-mismatch';
+			}
+
+			if ( self::sql_backtick_identifiers( $matches[2] ) !== $update_fields ) {
+				$violations[] = 'update-set-unexpected-identifiers';
+			}
+
+			foreach ( $update_fields as $index => $field ) {
+				if ( ! isset( $set_clauses[ $index ] ) || ! self::is_null_assignment_clause( $set_clauses[ $index ], $field ) ) {
+					$violations[] = 'update-set-clause-not-exact-null-assignment';
 					break;
 				}
 			}
 
-			foreach ( array_keys( $case['where'] ) as $field ) {
-				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s+IS NULL(?:\b|$)/', $matches[3] ) ) {
-					$violations[] = 'update-null-where-not-is-null';
+			$where_fields  = array_keys( $case['where'] );
+			$where_clauses = self::and_clauses( $matches[3] );
+			if ( count( $where_fields ) !== count( $where_clauses ) ) {
+				$violations[] = 'update-where-clause-count-mismatch';
+			}
+
+			if ( self::sql_backtick_identifiers( $matches[3] ) !== $where_fields ) {
+				$violations[] = 'update-where-unexpected-identifiers';
+			}
+
+			foreach ( $where_fields as $index => $field ) {
+				if ( ! isset( $where_clauses[ $index ] ) || ! self::is_null_predicate_clause( $where_clauses[ $index ], $field ) ) {
+					$violations[] = 'update-where-clause-not-exact-is-null';
 					break;
 				}
 			}
@@ -733,15 +753,43 @@ final class WpdbSqlSurface {
 				$violations[] = 'unexpected-table';
 			}
 
-			foreach ( array_keys( $case['where'] ) as $field ) {
-				if ( ! preg_match( '/`' . preg_quote( $field, '/' ) . '`\s+IS NULL(?:\b|$)/', $matches[2] ) ) {
-					$violations[] = 'delete-null-where-not-is-null';
+			$where_fields  = array_keys( $case['where'] );
+			$where_clauses = self::and_clauses( $matches[2] );
+			if ( count( $where_fields ) !== count( $where_clauses ) ) {
+				$violations[] = 'delete-where-clause-count-mismatch';
+			}
+
+			if ( self::sql_backtick_identifiers( $matches[2] ) !== $where_fields ) {
+				$violations[] = 'delete-where-unexpected-identifiers';
+			}
+
+			foreach ( $where_fields as $index => $field ) {
+				if ( ! isset( $where_clauses[ $index ] ) || ! self::is_null_predicate_clause( $where_clauses[ $index ], $field ) ) {
+					$violations[] = 'delete-where-clause-not-exact-is-null';
 					break;
 				}
 			}
 		}
 
 		return array_values( array_unique( $violations ) );
+	}
+
+	private static function comma_clauses( string $sql ): array {
+		return array_map( 'trim', explode( ',', $sql ) );
+	}
+
+	private static function and_clauses( string $sql ): array {
+		$clauses = preg_split( '/\s+AND\s+/i', trim( $sql ) );
+
+		return is_array( $clauses ) ? array_map( 'trim', $clauses ) : array();
+	}
+
+	private static function is_null_assignment_clause( string $clause, string $field ): bool {
+		return (bool) preg_match( '/^`' . preg_quote( $field, '/' ) . '`\s*=\s*NULL$/', trim( $clause ) );
+	}
+
+	private static function is_null_predicate_clause( string $clause, string $field ): bool {
+		return (bool) preg_match( '/^`' . preg_quote( $field, '/' ) . '`\s+IS NULL$/', trim( $clause ) );
 	}
 
 	private static function sql_contains_builder_value( string $sql, string $field, $value, string $format, string $context ): bool {
