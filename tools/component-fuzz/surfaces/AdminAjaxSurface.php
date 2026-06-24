@@ -34,6 +34,7 @@ final class AdminAjaxSurface {
 			$rows[] = self::check_ajax_response_xml_boundaries( $ctx->fork( 'ajax-response' ) );
 			$rows[] = self::check_nonce_and_capability_failures( $ctx->fork( 'nonce-cap' ) );
 			$rows[] = self::check_selected_safe_ajax_handlers( $ctx->fork( 'safe-handlers' ) );
+			$rows[] = self::check_compression_test_handler( $ctx->fork( 'compression-test' ) );
 			$rows[] = self::check_malformed_request_globals_restore( $ctx->fork( 'request-restore' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -761,6 +762,129 @@ final class AdminAjaxSurface {
 			array(
 				'cases'    => $handler_cases,
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_compression_test_handler( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'wp_ajax_wp_compression_test' ) ) {
+			return self::row(
+				$ctx,
+				'admin-ajax.wp-compression-test.capability-and-test-branch',
+				true,
+				array( 'missing' => array( 'wp_ajax_wp_compression_test' ) ),
+				'skipped'
+			);
+		}
+
+		$failures         = array();
+		$local            = self::snapshot_superglobals();
+		$user_snapshot    = self::snapshot_globals( array( 'current_user', 'userdata', 'user_ID' ) );
+		$db_before        = self::db_content_counts();
+		$compression_busy = ini_get( 'zlib.output_compression' ) || 'ob_gzhandler' === ini_get( 'output_handler' );
+
+		try {
+			\wp_set_current_user( 0 );
+			self::set_request_globals(
+				array(
+					'action' => 'wp-compression-test',
+					'test'   => self::safe_label( $ctx->fork( 'denied-test' ) ),
+				),
+				array()
+			);
+			$denied_capture = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_wp_compression_test();
+				},
+				true
+			);
+
+			if ( ! $compression_busy ) {
+				$grant_manage_options = static function ( array $allcaps, array $caps, array $args = array(), $user = null ): array {
+					unset( $caps, $args, $user );
+
+					$allcaps['manage_options'] = true;
+					return $allcaps;
+				};
+
+				\add_filter( 'user_has_cap', $grant_manage_options, 10, 4 );
+				try {
+					\wp_set_current_user( $ctx->int( 1, 99999 ) );
+					self::set_request_globals(
+						array(
+							'action' => 'wp-compression-test',
+							'test'   => '1',
+							'noise'  => self::hostile_string( $ctx->fork( 'noise' ) ),
+						),
+						array()
+					);
+					$test_capture = self::capture_terminating_call(
+						static function (): void {
+							\wp_ajax_wp_compression_test();
+						},
+						true
+					);
+				} finally {
+					\remove_filter( 'user_has_cap', $grant_manage_options, 10 );
+				}
+			} else {
+				$grant_manage_options = null;
+				$test_capture         = null;
+			}
+		} finally {
+			self::restore_superglobals( $local );
+			self::restore_globals( $user_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$denied_capture['captured']
+				&& '-1' === self::terminal_body( $denied_capture )
+				&& $denied_capture['bufferBalanced']
+				&& $denied_capture['filtersRestored'],
+			'wp_ajax_wp_compression_test() capability denial returns stable -1 without side effects',
+			array( 'capture' => $denied_capture )
+		);
+
+		if ( null !== $test_capture ) {
+			$body = self::terminal_body( $test_capture );
+			self::collect_failure(
+				$failures,
+				$test_capture['captured']
+					&& str_contains( $body, 'wpCompressionTest Lorem ipsum' )
+					&& strlen( $body ) > 1000
+					&& $test_capture['bufferBalanced']
+					&& $test_capture['filtersRestored']
+					&& false === \has_filter( 'user_has_cap', $grant_manage_options ),
+				'wp_ajax_wp_compression_test() test=1 emits deterministic JavaScript body under scoped capability grant',
+				array(
+					'capture' => $test_capture,
+					'bytes'   => strlen( $body ),
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			self::superglobals_match( $local )
+				&& self::globals_match( $user_snapshot )
+				&& $db_before === self::db_content_counts(),
+			'wp_ajax_wp_compression_test() restores request/user globals and avoids DB content mutation',
+			array(
+				'compressionBusy' => (bool) $compression_busy,
+				'dbBefore'        => $db_before,
+				'dbAfter'         => self::db_content_counts(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-ajax.wp-compression-test.capability-and-test-branch',
+			array() === $failures,
+			array(
+				'compressionBusy' => (bool) $compression_busy,
+				'testedBody'      => null !== $test_capture,
+				'failures'        => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
