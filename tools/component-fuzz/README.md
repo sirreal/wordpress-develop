@@ -366,10 +366,12 @@ database, network requests, or a configured site.
   route normalization, schema/context behavior, permission and error contracts,
   custom CSS validation, temp theme fixtures, and state restoration.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
-  coverage, including revision field/data contracts, autosave and revision
-  predicates, revision insert/save/restore/delete helpers, revisioned meta copy
-  and restore behavior, revision UI diffs, JS payload preparation, preview
-  overlay behavior, and global/filter restoration.
+  coverage, including protected revision field/filter contracts, autosave
+  create/update/delete and post-lock behavior, autosave and revision predicates,
+  revision insert/save/restore/delete helpers, revisioned meta copy and restore
+  behavior, post type support gates, revision title/list helpers, revision UI
+  diffs, JS payload preparation, preview overlay behavior, and global/filter
+  restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
   build/parse helpers, URL parsing, home/site URL helpers, weird path fragments,
@@ -584,7 +586,10 @@ The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.
 The `revisions-autosaves` surface uses the bounded post and postmeta rows in
-the in-memory `wpdb` stub. It records explicit skips for
+the in-memory `wpdb` stub. It exercises autosave creation/update/delete,
+post-lock windows, protected revision field filters, revision title/list
+helpers, post type support gates, and restore action/edit-user side effects
+without browser dispatch. It records explicit skips for
 `wp_get_latest_revision_id_and_total_count()` and `wp_get_post_revisions_url()`
 because the stub does not emulate the `WP_Query` `found_posts` count SQL shape
 for posts. User-specific `wp_get_post_autosave()` lookup is also skipped

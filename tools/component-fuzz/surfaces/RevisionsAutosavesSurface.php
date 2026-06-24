@@ -25,8 +25,11 @@ final class RevisionsAutosavesSurface {
 
 		try {
 			$rows[] = self::check_revision_field_data_contracts( $ctx->fork( 'fields' ), $case );
+			$rows[] = self::check_revision_field_filter_contracts( $ctx->fork( 'field-filters' ), $case );
 			$rows[] = self::check_revision_insert_lookup_predicates( $ctx->fork( 'predicates' ), $case );
 			$rows[] = self::check_save_restore_and_meta_helpers( $ctx->fork( 'restore-meta' ), $case );
+			$rows[] = self::check_autosave_create_update_delete_and_locks( $ctx->fork( 'autosave-locks' ), $case );
+			$rows[] = self::check_revision_support_restore_edges_and_titles( $ctx->fork( 'support-restore-ui' ), $case );
 			$rows[] = self::check_revision_ui_payloads( $ctx->fork( 'ui' ), $case );
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
 			$rows[] = $ctx->skip(
@@ -77,17 +80,23 @@ final class RevisionsAutosavesSurface {
 				'_wp_post_revision_data',
 				'_wp_post_revision_fields',
 				'_wp_put_post_revision',
+				'add_action',
 				'add_filter',
 				'add_post_meta',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'current_user_can',
+				'delete_post_meta',
 				'get_post',
 				'get_post_meta',
+				'get_userdata',
 				'has_filter',
 				'is_wp_error',
+				'metadata_exists',
 				'post_type_exists',
 				'register_post_meta',
 				'register_post_type',
+				'remove_action',
 				'remove_filter',
 				'sanitize_key',
 				'sanitize_title',
@@ -95,7 +104,9 @@ final class RevisionsAutosavesSurface {
 				'update_post_meta',
 				'wp_cache_flush',
 				'wp_check_invalid_utf8',
+				'wp_check_post_lock',
 				'wp_check_revisioned_meta_fields_have_changed',
+				'wp_create_post_autosave',
 				'wp_delete_post_revision',
 				'wp_get_post_autosave',
 				'wp_get_post_revision',
@@ -105,6 +116,9 @@ final class RevisionsAutosavesSurface {
 				'wp_insert_user',
 				'wp_is_post_autosave',
 				'wp_is_post_revision',
+				'wp_list_post_revisions',
+				'wp_post_revision_title',
+				'wp_post_revision_title_expanded',
 				'wp_post_revision_meta_keys',
 				'wp_prepare_revisions_for_js',
 				'wp_restore_post_revision',
@@ -113,6 +127,7 @@ final class RevisionsAutosavesSurface {
 				'wp_revisions_to_keep',
 				'wp_save_post_revision',
 				'wp_save_revisioned_meta_fields',
+				'wp_set_post_lock',
 				'wp_set_current_user',
 				'wp_slash',
 				'wp_update_post',
@@ -217,6 +232,88 @@ final class RevisionsAutosavesSurface {
 			array(
 				'case'       => self::case_summary( $case ),
 				'fieldCount' => count( $fields ),
+			)
+		);
+	}
+
+	private static function check_revision_field_filter_contracts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+
+		$failures = array();
+		$post_id  = 1000 + $ctx->int( 1, 8000 );
+		$post     = array(
+			'ID'                => $post_id,
+			'post_author'       => 77,
+			'post_content'      => $case['contentFrom'],
+			'post_date'         => $case['dateFrom'],
+			'post_date_gmt'     => $case['dateFromGmt'],
+			'post_excerpt'      => $case['excerptFrom'],
+			'post_modified'     => $case['dateTo'],
+			'post_modified_gmt' => $case['dateToGmt'],
+			'post_name'         => $case['slug'],
+			'post_parent'       => 11,
+			'post_status'       => 'publish',
+			'post_title'        => $case['titleFrom'],
+			'post_type'         => $case['postType'],
+			'comment_count'     => 9,
+		);
+		$protected = array( 'ID', 'post_name', 'post_parent', 'post_date', 'post_date_gmt', 'post_status', 'post_type', 'comment_count', 'post_author' );
+		$filter    = static function ( array $fields ) use ( $protected ): array {
+			foreach ( $protected as $field ) {
+				$fields[ $field ] = 'Component fuzz protected field';
+			}
+
+			return $fields;
+		};
+
+		\add_filter( '_wp_post_revision_fields', $filter, 10, 2 );
+		try {
+			$filtered_fields   = \_wp_post_revision_fields( $post );
+			$filtered_revision = \_wp_post_revision_data( $post, false );
+			$second_fields     = \_wp_post_revision_fields( $post );
+		} finally {
+			\remove_filter( '_wp_post_revision_fields', $filter, 10 );
+		}
+
+		$field_leaks    = array_values( array_intersect( $protected, array_keys( $filtered_fields ) ) );
+		$revision_leaks = array_values( array_intersect( $protected, array_keys( $filtered_revision ) ) );
+		$expected_leaks = array( 'post_date', 'post_date_gmt', 'post_name', 'post_parent', 'post_status', 'post_type' );
+
+		sort( $revision_leaks );
+		sort( $expected_leaks );
+
+		self::collect_failure(
+			$failures,
+			array() === $field_leaks
+				&& $expected_leaks === $revision_leaks
+				&& $post_id === (int) ( $filtered_revision['post_parent'] ?? 0 )
+				&& 'revision' === ( $filtered_revision['post_type'] ?? null )
+				&& 'inherit' === ( $filtered_revision['post_status'] ?? null )
+				&& $case['dateTo'] === ( $filtered_revision['post_date'] ?? null )
+				&& $case['dateToGmt'] === ( $filtered_revision['post_date_gmt'] ?? null ),
+			'_wp_post_revision_fields removes protected fields even when filters add them',
+			array(
+				'fieldLeaks'    => $field_leaks,
+				'revisionLeaks' => $revision_leaks,
+				'fields'        => $filtered_fields,
+				'revision'      => $filtered_revision,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array() === array_values( array_intersect( $protected, array_keys( $second_fields ) ) )
+				&& isset( $second_fields['post_title'], $second_fields['post_content'], $second_fields['post_excerpt'] ),
+			'protected field filtering does not leak into later revision field lookups',
+			array( 'secondFields' => $second_fields )
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.protected-field-filter-contracts',
+			$failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'fieldCount' => count( $filtered_fields ),
 			)
 		);
 	}
@@ -557,6 +654,447 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function check_autosave_create_update_delete_and_locks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures       = array();
+		$author_id      = self::insert_author( $case, 'autosave-author' );
+		$other_user_id  = self::insert_author( $case, 'autosave-other' );
+		$post_id        = self::insert_parent_post( $case, $author_id, 'autosave-locks' );
+		$meta_key       = 'cf_autosave_' . $case['token'];
+		$meta_value     = 'autosave-meta-' . $case['token'] . '-' . $ctx->int( 10, 999 );
+		$updated_title  = $case['titleTo'] . ' autosave update';
+		$updated_body   = $case['contentTo'] . "\nAutosave update " . $case['token'];
+		$updated_excerpt = $case['excerptTo'] . ' autosave update';
+		$events         = array();
+		$grant_caps     = self::grant_all_caps_filter( $author_id );
+		$meta_saver     = static function ( array $new_autosave ): void {
+			\wp_autosave_post_revisioned_meta_fields( $new_autosave );
+		};
+		$recorder       = static function ( array $new_autosave, bool $is_update = false ) use ( &$events ): void {
+			$events[] = array(
+				'id'       => (int) ( $new_autosave['ID'] ?? 0 ),
+				'parent'   => (int) ( $new_autosave['post_parent'] ?? 0 ),
+				'isUpdate' => $is_update,
+				'title'    => (string) ( $new_autosave['post_title'] ?? '' ),
+			);
+		};
+		$registered     = \register_post_meta(
+			$case['postType'],
+			$meta_key,
+			array(
+				'revisions_enabled' => true,
+				'show_in_rest'      => true,
+				'single'            => true,
+				'type'              => 'string',
+			)
+		);
+
+		\wp_set_current_user( $author_id );
+		$denied = \wp_create_post_autosave(
+			\wp_slash(
+				self::autosave_post_data(
+					$post_id,
+					$case,
+					$case['titleTo'],
+					$case['contentTo'],
+					$case['excerptTo']
+				)
+			)
+		);
+
+		\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+		\add_action( 'wp_creating_autosave', $meta_saver, 10, 1 );
+		\add_action( 'wp_creating_autosave', $recorder, 11, 2 );
+
+		try {
+			$_POST[ $meta_key ] = $meta_value;
+			$created            = \wp_create_post_autosave(
+				\wp_slash(
+					self::autosave_post_data(
+						$post_id,
+						$case,
+						$case['titleTo'],
+						$case['contentTo'],
+						$case['excerptTo']
+					)
+				)
+			);
+			$created_post       = is_int( $created ) ? \get_post( $created ) : null;
+			$created_meta       = is_int( $created ) ? \get_post_meta( $created, $meta_key, true ) : null;
+
+			$_POST[ $meta_key ] = '';
+			$updated            = \wp_create_post_autosave(
+				\wp_slash(
+					self::autosave_post_data(
+						$post_id,
+						$case,
+						$updated_title,
+						$updated_body,
+						$updated_excerpt
+					)
+				)
+			);
+			$updated_post       = is_int( $updated ) ? \get_post( $updated ) : null;
+			$updated_meta       = is_int( $updated ) ? \get_post_meta( $updated, $meta_key, true ) : null;
+
+			$deleted_same       = \wp_create_post_autosave(
+				\wp_slash(
+					self::autosave_post_data(
+						$post_id,
+						$case,
+						$case['titleFrom'],
+						$case['contentFrom'],
+						$case['excerptFrom']
+					)
+				)
+			);
+			$after_delete       = \wp_get_post_autosave( $post_id, $author_id );
+		} finally {
+			unset( $_POST[ $meta_key ] );
+			\remove_action( 'wp_creating_autosave', $recorder, 11 );
+			\remove_action( 'wp_creating_autosave', $meta_saver, 10 );
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+			\unregister_meta_key( 'post', $meta_key, $case['postType'] );
+		}
+
+		self::collect_failure(
+			$failures,
+			\is_wp_error( $denied )
+				&& 'edit_others_posts' === $denied->get_error_code(),
+			'wp_create_post_autosave returns a capability error before writes when editing is denied',
+			array( 'denied' => self::error_summary( $denied ) )
+		);
+		self::collect_failure(
+			$failures,
+			true === $registered
+				&& is_int( $created )
+				&& $created_post instanceof \WP_Post
+				&& (int) $post_id === (int) $created_post->post_parent
+				&& "{$post_id}-autosave-v1" === $created_post->post_name
+				&& $case['titleTo'] === $created_post->post_title
+				&& $case['contentTo'] === $created_post->post_content
+				&& $case['excerptTo'] === $created_post->post_excerpt
+				&& $meta_value === $created_meta,
+			'wp_create_post_autosave creates an autosave revision and saves posted revisioned meta',
+			array(
+				'created'     => $created,
+				'createdPost' => self::post_summary( $created_post ),
+				'createdMeta' => $created_meta,
+				'metaKey'     => $meta_key,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_int( $created )
+				&& (int) $created === (int) $updated
+				&& $updated_post instanceof \WP_Post
+				&& $updated_title === $updated_post->post_title
+				&& $updated_body === $updated_post->post_content
+				&& $updated_excerpt === $updated_post->post_excerpt
+				&& '' === $updated_meta,
+			'wp_create_post_autosave updates the existing autosave for the author and clears blank posted meta',
+			array(
+				'created'     => $created,
+				'updated'     => $updated,
+				'updatedPost' => self::post_summary( $updated_post ),
+				'updatedMeta' => $updated_meta,
+			)
+		);
+		$event_pair_ok = false === ( $events[0]['isUpdate'] ?? null )
+			&& true === ( $events[1]['isUpdate'] ?? null )
+			&& (int) ( $events[0]['id'] ?? 0 ) === (int) ( $events[1]['id'] ?? -1 )
+			&& (int) $post_id === (int) ( $events[0]['parent'] ?? 0 )
+			&& (int) $post_id === (int) ( $events[1]['parent'] ?? 0 );
+		$delete_path   = 0 === $deleted_same
+			&& false === $after_delete
+			&& 2 === count( $events )
+			&& $event_pair_ok;
+		$update_path   = is_int( $deleted_same )
+			&& (int) $deleted_same === (int) $updated
+			&& $after_delete instanceof \WP_Post
+			&& 3 === count( $events )
+			&& $event_pair_ok
+			&& true === ( $events[2]['isUpdate'] ?? null )
+			&& (int) ( $events[1]['id'] ?? 0 ) === (int) ( $events[2]['id'] ?? -1 )
+			&& (int) $post_id === (int) ( $events[2]['parent'] ?? 0 );
+
+		self::collect_failure(
+			$failures,
+			$delete_path || $update_path,
+			'wp_create_post_autosave deletes unchanged autosaves or updates changed autosaves with bounded action shapes',
+			array(
+				'deletedSame' => $deleted_same,
+				'afterDelete' => self::post_summary( $after_delete ),
+				'events'      => $events,
+				'path'        => $delete_path ? 'delete' : ( $update_path ? 'update' : 'unexpected' ),
+			)
+		);
+
+		\wp_set_current_user( 0 );
+		$anonymous_lock = \wp_set_post_lock( $post_id );
+		\wp_set_current_user( $author_id );
+		$own_lock        = \wp_set_post_lock( $post_id );
+		$same_user_check = \wp_check_post_lock( $post_id );
+		\wp_set_current_user( $other_user_id );
+		$other_check     = \wp_check_post_lock( $post_id );
+		$window_filter   = static function () use ( $case ): int {
+			return $case['lockWindow'];
+		};
+
+		\update_post_meta( $post_id, '_edit_lock', ( time() - $case['lockWindow'] - 5 ) . ':' . $author_id );
+		\add_filter( 'wp_check_post_lock_window', $window_filter, 10, 1 );
+		try {
+			$stale_check = \wp_check_post_lock( $post_id );
+		} finally {
+			\remove_filter( 'wp_check_post_lock_window', $window_filter, 10 );
+		}
+
+		\update_post_meta( $post_id, '_edit_lock', time() . ':999999' );
+		$missing_user_check = \wp_check_post_lock( $post_id );
+
+		self::collect_failure(
+			$failures,
+			false === $anonymous_lock
+				&& is_array( $own_lock )
+				&& (int) $author_id === (int) ( $own_lock[1] ?? 0 )
+				&& false === $same_user_check
+				&& (int) $author_id === (int) $other_check
+				&& false === $stale_check
+				&& false === $missing_user_check,
+			'wp_set_post_lock and wp_check_post_lock distinguish anonymous, owner, other, stale, and missing-user locks',
+			array(
+				'anonymousLock'    => $anonymous_lock,
+				'ownLock'          => self::lock_summary( $own_lock ),
+				'sameUserCheck'    => $same_user_check,
+				'otherCheck'       => $other_check,
+				'staleCheck'       => $stale_check,
+				'missingUserCheck' => $missing_user_check,
+				'lockWindow'       => $case['lockWindow'],
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.autosave-create-update-delete-and-locks',
+			$failures,
+			array(
+				'case'        => self::case_summary( $case ),
+				'postId'      => $post_id,
+				'created'     => $created,
+				'updated'     => $updated,
+				'deletedSame' => $deleted_same,
+			)
+		);
+	}
+
+	private static function check_revision_support_restore_edges_and_titles( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures             = array();
+		$author_id            = self::insert_author( $case, 'support-restore' );
+		$post_id              = self::insert_parent_post( $case, $author_id, 'support-restore' );
+		$revision_id          = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'],
+				'post_content'      => $case['contentTo'],
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			false
+		);
+		$autosave_id          = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'],
+				'post_content'      => $case['contentTo'] . "\nAutosave title helper " . $case['token'],
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			true
+		);
+		$events               = array();
+		$restore_recorder     = static function ( int $restored_post_id, int $restored_revision_id ) use ( &$events ): void {
+			$events[] = array(
+				'postId'     => $restored_post_id,
+				'revisionId' => $restored_revision_id,
+			);
+		};
+		$restore_non_revision = \wp_restore_post_revision( $post_id );
+		$restore_empty_fields = \wp_restore_post_revision( $revision_id, array() );
+
+		\wp_set_current_user( $author_id );
+		\add_action( 'wp_restore_post_revision', $restore_recorder, 10, 2 );
+		try {
+			$restore_all = \wp_restore_post_revision( $revision_id );
+		} finally {
+			\remove_action( 'wp_restore_post_revision', $restore_recorder, 10 );
+		}
+
+		$restored_post  = \get_post( $post_id );
+		$edit_last      = \get_post_meta( $post_id, '_edit_last', true );
+		$revision_title = \wp_post_revision_title( $revision_id, false );
+		$autosave_title = \wp_post_revision_title( $autosave_id, false );
+		$expanded_title = \wp_post_revision_title_expanded( $revision_id, false );
+		$grant_caps     = self::grant_all_caps_filter( $author_id );
+
+		\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+		try {
+			ob_start();
+			\wp_list_post_revisions( $post_id, 'all' );
+			$list_all = ob_get_clean();
+			ob_start();
+			\wp_list_post_revisions( $post_id, 'autosave' );
+			$list_autosaves = ob_get_clean();
+		} finally {
+			while ( ob_get_level() > 0 && ! isset( $list_autosaves ) ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			null === $restore_non_revision
+				&& false === $restore_empty_fields
+				&& (int) $post_id === (int) $restore_all
+				&& $restored_post instanceof \WP_Post
+				&& $case['titleTo'] === $restored_post->post_title
+				&& $case['contentTo'] === $restored_post->post_content
+				&& $case['excerptTo'] === $restored_post->post_excerpt
+				&& (int) $author_id === (int) $edit_last
+				&& array( array( 'postId' => (int) $post_id, 'revisionId' => (int) $revision_id ) ) === $events,
+			'wp_restore_post_revision rejects non-revisions and empty fields, restores all revisioned fields, and records edit user/action',
+			array(
+				'restoreNonRevision' => $restore_non_revision,
+				'restoreEmptyFields' => $restore_empty_fields,
+				'restoreAll'         => $restore_all,
+				'restoredPost'       => self::post_summary( $restored_post ),
+				'editLast'           => $edit_last,
+				'events'             => $events,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_string( $revision_title )
+				&& false === strpos( $revision_title, '[Autosave]' )
+				&& is_string( $autosave_title )
+				&& false !== strpos( $autosave_title, '[Autosave]' )
+				&& is_string( $expanded_title )
+				&& false !== strpos( $expanded_title, 'Revision Author ' . $case['token'] )
+				&& is_string( $list_all )
+				&& is_string( $list_autosaves )
+				&& 2 === substr_count( $list_all, '<li>' )
+				&& 1 === substr_count( $list_autosaves, '<li>' )
+				&& false !== strpos( $list_autosaves, '[Autosave]' ),
+			'revision title and list helpers distinguish normal revisions and autosaves without admin dispatch',
+			array(
+				'revisionTitle' => $revision_title,
+				'autosaveTitle' => $autosave_title,
+				'expandedTitle' => $expanded_title,
+				'allItems'      => is_string( $list_all ) ? substr_count( $list_all, '<li>' ) : null,
+				'autosaveItems' => is_string( $list_autosaves ) ? substr_count( $list_autosaves, '<li>' ) : null,
+			)
+		);
+
+		$unsupported_type = substr( \sanitize_key( 'cfnosup_' . $case['token'] ), 0, 20 );
+		\register_post_type(
+			$unsupported_type,
+			array(
+				'public'    => true,
+				'query_var' => false,
+				'rewrite'   => false,
+				'supports'  => array( 'title', 'editor' ),
+			)
+		);
+		$unsupported_case = array_merge( $case, array( 'postType' => $unsupported_type ) );
+		$unsupported_id   = self::insert_parent_post( $unsupported_case, $author_id, 'unsupported' );
+		$manual_revision  = self::insert_revision_row(
+			$unsupported_id,
+			$author_id,
+			array(
+				'post_title'        => 'Unsupported revision ' . $case['token'],
+				'post_content'      => 'Unsupported revision content',
+				'post_excerpt'      => '',
+				'post_date'         => $case['dateFrom'],
+				'post_date_gmt'     => $case['dateFromGmt'],
+				'post_modified'     => $case['dateFrom'],
+				'post_modified_gmt' => $case['dateFromGmt'],
+			),
+			false
+		);
+		$checked_revisions = \wp_get_post_revisions( $unsupported_id );
+		$raw_revisions     = \wp_get_post_revisions(
+			$unsupported_id,
+			array(
+				'check_enabled' => false,
+			)
+		);
+		$unsupported_save  = \wp_save_post_revision( $unsupported_id );
+		$auto_draft_id     = \wp_insert_post(
+			\wp_slash(
+				array(
+					'post_author'  => $author_id,
+					'post_content' => 'Auto draft content ' . $case['token'],
+					'post_status'  => 'auto-draft',
+					'post_title'   => 'Auto draft ' . $case['token'],
+					'post_type'    => $case['postType'],
+				)
+			),
+			true,
+			true
+		);
+		$auto_draft_save   = is_int( $auto_draft_id ) ? \wp_save_post_revision( $auto_draft_id ) : null;
+
+		self::collect_failure(
+			$failures,
+			array() === $checked_revisions
+				&& isset( $raw_revisions[ $manual_revision ] )
+				&& null === $unsupported_save,
+			'post type support gates checked revision reads and saves while raw revision queries can opt out',
+			array(
+				'unsupportedType'    => $unsupported_type,
+				'manualRevision'     => $manual_revision,
+				'checkedRevisionIds' => array_map( 'intval', array_keys( $checked_revisions ) ),
+				'rawRevisionIds'     => array_map( 'intval', array_keys( $raw_revisions ) ),
+				'unsupportedSave'    => $unsupported_save,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_int( $auto_draft_id )
+				&& null === $auto_draft_save,
+			'auto-draft status gates revision saves',
+			array(
+				'autoDraftId'   => $auto_draft_id,
+				'autoDraftSave' => $auto_draft_save,
+			)
+		);
+		return self::result(
+			$ctx,
+			'revisions-autosaves.support-restore-edges-and-title-helpers',
+			$failures,
+			array(
+				'case'         => self::case_summary( $case ),
+				'postId'       => $post_id,
+				'revisionId'   => $revision_id,
+				'autosaveId'   => $autosave_id,
+				'unsupported'  => $unsupported_id,
+			)
+		);
+	}
+
 	private static function check_revision_ui_payloads( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::prepare_runtime();
 		self::register_case_post_type( $case, true );
@@ -823,6 +1361,41 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function autosave_post_data( int $post_id, array $case, string $title, string $content, string $excerpt ): array {
+		return array(
+			'comment_status' => 'closed',
+			'content'        => $content,
+			'excerpt'        => $excerpt,
+			'ping_status'    => 'closed',
+			'post_ID'        => $post_id,
+			'post_status'    => 'draft',
+			'post_title'     => $title,
+			'post_type'      => $case['postType'],
+		);
+	}
+
+	private static function grant_all_caps_filter( int $user_id ): \Closure {
+		return static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $user_id ): array {
+			unset( $args );
+
+			if ( (int) $user->ID !== (int) $user_id ) {
+				return $allcaps;
+			}
+
+			foreach ( array( 'read', 'edit_posts', 'edit_others_posts', 'publish_posts', 'read_private_posts', 'edit_published_posts', 'edit_private_posts' ) as $cap ) {
+				$allcaps[ $cap ] = true;
+			}
+
+			foreach ( $caps as $cap ) {
+				if ( 'do_not_allow' !== $cap ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			return $allcaps;
+		};
+	}
+
 	private static function prepare_runtime(): void {
 		$wpdb = $GLOBALS['wpdb'];
 		$wpdb->component_fuzz_reset_content();
@@ -851,6 +1424,8 @@ final class RevisionsAutosavesSurface {
 		$GLOBALS['wp_taxonomies']    = array();
 		$GLOBALS['wp_meta_keys']     = array();
 		$GLOBALS['wp_rewrite']       = new \WP_Rewrite();
+		$GLOBALS['wp_query']         = new \WP_Query();
+		$GLOBALS['wp_the_query']     = $GLOBALS['wp_query'];
 
 		\create_initial_post_types();
 		\create_initial_taxonomies();
@@ -960,13 +1535,14 @@ final class RevisionsAutosavesSurface {
 		}
 
 		return array(
-			'get'     => $_GET,
-			'globals' => $globals,
-			'options' => isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			'get'      => $_GET,
+			'globals'  => $globals,
+			'options'  => isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
 				? $GLOBALS['wpdb']->component_fuzz_get_options()
 				: array(),
-			'post'    => $_POST,
-			'server'  => $server,
+			'post'     => $_POST,
+			'request'  => $_REQUEST,
+			'server'   => $server,
 		);
 	}
 
@@ -998,6 +1574,7 @@ final class RevisionsAutosavesSurface {
 
 		$_GET  = $snapshot['get'];
 		$_POST = $snapshot['post'];
+		$_REQUEST = $snapshot['request'];
 	}
 
 	private static function check_state_restored( \ComponentFuzz\FuzzContext $ctx, array $snapshot, array $case ): array {
@@ -1006,7 +1583,12 @@ final class RevisionsAutosavesSurface {
 		$options   = $wpdb instanceof \Component_Fuzz_WPDB_Stub ? $wpdb->component_fuzz_get_options() : array();
 		$count_ok  = array() === array_filter( $counts );
 		$filter_ok = false === \has_filter( '_wp_post_revision_field_post_content' )
+			&& false === \has_filter( '_wp_post_revision_fields' )
 			&& false === \has_filter( 'revision_text_diff_options' )
+			&& false === \has_filter( 'user_has_cap' )
+			&& false === \has_filter( 'wp_check_post_lock_window' )
+			&& false === \has_filter( 'wp_creating_autosave' )
+			&& false === \has_filter( 'wp_restore_post_revision' )
 			&& false === \has_filter( 'wp_revisions_to_keep' )
 			&& false === \has_filter( "wp_{$case['postType']}_revisions_to_keep" )
 			&& false === \has_filter( 'get_the_terms', '_wp_preview_terms_filter' )
@@ -1055,6 +1637,7 @@ final class RevisionsAutosavesSurface {
 			'dateLaterGmt'         => $latest,
 			'revisionLimit'        => $ctx->int( 1, 5 ),
 			'dynamicRevisionLimit' => $ctx->choice( array( 1, 2, 3, 5 ) ),
+			'lockWindow'           => $ctx->int( 45, 240 ),
 			'showSplitView'        => $ctx->bool(),
 		);
 	}
@@ -1124,6 +1707,7 @@ final class RevisionsAutosavesSurface {
 			'dateTo'               => $case['dateTo'],
 			'revisionLimit'        => $case['revisionLimit'],
 			'dynamicRevisionLimit' => $case['dynamicRevisionLimit'],
+			'lockWindow'           => $case['lockWindow'],
 			'showSplitView'        => $case['showSplitView'],
 		);
 	}
@@ -1153,6 +1737,17 @@ final class RevisionsAutosavesSurface {
 			'code'    => $value->get_error_code(),
 			'message' => $value->get_error_message(),
 			'data'    => $value->get_error_data(),
+		);
+	}
+
+	private static function lock_summary( $lock ) {
+		if ( ! is_array( $lock ) ) {
+			return $lock;
+		}
+
+		return array(
+			'hasTimestamp' => isset( $lock[0] ) && is_int( $lock[0] ),
+			'userId'       => isset( $lock[1] ) ? (int) $lock[1] : null,
 		);
 	}
 
