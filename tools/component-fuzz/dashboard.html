@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7929 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7938 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, and <code>user-preferences</code> at 800 passed and 100 skipped.</div>
+			<div class="note">Latest focused validations: <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; stale default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="metric">1</div>
+			<div class="note">Huygens the 2nd is active in <code>/private/tmp/component-fuzz-worker-site-health</code>; stale default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -269,6 +269,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 500 passed, 0 skipped, 0 failed; latest broad run: 7929 passed, 63 skipped, 0 failed.</td>
 					<td>Connector registry lifecycle, helper oracles, unregister/override replacement, icon manifest sanitization/caching, speculation rule allowlists, and state restoration.</td>
+				</tr>
+				<tr>
+					<td><code>content</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1200 passed, 0 skipped, 0 failed; latest broad run: 7938 passed, 63 skipped, 0 failed.</td>
+					<td>Post and term field sanitizers, slashing and metadata serialization, <code>get_extended()</code> more-tag parsing, date/query helpers, and class/key/title sanitizers.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -1447,7 +1454,7 @@
 		<div class="deps">
 			<div class="dep">
 				<strong>Bootstrap Core</strong>
-				<code>WpBootstrap</code>, hooks, options, cache, roles, post types, taxonomies, connector/icon registries.
+				<code>WpBootstrap</code>, hooks, options, cache, roles, post types, taxonomies, content parsers, connector/icon registries.
 			</div>
 			<div class="dep">
 				<strong>In-memory DB Stub</strong>

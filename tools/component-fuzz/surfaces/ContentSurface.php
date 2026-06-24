@@ -27,6 +27,7 @@ final class ContentSurface {
 		self::check_post_fields( $result, $inputs );
 		self::check_term_fields( $result, $inputs );
 		self::check_metadata_serialization( $result, $inputs );
+		self::check_extended_content_splitting( $result, $inputs );
 		self::check_date_queries( $result, $inputs );
 		self::check_query_var_normalization( $result, $inputs );
 		self::check_get_post_class_splitting( $result, $inputs );
@@ -543,6 +544,99 @@ final class ContentSurface {
 			),
 			$failures
 		);
+	}
+
+	private static function check_extended_content_splitting( array &$result, array $inputs ): void {
+		if ( ! \function_exists( 'get_extended' ) ) {
+			self::skip( $result, 'get_extended', 'get_extended() is unavailable.' );
+			return;
+		}
+
+		$failures = array();
+		$strings  = array_map(
+			static function ( string $value ): string {
+				return str_replace( array( "\r", "\n" ), ' ', $value );
+			},
+			$inputs['strings']
+		);
+		$cases    = array(
+			array(
+				'label'    => 'custom-more-text',
+				'content'  => " \t" . $strings[0] . '<!--more Continue ' . substr( sha1( $strings[1] ), 0, 8 ) . ' -->' . $strings[2] . "\t ",
+				'main'     => self::get_extended_component_trim( $strings[0] ),
+				'extended' => self::get_extended_component_trim( $strings[2] . "\t " ),
+				'moreText' => self::get_extended_component_trim( ' Continue ' . substr( sha1( $strings[1] ), 0, 8 ) . ' ' ),
+			),
+			array(
+				'label'    => 'empty-more-text',
+				'content'  => $strings[3] . '<!--more-->' . $strings[4],
+				'main'     => self::get_extended_component_trim( $strings[3] ),
+				'extended' => self::get_extended_component_trim( $strings[4] ),
+				'moreText' => '',
+			),
+			array(
+				'label'    => 'first-more-wins',
+				'content'  => $strings[5] . '<!--more First-->' . $strings[6] . '<!--more Second-->' . $strings[7],
+				'main'     => self::get_extended_component_trim( $strings[5] ),
+				'extended' => self::get_extended_component_trim( $strings[6] . '<!--more Second-->' . $strings[7] ),
+				'moreText' => self::get_extended_component_trim( ' First' ),
+			),
+			array(
+				'label'    => 'space-before-more-is-not-a-marker',
+				'content'  => $strings[8] . '<!-- more Not a marker-->' . $strings[9],
+				'main'     => self::get_extended_component_trim( $strings[8] . '<!-- more Not a marker-->' . $strings[9] ),
+				'extended' => '',
+				'moreText' => '',
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return \get_extended( $case['content'] );
+				}
+			);
+			if ( ! $call['ok'] ) {
+				$failures[] = self::call_failure( 'get-extended-throwable', 'get_extended() threw.', $call, array( 'case' => $case['label'] ) );
+				continue;
+			}
+			if ( ! is_array( $call['value'] ) ) {
+				$failures[] = array(
+					'name'    => 'get-extended-non-array',
+					'message' => 'get_extended() returned a non-array value.',
+					'case'    => $case['label'],
+					'type'    => gettype( $call['value'] ),
+				);
+				continue;
+			}
+
+			$actual = $call['value'];
+			if (
+				array( 'main', 'extended', 'more_text' ) !== array_keys( $actual )
+				|| $case['main'] !== $actual['main']
+				|| $case['extended'] !== $actual['extended']
+				|| $case['moreText'] !== $actual['more_text']
+			) {
+				$failures[] = array(
+					'name'     => 'get-extended-split-mismatch',
+					'message'  => 'get_extended() did not split the generated more tag as expected.',
+					'case'     => $case['label'],
+					'expected' => array(
+						'main'      => self::describe_string( $case['main'] ),
+						'extended'  => self::describe_string( $case['extended'] ),
+						'moreText'  => self::describe_string( $case['moreText'] ),
+					),
+					'actual'   => self::describe_value( $actual ),
+				);
+			}
+		}
+
+		self::record( $result, 'get_extended.more_tag_splitting', empty( $failures ), array( 'cases' => count( $cases ) ), $failures );
+	}
+
+	private static function get_extended_component_trim( string $value ): string {
+		$trimmed = preg_replace( '/^[\s]*(.*)[\s]*$/', '\\1', $value );
+		return is_string( $trimmed ) ? $trimmed : $value;
 	}
 
 	private static function check_date_queries( array &$result, array $inputs ): void {
