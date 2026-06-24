@@ -276,8 +276,6 @@ class Tests_Theme extends WP_UnitTestCase {
 	 *
 	 * @coversNothing
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_default_themes_are_included_in_new_files() {
 		require_once ABSPATH . 'wp-admin/includes/update-core.php';

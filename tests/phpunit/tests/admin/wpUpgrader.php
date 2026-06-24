@@ -999,13 +999,8 @@ class Tests_Admin_WpUpgrader extends WP_UnitTestCase {
 	 * @ticket 61114
 	 *
 	 * @covers WP_Upgrader::install_package
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_install_package_should_return_wp_error_when_a_filtered_source_directory_file_list_cannot_be_retrieved() {
-		define( 'FS_CHMOD_DIR', 0755 );
-
 		self::$instance->generic_strings();
 
 		self::$upgrader_skin_mock
@@ -1097,23 +1092,11 @@ class Tests_Admin_WpUpgrader extends WP_UnitTestCase {
 	 * Tests that `WP_Upgrader::install_package()` applies
 	 * 'upgrader_clear_destination' filters with arguments.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 54245
 	 *
 	 * @covers WP_Upgrader::install_package
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_install_package_should_clear_destination_when_clear_destination_is_true() {
-		define( 'FS_CHMOD_FILE', 0644 );
-
 		self::$instance->generic_strings();
 
 		self::$upgrader_skin_mock
@@ -1148,6 +1131,18 @@ class Tests_Admin_WpUpgrader extends WP_UnitTestCase {
 				->method( 'dirlist' )
 				->withConsecutive( ...$dirlist_args )
 				->willReturn( $dirlist_results );
+
+		self::$wp_filesystem_mock
+				->expects( $this->once() )
+				->method( 'is_writable' )
+				->with( '/dest_dir/file1.php' )
+				->willReturn( true );
+
+		self::$wp_filesystem_mock
+				->expects( $this->once() )
+				->method( 'delete' )
+				->with( '/dest_dir/', true )
+				->willReturn( true );
 
 		add_filter(
 			'upgrader_clear_destination',
@@ -1191,28 +1186,16 @@ class Tests_Admin_WpUpgrader extends WP_UnitTestCase {
 	 * Tests that `WP_Upgrader::install_package()` makes the
 	 * remote destination safe when set to a protected directory.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 54245
 	 *
 	 * @covers WP_Upgrader::install_package
 	 *
 	 * @dataProvider data_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @param string $protected_directory The path to a protected directory.
 	 * @param string $expected            The expected safe remote destination.
 	 */
 	public function test_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory( $protected_directory, $expected ) {
-		define( 'FS_CHMOD_FILE', 0644 );
-
 		self::$instance->generic_strings();
 
 		self::$upgrader_skin_mock
@@ -1247,6 +1230,18 @@ class Tests_Admin_WpUpgrader extends WP_UnitTestCase {
 				->method( 'dirlist' )
 				->withConsecutive( ...$dirlist_args )
 				->willReturn( $dirlist_results );
+
+		self::$wp_filesystem_mock
+				->expects( $this->once() )
+				->method( 'is_writable' )
+				->with( $expected . 'file1.php' )
+				->willReturn( true );
+
+		self::$wp_filesystem_mock
+				->expects( $this->once() )
+				->method( 'delete' )
+				->with( $expected, true )
+				->willReturn( true );
 
 		add_filter(
 			'upgrader_clear_destination',

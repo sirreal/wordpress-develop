@@ -19,27 +19,15 @@ class Tests_Filesystem_WpFilesystemDirect_Mkdir extends WP_Filesystem_Direct_Uni
 	/**
 	 * Tests that `WP_Filesystem_Direct::mkdir()` creates a directory.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 57774
 	 *
 	 * @dataProvider data_should_create_directory
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @param mixed $path The path to create.
 	 */
 	public function test_should_create_directory( $path ) {
-		define( 'FS_CHMOD_DIR', 0755 );
-
 		$path   = str_replace( 'TEST_DIR', self::$file_structure['test_dir']['path'], $path );
-		$actual = self::$filesystem->mkdir( $path );
+		$actual = self::$filesystem->mkdir( $path, 0755 );
 
 		if ( $path !== self::$file_structure['test_dir']['path'] && is_dir( $path ) ) {
 			rmdir( $path );
@@ -67,27 +55,15 @@ class Tests_Filesystem_WpFilesystemDirect_Mkdir extends WP_Filesystem_Direct_Uni
 	/**
 	 * Tests that `WP_Filesystem_Direct::mkdir()` does not create a directory.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 57774
 	 *
 	 * @dataProvider data_should_not_create_directory
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @param mixed $path     The path to create.
 	 */
 	public function test_should_not_create_directory( $path ) {
-		define( 'FS_CHMOD_DIR', 0755 );
-
 		$path   = str_replace( 'TEST_DIR', self::$file_structure['test_dir']['path'], $path );
-		$actual = self::$filesystem->mkdir( $path );
+		$actual = self::$filesystem->mkdir( $path, 0755 );
 
 		if ( $path !== self::$file_structure['test_dir']['path'] && is_dir( $path ) ) {
 			rmdir( $path );
@@ -110,6 +86,39 @@ class Tests_Filesystem_WpFilesystemDirect_Mkdir extends WP_Filesystem_Direct_Uni
 				'path' => 'TEST_DIR',
 			),
 		);
+	}
+
+	/**
+	 * Tests that `WP_Filesystem_Direct::mkdir()` uses FS_CHMOD_DIR when chmod is not passed.
+	 *
+	 * This test runs in a separate process so that it can define
+	 * constants without impacting other tests.
+	 *
+	 * This test does not preserve global state to prevent the exception
+	 * "Serialization of 'Closure' is not allowed." when running in a
+	 * separate process.
+	 *
+	 * @ticket 57774
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_should_use_fs_chmod_dir_when_chmod_not_passed() {
+		define( 'FS_CHMOD_DIR', 0755 );
+
+		$path = self::$file_structure['test_dir']['path'] . 'directory-to-create';
+
+		$created = self::$filesystem->mkdir( $path );
+		$chmod   = substr( sprintf( '%o', fileperms( $path ) ), -4 );
+
+		if ( $path !== self::$file_structure['test_dir']['path'] && is_dir( $path ) ) {
+			rmdir( $path );
+		}
+
+		$expected_permissions = $this->is_windows() ? '0777' : '0755';
+
+		$this->assertTrue( $created, 'The directory was not created.' );
+		$this->assertSame( $expected_permissions, $chmod, 'The permissions are incorrect.' );
 	}
 
 	/**
@@ -136,25 +145,13 @@ class Tests_Filesystem_WpFilesystemDirect_Mkdir extends WP_Filesystem_Direct_Uni
 	/**
 	 * Tests that `WP_Filesystem_Direct::mkdir()` sets the owner.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 57774
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_should_set_owner() {
-		define( 'FS_CHMOD_DIR', 0755 );
-
 		$path = self::$file_structure['test_dir']['path'] . 'directory-to-create';
 
 		// Get the default owner.
-		self::$filesystem->mkdir( $path );
+		self::$filesystem->mkdir( $path, 0755 );
 		$original_owner = fileowner( $path );
 
 		rmdir( $path );
@@ -173,25 +170,13 @@ class Tests_Filesystem_WpFilesystemDirect_Mkdir extends WP_Filesystem_Direct_Uni
 	/**
 	 * Tests that `WP_Filesystem_Direct::mkdir()` sets the group.
 	 *
-	 * This test runs in a separate process so that it can define
-	 * constants without impacting other tests.
-	 *
-	 * This test does not preserve global state to prevent the exception
-	 * "Serialization of 'Closure' is not allowed." when running in a
-	 * separate process.
-	 *
 	 * @ticket 57774
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_should_set_group() {
-		define( 'FS_CHMOD_DIR', 0755 );
-
 		$path = self::$file_structure['test_dir']['path'] . 'directory-to-create';
 
 		// Get the default group.
-		self::$filesystem->mkdir( $path );
+		self::$filesystem->mkdir( $path, 0755 );
 		$original_group = filegroup( $path );
 
 		rmdir( $path );
