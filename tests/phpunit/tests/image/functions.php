@@ -687,11 +687,10 @@ class Tests_Image_Functions extends WP_UnitTestCase {
 
 	/**
 	 * @covers ::wp_crop_image
-	 * @requires extension openssl
 	 */
 	public function test_wp_crop_image_should_fail_with_wp_error_object_if_url_does_not_exist() {
 		$file = wp_crop_image(
-			'https://wordpress.org/screenshots/3.9/canoladoesnotexist.jpg',
+			'http://127.0.0.1:0/canoladoesnotexist.jpg',
 			0,
 			0,
 			100,

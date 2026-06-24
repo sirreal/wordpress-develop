@@ -1864,16 +1864,9 @@ EOF;
 	 */
 	public function test_wp_calculate_image_srcset_no_date_uploads() {
 		$_wp_additional_image_sizes = wp_get_additional_image_sizes();
-
-		// Disable date organized uploads.
-		add_filter( 'upload_dir', '_upload_dir_no_subdir' );
-
-		// Make an image.
-		$filename = DIR_TESTDATA . '/images/' . self::$large_filename;
-		$id       = self::factory()->attachment->create_upload_object( $filename );
-
-		$image_meta      = wp_get_attachment_metadata( $id );
-		$uploads_dir_url = 'http://' . WP_TESTS_DOMAIN . '/wp-content/uploads/';
+		$image_meta                 = wp_get_attachment_metadata( self::$large_id );
+		$image_meta['file']         = wp_basename( $image_meta['file'] );
+		$uploads_dir_url            = 'http://' . WP_TESTS_DOMAIN . '/wp-content/uploads/';
 
 		// Set up test cases for all expected size names.
 		$intermediates = array( 'medium', 'medium_large', 'large', 'full' );
@@ -1896,12 +1889,12 @@ EOF;
 		$expected = trim( $expected, ' ,' );
 
 		foreach ( $intermediates as $int_size ) {
-			$image_urls[ $int_size ] = wp_get_attachment_image_url( $id, $int_size );
+			if ( 'full' === $int_size ) {
+				$image_urls[ $int_size ] = $uploads_dir_url . $image_meta['file'];
+			} else {
+				$image_urls[ $int_size ] = $uploads_dir_url . $image_meta['sizes'][ $int_size ]['file'];
+			}
 		}
-
-		// Remove the attachment.
-		wp_delete_attachment( $id, true );
-		remove_filter( 'upload_dir', '_upload_dir_no_subdir' );
 
 		foreach ( $intermediates as $int_size ) {
 			$size_array = $this->get_image_size_array_from_meta( $image_meta, $int_size );
@@ -5650,8 +5643,8 @@ EOF;
 	public function test_quality_with_image_conversion_file_sizes() {
 		add_filter( 'image_editor_output_format', array( $this, 'image_editor_output_jpeg' ) );
 		$temp_dir = get_temp_dir();
-		$file     = $temp_dir . '/33772.jpg';
-		copy( DIR_TESTDATA . '/images/33772.jpg', $file );
+		$file     = $temp_dir . '/a2-small.jpg';
+		copy( DIR_TESTDATA . '/images/a2-small.jpg', $file );
 
 		// Set JPEG output quality very low and WebP quality very high, this should force all generated WebP images to
 		// be larger than the matching generated JPEGs.
@@ -5671,27 +5664,40 @@ EOF;
 			)
 		);
 
-		add_filter( 'big_image_size_threshold', array( $this, 'add_big_image_size_threshold' ) );
+		add_image_size( 'test-size-250', 250, 250 );
+		add_image_size( 'test-size-200', 200, 200 );
 
-		// Generate all sizes as JPEGs.
-		$jpeg_sizes = wp_generate_attachment_metadata( $attachment_id, $file );
-		remove_filter( 'image_editor_output_format', array( $this, 'image_editor_output_jpeg' ) );
+		add_filter(
+			'big_image_size_threshold',
+			static function () {
+				return 300;
+			}
+		);
 
-		// Generate all sizes as WebP.
-		add_filter( 'image_editor_output_format', array( $this, 'image_editor_output_webp' ) );
-		$webp_sizes = wp_generate_attachment_metadata( $attachment_id, $file );
-		remove_filter( 'image_editor_output_format', array( $this, 'image_editor_output_webp' ) );
+		try {
+			// Generate all sizes as JPEGs.
+			$jpeg_sizes = wp_generate_attachment_metadata( $attachment_id, $file );
+			remove_filter( 'image_editor_output_format', array( $this, 'image_editor_output_jpeg' ) );
 
-		// The main (scaled) image: the JPEG should be smaller than the WebP.
-		$this->assertLessThan( $webp_sizes['filesize'], $jpeg_sizes['filesize'], 'The JPEG should be smaller than the WebP.' );
+			// Generate all sizes as WebP.
+			add_filter( 'image_editor_output_format', array( $this, 'image_editor_output_webp' ) );
+			$webp_sizes = wp_generate_attachment_metadata( $attachment_id, $file );
+			remove_filter( 'image_editor_output_format', array( $this, 'image_editor_output_webp' ) );
 
-		// Sub-sizes: for each size, the JPEGs should be smaller than the WebP.
-		$sizes_to_compare = array_intersect_key( $jpeg_sizes['sizes'], $webp_sizes['sizes'] );
+			// The main (scaled) image: the JPEG should be smaller than the WebP.
+			$this->assertLessThan( $webp_sizes['filesize'], $jpeg_sizes['filesize'], 'The JPEG should be smaller than the WebP.' );
 
-		$this->assertNotEmpty( $sizes_to_compare );
+			// Sub-sizes: for each size, the JPEGs should be smaller than the WebP.
+			$sizes_to_compare = array_intersect_key( $jpeg_sizes['sizes'], $webp_sizes['sizes'] );
 
-		foreach ( $sizes_to_compare as $size => $size_data ) {
-			$this->assertLessThan( $webp_sizes['sizes'][ $size ]['filesize'], $jpeg_sizes['sizes'][ $size ]['filesize'] );
+			$this->assertNotEmpty( $sizes_to_compare );
+
+			foreach ( $sizes_to_compare as $size => $size_data ) {
+				$this->assertLessThan( $webp_sizes['sizes'][ $size ]['filesize'], $jpeg_sizes['sizes'][ $size ]['filesize'] );
+			}
+		} finally {
+			remove_image_size( 'test-size-250' );
+			remove_image_size( 'test-size-200' );
 		}
 	}
 
@@ -7094,9 +7100,9 @@ EOF;
 	 */
 	public function test_jpeg_image_converts_to_webp_when_filtered( bool $apply_big_image_size_threshold ) {
 		$temp_dir      = get_temp_dir();
-		$file          = $temp_dir . '/33772.jpg';
+		$file          = $temp_dir . '/a2-small.jpg';
 		$scaled_suffix = $apply_big_image_size_threshold ? '-scaled' : '';
-		copy( DIR_TESTDATA . '/images/33772.jpg', $file );
+		copy( DIR_TESTDATA . '/images/a2-small.jpg', $file );
 
 		$editor = wp_get_image_editor( $file );
 
@@ -7113,7 +7119,12 @@ EOF;
 		);
 
 		if ( $apply_big_image_size_threshold ) {
-			add_filter( 'big_image_size_threshold', array( $this, 'add_big_image_size_threshold' ) );
+			add_filter(
+				'big_image_size_threshold',
+				static function () {
+					return 300;
+				}
+			);
 		}
 
 		// Generate all sizes as WebP.
@@ -7122,8 +7133,8 @@ EOF;
 		$image_meta = wp_generate_attachment_metadata( $attachment_id, $file );
 
 		$this->assertStringEndsNotWith( '.jpg', $image_meta['file'], 'The file extension is expected to change.' );
-		$this->assertSame( "33772{$scaled_suffix}.webp", basename( $image_meta['file'] ), "The file name is expected to be 33772{$scaled_suffix}.webp." );
-		$this->assertSame( '33772.jpg', $image_meta['original_image'], 'The original image name is expected to be stored in the meta data.' );
+		$this->assertSame( "a2-small{$scaled_suffix}.webp", basename( $image_meta['file'] ), "The file name is expected to be a2-small{$scaled_suffix}.webp." );
+		$this->assertSame( 'a2-small.jpg', $image_meta['original_image'], 'The original image name is expected to be stored in the meta data.' );
 		$this->assertSame( 'image/webp', wp_get_image_mime( $image_meta['file'] ), 'The image mime type is expected to be image/webp.' );
 	}
 

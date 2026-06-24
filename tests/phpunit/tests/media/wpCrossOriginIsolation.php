@@ -30,12 +30,18 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 */
 	private ?string $original_get_action;
 
+	/**
+	 * Original output buffer level.
+	 */
+	private int $original_ob_level;
+
 	public function set_up() {
 		parent::set_up();
 		$this->original_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? null;
 		$this->original_http_host  = $_SERVER['HTTP_HOST'] ?? null;
 		$this->original_https      = $_SERVER['HTTPS'] ?? null;
 		$this->original_get_action = $_GET['action'] ?? null;
+		$this->original_ob_level   = ob_get_level();
 	}
 
 	public function tear_down() {
@@ -64,7 +70,7 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 		}
 
 		// Clean up any output buffers started during tests.
-		while ( ob_get_level() > 1 ) {
+		while ( ob_get_level() > $this->original_ob_level ) {
 			ob_end_clean();
 		}
 
@@ -99,14 +105,7 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	}
 
 	/**
-	 * This test must run in a separate process because the output buffer
-	 * callback sends HTTP headers via header(), which would fail in the
-	 * main PHPUnit process where output has already started.
-	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_starts_output_buffer_for_chrome_137() {
 		$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
@@ -118,6 +117,29 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 		$this->assertSame( $level_before + 1, $level_after, 'Output buffer should be started for Chrome 137.' );
 
 		ob_end_clean();
+	}
+
+	/**
+	 * @ticket 64766
+	 *
+	 * @requires function xdebug_get_headers
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_output_buffer_sends_document_isolation_policy_header() {
+		$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+
+		ob_start();
+
+		wp_start_cross_origin_isolation_output_buffer();
+		echo '<script src="https://external.example.com/script.js"></script>';
+
+		ob_end_flush();
+		ob_get_clean();
+
+		$headers = xdebug_get_headers();
+
+		$this->assertContains( 'Document-Isolation-Policy: isolate-and-credentialless', $headers );
 	}
 
 	/**
@@ -189,10 +211,6 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 * Verifies that cross-origin elements get crossorigin="anonymous" added.
 	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @dataProvider data_elements_that_should_get_crossorigin
 	 *
 	 * @param string $html HTML input to process.
@@ -244,10 +262,6 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 * in credentialless mode without needing explicit CORS headers.
 	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @dataProvider data_elements_that_should_not_get_crossorigin
 	 *
 	 * @param string $html HTML input to process.
@@ -294,9 +308,6 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 * Uses site_url() at runtime since the test domain varies by CI config.
 	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_output_buffer_does_not_add_crossorigin_to_same_origin() {
 		$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
@@ -316,9 +327,6 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 * Elements that already have a crossorigin attribute should not be modified.
 	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_output_buffer_does_not_override_existing_crossorigin() {
 		$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
@@ -339,9 +347,6 @@ class Tests_Media_wpCrossOriginIsolation extends WP_UnitTestCase {
 	 * Multiple tags in the same output should each be handled correctly.
 	 *
 	 * @ticket 64766
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_output_buffer_handles_mixed_tags() {
 		$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';

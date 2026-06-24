@@ -93,8 +93,14 @@ class Tests_Media_wpGenerateAttachmentMetadata extends WP_UnitTestCase {
 	 * @ticket 62900
 	 */
 	public function test_wp_generate_attachment_metadata_png_thumbnail_smaller_than_original() {
-		// Use the test-image-large.png test file.
-		$attachment = $this->factory->attachment->create_upload_object( DIR_TESTDATA . '/images/png-tests/test-image-large.png' );
+		add_filter(
+			'big_image_size_threshold',
+			static function () {
+				return 25;
+			}
+		);
+
+		$attachment = $this->factory->attachment->create_upload_object( DIR_TESTDATA . '/images/test-image.png' );
 
 		$metadata = wp_get_attachment_metadata( $attachment );
 
