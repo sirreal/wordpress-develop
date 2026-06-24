@@ -41,6 +41,8 @@ final class DateTimeSurface {
 				self::check_weekstartend_windows( $ctx, $timestamps ),
 				self::check_human_time_diff( $ctx ),
 				self::check_safe_format_option_filters( $ctx, $timestamps, $timezones, $formats ),
+				self::check_current_datetime_timezone_override_and_iso8601( $ctx, $timestamps, $timezones, $offsets ),
+				self::check_date_and_human_diff_filter_contracts( $ctx, $timestamps, $timezones, $formats ),
 			);
 		} catch ( \Throwable $e ) {
 			$rows = array(
@@ -63,12 +65,15 @@ final class DateTimeSurface {
 				'wp_date',
 				'date_i18n',
 				'current_time',
+				'current_datetime',
 				'mysql2date',
 				'get_gmt_from_date',
 				'get_date_from_gmt',
 				'iso8601_timezone_to_offset',
+				'iso8601_to_datetime',
 				'wp_timezone_string',
 				'wp_timezone',
+				'wp_timezone_override_offset',
 				'get_weekstartend',
 				'human_time_diff',
 				'get_option',
@@ -689,6 +694,225 @@ final class DateTimeSurface {
 		);
 	}
 
+	private static function check_current_datetime_timezone_override_and_iso8601( \ComponentFuzz\FuzzContext $ctx, array $timestamps, array $timezones, array $offsets ): array {
+		$failures = array();
+		$samples  = array();
+		$cases    = 0;
+
+		foreach ( array_slice( $timezones, 0, min( 8, count( $timezones ) ) ) as $index => $timezone_name ) {
+			self::with_option_filters(
+				array(
+					'timezone_string' => $timezone_name,
+					'gmt_offset'      => $offsets[ $index % count( $offsets ) ],
+				),
+				static function () use ( $timezone_name, $timestamps, $index, &$failures, &$samples, &$cases ): void {
+					$zone            = new \DateTimeZone( $timezone_name );
+					$before          = time();
+					$current         = \current_datetime();
+					$after           = time();
+					$override        = \wp_timezone_override_offset();
+					$expected_offset = round( ( new \DateTimeImmutable( 'now', $zone ) )->getOffset() / HOUR_IN_SECONDS, 2 );
+					$timestamp       = $timestamps[ $index % count( $timestamps ) ];
+					$offset_token    = self::iso8601_token_from_offset( $expected_offset );
+					$iso             = gmdate( 'Ymd\TH:i:s', $timestamp ) . $offset_token;
+					$expected_gmt    = ( new \DateTimeImmutable( $iso ) )->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
+					$expected_user   = ( new \DateTimeImmutable( $iso ) )->setTimezone( $zone )->format( 'Y-m-d H:i:s' );
+					$actual_gmt      = \iso8601_to_datetime( $iso, 'gmt' );
+					$actual_user     = \iso8601_to_datetime( $iso, 'user' );
+					$actual_invalid  = \iso8601_to_datetime( $iso, 'site' );
+					++$cases;
+
+					self::sample(
+						$samples,
+						array(
+							'timezone'       => $timezone_name,
+							'override'       => $override,
+							'expectedOffset' => $expected_offset,
+							'iso'            => $iso,
+							'actualUser'     => $actual_user,
+							'actualGmt'      => $actual_gmt,
+						)
+					);
+
+					if (
+						! ( $current instanceof \DateTimeImmutable )
+						|| $current->getTimezone()->getName() !== $timezone_name
+						|| $current->getTimestamp() < $before
+						|| $current->getTimestamp() > $after
+						|| ! is_float( $override )
+						|| abs( $override - $expected_offset ) > 0.01
+						|| $actual_gmt !== $expected_gmt
+						|| $actual_user !== $expected_user
+						|| false !== $actual_invalid
+					) {
+						$failures[] = array(
+							'timezone'       => $timezone_name,
+							'currentClass'   => is_object( $current ) ? get_class( $current ) : get_debug_type( $current ),
+							'currentZone'    => $current instanceof \DateTimeImmutable ? $current->getTimezone()->getName() : null,
+							'currentWindow'  => array( $before, $after, $current instanceof \DateTimeImmutable ? $current->getTimestamp() : null ),
+							'override'       => self::describe_value( $override ),
+							'expectedOffset' => $expected_offset,
+							'iso'            => $iso,
+							'expectedGmt'    => $expected_gmt,
+							'actualGmt'      => self::describe_value( $actual_gmt ),
+							'expectedUser'   => $expected_user,
+							'actualUser'     => self::describe_value( $actual_user ),
+							'invalidMode'    => self::describe_value( $actual_invalid ),
+						);
+					}
+				}
+			);
+		}
+
+		self::with_option_filters(
+			array(
+				'timezone_string' => '',
+				'gmt_offset'      => $offsets[0] ?? 0,
+			),
+			static function () use ( &$failures ): void {
+				$override = \wp_timezone_override_offset();
+				if ( false !== $override ) {
+					$failures[] = array(
+						'case'     => 'override without timezone_string',
+						'expected' => false,
+						'actual'   => self::describe_value( $override ),
+					);
+				}
+			}
+		);
+
+		self::collect_invalid_iso8601_case( $failures );
+
+		return self::result(
+			$ctx,
+			'date-time.current-datetime-timezone-override-and-iso8601',
+			$failures,
+			array(
+				'cases'    => $cases,
+				'samples'  => $samples,
+				'failures' => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
+	private static function check_date_and_human_diff_filter_contracts( \ComponentFuzz\FuzzContext $ctx, array $timestamps, array $timezones, array $formats ): array {
+		$failures       = array();
+		$timestamp      = $timestamps[ $ctx->int( 0, count( $timestamps ) - 1 ) ];
+		$timezone_name  = $timezones[ $ctx->int( 0, count( $timezones ) - 1 ) ];
+		$timezone       = new \DateTimeZone( $timezone_name );
+		$format         = self::date_i18n_format( $formats[ $ctx->int( 0, count( $formats ) - 1 ) ] );
+		$human_delta    = $ctx->int( MINUTE_IN_SECONDS, 3 * DAY_IN_SECONDS );
+		$wp_date_seen   = array();
+		$date_i18n_seen = array();
+		$human_seen     = array();
+		$wp_date_filter = static function ( string $date, string $seen_format, int $seen_timestamp, \DateTimeZone $seen_timezone ) use ( &$wp_date_seen ): string {
+			$wp_date_seen[] = array(
+				'date'      => $date,
+				'format'    => $seen_format,
+				'timestamp' => $seen_timestamp,
+				'timezone'  => $seen_timezone->getName(),
+			);
+
+			return 'wp-filtered:' . $date;
+		};
+		$date_i18n_filter = static function ( string $date, string $seen_format, int $seen_timestamp, bool $seen_gmt ) use ( &$date_i18n_seen ): string {
+			$date_i18n_seen[] = array(
+				'date'      => $date,
+				'format'    => $seen_format,
+				'timestamp' => $seen_timestamp,
+				'gmt'       => $seen_gmt,
+			);
+
+			return 'i18n-filtered:' . $date;
+		};
+		$human_filter = static function ( string $since, int $diff, int $from, int $to ) use ( &$human_seen ): string {
+			$human_seen[] = compact( 'since', 'diff', 'from', 'to' );
+			return 'human-filtered:' . $since . ':' . $diff;
+		};
+
+		\add_filter( 'wp_date', $wp_date_filter, 10, 4 );
+		try {
+			$wp_date = \wp_date( $format, $timestamp, $timezone );
+		} finally {
+			\remove_filter( 'wp_date', $wp_date_filter, 10 );
+		}
+
+		self::with_option_filters(
+			array(
+				'timezone_string' => $timezone_name,
+				'gmt_offset'      => 0,
+			),
+			static function () use ( $date_i18n_filter, $human_filter, $format, $timestamp, $human_delta, &$date_i18n_seen, &$human_seen, &$date_i18n, &$human ): void {
+				\add_filter( 'date_i18n', $date_i18n_filter, 10, 4 );
+				try {
+					$date_i18n = \date_i18n( $format, $timestamp, false );
+				} finally {
+					\remove_filter( 'date_i18n', $date_i18n_filter, 10 );
+				}
+
+				\add_filter( 'human_time_diff', $human_filter, 10, 4 );
+				try {
+					$human = \human_time_diff( $timestamp, $timestamp + $human_delta );
+				} finally {
+					\remove_filter( 'human_time_diff', $human_filter, 10 );
+				}
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $wp_date_seen )
+				&& str_starts_with( $wp_date, 'wp-filtered:' )
+				&& $format === $wp_date_seen[0]['format']
+				&& (int) $timestamp === (int) $wp_date_seen[0]['timestamp']
+				&& $timezone_name === $wp_date_seen[0]['timezone'],
+			'wp_date filter receives formatted date, format, timestamp, and timezone object',
+			array(
+				'output' => self::describe_value( $wp_date ),
+				'seen'   => $wp_date_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			1 === count( $date_i18n_seen )
+				&& str_starts_with( $date_i18n, 'i18n-filtered:' )
+				&& $format === $date_i18n_seen[0]['format']
+				&& (int) $timestamp === (int) $date_i18n_seen[0]['timestamp']
+				&& false === $date_i18n_seen[0]['gmt'],
+			'date_i18n filter receives explicit timestamp and GMT flag without leaking outside the call',
+			array(
+				'output' => self::describe_value( $date_i18n ),
+				'seen'   => $date_i18n_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			1 === count( $human_seen )
+				&& str_starts_with( $human, 'human-filtered:' )
+				&& $human_delta === $human_seen[0]['diff']
+				&& $timestamp === $human_seen[0]['from']
+				&& $timestamp + $human_delta === $human_seen[0]['to']
+				&& null !== self::parse_human_time_diff_seconds( $human_seen[0]['since'] ),
+			'human_time_diff filter receives normalized text, absolute diff, and original endpoints',
+			array(
+				'output' => self::describe_value( $human ),
+				'seen'   => $human_seen,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'date-time.date-and-human-diff-filter-argument-locality',
+			$failures,
+			array(
+				'timestamp' => $timestamp,
+				'timezone'  => $timezone_name,
+				'format'    => $format,
+				'failures'  => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
 	private static function check_runtime_restored( \ComponentFuzz\FuzzContext $ctx, array $snapshot ): array {
 		$failures = array();
 
@@ -959,6 +1183,20 @@ final class DateTimeSurface {
 		return '-' === $matches[1] ? -$seconds : $seconds;
 	}
 
+	private static function collect_invalid_iso8601_case( array &$failures ): void {
+		$invalid_user = \iso8601_to_datetime( 'not-a-date', 'user' );
+		$invalid_gmt  = \iso8601_to_datetime( '2026-13-40T25:61:61+0000', 'gmt' );
+
+		if ( false !== $invalid_user || false !== $invalid_gmt ) {
+			$failures[] = array(
+				'api'         => 'iso8601_to_datetime',
+				'case'        => 'invalid date strings',
+				'invalidUser' => self::describe_value( $invalid_user ),
+				'invalidGmt'  => self::describe_value( $invalid_gmt ),
+			);
+		}
+	}
+
 	private static function parse_human_time_diff_seconds( string $value ): ?int {
 		if ( 1 !== preg_match( '/\A(\d+)\s+(second|minute|hour|day|week|month|year)s?\z/', $value, $matches ) ) {
 			return null;
@@ -975,6 +1213,17 @@ final class DateTimeSurface {
 		);
 
 		return (int) $matches[1] * $unit_seconds[ $matches[2] ];
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $message, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'message' => $message,
+			'details' => $details,
+		);
 	}
 
 	private static function with_option_filters( array $options, callable $callback ): void {
