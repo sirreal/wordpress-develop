@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7887 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7898 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>update-install-upgrader</code> at 1200 passed, <code>plugin-theme-lifecycle</code> at 1100 passed, <code>install-schema</code> at 900 passed, and <code>translations</code> at 700 passed.</div>
+			<div class="note">Latest focused validations: <code>admin-ajax</code> at 800 passed, <code>update-install-upgrader</code> at 1200 passed, <code>plugin-theme-lifecycle</code> at 1100 passed, and <code>install-schema</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; translations and plugin/theme lifecycle worker changes are integrated in main.</div>
+			<div class="metric">1</div>
+			<div class="note">Sagan the 2nd is strengthening <code>classic-walkers</code>; admin-ajax work is integrated in main.</div>
 		</div>
 	</div>
 
@@ -256,6 +256,13 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>admin-ajax</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7898 passed, 62 skipped, 0 failed.</td>
+					<td>Captured <code>wp_die()</code> handlers, JSON/XML response helpers, nonce/capability failures, safe AJAX handlers, compression-test capability/body branches, superglobal and output-buffer restoration.</td>
+				</tr>
 				<tr>
 					<td><code>feed-rendering</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
@@ -737,6 +744,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>62e6ac9ad4</code></td>
+					<td><code>admin-ajax</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>7898 passed, 62 skipped, 0 failed at 2 iterations after compression-test capability/body branch coverage.</td>
+				</tr>
 				<tr>
 					<td><code>8474330e39</code></td>
 					<td><code>update-install-upgrader</code></td>
