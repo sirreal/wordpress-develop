@@ -32,6 +32,7 @@ final class XmlRpcSurface {
 			$rows[] = self::check_ixr_message_fail_closed( $ctx->fork( 'ixr-message-errors' ) );
 			$rows[] = self::check_ixr_fault_xml( $ctx->fork( 'ixr-faults' ) );
 			$rows[] = self::check_ixr_server_dispatch( $ctx->fork( 'ixr-server' ) );
+			$rows[] = self::check_ixr_server_multicall_matrix( $ctx->fork( 'ixr-multicall' ) );
 			$rows[] = self::check_wp_xmlrpc_server_helpers( $ctx->fork( 'wp-server' ) );
 			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
 			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
@@ -374,6 +375,98 @@ final class XmlRpcSurface {
 				'capabilities' => self::describe_value( $capabilities ),
 				'missing'      => self::describe_value( $missing ),
 				'recursive'    => self::describe_value( $recursive ),
+			)
+		);
+	}
+
+	private static function check_ixr_server_multicall_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$marker = 'multi-' . $ctx->identifier( 5, 10 );
+		$text   = 'payload <tag>& "' . self::safe_text( $ctx->fork( 'text' ), 18 );
+		$left   = $ctx->int( -1000, 1000 );
+		$right  = $ctx->int( -1000, 1000 );
+		$helper = new class() {
+			public function echoPayload( $args ) {
+				return $args;
+			}
+
+			public function addPair( array $args ): int {
+				return array_sum( $args );
+			}
+
+			public function reject( array $args ): \IXR_Error {
+				return new \IXR_Error( 490, 'Rejected ' . (string) ( $args['marker'] ?? '' ) );
+			}
+		};
+		$server = new \IXR_Server(
+			array(
+				'component.echo'   => array( $helper, 'echoPayload' ),
+				'component.add'    => array( $helper, 'addPair' ),
+				'component.reject' => array( $helper, 'reject' ),
+			),
+			false,
+			true
+		);
+
+		$calls  = array(
+			array(
+				'methodName' => 'component.echo',
+				'params'     => array(
+					array(
+						'marker' => $marker,
+						'text'   => $text,
+					),
+				),
+			),
+			array(
+				'methodName' => 'component.add',
+				'params'     => array( $left, $right ),
+			),
+			array(
+				'methodName' => 'component.reject',
+				'params'     => array( array( 'marker' => $marker ) ),
+			),
+			array(
+				'methodName' => 'component.missing',
+				'params'     => array( $marker ),
+			),
+			array(
+				'methodName' => 'system.multicall',
+				'params'     => array(),
+			),
+		);
+		$result = self::call(
+			static function () use ( $server, $calls ) {
+				return $server->multiCall( $calls );
+			}
+		);
+		$value  = ! $result['threw'] ? new \IXR_Value( $result['value'] ) : null;
+		$xml    = $value instanceof \IXR_Value ? $value->getXml() : '';
+
+		$ok = ! $result['threw']
+			&& is_array( $result['value'] )
+			&& 5 === count( $result['value'] )
+			&& array( 'marker' => $marker, 'text' => $text ) === ( $result['value'][0][0] ?? null )
+			&& array( $left + $right ) === ( $result['value'][1] ?? null )
+			&& 490 === ( $result['value'][2]['faultCode'] ?? null )
+			&& 'Rejected ' . $marker === ( $result['value'][2]['faultString'] ?? null )
+			&& -32601 === ( $result['value'][3]['faultCode'] ?? null )
+			&& -32600 === ( $result['value'][4]['faultCode'] ?? null )
+			&& str_contains( (string) ( $result['value'][3]['faultString'] ?? '' ), 'component.missing' )
+			&& str_contains( (string) ( $result['value'][4]['faultString'] ?? '' ), 'Recursive calls' )
+			&& str_contains( $xml, '<array><data>' )
+			&& str_contains( $xml, '<name>faultCode</name>' )
+			&& false === strpos( $xml, '<tag>' );
+
+		return self::row(
+			$ctx,
+			'xmlrpc.ixr-server.multicall-mixed-success-fault-order',
+			$ok,
+			array(
+				'marker' => $marker,
+				'left'   => $left,
+				'right'  => $right,
+				'call'   => self::describe_call( $result ),
+				'xml'    => self::describe_string( $xml ),
 			)
 		);
 	}
