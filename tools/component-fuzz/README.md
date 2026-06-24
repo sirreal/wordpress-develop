@@ -266,7 +266,8 @@ database, network requests, or a configured site.
   attachments and embeds, reusable mailer cleanup/reset behavior,
   success/failure actions, and emoji email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
-  excerpts, balanced tags, URL extraction, embed helpers.
+  excerpts, balanced tags, URL extraction, link attribute helpers, and embed
+  helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
   GD/Imagick availability, output format filters, resize/save metadata,
   intermediate and generated sub-sizes, missing sub-size detection, and

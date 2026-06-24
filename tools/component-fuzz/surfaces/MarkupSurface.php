@@ -724,6 +724,109 @@ final class MarkupSurface {
 		}
 
 		self::check_excerpt_helpers( $input, $checks, $failures );
+		self::check_link_attribute_helpers( $checks, $failures );
+	}
+
+	private static function check_link_attribute_helpers( array &$checks, array &$failures ): void {
+		if ( ! function_exists( 'links_add_target' ) || ! function_exists( 'wp_rel_nofollow' ) || ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+			self::skip( $checks, 'markup.link-attribute-helpers', 'links_add_target, wp_rel_nofollow, or WP_HTML_Tag_Processor unavailable' );
+			return;
+		}
+
+		$html = '<p><a href="https://external.test/a?x=1&amp;y=2">external</a> <a href="/local" rel="tag" target="_self">local</a> <span><a data-cfz="1" href="https://external.test/second">second</a></span></p>';
+		$target = 'cfz-target-"probe';
+
+		$had_links_target = array_key_exists( '_links_add_target', $GLOBALS );
+		$links_target     = $GLOBALS['_links_add_target'] ?? null;
+
+		try {
+			$target_call = self::call(
+				'links_add_target:anchor-attrs',
+				static function () use ( $html, $target ) {
+					return \links_add_target( $html, $target, array( 'a' ) );
+				}
+			);
+			$nofollow_call = self::call(
+				'wp_rel_nofollow:anchor-attrs',
+				static function () use ( $html ) {
+					return \wp_rel_nofollow( $html );
+				}
+			);
+		} finally {
+			if ( $had_links_target ) {
+				$GLOBALS['_links_add_target'] = $links_target;
+			} else {
+				unset( $GLOBALS['_links_add_target'] );
+			}
+		}
+
+		$global_restored = $had_links_target
+			? ( array_key_exists( '_links_add_target', $GLOBALS ) && $GLOBALS['_links_add_target'] === $links_target )
+			: ! array_key_exists( '_links_add_target', $GLOBALS );
+
+		if ( ! $target_call['ok'] || ! is_string( $target_call['value'] ) || ! $nofollow_call['ok'] || ! is_string( $nofollow_call['value'] ) ) {
+			self::fail(
+				$checks,
+				$failures,
+				'markup.link-attribute-helpers',
+				'Link attribute helpers failed or returned non-string output.',
+				array(
+					'targetCall'    => self::call_summary( $target_call ),
+					'nofollowCall'  => self::call_summary( $nofollow_call ),
+					'globalRestored' => $global_restored,
+				)
+			);
+			return;
+		}
+
+		$target_attrs = self::anchor_attributes( $target_call['value'] );
+		$nofollow_html = function_exists( 'wp_unslash' ) ? \wp_unslash( $nofollow_call['value'] ) : stripslashes( $nofollow_call['value'] );
+		$nofollow_attrs = self::anchor_attributes( $nofollow_html );
+
+		$target_values = array_column( $target_attrs, 'target' );
+		$target_ok     = 3 === count( $target_attrs )
+			&& array( $target, $target, $target ) === $target_values
+			&& null === $target_attrs[0]['rel']
+			&& 'tag' === $target_attrs[1]['rel']
+			&& '1' === $target_attrs[2]['data-cfz']
+			&& false === strpos( $target_call['value'], 'target="_self"' );
+
+		$nofollow_ok = 3 === count( $nofollow_attrs )
+			&& 1 === self::rel_token_count( $nofollow_attrs[0]['rel'], 'nofollow' )
+			&& 1 === self::rel_token_count( $nofollow_attrs[1]['rel'], 'nofollow' )
+			&& 1 === self::rel_token_count( $nofollow_attrs[1]['rel'], 'tag' )
+			&& 1 === self::rel_token_count( $nofollow_attrs[2]['rel'], 'nofollow' )
+			&& '_self' === $nofollow_attrs[1]['target']
+			&& null === $nofollow_attrs[0]['target'];
+
+		if ( ! $target_ok || ! $nofollow_ok || ! $global_restored ) {
+			self::fail(
+				$checks,
+				$failures,
+				'markup.link-attribute-helpers',
+				'Link attribute helpers did not preserve expected anchor attributes and rel token invariants.',
+				array(
+					'targetAttrs'    => $target_attrs,
+					'nofollowAttrs'  => $nofollow_attrs,
+					'targetOutput'   => self::preview( $target_call['value'] ),
+					'nofollowOutput' => self::preview( $nofollow_html ),
+					'globalRestored' => $global_restored,
+				)
+			);
+			return;
+		}
+
+		self::pass(
+			$checks,
+			'markup.link-attribute-helpers',
+			array(
+				'anchorCount'    => count( $target_attrs ),
+				'targetSha1'     => sha1( $target_call['value'] ),
+				'nofollowSha1'   => sha1( $nofollow_html ),
+				'globalRestored' => $global_restored,
+				'durationMs'     => $target_call['durationMs'] + $nofollow_call['durationMs'],
+			)
+		);
 	}
 
 	private static function check_excerpt_helpers( string $input, array &$checks, array &$failures ): void {
@@ -1033,6 +1136,47 @@ final class MarkupSurface {
 				'durationMs'   => $call['durationMs'],
 			)
 		);
+	}
+
+	private static function anchor_attributes( string $html ): array {
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		$anchors   = array();
+
+		while ( $processor->next_tag( 'a' ) ) {
+			$anchors[] = array(
+				'href'     => self::attribute_value( $processor->get_attribute( 'href' ) ),
+				'rel'      => self::attribute_value( $processor->get_attribute( 'rel' ) ),
+				'target'   => self::attribute_value( $processor->get_attribute( 'target' ) ),
+				'data-cfz' => self::attribute_value( $processor->get_attribute( 'data-cfz' ) ),
+			);
+		}
+
+		return $anchors;
+	}
+
+	private static function attribute_value( $value ): ?string {
+		if ( is_string( $value ) ) {
+			return $value;
+		}
+
+		if ( true === $value ) {
+			return '';
+		}
+
+		return null;
+	}
+
+	private static function rel_token_count( ?string $rel, string $token ): int {
+		if ( null === $rel ) {
+			return 0;
+		}
+
+		$tokens = preg_split( '/\s+/', trim( $rel ) );
+		if ( ! is_array( $tokens ) ) {
+			return 0;
+		}
+
+		return count( array_keys( $tokens, $token, true ) );
 	}
 
 	private static function generate_markup( array &$rng, int $max_bytes ): array {
