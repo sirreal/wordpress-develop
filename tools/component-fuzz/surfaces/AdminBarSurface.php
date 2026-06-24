@@ -29,6 +29,7 @@ final class AdminBarSurface {
 				self::check_node_lifecycle( $ctx->fork( 'node-lifecycle' ) ),
 				self::check_parent_child_rendering( $ctx->fork( 'parent-child-rendering' ) ),
 				self::check_render_escaping_contracts( $ctx->fork( 'render-escaping' ) ),
+				self::check_initialize_side_effects( $ctx->fork( 'initialize-side-effects' ) ),
 				self::check_show_admin_bar_filters( $ctx->fork( 'show-admin-bar-filters' ) ),
 				self::check_default_menu_hook_registration( $ctx->fork( 'default-menu-hooks' ) ),
 			);
@@ -58,11 +59,14 @@ final class AdminBarSurface {
 			array(
 				'add_filter',
 				'add_action',
+				'current_theme_supports',
 				'did_action',
+				'do_action',
 				'esc_attr',
 				'esc_attr_e',
 				'esc_js',
 				'esc_url',
+				'get_theme_support',
 				'has_filter',
 				'is_admin',
 				'is_admin_bar_showing',
@@ -75,6 +79,8 @@ final class AdminBarSurface {
 				'sanitize_title',
 				'show_admin_bar',
 				'wp_admin_bar_render',
+				'wp_enqueue_script',
+				'wp_enqueue_style',
 				'wp_is_json_request',
 				'wp_is_mobile',
 				'wp_parse_args',
@@ -619,6 +625,95 @@ final class AdminBarSurface {
 		);
 	}
 
+	private static function check_initialize_side_effects( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$snapshot = self::snapshot_state();
+
+		$theme_callback = '__return_false';
+
+		try {
+			$GLOBALS['_wp_theme_features']['admin-bar'] = array(
+				array(
+					'callback' => $theme_callback,
+				),
+			);
+
+			$before_init_actions = \did_action( 'admin_bar_init' );
+			$bar                 = new \WP_Admin_Bar();
+
+			$bar->initialize();
+
+			$user_is_object       = $bar->user instanceof \stdClass;
+			$wp_head_header       = \has_action( 'wp_head', 'wp_admin_bar_header' );
+			$admin_head_header    = \has_action( 'admin_head', 'wp_admin_bar_header' );
+			$theme_bump_callback  = \has_action( 'wp_head', $theme_callback );
+			$default_bump_present = \has_action( 'wp_head', '_admin_bar_bump_cb' );
+			$after_init_actions   = \did_action( 'admin_bar_init' );
+		} finally {
+			self::restore_state( $snapshot );
+		}
+
+		$user_is_object       = $user_is_object ?? false;
+		$wp_head_header       = $wp_head_header ?? false;
+		$admin_head_header    = $admin_head_header ?? false;
+		$theme_bump_callback  = $theme_bump_callback ?? false;
+		$default_bump_present = $default_bump_present ?? false;
+		$before_init_actions  = $before_init_actions ?? null;
+		$after_init_actions   = $after_init_actions ?? null;
+
+		self::collect_failure(
+			$failures,
+			$user_is_object
+				&& false !== $wp_head_header
+				&& false !== $admin_head_header
+				&& false !== $theme_bump_callback
+				&& false === $default_bump_present,
+			'initialize registers toolbar headers and honors the theme support bump callback',
+			array(
+				'userIsObject'       => $user_is_object,
+				'wpHeadHeader'       => $wp_head_header,
+				'adminHeadHeader'    => $admin_head_header,
+				'themeBumpCallback'  => $theme_bump_callback,
+				'defaultBumpPresent' => $default_bump_present,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$after_init_actions === $before_init_actions + 1,
+			'initialize fires admin_bar_init exactly once',
+			array(
+				'beforeInitActions' => $before_init_actions,
+				'afterInitActions'  => $after_init_actions,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::global_matches( $snapshot['globals']['_wp_theme_features'], '_wp_theme_features' )
+				&& self::global_matches( $snapshot['globals']['wp_actions'], 'wp_actions' )
+				&& self::global_matches( $snapshot['globals']['wp_filter'], 'wp_filter' )
+				&& self::global_matches( $snapshot['globals']['wp_scripts'], 'wp_scripts' )
+				&& self::global_matches( $snapshot['globals']['wp_styles'], 'wp_styles' ),
+			'initialize probe restores theme support, hook counters, filters, and asset queues',
+			array(
+				'themeFeatures' => self::global_summary( '_wp_theme_features' ),
+				'wpActions'     => self::global_summary( 'wp_actions' ),
+				'wpScripts'     => self::global_summary( 'wp_scripts' ),
+				'wpStyles'      => self::global_summary( 'wp_styles' ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-bar.initialize.hooks-theme-support-and-restoration',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function check_show_admin_bar_filters( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures        = array();
 		$snapshot        = self::snapshot_state();
@@ -1089,6 +1184,7 @@ final class AdminBarSurface {
 		return array(
 			'globals' => self::snapshot_globals(
 				array(
+					'_wp_theme_features',
 					'current_screen',
 					'current_user',
 					'pagenow',
@@ -1105,6 +1201,8 @@ final class AdminBarSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_scripts',
+					'wp_styles',
 				)
 			),
 		);
