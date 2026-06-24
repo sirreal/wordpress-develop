@@ -1920,6 +1920,11 @@ final class EmailSurface {
 				'address' => 'mail@xn--bcher-kva.de',
 				'valid'   => true,
 			);
+			$samples[] = array(
+				'label'   => 'ascii-local-punycode-tld',
+				'address' => 'mail@xn--fsqu00a.xn--4rr70v',
+				'valid'   => true,
+			);
 		}
 
 		foreach ( self::extension_view_cases( $ctx->fork( 'make-clickable' ) ) as $sample ) {
@@ -2005,7 +2010,8 @@ final class EmailSurface {
 			if (
 				! $expect_link
 				&& array() !== $anchors
-				&& self::make_clickable_known_partial_email_boundary( $address, $anchors )
+				&& is_string( $rendered['value'] ?? null )
+				&& self::make_clickable_known_partial_email_boundary( $address, $anchors, $rendered['value'] )
 			) {
 				$known_boundaries[] = array(
 					'label'    => $case['label'],
@@ -2265,26 +2271,37 @@ final class EmailSurface {
 		return 1 === preg_match( '/\A[.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+[0-9a-z]{2,}\z/i', $address );
 	}
 
-	private static function make_clickable_known_partial_email_boundary( string $address, array $anchors ): bool {
+	private static function make_clickable_known_partial_email_boundary( string $address, array $anchors, string $rendered ): bool {
 		if ( ! str_contains( $address, '.xn--' ) ) {
 			return false;
 		}
 
-		foreach ( $anchors as $anchor ) {
-			$href = $anchor['href'] ?? null;
-			$text = $anchor['text'] ?? null;
-			if (
-				is_string( $href )
-				&& is_string( $text )
-				&& $href === $text
-				&& $href !== $address
-				&& str_starts_with( $address, $href )
-			) {
-				return true;
-			}
+		if ( 1 !== count( $anchors ) ) {
+			return false;
 		}
 
-		return false;
+		$anchor           = $anchors[0];
+		$href             = $anchor['href'] ?? null;
+		$text             = $anchor['text'] ?? null;
+		$expected_partial = self::make_clickable_partial_email_target( $address );
+		if ( null === $expected_partial || ! is_string( $href ) || ! is_string( $text ) ) {
+			return false;
+		}
+
+		$suffix   = substr( $address, strlen( $expected_partial ) );
+		$expected = 'Contact <a href="mailto:' . $expected_partial . '">' . $expected_partial . '</a>' . $suffix . ' now';
+
+		return $href === $expected_partial
+			&& $text === $expected_partial
+			&& $rendered === $expected;
+	}
+
+	private static function make_clickable_partial_email_target( string $address ): ?string {
+		if ( 1 !== preg_match( '/\A([.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+xn)(--[0-9a-z-]+)\z/i', $address, $matches ) ) {
+			return null;
+		}
+
+		return $matches[1];
 	}
 
 	private static function address_round_trip_ok( \WP_Email_Address $email ): bool {
