@@ -224,8 +224,9 @@ database, network requests, or a configured site.
   malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
   extensions are available, XMP alt text extraction, EXIF helper normalization,
   image metadata filters, temp-file cleanup, and state restoration.
-- `identity`: usernames, emails, capabilities, text/comment filters, comment
-  cookies, options, password hashing/checking, parse helpers.
+- `identity`: usernames, emails, identity sanitizer filter contracts,
+  capabilities, text/comment filters, comment cookies, options, password
+  hashing/checking, parse helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
   imported comment lookup against the in-memory stub, `wp_text_diff()`
   rendering/escaping/normalization, and `WP_Error` export/merge/remove

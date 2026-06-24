@@ -30,6 +30,7 @@ final class IdentitySurface {
 
 			self::exercise_usernames( $result, $rng );
 			self::exercise_email_addresses( $result, $rng );
+			self::exercise_identity_filter_contracts( $result, $rng );
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_urls( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
@@ -160,6 +161,77 @@ final class IdentitySurface {
 							self::check( $result, 'is_email.sanitized_canonical_stable', $sanitized === \sanitize_email( $valid_sanitized ), $input, $sanitized, \sanitize_email( $valid_sanitized ) );
 						}
 					}
+				}
+			}
+		);
+	}
+
+	private static function exercise_identity_filter_contracts( array &$result, array &$rng ): void {
+		if ( ! self::have_functions( array( 'add_filter', 'remove_filter', 'sanitize_user', 'sanitize_email', 'is_email' ), $result, 'identity_filter_contracts' ) ) {
+			return;
+		}
+
+		$user_input  = ' Filter <b>User</b> ' . substr( self::random_string( $rng, 16 ), 0, 16 ) . ' ';
+		$email_input = 'filter-' . self::rand_int( $rng, 100, 999 ) . '@example.test';
+
+		self::run_case(
+			$result,
+			'identity_filter_contracts',
+			static function () use ( &$result, $user_input, $email_input ): void {
+				$user_events           = array();
+				$sanitize_email_events = array();
+				$is_email_events       = array();
+
+				$user_filter = static function ( string $username, string $raw_username, bool $strict ) use ( &$user_events ): string {
+					$user_events[] = array(
+						'username' => $username,
+						'raw'      => $raw_username,
+						'strict'   => $strict,
+					);
+
+					return $strict ? 'identity_strict_user' : 'identity_loose_user';
+				};
+
+				$sanitize_email_filter = static function ( string $sanitized, string $email, ?string $context ) use ( &$sanitize_email_events ): string {
+					$sanitize_email_events[] = array(
+						'sanitized' => $sanitized,
+						'email'     => $email,
+						'context'   => $context,
+					);
+
+					return 'identity-sanitized@example.test';
+				};
+
+				$is_email_filter = static function ( $is_email, string $email, ?string $context ) use ( &$is_email_events ): string {
+					$is_email_events[] = array(
+						'isEmail' => $is_email,
+						'email'   => $email,
+						'context' => $context,
+					);
+
+					return 'identity-valid@example.test';
+				};
+
+				\add_filter( 'sanitize_user', $user_filter, 999, 3 );
+				\add_filter( 'sanitize_email', $sanitize_email_filter, 999, 3 );
+				\add_filter( 'is_email', $is_email_filter, 999, 3 );
+
+				try {
+					$strict_user = \sanitize_user( $user_input, true );
+					$loose_user  = \sanitize_user( $user_input, false );
+					$email       = \sanitize_email( $email_input );
+					$valid_email = \is_email( $email_input );
+
+					self::check( $result, 'sanitize_user.filter_overrides_strict_and_loose', 'identity_strict_user' === $strict_user && 'identity_loose_user' === $loose_user, $user_input, array( 'identity_strict_user', 'identity_loose_user' ), array( $strict_user, $loose_user ) );
+					self::check( $result, 'sanitize_user.filter_receives_raw_and_strict_flag', 2 === count( $user_events ) && $user_input === $user_events[0]['raw'] && true === $user_events[0]['strict'] && $user_input === $user_events[1]['raw'] && false === $user_events[1]['strict'], $user_input, 'two events with raw username and strict flag', $user_events );
+					self::check( $result, 'sanitize_email.filter_can_override_canonical_result', 'identity-sanitized@example.test' === $email, $email_input, 'identity-sanitized@example.test', $email );
+					self::check( $result, 'sanitize_email.filter_receives_normalized_email_and_null_context', 1 === count( $sanitize_email_events ) && $email_input === $sanitize_email_events[0]['email'] && null === $sanitize_email_events[0]['context'], $email_input, 'email and null context', $sanitize_email_events );
+					self::check( $result, 'is_email.filter_can_override_validation_result', 'identity-valid@example.test' === $valid_email, $email_input, 'identity-valid@example.test', $valid_email );
+					self::check( $result, 'is_email.filter_receives_original_email_and_null_context', 1 === count( $is_email_events ) && $email_input === $is_email_events[0]['email'] && null === $is_email_events[0]['context'], $email_input, 'email and null context', $is_email_events );
+				} finally {
+					\remove_filter( 'sanitize_user', $user_filter, 999 );
+					\remove_filter( 'sanitize_email', $sanitize_email_filter, 999 );
+					\remove_filter( 'is_email', $is_email_filter, 999 );
 				}
 			}
 		);
