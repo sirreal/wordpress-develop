@@ -34,6 +34,7 @@ final class SiteHealthDebugSurface {
 			$rows[] = self::check_format( $ctx->fork( 'format' ) );
 			$rows[] = self::check_debug_information_filter_locality( $ctx->fork( 'debug-information' ) );
 			$rows[] = self::check_database_size( $ctx->fork( 'database-size' ) );
+			$rows[] = self::check_sizes( $ctx->fork( 'sizes' ) );
 			$rows[] = self::check_mysql_var( $ctx->fork( 'mysql-var' ) );
 			$rows[] = $ctx->skip(
 				'site-health-debug.database-size.malformed-row-omissions',
@@ -43,7 +44,7 @@ final class SiteHealthDebugSurface {
 				'site-health-debug.debug-data.full-scan-bounded',
 				'Skipped full WP_Debug_Data::debug_data() because it eagerly performs network, plugin/theme, media, and filesystem discovery before filters can short-circuit it.',
 				array(
-					'coveredPublicPaths' => array( 'WP_Debug_Data::format', 'WP_Debug_Data::get_database_size' ),
+					'coveredPublicPaths' => array( 'WP_Debug_Data::format', 'WP_Debug_Data::get_database_size', 'WP_Debug_Data::get_sizes' ),
 				)
 			);
 		} catch ( \Throwable $e ) {
@@ -101,7 +102,7 @@ final class SiteHealthDebugSurface {
 			}
 		}
 
-		foreach ( array( 'add_filter', 'apply_filters', 'has_filter', 'remove_filter' ) as $function ) {
+		foreach ( array( 'add_filter', 'apply_filters', 'get_theme_root', 'has_filter', 'remove_filter', 'size_format', 'untrailingslashit', 'wp_cache_delete', 'wp_get_font_dir', 'wp_get_upload_dir', 'wp_upload_dir', 'wp_using_ext_object_cache' ) as $function ) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
@@ -109,6 +110,9 @@ final class SiteHealthDebugSurface {
 
 		if ( ! defined( 'ARRAY_A' ) ) {
 			$missing[] = 'constant ARRAY_A';
+		}
+		if ( ! defined( 'WP_START_TIMESTAMP' ) ) {
+			$missing[] = 'constant WP_START_TIMESTAMP';
 		}
 
 		return $missing;
@@ -412,6 +416,193 @@ final class SiteHealthDebugSurface {
 		);
 	}
 
+	private static function check_sizes( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		\wp_upload_dir( null, false, true );
+		\ComponentFuzz\ensure_dir( WP_CONTENT_DIR . '/uploads' );
+		\ComponentFuzz\ensure_dir( WP_CONTENT_DIR . '/uploads/fonts' );
+
+		$upload_dir = \wp_get_upload_dir();
+		$font_dir   = \wp_get_font_dir();
+		$paths      = array(
+			'wordpress_size' => \untrailingslashit( ABSPATH ),
+			'themes_size'    => \untrailingslashit( \get_theme_root() ),
+			'plugins_size'   => \untrailingslashit( WP_PLUGIN_DIR ),
+			'uploads_size'   => \untrailingslashit( $upload_dir['basedir'] ),
+			'fonts_size'     => \untrailingslashit( $font_dir['basedir'] ),
+		);
+		$dir_sizes  = self::directory_sizes( $ctx->fork( 'directory-sizes' ), $paths );
+		$db_rows    = self::database_rows( $ctx->fork( 'database-rows' ) );
+		$db_size    = 0;
+
+		foreach ( $db_rows as $row ) {
+			$db_size += $row['Data_length'] + $row['Index_length'];
+		}
+
+		$size_calls       = array();
+		$deprecated_calls = array();
+		$size_filter      = static function ( $space_used, $directory, $exclude, $max_execution_time, $directory_cache ) use ( $dir_sizes, &$size_calls ) {
+			$directory = \untrailingslashit( (string) $directory );
+			$size_calls[] = array(
+				'directory'        => $directory,
+				'exclude'          => is_array( $exclude ) ? array_map( 'strval', $exclude ) : $exclude,
+				'maxExecutionTime' => $max_execution_time,
+				'cacheCount'       => is_array( $directory_cache ) ? count( $directory_cache ) : null,
+			);
+
+			return array_key_exists( $directory, $dir_sizes ) ? $dir_sizes[ $directory ] : $space_used;
+		};
+		$deprecated_hook  = static function ( string $function_name, string $replacement, string $version ) use ( &$deprecated_calls ): void {
+			$deprecated_calls[] = array(
+				'function'    => $function_name,
+				'replacement' => $replacement,
+				'version'     => $version,
+			);
+		};
+		$wpdb             = new SiteHealthDebugWpdbDouble( $db_rows );
+		$actual           = array();
+		$previous_ext     = \wp_using_ext_object_cache( true );
+		$removed          = array(
+			'size'       => false,
+			'deprecated' => false,
+		);
+
+		\wp_cache_delete( 'dirsize_cache', 'transient' );
+
+		try {
+			\add_filter( 'pre_recurse_dirsize', $size_filter, 10, 5 );
+			\add_filter( 'deprecated_function_run', $deprecated_hook, 10, 3 );
+
+			$actual = self::with_wpdb(
+				$wpdb,
+				static function (): array {
+					return \WP_Debug_Data::get_sizes();
+				}
+			);
+		} finally {
+			$removed['size']       = \remove_filter( 'pre_recurse_dirsize', $size_filter, 10 );
+			$removed['deprecated'] = \remove_filter( 'deprecated_function_run', $deprecated_hook, 10 );
+			\wp_cache_delete( 'dirsize_cache', 'transient' );
+			\wp_using_ext_object_cache( $previous_ext );
+		}
+
+		$expected_total = $db_size + array_sum( $dir_sizes );
+		foreach ( $paths as $name => $path ) {
+			$expected_size = \size_format( $dir_sizes[ $path ], 2 );
+			self::collect_failure(
+				$failures,
+				isset( $actual[ $name ] )
+					&& $path === ( $actual[ $name ]['path'] ?? null )
+					&& $dir_sizes[ $path ] === ( $actual[ $name ]['raw'] ?? null )
+					&& $expected_size === ( $actual[ $name ]['size'] ?? null )
+					&& $expected_size . ' (' . $dir_sizes[ $path ] . ' bytes)' === ( $actual[ $name ]['debug'] ?? null ),
+				"get_sizes returns generated {$name} path, raw bytes, display size, and debug size",
+				array(
+					'name'     => $name,
+					'path'     => $path,
+					'expected' => array(
+						'raw'   => $dir_sizes[ $path ],
+						'size'  => $expected_size,
+						'debug' => $expected_size . ' (' . $dir_sizes[ $path ] . ' bytes)',
+					),
+					'actual'   => $actual[ $name ] ?? null,
+				)
+			);
+		}
+
+		$expected_db_size    = \size_format( $db_size, 2 );
+		$expected_total_size = \size_format( $expected_total, 2 );
+		self::collect_failure(
+			$failures,
+			isset( $actual['database_size'], $actual['total_size'] )
+				&& $db_size === ( $actual['database_size']['raw'] ?? null )
+				&& $expected_db_size === ( $actual['database_size']['size'] ?? null )
+				&& $expected_db_size . ' (' . $db_size . ' bytes)' === ( $actual['database_size']['debug'] ?? null )
+				&& $expected_total === ( $actual['total_size']['raw'] ?? null )
+				&& $expected_total_size === ( $actual['total_size']['size'] ?? null )
+				&& $expected_total_size . ' (' . $expected_total . ' bytes)' === ( $actual['total_size']['debug'] ?? null ),
+			'get_sizes combines generated directory sizes with database size into total_size',
+			array(
+				'expectedDatabase' => array(
+					'raw'   => $db_size,
+					'size'  => $expected_db_size,
+					'debug' => $expected_db_size . ' (' . $db_size . ' bytes)',
+				),
+				'expectedTotal'    => array(
+					'raw'   => $expected_total,
+					'size'  => $expected_total_size,
+					'debug' => $expected_total_size . ' (' . $expected_total . ' bytes)',
+				),
+				'actualDatabase'   => $actual['database_size'] ?? null,
+				'actualTotal'      => $actual['total_size'] ?? null,
+			)
+		);
+
+		$wordpress_call = $size_calls[0] ?? array();
+		$expected_exclude = array_values(
+			array(
+				$paths['themes_size'],
+				$paths['plugins_size'],
+				$paths['uploads_size'],
+				$paths['fonts_size'],
+			)
+		);
+		self::collect_failure(
+			$failures,
+			count( $paths ) === count( $size_calls )
+				&& $paths['wordpress_size'] === ( $wordpress_call['directory'] ?? null )
+				&& $expected_exclude === ( $wordpress_call['exclude'] ?? null )
+				&& array() === array_diff( array_values( $paths ), array_column( $size_calls, 'directory' ) ),
+			'get_sizes asks recurse_dirsize for each bounded install path and excludes nested content from ABSPATH',
+			array(
+				'paths'           => $paths,
+				'sizeCalls'       => $size_calls,
+				'expectedExclude' => $expected_exclude,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$removed['size']
+				&& $removed['deprecated']
+				&& false === \has_filter( 'pre_recurse_dirsize', $size_filter )
+				&& false === \has_filter( 'deprecated_function_run', $deprecated_hook )
+				&& array(
+					array(
+						'function'    => 'WP_Debug_Data::get_sizes',
+						'replacement' => 'WP_REST_Site_Health_Controller::get_directory_sizes()',
+						'version'     => '5.6.0',
+					),
+				) === $deprecated_calls
+				&& $wpdb->restored,
+			'get_sizes emits its deprecation hook once and temporary filters plus $wpdb are restored',
+			array(
+				'removed'          => $removed,
+				'deprecatedCalls'  => $deprecated_calls,
+				'afterSizeFilter'  => \has_filter( 'pre_recurse_dirsize', $size_filter ),
+				'afterDeprecated'  => \has_filter( 'deprecated_function_run', $deprecated_hook ),
+				'wpdbRestored'     => $wpdb->restored,
+				'databaseLastCall' => array(
+					'query'  => $wpdb->last_query,
+					'output' => $wpdb->last_output,
+				),
+			)
+		);
+
+		return $ctx->result(
+			'site-health-debug.sizes.directory-database-total',
+			array() === $failures,
+			array(
+				'failures'      => array_slice( $failures, 0, 8 ),
+				'directoryRaw'  => $dir_sizes,
+				'databaseRaw'   => $db_size,
+				'totalRaw'      => $expected_total,
+				'pathCount'     => count( $paths ),
+				'sizeCallCount' => count( $size_calls ),
+			)
+		);
+	}
+
 	private static function check_mysql_var( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures      = array();
 		$available_var = 'cfz_' . self::slug( $ctx->fork( 'available' ), 'available' );
@@ -682,6 +873,26 @@ final class SiteHealthDebugSurface {
 		}
 	}
 
+	private static function directory_sizes( \ComponentFuzz\FuzzContext $ctx, array $paths ): array {
+		$sizes = array();
+		foreach ( $paths as $name => $path ) {
+			$sizes[ $path ] = self::directory_size( $ctx->fork( $name ) );
+		}
+
+		return $sizes;
+	}
+
+	private static function directory_size( \ComponentFuzz\FuzzContext $ctx ): int {
+		return $ctx->choice(
+			array(
+				0,
+				$ctx->int( 1, 1023 ),
+				$ctx->int( 1024, 1024 * 1024 ),
+				$ctx->int( 1024 * 1024, 6 * 1024 * 1024 ),
+			)
+		);
+	}
+
 	private static function with_wpdb( SiteHealthDebugWpdbDouble $wpdb, callable $callback ) {
 		$previous_exists = array_key_exists( 'wpdb', $GLOBALS );
 		$previous_wpdb   = $GLOBALS['wpdb'] ?? null;
@@ -762,6 +973,7 @@ final class SiteHealthDebugSurface {
 					'wp_actions',
 					'wp_current_filter',
 					'wp_object_cache',
+					'_wp_using_ext_object_cache',
 				)
 			),
 			'obLevel'       => ob_get_level(),

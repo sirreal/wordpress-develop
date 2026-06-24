@@ -32,6 +32,9 @@ final class WpBootstrap {
 		if ( ! defined( 'ABSPATH' ) ) {
 			define( 'ABSPATH', $src );
 		}
+		if ( ! defined( 'WP_START_TIMESTAMP' ) ) {
+			define( 'WP_START_TIMESTAMP', microtime( true ) );
+		}
 		if ( ! defined( 'WPINC' ) ) {
 			define( 'WPINC', 'wp-includes' );
 		}

@@ -426,10 +426,11 @@ database, network requests, or a configured site.
   detection short-circuits, and selected direct `WP_Site_Health` tests without
   remote requests.
 - `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
-  formatting and database-size helpers, including private field/section
+  formatting and diagnostic size helpers, including private field/section
   suppression, debug vs info labels, `debug_information` filter locality,
-  scoped `SHOW TABLE STATUS` and `SHOW VARIABLES` wpdb doubles, MySQL variable
-  lookup fallbacks, and explicit skips for unsafe full debug-data scans.
+  scoped `SHOW TABLE STATUS` and `SHOW VARIABLES` wpdb doubles, generated
+  directory/database/total-size aggregation, MySQL variable lookup fallbacks,
+  and explicit skips for unsafe full debug-data scans.
 - `state`: object cache groups and multi-operations, option, transient, and
   cache-backed site-transient APIs, filters, serialization, JSON, and value
   helpers.
