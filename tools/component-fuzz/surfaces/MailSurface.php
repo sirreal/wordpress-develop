@@ -29,6 +29,7 @@ final class MailSurface {
 			$rows[] = self::check_pre_wp_mail_short_circuit( $ctx->fork( 'pre' ) );
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
 			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
+			$rows[] = self::check_unicode_recipient_handoff( $ctx->fork( 'unicode' ) );
 			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
 			$rows[] = self::check_phpmailer_failure_action( $ctx->fork( 'failure' ) );
 			$rows[] = self::check_staticize_emoji_for_email( $ctx->fork( 'emoji' ) );
@@ -348,6 +349,115 @@ final class MailSurface {
 		);
 
 		return self::row( $ctx, 'mail.phpmailer.string-header-and-path-parsing', $failures );
+	}
+
+	private static function check_unicode_recipient_handoff( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'is_email' ) || ! function_exists( 'wp_is_unicode_email' ) || ! class_exists( 'WP_Email_Address' ) ) {
+			return $ctx->skip( 'mail.phpmailer.unicode-recipient-handoff', 'Unicode email APIs are unavailable.' );
+		}
+
+		$failures          = array();
+		$token             = preg_replace( '/[^a-z0-9-]+/', '-', strtolower( $ctx->identifier( 4, 8 ) ) );
+		$token             = trim( (string) $token, '-' );
+		$token             = '' === $token ? 'mail' . ( $ctx->seed() % 10000 ) : $token;
+		$to_email          = "gr\u{00E5}-{$token}@example.test";
+		$cc_email          = "c\u{00E9}cile-{$token}@example.test";
+		$reply_email       = "r\u{00E9}ply-{$token}@example.test";
+		$to_name           = "Gr\u{00E5} Recipient";
+		$cc_name           = "C\u{00E9}cile Copy";
+		$reply_name        = "R\u{00E9}ply Contact";
+		$subject           = "Unicode Subject \u{2603} {$token}";
+		$message           = "Unicode body gr\u{00E5} c\u{00E9}cile \u{2603} {$token}";
+		$succeeded         = array();
+		$had_unicode_email = false !== \has_filter( 'is_email', 'wp_is_unicode_email' );
+		$previous_validator = \PHPMailer\PHPMailer\PHPMailer::$validator;
+		$success_action    = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+
+		if ( ! $had_unicode_email ) {
+			\add_filter( 'is_email', 'wp_is_unicode_email', 10, 3 );
+		}
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']    = self::new_mailer();
+		\PHPMailer\PHPMailer\PHPMailer::$validator = static function ( $email ): bool {
+			return (bool) \is_email( $email );
+		};
+		$to_address     = \WP_Email_Address::from_string( $to_email, 'unicode' );
+		$cc_address     = \WP_Email_Address::from_string( $cc_email, 'unicode' );
+		$reply_address  = \WP_Email_Address::from_string( $reply_email, 'unicode' );
+		$to_is_email    = \is_email( $to_email );
+		$cc_is_email    = \is_email( $cc_email );
+		$reply_is_email = \is_email( $reply_email );
+
+		\add_action( 'wp_mail_succeeded', $success_action );
+		try {
+			$result = \wp_mail(
+				array( $to_name . ' <' . $to_email . '>' ),
+				$subject,
+				$message,
+				array(
+					'From: Unicode Sender <unicode-sender@example.test>',
+					'Cc: ' . $cc_name . ' <' . $cc_email . '>',
+					'Reply-To: ' . $reply_name . ' <' . $reply_email . '>',
+					'Content-Type: text/plain; charset=UTF-8',
+					'X-Unicode-Token: ' . $token,
+				)
+			);
+		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+			\PHPMailer\PHPMailer\PHPMailer::$validator = $previous_validator;
+			if ( ! $had_unicode_email ) {
+				\remove_filter( 'is_email', 'wp_is_unicode_email', 10 );
+			}
+		}
+
+		$sent         = MailSurfaceMailer::$sent[0] ?? array();
+		$succeeded_to = (array) ( $succeeded[0]['to'] ?? array() );
+
+		self::collect_failure(
+			$failures,
+			$to_address instanceof \WP_Email_Address
+				&& $cc_address instanceof \WP_Email_Address
+				&& $reply_address instanceof \WP_Email_Address
+				&& $to_email === $to_is_email
+				&& $cc_email === $cc_is_email
+				&& $reply_email === $reply_is_email,
+			'generated UTF-8 local-part addresses are valid under the Unicode email filter',
+			array(
+				'to'      => self::describe_value( $to_address ),
+				'cc'      => self::describe_value( $cc_address ),
+				'replyTo' => self::describe_value( $reply_address ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $result
+				&& 1 === count( MailSurfaceMailer::$sent )
+				&& self::addresses_include( $sent['to'] ?? array(), $to_email, $to_name )
+				&& self::addresses_include( $sent['cc'] ?? array(), $cc_email, $cc_name )
+				&& self::addresses_include( $sent['replyTo'] ?? array(), $reply_email, $reply_name )
+				&& $subject === ( $sent['subject'] ?? null )
+				&& $message === ( $sent['body'] ?? null )
+				&& 'text/plain' === ( $sent['contentType'] ?? null )
+				&& 'UTF-8' === ( $sent['charset'] ?? null )
+				&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-Unicode-Token' )
+				&& 1 === count( $succeeded )
+				&& in_array( $to_name . ' <' . $to_email . '>', $succeeded_to, true )
+				&& false === \has_filter( 'wp_mail_succeeded', $success_action ),
+			'wp_mail hands UTF-8 local-part recipients, display names, subject, body, and headers to PHPMailer',
+			array(
+				'result'      => $result,
+				'sent'        => self::describe_value( $sent ),
+				'succeeded'   => self::describe_value( $succeeded ),
+				'filterState' => \has_filter( 'is_email', 'wp_is_unicode_email' ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.unicode-recipient-handoff', $failures );
 	}
 
 	private static function check_phpmailer_reuse_resets_message_state( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {

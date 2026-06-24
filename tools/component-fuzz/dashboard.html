@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7913 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7907 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, <code>assets</code> at 1300 passed, <code>media-editor</code> at 700 passed and 100 skipped, and <code>filesystem</code> at 1000 passed.</div>
+			<div class="note">Latest focused validations: <code>mail</code> at 800 passed, <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, <code>assets</code> at 1300 passed, and <code>media-editor</code> at 700 passed and 100 skipped.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -358,8 +358,8 @@
 					<td><code>mail</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7607 passed, 62 skipped, 0 failed.</td>
-					<td><code>wp_mail()</code>, PHPMailer state reuse, recipient/header parsing, attachments, embeds, success/failure hooks.</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7907 passed, 62 skipped, 0 failed.</td>
+					<td><code>wp_mail()</code>, PHPMailer state reuse, UTF-8 local-part recipient/display-name handoff, recipient/header parsing, attachments, embeds, success/failure hooks.</td>
 				</tr>
 				<tr>
 					<td><code>block-widgets</code></td>
@@ -1371,8 +1371,8 @@
 			<tbody>
 				<tr>
 					<td>Unicode email</td>
-					<td>Verified 24570 passed checks at 20 focused follow-up iterations, including Unicode-domain user lookups and password-reset recipient preservation; earlier 183696-row focused run covers machine/readable UTF-8 address views.</td>
-					<td>No real PHPMailer delivery or browser UI validation; direct validation, sanitization, structural views, user lookup behavior, and pre-send password-reset mail routing only.</td>
+					<td>Verified 24570 passed checks at 20 focused email iterations plus 800 passed no-delivery mail checks, including Unicode-domain user lookups, password-reset recipient preservation, and UTF-8 local-part PHPMailer handoff; earlier 183696-row focused run covers machine/readable UTF-8 address views.</td>
+					<td>No real PHPMailer delivery or browser UI validation; direct validation, sanitization, structural views, user lookup behavior, pre-send password-reset routing, and intercepted PHPMailer composition only.</td>
 				</tr>
 				<tr>
 					<td>Admin/browser flows</td>
