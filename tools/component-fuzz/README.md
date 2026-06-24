@@ -71,9 +71,9 @@ database, network requests, or a configured site.
   state restoration without admin upload/AJAX dispatch.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
-  sign-on cookie actions with cookie sending short-circuited, auth cookie
-  validation hooks/default parsing, current-user and cookie global restoration,
-  and session token lifecycle operations.
+  sign-on and clear-auth-cookie actions with cookie sending short-circuited,
+  auth cookie validation hooks/default parsing, current-user and cookie global
+  restoration, and session token lifecycle operations.
 - `blocks`: block parser/serializer round trips, optimized block detection,
   dynamic render filters, block type metadata, variations, hooks, style,
   pattern/category, bindings, and supports registries, including dynamic block

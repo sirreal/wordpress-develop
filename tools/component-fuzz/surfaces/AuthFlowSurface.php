@@ -49,6 +49,7 @@ final class AuthFlowSurface {
 			$rows[] = self::check_synthetic_user_rows( $ctx->fork( 'user-rows' ) );
 			$rows[] = self::check_authenticate_filter_and_password_paths( $ctx->fork( 'authenticate' ) );
 			$rows[] = self::check_signon_cookie_actions_without_headers( $ctx->fork( 'signon' ) );
+			$rows[] = self::check_clear_auth_cookie_without_headers( $ctx->fork( 'clear-cookie' ) );
 			$rows[] = self::check_cookie_authentication_paths( $ctx->fork( 'cookie-auth' ) );
 			$rows[] = self::check_auth_cookie_validation_events( $ctx->fork( 'cookie-events' ) );
 			$rows[] = self::check_session_token_lifecycle( $ctx->fork( 'session-lifecycle' ) );
@@ -203,6 +204,10 @@ final class AuthFlowSurface {
 				'userId'    => (int) $user->ID,
 			)
 		);
+	}
+
+	public static function action_clear_auth_cookie(): void {
+		self::record_event( 'clear_auth_cookie', array() );
 	}
 
 	public static function action_auth_cookie_malformed( string $cookie, string $scheme ): void {
@@ -563,6 +568,71 @@ final class AuthFlowSurface {
 		return self::row(
 			$ctx,
 			'auth-flow.signon-cookie-actions-no-headers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_clear_auth_cookie_without_headers( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_case_state();
+		self::clear_events();
+
+		$failures       = array();
+		$headers_before = function_exists( 'headers_list' ) ? headers_list() : array();
+		$cookie_value   = implode(
+			'|',
+			array(
+				str_replace( '|', '', $ctx->identifier( 4, 12 ) ),
+				(string) ( time() + HOUR_IN_SECONDS ),
+				str_replace( '|', '', $ctx->identifier( 4, 16 ) ),
+				str_replace( '|', '', $ctx->identifier( 8, 32 ) ),
+			)
+		);
+
+		$_COOKIE[ AUTH_COOKIE ]        = $cookie_value;
+		$_COOKIE[ SECURE_AUTH_COOKIE ] = strrev( $cookie_value );
+		$_COOKIE[ LOGGED_IN_COOKIE ]   = $cookie_value . '-logged-in';
+
+		\add_filter( 'send_auth_cookies', array( __CLASS__, 'filter_send_auth_cookies' ), 10, 6 );
+		\add_action( 'clear_auth_cookie', array( __CLASS__, 'action_clear_auth_cookie' ), 10, 0 );
+
+		try {
+			\wp_clear_auth_cookie();
+
+			$clear_events  = self::events( 'clear_auth_cookie' );
+			$send_events   = self::events( 'send_auth_cookies' );
+			$send_event    = $send_events[0] ?? array();
+			$headers_after = function_exists( 'headers_list' ) ? headers_list() : array();
+
+			self::collect_failure(
+				$failures,
+				1 === count( $clear_events )
+					&& 1 === count( $send_events )
+					&& true === ( $send_event['send'] ?? null )
+					&& 0 === ( $send_event['expire'] ?? null )
+					&& 0 === ( $send_event['expiration'] ?? null )
+					&& 0 === ( $send_event['userId'] ?? null )
+					&& '' === ( $send_event['scheme'] ?? null )
+					&& sha1( '' ) === ( $send_event['tokenSha1'] ?? null )
+					&& false === ( $send_event['returned'] ?? null )
+					&& $headers_before === $headers_after,
+				'wp_clear_auth_cookie fires clear action, zeroes send_auth_cookies fields, and short-circuits headers',
+				array(
+					'clearEvents'   => $clear_events,
+					'sendEvents'    => $send_events,
+					'headersBefore' => $headers_before,
+					'headersAfter'  => $headers_after,
+				)
+			);
+		} finally {
+			\remove_filter( 'send_auth_cookies', array( __CLASS__, 'filter_send_auth_cookies' ), 10 );
+			\remove_action( 'clear_auth_cookie', array( __CLASS__, 'action_clear_auth_cookie' ), 10 );
+			unset( $_COOKIE[ AUTH_COOKIE ], $_COOKIE[ SECURE_AUTH_COOKIE ], $_COOKIE[ LOGGED_IN_COOKIE ] );
+		}
+
+		return self::row(
+			$ctx,
+			'auth-flow.clear-auth-cookie-action-and-send-filter',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
