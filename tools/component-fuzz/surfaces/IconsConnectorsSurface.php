@@ -30,6 +30,7 @@ final class IconsConnectorsSurface {
 			return array(
 				self::check_connector_registry_lifecycle( $ctx->fork( 'connector-registry' ) ),
 				self::check_connector_init_settings_and_serialization( $ctx->fork( 'connector-init-settings' ) ),
+				self::check_connector_masking_and_file_mod_flags( $ctx->fork( 'connector-mask-filemods' ) ),
 				self::check_icon_registry_lifecycle( $ctx->fork( 'icon-registry' ) ),
 				self::check_rest_icons_controller( $ctx->fork( 'rest-icons' ) ),
 			);
@@ -656,6 +657,85 @@ final class IconsConnectorsSurface {
 		return self::result(
 			$ctx,
 			'icons-connectors.connectors.init-settings-rest-module-data',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_connector_masking_and_file_mod_flags( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$token         = strtolower( $ctx->identifier( 4, 10 ) );
+		$long_secret   = 'sk-' . $token . '-' . substr( hash( 'sha256', (string) $ctx->seed() ), 0, 28 );
+		$edge_secret   = substr( $token . 'abcde', 0, 5 );
+		$short_secrets = array(
+			'',
+			substr( $token . 'a', 0, 1 ),
+			substr( $token . 'abcd', 0, 4 ),
+		);
+
+		foreach ( $short_secrets as $secret ) {
+			self::collect_failure(
+				$failures,
+				$secret === \_wp_connectors_mask_api_key( $secret ),
+				'short connector API keys are not masked or expanded',
+				array(
+					'secretLength' => strlen( $secret ),
+					'masked'       => \_wp_connectors_mask_api_key( $secret ),
+				)
+			);
+		}
+
+		foreach ( array( $edge_secret, $long_secret ) as $secret ) {
+			$masked       = \_wp_connectors_mask_api_key( $secret );
+			$bullet_count = substr_count( $masked, "\u{2022}" );
+			self::collect_failure(
+				$failures,
+				substr( $secret, -4 ) === substr( $masked, -4 )
+					&& min( strlen( $secret ) - 4, 16 ) === $bullet_count
+					&& str_starts_with( $masked, "\u{2022}" )
+					&& ! str_contains( $masked, $secret ),
+				'connector API key masking preserves only the final four bytes and caps mask width',
+				array(
+					'secretLength' => strlen( $secret ),
+					'masked'       => $masked,
+					'bulletCount'  => $bullet_count,
+					'suffix'       => substr( $secret, -4 ),
+				)
+			);
+		}
+
+		$contexts        = array();
+		$file_mod_filter = static function ( bool $allowed, string $context ) use ( &$contexts ): bool {
+			$contexts[] = $context;
+			return 'install_plugins' === $context ? false : $allowed;
+		};
+
+		\add_filter( 'file_mod_allowed', $file_mod_filter, 10, 2 );
+		try {
+			$disabled_data = \_wp_connectors_get_connector_script_module_data( array() );
+		} finally {
+			\remove_filter( 'file_mod_allowed', $file_mod_filter, 10 );
+		}
+		$default_data = \_wp_connectors_get_connector_script_module_data( array() );
+
+		self::collect_failure(
+			$failures,
+			array( 'install_plugins' ) === $contexts
+				&& true === ( $disabled_data['isFileModDisabled'] ?? null )
+				&& false === ( $default_data['isFileModDisabled'] ?? null )
+				&& false === \has_filter( 'file_mod_allowed', $file_mod_filter ),
+			'connector module data reports file modification policy from the install_plugins context',
+			array(
+				'contexts'     => $contexts,
+				'disabledData' => $disabled_data,
+				'defaultData'  => $default_data,
+				'hasFilter'    => \has_filter( 'file_mod_allowed', $file_mod_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'icons-connectors.connectors.masking-file-mod-policy',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
