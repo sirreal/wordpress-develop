@@ -36,6 +36,7 @@ final class SyndicationSurface {
 			$rows[] = self::check_oembed_output_filters( $ctx->fork( 'output-filters' ) );
 			$rows[] = self::check_oembed_no_network_shortcuts( $ctx->fork( 'no-network' ) );
 			$rows[] = self::check_feed_helpers( $ctx->fork( 'feed-helpers' ) );
+			$rows[] = self::check_feed_link_generation( $ctx->fork( 'feed-links' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -88,7 +89,7 @@ final class SyndicationSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'SimpleXMLElement', 'WP_Embed', 'WP_oEmbed' ) as $class ) {
+		foreach ( array( 'SimpleXMLElement', 'WP_Embed', 'WP_oEmbed', 'WP_Post' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -99,12 +100,18 @@ final class SyndicationSurface {
 				'_oembed_create_xml',
 				'_oembed_filter_feed_content',
 				'add_filter',
+				'esc_attr',
+				'esc_html',
 				'feed_content_type',
 				'get_bloginfo_rss',
 				'get_default_feed',
+				'get_feed_link',
+				'get_post_comments_feed_link',
 				'get_self_link',
 				'has_filter',
+				'home_url',
 				'prep_atom_text_construct',
+				'post_comments_feed_link',
 				'remove_filter',
 				'self_link',
 				'wp_cache_delete',
@@ -906,6 +913,162 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function check_feed_link_generation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$post_id       = $ctx->int( 100000, 199999 );
+		$page_id       = $ctx->int( 200000, 299999 );
+		$attachment_id = $ctx->int( 300000, 399999 );
+		$missing_id    = $ctx->int( 400000, 499999 );
+		$marker        = self::slug( $ctx, 4, 12 );
+
+		$post       = self::cached_feed_post( $post_id, 'post' );
+		$page       = self::cached_feed_post( $page_id, 'page' );
+		$attachment = self::cached_feed_post( $attachment_id, 'attachment' );
+
+		$plain_permalink_filter = static fn (): string => '';
+		$link_filter_calls      = array();
+		$link_filter            = static function ( string $url ) use ( &$link_filter_calls, $marker ): string {
+			$link_filter_calls[] = $url;
+
+			return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . 'cfz=' . rawurlencode( $marker );
+		};
+
+		$html_filter_calls = array();
+		$html_filter       = static function (
+			string $link,
+			int $filtered_post_id,
+			string $feed
+		) use ( &$html_filter_calls, $marker ): string {
+			$html_filter_calls[] = array(
+				'link'   => $link,
+				'postId' => $filtered_post_id,
+				'feed'   => $feed,
+			);
+
+			return str_replace( '</a>', '<span data-cfz="' . \esc_attr( $marker ) . '"></span></a>', $link );
+		};
+
+		\wp_cache_set( $post_id, $post, 'posts' );
+		\wp_cache_set( $page_id, $page, 'posts' );
+		\wp_cache_set( $attachment_id, $attachment, 'posts' );
+		$GLOBALS['wp_rewrite'] = self::plain_rewrite_stub();
+		\add_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10, 3 );
+		\add_filter( 'pre_option_permalink_structure', $plain_permalink_filter );
+		$buffer_level = ob_get_level();
+		try {
+			$comments_atom_feed = \get_feed_link( 'comments_atom' );
+			$post_rss_feed      = \get_post_comments_feed_link( $post_id, 'rss2' );
+			$page_atom_feed     = \get_post_comments_feed_link( $page_id, 'atom' );
+			$attachment_feed    = \get_post_comments_feed_link( $attachment_id, 'atom' );
+			$missing_feed       = \get_post_comments_feed_link( $missing_id, 'rss2' );
+
+			\add_filter( 'post_comments_feed_link', $link_filter );
+			$filtered_post_feed = \get_post_comments_feed_link( $post_id, 'atom' );
+			\remove_filter( 'post_comments_feed_link', $link_filter );
+
+			$link_text = 'Comment feed <strong>' . \esc_html( $marker ) . '</strong> & raw';
+			\add_filter( 'post_comments_feed_link_html', $html_filter, 10, 3 );
+			ob_start();
+			\post_comments_feed_link( $link_text, $page_id, 'atom' );
+			$link_output = (string) ob_get_clean();
+			\remove_filter( 'post_comments_feed_link_html', $html_filter, 10 );
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'post_comments_feed_link', $link_filter );
+			\remove_filter( 'post_comments_feed_link_html', $html_filter, 10 );
+			\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter );
+			\remove_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10 );
+			\wp_cache_delete( $post_id, 'posts' );
+			\wp_cache_delete( $page_id, 'posts' );
+			\wp_cache_delete( $attachment_id, 'posts' );
+		}
+
+		$post_query       = self::query_args( $post_rss_feed ?? '' );
+		$page_query       = self::query_args( $page_atom_feed ?? '' );
+		$attachment_query = self::query_args( $attachment_feed ?? '' );
+		$filtered_query   = self::query_args( $filtered_post_feed ?? '' );
+
+		self::collect_failure(
+			$failures,
+			is_string( $comments_atom_feed ?? null )
+				&& str_starts_with( $comments_atom_feed, 'https://example.test' )
+				&& array( 'feed' => 'comments-atom' ) === self::query_args( $comments_atom_feed ),
+			'get_feed_link normalizes comments_* feed names in plain permalink mode',
+			array( 'commentsAtomFeed' => $comments_atom_feed ?? null )
+		);
+
+		self::collect_failure(
+			$failures,
+			'https' === parse_url( $post_rss_feed ?? '', PHP_URL_SCHEME )
+				&& 'example.test' === parse_url( $post_rss_feed ?? '', PHP_URL_HOST )
+				&& array(
+					'feed' => 'rss2',
+					'p'    => (string) $post_id,
+				) === $post_query
+				&& array(
+					'feed'    => 'atom',
+					'page_id' => (string) $page_id,
+				) === $page_query
+				&& array(
+					'attachment_id' => (string) $attachment_id,
+					'feed'          => 'atom',
+				) === $attachment_query
+				&& '' === $missing_feed,
+			'post comment feed links use the correct plain-query key for posts, pages, unattached attachments, and missing posts',
+			array(
+				'postFeed'       => $post_rss_feed ?? null,
+				'pageFeed'       => $page_atom_feed ?? null,
+				'attachmentFeed' => $attachment_feed ?? null,
+				'missingFeed'    => $missing_feed ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				'cfz'  => $marker,
+				'feed' => 'atom',
+				'p'    => (string) $post_id,
+			) === $filtered_query
+				&& 1 === count( $link_filter_calls )
+				&& false === \has_filter( 'post_comments_feed_link', $link_filter, 10 ),
+			'post_comments_feed_link filter receives the generated URL and remains local',
+			array(
+				'filteredPostFeed' => $filtered_post_feed ?? null,
+				'filterCalls'      => $link_filter_calls,
+				'filterActive'     => \has_filter( 'post_comments_feed_link', $link_filter, 10 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $link_output ?? null )
+				&& str_contains( $link_output, 'href="' . \esc_url( $page_atom_feed ?? '' ) . '"' )
+				&& str_contains( $link_output, $link_text )
+				&& str_contains( $link_output, '<span data-cfz="' . \esc_attr( $marker ) . '"></span>' )
+				&& 1 === count( $html_filter_calls )
+				&& $page_id === $html_filter_calls[0]['postId']
+				&& 'atom' === $html_filter_calls[0]['feed']
+				&& false === \has_filter( 'post_comments_feed_link_html', $html_filter, 10 ),
+			'post_comments_feed_link emits escaped hrefs, preserves caller link text, and scopes the HTML filter',
+			array(
+				'linkOutput'      => self::describe_string( is_string( $link_output ?? null ) ? $link_output : '' ),
+				'htmlFilterCalls' => $html_filter_calls,
+				'filterActive'    => \has_filter( 'post_comments_feed_link_html', $html_filter, 10 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'syndication.feed.link-generation-and-filters',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function slug( \ComponentFuzz\FuzzContext $ctx, int $min = 3, int $max = 12 ): string {
 		$raw  = strtolower( $ctx->identifier( $min, $max ) );
 		$slug = (string) preg_replace( '/[^a-z0-9-]+/', '-', $raw );
@@ -947,6 +1110,59 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function cached_feed_post( int $post_id, string $post_type, int $post_parent = 0 ): object {
+		return (object) array(
+			'ID'                    => $post_id,
+			'post_author'           => 0,
+			'post_date'             => '2024-01-01 00:00:00',
+			'post_date_gmt'         => '2024-01-01 00:00:00',
+			'post_content'          => '',
+			'post_title'            => 'Syndication Feed Post ' . $post_id,
+			'post_excerpt'          => '',
+			'post_status'           => 'publish',
+			'comment_status'        => 'open',
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => 'syndication-feed-post-' . $post_id,
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => '2024-01-01 00:00:00',
+			'post_modified_gmt'     => '2024-01-01 00:00:00',
+			'post_content_filtered' => '',
+			'post_parent'           => $post_parent,
+			'guid'                  => '',
+			'menu_order'            => 0,
+			'post_type'             => $post_type,
+			'post_mime_type'        => 'attachment' === $post_type ? 'image/jpeg' : '',
+			'comment_count'         => 0,
+			'filter'                => 'raw',
+		);
+	}
+
+	private static function query_args( string $url ): array {
+		$query = parse_url( html_entity_decode( $url, ENT_QUOTES, 'UTF-8' ), PHP_URL_QUERY );
+		if ( ! is_string( $query ) ) {
+			return array();
+		}
+
+		$args = array();
+		parse_str( $query, $args );
+		ksort( $args );
+		return array_map( 'strval', $args );
+	}
+
+	private static function plain_rewrite_stub(): object {
+		return new class() {
+			public function get_feed_permastruct(): string {
+				return '';
+			}
+
+			public function get_comment_feed_permastruct(): string {
+				return '';
+			}
+		};
+	}
+
 	private static function reset_runtime(): void {
 		global $wp_embed;
 
@@ -970,6 +1186,7 @@ final class SyndicationSurface {
 					'wp_embed',
 					'wp_filter',
 					'wp_filters',
+					'wp_rewrite',
 				)
 			),
 			'server'         => array(
