@@ -28,6 +28,7 @@ final class InstallSchemaSurface {
 
 		try {
 			$rows[] = self::check_wp_get_db_schema_table_sets( $ctx );
+			$rows[] = self::check_make_db_current_scope_wrappers( $ctx );
 			$rows[] = self::check_create_table_parser_variants( $ctx );
 			$rows[] = self::check_dbdelta_equivalent_noops( $ctx );
 			$rows[] = self::check_dbdelta_column_change_isolation( $ctx );
@@ -84,6 +85,8 @@ final class InstallSchemaSurface {
 				'apply_filters',
 				'dbDelta',
 				'is_multisite',
+				'make_db_current',
+				'make_db_current_silent',
 				'wp_get_db_schema',
 				'wp_should_upgrade_global_tables',
 			) as $function
@@ -164,6 +167,104 @@ final class InstallSchemaSurface {
 
 		return $ctx->result(
 			'install-schema.wp-get-db-schema-table-sets-and-prefixes',
+			$result['ok'],
+			$result
+		);
+	}
+
+	private static function check_make_db_current_scope_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$prefix = self::prefix_for_context( $ctx->fork( 'make-db-current-prefix' ) );
+		$wpdb   = new InstallSchemaWpdbDouble( $prefix );
+		$scopes = array_values(
+			array_unique(
+				array(
+					'blog',
+					'global',
+					'ms_global',
+					'all',
+					$ctx->choice( array( 'blog', 'global', 'ms_global', 'all' ) ),
+				)
+			)
+		);
+
+		$result = self::with_wpdb(
+			$wpdb,
+			static function () use ( $scopes ): array {
+				$observed = array();
+				$failures = array();
+
+				foreach ( $scopes as $scope ) {
+					$expected_tables = self::create_table_names( wp_get_db_schema( $scope ) );
+					sort( $expected_tables );
+
+					$silent = self::capture_make_db_current_call(
+						static function () use ( $scope ): void {
+							make_db_current_silent( $scope );
+						}
+					);
+
+					$noisy = self::capture_make_db_current_call(
+						static function () use ( $scope ): void {
+							make_db_current( $scope );
+						}
+					);
+
+					$silent_tables = $silent['tables'];
+					$noisy_tables  = $noisy['tables'];
+					sort( $silent_tables );
+					sort( $noisy_tables );
+
+					$observed[ $scope ] = array(
+						'expectedTables' => $expected_tables,
+						'silentTables'   => $silent_tables,
+						'noisyTables'    => $noisy_tables,
+						'silentOutput'   => $silent['output'],
+						'noisyOutput'    => $noisy['output'],
+						'silentCalls'    => $silent['calls'],
+						'noisyCalls'     => $noisy['calls'],
+					);
+
+					if ( $expected_tables !== $silent_tables || $expected_tables !== $noisy_tables ) {
+						$failures[] = array(
+							'scope'    => $scope,
+							'reason'   => 'schema-scope-table-set-mismatch',
+							'expected' => $expected_tables,
+							'silent'   => $silent_tables,
+							'noisy'    => $noisy_tables,
+						);
+						continue;
+					}
+
+					if ( 1 !== $silent['calls'] || 1 !== $noisy['calls'] ) {
+						$failures[] = array(
+							'scope'       => $scope,
+							'reason'      => 'dbdelta-filter-call-count-mismatch',
+							'silentCalls' => $silent['calls'],
+							'noisyCalls'  => $noisy['calls'],
+						);
+						continue;
+					}
+
+					if ( '' !== $silent['output'] || "<ol>\n</ol>\n" !== $noisy['output'] ) {
+						$failures[] = array(
+							'scope'        => $scope,
+							'reason'       => 'wrapper-output-mismatch',
+							'silentOutput' => $silent['output'],
+							'noisyOutput'  => $noisy['output'],
+						);
+					}
+				}
+
+				return array(
+					'ok'       => array() === $failures,
+					'observed' => $observed,
+					'failures' => array_slice( $failures, 0, self::MAX_FAILURES ),
+				);
+			}
+		);
+
+		return $ctx->result(
+			'install-schema.make-db-current-wrappers-preserve-schema-scopes',
 			$result['ok'],
 			$result
 		);
@@ -1006,6 +1107,43 @@ final class InstallSchemaSurface {
 		}
 
 		return $escaped;
+	}
+
+	private static function capture_make_db_current_call( callable $callback ): array {
+		$tables = array();
+		$calls  = 0;
+		$filter = static function ( array $queries ) use ( &$tables, &$calls ): array {
+			$calls++;
+			foreach ( $queries as $query ) {
+				$parsed = self::parse_create_tables( (string) $query );
+				$tables = array_merge( $tables, array_keys( $parsed['tables'] ) );
+			}
+
+			return array();
+		};
+
+		add_filter( 'dbdelta_queries', $filter, PHP_INT_MAX );
+		$output         = '';
+		$buffer_started = false;
+
+		try {
+			ob_start();
+			$buffer_started = true;
+			$callback();
+			$output         = (string) ob_get_clean();
+			$buffer_started = false;
+		} finally {
+			if ( $buffer_started && ob_get_level() > 0 ) {
+				ob_end_clean();
+			}
+			remove_filter( 'dbdelta_queries', $filter, PHP_INT_MAX );
+		}
+
+		return array(
+			'tables' => $tables,
+			'calls'  => $calls,
+			'output' => $output,
+		);
 	}
 
 	private static function with_wpdb( InstallSchemaWpdbDouble $wpdb, callable $callback ) {

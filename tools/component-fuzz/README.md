@@ -224,9 +224,10 @@ database, network requests, or a configured site.
   rendering/escaping/normalization, and `WP_Error` export/merge/remove
   transfer semantics.
 - `install-schema`: no-DB install and upgrade schema coverage, including
-  `wp_get_db_schema()` table sets, `dbDelta()` CREATE TABLE parsing,
-  equivalent-schema no-ops, isolated column/index diffs, SQL table allowlists,
-  and malformed DDL fail-closed behavior.
+  `wp_get_db_schema()` table sets, `make_db_current()`/silent wrapper scope
+  expansion, `dbDelta()` CREATE TABLE parsing, equivalent-schema no-ops,
+  isolated column/index diffs, SQL table allowlists, and malformed DDL
+  fail-closed behavior.
 - `interactivity`: server-side directive processing for context, bind, class,
   style, text, and each directives, explicit namespace/negation/length
   evaluation, script-module router metadata, unsupported/unbalanced HTML
