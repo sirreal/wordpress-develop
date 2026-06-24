@@ -506,37 +506,63 @@ function _wp_utf8_decode_fallback( $utf8_text ) {
 			continue;
 		}
 
-		$next_at        = $at;
 		$invalid_length = 0;
-		$found          = _wp_scan_utf8( $utf8_text, $next_at, $invalid_length, null, 1 );
-		$span_length    = $next_at - $at;
+		$span_length    = 0;
 		$next_byte      = '?';
+		$byte1          = ord( $utf8_text[ $at ] );
+		$byte2          = ord( $utf8_text[ $at + 1 ] ?? "\xC0" );
+		$byte3          = ord( $utf8_text[ $at + 2 ] ?? "\xC0" );
+		$byte4          = ord( $utf8_text[ $at + 3 ] ?? "\xC0" );
 
-		if ( 1 !== $found ) {
-			if ( $invalid_length > 0 ) {
-				$next_byte = '';
-				goto flush_sub_part;
+		if ( $byte1 >= 0xC2 && $byte1 <= 0xDF && $byte2 >= 0x80 && $byte2 <= 0xBF ) {
+			$span_length = 2;
+			$code_point  = ( ( $byte1 & 0x1F ) << 6 ) | ( $byte2 & 0x3F );
+			$next_byte   = $code_point <= 0xFF ? chr( $code_point ) : '?';
+		} elseif (
+			$byte3 >= 0x80 && $byte3 <= 0xBF &&
+			(
+				( 0xE0 === $byte1 && $byte2 >= 0xA0 && $byte2 <= 0xBF ) ||
+				( $byte1 >= 0xE1 && $byte1 <= 0xEC && $byte2 >= 0x80 && $byte2 <= 0xBF ) ||
+				( 0xED === $byte1 && $byte2 >= 0x80 && $byte2 <= 0x9F ) ||
+				( $byte1 >= 0xEE && $byte1 <= 0xEF && $byte2 >= 0x80 && $byte2 <= 0xBF )
+			)
+		) {
+			$span_length = 3;
+		} elseif (
+			$byte3 >= 0x80 && $byte3 <= 0xBF &&
+			$byte4 >= 0x80 && $byte4 <= 0xBF &&
+			(
+				( 0xF0 === $byte1 && $byte2 >= 0x90 && $byte2 <= 0xBF ) ||
+				( $byte1 >= 0xF1 && $byte1 <= 0xF3 && $byte2 >= 0x80 && $byte2 <= 0xBF ) ||
+				( 0xF4 === $byte1 && $byte2 >= 0x80 && $byte2 <= 0x8F )
+			)
+		) {
+			$span_length = 4;
+		} else {
+			$next_byte      = '';
+			$invalid_length = 1;
+
+			if ( 0xE0 === ( $byte1 & 0xF0 ) ) {
+				$byte2_valid = (
+					( 0xE0 === $byte1 && $byte2 >= 0xA0 && $byte2 <= 0xBF ) ||
+					( $byte1 >= 0xE1 && $byte1 <= 0xEC && $byte2 >= 0x80 && $byte2 <= 0xBF ) ||
+					( 0xED === $byte1 && $byte2 >= 0x80 && $byte2 <= 0x9F ) ||
+					( $byte1 >= 0xEE && $byte1 <= 0xEF && $byte2 >= 0x80 && $byte2 <= 0xBF )
+				);
+
+				$invalid_length = min( $end - $at, $byte2_valid ? 2 : 1 );
+			} elseif ( 0xF0 === ( $byte1 & 0xF8 ) ) {
+				$byte2_valid = (
+					( 0xF0 === $byte1 && $byte2 >= 0x90 && $byte2 <= 0xBF ) ||
+					( $byte1 >= 0xF1 && $byte1 <= 0xF3 && $byte2 >= 0x80 && $byte2 <= 0xBF ) ||
+					( 0xF4 === $byte1 && $byte2 >= 0x80 && $byte2 <= 0x8F )
+				);
+				$byte3_valid = $byte3 >= 0x80 && $byte3 <= 0xBF;
+
+				$invalid_length = min( $end - $at, $byte2_valid ? ( $byte3_valid ? 3 : 2 ) : 1 );
 			}
-
-			break;
 		}
 
-		// All convertible code points are two-bytes long.
-		$byte1 = ord( $utf8_text[ $at ] );
-		if ( 0xC0 !== ( $byte1 & 0xE0 ) ) {
-			goto flush_sub_part;
-		}
-
-		// All convertible code points are not greater than U+FF.
-		$byte2      = ord( $utf8_text[ $at + 1 ] );
-		$code_point = ( ( $byte1 & 0x1F ) << 6 ) | ( ( $byte2 & 0x3F ) );
-		if ( $code_point > 0xFF ) {
-			goto flush_sub_part;
-		}
-
-		$next_byte = chr( $code_point );
-
-		flush_sub_part:
 		$iso_8859_1_text .= substr( $utf8_text, $was_at, $at - $was_at );
 		$iso_8859_1_text .= $next_byte;
 		$at              += $span_length;

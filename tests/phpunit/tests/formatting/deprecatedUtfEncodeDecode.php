@@ -58,9 +58,9 @@ class Tests_DeprecatedUtf8EncodeDecodeTest extends WP_UnitTestCase {
 	 * @ticket 63863.
 	 */
 	public function test_utf8_decode_characters() {
-		for ( $i = 0; $i <= 0x10FFFF; $i++ ) {
-			$hex_i = strtoupper( str_pad( dechex( $i ), 2, '0', STR_PAD_LEFT ) );
+		$input = '';
 
+		for ( $i = 0; $i <= 0x10FFFF; $i++ ) {
 			if ( $i < 0xD800 || $i > 0xE000 ) {
 				$c = mb_chr( $i );
 			} else {
@@ -75,12 +75,14 @@ class Tests_DeprecatedUtf8EncodeDecodeTest extends WP_UnitTestCase {
 				$c = "{$byte1}{$byte2}{$byte3}";
 			}
 
-			$this->assertSame(
-				bin2hex( mb_convert_encoding( $c, 'ISO-8859-1', 'UTF-8' ) ),
-				bin2hex( _wp_utf8_decode_fallback( $c ) ),
-				"Failed to convert U+{$hex_i} properly."
-			);
+			$input .= "{$c} ";
 		}
+
+		$this->assertSame(
+			bin2hex( mb_convert_encoding( $input, 'ISO-8859-1', 'UTF-8' ) ),
+			bin2hex( _wp_utf8_decode_fallback( $input ) ),
+			'Failed to convert all Unicode code points properly.'
+		);
 	}
 
 	/**

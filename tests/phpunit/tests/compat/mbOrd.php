@@ -22,15 +22,15 @@ class Tests_Compat_mbOrd extends WP_UnitTestCase {
 			 * and spot-check an unpaired and incorrectly-converted surrogate
 			 * half below.
 			 */
-			if ( false !== mb_chr( $code_point ) ) {
-				$this->assertSame(
-					$code_point,
-					_mb_ord( mb_chr( $code_point ) ),
-					'Failed to properly decode the code point from the string.'
-				);
+			$char = mb_chr( $code_point );
+
+			if ( false !== $char && $code_point !== _mb_ord( $char ) ) {
+				$hex_char = strtoupper( str_pad( dechex( $code_point ), 4, '0', STR_PAD_LEFT ) );
+				$this->fail( "Failed to properly decode U+{$hex_char} from the string." );
 			}
 		}
 
+		$this->assertTrue( true, 'All valid code points were decoded properly.' );
 		$this->assertFalse( _mb_ord( '' ), 'Should have failed on empty string.' );
 		$this->assertFalse( _mb_ord( 'hi', 'latin1' ), 'Should have rejected non-UTF-8 encoding.' );
 		$this->assertFalse( _mb_ord( 'hi', 'utf8' ), 'Should have rejected non-UTF-8 encoding.' );
