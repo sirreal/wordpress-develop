@@ -31,6 +31,7 @@ final class TemplateHierarchySurface {
 
 			$rows[] = self::check_locate_template_priority( $ctx->fork( 'locate' ), $case );
 			$rows[] = self::check_get_query_template_filters( $ctx->fork( 'query-template' ), $case );
+			$rows[] = self::check_direct_template_helpers_and_theme_paths( $ctx->fork( 'direct-templates' ), $case );
 			$rows[] = self::check_get_single_template_hierarchy( $ctx->fork( 'single-template' ), $case );
 			$rows[] = self::check_load_template_include_semantics( $ctx->fork( 'load-template' ), $case );
 			$rows[] = self::check_get_template_part_hooks_and_args( $ctx->fork( 'template-part' ), $case );
@@ -68,9 +69,19 @@ final class TemplateHierarchySurface {
 			array(
 				'add_filter',
 				'comments_template',
+				'get_404_template',
+				'get_archive_template',
+				'get_embed_template',
+				'get_page_template',
 				'get_query_template',
+				'get_search_template',
 				'get_single_template',
+				'get_stylesheet',
+				'get_stylesheet_directory',
+				'get_template',
+				'get_template_directory',
 				'get_template_part',
+				'get_theme_root',
 				'locate_template',
 				'load_template',
 				'remove_filter',
@@ -94,6 +105,14 @@ final class TemplateHierarchySurface {
 		$shared     = \locate_template( array( 'missing.php', 'shared.php' ) );
 		$parent     = \locate_template( array( 'parent-only.php' ) );
 		$empty      = \locate_template( array( '', 'absent.php' ) );
+		unset( $GLOBALS['cfz_template_hierarchy_loaded'] );
+		$no_load    = self::capture_output(
+			static function (): void {
+				\locate_template( array( 'shared.php' ), false );
+			}
+		);
+		$no_load_events = $GLOBALS['cfz_template_hierarchy_loaded'] ?? array();
+		unset( $GLOBALS['cfz_template_hierarchy_loaded'] );
 		$loaded_out = self::capture_output(
 			static function () use ( $case ): void {
 				\locate_template(
@@ -118,6 +137,16 @@ final class TemplateHierarchySurface {
 				'parent' => $parent,
 				'empty'  => $empty,
 				'roots'  => array( $case['paths']['child'], $case['paths']['parent'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $no_load && array() === $no_load_events,
+			'locate_template does not include located files when load is false',
+			array(
+				'output' => self::describe_string( $no_load ),
+				'loaded' => $no_load_events,
 			)
 		);
 
@@ -202,6 +231,246 @@ final class TemplateHierarchySurface {
 			'template-hierarchy.get-query-template-filter-contract',
 			$failures,
 			array( 'preferred' => $preferred )
+		);
+	}
+
+	private static function check_direct_template_helpers_and_theme_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_template_globals();
+
+		$failures      = array();
+		$observed      = array();
+		$directory_log = array();
+		$types         = array( 'archive', 'page', 'search', '404', 'embed' );
+		$filters       = array();
+
+		foreach ( $types as $type ) {
+			$hierarchy_filter = static function ( array $templates ) use ( &$observed, $type ): array {
+				$observed[ $type ]['hierarchy'][] = $templates;
+				return $templates;
+			};
+			$template_filter  = static function ( string $template, string $seen_type, array $templates ) use ( &$observed, $type ): string {
+				$observed[ $type ]['template'][] = array(
+					'template'  => $template,
+					'type'      => $seen_type,
+					'templates' => $templates,
+				);
+				return $template;
+			};
+
+			\add_filter( "{$type}_template_hierarchy", $hierarchy_filter );
+			\add_filter( "{$type}_template", $template_filter, 10, 3 );
+			$filters[] = array( "{$type}_template_hierarchy", $hierarchy_filter );
+			$filters[] = array( "{$type}_template", $template_filter );
+		}
+
+		$stylesheet_directory_filter = static function ( string $stylesheet_dir, string $stylesheet, string $theme_root ) use ( &$directory_log ): string {
+			$directory_log[] = array(
+				'hook'      => 'stylesheet',
+				'directory' => $stylesheet_dir,
+				'theme'     => $stylesheet,
+				'root'      => $theme_root,
+			);
+			return $stylesheet_dir;
+		};
+		$template_directory_filter   = static function ( string $template_dir, string $template, string $theme_root ) use ( &$directory_log ): string {
+			$directory_log[] = array(
+				'hook'      => 'template',
+				'directory' => $template_dir,
+				'theme'     => $template,
+				'root'      => $theme_root,
+			);
+			return $template_dir;
+		};
+
+		\add_filter( 'stylesheet_directory', $stylesheet_directory_filter, 10, 3 );
+		\add_filter( 'template_directory', $template_directory_filter, 10, 3 );
+
+		$meta_filter = null;
+
+		try {
+			$stylesheet           = \get_stylesheet();
+			$template             = \get_template();
+			$theme_root           = \get_theme_root( $stylesheet );
+			$stylesheet_directory = \get_stylesheet_directory();
+			$template_directory   = \get_template_directory();
+			\wp_set_template_globals();
+			$wp_stylesheet_path = $GLOBALS['wp_stylesheet_path'] ?? null;
+			$wp_template_path   = $GLOBALS['wp_template_path'] ?? null;
+
+			$expected_directory_log = array(
+				array(
+					'hook'      => 'stylesheet',
+					'directory' => $case['paths']['child'],
+					'theme'     => $case['theme']['child'],
+					'root'      => $case['paths']['themes'],
+				),
+				array(
+					'hook'      => 'template',
+					'directory' => $case['paths']['parent'],
+					'theme'     => $case['theme']['parent'],
+					'root'      => $case['paths']['themes'],
+				),
+				array(
+					'hook'      => 'stylesheet',
+					'directory' => $case['paths']['child'],
+					'theme'     => $case['theme']['child'],
+					'root'      => $case['paths']['themes'],
+				),
+				array(
+					'hook'      => 'template',
+					'directory' => $case['paths']['parent'],
+					'theme'     => $case['theme']['parent'],
+					'root'      => $case['paths']['themes'],
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				$case['theme']['child'] === $stylesheet
+					&& $case['theme']['parent'] === $template
+					&& $case['paths']['themes'] === $theme_root
+					&& $case['paths']['child'] === $stylesheet_directory
+					&& $case['paths']['parent'] === $template_directory
+					&& $case['paths']['child'] === $wp_stylesheet_path
+					&& $case['paths']['parent'] === $wp_template_path
+					&& $expected_directory_log === $directory_log,
+				'stylesheet/template helpers keep child and parent paths distinct under the generated theme root',
+				array(
+					'stylesheet'       => $stylesheet,
+					'template'         => $template,
+					'themeRoot'        => $theme_root,
+					'stylesheetDir'    => $stylesheet_directory,
+					'templateDir'      => $template_directory,
+					'wpStylesheetPath' => $wp_stylesheet_path,
+					'wpTemplatePath'   => $wp_template_path,
+					'directoryLog'     => $directory_log,
+				)
+			);
+
+			$archive_type     = 'report-' . self::safe_fragment( $ctx->fork( 'archive-type' ), 7 );
+			$archive_template = "archive-{$archive_type}.php";
+			self::write_template_file( $case['paths']['child'] . '/' . $archive_template, 'archive-type' );
+			self::write_template_file( $case['paths']['parent'] . '/archive.php', 'archive-fallback' );
+			self::set_query_context( array( 'post_type' => array( $archive_type ) ), null, array( 'is_archive' => true ) );
+			$archive = \get_archive_template();
+
+			$page_id           = $ctx->fork( 'page-id' )->int( 2000, 9999 );
+			$page_slug_raw     = 'landing-' . self::safe_fragment( $ctx->fork( 'page-a' ), 5 ) . '%2b' . self::safe_fragment( $ctx->fork( 'page-b' ), 5 );
+			$page_slug_decoded = urldecode( $page_slug_raw );
+			$page_post         = self::make_post( $page_id, 'page', $page_slug_decoded );
+			$page_template     = "page-{$page_slug_decoded}.php";
+			self::write_template_file( $case['paths']['child'] . '/' . $page_template, 'page-decoded' );
+			self::write_template_file( $case['paths']['parent'] . "/page-{$page_slug_raw}.php", 'page-raw' );
+			self::write_template_file( $case['paths']['parent'] . "/page-{$page_id}.php", 'page-id' );
+			self::write_template_file( $case['paths']['parent'] . '/page.php', 'page-fallback' );
+
+			$meta_filter = static function ( $value, $object_id, $meta_key, $single ) use ( $page_id ) {
+				if ( (int) $object_id === $page_id && '_wp_page_template' === $meta_key && $single ) {
+					return 'default';
+				}
+				return $value;
+			};
+			\add_filter( 'get_post_metadata', $meta_filter, 10, 4 );
+
+			self::set_query_context(
+				array( 'pagename' => $page_slug_raw ),
+				$page_post,
+				array(
+					'is_page'     => true,
+					'is_singular' => true,
+				)
+			);
+			$page = \get_page_template();
+
+			self::write_template_file( $case['paths']['child'] . '/search.php', 'search-child' );
+			self::set_query_context( array( 's' => 'lookup-' . $case['token'] ), null, array( 'is_search' => true ) );
+			$search = \get_search_template();
+
+			self::write_template_file( $case['paths']['child'] . '/404.php', '404-child' );
+			self::set_query_context( array(), null, array( 'is_404' => true ) );
+			$not_found = \get_404_template();
+
+			$embed_type     = 'clip-' . self::safe_fragment( $ctx->fork( 'embed-type' ), 7 );
+			$embed_template = "embed-{$embed_type}.php";
+			$embed_post     = self::make_post( $ctx->fork( 'embed-id' )->int( 10000, 19999 ), $embed_type, 'embedded-' . self::safe_fragment( $ctx->fork( 'embed-name' ), 6 ) );
+			self::write_template_file( $case['paths']['child'] . '/' . $embed_template, 'embed-type' );
+			self::write_template_file( $case['paths']['parent'] . '/embed.php', 'embed-fallback' );
+			self::set_query_context( array(), $embed_post, array( 'is_singular' => true ) );
+			$embed = \get_embed_template();
+		} finally {
+			foreach ( $filters as $filter ) {
+				\remove_filter( $filter[0], $filter[1], 10 );
+			}
+			\remove_filter( 'stylesheet_directory', $stylesheet_directory_filter, 10 );
+			\remove_filter( 'template_directory', $template_directory_filter, 10 );
+			if ( null !== $meta_filter ) {
+				\remove_filter( 'get_post_metadata', $meta_filter, 10 );
+			}
+		}
+
+		$selected = array(
+			'archive' => $archive,
+			'page'    => $page,
+			'search'  => $search,
+			'404'     => $not_found,
+			'embed'   => $embed,
+		);
+		$expected_basenames = array(
+			'archive' => $archive_template,
+			'page'    => $page_template,
+			'search'  => 'search.php',
+			'404'     => '404.php',
+			'embed'   => $embed_template,
+		);
+		self::collect_failure(
+			$failures,
+			$expected_basenames === self::path_basenames( $selected )
+				&& self::all_paths_in_theme_roots( $selected, $case ),
+			'direct template helpers select expected basenames and stay confined to generated theme paths',
+			array(
+				'selected' => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+				'expected' => $expected_basenames,
+			)
+		);
+
+		$expected_hierarchies = array(
+			'archive' => array( $archive_template, 'archive.php' ),
+			'page'    => array( $page_template, "page-{$page_slug_raw}.php", "page-{$page_id}.php", 'page.php' ),
+			'search'  => array( 'search.php' ),
+			'404'     => array( '404.php' ),
+			'embed'   => array( $embed_template, 'embed.php' ),
+		);
+		$template_contracts   = array();
+		foreach ( $expected_hierarchies as $type => $templates ) {
+			$type_name      = (string) $type;
+			$hierarchy_seen = $observed[ $type ]['hierarchy'][0] ?? null;
+			$template_seen  = $observed[ $type ]['template'][0] ?? null;
+			$template_contracts[ $type ] = array(
+				'hierarchy' => $hierarchy_seen,
+				'template'  => $template_seen,
+			);
+			self::collect_failure(
+				$failures,
+				$templates === $hierarchy_seen
+					&& is_array( $template_seen )
+					&& $type_name === $template_seen['type']
+					&& $templates === $template_seen['templates']
+					&& ( $selected[ $type ] ?? null ) === $template_seen['template'],
+				"{$type_name} template filters receive local hierarchy and selected path arguments",
+				array(
+					'expected' => $templates,
+					'seen'     => $template_contracts[ $type ],
+				)
+			);
+		}
+
+		return self::result(
+			'template-hierarchy.direct-template-helper-paths-and-filters',
+			$failures,
+			array(
+				'selected'  => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+				'contracts' => $template_contracts,
+			)
 		);
 	}
 
@@ -355,7 +624,7 @@ final class TemplateHierarchySurface {
 		self::collect_failure(
 			$failures,
 			6 === count( $events )
-				&& array( 'before', 'after', 'before', 'after', 'before', 'after' ) === array_column( $events, 'hook')
+				&& array( 'before', 'after', 'before', 'after', 'before', 'after' ) === array_column( $events, 'hook' )
 				&& array( true, true, true, true, false, false ) === array_column( $events, 'loadOnce' ),
 			'load_template before/after hooks fire for each call with load_once metadata',
 			array( 'events' => $events )
@@ -694,6 +963,56 @@ PHP
 		}
 	}
 
+	private static function set_query_context( array $query_vars = array(), $post = null, array $flags = array() ): void {
+		$query             = new \WP_Query();
+		$query->query_vars = $query_vars;
+
+		foreach ( $flags as $flag => $value ) {
+			$query->{$flag} = $value;
+		}
+
+		if ( $post instanceof \WP_Post ) {
+			$query->post     = $post;
+			$GLOBALS['post'] = $post;
+		} else {
+			unset( $GLOBALS['post'] );
+		}
+
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+	}
+
+	private static function make_post( int $id, string $post_type, string $post_name ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => 1,
+				'post_date'             => '2026-06-23 12:00:00',
+				'post_date_gmt'         => '2026-06-23 10:00:00',
+				'post_content'          => 'Template hierarchy direct helper host',
+				'post_title'            => 'Template hierarchy direct helper host',
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'open',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => $post_name,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-23 12:00:00',
+				'post_modified_gmt'     => '2026-06-23 10:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'https://example.test/template-hierarchy-direct',
+				'menu_order'            => 0,
+				'post_type'             => $post_type,
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+				'filter'                => 'raw',
+			)
+		);
+	}
+
 	private static function capture_output( callable $callback ): string {
 		$level = ob_get_level();
 		ob_start();
@@ -773,12 +1092,46 @@ PHP
 			|| str_starts_with( $path, ABSPATH . WPINC . '/theme-compat/' );
 	}
 
+	private static function all_paths_in_theme_roots( array $paths, array $case ): bool {
+		foreach ( $paths as $path ) {
+			if (
+				! is_string( $path )
+				|| (
+					! str_starts_with( $path, $case['paths']['child'] . '/' )
+					&& ! str_starts_with( $path, $case['paths']['parent'] . '/' )
+				)
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function relative_to_root( string $path, string $root ): string {
 		if ( str_starts_with( $path, $root . '/' ) ) {
 			return substr( $path, strlen( $root ) + 1 );
 		}
 
 		return $path;
+	}
+
+	private static function relative_paths_to_root( array $paths, string $root ): array {
+		$relative = array();
+		foreach ( $paths as $name => $path ) {
+			$relative[ $name ] = is_string( $path ) ? self::relative_to_root( $path, $root ) : $path;
+		}
+
+		return $relative;
+	}
+
+	private static function path_basenames( array $paths ): array {
+		$basenames = array();
+		foreach ( $paths as $name => $path ) {
+			$basenames[ $name ] = is_string( $path ) ? basename( $path ) : $path;
+		}
+
+		return $basenames;
 	}
 
 	private static function describe_string( string $value ): array {
