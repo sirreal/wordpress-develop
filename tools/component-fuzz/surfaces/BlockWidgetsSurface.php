@@ -410,7 +410,7 @@ final class BlockWidgetsSurface {
 				'content' => $content,
 				'idBase'  => $widget->id_base,
 			);
-			return $content;
+			return \do_blocks( $content );
 		};
 
 		\register_widget( 'WP_Widget_Block' );
@@ -463,6 +463,7 @@ final class BlockWidgetsSurface {
 			str_contains( $rendered, '<aside class="widget_block widget_text component-fuzz-the-widget">' )
 				&& str_contains( $rendered, \esc_html( $paragraph_text ) )
 				&& str_contains( $rendered, \esc_html( $marker ) )
+				&& ! str_contains( $rendered, '<!-- wp:' )
 				&& '' === $cancelled
 				&& 2 === count( $seen['display'] )
 				&& 1 === count( $seen['actions'] )
