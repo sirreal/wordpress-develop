@@ -31,9 +31,11 @@ final class PluginThemeLifecycleSurface {
 			self::install_theme_root( $case );
 			self::clear_runtime_caches();
 
+			$rows[] = self::check_plugin_header_path_hook_invariants( $ctx, $case );
 			$rows[] = self::check_plugin_validation_requirements( $ctx, $case );
 			$rows[] = self::check_plugin_activation_deactivation( $ctx, $case );
 			$rows[] = self::check_plugin_network_delete_paths( $ctx, $case );
+			$rows[] = self::check_theme_root_stylesheet_template_normalization( $ctx, $case );
 			$rows[] = self::check_theme_enumeration_requirements( $ctx, $case );
 			$rows[] = self::check_theme_switch_support_globals( $ctx, $case );
 			$rows[] = self::check_theme_delete_paths( $ctx, $case );
@@ -84,6 +86,8 @@ final class PluginThemeLifecycleSurface {
 			array(
 				'get_plugins',
 				'get_plugin_data',
+				'plugin_basename',
+				'plugin_dir_path',
 				'validate_plugin',
 				'validate_plugin_requirements',
 				'is_plugin_active',
@@ -100,6 +104,9 @@ final class PluginThemeLifecycleSurface {
 				'switch_theme',
 				'delete_theme',
 				'register_theme_directory',
+				'search_theme_directories',
+				'get_raw_theme_root',
+				'get_theme_root',
 				'wp_clean_themes_cache',
 				'wp_set_template_globals',
 				'add_theme_support',
@@ -122,6 +129,7 @@ final class PluginThemeLifecycleSurface {
 				'add_filter',
 				'remove_filter',
 				'add_action',
+				'has_action',
 				'remove_action',
 			) as $function
 		) {
@@ -150,6 +158,135 @@ final class PluginThemeLifecycleSurface {
 		return $missing;
 	}
 
+	private static function check_plugin_header_path_hook_invariants( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::clear_runtime_caches();
+
+		$good     = $case['plugins']['good'];
+		$implicit = $case['plugins']['implicitTextDomain'];
+		$late     = $case['plugins']['lateHeader'];
+
+		$good_data     = \get_plugin_data( $good['path'], false, false );
+		$implicit_data = \get_plugin_data( $implicit['path'], false, false );
+		$late_data     = \get_plugin_data( $late['path'], false, false );
+		$installed     = \get_plugins();
+
+		if (
+			( $good_data['Name'] ?? null ) !== $good['name']
+			|| ( $good_data['Version'] ?? null ) !== $good['version']
+			|| ( $good_data['TextDomain'] ?? null ) !== $good['slug']
+			|| ( $good_data['Title'] ?? null ) !== $good['name']
+			|| ( $good_data['AuthorName'] ?? null ) !== 'Component Fuzz'
+		) {
+			self::record_failure(
+				$failures,
+				'get_plugin_data.raw-header-fields-match-temp-plugin',
+				array(
+					'expectedName'    => $good['name'],
+					'expectedVersion' => $good['version'],
+					'expectedDomain'  => $good['slug'],
+					'actual'          => $good_data,
+				)
+			);
+		}
+
+		if (
+			( $implicit_data['Name'] ?? null ) !== $implicit['name']
+			|| ( $implicit_data['TextDomain'] ?? null ) !== $implicit['slug']
+			|| ! isset( $installed[ $implicit['file'] ] )
+		) {
+			self::record_failure(
+				$failures,
+				'get_plugin_data.falls-back-to-directory-text-domain',
+				array(
+					'plugin' => $implicit['file'],
+					'data'   => $implicit_data,
+				)
+			);
+		}
+
+		if (
+			'' !== ( $late_data['Name'] ?? '' )
+			|| isset( $installed[ $late['file'] ] )
+		) {
+			self::record_failure(
+				$failures,
+				'get_plugin_data.ignores-plugin-header-after-initial-read-window',
+				array(
+					'plugin'    => $late['file'],
+					'data'      => $late_data,
+					'installed' => isset( $installed[ $late['file'] ] ),
+				)
+			);
+		}
+		self::expect_plugin_validation_code( $failures, 'late-header-plugin', $late['file'], 'no_plugin_header' );
+
+		$backslash_path = str_replace( '/', '\\', $good['path'] );
+		if (
+			\plugin_basename( $good['path'] ) !== $good['file']
+			|| \plugin_basename( $backslash_path ) !== $good['file']
+			|| \plugin_dir_path( $good['path'] ) !== \trailingslashit( $good['dir'] )
+		) {
+			self::record_failure(
+				$failures,
+				'plugin-path-helpers.normalize-absolute-and-backslash-paths',
+				array(
+					'plugin'         => $good['file'],
+					'basename'       => \plugin_basename( $good['path'] ),
+					'backslashBase'  => \plugin_basename( $backslash_path ),
+					'dirPath'        => \plugin_dir_path( $good['path'] ),
+					'expectedDirPath' => \trailingslashit( $good['dir'] ),
+				)
+			);
+		}
+
+		$activation_hook      = 'activate_' . $good['file'];
+		$deactivation_hook    = 'deactivate_' . $good['file'];
+		$absolute_activation  = 'activate_' . $good['path'];
+		$absolute_deactivate  = 'deactivate_' . $good['path'];
+		$activation_callback  = static function (): void {};
+		$deactivation_callback = static function (): void {};
+
+		\register_activation_hook( $good['path'], $activation_callback );
+		\register_deactivation_hook( $good['path'], $deactivation_callback );
+		try {
+			if (
+				10 !== \has_action( $activation_hook, $activation_callback )
+				|| 10 !== \has_action( $deactivation_hook, $deactivation_callback )
+				|| false !== \has_action( $absolute_activation, $activation_callback )
+				|| false !== \has_action( $absolute_deactivate, $deactivation_callback )
+			) {
+				self::record_failure(
+					$failures,
+					'register-plugin-lifecycle-hooks.use-plugin-basename-hook-locality',
+					array(
+						'activationHook'        => $activation_hook,
+						'activationPriority'    => \has_action( $activation_hook, $activation_callback ),
+						'deactivationHook'      => $deactivation_hook,
+						'deactivationPriority'  => \has_action( $deactivation_hook, $deactivation_callback ),
+						'absoluteActivationHit' => \has_action( $absolute_activation, $activation_callback ),
+						'absoluteDeactivateHit' => \has_action( $absolute_deactivate, $deactivation_callback ),
+					)
+				);
+			}
+		} finally {
+			\remove_action( $activation_hook, $activation_callback, 10 );
+			\remove_action( $deactivation_hook, $deactivation_callback, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme-lifecycle.plugin.header-path-and-hook-invariants',
+			$failures,
+			array(
+				'plugin'        => $good['file'],
+				'implicitDomain' => $implicit['file'],
+				'lateHeader'    => $late['file'],
+				'installedCount' => count( $installed ),
+			)
+		);
+	}
+
 	private static function check_plugin_validation_requirements( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		self::clear_runtime_caches();
@@ -173,6 +310,13 @@ final class PluginThemeLifecycleSurface {
 				$failures,
 				'get_plugins.skips-plugin-without-header',
 				array( 'plugin' => $case['plugins']['headerless']['file'] )
+			);
+		}
+		if ( isset( $installed[ $case['plugins']['lateHeader']['file'] ] ) ) {
+			self::record_failure(
+				$failures,
+				'get_plugins.skips-plugin-with-header-after-initial-read-window',
+				array( 'plugin' => $case['plugins']['lateHeader']['file'] )
 			);
 		}
 
@@ -454,6 +598,87 @@ final class PluginThemeLifecycleSurface {
 				'isMultisite'   => \is_multisite(),
 				'networkActive' => $network_active,
 				'deletePlugin'  => $delete_plugin,
+			)
+		);
+	}
+
+	private static function check_theme_root_stylesheet_template_normalization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::clear_runtime_caches();
+
+		$theme_root = $case['paths']['themeRoot'];
+		$parent     = $case['themes']['parent']['slug'];
+		$child      = $case['themes']['child']['slug'];
+
+		$registered       = \register_theme_directory( \trailingslashit( $theme_root ) );
+		$missing_register = \register_theme_directory( $theme_root . '/' . $case['themes']['missingSlug'] );
+		$directories      = array_values( (array) $GLOBALS['wp_theme_directories'] );
+
+		if (
+			true !== $registered
+			|| false !== $missing_register
+			|| array( $theme_root ) !== $directories
+		) {
+			self::record_failure(
+				$failures,
+				'register_theme_directory.untrails-existing-root-and-rejects-missing-root',
+				array(
+					'registered'      => $registered,
+					'missingRegister' => $missing_register,
+					'directories'     => $directories,
+					'expected'        => array( $theme_root ),
+				)
+			);
+		}
+
+		$found          = \search_theme_directories( true );
+		$raw_child_root = \get_raw_theme_root( $child, true );
+		$child_root     = \get_theme_root( $child );
+		$parent_root    = \get_theme_root( $parent );
+		$child_theme    = \wp_get_theme( $child, $theme_root );
+
+		if (
+			! is_array( $found )
+			|| ! isset( $found[ $child ], $found[ $parent ] )
+			|| ( $found[ $child ]['theme_root'] ?? null ) !== $theme_root
+			|| ( $found[ $parent ]['theme_root'] ?? null ) !== $theme_root
+			|| '/themes' !== $raw_child_root
+			|| $theme_root !== $child_root
+			|| $theme_root !== $parent_root
+			|| ! $child_theme->exists()
+			|| $child_theme->get_stylesheet() !== $child
+			|| $child_theme->get_template() !== $parent
+			|| $child_theme->get_stylesheet_directory() !== $case['themes']['child']['dir']
+			|| $child_theme->get_template_directory() !== $case['themes']['parent']['dir']
+		) {
+			self::record_failure(
+				$failures,
+				'theme-root-helpers.resolve-stylesheet-template-and-root-consistently',
+				array(
+					'found'                => is_array( $found ) ? self::compact_data( $found ) : self::describe_value( $found ),
+					'rawChildRoot'         => $raw_child_root,
+					'childRoot'            => $child_root,
+					'parentRoot'           => $parent_root,
+					'childExists'          => $child_theme->exists(),
+					'childStylesheet'      => $child_theme->get_stylesheet(),
+					'childTemplate'        => $child_theme->get_template(),
+					'stylesheetDirectory'  => $child_theme->get_stylesheet_directory(),
+					'templateDirectory'    => $child_theme->get_template_directory(),
+					'expectedStylesheetDir' => $case['themes']['child']['dir'],
+					'expectedTemplateDir'  => $case['themes']['parent']['dir'],
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme-lifecycle.theme.root-stylesheet-template-normalization',
+			$failures,
+			array(
+				'themeRoot'    => self::preview( $theme_root ),
+				'parent'       => $parent,
+				'child'        => $child,
+				'rawChildRoot' => $raw_child_root,
 			)
 		);
 	}
@@ -978,7 +1203,7 @@ final class PluginThemeLifecycleSurface {
 		$plugin_ctx = $ctx->fork( 'plugins' );
 		$theme_ctx  = $ctx->fork( 'themes' );
 
-		$plugin_keys = array( 'good', 'output', 'headerless', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete' );
+		$plugin_keys = array( 'good', 'output', 'headerless', 'lateHeader', 'implicitTextDomain', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete' );
 		$plugins     = array();
 		foreach ( $plugin_keys as $key ) {
 			$slug            = self::slug( $plugin_ctx, 'cfz-' . $key, $used );
@@ -1084,6 +1309,18 @@ final class PluginThemeLifecycleSurface {
 
 		self::ensure_dir( $case['plugins']['headerless']['dir'] );
 		self::write_file( $case['plugins']['headerless']['path'], "<?php\n// Deliberately no plugin header.\n" );
+
+		self::write_late_header_plugin( $case['plugins']['lateHeader'] );
+
+		self::write_plugin(
+			$case['plugins']['implicitTextDomain'],
+			array(
+				'RequiresWP'  => '5.0',
+				'RequiresPHP' => '5.6',
+				'TextDomain'  => '',
+			),
+			"// Plugin fixture that relies on get_plugin_data() text domain fallback.\n"
+		);
 
 		self::write_plugin(
 			$case['plugins']['futureWp'],
@@ -1255,6 +1492,23 @@ final class PluginThemeLifecycleSurface {
 		self::write_file( $theme['dir'] . '/index.php', "<?php\n// Theme index fixture.\n" );
 		self::ensure_dir( $theme['dir'] . '/templates' );
 		self::write_file( $theme['dir'] . '/templates/index.html', "<!-- wp:paragraph --><p>Theme fixture</p><!-- /wp:paragraph -->\n" );
+	}
+
+	private static function write_late_header_plugin( array $plugin ): void {
+		self::ensure_dir( $plugin['dir'] );
+		$header = self::plugin_header(
+			$plugin,
+			array(
+				'RequiresWP'  => '5.0',
+				'RequiresPHP' => '5.6',
+			)
+		);
+		$header = (string) preg_replace( '/^<\?php\n/', '', $header );
+		$prefix = "<?php\n/*\n"
+			. str_repeat( " * Padding before delayed header discovery.\n", 260 )
+			. " */\n";
+
+		self::write_file( $plugin['path'], $prefix . $header . "// Header appears after the get_file_data() read window.\n" );
 	}
 
 	private static function theme_header( array $theme, array $headers ): string {
