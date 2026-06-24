@@ -78,6 +78,7 @@ final class CommentWorkflowSurface {
 				'wp_handle_comment_submission',
 				'wp_insert_comment',
 				'wp_insert_post',
+				'wp_insert_user',
 				'wp_new_comment',
 				'wp_set_comment_status',
 				'wp_slash',
@@ -157,6 +158,7 @@ final class CommentWorkflowSurface {
 	private static function check_new_comment_pipeline( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures       = array();
 		$post_id        = self::insert_post( $case, 'open' );
+		$user_id        = self::insert_user( $ctx->fork( 'user' ), $case );
 		$parent_id      = \wp_insert_comment(
 			array(
 				'comment_post_ID'      => $post_id,
@@ -171,7 +173,7 @@ final class CommentWorkflowSurface {
 		$insert_seen     = array();
 		$post_seen       = array();
 		$prefilter_user  = 0;
-		$filtered_user   = 0;
+		$filtered_user   = $user_id;
 		$agent           = 'ComponentFuzz-Agent-' . str_repeat( $case['token'], 40 );
 		$expected_agent  = substr( $agent, 0, 254 );
 		$expected_ip     = '203.0.113.' . $ctx->int( 1, 200 );
@@ -285,7 +287,9 @@ final class CommentWorkflowSurface {
 					),
 				) === $post_seen
 				&& false === \has_action( 'comment_post', $post_action )
-				&& false === \has_action( 'wp_insert_comment', $insert_action ),
+				&& false === \has_action( 'wp_insert_comment', $insert_action )
+				&& false === \has_filter( 'pre_comment_approved', $approve )
+				&& false === \has_filter( 'preprocess_comment', $preprocess ),
 			'wp_new_comment fires preprocess, insert, and comment_post hooks with normalized data and removes hooks',
 			array(
 				'preprocess' => $preprocess_seen,
@@ -304,7 +308,10 @@ final class CommentWorkflowSurface {
 			$ctx,
 			'comment-workflow.new-comment.preprocess-hooks-and-parent-normalization',
 			$failures,
-			array( 'postId' => $post_id )
+			array(
+				'postId' => $post_id,
+				'userId' => $user_id,
+			)
 		);
 	}
 
@@ -642,6 +649,25 @@ final class CommentWorkflowSurface {
 			true,
 			false
 		);
+	}
+
+	private static function insert_user( \ComponentFuzz\FuzzContext $ctx, array $case ): int {
+		$login = 'cfz_comment_user_' . substr( hash( 'sha1', $case['token'] . ':' . $ctx->seed() ), 0, 12 );
+		$user  = \wp_insert_user(
+			array(
+				'user_login'   => $login,
+				'user_pass'    => 'component-fuzz-pass',
+				'user_email'   => $login . '@example.test',
+				'display_name' => 'Comment Workflow User ' . $case['token'],
+				'role'         => 'subscriber',
+			)
+		);
+
+		if ( \is_wp_error( $user ) ) {
+			throw new \RuntimeException( 'Could not insert comment workflow user: ' . $user->get_error_message() );
+		}
+
+		return (int) $user;
 	}
 
 	private static function slashed_comment_data( array $case, int $post_id, string $content ): array {
