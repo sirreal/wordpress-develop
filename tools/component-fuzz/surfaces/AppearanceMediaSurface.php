@@ -32,6 +32,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_background_post_normalization( $ctx->fork( 'background' ) );
 			$rows[] = self::check_header_defaults_and_selection( $ctx->fork( 'headers' ) );
 			$rows[] = self::check_header_and_background_frontend_helpers( $ctx->fork( 'frontend' ) );
+			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
 			$rows[] = $ctx->skip(
 				'appearance-media.unsafe-upload-and-ajax-paths',
@@ -91,29 +92,42 @@ final class AppearanceMediaSurface {
 				'apply_filters',
 				'checked',
 				'create_initial_post_types',
+				'current_theme_supports',
 				'delete_option',
 				'display_header_text',
+				'esc_url',
 				'get_background_color',
 				'get_background_image',
+				'get_custom_header',
+				'get_custom_header_markup',
 				'get_header_image',
 				'get_header_image_tag',
 				'get_header_textcolor',
+				'get_header_video_settings',
+				'get_header_video_url',
 				'get_option',
 				'get_site_icon_url',
 				'get_stylesheet',
 				'get_template_directory_uri',
 				'get_theme_mod',
 				'get_theme_support',
+				'has_custom_header',
 				'has_filter',
 				'has_header_image',
+				'has_header_video',
 				'has_site_icon',
+				'is_header_video_active',
 				'is_random_header_image',
 				'remove_all_filters',
 				'remove_filter',
 				'remove_theme_mod',
+				'set_url_scheme',
 				'set_theme_mod',
+				'the_header_video_url',
 				'update_option',
+				'wp_check_filetype',
 				'wp_create_nonce',
+				'wp_get_mime_types',
 				'wp_nonce_tick',
 				'wp_site_icon',
 			) as $function
@@ -355,6 +369,130 @@ final class AppearanceMediaSurface {
 		return self::row(
 			$ctx,
 			'appearance-media.frontend.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_custom_header_markup_and_video( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$token           = strtolower( $ctx->identifier( 4, 10 ) );
+		$video_url       = $ctx->choice(
+			array(
+				'https://www.youtube.com/watch?v=' . rawurlencode( $token ) . '&unsafe=<tag>',
+				'https://youtu.be/' . rawurlencode( $token ) . '?unsafe=<tag>',
+				'https://example.test/media/' . rawurlencode( $token ) . '.mp4',
+				'https://example.test/media/' . rawurlencode( $token ) . '.webm',
+			)
+		);
+		$expected_video  = \set_url_scheme( str_replace( '<tag>', 'tag', $video_url ) );
+		$expected_mime   = str_contains( $expected_video, 'youtube.com/watch' ) || str_contains( $expected_video, 'youtu.be/' )
+			? 'video/x-youtube'
+			: ( str_contains( $expected_video, '.webm' ) ? 'video/webm' : 'video/mp4' );
+		$active_callback = static fn (): bool => true;
+		$force_inactive  = static fn (): bool => false;
+
+		\add_theme_support(
+			'custom-header',
+			array(
+				'video'                 => true,
+				'video-active-callback' => $active_callback,
+			)
+		);
+		\set_theme_mod( 'header_image', 'http://example.test/header-' . rawurlencode( $token ) . '.jpg?unsafe=<tag>' );
+		\set_theme_mod(
+			'header_image_data',
+			(object) array(
+				'attachment_id' => 0,
+				'url'           => 'http://example.test/header-' . rawurlencode( $token ) . '.jpg?unsafe=<tag>',
+				'thumbnail_url' => 'http://example.test/header-thumb-' . rawurlencode( $token ) . '.jpg',
+				'width'         => 1200,
+				'height'        => 300,
+			)
+		);
+		\set_theme_mod( 'external_header_video', $video_url );
+		\remove_theme_mod( 'header_video' );
+
+		$header          = \get_custom_header();
+		$video           = \get_header_video_url();
+		$has_video       = \has_header_video();
+		$video_echo      = self::capture( static fn() => \the_header_video_url() );
+		$settings        = \get_header_video_settings();
+		$markup          = \get_custom_header_markup();
+		$has_header      = \has_custom_header();
+		$active_before   = \is_header_video_active();
+		\add_filter( 'is_header_video_active', $force_inactive );
+		try {
+			$active_after_filter = \is_header_video_active();
+			$has_header_filtered = \has_custom_header();
+			$markup_filtered     = \get_custom_header_markup();
+		} finally {
+			\remove_filter( 'is_header_video_active', $force_inactive );
+		}
+
+		\remove_theme_mod( 'header_image' );
+		\remove_theme_mod( 'header_image_data' );
+		$fallback_markup = \get_custom_header_markup();
+		$fallback_header = \has_custom_header();
+		\remove_theme_mod( 'external_header_video' );
+		\remove_theme_support( 'custom-header' );
+		$unsupported_active = \is_header_video_active();
+
+		self::collect_failure(
+			$failures,
+			$header instanceof \stdClass
+				&& 1200 === (int) $header->width
+				&& 300 === (int) $header->height
+				&& true === (bool) $header->video
+				&& $expected_video === $video
+				&& \esc_url( $expected_video ) === $video_echo
+				&& true === $has_video
+				&& true === $has_header
+				&& true === $active_before
+				&& false === $active_after_filter
+				&& true === $has_header_filtered
+				&& str_contains( $markup, 'id="wp-custom-header"' )
+				&& str_contains( $markup, 'src="http://example.test/header-' )
+				&& str_contains( $markup, 'unsafe=tag' )
+				&& ! str_contains( $markup, '<tag>' )
+				&& str_contains( $markup_filtered, 'id="wp-custom-header"' )
+				&& $expected_video === ( $settings['videoUrl'] ?? null )
+				&& $expected_mime === ( $settings['mimeType'] ?? null )
+				&& 'http://example.test/header-' . rawurlencode( $token ) . '.jpg?unsafe=tag' === ( $settings['posterUrl'] ?? null )
+				&& 1200 === (int) ( $settings['width'] ?? 0 )
+				&& 300 === (int) ( $settings['height'] ?? 0 )
+				&& 900 === (int) ( $settings['minWidth'] ?? 0 )
+				&& 500 === (int) ( $settings['minHeight'] ?? 0 )
+				&& is_array( $settings['l10n'] ?? null )
+				&& str_contains( $fallback_markup, 'id="wp-custom-header"' )
+				&& str_contains( $fallback_markup, '/images/default-header.jpg' )
+				&& true === $fallback_header
+				&& false === $unsupported_active,
+			'custom header markup and video helpers sanitize URLs, classify video MIME, and respect active/support gates',
+			array(
+				'inputVideo'          => $video_url,
+				'expectedVideo'       => $expected_video,
+				'expectedMime'        => $expected_mime,
+				'header'              => self::describe_value( $header ),
+				'video'               => self::preview( (string) $video ),
+				'videoEcho'           => self::preview( $video_echo ),
+				'hasVideo'            => $has_video,
+				'hasHeader'           => $has_header,
+				'activeBefore'        => $active_before,
+				'activeAfterFilter'   => $active_after_filter,
+				'hasHeaderFiltered'   => $has_header_filtered,
+				'markup'              => self::preview( $markup ),
+				'markupFiltered'      => self::preview( $markup_filtered ),
+				'settings'            => self::describe_value( $settings ),
+				'fallbackMarkup'      => self::preview( $fallback_markup ),
+				'fallbackHeader'      => $fallback_header,
+				'unsupportedActive'   => $unsupported_active,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.custom-header.markup-video-settings',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);
