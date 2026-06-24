@@ -45,6 +45,7 @@ final class MediaRemoteSurface {
 				$rows[] = self::check_download_url_contracts( $ctx->fork( 'download-url' ), $download_paths );
 				$rows[] = self::check_media_sideload_image_flows( $ctx->fork( 'media-sideload-image' ), $temp_root, $download_paths );
 				$rows[] = self::check_media_handle_sideload_branches( $ctx->fork( 'media-handle-sideload' ), $temp_root );
+				$rows[] = self::check_media_handle_sideload_filter_contracts( $ctx->fork( 'media-handle-filters' ), $temp_root );
 			}
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->result(
@@ -672,6 +673,177 @@ final class MediaRemoteSurface {
 		);
 	}
 
+	private static function check_media_handle_sideload_filter_contracts( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures         = array();
+		$source_dir       = $temp_root . DIRECTORY_SEPARATOR . 'handle-filter-source';
+		$upload_events    = array();
+		$prefilter_events = array();
+		$override_events  = array();
+		$upload_root      = self::$upload_root;
+		$parent_id        = self::insert_parent_post_with_date( $ctx, '2022-05-06 09:15:00' );
+		$forced_base      = 'forced-' . preg_replace( '/[^a-z0-9-]+/', '-', strtolower( $ctx->identifier( 4, 10 ) ) );
+		$forced_base      = trim( $forced_base, '-' );
+		$forced_name      = null;
+		$reject_name      = null;
+
+		$upload_dir_filter = static function ( array $uploads ) use ( &$upload_events ): array {
+			$filtered        = MediaRemoteSurface::filter_upload_dir( $uploads );
+			$upload_events[] = array(
+				'path'   => $filtered['path'] ?? null,
+				'subdir' => $filtered['subdir'] ?? null,
+			);
+			return $filtered;
+		};
+		$prefilter = static function ( array $file ) use ( &$prefilter_events, &$reject_name ): array {
+			$prefilter_events[] = array(
+				'name'  => $file['name'] ?? null,
+				'error' => $file['error'] ?? null,
+				'size'  => $file['size'] ?? null,
+			);
+
+			if ( is_string( $reject_name ) && $reject_name === ( $file['name'] ?? null ) ) {
+				$file['error'] = 'component fuzz prefilter rejected ' . $reject_name;
+			}
+
+			return $file;
+		};
+		$overrides_filter = static function ( $overrides, array $file ) use ( &$override_events, &$forced_name, $forced_base ) {
+			$overrides = is_array( $overrides ) ? $overrides : array();
+			$override_events[] = array(
+				'name'     => $file['name'] ?? null,
+				'testForm' => $overrides['test_form'] ?? null,
+			);
+
+			if ( is_string( $forced_name ) && $forced_name === ( $file['name'] ?? null ) ) {
+				$overrides['unique_filename_callback'] = static function ( string $dir, string $name, string $ext ) use ( $forced_base ): string {
+					unset( $dir, $name );
+					return $forced_base . $ext;
+				};
+			}
+
+			return $overrides;
+		};
+
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'wp_handle_sideload_prefilter', $prefilter );
+		\add_filter( 'wp_handle_sideload_overrides', $overrides_filter, 10, 2 );
+
+		try {
+			$forced_case = array(
+				'label'    => 'overrides-unique-filename',
+				'filename' => self::client_filename( $ctx->fork( 'forced-name' ), 'txt' ),
+				'mime'     => 'text/plain',
+				'bytes'    => "override filename sideload\n" . $ctx->ascii( 6, 24 ),
+				'desc'     => null,
+				'postData' => array(),
+			);
+			$forced_name = $forced_case['filename'];
+			$forced_path = self::write_fixture( $source_dir, 'forced-name.txt', $forced_case['bytes'] );
+			$forced_id   = null === $forced_path ? null : \media_handle_sideload( self::file_array( $forced_case, $forced_path ), $parent_id, null, array() );
+
+			self::assert_handle_sideload_attachment(
+				$failures,
+				$forced_id,
+				array(
+					'case'              => $forced_case,
+					'expectedTitle'     => $forced_base,
+					'expectedParent'    => $parent_id,
+					'expectedDate'      => null,
+					'expectedPathPart'  => '/2022/05/',
+					'expectedBasename'  => $forced_base . '.txt',
+					'uploadRoot'        => $upload_root,
+					'originalSource'    => $forced_path,
+					'forbiddenPostId'   => null,
+				)
+			);
+
+			$before_reject = self::content_counts();
+			$reject_case   = array(
+				'label'    => 'prefilter-error',
+				'filename' => self::client_filename( $ctx->fork( 'reject-name' ), 'txt' ),
+				'mime'     => 'text/plain',
+				'bytes'    => "prefilter rejected sideload\n" . $ctx->ascii( 6, 24 ),
+			);
+			$reject_name   = $reject_case['filename'];
+			$reject_path   = self::write_fixture( $source_dir, 'prefilter-reject.txt', $reject_case['bytes'] );
+			$reject_result = null === $reject_path ? null : \media_handle_sideload( self::file_array( $reject_case, $reject_path ), 0 );
+			$after_reject  = self::content_counts();
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $reject_result )
+					&& 'upload_error' === $reject_result->get_error_code()
+					&& str_contains( $reject_result->get_error_message(), 'component fuzz prefilter rejected' )
+					&& ( $before_reject['posts'] ?? null ) === ( $after_reject['posts'] ?? null )
+					&& ( $before_reject['post_meta'] ?? null ) === ( $after_reject['post_meta'] ?? null )
+					&& is_string( $reject_path )
+					&& file_exists( $reject_path ),
+				'wp_handle_sideload_prefilter errors stop attachment creation before moving the temp source',
+				array(
+					'result'       => self::describe_error( $reject_result ),
+					'before'       => $before_reject,
+					'after'        => $after_reject,
+					'sourceExists' => is_string( $reject_path ) ? file_exists( $reject_path ) : null,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_handle_sideload_overrides', $overrides_filter, 10 );
+			\remove_filter( 'wp_handle_sideload_prefilter', $prefilter );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+			self::cleanup_leftover_sources( $source_dir );
+		}
+
+		self::collect_failure(
+			$failures,
+			null !== $upload_root
+				&& array() !== $upload_events
+				&& self::upload_events_within_root( $upload_events, $upload_root )
+				&& false === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& false === \has_filter( 'wp_handle_sideload_prefilter', $prefilter )
+				&& false === \has_filter( 'wp_handle_sideload_overrides', $overrides_filter ),
+			'media_handle_sideload upload, prefilter, and override filters are scoped to the filter contract check',
+			array(
+				'uploadRoot' => $upload_root,
+				'uploads'    => $upload_events,
+				'prefilter'  => $prefilter_events,
+				'overrides'  => $override_events,
+				'hasFilters' => array(
+					'uploadDir'  => \has_filter( 'upload_dir', $upload_dir_filter ),
+					'prefilter'  => \has_filter( 'wp_handle_sideload_prefilter', $prefilter ),
+					'overrides'  => \has_filter( 'wp_handle_sideload_overrides', $overrides_filter ),
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::event_contains_name( $prefilter_events, (string) $forced_name )
+				&& self::event_contains_name( $prefilter_events, (string) $reject_name )
+				&& self::event_contains_name( $override_events, (string) $forced_name )
+				&& self::event_contains_name( $override_events, (string) $reject_name ),
+			'media_handle_sideload prefilter and overrides filters observe both success and rejection fixtures',
+			array(
+				'forcedName' => $forced_name,
+				'rejectName' => $reject_name,
+				'prefilter'  => $prefilter_events,
+				'overrides'  => $override_events,
+			)
+		);
+
+		return $ctx->result(
+			'media-remote.media-handle-sideload-filter-contracts',
+			array() === $failures,
+			array(
+				'cases'     => 2,
+				'forced'    => $forced_base,
+				'failures'  => array_slice( $failures, 0, 10 ),
+				'prefilter' => $prefilter_events,
+				'overrides' => $override_events,
+				'uploads'   => $upload_events,
+			)
+		);
+	}
+
 	private static function http_interceptor( array $routes, array &$events, array &$download_paths ): \Closure {
 		return static function ( $pre, array $parsed_args, string $url ) use ( $routes, &$events, &$download_paths ) {
 			unset( $pre );
@@ -879,6 +1051,7 @@ final class MediaRemoteSurface {
 				&& null !== $expected['uploadRoot']
 				&& self::path_starts_with( $attached_file, (string) $expected['uploadRoot'] )
 				&& str_contains( $normalized_file, (string) $expected['expectedPathPart'] )
+				&& ( ! isset( $expected['expectedBasename'] ) || basename( $attached_file ) === (string) $expected['expectedBasename'] )
 				&& is_file( $attached_file )
 				&& null !== $expected['originalSource']
 				&& ! file_exists( (string) $expected['originalSource'] ),
@@ -887,6 +1060,7 @@ final class MediaRemoteSurface {
 				'case'             => self::case_summary( $case ),
 				'attachedFile'     => $attached_file,
 				'expectedPathPart' => $expected['expectedPathPart'],
+				'expectedBasename' => $expected['expectedBasename'] ?? null,
 				'uploadRoot'       => $expected['uploadRoot'],
 				'sourceExists'     => null === $expected['originalSource'] ? null : file_exists( (string) $expected['originalSource'] ),
 			)
@@ -1200,6 +1374,16 @@ final class MediaRemoteSurface {
 		}
 
 		return true;
+	}
+
+	private static function event_contains_name( array $events, string $name ): bool {
+		foreach ( $events as $event ) {
+			if ( $name === (string) ( $event['name'] ?? '' ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function path_starts_with( string $path, string $root ): bool {

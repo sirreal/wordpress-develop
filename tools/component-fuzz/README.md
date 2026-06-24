@@ -283,8 +283,8 @@ database, network requests, or a configured site.
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
   Content-Disposition filename sanitization, URL extension/MIME boundaries,
-  temp-file cleanup, size/type rejection, filter locality, and global
-  restoration.
+  temp-file cleanup, size/type rejection, sideload prefilter and override
+  filter contracts, filter locality, and global restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   registration argument edges, legacy callbacks, sanitize/auth/protected-meta
   filters, cache-backed lookup shape, filtered and in-memory CRUD cache
