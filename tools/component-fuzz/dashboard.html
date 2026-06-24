@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7861 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7854 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>template-hierarchy</code> at 700 passed, <code>shortcodes</code> at 1400 passed, and <code>email</code> Unicode follow-up at 24570 passed.</div>
+			<div class="note">Latest focused validations: <code>blocks</code> at 500 passed, <code>date-time</code> at 1200 passed, and <code>template-hierarchy</code> at 700 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">No active delegated workers; Helmholtz the 2nd's revisions/autosaves work has been integrated in main.</div>
+			<div class="metric">1</div>
+			<div class="note">Hooke the 2nd is strengthening <code>style</code> coverage; Blocks worker output has been integrated in main.</div>
 		</div>
 	</div>
 
@@ -437,6 +437,20 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>blocks</code></td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Hilbert the 2nd / main worktree</td>
+					<td>Main focused run: 500 passed, 0 skipped, 0 failed; latest broad run: 7854 passed, 63 skipped, 0 failed.</td>
+					<td>Nested parse/serialize round trips, <code>has_block()</code>/<code>has_blocks()</code>, dynamic render callbacks, render filters, registry and support behavior.</td>
+				</tr>
+				<tr>
+					<td><code>date-time</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1200 passed, 0 skipped, 0 failed; latest broad run: 7854 passed, 63 skipped, 0 failed.</td>
+					<td><code>wp_date()</code>/<code>date_i18n()</code>/<code>mysql2date()</code>, timezone options and override offsets, <code>current_datetime()</code>, ISO8601 conversion, GMT/local round trips, date and human-diff filter contracts.</td>
 				</tr>
 				<tr>
 					<td><code>email</code></td>
@@ -653,6 +667,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>48bfee1d39</code></td>
+					<td><code>blocks</code></td>
+					<td>500 passed, 0 skipped, 0 failed.</td>
+					<td>7854 passed, 63 skipped, 0 failed at 2 iterations after nested parse/serialize, block detection, and dynamic render callback/filter coverage.</td>
+				</tr>
+				<tr>
+					<td><code>cc1ac49ff3</code></td>
+					<td><code>date-time</code></td>
+					<td>1200 passed, 0 skipped, 0 failed.</td>
+					<td>7854 passed, 63 skipped, 0 failed at 2 iterations after current datetime, timezone override, ISO8601 conversion, and date/human filter coverage.</td>
+				</tr>
 				<tr>
 					<td><code>0b1c9674a6</code></td>
 					<td><code>template-hierarchy</code></td>
