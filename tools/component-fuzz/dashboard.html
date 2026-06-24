@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7966 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7962 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; empty admin-list-tables, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
+			<div class="note">No active subagents; empty admin-list-tables, icons-connectors, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
 		</div>
 	</div>
 
@@ -262,6 +262,13 @@
 					<td>Main worktree; Heisenberg the 2nd and Kepler the 2nd review findings fixed through <code>416f45a6b7</code></td>
 					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7966 passed, 64 skipped, 0 failed.</td>
 					<td>REST request normalization, parameter precedence, schema validation, route dispatch, permission semantics, response links, CURIE compaction, embedding, envelopes, headers, response conversion, and REST server global/filter restoration.</td>
+				</tr>
+				<tr>
+					<td><code>admin-list-tables</code></td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Dewey the 2nd and Hypatia the 2nd review findings fixed through <code>f7dc6d84e8</code></td>
+					<td>Main focused run: 500 passed, 200 skipped, 0 failed; latest broad run: 7962 passed, 66 skipped, 0 failed.</td>
+					<td>Concrete list tables for posts, media, comments, terms, users, plugins, themes, application passwords, and guarded network sites/users, including synthetic object/pre-query/user-meta fixtures, column/header state isolation, row/template rendering, capability gates, and explicit current-core boundaries.</td>
 				</tr>
 				<tr>
 					<td><code>account-security</code></td>
@@ -926,6 +933,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>6a573889ae</code> / <code>f7dc6d84e8</code></td>
+					<td><code>admin-list-tables</code></td>
+					<td>500 passed, 200 skipped, 0 failed after review fixes.</td>
+					<td>7962 passed, 66 skipped, 0 failed at 2 iterations after application-password list table user-meta fixtures, row/template rendering, global restoration, column-cache isolation, and last-IP boundary recording.</td>
+				</tr>
 				<tr>
 					<td><code>c7afdcbeca</code> / <code>416f45a6b7</code></td>
 					<td><code>rest</code></td>
@@ -1759,8 +1772,8 @@
 			<tbody>
 				<tr>
 					<td>Application passwords</td>
-					<td>Validated lifecycle, chunking, generic/legacy hash checks, API-request gating, site/user availability errors, matched-password constraint hooks, success/failure hook payloads, email-identifier fallback, Basic Auth validation, usage IP/time recording, and role/REST auth global restoration.</td>
-					<td>No live HTTP Basic Auth request dispatch or browser profile-screen authorization flow; direct public API calls cover the authentication and persistence contracts without network or process-exit paths.</td>
+					<td>Validated lifecycle, chunking, generic/legacy hash checks, API-request gating, site/user availability errors, matched-password constraint hooks, success/failure hook payloads, email-identifier fallback, Basic Auth validation, usage IP/time recording, concrete list-table row/template rendering, and role/REST/list-table global restoration.</td>
+					<td>No live HTTP Basic Auth request dispatch or browser profile-screen authorization flow; direct public API calls cover the authentication and persistence contracts without network or process-exit paths. Stored hostile <code>last_ip</code> row output is recorded as an explicit current-core escaping boundary.</td>
 				</tr>
 				<tr>
 					<td>Unicode email</td>
