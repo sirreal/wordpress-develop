@@ -231,12 +231,12 @@
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -283,6 +283,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7936 passed, 63 skipped, 0 failed.</td>
 					<td>Synthetic user rows, authentication filters/password paths, sign-on and clear-auth-cookie short-circuits, auth-cookie validation hooks, session lifecycle, and current-user/cookie restoration.</td>
+				</tr>
+				<tr>
+					<td><code>wxr-export</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 100 skipped, 0 failed; latest broad run: 7936 passed, 63 skipped, 0 failed.</td>
+					<td>Subprocess-isolated <code>export_wp()</code>, selection arguments, title/content/excerpt export filters, XML/CDATA/UTF-8 safety, meta skip filters, author/term ordering, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -807,6 +814,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>eff9136132</code></td>
+					<td><code>wxr-export</code></td>
+					<td>800 passed, 100 skipped, 0 failed.</td>
+					<td>7936 passed, 63 skipped, 0 failed at 2 iterations after item title/content/excerpt export-filter coverage.</td>
+				</tr>
 				<tr>
 					<td><code>614c8d1490</code></td>
 					<td><code>auth-flow</code></td>
