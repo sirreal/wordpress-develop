@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7962 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7959 passed, 0 failed, 0 errored, 67 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; empty admin-list-tables, icons-connectors, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
+			<div class="note">No active subagents; empty admin-list-tables, media-remote, icons-connectors, shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
 		</div>
 	</div>
 
@@ -496,10 +496,10 @@
 				</tr>
 				<tr>
 					<td><code>import-diff</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 1050 passed, 0 skipped, 0 failed; latest broad run: 7621 passed, 62 skipped, 0 failed.</td>
-					<td>Importer registry/form helpers, text diff rendering, imported comment lookup, WP_Error transfer and lifecycle ordering.</td>
+					<td><span class="status good">reviewed validation passed</span></td>
+					<td>Main worktree; Singer the 2nd finding fixed in <code>473a6b1e07</code>, Linnaeus the 2nd follow-up found no actionable issues</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7959 passed, 67 skipped, 0 failed.</td>
+					<td>Importer registry/form helpers, text diff rendering, post/comment imported lookup through in-memory postmeta/comment fixtures, importer chunking, duplicate permalink behavior, WP_Error transfer and lifecycle ordering, and stub meta-query limit projection.</td>
 				</tr>
 				<tr>
 					<td><code>navigation</code></td>
@@ -933,6 +933,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>90161ef07f</code> / <code>0700329bba</code></td>
+					<td><code>import-diff</code></td>
+					<td>800 passed, 0 skipped, 0 failed after review fixes.</td>
+					<td>7959 passed, 67 skipped, 0 failed at 2 iterations after imported post permalink lookup, postmeta count/projection support, meta query limit handling, chunk-boundary coverage, and duplicate permalink oracle hardening.</td>
+				</tr>
 				<tr>
 					<td><code>6a573889ae</code> / <code>f7dc6d84e8</code></td>
 					<td><code>admin-list-tables</code></td>
@@ -1404,7 +1410,7 @@
 				<tr>
 					<td><code>46237be00d</code></td>
 					<td><code>import-diff</code></td>
-					<td>1050 passed, 0 skipped, 0 failed.</td>
+					<td>1050 passed, 0 skipped, 0 failed before the imported-post follow-up.</td>
 					<td>7621 passed, 62 skipped, 0 failed at 2 iterations after WP_Error lifecycle ordering and default-code integration.</td>
 				</tr>
 				<tr>
