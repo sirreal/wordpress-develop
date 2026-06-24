@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7876 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7885 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>admin-bar</code> at 500 passed, <code>post-types</code> at 700 passed, and <code>style</code> at 1200 passed.</div>
+			<div class="note">Latest focused validations: <code>taxonomy</code> at 1000 passed, <code>admin-bar</code> at 500 passed, and <code>post-types</code> at 700 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">1</div>
-			<div class="note">Peirce the 2nd is strengthening <code>taxonomy</code> coverage; post-types archive helper work is integrated in main.</div>
+			<div class="metric good">0</div>
+			<div class="note">No active delegated workers; Peirce the 2nd's taxonomy work has been integrated in main.</div>
 		</div>
 	</div>
 
@@ -437,6 +437,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>taxonomy</code></td>
+					<td><span class="status good">integrated validation passed</span></td>
+					<td>Peirce the 2nd / main worktree</td>
+					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7885 passed, 62 skipped, 0 failed.</td>
+					<td>Taxonomy registry lifecycle, object shape, query/rewrite side effects, term field filters, hierarchy helper edges, cache-backed term objects and link helpers.</td>
 				</tr>
 				<tr>
 					<td><code>admin-bar</code></td>
@@ -695,6 +702,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>c4c5b7456b</code></td>
+					<td><code>taxonomy</code></td>
+					<td>1000 passed, 0 skipped, 0 failed.</td>
+					<td>7885 passed, 62 skipped, 0 failed at 2 iterations after registration side-effect, term field filter, and hierarchy helper coverage.</td>
+				</tr>
 				<tr>
 					<td><code>d5de86ecd5</code></td>
 					<td><code>admin-bar</code></td>
