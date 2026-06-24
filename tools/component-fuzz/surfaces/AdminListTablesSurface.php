@@ -32,6 +32,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_posts_media_tables( $ctx->fork( 'posts-media' ) );
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
+			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
 			$rows[] = self::check_network_tables( $ctx->fork( 'network-tables' ) );
 			$rows[] = self::skipped_db_heavy_branches( $ctx->fork( 'skips' ) );
 		} catch ( \Throwable $e ) {
@@ -1164,6 +1165,213 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function check_application_passwords_table( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures         = array();
+		$filters          = array();
+		$current_user     = self::synthetic_user( $ctx->fork( 'current-user' ), 54500, 'app-passwords' );
+		$screen           = self::screen( 'application-passwords-user' );
+		$first_password   = self::synthetic_application_password( $ctx->fork( 'first-password' ), 0 );
+		$second_password  = self::synthetic_application_password( $ctx->fork( 'second-password' ), 1 );
+		$passwords        = array( $first_password, $second_password );
+		$custom_events    = array();
+		$template_events  = array();
+		$hidden_events    = array();
+		$primary_events   = array();
+		$result           = array();
+		$filters_removed  = false;
+
+		$meta_filter = static function ( $value, int $object_id, string $meta_key, bool $single ) use ( $current_user, $passwords ) {
+			if (
+				$object_id === (int) $current_user->ID
+				&& '_application_passwords' === $meta_key
+				&& $single
+			) {
+				return array( $passwords );
+			}
+
+			return $value;
+		};
+		$columns_filter = static function ( array $columns ): array {
+			$columns['cfz_ap_custom'] = \esc_html( 'Generated <script>alert(1)</script> Application Password Column' );
+			return $columns;
+		};
+		$hidden_filter = static function ( array $hidden, \WP_Screen $current_screen ) use ( $screen, &$hidden_events ): array {
+			$hidden_events[] = $current_screen->id;
+
+			if ( $current_screen->id === $screen->id ) {
+				return array( 'last_ip' );
+			}
+
+			return $hidden;
+		};
+		$primary_filter = static function ( string $default, string $context ) use ( $screen, &$primary_events ): string {
+			$primary_events[] = $context;
+
+			if ( $context === $screen->id ) {
+				return 'name';
+			}
+
+			return $default;
+		};
+		$custom_column_action = static function ( string $column_name, array $item ) use ( &$custom_events ): void {
+			$custom_events[] = array(
+				'column' => $column_name,
+				'uuid'   => $item['uuid'] ?? '',
+			);
+
+			if ( 'cfz_ap_custom' === $column_name ) {
+				echo '<span class="cfz-ap-custom" data-uuid="' . \esc_attr( (string) ( $item['uuid'] ?? '' ) ) . '">custom</span>';
+			}
+		};
+		$template_column_action = static function ( string $column_name ) use ( &$template_events ): void {
+			$template_events[] = $column_name;
+
+			if ( 'cfz_ap_custom' === $column_name ) {
+				echo '<span class="cfz-ap-template">{{ data.uuid }}</span>';
+			}
+		};
+
+		self::add_filter_record( $filters, 'get_user_metadata', $meta_filter, 10, 5 );
+		self::add_filter_record( $filters, "manage_{$screen->id}_columns", $columns_filter, 10, 1 );
+		self::add_filter_record( $filters, 'hidden_columns', $hidden_filter, 10, 3 );
+		self::add_filter_record( $filters, 'list_table_primary_column', $primary_filter, 10, 2 );
+		self::add_filter_record( $filters, "manage_{$screen->id}_custom_column", $custom_column_action, 10, 2 );
+		self::add_filter_record( $filters, "manage_{$screen->id}_custom_column_js_template", $template_column_action, 10, 1 );
+
+		try {
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['user_id']      = (int) $current_user->ID;
+			$GLOBALS['pagenow']      = 'user-edit.php';
+			$_GET                    = array( 'user_id' => (string) $current_user->ID );
+			$_POST                   = array();
+			$_REQUEST                = $_GET;
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/user-edit.php';
+			$_SERVER['REQUEST_URI']  = '/wp-admin/user-edit.php?user_id=' . (int) $current_user->ID;
+
+			$table = self::list_table( 'WP_Application_Passwords_List_Table', $screen );
+			$table->prepare_items();
+
+			$column_info = $table->get_column_info();
+			$row         = self::capture(
+				static function () use ( $table ): void {
+					$table->single_row( $table->items[0] );
+				}
+			);
+			$display     = self::capture(
+				static function () use ( $table ): void {
+					$table->display();
+				}
+			);
+			$template    = self::capture(
+				static function () use ( $table ): void {
+					$table->print_js_template_row();
+				}
+			);
+
+			$result = compact(
+				'column_info',
+				'custom_events',
+				'display',
+				'first_password',
+				'row',
+				'second_password',
+				'table',
+				'template',
+				'template_events'
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_removed = self::filters_removed( $filters );
+		}
+
+		$column_info     = $result['column_info'] ?? array();
+		$columns         = $column_info[0] ?? array();
+		$hidden          = $column_info[1] ?? array();
+		$primary         = $column_info[3] ?? null;
+		$row             = (string) ( $result['row'] ?? '' );
+		$display         = (string) ( $result['display'] ?? '' );
+		$template        = (string) ( $result['template'] ?? '' );
+		$prepared_items  = $result['table']->items ?? array();
+		$first_prepared  = $prepared_items[0] ?? array();
+		$second_prepared = $prepared_items[1] ?? array();
+
+		self::collect_failure(
+			$failures,
+			2 === count( $prepared_items )
+				&& ( $result['second_password']['uuid'] ?? null ) === ( $first_prepared['uuid'] ?? null )
+				&& ( $result['first_password']['uuid'] ?? null ) === ( $second_prepared['uuid'] ?? null ),
+			'application passwords prepare_items reads filtered user meta and reverses newest credentials first',
+			array(
+				'preparedUuids' => array_column( $prepared_items, 'uuid' ),
+				'fixtureUuids'  => array( $first_password['uuid'], $second_password['uuid'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::stable_column_ids( $columns )
+				&& isset( $columns['name'], $columns['created'], $columns['last_used'], $columns['last_ip'], $columns['revoke'], $columns['cfz_ap_custom'] )
+				&& array( 'last_ip' ) === $hidden
+				&& 'name' === $primary
+				&& in_array( $screen->id, $hidden_events, true )
+				&& in_array( $screen->id, $primary_events, true ),
+			'application password columns, hidden columns, and primary column are stable and screen-local',
+			array( 'columnInfo' => $column_info )
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $row, 'data-uuid="' . \esc_attr( $second_password['uuid'] ) . '"' )
+				&& str_contains( $row, \esc_html( $second_password['name'] ) )
+				&& ! str_contains( $row, $second_password['password'] )
+				&& str_contains( $row, 'revoke-application-password-' . \esc_attr( $second_password['uuid'] ) )
+				&& str_contains( $row, 'cfz-ap-custom' )
+				&& array( 'cfz_ap_custom' ) === array_values( array_unique( array_column( $custom_events, 'column' ) ) )
+				&& self::html_has_no_raw_script( $row ),
+			'application password row output escapes generated names, hides hashes, renders revoke/custom controls, and has no raw script leakage',
+			array(
+				'customEvents' => $custom_events,
+				'row'          => self::describe_string( $row ),
+				'rowScript'    => self::raw_script_context( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $display, 'revoke-all-application-passwords' )
+				&& str_contains( $display, 'data-uuid="' . \esc_attr( $second_password['uuid'] ) . '"' )
+				&& str_contains( $template, 'data-uuid="{{ data.uuid }}"' )
+				&& str_contains( $template, 'wp.date.dateI18n' )
+				&& str_contains( $template, 'cfz-ap-template' )
+				&& in_array( 'cfz_ap_custom', $template_events, true )
+				&& self::html_has_no_raw_script( $display . $template ),
+			'application password full display and JS template preserve row UUIDs, date formatting, revoke-all tablenav, and custom template hooks',
+			array(
+				'display'        => self::describe_string( $display ),
+				'template'       => self::describe_string( $template ),
+				'templateEvents' => $template_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'application password metadata, column, hidden, primary, and custom-column filters are removed',
+			array( 'filtersRemoved' => $filters_removed )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.application-passwords.user-meta-rows-template',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
+			)
+		);
+	}
+
 	private static function check_network_tables( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures        = array();
 		$filters         = array();
@@ -1477,6 +1685,7 @@ final class AdminListTablesSurface {
 					'WP_Users_List_Table',
 					'WP_Plugins_List_Table',
 					'WP_Themes_List_Table',
+					'WP_Application_Passwords_List_Table',
 					'WP_MS_Sites_List_Table',
 					'WP_MS_Users_List_Table',
 				),
@@ -1486,7 +1695,6 @@ final class AdminListTablesSurface {
 					'WP_Plugin_Install_List_Table',
 					'WP_Theme_Install_List_Table',
 					'WP_MS_Themes_List_Table',
-					'WP_Application_Passwords_List_Table',
 				),
 			)
 		);
@@ -1704,6 +1912,20 @@ final class AdminListTablesSurface {
 				'deleted'      => '0',
 				'lang_id'      => '0',
 			)
+		);
+	}
+
+	private static function synthetic_application_password( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$token = substr( hash( 'sha1', (string) $ctx->seed() . ':' . $index ), 0, 12 );
+
+		return array(
+			'uuid'      => sprintf( '00000000-0000-4000-8000-%012s', $token ),
+			'app_id'    => sprintf( '11111111-1111-4111-8111-%012s', substr( hash( 'sha1', 'app:' . $token ), 0, 12 ) ),
+			'name'      => 'Generated App Password ' . self::hostile_label( $ctx->fork( 'name' ) ),
+			'password'  => '$generic$component-fuzz-secret-' . $token,
+			'created'   => 1763980800 + ( $index * DAY_IN_SECONDS ),
+			'last_used' => 1764067200 + ( $index * DAY_IN_SECONDS ),
+			'last_ip'   => '192.0.2.' . ( 10 + $index ),
 		);
 	}
 

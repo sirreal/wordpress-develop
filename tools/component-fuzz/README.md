@@ -44,11 +44,11 @@ database, network requests, or a configured site.
   bulk-action/month-dropdown helper contracts, and safe admin/AJAX nonce checks
   without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
-  for posts, media, comments, terms, users, plugins, themes, and guarded
-  network sites/users, including columns/hidden/sortable/default-primary logic,
-  views, actions, bulk actions, row URL and HTML escaping, pagination/counts,
-  synthetic object/pre-query fixtures, capability gates, and state/filter
-  restoration.
+  for posts, media, comments, terms, users, plugins, themes, application
+  passwords, and guarded network sites/users, including columns/hidden/sortable/
+  default-primary logic, views, actions, bulk actions, row URL and HTML escaping,
+  pagination/counts, synthetic object/pre-query/user-meta fixtures, capability
+  gates, JS row templates, and state/filter restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
