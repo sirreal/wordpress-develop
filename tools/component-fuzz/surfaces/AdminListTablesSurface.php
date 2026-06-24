@@ -33,6 +33,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
 			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
+			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
 			$rows[] = self::check_network_tables( $ctx->fork( 'network-tables' ) );
 			$rows[] = self::skipped_db_heavy_branches( $ctx->fork( 'skips' ) );
 		} catch ( \Throwable $e ) {
@@ -1325,11 +1326,12 @@ final class AdminListTablesSurface {
 			str_contains( $row, 'data-uuid="' . \esc_attr( $second_password['uuid'] ) . '"' )
 				&& str_contains( $row, \esc_html( $second_password['name'] ) )
 				&& ! str_contains( $row, $second_password['password'] )
+				&& str_contains( $row, $second_password['last_ip'] )
 				&& str_contains( $row, 'revoke-application-password-' . \esc_attr( $second_password['uuid'] ) )
 				&& str_contains( $row, 'cfz-ap-custom' )
 				&& array( 'cfz_ap_custom' ) === array_values( array_unique( array_column( $custom_events, 'column' ) ) )
 				&& self::html_has_no_raw_script( $row ),
-			'application password row output escapes generated names, hides hashes, renders revoke/custom controls, and has no raw script leakage',
+			'application password row output escapes generated names, renders bounded IP literals, hides hashes, renders revoke/custom controls, and has no raw script leakage',
 			array(
 				'customEvents' => $custom_events,
 				'row'          => self::describe_string( $row ),
@@ -1368,6 +1370,47 @@ final class AdminListTablesSurface {
 			array(
 				'failures' => array_slice( $failures, 0, 8 ),
 				'screen'   => $screen->id,
+			)
+		);
+	}
+
+	private static function check_application_passwords_last_ip_boundary( \ComponentFuzz\FuzzContext $ctx ): array {
+		$item   = self::synthetic_application_password( $ctx->fork( 'password' ), 9 );
+		$screen = self::screen( 'application-passwords-user-last-ip-' . $ctx->iteration() );
+		$table  = self::list_table( 'WP_Application_Passwords_List_Table', $screen );
+
+		$item['last_ip'] = '198.51.100.' . $ctx->int( 1, 254 ) . '<script>alert(1)</script>';
+		$row             = self::capture(
+			static function () use ( $item, $table ): void {
+				$table->single_row( $item );
+			}
+		);
+
+		if ( ! self::html_has_no_raw_script( $row ) ) {
+			return $ctx->skip(
+				'admin-list-tables.application-passwords.last-ip-escaped',
+				'Current core prints stored application-password last_ip values without escaping; hostile last_ip row coverage is documented as a boundary until core changes.',
+				array(
+					'rowScript' => self::raw_script_context( $row ),
+				)
+			);
+		}
+
+		if ( ! str_contains( $row, \esc_html( $item['last_ip'] ) ) ) {
+			return $ctx->fail(
+				'admin-list-tables.application-passwords.last-ip-escaped',
+				array(
+					'expectedEscapedLastIp' => \esc_html( $item['last_ip'] ),
+					'row'                   => self::describe_string( $row ),
+				)
+			);
+		}
+
+		return $ctx->pass(
+			'admin-list-tables.application-passwords.last-ip-escaped',
+			array(
+				'escapedLastIpPresent' => true,
+				'row'                  => self::describe_string( $row ),
 			)
 		);
 	}
