@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7896 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7887 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>classic-walkers</code> at 1100 passed and 100 skipped, <code>admin-ajax</code> at 800 passed, <code>update-install-upgrader</code> at 1200 passed, and <code>plugin-theme-lifecycle</code> at 1100 passed.</div>
+			<div class="note">Latest focused validations: <code>filesystem</code> at 1000 passed, <code>classic-walkers</code> at 1100 passed and 100 skipped, <code>admin-ajax</code> at 800 passed, and <code>update-install-upgrader</code> at 1200 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active subagents; classic-walkers and admin-ajax work are integrated in main.</div>
+			<div class="metric">1</div>
+			<div class="note">Mendel the 2nd is strengthening <code>assets</code> in <code>/private/tmp/component-fuzz-worker-assets</code>; filesystem work is integrated in main.</div>
 		</div>
 	</div>
 
@@ -256,6 +256,13 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>filesystem</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 7887 passed, 64 skipped, 0 failed.</td>
+					<td>Path normalization/joining, validation classes, filename sanitization/uniqueness, temp names, direct filesystem sandboxing, metadata/time/chmod round trips, missing-file failure values.</td>
+				</tr>
 				<tr>
 					<td><code>classic-walkers</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
@@ -751,6 +758,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>e6864cfb09</code></td>
+					<td><code>filesystem</code></td>
+					<td>1000 passed, 0 skipped, 0 failed.</td>
+					<td>7887 passed, 64 skipped, 0 failed at 2 iterations after direct filesystem metadata/time/chmod coverage.</td>
+				</tr>
 				<tr>
 					<td><code>2370d0b086</code></td>
 					<td><code>classic-walkers</code></td>
