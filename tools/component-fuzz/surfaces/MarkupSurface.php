@@ -728,13 +728,23 @@ final class MarkupSurface {
 	}
 
 	private static function check_link_attribute_helpers( array &$checks, array &$failures ): void {
-		if ( ! function_exists( 'links_add_target' ) || ! function_exists( 'wp_rel_nofollow' ) || ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
-			self::skip( $checks, 'markup.link-attribute-helpers', 'links_add_target, wp_rel_nofollow, or WP_HTML_Tag_Processor unavailable' );
+		if ( ! function_exists( 'links_add_target' ) || ! function_exists( 'wp_rel_nofollow' ) || ! function_exists( 'wp_internal_hosts' ) || ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+			self::skip( $checks, 'markup.link-attribute-helpers', 'links_add_target, wp_rel_nofollow, wp_internal_hosts, or WP_HTML_Tag_Processor unavailable' );
 			return;
 		}
 
-		$html = '<p><a href="https://external.test/a?x=1&amp;y=2">external</a> <a href="/local" rel="tag" target="_self">local</a> <span><a data-cfz="1" href="https://external.test/second">second</a></span></p>';
-		$target = 'cfz-target-"probe';
+		$external_host = self::external_fixture_host();
+		if ( null === $external_host ) {
+			self::skip( $checks, 'markup.link-attribute-helpers', 'No generated host was outside wp_internal_hosts().' );
+			return;
+		}
+
+		$external_href      = 'https://' . $external_host . '/a?x=1&y=2';
+		$external_href_attr = 'https://' . $external_host . '/a?x=1&amp;y=2';
+		$second_href        = 'https://' . $external_host . '/second';
+		$expected_hrefs     = array( $external_href, '/local', $second_href );
+		$html               = '<p><a href="' . $external_href_attr . '">external</a> <a href="/local" rel="tag" target="_self">local</a> <span><a data-cfz="1" href="' . $second_href . '">second</a></span></p>';
+		$target             = 'cfz-target-"probe';
 
 		$had_links_target = array_key_exists( '_links_add_target', $GLOBALS );
 		$links_target     = $GLOBALS['_links_add_target'] ?? null;
@@ -784,20 +794,28 @@ final class MarkupSurface {
 		$nofollow_attrs = self::anchor_attributes( $nofollow_html );
 
 		$target_values = array_column( $target_attrs, 'target' );
+		$target_hrefs  = array_column( $target_attrs, 'href' );
 		$target_ok     = 3 === count( $target_attrs )
+			&& $expected_hrefs === $target_hrefs
 			&& array( $target, $target, $target ) === $target_values
 			&& null === $target_attrs[0]['rel']
+			&& null === $target_attrs[0]['data-cfz']
 			&& 'tag' === $target_attrs[1]['rel']
 			&& '1' === $target_attrs[2]['data-cfz']
 			&& false === strpos( $target_call['value'], 'target="_self"' );
 
+		$nofollow_hrefs = array_column( $nofollow_attrs, 'href' );
 		$nofollow_ok = 3 === count( $nofollow_attrs )
+			&& $expected_hrefs === $nofollow_hrefs
 			&& 1 === self::rel_token_count( $nofollow_attrs[0]['rel'], 'nofollow' )
 			&& 1 === self::rel_token_count( $nofollow_attrs[1]['rel'], 'nofollow' )
 			&& 1 === self::rel_token_count( $nofollow_attrs[1]['rel'], 'tag' )
 			&& 1 === self::rel_token_count( $nofollow_attrs[2]['rel'], 'nofollow' )
 			&& '_self' === $nofollow_attrs[1]['target']
-			&& null === $nofollow_attrs[0]['target'];
+			&& null === $nofollow_attrs[0]['target']
+			&& null === $nofollow_attrs[2]['target']
+			&& null === $nofollow_attrs[0]['data-cfz']
+			&& '1' === $nofollow_attrs[2]['data-cfz'];
 
 		if ( ! $target_ok || ! $nofollow_ok || ! $global_restored ) {
 			self::fail(
@@ -811,6 +829,8 @@ final class MarkupSurface {
 					'targetOutput'   => self::preview( $target_call['value'] ),
 					'nofollowOutput' => self::preview( $nofollow_html ),
 					'globalRestored' => $global_restored,
+					'externalHost'   => $external_host,
+					'internalHosts'  => \wp_internal_hosts(),
 				)
 			);
 			return;
@@ -823,6 +843,7 @@ final class MarkupSurface {
 				'anchorCount'    => count( $target_attrs ),
 				'targetSha1'     => sha1( $target_call['value'] ),
 				'nofollowSha1'   => sha1( $nofollow_html ),
+				'externalHost'   => $external_host,
 				'globalRestored' => $global_restored,
 				'durationMs'     => $target_call['durationMs'] + $nofollow_call['durationMs'],
 			)
@@ -1177,6 +1198,23 @@ final class MarkupSurface {
 		}
 
 		return count( array_keys( $tokens, $token, true ) );
+	}
+
+	private static function external_fixture_host(): ?string {
+		$internal_hosts = array_map(
+			static function ( $host ): string {
+				return strtolower( (string) $host );
+			},
+			(array) \wp_internal_hosts()
+		);
+
+		foreach ( array( 'component-fuzz-external.invalid', 'external.test', 'example.invalid' ) as $host ) {
+			if ( ! in_array( $host, $internal_hosts, true ) ) {
+				return $host;
+			}
+		}
+
+		return null;
 	}
 
 	private static function generate_markup( array &$rng, int $max_bytes ): array {
