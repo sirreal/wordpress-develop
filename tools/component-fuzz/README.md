@@ -151,7 +151,8 @@ database, network requests, or a configured site.
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, invalid UTF-8, malformed address structure, selected boundary lengths,
   normalization-sensitive local parts, comment-author email filtering, and user
-  email lookup/duplicate behavior for accent-distinct local parts.
+  email lookup/duplicate behavior for accent-distinct local parts/domains plus
+  password-reset Unicode recipient paths.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,
@@ -436,8 +437,10 @@ database, network requests, or a configured site.
   ordering, header observability, and state restoration.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
-  system method dispatch, method registry filters, demo helpers, and disabled
-  login behavior without publishing, media, pingback, or option side effects.
+  system method dispatch, method registry filters, demo helpers, disabled
+  login behavior, legacy post title/category XML helpers, and short-circuited
+  `WP_HTTP_IXR_Client` transport/error handling without publishing, media,
+  pingback, option, or live network side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page

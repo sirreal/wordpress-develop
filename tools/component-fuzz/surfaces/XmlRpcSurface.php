@@ -33,6 +33,8 @@ final class XmlRpcSurface {
 			$rows[] = self::check_ixr_fault_xml( $ctx->fork( 'ixr-faults' ) );
 			$rows[] = self::check_ixr_server_dispatch( $ctx->fork( 'ixr-server' ) );
 			$rows[] = self::check_wp_xmlrpc_server_helpers( $ctx->fork( 'wp-server' ) );
+			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
+			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'xmlrpc.surface-no-throw',
@@ -46,6 +48,8 @@ final class XmlRpcSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::load_http_ixr_client();
+
 		$missing = array();
 
 		foreach (
@@ -57,6 +61,7 @@ final class XmlRpcSurface {
 				'IXR_Request',
 				'IXR_Server',
 				'IXR_Value',
+				'WP_HTTP_IXR_Client',
 				'wp_xmlrpc_server',
 			) as $class
 		) {
@@ -68,9 +73,17 @@ final class XmlRpcSurface {
 		foreach (
 			array(
 				'add_filter',
+				'has_filter',
+				'is_wp_error',
 				'remove_filter',
+				'wp_remote_retrieve_body',
+				'wp_remote_retrieve_response_code',
 				'wp_slash',
+				'wp_safe_remote_post',
 				'xml_parser_create',
+				'xmlrpc_getpostcategory',
+				'xmlrpc_getposttitle',
+				'xmlrpc_removepostdata',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -79,6 +92,19 @@ final class XmlRpcSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_http_ixr_client(): void {
+		if ( class_exists( 'WP_HTTP_IXR_Client' ) ) {
+			return;
+		}
+
+		if ( defined( 'ABSPATH' ) && defined( 'WPINC' ) ) {
+			$file = ABSPATH . WPINC . '/class-wp-http-ixr-client.php';
+			if ( is_file( $file ) ) {
+				require_once $file;
+			}
+		}
 	}
 
 	private static function check_ixr_value_serialization( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -469,6 +495,255 @@ final class XmlRpcSurface {
 					'Publishing, media upload, taxonomy, comment, and pingback methods require DB/network side effects.',
 				),
 			)
+		);
+	}
+
+	private static function check_xmlrpc_post_data_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures                 = array();
+		$previous_default_title   = $GLOBALS['post_default_title'] ?? null;
+		$previous_default_cat     = $GLOBALS['post_default_category'] ?? null;
+		$had_default_title        = array_key_exists( 'post_default_title', $GLOBALS );
+		$had_default_cat          = array_key_exists( 'post_default_category', $GLOBALS );
+		$title                    = 'Title ' . self::safe_text( $ctx->fork( 'title' ), 24 );
+		$body                     = 'Body ' . self::safe_text( $ctx->fork( 'body' ), 48 );
+		$categories               = array(
+			'alpha-' . $ctx->identifier( 3, 8 ),
+			'beta-' . $ctx->identifier( 3, 8 ),
+			'gamma-' . $ctx->identifier( 3, 8 ),
+		);
+		$default_title            = 'Default title ' . self::safe_text( $ctx->fork( 'default-title' ), 18 );
+		$default_category         = 'default-' . $ctx->identifier( 4, 10 );
+		$content                  = '<title>' . $title . "</title>\n"
+			. '<category>,' . implode( ',', $categories ) . ",</category>\n"
+			. '<content>' . $body . '</content>';
+		$fallback_content         = '<content>' . $body . '</content>';
+		$GLOBALS['post_default_title']    = $default_title;
+		$GLOBALS['post_default_category'] = $default_category;
+
+		try {
+			$extracted_title       = \xmlrpc_getposttitle( $content );
+			$extracted_categories  = \xmlrpc_getpostcategory( $content );
+			$removed              = \xmlrpc_removepostdata( $content );
+			$fallback_title       = \xmlrpc_getposttitle( $fallback_content );
+			$fallback_category    = \xmlrpc_getpostcategory( $fallback_content );
+		} finally {
+			if ( $had_default_title ) {
+				$GLOBALS['post_default_title'] = $previous_default_title;
+			} else {
+				unset( $GLOBALS['post_default_title'] );
+			}
+
+			if ( $had_default_cat ) {
+				$GLOBALS['post_default_category'] = $previous_default_cat;
+			} else {
+				unset( $GLOBALS['post_default_category'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$title === $extracted_title
+				&& $categories === $extracted_categories
+				&& $default_title === $fallback_title
+				&& $default_category === $fallback_category,
+			'legacy XML-RPC post title/category helpers extract generated tags and fall back to globals',
+			array(
+				'title'              => self::describe_string( $title ),
+				'extractedTitle'     => self::describe_value( $extracted_title ),
+				'categories'         => $categories,
+				'extractedCategories' => self::describe_value( $extracted_categories ),
+				'fallbackTitle'      => self::describe_value( $fallback_title ),
+				'fallbackCategory'   => self::describe_value( $fallback_category ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === strpos( $removed, '<title>' )
+				&& false === strpos( $removed, '<category>' )
+				&& str_contains( $removed, '<content>' . $body . '</content>' ),
+			'xmlrpc_removepostdata removes title/category elements while preserving remaining XML bytes',
+			array(
+				'removed' => self::describe_string( $removed ),
+				'body'    => self::describe_string( $body ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.legacy-post-data-helpers.extract-and-remove-bounded-tags',
+			array() === $failures,
+			array(
+				'failures'   => $failures,
+				'categories' => $categories,
+			)
+		);
+	}
+
+	private static function check_http_ixr_client_transport( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$captured       = array();
+		$marker         = 'xmlrpc-http-' . $ctx->identifier( 6, 12 );
+		$client_header  = 'client-' . $ctx->identifier( 5, 10 );
+		$filtered_header = 'filtered-' . $ctx->identifier( 5, 10 );
+		$url            = 'https://api.example.test:8443/xmlrpc.php?rsd=' . rawurlencode( $marker );
+		$payload_text   = 'payload <tag>& "' . self::safe_text( $ctx->fork( 'payload' ), 18 );
+		$payload_number = $ctx->int( -1000, 1000 );
+		$payload_bytes  = "bytes:\x00" . self::safe_text( $ctx->fork( 'bytes' ), 12 );
+		$expected_args  = self::normalize_ixr_value(
+			array(
+				$payload_text,
+				$payload_number,
+				new \IXR_Base64( $payload_bytes ),
+			)
+		);
+		$header_filter  = static function ( array $headers ) use ( $filtered_header ): array {
+			$headers['X-Filtered-Header'] = $filtered_header;
+			return $headers;
+		};
+		$http_filter    = static function ( $preempt, array $parsed_args, string $request_url ) use ( &$captured, $marker ) {
+			$message = new \IXR_Message( (string) ( $parsed_args['body'] ?? '' ) );
+			$parsed  = $message->parse();
+			$method  = is_string( $message->methodName ) ? $message->methodName : '';
+
+			$captured[] = array(
+				'preempt' => $preempt,
+				'url'     => $request_url,
+				'headers' => $parsed_args['headers'] ?? array(),
+				'timeout' => $parsed_args['timeout'] ?? null,
+				'body'    => self::describe_string( (string) ( $parsed_args['body'] ?? '' ) ),
+				'request' => array(
+					'parsed' => $parsed,
+					'method' => $method,
+					'params' => self::normalize_ixr_value( $message->params ),
+				),
+			);
+
+			if ( 'component.status' === $method ) {
+				return self::http_response( 503, 'Synthetic unavailable', '<not-used />' );
+			}
+
+			if ( 'component.fault' === $method ) {
+				$error = new \IXR_Error( 499, 'Synthetic fault ' . $marker );
+				return self::http_response( 200, 'OK', $error->getXml() );
+			}
+
+			if ( 'component.transport' === $method ) {
+				return new \WP_Error( 'component_fuzz_xmlrpc_transport', 'Synthetic transport failure.' );
+			}
+
+			$response = new \IXR_Value(
+				array(
+					'method'     => $method,
+					'paramCount' => count( $message->params ),
+					'marker'     => $marker,
+				)
+			);
+
+			return self::http_response(
+				200,
+				'OK',
+				'<?xml version="1.0"?><methodResponse><params><param><value>' . $response->getXml() . '</value></param></params></methodResponse>'
+			);
+		};
+
+		\add_filter( 'wp_http_ixr_client_headers', $header_filter, 10, 1 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		try {
+			$client                                = new \WP_HTTP_IXR_Client( $url, false, false, 7 );
+			$client->headers['X-Client-Header']   = $client_header;
+			$success                              = $client->query( 'component.ok', $payload_text, $payload_number, new \IXR_Base64( $payload_bytes ) );
+			$success_response                     = $success ? $client->getResponse() : null;
+			$status_client                        = new \WP_HTTP_IXR_Client( $url, false, false, 4 );
+			$status_error                         = $status_client->query( 'component.status', $marker );
+			$fault_client                         = new \WP_HTTP_IXR_Client( $url, false, false, 4 );
+			$fault_error                          = $fault_client->query( 'component.fault', $marker );
+			$transport_client                     = new \WP_HTTP_IXR_Client( $url, false, false, 4 );
+			$transport_error                      = $transport_client->query( 'component.transport', $marker );
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_filter( 'wp_http_ixr_client_headers', $header_filter, 10 );
+		}
+
+		$first_capture = $captured[0] ?? array();
+		$first_headers = is_array( $first_capture['headers'] ?? null ) ? $first_capture['headers'] : array();
+		self::collect_failure(
+			$failures,
+			true === $success
+				&& array(
+					'method'     => 'component.ok',
+					'paramCount' => 3,
+					'marker'     => $marker,
+				) === $success_response
+				&& 4 === count( $captured )
+				&& false === ( $first_capture['preempt'] ?? null )
+				&& $url === ( $first_capture['url'] ?? null )
+				&& 7 === ( $first_capture['timeout'] ?? null )
+				&& 'text/xml' === ( $first_headers['Content-Type'] ?? null )
+				&& $client_header === ( $first_headers['X-Client-Header'] ?? null )
+				&& $filtered_header === ( $first_headers['X-Filtered-Header'] ?? null )
+				&& 'component.ok' === ( $first_capture['request']['method'] ?? null )
+				&& self::values_equivalent( $expected_args, $first_capture['request']['params'] ?? null ),
+			'WP_HTTP_IXR_Client composes filtered HTTP requests and parses successful method responses',
+			array(
+				'success'          => $success,
+				'successResponse'  => self::describe_value( $success_response ),
+				'firstCapture'     => self::describe_value( $first_capture ),
+				'expectedParams'   => self::describe_value( $expected_args ),
+				'firstDifference'  => self::first_difference( $expected_args, $first_capture['request']['params'] ?? null ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === $status_error
+				&& $status_client->isError()
+				&& -32301 === $status_client->getErrorCode()
+				&& false === $fault_error
+				&& $fault_client->isError()
+				&& 499 === $fault_client->getErrorCode()
+				&& str_contains( $fault_client->getErrorMessage(), 'Synthetic fault' )
+				&& false === $transport_error
+				&& $transport_client->isError()
+				&& -32300 === $transport_client->getErrorCode(),
+			'WP_HTTP_IXR_Client maps HTTP status, XML-RPC fault, and transport failures to IXR_Error codes',
+			array(
+				'statusError'    => self::describe_value( $status_client->error ),
+				'faultError'     => self::describe_value( $fault_client->error ),
+				'transportError' => self::describe_value( $transport_client->error ),
+				'captured'       => self::describe_value( $captured ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_http_request', $http_filter )
+				&& false === \has_filter( 'wp_http_ixr_client_headers', $header_filter ),
+			'XML-RPC HTTP client filters are removed after synthetic transport checks',
+			array(
+				'preHttp' => \has_filter( 'pre_http_request', $http_filter ),
+				'headers' => \has_filter( 'wp_http_ixr_client_headers', $header_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.wp-http-ixr-client.short-circuited-transport-contracts',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'captured' => self::describe_value( $captured ),
+			)
+		);
+	}
+
+	private static function http_response( int $code, string $message, string $body ): array {
+		return array(
+			'headers'  => array(),
+			'body'     => $body,
+			'response' => array(
+				'code'    => $code,
+				'message' => $message,
+			),
+			'cookies'  => array(),
+			'filename' => null,
 		);
 	}
 
