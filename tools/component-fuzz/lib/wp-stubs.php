@@ -1521,6 +1521,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return array( array( 'cnt' => count( $rows ) ) );
 			}
 
+			$rows = $this->component_fuzz_apply_limit( $query, $rows );
+
 			if ( preg_match( '/SELECT\s+' . preg_quote( $id_column, '/' ) . '\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( $id_column ) );
 			}
@@ -1620,11 +1622,11 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		private function component_fuzz_apply_limit( $query, array $rows ) {
-			if ( preg_match( '/\bLIMIT\s+(\d+)\s*,\s*(\d+)/i', $query, $matches ) ) {
+			if ( preg_match( '/\bLIMIT\s+[\'"]?(\d+)[\'"]?\s*,\s*[\'"]?(\d+)[\'"]?/i', $query, $matches ) ) {
 				return array_slice( array_values( $rows ), (int) $matches[1], (int) $matches[2] );
 			}
 
-			if ( preg_match( '/\bLIMIT\s+(\d+)/i', $query, $matches ) ) {
+			if ( preg_match( '/\bLIMIT\s+[\'"]?(\d+)[\'"]?/i', $query, $matches ) ) {
 				return array_slice( array_values( $rows ), 0, (int) $matches[1] );
 			}
 
