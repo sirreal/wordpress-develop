@@ -1185,6 +1185,7 @@ final class RestSurface {
 			$links          = \WP_REST_Server::get_response_links( $response );
 			$compact_links  = \WP_REST_Server::get_compact_response_links( $response );
 			$data_no_embed  = $server->response_to_data( $response, false );
+			$data_embed_all = $server->response_to_data( $response, true );
 			$enveloped      = $server->envelope_response( $response, array( 'related' ) );
 			$envelope_data  = $enveloped->get_data();
 		} finally {
@@ -1196,6 +1197,7 @@ final class RestSurface {
 		$http_response   = new \WP_HTTP_Response( array( 'converted' => $token ), 206, array( 'X-Converted' => $token ) );
 		$converted       = \rest_ensure_response( $http_response );
 		$embedded        = $envelope_data['body']['_embedded']['related'][0] ?? null;
+		$embedded_all    = $data_embed_all['_embedded']['related'][0] ?? null;
 		$links_in_body   = $data_no_embed['_links'] ?? array();
 		$envelope_body   = $envelope_data['body'] ?? array();
 		$envelope_headers = $envelope_data['headers'] ?? array();
@@ -1221,6 +1223,15 @@ final class RestSurface {
 				&& true === ( $links_in_body['related'][0]['embeddable'] ?? null ),
 			'noEmbedWhenFalse'  => ! isset( $data_no_embed['_embedded'] ),
 		);
+		$embed_ok = array(
+			'relatedEmbeddedAll' => is_array( $embedded_all )
+				&& $id === ( $embedded_all['embeddedId'] ?? null )
+				&& 'embed' === ( $embedded_all['context'] ?? null )
+				&& 7 === ( $embedded_all['perPage'] ?? null )
+				&& $token === ( $embedded_all['token'] ?? null ),
+			'externalAuthorRejected' => isset( $data_embed_all['_links']['author'][0]['href'] )
+				&& ! isset( $data_embed_all['_embedded']['author'] ),
+		);
 		$envelope_ok = array(
 			'envelopeResponseClass' => $enveloped instanceof \WP_REST_Response,
 			'envelopeHttpStatus'    => 200 === $enveloped->get_status(),
@@ -1232,7 +1243,7 @@ final class RestSurface {
 			'headersPreserved'      => 'replacement' === ( $envelope_headers['X-Fuzz-Header'] ?? null )
 				&& 'one, two' === ( $envelope_headers['X-Fuzz-Trace'] ?? null )
 				&& isset( $envelope_headers['Link'] ),
-			'relatedEmbedded'       => 1 === $embed_hits
+			'relatedEmbedded'       => 2 === $embed_hits
 				&& is_array( $embedded )
 				&& $id === ( $embedded['embeddedId'] ?? null )
 				&& 'embed' === ( $embedded['context'] ?? null )
@@ -1250,6 +1261,7 @@ final class RestSurface {
 
 		$ok = self::all_true( $headers_ok )
 			&& self::all_true( $links_ok )
+			&& self::all_true( $embed_ok )
 			&& self::all_true( $envelope_ok )
 			&& self::all_true( $conversion_ok );
 
@@ -1261,10 +1273,12 @@ final class RestSurface {
 				'namespace'    => $namespace,
 				'headersOk'    => $headers_ok,
 				'linksOk'      => $links_ok,
+				'embedOk'      => $embed_ok,
 				'envelopeOk'   => $envelope_ok,
 				'conversionOk' => $conversion_ok,
 				'links'        => $links,
 				'compactLinks' => $compact_links,
+				'embedAll'     => $data_embed_all,
 				'envelope'     => $envelope_data,
 			),
 		);
