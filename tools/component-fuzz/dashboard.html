@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7942 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7953 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>identity</code> at 100 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>identity</code> at 100 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale plugin-theme, media-metadata, fonts, identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale admin-screen, plugin-theme, media-metadata, fonts, identity, comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -256,6 +256,13 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>markup</code></td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Aquinas the 2nd review findings fixed in <code>6b590ee976</code></td>
+					<td>Main focused run: 2173 passed, 27 skipped, 0 failed; latest broad run: 7953 passed, 62 skipped, 0 failed.</td>
+					<td>Block parser/serializer/render guards, local shortcode registry behavior, strip/balance/excerpt helpers, URL extraction, link target/nofollow attribute oracles, embed helpers, and global restoration.</td>
+				</tr>
 				<tr>
 					<td><code>media-metadata</code></td>
 					<td><span class="status good">reviewed validation passed</span></td>
@@ -835,6 +842,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>b691234d07</code> / <code>6b590ee976</code></td>
+					<td><code>markup</code></td>
+					<td>2173 passed, 27 skipped, 0 failed after review fixes.</td>
+					<td>7953 passed, 62 skipped, 0 failed at 2 iterations after link target/nofollow attribute helper coverage.</td>
+				</tr>
 				<tr>
 					<td><code>55387b1acf</code></td>
 					<td><code>media-metadata</code></td>
