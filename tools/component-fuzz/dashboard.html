@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7938 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7936 passed, 0 failed, 0 errored, 63 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; stale site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale comment-workflow, site-health, default-widgets, admin-list-tables, plugin-theme-lifecycle, security, mail, user-preferences, discovery, navigation, template-links, syndication, fonts, media-remote, icons-connectors, and appearance-media workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -276,6 +276,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1200 passed, 0 skipped, 0 failed; latest broad run: 7938 passed, 63 skipped, 0 failed.</td>
 					<td>Post and term field sanitizers, slashing and metadata serialization, <code>get_extended()</code> more-tag parsing, date/query helpers, and class/key/title sanitizers.</td>
+				</tr>
+				<tr>
+					<td><code>auth-flow</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7936 passed, 63 skipped, 0 failed.</td>
+					<td>Synthetic user rows, authentication filters/password paths, sign-on and clear-auth-cookie short-circuits, auth-cookie validation hooks, session lifecycle, and current-user/cookie restoration.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -800,6 +807,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>614c8d1490</code></td>
+					<td><code>auth-flow</code></td>
+					<td>900 passed, 0 skipped, 0 failed.</td>
+					<td>7936 passed, 63 skipped, 0 failed at 2 iterations after clear-auth-cookie action and send-auth-cookies short-circuit coverage.</td>
+				</tr>
 				<tr>
 					<td><code>0c7be29fa4</code></td>
 					<td><code>content</code></td>
