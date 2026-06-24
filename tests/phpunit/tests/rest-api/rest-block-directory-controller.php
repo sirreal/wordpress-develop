@@ -41,6 +41,15 @@ class WP_REST_Block_Directory_Controller_Test extends WP_Test_REST_Controller_Te
 		self::delete_user( self::$admin_id );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Block_Directory_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 * @ticket 50321
 	 */

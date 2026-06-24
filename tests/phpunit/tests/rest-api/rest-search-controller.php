@@ -44,6 +44,26 @@ class WP_Test_REST_Search_Controller extends WP_Test_REST_Controller_Testcase {
 	 */
 	private static $my_tag_id;
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$search_handlers = array(
+			new WP_REST_Post_Search_Handler(),
+			new WP_REST_Term_Search_Handler(),
+			new WP_REST_Post_Format_Search_Handler(),
+		);
+
+		$search_handlers = apply_filters( 'wp_rest_search_handlers', $search_handlers );
+
+		$controller = new WP_REST_Search_Controller( $search_handlers );
+		$controller->register_routes();
+
+		$this->register_post_type_rest_routes_for_test( array( 'post', 'page' ) );
+		$this->register_taxonomy_rest_routes_for_test( array( 'category', 'post_tag' ) );
+	}
+
 	/**
 	 * Create fake data before our tests run.
 	 *

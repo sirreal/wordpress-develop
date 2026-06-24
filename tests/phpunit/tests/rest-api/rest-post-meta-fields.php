@@ -258,7 +258,12 @@ class WP_Test_REST_Post_Meta_Fields extends WP_Test_REST_TestCase {
 		/** @var WP_REST_Server $wp_rest_server */
 		global $wp_rest_server;
 		$wp_rest_server = new Spy_REST_Server();
-		do_action( 'rest_api_init', $wp_rest_server );
+		$this->do_rest_api_init_without_initial_routes();
+		$this->register_initial_rest_routes_for_test();
+	}
+
+	private function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( 'post', 'page', 'cpt' ) );
 	}
 
 	protected function grant_write_permission() {

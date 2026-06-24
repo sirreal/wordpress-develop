@@ -108,6 +108,14 @@ class Tests_REST_wpRestTemplateRevisionsController extends WP_Test_REST_Controll
 	 */
 	private static $template_part_revisions = array();
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( self::TEMPLATE_POST_TYPE, self::TEMPLATE_PART_POST_TYPE ) );
+	}
+
 	/**
 	 * Create fake data before our tests run.
 	 *

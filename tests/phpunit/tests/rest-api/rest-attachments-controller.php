@@ -194,6 +194,17 @@ class WP_Test_REST_Attachments_Controller extends WP_Test_REST_Post_Type_Control
 		parent::tear_down();
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( 'post', 'page', 'attachment' ) );
+
+		$controller = new WP_REST_Users_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 * Enables client-side media processing and reinitializes the REST server
 	 * so that the sideload and finalize routes are registered.

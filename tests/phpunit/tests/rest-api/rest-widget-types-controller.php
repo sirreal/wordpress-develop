@@ -57,6 +57,15 @@ class WP_Test_REST_Widget_Types_Controller extends WP_Test_REST_Controller_Testc
 		self::delete_user( self::$subscriber_id );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Widget_Types_Controller();
+		$controller->register_routes();
+	}
+
 	private function setup_widget( $id_base, $number, $settings ) {
 		global $wp_widget_factory;
 

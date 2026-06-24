@@ -148,6 +148,15 @@ class REST_Block_Renderer_Controller_Test extends WP_Test_REST_Controller_Testca
 		parent::tear_down();
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Block_Renderer_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 * Register test block.
 	 *

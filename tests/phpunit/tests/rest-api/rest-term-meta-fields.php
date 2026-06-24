@@ -193,7 +193,8 @@ class WP_Test_REST_Term_Meta_Fields extends WP_Test_REST_TestCase {
 		/** @var WP_REST_Server $wp_rest_server */
 		global $wp_rest_server;
 		$wp_rest_server = new Spy_REST_Server();
-		do_action( 'rest_api_init', $wp_rest_server );
+		$this->do_rest_api_init_without_initial_routes();
+		$this->register_taxonomy_rest_routes_for_test( array( 'category', 'post_tag', 'customtax' ) );
 	}
 
 	protected function grant_write_permission() {
@@ -326,7 +327,8 @@ class WP_Test_REST_Term_Meta_Fields extends WP_Test_REST_TestCase {
 		/** @var WP_REST_Server $wp_rest_server */
 		global $wp_rest_server;
 		$wp_rest_server = new Spy_REST_Server();
-		do_action( 'rest_api_init', $wp_rest_server );
+		$this->do_rest_api_init_without_initial_routes();
+		$this->register_taxonomy_rest_routes_for_test( array( 'category', 'post_tag', 'customtax' ) );
 
 		add_term_meta( self::$category_id, 'test_string', 42 );
 		add_term_meta( self::$category_id, 'test_number', '42' );

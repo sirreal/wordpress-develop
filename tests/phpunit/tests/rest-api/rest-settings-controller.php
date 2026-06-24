@@ -41,6 +41,15 @@ class WP_Test_REST_Settings_Controller extends WP_Test_REST_Controller_Testcase 
 		$this->endpoint = new WP_REST_Settings_Controller();
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Settings_Controller();
+		$controller->register_routes();
+	}
+
 	public function tear_down() {
 		$settings_to_unregister = array(
 			'mycustomsetting',

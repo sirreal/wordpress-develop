@@ -39,6 +39,14 @@ class Tests_REST_wpRestTemplateAutosavesController extends WP_Test_REST_Controll
 	 */
 	const PARENT_POST_TYPE = 'wp_template';
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( self::TEMPLATE_POST_TYPE, self::TEMPLATE_PART_POST_TYPE ) );
+	}
+
 	/**
 	 * Admin user ID.
 	 *

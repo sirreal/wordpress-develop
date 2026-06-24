@@ -105,6 +105,14 @@ class WP_Test_REST_Revisions_Controller extends WP_Test_REST_Controller_Testcase
 		$this->revision_2_1_id = $post_2_revision->ID;
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( 'post', 'page' ) );
+	}
+
 	public function _filter_map_meta_cap_remove_no_allow_revisions( $caps, $cap, $user_id, $args ) {
 		if ( 'delete_post' !== $cap || empty( $args ) ) {
 			return $caps;

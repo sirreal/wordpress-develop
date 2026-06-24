@@ -88,8 +88,11 @@ class Tests_REST_WpRestUrlDetailsController extends WP_Test_REST_Controller_Test
 	public function set_up() {
 		parent::set_up();
 
-		add_filter( 'pre_http_request', array( $this, 'mock_success_request_to_remote_url' ), 10, 3 );
+		if ( ! $this->should_register_rest_routes() ) {
+			return;
+		}
 
+		add_filter( 'pre_http_request', array( $this, 'mock_success_request_to_remote_url' ), 10, 3 );
 		// Disables usage of cache during major of tests.
 		add_filter( 'pre_site_transient_' . $this->get_transient_name(), '__return_null' );
 	}
@@ -97,6 +100,25 @@ class Tests_REST_WpRestUrlDetailsController extends WP_Test_REST_Controller_Test
 	public function tear_down() {
 		$this->request_args = array();
 		parent::tear_down();
+	}
+
+	protected function should_register_rest_routes() {
+		return ! in_array(
+			$this->getName( false ),
+			array(
+				'test_get_title',
+				'test_get_icon',
+				'test_get_description',
+				'test_get_image',
+				'test_context_param',
+				'test_get_item',
+				'test_create_item',
+				'test_update_item',
+				'test_delete_item',
+				'test_prepare_item',
+			),
+			true
+		);
 	}
 
 	/**

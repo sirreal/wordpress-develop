@@ -122,6 +122,14 @@ class WP_Test_REST_Tags_Controller extends WP_Test_REST_Controller_Testcase {
 		);
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_taxonomy_rest_routes_for_test( array( 'post_tag' ) );
+	}
+
 	public function test_register_routes() {
 		$routes = rest_get_server()->get_routes();
 		$this->assertArrayHasKey( '/wp/v2/tags', $routes );

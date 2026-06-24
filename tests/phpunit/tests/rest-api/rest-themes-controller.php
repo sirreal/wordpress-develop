@@ -144,6 +144,15 @@ class WP_Test_REST_Themes_Controller extends WP_Test_REST_Controller_Testcase {
 		switch_theme( 'rest-api' );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Themes_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 * Theme routes should be registered correctly.
 	 *
