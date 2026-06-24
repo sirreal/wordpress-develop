@@ -75,6 +75,7 @@ final class FrontendFeaturesSurface {
 				'did_action',
 				'get_option',
 				'has_action',
+				'has_filter',
 				'home_url',
 				'is_user_logged_in',
 				'remove_action',
@@ -189,10 +190,13 @@ final class FrontendFeaturesSurface {
 				'version'  => $version,
 			);
 		};
+		$suppress_doing_it_wrong = static function (): bool {
+			return false;
+		};
 
 		\add_action( 'doing_it_wrong_run', $diag_action, 10, 3 );
 		try {
-			$valid_list      = $rules->add_rule(
+			$valid_list     = $rules->add_rule(
 				'prefetch',
 				$list_id,
 				array(
@@ -201,15 +205,7 @@ final class FrontendFeaturesSurface {
 					'eagerness' => 'immediate',
 				)
 			);
-			$duplicate_list  = $rules->add_rule(
-				'prefetch',
-				$list_id,
-				array(
-					'source' => 'list',
-					'urls'   => array( '/duplicate-' . $slug ),
-				)
-			);
-			$valid_document  = $rules->add_rule(
+			$valid_document = $rules->add_rule(
 				'prerender',
 				$doc_id,
 				array(
@@ -218,27 +214,93 @@ final class FrontendFeaturesSurface {
 					'eagerness' => 'moderate',
 				)
 			);
-			$invalid_results = array(
-				'bad-mode'            => $rules->add_rule( 'fetch', 'bad-mode-' . $slug, array( 'urls' => array( '/bad' ) ) ),
-				'bad-id'              => $rules->add_rule( 'prefetch', '1bad-' . $slug, array( 'urls' => array( '/bad' ) ) ),
-				'missing-where-urls'  => $rules->add_rule( 'prefetch', 'missing-' . $slug, array( 'source' => 'list' ) ),
-				'where-and-urls'      => $rules->add_rule( 'prefetch', 'both-' . $slug, array( 'where' => array(), 'urls' => array( '/bad' ) ) ),
-				'list-with-where'     => $rules->add_rule( 'prefetch', 'list-where-' . $slug, array( 'source' => 'list', 'where' => array() ) ),
-				'document-with-urls'  => $rules->add_rule( 'prerender', 'doc-urls-' . $slug, array( 'source' => 'document', 'urls' => array( '/bad' ) ) ),
-				'bad-eagerness'       => $rules->add_rule( 'prefetch', 'bad-eager-' . $slug, array( 'urls' => array( '/bad' ), 'eagerness' => 'lazy' ) ),
-				'immediate-document'  => $rules->add_rule( 'prerender', 'immediate-doc-' . $slug, array( 'where' => $where, 'eagerness' => 'immediate' ) ),
+			$valid_diagnostics = $diagnostics;
+			$diagnostics       = array();
+
+			$invalid_cases = array(
+				'duplicate-list'      => static function () use ( $rules, $list_id, $slug ): bool {
+					return $rules->add_rule(
+						'prefetch',
+						$list_id,
+						array(
+							'source' => 'list',
+							'urls'   => array( '/duplicate-' . $slug ),
+						)
+					);
+				},
+				'bad-mode'            => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'fetch', 'bad-mode-' . $slug, array( 'urls' => array( '/bad' ) ) );
+				},
+				'bad-id'              => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prefetch', '1bad-' . $slug, array( 'urls' => array( '/bad' ) ) );
+				},
+				'missing-where-urls'  => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prefetch', 'missing-' . $slug, array( 'source' => 'list' ) );
+				},
+				'where-and-urls'      => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prefetch', 'both-' . $slug, array( 'where' => array(), 'urls' => array( '/bad' ) ) );
+				},
+				'list-with-where'     => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prefetch', 'list-where-' . $slug, array( 'source' => 'list', 'where' => array() ) );
+				},
+				'document-with-urls'  => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prerender', 'doc-urls-' . $slug, array( 'source' => 'document', 'urls' => array( '/bad' ) ) );
+				},
+				'bad-eagerness'       => static function () use ( $rules, $slug ): bool {
+					return $rules->add_rule( 'prefetch', 'bad-eager-' . $slug, array( 'urls' => array( '/bad' ), 'eagerness' => 'lazy' ) );
+				},
+				'immediate-document'  => static function () use ( $rules, $slug, $where ): bool {
+					return $rules->add_rule( 'prerender', 'immediate-doc-' . $slug, array( 'where' => $where, 'eagerness' => 'immediate' ) );
+				},
 			);
+
+			$invalid_results     = array();
+			$invalid_diagnostics = array();
+
+			\add_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10, 4 );
+			try {
+				foreach ( $invalid_cases as $label => $callback ) {
+					$before                    = count( $diagnostics );
+					$invalid_results[ $label ] = $callback();
+					$invalid_diagnostics[ $label ] = array_slice( $diagnostics, $before );
+				}
+			} finally {
+				\remove_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10 );
+			}
 		} finally {
 			\remove_action( 'doing_it_wrong_run', $diag_action, 10 );
 		}
 
-		$serialized = $rules->jsonSerialize();
-		$json       = \wp_json_encode( $rules );
+		$serialized             = $rules->jsonSerialize();
+		$json                   = \wp_json_encode( $rules );
+		$serialized_json        = \wp_json_encode( $serialized );
+		$serialized_keys        = array_keys( $serialized );
+		$expected_keys          = array( 'prefetch', 'prerender' );
+		$diagnostic_counts      = array();
+		$valid_diagnostic_count = count( $valid_diagnostics );
+		$invalid_payloads_clear = true;
+		$diagnostics_exact      = true;
+
+		sort( $serialized_keys );
+
+		foreach ( $invalid_diagnostics as $label => $case_diagnostics ) {
+			$diagnostic_counts[ $label ] = count( $case_diagnostics );
+
+			if ( 1 !== $diagnostic_counts[ $label ] ) {
+				$diagnostics_exact = false;
+			}
+		}
+
+		foreach ( array( '/duplicate-' . $slug, '/bad' ) as $needle ) {
+			if ( str_contains( (string) $serialized_json, $needle ) ) {
+				$invalid_payloads_clear = false;
+				break;
+			}
+		}
 
 		self::collect_failure(
 			$failures,
 			true === $valid_list
-				&& false === $duplicate_list
 				&& true === $valid_document
 				&& array_fill_keys( array_keys( $invalid_results ), false ) === $invalid_results
 				&& $rules->has_rule( 'prefetch', $list_id )
@@ -247,23 +309,32 @@ final class FrontendFeaturesSurface {
 				&& isset( $serialized['prefetch'][0], $serialized['prerender'][0] )
 				&& 1 === count( $serialized['prefetch'] )
 				&& 1 === count( $serialized['prerender'] )
+				&& $expected_keys === $serialized_keys
 				&& $list_url === ( $serialized['prefetch'][0]['urls'][0] ?? null )
 				&& $where === ( $serialized['prerender'][0]['where'] ?? null )
+				&& $invalid_payloads_clear
 				&& ! str_contains( (string) $json, $list_id )
 				&& ! str_contains( (string) $json, $doc_id )
-				&& count( $diagnostics ) >= count( $invalid_results ) + 1
-				&& false === \has_action( 'doing_it_wrong_run', $diag_action ),
+				&& 0 === $valid_diagnostic_count
+				&& $diagnostics_exact
+				&& false === \has_action( 'doing_it_wrong_run', $diag_action )
+				&& false === \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong ),
 			'WP_Speculation_Rules accepts valid list/document rules, rejects invalid and duplicate rules, and omits IDs from JSON',
 			array(
-				'validList'       => $valid_list,
-				'duplicateList'   => $duplicate_list,
-				'validDocument'   => $valid_document,
-				'invalidResults'  => $invalid_results,
-				'serialized'      => $serialized,
-				'json'            => $json,
-				'diagnosticCount' => count( $diagnostics ),
-				'diagnostics'     => array_slice( $diagnostics, 0, 10 ),
-				'hasAction'       => \has_action( 'doing_it_wrong_run', $diag_action ),
+				'validList'             => $valid_list,
+				'validDocument'         => $valid_document,
+				'invalidResults'        => $invalid_results,
+				'serializedKeys'        => $serialized_keys,
+				'serialized'            => $serialized,
+				'serializedJson'        => $serialized_json,
+				'json'                  => $json,
+				'validDiagnosticCount'  => $valid_diagnostic_count,
+				'validDiagnostics'      => array_slice( $valid_diagnostics, 0, 10 ),
+				'invalidDiagCounts'     => $diagnostic_counts,
+				'invalidDiagnostics'    => array_slice( $invalid_diagnostics, 0, 10 ),
+				'invalidPayloadsClear'  => $invalid_payloads_clear,
+				'hasAction'             => \has_action( 'doing_it_wrong_run', $diag_action ),
+				'triggerHasFilter'      => \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong ),
 			)
 		);
 
