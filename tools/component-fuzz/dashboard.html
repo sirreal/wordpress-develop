@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7885 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7872 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>taxonomy</code> at 1000 passed, <code>admin-bar</code> at 500 passed, and <code>post-types</code> at 700 passed.</div>
+			<div class="note">Latest focused validations: <code>community-events</code> at 700 passed, <code>taxonomy</code> at 1000 passed, and <code>admin-bar</code> at 500 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric good">0</div>
-			<div class="note">No active delegated workers; Peirce the 2nd's taxonomy work has been integrated in main.</div>
+			<div class="metric">1</div>
+			<div class="note">Feynman the 2nd is strengthening <code>translations</code> coverage; community-events work is integrated in main.</div>
 		</div>
 	</div>
 
@@ -437,6 +437,13 @@
 					<td>Main worktree</td>
 					<td>Main focused run: 1500 passed, 100 skipped, 0 failed; broad run: 6673 passed, 64 skipped, 0 failed.</td>
 					<td>Load/compat helpers, memory/env matrices, SSL headers, scoped superglobals.</td>
+				</tr>
+				<tr>
+					<td><code>community-events</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7872 passed, 62 skipped, 0 failed.</td>
+					<td>IP anonymization, request minimization, transient/cache behavior, strict coordinate matching, cache expiration normalization, event trimming, response and error contracts.</td>
 				</tr>
 				<tr>
 					<td><code>taxonomy</code></td>
@@ -702,6 +709,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>7e02656bf4</code></td>
+					<td><code>community-events</code></td>
+					<td>700 passed, 0 skipped, 0 failed.</td>
+					<td>7872 passed, 62 skipped, 0 failed at 2 iterations after strict coordinate matching and cache expiration normalization coverage.</td>
+				</tr>
 				<tr>
 					<td><code>c4c5b7456b</code></td>
 					<td><code>taxonomy</code></td>
