@@ -473,7 +473,7 @@ final class AccountSecuritySurface {
 		$failures = array();
 		$token    = self::token( $ctx->fork( 'user-token' ), 10 );
 		$login    = 'cfz_app_auth_' . $ctx->iteration() . '_' . $token;
-		$email    = $login . '@example.test';
+		$email    = $login . '@example.com';
 		$user_id  = \wp_insert_user(
 			array(
 				'user_login' => $login,
@@ -628,12 +628,34 @@ final class AccountSecuritySurface {
 				)
 			);
 
+			$email_success        = \wp_authenticate_application_password( null, $email, $spaced );
+			$accepted_did_count   = count( $did_authenticate );
+			$last_success_event   = end( $did_authenticate );
+			$last_success_event   = is_array( $last_success_event ) ? $last_success_event : array();
+			$password_check_count = count( $password_checks );
+
+			self::collect_failure(
+				$failures,
+				$email_success instanceof \WP_User
+					&& $email_success->ID === $user_id
+					&& $first_did_count + 1 === $accepted_did_count
+					&& $uuid === ( $last_success_event['uuid'] ?? null )
+					&& 2 === $password_check_count,
+				'API authentication also resolves users through the email fallback branch',
+				array(
+					'email'           => self::describe_string( $email ),
+					'emailSuccess'    => self::describe_value( $email_success ),
+					'didAuthenticate' => self::describe_value( $did_authenticate ),
+					'passwordChecks'  => self::describe_value( $password_checks ),
+				)
+			);
+
 			$wrong = \wp_authenticate_application_password( null, $login, $wrong_password );
 			self::collect_failure(
 				$failures,
 				self::is_error_code( $wrong, 'incorrect_password' )
 					&& in_array( 'incorrect_password', $failed_auth, true )
-					&& $first_did_count === count( $did_authenticate ),
+					&& $accepted_did_count === count( $did_authenticate ),
 				'incorrect passwords fail closed and fire only the failure hook',
 				array(
 					'wrong'           => self::describe_value( $wrong ),
@@ -649,7 +671,7 @@ final class AccountSecuritySurface {
 				$failures,
 				self::is_error_code( $rejected, 'component_fuzz_rejected' )
 					&& in_array( 'component_fuzz_rejected', $failed_auth, true )
-					&& $first_did_count === count( $did_authenticate ),
+					&& $accepted_did_count === count( $did_authenticate ),
 				'constraint hook can reject a matched password before usage is accepted',
 				array(
 					'rejected'        => self::describe_value( $rejected ),
@@ -659,32 +681,46 @@ final class AccountSecuritySurface {
 				)
 			);
 
-			$site_available = false;
-			$site_disabled  = \wp_authenticate_application_password( null, $login, $spaced );
-			$site_available = true;
-			$user_available = false;
-			$user_disabled  = \wp_authenticate_application_password( null, $login, $spaced );
-			$user_available = true;
-			$unknown_email  = \wp_authenticate_application_password( null, 'missing@example.com', $spaced );
-			$unknown_login  = \wp_authenticate_application_password( null, 'missing account', $spaced );
+			$failure_hook_start            = count( $failed_auth );
+			$success_count_before_failures = count( $did_authenticate );
+			$check_count_before_failures   = count( $password_checks );
+			$site_available                = false;
+			$site_disabled                 = \wp_authenticate_application_password( null, $login, $spaced );
+			$site_available                = true;
+			$user_available                = false;
+			$user_disabled                 = \wp_authenticate_application_password( null, $login, $spaced );
+			$user_available                = true;
+			$unknown_email                 = \wp_authenticate_application_password( null, 'missing@example.com', $spaced );
+			$unknown_login                 = \wp_authenticate_application_password( null, 'missing account', $spaced );
+			$failure_hook_sequence         = array_slice( $failed_auth, $failure_hook_start );
 
 			self::collect_failure(
 				$failures,
 				self::is_error_code( $site_disabled, 'application_passwords_disabled' )
 					&& self::is_error_code( $user_disabled, 'application_passwords_disabled_for_user' )
 					&& self::is_error_code( $unknown_email, 'invalid_email' )
-					&& self::is_error_code( $unknown_login, 'invalid_username' ),
-				'availability and identity failures return their documented error codes',
+					&& self::is_error_code( $unknown_login, 'invalid_username' )
+					&& array(
+						'application_passwords_disabled',
+						'application_passwords_disabled_for_user',
+						'invalid_email',
+						'invalid_username',
+					) === $failure_hook_sequence
+					&& $success_count_before_failures === count( $did_authenticate )
+					&& $check_count_before_failures === count( $password_checks ),
+				'availability and identity failures return documented error codes and failure-hook payloads',
 				array(
-					'siteDisabled' => self::describe_value( $site_disabled ),
-					'userDisabled' => self::describe_value( $user_disabled ),
-					'unknownEmail' => self::describe_value( $unknown_email ),
-					'unknownLogin' => self::describe_value( $unknown_login ),
-					'failedAuth'   => self::describe_value( $failed_auth ),
+					'siteDisabled'       => self::describe_value( $site_disabled ),
+					'userDisabled'       => self::describe_value( $user_disabled ),
+					'unknownEmail'       => self::describe_value( $unknown_email ),
+					'unknownLogin'       => self::describe_value( $unknown_login ),
+					'failureHookSequence' => self::describe_value( $failure_hook_sequence ),
+					'didAuthenticate'    => self::describe_value( $did_authenticate ),
+					'passwordChecks'     => self::describe_value( $password_checks ),
 				)
 			);
 
-			$_SERVER['PHP_AUTH_USER'] = $login;
+			$_SERVER['PHP_AUTH_USER'] = $email;
 			$_SERVER['PHP_AUTH_PW']   = $spaced;
 			$validated                = \wp_validate_application_password( false );
 			$already_validated        = \wp_validate_application_password( $user_id );
@@ -692,7 +728,7 @@ final class AccountSecuritySurface {
 
 			self::collect_failure(
 				$failures,
-				$user_id === $validated && $user_id === $already_validated && $first_did_count + 1 === count( $did_authenticate ),
+				$user_id === $validated && $user_id === $already_validated && $accepted_did_count + 1 === count( $did_authenticate ),
 				'server Basic Auth credentials validate to the user ID and non-empty input users short-circuit',
 				array(
 					'validated'        => self::describe_value( $validated ),
@@ -1434,11 +1470,15 @@ final class AccountSecuritySurface {
 		foreach (
 			array(
 				'pagenow',
+				'wp_roles',
+				'wp_user_roles',
 				'wp_actions',
 				'wp_current_filter',
 				'wp_filter',
 				'wp_filters',
 				'wp_object_cache',
+				'wp_rest_application_password_status',
+				'wp_rest_application_password_uuid',
 				'wpdb',
 			) as $name
 		) {
