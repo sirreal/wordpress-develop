@@ -377,9 +377,12 @@ final class BlockWidgetsSurface {
 		$seen            = array(
 			'display' => array(),
 			'actions' => array(),
+			'content' => array(),
+			'order'   => array(),
 		);
 
 		$display_filter = static function ( $instance, \WP_Widget $widget, array $args ) use ( &$seen, $cancel_token, $marker ) {
+			$seen['order'][] = 'display';
 			$seen['display'][] = array(
 				'idBase'       => $widget->id_base,
 				'content'      => $instance['content'] ?? null,
@@ -394,11 +397,20 @@ final class BlockWidgetsSurface {
 			return $instance;
 		};
 		$the_widget_action = static function ( string $widget, array $instance, array $args ) use ( &$seen ): void {
+			$seen['order'][]   = 'action';
 			$seen['actions'][] = array(
 				'widget'       => $widget,
 				'content'      => $instance['content'] ?? null,
 				'beforeWidget' => $args['before_widget'] ?? null,
 			);
+		};
+		$content_filter = static function ( string $content, array $instance, \WP_Widget_Block $widget ) use ( &$seen ): string {
+			$seen['order'][]   = 'content';
+			$seen['content'][] = array(
+				'content' => $content,
+				'idBase'  => $widget->id_base,
+			);
+			return $content;
 		};
 
 		\register_widget( 'WP_Widget_Block' );
@@ -413,6 +425,7 @@ final class BlockWidgetsSurface {
 
 		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
 		\add_action( 'the_widget', $the_widget_action, 10, 3 );
+		\add_filter( 'widget_block_content', $content_filter, 10, 3 );
 		try {
 			ob_start();
 			\the_widget(
@@ -436,6 +449,7 @@ final class BlockWidgetsSurface {
 			);
 			$cancelled = ob_get_clean();
 		} finally {
+			\remove_filter( 'widget_block_content', $content_filter, 10 );
 			\remove_action( 'the_widget', $the_widget_action, 10 );
 			\remove_filter( 'widget_display_callback', $display_filter, 10 );
 		}
@@ -452,11 +466,15 @@ final class BlockWidgetsSurface {
 				&& '' === $cancelled
 				&& 2 === count( $seen['display'] )
 				&& 1 === count( $seen['actions'] )
+				&& 1 === count( $seen['content'] )
+				&& array( 'display', 'action', 'content', 'display' ) === $seen['order']
 				&& 'block' === ( $seen['display'][0]['idBase'] ?? null )
 				&& str_contains( (string) ( $seen['display'][0]['beforeWidget'] ?? '' ), 'widget_block' )
 				&& str_contains( (string) ( $seen['display'][1]['content'] ?? '' ), $cancel_token )
 				&& 'WP_Widget_Block' === ( $seen['actions'][0]['widget'] ?? null )
-				&& str_contains( (string) ( $seen['actions'][0]['content'] ?? '' ), $marker ),
+				&& str_contains( (string) ( $seen['actions'][0]['content'] ?? '' ), $marker )
+				&& 'block' === ( $seen['content'][0]['idBase'] ?? null )
+				&& str_contains( (string) ( $seen['content'][0]['content'] ?? '' ), $marker ),
 			'the_widget applies display callbacks before action/rendering and honors cancellation',
 			array(
 				'rendered'  => self::preview( $rendered ),
