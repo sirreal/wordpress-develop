@@ -454,6 +454,7 @@ final class DefaultWidgetsSurface {
 		$widget->save_settings( $saved_instances );
 		$widget->_set( $number );
 		$display_args = self::widget_args( $widget );
+		$widget->_set( $number + 1000 );
 
 		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
 		\add_filter( 'widget_form_callback', $form_filter, 10, 2 );
@@ -468,6 +469,7 @@ final class DefaultWidgetsSurface {
 
 			$widget->_set( $blocked_number );
 			$blocked_args    = self::widget_args( $widget );
+			$widget->_set( $blocked_number + 1000 );
 			$blocked_output  = self::capture_callback_output(
 				static function () use ( $widget, $blocked_args, $blocked_number ): void {
 					$widget->display_callback( $blocked_args, $blocked_number );
@@ -546,15 +548,16 @@ final class DefaultWidgetsSurface {
 				&& 'Saved ' . $token === ( $update_seen[0]['old']['title'] ?? null )
 				&& str_contains( $updated['title'] ?? '', 'Updated ' . $token )
 				&& str_contains( $updated['title'] ?? '', 'update-filtered' )
-				&& ! str_contains( $updated['title'] ?? '', '<script' )
+				&& self::safe_title( $updated['title'] ?? '' )
 				&& str_contains( $updated['text'] ?? '', '<p>Updated ' . $token . '</p>' )
 				&& ! str_contains( $updated['text'] ?? '', '<script' )
 				&& true === ( $updated['filter'] ?? null )
 				&& true === ( $updated['visual'] ?? null )
-				&& isset( $settings_after_update[ $blocked_number ] ),
+				&& ( $settings_after_update[ $blocked_number ] ?? null ) === $saved_instances[ $blocked_number ],
 			'update_callback sanitizes one posted instance, runs update filter, and preserves sibling instances',
 			array(
 				'updated'  => $updated,
+				'sibling'  => $settings_after_update[ $blocked_number ] ?? null,
 				'settings' => $settings_after_update,
 				'seen'     => $update_seen,
 			)
