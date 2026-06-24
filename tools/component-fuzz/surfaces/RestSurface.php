@@ -1192,6 +1192,7 @@ final class RestSurface {
 			\remove_filter( 'rest_envelope_response', $envelope_filter, 10 );
 		}
 
+		$filter_removed = false === \has_filter( 'rest_envelope_response', $envelope_filter );
 		$headers         = $response->get_headers();
 		$ensured_same    = \rest_ensure_response( $response );
 		$http_response   = new \WP_HTTP_Response( array( 'converted' => $token ), 206, array( 'X-Converted' => $token ) );
@@ -1240,6 +1241,7 @@ final class RestSurface {
 			'filterMutated'         => 1 === $envelope_hits
 				&& $token === ( $envelope_headers['X-Envelope-Token'] ?? null )
 				&& $token === ( $envelope_body['envelopeToken'] ?? null ),
+			'filterRemoved'         => $filter_removed,
 			'headersPreserved'      => 'replacement' === ( $envelope_headers['X-Fuzz-Header'] ?? null )
 				&& 'one, two' === ( $envelope_headers['X-Fuzz-Trace'] ?? null )
 				&& isset( $envelope_headers['Link'] ),
