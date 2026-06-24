@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7842 passed, 0 failed, 0 errored, 64 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7850 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validation: <code>revisions-autosaves</code> at 900 passed, 300 skipped, 0 failed; largest remains <code>email</code> at 183696 passed.</div>
+			<div class="note">Latest focused validations: <code>email</code> Unicode follow-up at 24570 passed and <code>xmlrpc</code> at 800 passed; largest remains <code>email</code> at 183696 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -441,9 +441,16 @@
 				<tr>
 					<td><code>email</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
-					<td>Franklin the 2nd / main worktree</td>
-					<td>Main focused run: 183696 passed, 0 skipped, 0 failed; latest broad run: 7667 passed, 62 skipped, 0 failed.</td>
-					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, user lookups, malformed UTF-8 and boundary follow-up oracles.</td>
+					<td>Schrodinger the 2nd / main worktree</td>
+					<td>Unicode follow-up focused run: 24570 passed, 0 skipped, 0 failed; latest broad run: 7850 passed, 62 skipped, 0 failed.</td>
+					<td>Unicode/ASCII filters, <code>WP_Email_Address</code> views, IDN/Punycode, accent-distinct local/domain user lookups, password-reset recipients, malformed UTF-8 and boundary oracles.</td>
+				</tr>
+				<tr>
+					<td><code>xmlrpc</code></td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Main worktree</td>
+					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7849 passed, 62 skipped, 0 failed.</td>
+					<td>IXR value/request/message/server contracts, legacy post XML helpers, short-circuited <code>WP_HTTP_IXR_Client</code> transport and fault/error mapping.</td>
 				</tr>
 				<tr>
 					<td><code>comments</code></td>
@@ -639,6 +646,18 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>bd7fc967f2</code></td>
+					<td><code>email</code></td>
+					<td>24570 passed, 0 skipped, 0 failed at 20 iterations for the Unicode follow-up.</td>
+					<td>7850 passed, 62 skipped, 0 failed at 2 iterations after Unicode-domain user lookups and password-reset recipient coverage.</td>
+				</tr>
+				<tr>
+					<td><code>e330757e2e</code></td>
+					<td><code>xmlrpc</code></td>
+					<td>800 passed, 0 skipped, 0 failed.</td>
+					<td>7849 passed, 62 skipped, 0 failed at 2 iterations after legacy post XML helper and short-circuited HTTP IXR client coverage.</td>
+				</tr>
 				<tr>
 					<td><code>4841e86db6</code></td>
 					<td><code>revisions-autosaves</code></td>
@@ -1100,8 +1119,8 @@
 			<tbody>
 				<tr>
 					<td>Unicode email</td>
-					<td>Verified 120,981 passed checks at 100 focused iterations, including machine/readable UTF-8 address views.</td>
-					<td>No mail delivery or browser UI validation; direct validation, sanitization, structural views, and user lookup behavior only.</td>
+					<td>Verified 24570 passed checks at 20 focused follow-up iterations, including Unicode-domain user lookups and password-reset recipient preservation; earlier 183696-row focused run covers machine/readable UTF-8 address views.</td>
+					<td>No real PHPMailer delivery or browser UI validation; direct validation, sanitization, structural views, user lookup behavior, and pre-send password-reset mail routing only.</td>
 				</tr>
 				<tr>
 					<td>Admin/browser flows</td>
