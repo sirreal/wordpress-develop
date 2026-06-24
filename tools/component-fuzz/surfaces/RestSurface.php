@@ -1219,6 +1219,7 @@ final class RestSurface {
 		\add_filter( 'rest_envelope_response', $envelope_filter, 10, 2 );
 		try {
 			$links          = \WP_REST_Server::get_response_links( $response );
+			$target_hint_hits_after_links = $target_hint_permission_hits;
 			$compact_links  = \WP_REST_Server::get_compact_response_links( $response );
 			$data_no_embed  = $server->response_to_data( $response, false );
 			$data_embed_all = $server->response_to_data( $response, true );
@@ -1235,7 +1236,7 @@ final class RestSurface {
 
 		$filter_removed = false === \has_filter( 'rest_envelope_response', $envelope_filter );
 		$rest_server_restored = $had_rest_server
-			? $previous_rest_server === ( $GLOBALS['wp_rest_server'] ?? null )
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $previous_rest_server === $GLOBALS['wp_rest_server']
 			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
 		$headers         = $response->get_headers();
 		$ensured_same    = \rest_ensure_response( $response );
@@ -1259,7 +1260,7 @@ final class RestSurface {
 			'selfRecordFlattened' => ! isset( $links['self'][0]['attributes'] ),
 			'selfTargetHints'   => array( 'GET', 'HEAD' ) === ( $links['self'][0]['targetHints']['allow'] ?? null ),
 			'selfAutomaticTargetHints' => array( 'GET', 'POST' ) === ( $links['self'][1]['targetHints']['allow'] ?? null )
-				&& $target_hint_permission_hits >= 2,
+				&& 2 === $target_hint_hits_after_links,
 			'collectionRemoved' => array( $collection_href ) === array_column( $links['collection'] ?? array(), 'href' ),
 			'curieCompacted'    => isset( $compact_links['wp:term'], $compact_links['curies'][0] )
 				&& ! isset( $compact_links['https://api.w.org/term'] )
@@ -1278,6 +1279,7 @@ final class RestSurface {
 				&& 7 === ( $embedded_all['perPage'] ?? null )
 				&& $token === ( $embedded_all['token'] ?? null ),
 			'externalAuthorRejected' => isset( $data_embed_all['_links']['author'][0]['href'] )
+				&& true === ( $data_embed_all['_links']['author'][0]['embeddable'] ?? null )
 				&& ! isset( $data_embed_all['_embedded']['author'] ),
 		);
 		$envelope_ok = array(
@@ -1331,6 +1333,7 @@ final class RestSurface {
 				'embedAll'     => $data_embed_all,
 				'envelope'     => $envelope_data,
 				'targetHintPermissionHits' => $target_hint_permission_hits,
+				'targetHintHitsAfterLinks' => $target_hint_hits_after_links,
 			),
 		);
 	}
