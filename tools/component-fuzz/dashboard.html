@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7970 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7974 passed, 0 failed, 0 errored, 65 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
+			<div class="note">Latest focused validations: <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, and <code>mail</code> at 900 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; empty blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
+			<div class="note">No active subagents; empty shortcodes, blocks, email-utf8, and email-display workers were retired after producing no usable commits or local changes.</div>
 		</div>
 	</div>
 
@@ -692,10 +692,10 @@
 				</tr>
 				<tr>
 					<td><code>blocks</code></td>
-					<td><span class="status good">integrated validation passed</span></td>
-					<td>Hilbert the 2nd / main worktree</td>
-					<td>Main focused run: 500 passed, 0 skipped, 0 failed; latest broad run: 7854 passed, 63 skipped, 0 failed.</td>
-					<td>Nested parse/serialize round trips, <code>has_block()</code>/<code>has_blocks()</code>, dynamic render callbacks, render filters, registry and support behavior.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Turing the 2nd and Confucius the 2nd review findings fixed through <code>f171eac2db</code></td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7974 passed, 65 skipped, 0 failed.</td>
+					<td>Nested parse/serialize round trips, <code>has_block()</code>/<code>has_blocks()</code>, dynamic render callbacks, render filters, registry/support behavior, and block hook insertion plus ignored-metadata oracles.</td>
 				</tr>
 				<tr>
 					<td><code>date-time</code></td>
@@ -919,6 +919,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>6e314890cd</code> / <code>f171eac2db</code></td>
+					<td><code>blocks</code></td>
+					<td>600 passed, 0 skipped, 0 failed after review fixes.</td>
+					<td>7974 passed, 65 skipped, 0 failed at 2 iterations after block hook insertion, filter-added hooks, single-instance suppression, exact registry grouping, and ignored-metadata coverage.</td>
+				</tr>
 				<tr>
 					<td><code>c425fca547</code> / <code>f4c5664dde</code></td>
 					<td><code>email</code></td>
