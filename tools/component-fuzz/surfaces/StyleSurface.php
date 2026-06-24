@@ -33,12 +33,16 @@ final class StyleSurface {
 			$case = self::case_for_context( $ctx );
 
 			$rows[] = self::check_style_engine_block_styles( $ctx, $case );
+			$rows[] = self::check_style_engine_preset_boundaries( $ctx, $case );
 			$rows[] = self::check_css_declarations_safety( $ctx, $case );
 			$rows[] = self::check_stylesheet_rules_and_context_store( $ctx, $case );
+			$rows[] = self::check_block_selector_helpers( $ctx );
 			$rows[] = self::check_theme_json_schema_migration( $ctx, $case );
 			$rows[] = self::check_theme_json_data_merge( $ctx, $case );
+			$rows[] = self::check_theme_json_variable_resolution( $ctx, $case );
 			$rows[] = self::check_theme_json_stylesheet( $ctx, $case );
 			$rows[] = self::check_block_style_variation_serialization( $ctx, $case );
+			$rows[] = self::check_theme_style_helper_filter_restoration( $ctx, $case );
 			$rows[] = self::check_style_store_cleanup( $ctx );
 			$rows[] = self::check_global_stylesheet_guard( $ctx );
 		} catch ( \Throwable $e ) {
@@ -71,6 +75,7 @@ final class StyleSurface {
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Data',
 				'WP_Theme_JSON_Schema',
+				'WP_Block_Type',
 				'WP_Block_Type_Registry',
 				'WP_Block_Styles_Registry',
 			) as $class
@@ -89,6 +94,8 @@ final class StyleSurface {
 				'register_block_type',
 				'unregister_block_type',
 				'register_block_style',
+				'get_block_editor_theme_styles',
+				'wp_get_block_name_from_theme_json_path',
 				'wp_get_block_css_selector',
 				'wp_get_layout_definitions',
 				'wp_get_typography_font_size_value',
@@ -142,6 +149,142 @@ final class StyleSurface {
 				'structure'      => self::css_structure_report( $css ),
 				'unsafeBytes'    => self::unsafe_byte_report( $css ),
 				'allowedMissing' => array_values( array_diff( array_keys( $declarations ), self::allowed_style_engine_properties() ) ),
+			)
+		);
+	}
+
+	private static function check_style_engine_preset_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$slug     = $case['safeSlug'];
+		$css_slug = \_wp_to_kebab_case( $slug );
+		$styles   = array(
+			'color'      => array(
+				'text'       => 'var:preset|color|' . $slug,
+				'background' => 'var:preset|color|' . $slug,
+				'gradient'   => 'var:preset|gradient|' . $slug,
+			),
+			'spacing'    => array(
+				'padding' => array(
+					'top'    => 'var:preset|spacing|' . $slug,
+					'right'  => '0',
+					'bottom' => $case['safeSpacing'],
+				),
+			),
+			'typography' => array(
+				'fontSize'   => 'var:preset|font-size|' . $slug,
+				'fontFamily' => 'var:preset|font-family|' . $slug,
+			),
+			'border'     => array(
+				'radius' => array(
+					'bottomRight' => 'var:preset|border-radius|' . $slug,
+				),
+				'top'    => array(
+					'color' => 'var:preset|color|' . $slug,
+					'width' => '0',
+					'style' => 'solid',
+				),
+			),
+			'dimensions' => array(
+				'aspectRatio' => '16 / 9',
+				'width'       => 'var:preset|dimension|' . $slug,
+			),
+		);
+
+		$selector = '.component-fuzz-preset-' . $slug;
+		$resolved = self::call(
+			static fn() => \wp_style_engine_get_styles(
+				$styles,
+				array(
+					'selector'                   => $selector,
+					'convert_vars_to_classnames' => false,
+				)
+			)
+		);
+		$classnames_only = self::call(
+			static fn() => \wp_style_engine_get_styles(
+				$styles,
+				array(
+					'selector'                   => $selector,
+					'convert_vars_to_classnames' => true,
+				)
+			)
+		);
+
+		$resolved_value        = is_array( $resolved['value'] ) ? $resolved['value'] : array();
+		$classnames_only_value = is_array( $classnames_only['value'] ) ? $classnames_only['value'] : array();
+		$resolved_declarations = is_array( $resolved_value['declarations'] ?? null ) ? $resolved_value['declarations'] : array();
+		$skipped_declarations  = is_array( $classnames_only_value['declarations'] ?? null ) ? $classnames_only_value['declarations'] : array();
+		$resolved_css          = (string) ( $resolved_value['css'] ?? '' );
+		$skipped_css           = (string) ( $classnames_only_value['css'] ?? '' );
+		$resolved_classes      = self::class_tokens( (string) ( $resolved_value['classnames'] ?? '' ) );
+		$skipped_classes       = self::class_tokens( (string) ( $classnames_only_value['classnames'] ?? '' ) );
+
+		$expected_classes = array(
+			'has-text-color',
+			'has-' . $css_slug . '-color',
+			'has-background',
+			'has-' . $css_slug . '-background-color',
+			'has-' . $css_slug . '-gradient-background',
+			'has-aspect-ratio',
+			'has-' . $css_slug . '-font-size',
+			'has-' . $css_slug . '-font-family',
+		);
+
+		$ok = ! $resolved['threw']
+			&& ! $classnames_only['threw']
+			&& array() === array_diff( $expected_classes, $resolved_classes )
+			&& array() === array_diff( $expected_classes, $skipped_classes )
+			&& $resolved_classes === $skipped_classes
+			&& count( $resolved_classes ) === count( array_unique( $resolved_classes ) )
+			&& count( $skipped_classes ) === count( array_unique( $skipped_classes ) )
+			&& self::expected_declarations_present(
+				$resolved_declarations,
+				array(
+					'color'                      => 'var(--wp--preset--color--' . $css_slug . ')',
+					'background-color'           => 'var(--wp--preset--color--' . $css_slug . ')',
+					'background'                 => 'var(--wp--preset--gradient--' . $css_slug . ')',
+					'padding-top'                => 'var(--wp--preset--spacing--' . $css_slug . ')',
+					'padding-right'              => '0',
+					'border-bottom-right-radius' => 'var(--wp--preset--border-radius--' . $css_slug . ')',
+					'border-top-color'           => 'var(--wp--preset--color--' . $css_slug . ')',
+					'border-top-style'           => 'solid',
+					'font-size'                  => 'var(--wp--preset--font-size--' . $css_slug . ')',
+					'font-family'                => 'var(--wp--preset--font-family--' . $css_slug . ')',
+					'width'                      => 'var(--wp--preset--dimension--' . $css_slug . ')',
+					'aspect-ratio'               => '16 / 9',
+				)
+			)
+			&& ! array_key_exists( 'color', $skipped_declarations )
+			&& ! array_key_exists( 'background-color', $skipped_declarations )
+			&& ! array_key_exists( 'background', $skipped_declarations )
+			&& ! array_key_exists( 'font-size', $skipped_declarations )
+			&& ! array_key_exists( 'font-family', $skipped_declarations )
+			&& ! array_key_exists( 'width', $skipped_declarations )
+			&& 'var:preset|spacing|' . $slug === ( $skipped_declarations['padding-top'] ?? null )
+			&& 'var:preset|border-radius|' . $slug === ( $skipped_declarations['border-bottom-right-radius'] ?? null )
+			&& 'var:preset|color|' . $slug === ( $skipped_declarations['border-top-color'] ?? null )
+			&& 'solid' === ( $skipped_declarations['border-top-style'] ?? null )
+			&& '16 / 9' === ( $skipped_declarations['aspect-ratio'] ?? null )
+			&& self::css_structure_ok( $resolved_css )
+			&& self::css_structure_ok( $skipped_css )
+			&& ! self::contains_raw_unsafe_bytes( $resolved_css )
+			&& ! self::contains_raw_unsafe_bytes( $skipped_css );
+
+		return $ctx->result(
+			'style.wp-style-engine.preset-classnames-css-var-boundaries',
+			$ok,
+			array(
+				'slug'                 => $slug,
+				'cssSlug'              => $css_slug,
+				'resolved'             => self::describe_call( $resolved ),
+				'classnamesOnly'       => self::describe_call( $classnames_only ),
+				'resolvedDeclarations' => $resolved_declarations,
+				'skippedDeclarations'  => $skipped_declarations,
+				'resolvedClasses'      => $resolved_classes,
+				'skippedClasses'       => $skipped_classes,
+				'resolvedStructure'    => self::css_structure_report( $resolved_css ),
+				'skippedStructure'     => self::css_structure_report( $skipped_css ),
+				'resolvedUnsafeBytes'  => self::unsafe_byte_report( $resolved_css ),
+				'skippedUnsafeBytes'   => self::unsafe_byte_report( $skipped_css ),
 			)
 		);
 	}
@@ -258,6 +401,64 @@ final class StyleSurface {
 				'replacedColor'  => $replaced_color,
 				'structure'      => self::css_structure_report( $css ),
 				'storesAfterRun' => array_keys( \WP_Style_Engine_CSS_Rules_Store::get_stores() ),
+			)
+		);
+	}
+
+	private static function check_block_selector_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$registry = \WP_Block_Type_Registry::get_instance();
+		$box      = $registry->get_registered( 'fuzz/box' );
+		$button   = $registry->get_registered( 'core/button' );
+
+		$call = self::call(
+			static function () use ( $box, $button ): array {
+				return array(
+					'boxRoot'                  => $box ? \wp_get_block_css_selector( $box, 'root' ) : null,
+					'boxSpacingRoot'           => $box ? \wp_get_block_css_selector( $box, 'spacing' ) : null,
+					'boxSpacingRootPath'       => $box ? \wp_get_block_css_selector( $box, array( 'spacing', 'root' ) ) : null,
+					'boxSpacingPadding'        => $box ? \wp_get_block_css_selector( $box, array( 'spacing', 'padding' ) ) : null,
+					'boxSpacingPaddingFallback' => $box ? \wp_get_block_css_selector( $box, array( 'spacing', 'padding' ), true ) : null,
+					'boxColor'                 => $box ? \wp_get_block_css_selector( $box, 'color' ) : null,
+					'boxColorFallback'         => $box ? \wp_get_block_css_selector( $box, 'color', true ) : null,
+					'buttonRoot'               => $button ? \wp_get_block_css_selector( $button, 'root' ) : null,
+					'emptyTarget'              => $box ? \wp_get_block_css_selector( $box, '' ) : 'not-called',
+					'pathDirect'               => \wp_get_block_name_from_theme_json_path( array( 'styles', 'blocks', 'fuzz/box', 'elements', 'link' ) ),
+					'pathFallback'             => \wp_get_block_name_from_theme_json_path( array( 'styles', 'elements', 'core/paragraph', 'link' ) ),
+					'pathInvalid'              => \wp_get_block_name_from_theme_json_path( array( 'styles', 'blocks', 'fuzz-box' ) ),
+				);
+			}
+		);
+
+		$value = is_array( $call['value'] ) ? $call['value'] : array();
+		$ok    = $box instanceof \WP_Block_Type
+			&& $button instanceof \WP_Block_Type
+			&& ! $call['threw']
+			&& '.wp-block-fuzz-box' === ( $value['boxRoot'] ?? null )
+			&& '.wp-block-fuzz-box__inner' === ( $value['boxSpacingRoot'] ?? null )
+			&& '.wp-block-fuzz-box__inner' === ( $value['boxSpacingRootPath'] ?? null )
+			&& array_key_exists( 'boxSpacingPadding', $value )
+			&& null === $value['boxSpacingPadding']
+			&& '.wp-block-fuzz-box__inner' === ( $value['boxSpacingPaddingFallback'] ?? null )
+			&& array_key_exists( 'boxColor', $value )
+			&& null === $value['boxColor']
+			&& '.wp-block-fuzz-box' === ( $value['boxColorFallback'] ?? null )
+			&& '.wp-block-button' === ( $value['buttonRoot'] ?? null )
+			&& array_key_exists( 'emptyTarget', $value )
+			&& null === $value['emptyTarget']
+			&& 'fuzz/box' === ( $value['pathDirect'] ?? null )
+			&& 'core/paragraph' === ( $value['pathFallback'] ?? null )
+			&& '' === ( $value['pathInvalid'] ?? null );
+
+		return $ctx->result(
+			'style.block-selector-helpers.paths-fallbacks-deterministic',
+			$ok,
+			array(
+				'registered' => array(
+					'fuzz/box'    => $box instanceof \WP_Block_Type,
+					'core/button' => $button instanceof \WP_Block_Type,
+				),
+				'call'       => self::describe_call( $call ),
+				'selectors'  => $value,
 			)
 		);
 	}
@@ -389,6 +590,112 @@ final class StyleSurface {
 		);
 	}
 
+	private static function check_theme_json_variable_resolution( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$raw_slug      = $case['safeSlug'];
+		$slug          = \_wp_to_kebab_case( $raw_slug );
+		$missing       = 'missing-' . $slug;
+		$variable_color = '#123456';
+		$data          = array(
+			'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+			'settings' => array(
+				'color'      => array(
+					'palette' => array(
+						array(
+							'name'  => 'Fuzz Accent',
+							'slug'  => $slug,
+							'color' => $variable_color,
+						),
+					),
+				),
+				'spacing'    => array(
+					'spacingSizes' => array(
+						array(
+							'name' => 'Fuzz Space',
+							'slug' => $slug,
+							'size' => $case['safeSpacing'],
+						),
+					),
+				),
+				'typography' => array(
+					'fontSizes' => array(
+						array(
+							'name' => 'Fuzz Font',
+							'slug' => $slug,
+							'size' => $case['safeFontSize'],
+						),
+					),
+				),
+			),
+			'styles'   => array(
+				'color'      => array(
+					'text'       => 'var:preset|color|' . $slug,
+					'background' => 'var:preset|color|' . $missing,
+				),
+				'spacing'    => array(
+					'blockGap' => 'var:preset|spacing|' . $slug,
+				),
+				'typography' => array(
+					'fontSize' => 'var:preset|font-size|' . $slug,
+				),
+				'blocks'     => array(
+					'core/paragraph' => array(
+						'color' => array(
+							'text' => 'var:preset|color|' . $slug,
+						),
+					),
+				),
+			),
+		);
+
+		$first = self::call(
+			static function () use ( $data ): array {
+				$tree     = new \WP_Theme_JSON( $data, 'theme' );
+				$raw      = $tree->get_raw_data();
+				$resolved = \WP_Theme_JSON::resolve_variables( $tree )->get_raw_data();
+				return array(
+					'raw'      => $raw,
+					'resolved' => $resolved,
+				);
+			}
+		);
+		$second = self::call(
+			static function () use ( $data ): array {
+				$tree = new \WP_Theme_JSON( $data, 'theme' );
+				return \WP_Theme_JSON::resolve_variables( $tree )->get_raw_data();
+			}
+		);
+
+		$value    = is_array( $first['value'] ) ? $first['value'] : array();
+		$raw      = is_array( $value['raw'] ?? null ) ? $value['raw'] : array();
+		$resolved = is_array( $value['resolved'] ?? null ) ? $value['resolved'] : array();
+
+		$ok = ! $first['threw']
+			&& ! $second['threw']
+			&& $resolved === $second['value']
+			&& 'var(--wp--preset--color--' . $slug . ')' === self::array_get( $raw, array( 'styles', 'color', 'text' ) )
+			&& 'var(--wp--preset--color--' . $missing . ')' === self::array_get( $raw, array( 'styles', 'color', 'background' ) )
+			&& $variable_color === self::array_get( $resolved, array( 'styles', 'color', 'text' ) )
+			&& 'var(--wp--preset--color--' . $missing . ')' === self::array_get( $resolved, array( 'styles', 'color', 'background' ) )
+			&& $case['safeSpacing'] === self::array_get( $resolved, array( 'styles', 'spacing', 'blockGap' ) )
+			&& $case['safeFontSize'] === self::array_get( $resolved, array( 'styles', 'typography', 'fontSize' ) )
+			&& $variable_color === self::array_get( $resolved, array( 'styles', 'blocks', 'core/paragraph', 'color', 'text' ) );
+
+		return $ctx->result(
+			'style.theme-json.variables-resolve-known-presets-only',
+			$ok,
+			array(
+				'slug'      => $slug,
+				'rawSlug'   => $raw_slug,
+				'missing'   => $missing,
+				'color'     => $variable_color,
+				'first'     => self::describe_call( $first ),
+				'second'    => self::describe_call( $second ),
+				'raw'       => self::preview( $raw ),
+				'resolved'  => self::preview( $resolved ),
+			)
+		);
+	}
+
 	private static function check_theme_json_stylesheet( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$raw = $case['themeJsonUnsafe'];
 
@@ -490,6 +797,92 @@ final class StyleSurface {
 				'call'               => self::describe_call( $call ),
 				'variationTextColor' => $case['variationTextColor'],
 				'structure'          => self::css_structure_report( $css ),
+			)
+		);
+	}
+
+	private static function check_theme_style_helper_filter_restoration( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$global_snapshot = self::snapshot_globals( array( 'editor_styles', '_wp_theme_features' ) );
+		$style_handle    = 'component-fuzz-editor-' . $ctx->seed() . '-' . $ctx->iteration() . '.css';
+		$style_file      = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $style_handle;
+		$style_url       = 'http://example.test/component-fuzz-theme/' . rawurlencode( $style_handle );
+		$remote_url      = 'https://example.invalid/component-fuzz-editor.css';
+		$css             = '.component-fuzz-editor-' . $ctx->iteration() . '{color:' . $case['safeColor'] . ';margin-top:' . $case['safeSpacing'] . ';}';
+		$remote_requests = array();
+
+		if ( false === file_put_contents( $style_file, $css ) ) {
+			self::restore_globals( $global_snapshot );
+			return $ctx->fail(
+				'style.theme-style-helper.local-filtered-editor-styles',
+				array(
+					'message' => 'Could not write temporary editor style fixture.',
+					'path'    => $style_file,
+				)
+			);
+		}
+
+		$path_filter = static function ( string $path, string $file ) use ( $style_file, $style_handle ): string {
+			return $style_handle === $file ? $style_file : $path;
+		};
+		$uri_filter  = static function ( string $url, string $file ) use ( $style_url, $style_handle ): string {
+			return $style_handle === $file ? $style_url : $url;
+		};
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$remote_requests ) {
+			$remote_requests[] = $url;
+			return new \WP_Error( 'component_fuzz_no_network', 'Network access is disabled for style fuzzing.' );
+		};
+
+		$call             = null;
+		$filters_removed  = false;
+		$globals_restored = false;
+		try {
+			\add_filter( 'theme_file_path', $path_filter, 10, 2 );
+			\add_filter( 'theme_file_uri', $uri_filter, 10, 2 );
+			\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+			\add_theme_support( 'editor-styles' );
+			$GLOBALS['editor_styles'] = array( $style_handle, $remote_url );
+
+			$call = self::call( static fn() => \get_block_editor_theme_styles() );
+		} finally {
+			\remove_filter( 'theme_file_path', $path_filter, 10 );
+			\remove_filter( 'theme_file_uri', $uri_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			self::restore_globals( $global_snapshot );
+
+			if ( is_file( $style_file ) ) {
+				unlink( $style_file );
+			}
+
+			$filters_removed  = false === \has_filter( 'theme_file_path', $path_filter )
+				&& false === \has_filter( 'theme_file_uri', $uri_filter )
+				&& false === \has_filter( 'pre_http_request', $http_filter );
+			$globals_restored = self::globals_match_snapshot( $global_snapshot );
+		}
+
+		$value = is_array( $call['value'] ?? null ) ? $call['value'] : array();
+		$first = is_array( $value[0] ?? null ) ? $value[0] : array();
+		$ok    = is_array( $call )
+			&& ! $call['threw']
+			&& 1 === count( $value )
+			&& $css === ( $first['css'] ?? null )
+			&& $style_url === ( $first['baseURL'] ?? null )
+			&& 'theme' === ( $first['__unstableType'] ?? null )
+			&& false === ( $first['isGlobalStyles'] ?? true )
+			&& array( $remote_url ) === $remote_requests
+			&& $filters_removed
+			&& $globals_restored;
+
+		return $ctx->result(
+			'style.theme-style-helper.local-filtered-editor-styles',
+			$ok,
+			array(
+				'call'             => is_array( $call ) ? self::describe_call( $call ) : null,
+				'styleHandle'      => $style_handle,
+				'styleUrl'         => $style_url,
+				'remoteRequests'   => $remote_requests,
+				'filtersRemoved'   => $filters_removed,
+				'globalsRestored'  => $globals_restored,
+				'tempFileRemaining' => is_file( $style_file ),
 			)
 		);
 	}
@@ -1173,6 +1566,28 @@ final class StyleSurface {
 		return array() === array_diff( $properties, self::allowed_style_engine_properties() );
 	}
 
+	private static function class_tokens( string $classnames ): array {
+		if ( '' === trim( $classnames ) ) {
+			return array();
+		}
+
+		$tokens = preg_split( '/\s+/', trim( $classnames ) );
+		return is_array( $tokens ) ? $tokens : array();
+	}
+
+	private static function class_tokens_include( string $classnames, array $expected ): bool {
+		return array() === array_diff( $expected, self::class_tokens( $classnames ) );
+	}
+
+	private static function expected_declarations_present( array $declarations, array $expected ): bool {
+		foreach ( $expected as $property => $value ) {
+			if ( ! array_key_exists( $property, $declarations ) || $declarations[ $property ] !== $value ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private static function allowed_style_engine_properties(): array {
 		static $allowed = null;
 
@@ -1366,6 +1781,22 @@ final class StyleSurface {
 				$GLOBALS[ $name ] = $entry['value'];
 			}
 		}
+	}
+
+	private static function globals_match_snapshot( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( empty( $entry['exists'] ) ) {
+				if ( array_key_exists( $name, $GLOBALS ) ) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( ! array_key_exists( $name, $GLOBALS ) || $GLOBALS[ $name ] !== $entry['value'] ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static function get_style_stores(): array {

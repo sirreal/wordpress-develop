@@ -402,9 +402,11 @@ database, network requests, or a configured site.
 - `state`: object cache groups and multi-operations, option, transient, and
   cache-backed site-transient APIs, filters, serialization, JSON, and value
   helpers.
-- `style`: style engine serialization, CSS declaration filtering, theme.json
-  schema/data merging, block style variation declarations, selectors, presets,
-  custom properties, and no-DB global style guards.
+- `style`: style engine serialization, preset/classname and CSS variable
+  boundaries, CSS declaration filtering, theme.json schema/data merging and
+  variable resolution, block style variation declarations, selector/path
+  helpers, scoped editor style helpers, custom properties, and no-DB global
+  style guards.
 - `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
   wildcard/regex matching, cache-key lookup, no-network fetch short-circuits,
   HTML/XML filtering, feed metadata escaping, default feed normalization, self
