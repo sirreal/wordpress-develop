@@ -1081,7 +1081,7 @@ final class ImagesSurface {
 		}
 
 		$diff      = abs( ( $orig_w * $new_h ) - ( $new_w * $orig_h ) );
-		$tolerance = max( $orig_w, $orig_h, $new_w, $new_h );
+		$tolerance = 2 * max( $orig_w, $orig_h, $new_w, $new_h );
 		return $diff <= $tolerance;
 	}
 
