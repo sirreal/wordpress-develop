@@ -352,8 +352,8 @@ class WP_Token_Map {
 			foreach ( $groups[ $group ] as $group_word ) {
 				list( $word, $mapping ) = $group_word;
 
-				$word_length    = pack( 'C', strlen( $word ) );
-				$mapping_length = pack( 'C', strlen( $mapping ) );
+				$word_length    = chr( strlen( $word ) );
+				$mapping_length = chr( strlen( $mapping ) );
 				$group_string  .= "{$word_length}{$word}{$mapping_length}{$mapping}";
 			}
 
@@ -472,10 +472,10 @@ class WP_Token_Map {
 		$at           = 0;
 
 		while ( $at < $group_length ) {
-			$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+			$token_length   = ord( $group[ $at++ ] );
 			$token_at       = $at;
 			$at            += $token_length;
-			$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+			$mapping_length = ord( $group[ $at++ ] );
 			$mapping_at     = $at;
 
 			if ( $token_length === $length && 0 === substr_compare( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
@@ -559,10 +559,10 @@ class WP_Token_Map {
 			$group_length = strlen( $group );
 			$at           = 0;
 			while ( $at < $group_length ) {
-				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+				$token_length   = ord( $group[ $at++ ] );
 				$token          = substr( $group, $at, $token_length );
 				$at            += $token_length;
-				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+				$mapping_length = ord( $group[ $at++ ] );
 				$mapping_at     = $at;
 
 				if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
@@ -666,11 +666,11 @@ class WP_Token_Map {
 			$group_length = strlen( $group );
 			$at           = 0;
 			while ( $at < $group_length ) {
-				$length = unpack( 'C', $group[ $at++ ] )[1];
+				$length = ord( $group[ $at++ ] );
 				$key    = $prefix . substr( $group, $at, $length );
 
 				$at    += $length;
-				$length = unpack( 'C', $group[ $at++ ] )[1];
+				$length = ord( $group[ $at++ ] );
 				$value  = substr( $group, $at, $length );
 
 				$tokens[ $key ] = $value;
@@ -737,10 +737,10 @@ class WP_Token_Map {
 			$data_line    = "{$i3}\"";
 			$at           = 0;
 			while ( $at < $group_length ) {
-				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+				$token_length   = ord( $group[ $at++ ] );
 				$token          = substr( $group, $at, $token_length );
 				$at            += $token_length;
-				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+				$mapping_length = ord( $group[ $at++ ] );
 				$mapping        = substr( $group, $at, $mapping_length );
 				$at            += $mapping_length;
 
