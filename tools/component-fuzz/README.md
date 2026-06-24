@@ -316,8 +316,9 @@ database, network requests, or a configured site.
   update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
   output behavior, `WP_Upgrader` local/filtered download and temp-directory
   install-package lifecycles, plugin/theme package validation helpers,
-  no-update upgrade branches, auto-update decision filters, core version-policy
-  decisions, and maintenance-mode writes against a temp filesystem only.
+  no-update upgrade branches, auto-update decision filters, VCS and PHP
+  compatibility gates, core version-policy decisions, and maintenance-mode
+  writes against a temp filesystem only.
 - `utility-internals`: no-DB low-level utility coverage for `WP_List_Util`,
   list helper wrappers, `WP_Token_Map`, `WP_MatchesMapRegex`, and
   `WP_URL_Pattern_Prefixer`, including reference filter/pluck/sort oracles,

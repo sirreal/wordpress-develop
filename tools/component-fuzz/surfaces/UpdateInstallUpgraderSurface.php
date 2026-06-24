@@ -879,6 +879,13 @@ final class UpdateInstallUpgraderSurface {
 					return $updater->should_update( 'theme', $theme_item, $case['paths']['wpContent'] );
 				}
 			);
+			self::$vcs_checkout = true;
+			$plugin_vcs_denied  = self::call(
+				static function () use ( $updater, $plugin_item, $case ) {
+					return $updater->should_update( 'plugin', $plugin_item, $case['paths']['wpContent'] );
+				}
+			);
+			self::$vcs_checkout = false;
 
 			$disabled_plugin_item                       = clone $plugin_item;
 			$disabled_plugin_item->disable_autoupdate   = true;
@@ -901,6 +908,30 @@ final class UpdateInstallUpgraderSurface {
 			$plugin_php_incompatible                    = self::call(
 				static function () use ( $updater, $incompatible_plugin_item, $case ) {
 					return $updater->should_update( 'plugin', $incompatible_plugin_item, $case['paths']['wpContent'] );
+				}
+			);
+
+			$disabled_theme_item                    = clone $theme_item;
+			$disabled_theme_item->disable_autoupdate = true;
+			self::$auto_update_overrides['theme']   = false;
+			$theme_filter_denied                    = self::call(
+				static function () use ( $updater, $disabled_theme_item, $case ) {
+					return $updater->should_update( 'theme', $disabled_theme_item, $case['paths']['wpContent'] );
+				}
+			);
+			self::$auto_update_overrides['theme']   = true;
+			$theme_filter_overrode_disable          = self::call(
+				static function () use ( $updater, $disabled_theme_item, $case ) {
+					return $updater->should_update( 'theme', $disabled_theme_item, $case['paths']['wpContent'] );
+				}
+			);
+			$incompatible_theme_item                = clone $theme_item;
+			$incompatible_theme_item->autoupdate    = true;
+			$incompatible_theme_item->requires_php  = '99.0';
+			self::$auto_update_overrides['theme']   = true;
+			$theme_php_incompatible                 = self::call(
+				static function () use ( $updater, $incompatible_theme_item, $case ) {
+					return $updater->should_update( 'theme', $incompatible_theme_item, $case['paths']['wpContent'] );
 				}
 			);
 			self::$auto_update_overrides                = array();
@@ -932,6 +963,12 @@ final class UpdateInstallUpgraderSurface {
 		);
 		self::record_failure_if(
 			$failures,
+			$plugin_vcs_denied['threw'] || false !== $plugin_vcs_denied['value'],
+			'WP_Automatic_Updater.should_update.vcs-checkout-denies-auto-update',
+			array( 'call' => self::describe_call( $plugin_vcs_denied ) )
+		);
+		self::record_failure_if(
+			$failures,
 			$plugin_filter_denied['threw'] || false !== $plugin_filter_denied['value'],
 			'WP_Automatic_Updater.should_update.dynamic-filter-can-deny',
 			array( 'call' => self::describe_call( $plugin_filter_denied ) )
@@ -947,6 +984,24 @@ final class UpdateInstallUpgraderSurface {
 			$plugin_php_incompatible['threw'] || false !== $plugin_php_incompatible['value'],
 			'WP_Automatic_Updater.should_update.php-requirement-still-gates-filter-allow',
 			array( 'call' => self::describe_call( $plugin_php_incompatible ) )
+		);
+		self::record_failure_if(
+			$failures,
+			$theme_filter_denied['threw'] || false !== $theme_filter_denied['value'],
+			'WP_Automatic_Updater.should_update.theme-dynamic-filter-can-deny',
+			array( 'call' => self::describe_call( $theme_filter_denied ) )
+		);
+		self::record_failure_if(
+			$failures,
+			$theme_filter_overrode_disable['threw'] || true !== $theme_filter_overrode_disable['value'],
+			'WP_Automatic_Updater.should_update.theme-dynamic-filter-can-override-disable-flag',
+			array( 'call' => self::describe_call( $theme_filter_overrode_disable ) )
+		);
+		self::record_failure_if(
+			$failures,
+			$theme_php_incompatible['threw'] || false !== $theme_php_incompatible['value'],
+			'WP_Automatic_Updater.should_update.theme-php-requirement-still-gates-filter-allow',
+			array( 'call' => self::describe_call( $theme_php_incompatible ) )
 		);
 
 		return self::row(
