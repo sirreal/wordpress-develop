@@ -280,7 +280,8 @@ database, network requests, or a configured site.
   bounded byte fixtures, including `wp_read_audio_metadata()` and
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
-  filters, `wp_attachment_is()` MIME/extension branches, and
+  filters, `wp_attachment_is()` MIME/extension branches, image/document
+  classification, MIME/extension disagreement, wrapper behavior, and
   `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected

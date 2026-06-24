@@ -91,6 +91,7 @@ final class MediaMetadataSurface {
 				'sanitize_file_name',
 				'wp_add_id3_tag_data',
 				'wp_attachment_is',
+				'wp_attachment_is_image',
 				'wp_cache_flush',
 				'wp_cache_set',
 				'wp_check_filetype',
@@ -412,26 +413,44 @@ final class MediaMetadataSurface {
 		$audio_path  = self::write_fixture( $fixture_dir, 'song.mp3', 'ID3' . $ctx->bytes( 8, 20 ) );
 		$video_path  = self::write_fixture( $fixture_dir, 'clip.webm', "\x1A\x45\xDF\xA3" . $ctx->bytes( 8, 20 ) );
 		$bin_path    = self::write_fixture( $fixture_dir, 'audio-binary.bin', $ctx->bytes( 8, 20 ) );
+		$image_path  = self::write_fixture( $fixture_dir, 'picture.jpg', "\xFF\xD8\xFF\xE0" . $ctx->bytes( 8, 20 ) );
+		$pdf_path    = self::write_fixture( $fixture_dir, 'document.pdf', "%PDF-1.4\n" . $ctx->bytes( 8, 20 ) . "\n%%EOF\n" );
+		$mismatch    = self::write_fixture( $fixture_dir, 'mime-image-extension.png', "\x89PNG\r\n\x1A\n" . $ctx->bytes( 8, 20 ) );
 
-		if ( null === $audio_path || null === $video_path || null === $bin_path ) {
+		if ( null === $audio_path || null === $video_path || null === $bin_path || null === $image_path || null === $pdf_path || null === $mismatch ) {
 			self::collect_failure( $failures, false, 'attachment type fixtures are writable' );
 		} else {
-			$audio_id = 861000 + $ctx->iteration();
-			$video_id = 862000 + $ctx->iteration();
-			$mime_id  = 863000 + $ctx->iteration();
+			$audio_id    = 861000 + $ctx->iteration();
+			$video_id    = 862000 + $ctx->iteration();
+			$mime_id     = 863000 + $ctx->iteration();
+			$image_id    = 864000 + $ctx->iteration();
+			$pdf_id      = 865000 + $ctx->iteration();
+			$mismatch_id = 866000 + $ctx->iteration();
 
 			self::seed_attachment_post( $audio_id, 'import', $audio_path );
 			self::seed_attachment_post( $video_id, 'import', $video_path );
 			self::seed_attachment_post( $mime_id, 'audio/mpeg', $bin_path );
+			self::seed_attachment_post( $image_id, 'import', $image_path );
+			self::seed_attachment_post( $pdf_id, 'application/pdf', $pdf_path );
+			self::seed_attachment_post( $mismatch_id, 'image/jpeg', $mismatch );
 
 			$attachment_checks = array(
-				'audio-import-audio' => \wp_attachment_is( 'audio', $audio_id ),
-				'audio-import-video' => \wp_attachment_is( 'video', $audio_id ),
-				'video-import-video' => \wp_attachment_is( 'video', $video_id ),
-				'video-import-audio' => \wp_attachment_is( 'audio', $video_id ),
-				'mime-audio'         => \wp_attachment_is( 'audio', $mime_id ),
-				'mime-mp3'           => \wp_attachment_is( 'mp3', $audio_id ),
-				'missing'            => \wp_attachment_is( 'audio', 999999 + $ctx->iteration() ),
+				'audio-import-audio'       => \wp_attachment_is( 'audio', $audio_id ),
+				'audio-import-video'       => \wp_attachment_is( 'video', $audio_id ),
+				'video-import-video'       => \wp_attachment_is( 'video', $video_id ),
+				'video-import-audio'       => \wp_attachment_is( 'audio', $video_id ),
+				'image-import-image'       => \wp_attachment_is( 'image', $image_id ),
+				'image-import-wrapper'     => \wp_attachment_is_image( $image_id ),
+				'image-import-png'         => \wp_attachment_is( 'png', $image_id ),
+				'pdf-document'             => \wp_attachment_is( 'pdf', $pdf_id ),
+				'pdf-image'                => \wp_attachment_is( 'image', $pdf_id ),
+				'pdf-wrapper'              => \wp_attachment_is_image( $pdf_id ),
+				'mime-audio'               => \wp_attachment_is( 'audio', $mime_id ),
+				'mime-mismatch-image'      => \wp_attachment_is( 'image', $mismatch_id ),
+				'mime-mismatch-png'        => \wp_attachment_is( 'png', $mismatch_id ),
+				'mime-mismatch-jpg'        => \wp_attachment_is( 'jpg', $mismatch_id ),
+				'mime-mp3'                 => \wp_attachment_is( 'mp3', $audio_id ),
+				'missing'                  => \wp_attachment_is( 'audio', 999999 + $ctx->iteration() ),
 			);
 
 			self::collect_failure(
@@ -440,10 +459,19 @@ final class MediaMetadataSurface {
 					&& false === $attachment_checks['audio-import-video']
 					&& true === $attachment_checks['video-import-video']
 					&& false === $attachment_checks['video-import-audio']
+					&& true === $attachment_checks['image-import-image']
+					&& true === $attachment_checks['image-import-wrapper']
+					&& false === $attachment_checks['image-import-png']
+					&& true === $attachment_checks['pdf-document']
+					&& false === $attachment_checks['pdf-image']
+					&& false === $attachment_checks['pdf-wrapper']
 					&& true === $attachment_checks['mime-audio']
+					&& true === $attachment_checks['mime-mismatch-image']
+					&& true === $attachment_checks['mime-mismatch-png']
+					&& false === $attachment_checks['mime-mismatch-jpg']
 					&& true === $attachment_checks['mime-mp3']
 					&& false === $attachment_checks['missing'],
-				'wp_attachment_is honors import extension branches, direct MIME branches, and missing attachments',
+				'wp_attachment_is honors import image/audio/video branches, direct MIME branches, extension fallbacks, wrappers, and missing attachments',
 				array( 'attachmentChecks' => $attachment_checks )
 			);
 		}
