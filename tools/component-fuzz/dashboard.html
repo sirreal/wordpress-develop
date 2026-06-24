@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7910 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7913 passed, 0 failed, 0 errored, 62 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>query-loop</code> at 7500 passed, <code>mail</code> at 800 passed, <code>canonical-routing</code> at 1100 passed, <code>xmlrpc</code> at 900 passed, and <code>assets</code> at 1300 passed.</div>
+			<div class="note">Latest focused validations: <code>classic-walkers</code> at 1100 passed and 100 skipped, <code>utility-internals</code> at 600 passed, <code>query-loop</code> at 7500 passed, <code>mail</code> at 800 passed, and <code>canonical-routing</code> at 1100 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; the stale fonts worker was retired after producing no commits or local changes.</div>
+			<div class="note">No active subagents; stale fonts and media-remote workers were retired after producing no commits or local changes.</div>
 		</div>
 	</div>
 
@@ -280,9 +280,9 @@
 				<tr>
 					<td><code>classic-walkers</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
-					<td>Sagan the 2nd / main worktree</td>
-					<td>Main focused run: 1100 passed, 100 skipped, 0 failed; latest broad run: 7896 passed, 63 skipped, 0 failed.</td>
-					<td>Classic walker traversal, generated hierarchies, depth and parent/current state, output escaping/filter boundaries, argument normalization, and state restoration.</td>
+					<td>Main worktree</td>
+					<td>Main focused run: 1100 passed, 100 skipped, 0 failed; latest broad run: 7913 passed, 62 skipped, 0 failed.</td>
+					<td>Classic walker traversal, generated hierarchies, depth and parent/current state, generated has-children oracles, output escaping/filter boundaries, argument normalization, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>admin-ajax</code></td>
@@ -435,8 +435,8 @@
 					<td><code>utility-internals</code></td>
 					<td><span class="status good">local validation passed</span></td>
 					<td>Main worktree</td>
-					<td>Main focused run: 500 passed, 0 skipped, 0 failed; broad run: 9874 passed, 81 skipped, 0 failed.</td>
-					<td>List utilities, token maps, rewrite match substitution, URL pattern prefixing.</td>
+					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7913 passed, 62 skipped, 0 failed.</td>
+					<td>List utilities, chained filter/sort/pluck state, token maps, rewrite match substitution, URL pattern prefixing.</td>
 				</tr>
 				<tr>
 					<td><code>icons-connectors</code></td>

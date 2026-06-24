@@ -109,8 +109,9 @@ database, network requests, or a configured site.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu
-  checklist/edit field names, bounded HTML balance, escaping contracts, and
-  global/filter/superglobal/output-buffer restoration.
+  checklist/edit field names, generated has-children oracles, bounded HTML
+  balance, escaping contracts, and global/filter/superglobal/output-buffer
+  restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   query variables, `WP_Date_Query`, title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
@@ -327,8 +328,9 @@ database, network requests, or a configured site.
 - `utility-internals`: no-DB low-level utility coverage for `WP_List_Util`,
   list helper wrappers, `WP_Token_Map`, `WP_MatchesMapRegex`, and
   `WP_URL_Pattern_Prefixer`, including reference filter/pluck/sort oracles,
-  token lookup/precomputed table round trips, rewrite match substitution,
-  URL-pattern prefix escaping/idempotence boundaries, and state restoration.
+  chained filter/sort/pluck state, token lookup/precomputed table round trips,
+  rewrite match substitution, URL-pattern prefix escaping/idempotence
+  boundaries, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen

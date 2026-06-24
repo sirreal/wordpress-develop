@@ -26,6 +26,7 @@ final class UtilityInternalsSurface {
 
 		try {
 			$rows[] = self::check_list_util_filter_pluck_sort( $ctx->fork( 'list' ) );
+			$rows[] = self::check_list_util_chained_state( $ctx->fork( 'list-chain' ) );
 			$rows[] = self::check_token_map_lookup_and_precompute( $ctx->fork( 'token-map' ) );
 			$rows[] = self::check_matches_map_regex( $ctx->fork( 'matches' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'prefixer' ) );
@@ -171,6 +172,79 @@ final class UtilityInternalsSurface {
 			'utility-internals.list-util.filter-pluck-sort',
 			array() === $failures,
 			array(
+				'rows'     => self::summarize_list( $list ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_list_util_chained_state( \ComponentFuzz\FuzzContext $ctx ): array {
+		$list     = self::list_fixture( $ctx );
+		$args     = array(
+			'type'   => $ctx->choice( array( 'post', 'page', 'nav', 'media' ) ),
+			'active' => $ctx->choice( array( '0', '1' ) ),
+		);
+		$orderby  = array(
+			'score' => $ctx->choice( array( 'ASC', 'DESC' ) ),
+			'id'    => 'ASC',
+		);
+		$util     = new \WP_List_Util( $list );
+		$failures = array();
+
+		$filtered          = $util->filter( $args, 'AND' );
+		$expected_filtered = self::reference_filter( $list, $args, 'AND' );
+		self::collect_failure(
+			$failures,
+			self::same_list_values( $expected_filtered, $filtered )
+				&& self::same_list_values( $expected_filtered, $util->get_output() )
+				&& self::same_list_values( $list, $util->get_input() ),
+			'WP_List_Util chain filter output matches reference without mutating input',
+			array(
+				'args'           => $args,
+				'actualKeys'     => array_keys( $filtered ),
+				'expectedKeys'   => array_keys( $expected_filtered ),
+				'inputUnchanged' => self::same_list_values( $list, $util->get_input() ),
+			)
+		);
+
+		$sorted          = $util->sort( $orderby, 'ASC', true );
+		$expected_sorted = self::reference_sort( $expected_filtered, $orderby, true );
+		self::collect_failure(
+			$failures,
+			array_keys( $expected_sorted ) === array_keys( $sorted )
+				&& self::same_list_values( $expected_sorted, $sorted )
+				&& self::same_list_values( $list, $util->get_input() ),
+			'WP_List_Util chain sort reorders current output while preserving keys and input',
+			array(
+				'orderby'        => $orderby,
+				'actualKeys'     => array_keys( $sorted ),
+				'expectedKeys'   => array_keys( $expected_sorted ),
+				'inputUnchanged' => self::same_list_values( $list, $util->get_input() ),
+			)
+		);
+
+		$plucked          = $util->pluck( 'label', 'id' );
+		$expected_plucked = self::reference_pluck( $expected_sorted, 'label', 'id' );
+		self::collect_failure(
+			$failures,
+			$expected_plucked === $plucked
+				&& $expected_plucked === $util->get_output()
+				&& self::same_list_values( $list, $util->get_input() ),
+			'WP_List_Util chain pluck projects sorted output while preserving original input',
+			array(
+				'actual'         => $plucked,
+				'expected'       => $expected_plucked,
+				'inputUnchanged' => self::same_list_values( $list, $util->get_input() ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'utility-internals.list-util.chained-state',
+			array() === $failures,
+			array(
+				'args'     => $args,
+				'orderby'  => $orderby,
 				'rows'     => self::summarize_list( $list ),
 				'failures' => $failures,
 			)
