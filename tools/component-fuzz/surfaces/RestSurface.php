@@ -93,6 +93,13 @@ final class RestSurface {
 					return self::check_permission_callback_semantics( $rng );
 				}
 			);
+			$checks[] = self::run_check(
+				'response-links-envelope',
+				'WP_REST_Response links, headers, CURIE compaction, embedding, envelopes, and response conversion preserve response metadata without leaking filters.',
+				function () use ( &$rng ) {
+					return self::check_response_links_envelope( $rng );
+				}
+			);
 		} finally {
 			self::remove_stateless_filters( $filters );
 		}
@@ -151,6 +158,7 @@ final class RestSurface {
 			'rest_ensure_response',
 			'rest_sanitize_value_from_schema',
 			'rest_validate_value_from_schema',
+			'rest_url',
 			'sanitize_hex_color',
 			'sanitize_text_field',
 			'sanitize_url',
@@ -1066,6 +1074,198 @@ final class RestSurface {
 			'details'  => array(
 				'namespace' => $namespace,
 				'cases'     => $results,
+			),
+		);
+	}
+
+	private static function check_response_links_envelope( array &$rng ): array {
+		$namespace    = self::namespace_token( $rng );
+		$token        = self::slug_token( $rng, 'resp' );
+		$id           = (string) self::rng_int( $rng, 100, 999 );
+		$server       = new \WP_REST_Server();
+		$embed_hits   = 0;
+		$envelope_hits = 0;
+
+		$embedded_route = '/' . $namespace . '/embedded/(?P<id>[0-9]+)';
+		$server->register_route(
+			$namespace,
+			$embedded_route,
+			array(
+				array(
+					'methods'             => 'GET',
+					'permission_callback' => function () {
+						return true;
+					},
+					'callback'            => function ( $request ) use ( &$embed_hits, $token ) {
+						++$embed_hits;
+						return new \WP_REST_Response(
+							array(
+								'embeddedId' => $request['id'],
+								'context'    => $request['context'],
+								'perPage'    => $request['per_page'],
+								'token'      => $token,
+							),
+							207,
+							array( 'X-Embedded' => 'yes' )
+						);
+					},
+					'args'                => array(
+						'per_page' => array(
+							'type'    => 'integer',
+							'maximum' => 7,
+						),
+					),
+				),
+			)
+		);
+
+		$self_href       = \rest_url( $namespace . '/items/' . $id );
+		$collection_href = \rest_url( $namespace . '/items' );
+		$temp_href       = \rest_url( $namespace . '/items/temp-' . $id );
+		$embedded_href   = \rest_url( $namespace . '/embedded/' . $id );
+		$wp_term_href    = \rest_url( $namespace . '/terms/' . $id );
+		$wp_term_two     = \rest_url( $namespace . '/terms/' . ( (int) $id + 1 ) );
+
+		$response = new \WP_REST_Response(
+			array(
+				'id'    => $id,
+				'token' => $token,
+			),
+			202,
+			array( 'X-Fuzz-Header' => 'initial' )
+		);
+		$response->header( 'X-Fuzz-Header', 'replacement' );
+		$response->header( 'X-Fuzz-Trace', 'one' );
+		$response->header( 'X-Fuzz-Trace', 'two', false );
+		$response->link_header( 'alternate', 'https://example.test/rest/' . rawurlencode( $token ), array( 'title' => 'Alt ' . $token ) );
+		$response->link_header( 'describedby', 'https://example.test/rest/schema/' . rawurlencode( $token ), array( 'type' => 'application/schema+json' ) );
+		$response->add_link(
+			'self',
+			$self_href,
+			array(
+				'href'        => 'ignored-by-add-link',
+				'title'       => 'Self ' . $token,
+				'targetHints' => array( 'allow' => array( 'GET', 'HEAD' ) ),
+			)
+		);
+		$response->add_link( 'collection', $temp_href, array( 'title' => 'Removed ' . $token ) );
+		$response->add_links(
+			array(
+				'collection'            => array(
+					'href'  => $collection_href,
+					'title' => 'Collection ' . $token,
+				),
+				'https://api.w.org/term' => array(
+					array(
+						'href'     => $wp_term_href,
+						'taxonomy' => 'category',
+					),
+					array(
+						'href'     => $wp_term_two,
+						'taxonomy' => 'post_tag',
+					),
+				),
+			)
+		);
+		$response->remove_link( 'collection', $temp_href );
+		$response->add_link( 'related', $embedded_href, array( 'embeddable' => true ) );
+		$response->add_link( 'author', 'https://example.invalid/not-rest/' . rawurlencode( $id ), array( 'embeddable' => true ) );
+
+		$envelope_filter = function ( array $envelope, \WP_REST_Response $original ) use ( &$envelope_hits, $response, $token ): array {
+			++$envelope_hits;
+			if ( $original === $response ) {
+				$envelope['headers']['X-Envelope-Token'] = $token;
+				$envelope['body']['envelopeToken']       = $token;
+			}
+			return $envelope;
+		};
+
+		\add_filter( 'rest_envelope_response', $envelope_filter, 10, 2 );
+		try {
+			$links          = \WP_REST_Server::get_response_links( $response );
+			$compact_links  = \WP_REST_Server::get_compact_response_links( $response );
+			$data_no_embed  = $server->response_to_data( $response, false );
+			$enveloped      = $server->envelope_response( $response, array( 'related' ) );
+			$envelope_data  = $enveloped->get_data();
+		} finally {
+			\remove_filter( 'rest_envelope_response', $envelope_filter, 10 );
+		}
+
+		$headers         = $response->get_headers();
+		$ensured_same    = \rest_ensure_response( $response );
+		$http_response   = new \WP_HTTP_Response( array( 'converted' => $token ), 206, array( 'X-Converted' => $token ) );
+		$converted       = \rest_ensure_response( $http_response );
+		$embedded        = $envelope_data['body']['_embedded']['related'][0] ?? null;
+		$links_in_body   = $data_no_embed['_links'] ?? array();
+		$envelope_body   = $envelope_data['body'] ?? array();
+		$envelope_headers = $envelope_data['headers'] ?? array();
+
+		$headers_ok = array(
+			'replacedHeader' => 'replacement' === ( $headers['X-Fuzz-Header'] ?? null ),
+			'appendedHeader' => 'one, two' === ( $headers['X-Fuzz-Trace'] ?? null ),
+			'linkAlternate'  => isset( $headers['Link'] ) && str_contains( $headers['Link'], 'rel="alternate"' ) && str_contains( $headers['Link'], 'title="Alt ' . $token . '"' ),
+			'linkDescribed'  => isset( $headers['Link'] ) && str_contains( $headers['Link'], 'rel="describedby"' ) && str_contains( $headers['Link'], 'type=application/schema+json' ),
+		);
+		$links_ok   = array(
+			'selfHref'          => $self_href === ( $links['self'][0]['href'] ?? null ),
+			'selfRecordFlattened' => ! isset( $links['self'][0]['attributes'] ),
+			'selfTargetHints'   => array( 'GET', 'HEAD' ) === ( $links['self'][0]['targetHints']['allow'] ?? null ),
+			'collectionRemoved' => array( $collection_href ) === array_column( $links['collection'] ?? array(), 'href' ),
+			'curieCompacted'    => isset( $compact_links['wp:term'], $compact_links['curies'][0] )
+				&& ! isset( $compact_links['https://api.w.org/term'] )
+				&& array( $wp_term_href, $wp_term_two ) === array_column( $compact_links['wp:term'], 'href' )
+				&& 'wp' === ( $compact_links['curies'][0]['name'] ?? null )
+				&& true === ( $compact_links['curies'][0]['templated'] ?? null ),
+			'bodyLinksCompact'  => isset( $links_in_body['wp:term'], $links_in_body['related'], $links_in_body['curies'] )
+				&& $embedded_href === ( $links_in_body['related'][0]['href'] ?? null )
+				&& true === ( $links_in_body['related'][0]['embeddable'] ?? null ),
+			'noEmbedWhenFalse'  => ! isset( $data_no_embed['_embedded'] ),
+		);
+		$envelope_ok = array(
+			'envelopeResponseClass' => $enveloped instanceof \WP_REST_Response,
+			'envelopeHttpStatus'    => 200 === $enveloped->get_status(),
+			'originalStatus'        => 202 === ( $envelope_data['status'] ?? null ),
+			'bodyPreserved'         => $id === ( $envelope_body['id'] ?? null ) && $token === ( $envelope_body['token'] ?? null ),
+			'filterMutated'         => 1 === $envelope_hits
+				&& $token === ( $envelope_headers['X-Envelope-Token'] ?? null )
+				&& $token === ( $envelope_body['envelopeToken'] ?? null ),
+			'headersPreserved'      => 'replacement' === ( $envelope_headers['X-Fuzz-Header'] ?? null )
+				&& 'one, two' === ( $envelope_headers['X-Fuzz-Trace'] ?? null )
+				&& isset( $envelope_headers['Link'] ),
+			'relatedEmbedded'       => 1 === $embed_hits
+				&& is_array( $embedded )
+				&& $id === ( $embedded['embeddedId'] ?? null )
+				&& 'embed' === ( $embedded['context'] ?? null )
+				&& 7 === ( $embedded['perPage'] ?? null )
+				&& $token === ( $embedded['token'] ?? null ),
+			'authorNotEmbedded'     => ! isset( $envelope_body['_embedded']['author'] ),
+		);
+		$conversion_ok = array(
+			'restResponseIdentity' => $ensured_same === $response,
+			'httpResponseWrapped'  => $converted instanceof \WP_REST_Response
+				&& 206 === $converted->get_status()
+				&& array( 'converted' => $token ) === $converted->get_data()
+				&& array( 'X-Converted' => $token ) === $converted->get_headers(),
+		);
+
+		$ok = self::all_true( $headers_ok )
+			&& self::all_true( $links_ok )
+			&& self::all_true( $envelope_ok )
+			&& self::all_true( $conversion_ok );
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST response links, envelopes, embedding, headers, and conversions stayed stable.' : 'REST response link/envelope invariant failed.',
+			'features' => array( 'response-links', 'curies', 'response-headers', 'embedding', 'envelopes', 'response-conversion' ),
+			'details'  => array(
+				'namespace'    => $namespace,
+				'headersOk'    => $headers_ok,
+				'linksOk'      => $links_ok,
+				'envelopeOk'   => $envelope_ok,
+				'conversionOk' => $conversion_ok,
+				'links'        => $links,
+				'compactLinks' => $compact_links,
+				'envelope'     => $envelope_data,
 			),
 		);
 	}

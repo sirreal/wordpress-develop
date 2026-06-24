@@ -374,7 +374,8 @@ database, network requests, or a configured site.
   sanitization/caching, connector override re-registration, allowlist behavior,
   rule serialization, and state restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
-  schema sanitize/validate, permissions, HEAD/GET behavior.
+  schema sanitize/validate, permissions, HEAD/GET behavior, response links,
+  CURIE compaction, embedding, envelopes, headers, and response conversion.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
   `WP::parse_request()`, rewrite/pathinfo/index matching, public/private
   query-var gates, query-var precedence, `register_globals()`, `handle_404()`
