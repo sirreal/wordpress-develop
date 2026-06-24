@@ -34,6 +34,7 @@ final class SiteHealthDebugSurface {
 			$rows[] = self::check_format( $ctx->fork( 'format' ) );
 			$rows[] = self::check_debug_information_filter_locality( $ctx->fork( 'debug-information' ) );
 			$rows[] = self::check_database_size( $ctx->fork( 'database-size' ) );
+			$rows[] = self::check_mysql_var( $ctx->fork( 'mysql-var' ) );
 			$rows[] = $ctx->skip(
 				'site-health-debug.database-size.malformed-row-omissions',
 				'Skipped malformed SHOW TABLE STATUS rows because get_database_size() currently assumes MySQL returns numeric Data_length and Index_length columns.'
@@ -411,6 +412,84 @@ final class SiteHealthDebugSurface {
 		);
 	}
 
+	private static function check_mysql_var( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$available_var = 'cfz_' . self::slug( $ctx->fork( 'available' ), 'available' );
+		$missing_var   = 'cfz_' . self::slug( $ctx->fork( 'missing' ), 'missing' );
+		$malformed_var = 'cfz_' . self::slug( $ctx->fork( 'malformed' ), 'malformed' );
+		$available     = self::mysql_var_value( $ctx->fork( 'value' ) );
+		$wpdb          = new SiteHealthDebugWpdbDouble(
+			array(),
+			array(
+				$available_var => $available,
+				$malformed_var => array(
+					'Variable_name' => $malformed_var,
+					'NotValue'      => 'missing value column',
+				),
+			)
+		);
+		$observed      = self::with_wpdb(
+			$wpdb,
+			static function () use ( $available_var, $missing_var, $malformed_var ): array {
+				return array(
+					'available' => \WP_Debug_Data::get_mysql_var( $available_var ),
+					'missing'   => \WP_Debug_Data::get_mysql_var( $missing_var ),
+					'malformed' => \WP_Debug_Data::get_mysql_var( $malformed_var ),
+				);
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			$available === $observed['available']
+				&& null === $observed['missing']
+				&& null === $observed['malformed'],
+			'get_mysql_var returns only populated Value columns and null for missing or malformed rows',
+			array(
+				'availableVar' => $available_var,
+				'expected'     => $available,
+				'observed'     => $observed,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'query' => 'SHOW VARIABLES LIKE %s',
+					'args'  => array( $available_var ),
+				),
+				array(
+					'query' => 'SHOW VARIABLES LIKE %s',
+					'args'  => array( $missing_var ),
+				),
+				array(
+					'query' => 'SHOW VARIABLES LIKE %s',
+					'args'  => array( $malformed_var ),
+				),
+			) === $wpdb->prepared_queries
+				&& array( ARRAY_A, ARRAY_A, ARRAY_A ) === array_column( $wpdb->row_queries, 'output' )
+				&& $wpdb->restored,
+			'get_mysql_var prepares exact SHOW VARIABLES queries, requests ARRAY_A rows, and restores $wpdb',
+			array(
+				'prepared' => $wpdb->prepared_queries,
+				'rows'     => $wpdb->row_queries,
+				'restored' => $wpdb->restored,
+			)
+		);
+
+		return $ctx->result(
+			'site-health-debug.mysql-var.lookup-contract',
+			array() === $failures,
+			array(
+				'failures'      => array_slice( $failures, 0, 4 ),
+				'availableVar'  => $available_var,
+				'missingVar'    => $missing_var,
+				'malformedVar'  => $malformed_var,
+				'preparedCount' => count( $wpdb->prepared_queries ),
+			)
+		);
+	}
+
 	private static function format_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$private_sentinel = 'cfz-private-debug-data-' . $ctx->seed();
 		$main_section_id  = 'cfz-section-' . self::slug( $ctx->fork( 'main-section-id' ), 'section' );
@@ -585,6 +664,22 @@ final class SiteHealthDebugSurface {
 		}
 
 		return $rows;
+	}
+
+	private static function mysql_var_value( \ComponentFuzz\FuzzContext $ctx ) {
+		switch ( $ctx->choice( array( 'string', 'int-string', 'empty', 'zero', 'unicode' ) ) ) {
+			case 'int-string':
+				return (string) $ctx->int( 1, 999999 );
+			case 'empty':
+				return '';
+			case 'zero':
+				return '0';
+			case 'unicode':
+				return 'utf8mb4_' . self::safe_label( $ctx );
+			case 'string':
+			default:
+				return 'value_' . self::slug( $ctx, 'mysql' );
+		}
 	}
 
 	private static function with_wpdb( SiteHealthDebugWpdbDouble $wpdb, callable $callback ) {
@@ -954,11 +1049,15 @@ final class SiteHealthDebugWpdbDouble {
 	public string $last_query = '';
 	public $last_output = null;
 	public bool $restored = false;
+	public array $prepared_queries = array();
+	public array $row_queries = array();
 
 	private array $rows;
+	private array $variables;
 
-	public function __construct( array $rows ) {
-		$this->rows = $rows;
+	public function __construct( array $rows, array $variables = array() ) {
+		$this->rows      = $rows;
+		$this->variables = $variables;
 	}
 
 	public function get_results( $query = null, $output = OBJECT ): array {
@@ -967,5 +1066,49 @@ final class SiteHealthDebugWpdbDouble {
 		$this->num_rows    = count( $this->rows );
 
 		return $this->rows;
+	}
+
+	public function prepare( $query, ...$args ): string {
+		$query = (string) $query;
+		$this->prepared_queries[] = array(
+			'query' => $query,
+			'args'  => $args,
+		);
+
+		if ( 'SHOW VARIABLES LIKE %s' === $query && isset( $args[0] ) ) {
+			return 'SHOW VARIABLES LIKE ' . (string) $args[0];
+		}
+
+		return $query;
+	}
+
+	public function get_row( $query = null, $output = OBJECT ) {
+		$query               = (string) $query;
+		$this->last_query    = $query;
+		$this->last_output   = $output;
+		$this->row_queries[] = array(
+			'query'  => $query,
+			'output' => $output,
+		);
+
+		$prefix = 'SHOW VARIABLES LIKE ';
+		if ( ! str_starts_with( $query, $prefix ) ) {
+			return null;
+		}
+
+		$name = substr( $query, strlen( $prefix ) );
+		if ( ! array_key_exists( $name, $this->variables ) ) {
+			return null;
+		}
+
+		$value = $this->variables[ $name ];
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+
+		return array(
+			'Variable_name' => $name,
+			'Value'         => $value,
+		);
 	}
 }

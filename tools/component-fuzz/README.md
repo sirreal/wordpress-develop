@@ -397,8 +397,8 @@ database, network requests, or a configured site.
 - `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
   formatting and database-size helpers, including private field/section
   suppression, debug vs info labels, `debug_information` filter locality,
-  scoped `SHOW TABLE STATUS` wpdb doubles, and explicit skips for unsafe full
-  debug-data scans.
+  scoped `SHOW TABLE STATUS` and `SHOW VARIABLES` wpdb doubles, MySQL variable
+  lookup fallbacks, and explicit skips for unsafe full debug-data scans.
 - `state`: object cache groups and multi-operations, option, transient, and
   cache-backed site-transient APIs, filters, serialization, JSON, and value
   helpers.
