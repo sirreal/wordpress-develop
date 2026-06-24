@@ -91,6 +91,7 @@ final class MediaEditorSurface {
 				'wp_get_attachment_metadata',
 				'wp_get_image_editor',
 				'wp_get_image_editor_output_format',
+				'wp_get_missing_image_subsizes',
 				'wp_get_registered_image_subsizes',
 				'wp_getimagesize',
 				'wp_image_editor_supports',
@@ -248,12 +249,21 @@ final class MediaEditorSurface {
 		$safe_name     = self::safe_image_basename( $unsafe_name, 'jpg' );
 		$original_name = self::safe_image_basename( '../original ' . $unsafe_name, 'jpg' );
 		$relative_file = '2026/06/' . $safe_name;
+		$existing_size = 'component-fuzz-existing-' . $ctx->int( 10, 999 );
+		$missing_size  = 'component-fuzz-missing-' . $ctx->int( 10, 999 );
+		$too_large     = 'component-fuzz-large-' . $ctx->int( 10, 999 );
 		$metadata      = array(
 			'width'          => 320,
 			'height'         => 240,
 			'file'           => $relative_file,
 			'original_image' => $original_name,
 			'sizes'          => array(
+				$existing_size => array(
+					'file'      => 'component-fuzz-existing-160x120.jpg',
+					'width'     => 160,
+					'height'    => 120,
+					'mime-type' => 'image/jpeg',
+				),
 				'component fuzz:' . $ctx->identifier( 2, 6 ) => array(
 					'file'      => 'component-fuzz-160x120.jpg',
 					'width'     => 160,
@@ -264,6 +274,7 @@ final class MediaEditorSurface {
 		);
 		$updates       = array();
 		$size_name     = 'component-fuzz-helper-' . $ctx->int( 10, 999 );
+		$missing_calls = array();
 		$upload_filter = self::upload_dir_filter( $upload_root );
 		$meta_filter   = static function ( $data, int $id ) use ( $attachment_id ) {
 			if ( $attachment_id === $id && is_array( $data ) ) {
@@ -286,6 +297,17 @@ final class MediaEditorSurface {
 
 			return $check;
 		};
+		$missing_filter = static function ( array $missing_sizes, array $image_meta, int $id ) use ( $attachment_id, &$missing_calls ): array {
+			if ( $attachment_id === $id ) {
+				$missing_calls[] = array(
+					'keys'   => array_keys( $missing_sizes ),
+					'width'  => $image_meta['width'] ?? null,
+					'height' => $image_meta['height'] ?? null,
+				);
+			}
+
+			return $missing_sizes;
+		};
 
 		\ComponentFuzz\ensure_dir( $upload_root . DIRECTORY_SEPARATOR . '2026' . DIRECTORY_SEPARATOR . '06' );
 		self::seed_attachment_post( $attachment_id, 'image/jpeg' );
@@ -302,6 +324,7 @@ final class MediaEditorSurface {
 		\add_filter( 'wp_get_attachment_metadata', $meta_filter, 10, 2 );
 		\add_filter( 'get_attached_file', $file_filter, 10, 2 );
 		\add_filter( 'update_post_metadata', $update_filter, 10, 4 );
+		\add_filter( 'wp_get_missing_image_subsizes', $missing_filter, 10, 3 );
 
 		try {
 			$attached_unfiltered = \get_attached_file( $attachment_id, true );
@@ -312,12 +335,17 @@ final class MediaEditorSurface {
 			$update_result       = \wp_update_attachment_metadata( $attachment_id, $metadata + array( 'component_fuzz_update' => true ) );
 
 			\add_image_size( $size_name, 111, 77, array( 'left', 'top' ) );
+			\add_image_size( $existing_size, 160, 120, true );
+			\add_image_size( $missing_size, 96, 96, false );
+			\add_image_size( $too_large, 5000, 5000, false );
 			$registered_sizes = \wp_get_registered_image_subsizes();
+			$missing_subsizes = \wp_get_missing_image_subsizes( $attachment_id );
 		} finally {
 			\remove_filter( 'upload_dir', $upload_filter );
 			\remove_filter( 'wp_get_attachment_metadata', $meta_filter, 10 );
 			\remove_filter( 'get_attached_file', $file_filter, 10 );
 			\remove_filter( 'update_post_metadata', $update_filter, 10 );
+			\remove_filter( 'wp_get_missing_image_subsizes', $missing_filter, 10 );
 			\wp_cache_delete( $attachment_id, 'posts' );
 			\wp_cache_delete( $attachment_id, 'post_meta' );
 		}
@@ -353,6 +381,27 @@ final class MediaEditorSurface {
 				'updateCount'         => count( $updates ),
 				'registeredSizeName'  => $size_name,
 				'registeredSizeValue' => $registered_sizes[ $size_name ] ?? null,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			isset( $missing_subsizes[ $missing_size ] )
+				&& isset( $missing_subsizes[ $size_name ] )
+				&& ! isset( $missing_subsizes[ $existing_size ] )
+				&& ! isset( $missing_subsizes[ $too_large ] )
+				&& 96 === $missing_subsizes[ $missing_size ]['width']
+				&& false === $missing_subsizes[ $missing_size ]['crop']
+				&& 1 === count( $missing_calls )
+				&& in_array( $missing_size, $missing_calls[0]['keys'], true )
+				&& false === \has_filter( 'wp_get_missing_image_subsizes', $missing_filter ),
+			'missing subsize helper returns only possible unrepresented registered sizes and removes scoped filter',
+			array(
+				'existingSize'    => $existing_size,
+				'missingSize'     => $missing_size,
+				'tooLarge'        => $too_large,
+				'sizeName'        => $size_name,
+				'missingSubsizes' => $missing_subsizes,
+				'missingCalls'    => $missing_calls,
 			)
 		);
 

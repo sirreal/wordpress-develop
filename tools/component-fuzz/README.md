@@ -262,8 +262,8 @@ database, network requests, or a configured site.
   excerpts, balanced tags, URL extraction, embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
   GD/Imagick availability, output format filters, resize/save metadata,
-  intermediate and generated sub-sizes, and cache/filter-backed attachment
-  metadata helpers with temp-file cleanup.
+  intermediate and generated sub-sizes, missing sub-size detection, and
+  cache/filter-backed attachment metadata helpers with temp-file cleanup.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
   boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
