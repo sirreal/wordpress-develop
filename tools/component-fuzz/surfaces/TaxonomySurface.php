@@ -34,8 +34,11 @@ final class TaxonomySurface {
 			$rows[] = self::check_registry_lifecycle( $ctx, $case );
 			$rows[] = self::check_taxonomy_list_queries( $ctx, $case );
 			$rows[] = self::check_object_shape_and_normalization( $ctx, $case );
+			$rows[] = self::check_registration_side_effect_boundaries( $ctx, $case );
 			$rows[] = self::check_sanitization_contexts( $ctx, $case );
+			$rows[] = self::check_term_field_filter_boundaries( $ctx, $case );
 			$rows[] = self::check_synthetic_term_objects( $ctx, $case );
+			$rows[] = self::check_hierarchy_helper_edges( $ctx, $case );
 			$rows[] = self::check_term_link_cheap_paths( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -79,6 +82,7 @@ final class TaxonomySurface {
 		foreach (
 			array(
 				'add_filter',
+				'get_ancestors',
 				'get_object_taxonomies',
 				'get_taxonomies',
 				'get_taxonomy',
@@ -87,16 +91,21 @@ final class TaxonomySurface {
 				'get_term_field',
 				'get_term_link',
 				'home_url',
+				'has_filter',
 				'is_taxonomy_hierarchical',
 				'register_taxonomy',
 				'register_taxonomy_for_object_type',
+				'remove_filter',
 				'sanitize_key',
+				'sanitize_title',
 				'sanitize_term',
 				'sanitize_term_field',
 				'sanitize_title_with_dashes',
 				'taxonomy_exists',
+				'term_is_ancestor_of',
 				'unregister_taxonomy',
 				'unregister_taxonomy_for_object_type',
+				'wp_check_term_hierarchy_for_loops',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -376,6 +385,171 @@ final class TaxonomySurface {
 		);
 	}
 
+	private static function check_registration_side_effect_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$manual_taxonomy = $case['taxonomies']['callbacks'];
+		$meta_box_cb     = static function () use ( $case ): string {
+			return 'meta-' . $case['token'];
+		};
+		$sanitize_cb     = static function ( $value ): array {
+			return array_map( 'intval', (array) $value );
+		};
+
+		$manual_taxonomy_object = new \WP_Taxonomy(
+			$manual_taxonomy,
+			$case['objectTypes'][0],
+			self::registration_args(
+				$case,
+				array(
+					'public'               => true,
+					'publicly_queryable'   => true,
+					'hierarchical'         => false,
+					'query_var'            => false,
+					'rewrite'              => false,
+					'show_in_rest'         => true,
+					'rest_namespace'       => false,
+					'default_term'         => $case['defaultTermInput'],
+					'args'                 => array(
+						'orderby'    => 'slug',
+						'hide_empty' => false,
+					),
+					'meta_box_cb'          => $meta_box_cb,
+					'meta_box_sanitize_cb' => $sanitize_cb,
+				)
+			)
+		);
+		$default_term_expected   = self::expected_default_term( $case['defaultTermInput'] );
+		$sanitize_result         = call_user_func( $manual_taxonomy_object->meta_box_sanitize_cb, array( '7', 'bad', -2 ) );
+
+		$hierarchical_defaults = new \WP_Taxonomy(
+			$manual_taxonomy . '_h',
+			$case['objectTypes'][0],
+			array(
+				'public'       => true,
+				'hierarchical' => true,
+				'query_var'    => false,
+				'rewrite'      => false,
+			)
+		);
+		$flat_defaults         = new \WP_Taxonomy(
+			$manual_taxonomy . '_f',
+			$case['objectTypes'][0],
+			array(
+				'public'       => true,
+				'hierarchical' => false,
+				'query_var'    => false,
+				'rewrite'      => false,
+			)
+		);
+
+		$query_taxonomy = $case['taxonomies']['rewriteBoundary'];
+		$query_input    = 'Query Var ' . $case['token'] . ' / ' . $case['unicode'];
+		$query_var      = \sanitize_title_with_dashes( $query_input );
+		$rewrite_slug   = 'topics-' . $case['token'];
+		$ajax_hook      = 'wp_ajax_add-' . $query_taxonomy;
+		$registered     = \register_taxonomy(
+			$query_taxonomy,
+			$case['objectTypes'][0],
+			array(
+				'public'             => true,
+				'publicly_queryable' => true,
+				'hierarchical'       => $case['hierarchical'],
+				'query_var'          => $query_input,
+				'rewrite'            => array(
+					'slug'         => $rewrite_slug,
+					'with_front'   => false,
+					'hierarchical' => true,
+					'ep_mask'      => EP_TAGS,
+				),
+			)
+		);
+
+		if ( \is_wp_error( $registered ) ) {
+			return $ctx->fail(
+				'taxonomy.registration.callbacks-query-rewrite-boundaries',
+				self::case_data( $case ) + array(
+					'registerError' => $registered->get_error_code(),
+				)
+			);
+		}
+
+		$rewrite_tag          = '%' . $query_taxonomy . '%';
+		$rewrite_codes        = array_values( $GLOBALS['wp_rewrite']->rewritecode );
+		$rewrite_replacements = array_values( $GLOBALS['wp_rewrite']->rewritereplace );
+		$query_replacements   = array_values( $GLOBALS['wp_rewrite']->queryreplace );
+		$tag_position         = array_search( $rewrite_tag, $rewrite_codes, true );
+		$tag_regex            = is_int( $tag_position ) ? ( $rewrite_replacements[ $tag_position ] ?? null ) : null;
+		$tag_query            = is_int( $tag_position ) ? ( $query_replacements[ $tag_position ] ?? null ) : null;
+		$permastruct          = $GLOBALS['wp_rewrite']->extra_permastructs[ $query_taxonomy ] ?? null;
+		$expected_tag_regex   = $registered->hierarchical && $registered->rewrite['hierarchical'] ? '(.+?)' : '([^/]+)';
+		$hook_registered      = \has_filter( $ajax_hook, '_wp_ajax_add_hierarchical_term' );
+		$query_var_count      = count( array_keys( $GLOBALS['wp']->public_query_vars, $query_var, true ) );
+		$unregistered         = \unregister_taxonomy( $query_taxonomy );
+		$query_var_removed    = ! in_array( $query_var, $GLOBALS['wp']->public_query_vars, true );
+		$rewrite_removed      = false === array_search( $rewrite_tag, array_values( $GLOBALS['wp_rewrite']->rewritecode ), true )
+			&& ! isset( $GLOBALS['wp_rewrite']->extra_permastructs[ $query_taxonomy ] );
+		$hook_removed         = false === \has_filter( $ajax_hook, '_wp_ajax_add_hierarchical_term' );
+
+		$manual_ok = $manual_taxonomy_object->meta_box_cb === $meta_box_cb
+			&& $manual_taxonomy_object->meta_box_sanitize_cb === $sanitize_cb
+			&& array( 7, 0, -2 ) === $sanitize_result
+			&& true === $manual_taxonomy_object->show_in_rest
+			&& 'wp/v2' === $manual_taxonomy_object->rest_namespace
+			&& $default_term_expected === $manual_taxonomy_object->default_term
+			&& array(
+				'orderby'    => 'slug',
+				'hide_empty' => false,
+			) === $manual_taxonomy_object->args;
+
+		$meta_box_defaults_ok = 'post_categories_meta_box' === $hierarchical_defaults->meta_box_cb
+			&& 'taxonomy_meta_box_sanitize_cb_checkboxes' === $hierarchical_defaults->meta_box_sanitize_cb
+			&& 'post_tags_meta_box' === $flat_defaults->meta_box_cb
+			&& 'taxonomy_meta_box_sanitize_cb_input' === $flat_defaults->meta_box_sanitize_cb;
+
+		$side_effects_ok = $registered instanceof \WP_Taxonomy
+			&& $query_var === $registered->query_var
+			&& 1 === $query_var_count
+			&& is_int( $tag_position )
+			&& $expected_tag_regex === $tag_regex
+			&& $query_var . '=' === $tag_query
+			&& is_array( $permastruct )
+			&& str_contains( $permastruct['struct'], $rewrite_slug . '/' . $rewrite_tag )
+			&& false === $permastruct['with_front']
+			&& EP_TAGS === $permastruct['ep_mask']
+			&& 10 === $hook_registered
+			&& true === $unregistered
+			&& $query_var_removed
+			&& $rewrite_removed
+			&& $hook_removed
+			&& ! \taxonomy_exists( $query_taxonomy );
+
+		return $ctx->result(
+			'taxonomy.registration.callbacks-query-rewrite-boundaries',
+			$manual_ok && $meta_box_defaults_ok && $side_effects_ok,
+			self::case_data( $case ) + array(
+				'manualOk'            => $manual_ok,
+				'metaBoxDefaultsOk'   => $meta_box_defaults_ok,
+				'sideEffectsOk'       => $side_effects_ok,
+				'queryInput'          => $query_input,
+				'queryVar'            => $query_var,
+				'queryVarCount'       => $query_var_count,
+				'registeredRewrite'   => $registered->rewrite,
+				'rewriteTagPosition'  => $tag_position,
+				'rewriteTagRegex'     => $tag_regex,
+				'rewriteTagQuery'     => $tag_query,
+				'permastruct'         => $permastruct,
+				'hookRegistered'      => $hook_registered,
+				'unregistered'        => $unregistered,
+				'queryVarRemoved'     => $query_var_removed,
+				'rewriteRemoved'      => $rewrite_removed,
+				'hookRemoved'         => $hook_removed,
+				'defaultTermExpected' => $default_term_expected,
+				'defaultTermActual'   => $manual_taxonomy_object->default_term,
+			)
+		);
+	}
+
 	private static function check_sanitization_contexts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::reset_taxonomy_registry();
 
@@ -486,6 +660,178 @@ final class TaxonomySurface {
 		);
 	}
 
+	private static function check_term_field_filter_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$taxonomy = $case['taxonomies']['filter'];
+		$tax      = \register_taxonomy(
+			$taxonomy,
+			$case['objectTypes'][0],
+			array(
+				'public'    => true,
+				'query_var' => false,
+				'rewrite'   => false,
+			)
+		);
+
+		if ( \is_wp_error( $tax ) ) {
+			return $ctx->fail(
+				'taxonomy.term-field.filters-and-slug-normalization',
+				self::case_data( $case ) + array(
+					'registerError' => $tax->get_error_code(),
+				)
+			);
+		}
+
+		$events  = array();
+		$filters = array();
+		$term_id = 400 + strlen( $case['token'] );
+
+		$edit_generic = static function ( $value, int $seen_term_id, string $seen_taxonomy ) use ( &$events ): string {
+			$events[] = array(
+				'hook'     => 'edit_term_name',
+				'termId'   => $seen_term_id,
+				'taxonomy' => $seen_taxonomy,
+				'value'    => $value,
+			);
+			return $value . '-generic-edit';
+		};
+		$edit_specific = static function ( $value, int $seen_term_id ) use ( &$events, $taxonomy ): string {
+			$events[] = array(
+				'hook'   => 'edit_' . $taxonomy . '_name',
+				'termId' => $seen_term_id,
+				'value'  => $value,
+			);
+			return $value . '-specific-edit';
+		};
+		$pre_slug_generic = static function ( string $value, string $seen_taxonomy ) use ( &$events ): string {
+			$events[] = array(
+				'hook'     => 'pre_term_slug',
+				'taxonomy' => $seen_taxonomy,
+				'value'    => $value,
+			);
+			return $value . '-generic-db';
+		};
+		$pre_slug_specific = static function ( string $value ) use ( &$events, $taxonomy ): string {
+			$events[] = array(
+				'hook'  => 'pre_' . $taxonomy . '_slug',
+				'value' => $value,
+			);
+			return $value . '-specific-db';
+		};
+		$display_generic = static function ( string $value, int $seen_term_id, string $seen_taxonomy, string $context ) use ( &$events ): string {
+			$events[] = array(
+				'hook'     => 'term_description',
+				'termId'   => $seen_term_id,
+				'taxonomy' => $seen_taxonomy,
+				'context'  => $context,
+				'value'    => $value,
+			);
+			return $value . '-generic-display';
+		};
+		$display_specific = static function ( string $value, int $seen_term_id, string $context ) use ( &$events, $taxonomy ): string {
+			$events[] = array(
+				'hook'    => $taxonomy . '_description',
+				'termId'  => $seen_term_id,
+				'context' => $context,
+				'value'   => $value,
+			);
+			return $value . '-specific-display';
+		};
+		$rss_generic = static function ( string $value, string $seen_taxonomy ) use ( &$events ): string {
+			$events[] = array(
+				'hook'     => 'term_slug_rss',
+				'taxonomy' => $seen_taxonomy,
+				'value'    => $value,
+			);
+			return $value . '-generic-rss';
+		};
+		$rss_specific = static function ( string $value ) use ( &$events, $taxonomy ): string {
+			$events[] = array(
+				'hook'  => $taxonomy . '_slug_rss',
+				'value' => $value,
+			);
+			return $value . '-specific-rss';
+		};
+
+		$filters_restored = false;
+		try {
+			self::add_filter_record( $filters, 'edit_term_name', $edit_generic, 20, 3 );
+			self::add_filter_record( $filters, 'edit_' . $taxonomy . '_name', $edit_specific, 20, 2 );
+			self::add_filter_record( $filters, 'pre_term_slug', $pre_slug_generic, 20, 2 );
+			self::add_filter_record( $filters, 'pre_' . $taxonomy . '_slug', $pre_slug_specific, 20, 1 );
+			self::add_filter_record( $filters, 'term_description', $display_generic, 20, 4 );
+			self::add_filter_record( $filters, $taxonomy . '_description', $display_specific, 20, 3 );
+			self::add_filter_record( $filters, 'term_slug_rss', $rss_generic, 20, 2 );
+			self::add_filter_record( $filters, $taxonomy . '_slug_rss', $rss_specific, 20, 1 );
+
+			$raw_name        = '<b>Name</b> & ' . $case['token'];
+			$raw_slug        = 'Résumé ' . $case['token'] . ' / <tag>';
+			$raw_description = '<strong>Description</strong> ' . $case['unicode'];
+			$edit_name       = \sanitize_term_field( 'name', $raw_name, $term_id, $taxonomy, 'edit' );
+			$db_slug         = \sanitize_term_field( 'slug', $raw_slug, $term_id, $taxonomy, 'db' );
+			$display_desc    = \sanitize_term_field( 'description', $raw_description, $term_id, $taxonomy, 'display' );
+			$rss_slug        = \sanitize_term_field( 'slug', $raw_slug, $term_id, $taxonomy, 'rss' );
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_restored = self::filters_absent( $filters );
+		}
+
+		$expected_slug   = $raw_slug . '-generic-db-specific-db';
+		$dash_slug       = \sanitize_title_with_dashes( $raw_slug );
+		$expected_events = array(
+			'edit_term_name',
+			'edit_' . $taxonomy . '_name',
+			'pre_term_slug',
+			'pre_' . $taxonomy . '_slug',
+			'term_description',
+			$taxonomy . '_description',
+			'term_slug_rss',
+			$taxonomy . '_slug_rss',
+		);
+		$actual_events   = array_column( $events, 'hook' );
+		$edit_ok         = is_string( $edit_name )
+			&& ! str_contains( $edit_name, '<' )
+			&& ! str_contains( $edit_name, '>' )
+			&& str_contains( $edit_name, 'generic-edit' )
+			&& str_contains( $edit_name, 'specific-edit' );
+		$db_ok           = $expected_slug === $db_slug;
+		$dash_slug_ok    = '' !== $dash_slug
+			&& strtolower( $dash_slug ) === $dash_slug
+			&& ! str_contains( $dash_slug, ' ' )
+			&& ! str_contains( $dash_slug, '<' )
+			&& ! str_contains( $dash_slug, '>' );
+		$display_ok      = is_string( $display_desc )
+			&& str_contains( $display_desc, 'generic-display' )
+			&& str_contains( $display_desc, 'specific-display' );
+		$rss_ok          = $raw_slug . '-generic-rss-specific-rss' === $rss_slug;
+		$events_ok       = $expected_events === $actual_events;
+
+		return $ctx->result(
+			'taxonomy.term-field.filters-and-slug-normalization',
+			$edit_ok && $db_ok && $dash_slug_ok && $display_ok && $rss_ok && $events_ok && $filters_restored,
+			self::case_data( $case ) + array(
+				'editOk'          => $edit_ok,
+				'dbOk'            => $db_ok,
+				'dashSlugOk'      => $dash_slug_ok,
+				'displayOk'       => $display_ok,
+				'rssOk'           => $rss_ok,
+				'eventsOk'        => $events_ok,
+				'filtersRestored' => $filters_restored,
+				'expectedEvents'  => $expected_events,
+				'actualEvents'    => $actual_events,
+				'rawSlug'         => $raw_slug,
+				'expectedSlug'    => $expected_slug,
+				'dbSlug'          => $db_slug,
+				'dashSlug'        => $dash_slug,
+				'editName'        => $edit_name,
+				'displayDesc'     => $display_desc,
+				'rssSlug'         => $rss_slug,
+				'events'          => $events,
+			)
+		);
+	}
+
 	private static function check_synthetic_term_objects( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::reset_taxonomy_registry();
 
@@ -565,6 +911,114 @@ final class TaxonomySurface {
 				'numericCount'    => count( $get_numeric ),
 				'cacheInstance'   => $instance,
 				'invalidInstance' => $invalid_instance,
+			)
+		);
+	}
+
+	private static function check_hierarchy_helper_edges( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$taxonomy = $case['taxonomies']['hierarchy'];
+		$tax      = \register_taxonomy(
+			$taxonomy,
+			$case['objectTypes'][0],
+			array(
+				'public'       => true,
+				'hierarchical' => true,
+				'query_var'    => false,
+				'rewrite'      => false,
+			)
+		);
+
+		if ( \is_wp_error( $tax ) ) {
+			return $ctx->fail(
+				'taxonomy.hierarchy.cache-backed-ancestor-edges',
+				self::case_data( $case ) + array(
+					'registerError' => $tax->get_error_code(),
+				)
+			);
+		}
+
+		$base       = 700000 + (int) hexdec( substr( sha1( $case['token'] ), 0, 4 ) );
+		$grand_id   = $base + 1;
+		$parent_id  = $base + 2;
+		$child_id   = $base + 3;
+		$loop_a_id  = $base + 10;
+		$loop_b_id  = $base + 11;
+		$cached_ids = array();
+
+		$unregistered = false;
+		try {
+			$terms = array(
+				self::hierarchy_term( $grand_id, $taxonomy, 'grand-' . $case['token'], 'Grand ' . $case['token'], 0 ),
+				self::hierarchy_term( $parent_id, $taxonomy, 'parent-' . $case['token'], 'Parent ' . $case['token'], $grand_id ),
+				self::hierarchy_term( $child_id, $taxonomy, 'child-' . $case['token'], 'Child ' . $case['token'], $parent_id ),
+				self::hierarchy_term( $loop_a_id, $taxonomy, 'loop-a-' . $case['token'], 'Loop A ' . $case['token'], $loop_b_id ),
+				self::hierarchy_term( $loop_b_id, $taxonomy, 'loop-b-' . $case['token'], 'Loop B ' . $case['token'], $loop_a_id ),
+			);
+
+			foreach ( $terms as $term ) {
+				\wp_cache_set( (int) $term->term_id, $term, 'terms' );
+				$cached_ids[] = (int) $term->term_id;
+			}
+
+			$explicit_ancestors = \get_ancestors( $child_id, $taxonomy, 'taxonomy' );
+			$detected_ancestors = \get_ancestors( $child_id, $taxonomy );
+			$loop_ancestors     = \get_ancestors( $loop_a_id, $taxonomy, 'taxonomy' );
+			$grand_is_ancestor  = \term_is_ancestor_of( $grand_id, $child_id, $taxonomy );
+			$parent_is_ancestor = \term_is_ancestor_of( $parent_id, $child_id, $taxonomy );
+			$child_is_ancestor  = \term_is_ancestor_of( $child_id, $grand_id, $taxonomy );
+			$self_parent        = \wp_check_term_hierarchy_for_loops( $child_id, $child_id, $taxonomy );
+			$zero_parent        = \wp_check_term_hierarchy_for_loops( 0, $child_id, $taxonomy );
+			$valid_parent       = \wp_check_term_hierarchy_for_loops( $parent_id, $child_id, $taxonomy );
+			$loop_parent        = \wp_check_term_hierarchy_for_loops( $loop_b_id, $loop_a_id, $taxonomy );
+			$unregistered       = \unregister_taxonomy( $taxonomy );
+		} finally {
+			foreach ( $cached_ids as $cached_id ) {
+				\wp_cache_delete( $cached_id, 'terms' );
+			}
+			if ( \taxonomy_exists( $taxonomy ) ) {
+				\unregister_taxonomy( $taxonomy );
+			}
+		}
+
+		$chain_ok = array( $parent_id, $grand_id ) === $explicit_ancestors
+			&& $explicit_ancestors === $detected_ancestors
+			&& true === $grand_is_ancestor
+			&& true === $parent_is_ancestor
+			&& false === $child_is_ancestor;
+		$loop_ok  = array( $loop_b_id, $loop_a_id ) === $loop_ancestors
+			&& 0 === $self_parent
+			&& 0 === $zero_parent
+			&& $parent_id === $valid_parent
+			&& 0 === $loop_parent;
+		$cleanup_ok = true === $unregistered && ! \taxonomy_exists( $taxonomy );
+
+		return $ctx->result(
+			'taxonomy.hierarchy.cache-backed-ancestor-edges',
+			$chain_ok && $loop_ok && $cleanup_ok,
+			self::case_data( $case ) + array(
+				'chainOk'           => $chain_ok,
+				'loopOk'            => $loop_ok,
+				'cleanupOk'         => $cleanup_ok,
+				'ids'               => array(
+					'grand'  => $grand_id,
+					'parent' => $parent_id,
+					'child'  => $child_id,
+					'loopA'  => $loop_a_id,
+					'loopB'  => $loop_b_id,
+				),
+				'explicitAncestors' => $explicit_ancestors,
+				'detectedAncestors' => $detected_ancestors,
+				'loopAncestors'     => $loop_ancestors,
+				'grandIsAncestor'   => $grand_is_ancestor,
+				'parentIsAncestor'  => $parent_is_ancestor,
+				'childIsAncestor'   => $child_is_ancestor,
+				'selfParent'        => $self_parent,
+				'zeroParent'        => $zero_parent,
+				'validParent'       => $valid_parent,
+				'loopParent'        => $loop_parent,
+				'unregistered'      => $unregistered,
 			)
 		);
 	}
@@ -692,7 +1146,11 @@ final class TaxonomySurface {
 				'normalization' => 'cf_norm_' . substr( $token, 0, 18 ),
 				'defaults'      => 'cf_def_' . substr( $token, 0, 19 ),
 				'sanitize'      => 'cf_san_' . substr( $token, 0, 19 ),
+				'callbacks'     => 'cf_cb_' . substr( $token, 0, 21 ),
+				'rewriteBoundary' => 'cf_rew_' . substr( $token, 0, 20 ),
+				'filter'        => 'cf_flt_' . substr( $token, 0, 20 ),
 				'termObject'    => 'cf_term_' . substr( $token, 0, 18 ),
+				'hierarchy'     => 'cf_hier_' . substr( $token, 0, 19 ),
 				'linkQuery'     => 'cf_lq_' . substr( $token, 0, 20 ),
 				'linkRewrite'   => 'cf_lr_' . substr( $token, 0, 20 ),
 			),
@@ -746,6 +1204,19 @@ final class TaxonomySurface {
 				'edit_terms'   => 'edit-' . $token,
 				'delete_terms' => 'delete ' . $token,
 				'assign_terms' => "assign\x80" . $token,
+			),
+			'defaultTermInput'    => $ctx->choice(
+				array(
+					'Default ' . $unicode . ' ' . $token,
+					array(
+						'name'        => 'Default ' . $token,
+						'slug'        => 'Default Slug ' . $token,
+						'description' => 'Default description ' . $unicode,
+					),
+					array(
+						'name' => '<b>Default</b> ' . $token,
+					),
+				)
 			),
 		);
 	}
@@ -854,6 +1325,36 @@ final class TaxonomySurface {
 			'count'            => -7,
 			'object_id'        => -19,
 			'filter'           => 'raw',
+		);
+	}
+
+	private static function hierarchy_term( int $term_id, string $taxonomy, string $slug, string $name, int $parent ): \stdClass {
+		return (object) array(
+			'term_id'          => $term_id,
+			'name'             => $name,
+			'slug'             => $slug,
+			'term_group'       => 0,
+			'term_taxonomy_id' => $term_id + 1000,
+			'taxonomy'         => $taxonomy,
+			'description'      => 'Synthetic hierarchy term ' . $term_id,
+			'parent'           => $parent,
+			'count'            => 0,
+			'filter'           => 'raw',
+		);
+	}
+
+	private static function expected_default_term( $default_term ): array {
+		if ( ! is_array( $default_term ) ) {
+			$default_term = array( 'name' => $default_term );
+		}
+
+		return array_merge(
+			array(
+				'name'        => '',
+				'slug'        => '',
+				'description' => '',
+			),
+			$default_term
 		);
 	}
 
@@ -983,6 +1484,27 @@ final class TaxonomySurface {
 	private static function objects_match_names( array $objects ): bool {
 		foreach ( $objects as $name => $object ) {
 			if ( ! ( $object instanceof \WP_Taxonomy ) || $name !== $object->name ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function add_filter_record( array &$filters, string $hook, callable $callback, int $priority, int $accepted_args ): void {
+		\add_filter( $hook, $callback, $priority, $accepted_args );
+		$filters[] = array( $hook, $callback, $priority );
+	}
+
+	private static function remove_filter_records( array $filters ): void {
+		foreach ( $filters as $filter ) {
+			\remove_filter( $filter[0], $filter[1], $filter[2] );
+		}
+	}
+
+	private static function filters_absent( array $filters ): bool {
+		foreach ( $filters as $filter ) {
+			if ( false !== \has_filter( $filter[0], $filter[1] ) ) {
 				return false;
 			}
 		}

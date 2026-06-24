@@ -413,8 +413,10 @@ database, network requests, or a configured site.
   HTML/XML filtering, feed metadata escaping, default feed normalization, self
   links, and Atom text construction.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
-  registry query consistency, argument normalization, labels, term
-  sanitization, synthetic `WP_Term` behavior, and cheap term-link paths.
+  registry query consistency, argument/callback/default-term normalization,
+  query-var and rewrite side-effect boundaries, term sanitization and field
+  filters, slug/name normalization, synthetic `WP_Term` behavior, hierarchy
+  helper edge cases, and cheap term-link paths.
 - `taxonomy-relationships`: in-memory wpdb-backed object/term assignment
   coverage, including `wp_set_object_terms()` replace/append behavior,
   field-variant agreement, scoped removal, membership/object lookup helpers,
