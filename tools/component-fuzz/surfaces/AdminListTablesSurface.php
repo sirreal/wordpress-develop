@@ -2250,6 +2250,7 @@ final class AdminListTablesSurface {
 					'tax',
 					'taxonomy',
 					'totals',
+					'user_id',
 					'usersearch',
 					'wp_actions',
 					'wp_current_filter',
