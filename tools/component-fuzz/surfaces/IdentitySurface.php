@@ -847,6 +847,8 @@ final class IdentitySurface {
 		$snapshot = array(
 			'_COOKIE'           => $_COOKIE,
 			'wp_current_filter' => $GLOBALS['wp_current_filter'] ?? null,
+			'wp_filters_exists' => array_key_exists( 'wp_filters', $GLOBALS ),
+			'wp_filters'        => $GLOBALS['wp_filters'] ?? null,
 		);
 
 		if ( $include_filters ) {
@@ -864,6 +866,13 @@ final class IdentitySurface {
 				unset( $GLOBALS['wp_current_filter'] );
 			} else {
 				$GLOBALS['wp_current_filter'] = $snapshot['wp_current_filter'];
+			}
+		}
+		if ( array_key_exists( 'wp_filters_exists', $snapshot ) ) {
+			if ( $snapshot['wp_filters_exists'] ) {
+				$GLOBALS['wp_filters'] = $snapshot['wp_filters'];
+			} else {
+				unset( $GLOBALS['wp_filters'] );
 			}
 		}
 		if ( array_key_exists( 'wp_filter_exists', $snapshot ) ) {
