@@ -596,11 +596,15 @@ final class BlocksSurface {
 			);
 
 			if ( $case['anchorName'] === $anchor_block_type && 'before' === $relative_position ) {
-				$hooked_block_types[] = $case['suppressedName'];
-				$hooked_block_types[] = $case['filterName'];
+				if ( ! in_array( $case['suppressedName'], $hooked_block_types, true ) ) {
+					$hooked_block_types[] = $case['suppressedName'];
+				}
+				if ( ! in_array( $case['filterName'], $hooked_block_types, true ) ) {
+					$hooked_block_types[] = $case['filterName'];
+				}
 			}
 
-			return array_values( array_unique( $hooked_block_types ) );
+			return array_values( $hooked_block_types );
 		};
 		$filter_hooked_block       = static function ( $parsed_hooked_block, string $hooked_block_type, string $relative_position, array $parsed_anchor_block, $context ) use ( $case, &$events ) {
 			$events[] = array(
@@ -661,25 +665,21 @@ final class BlocksSurface {
 			$ignored          = is_array( $metadata_anchor )
 				? ( $metadata_anchor['attrs']['metadata']['ignoredHookedBlocks'] ?? array() )
 				: array();
+			$expected_hooked_blocks = array(
+				'before'      => array( $case['beforeName'], $case['ignoredBeforeName'] ),
+				'after'       => array( $case['afterName'], $case['singleName'] ),
+				'first_child' => array( $case['firstName'] ),
+				'last_child'  => array( $case['lastName'] ),
+			);
 
 			self::collect_failure(
 				$failures,
-				isset(
-					$hooked_blocks[ $case['anchorName'] ]['before'],
-					$hooked_blocks[ $case['anchorName'] ]['after'],
-					$hooked_blocks[ $case['anchorName'] ]['first_child'],
-					$hooked_blocks[ $case['anchorName'] ]['last_child']
-				)
-					&& in_array( $case['beforeName'], $hooked_blocks[ $case['anchorName'] ]['before'], true )
-					&& in_array( $case['ignoredBeforeName'], $hooked_blocks[ $case['anchorName'] ]['before'], true )
-					&& in_array( $case['afterName'], $hooked_blocks[ $case['anchorName'] ]['after'], true )
-					&& in_array( $case['singleName'], $hooked_blocks[ $case['anchorName'] ]['after'], true )
-					&& in_array( $case['firstName'], $hooked_blocks[ $case['anchorName'] ]['first_child'], true )
-					&& in_array( $case['lastName'], $hooked_blocks[ $case['anchorName'] ]['last_child'], true ),
+				self::hooked_blocks_match( $hooked_blocks[ $case['anchorName'] ] ?? array(), $expected_hooked_blocks ),
 				'get_hooked_blocks groups registered hooked blocks by anchor and relative position',
 				array(
-					'case'         => $case,
-					'hookedBlocks' => $hooked_blocks[ $case['anchorName'] ] ?? null,
+					'case'                 => $case,
+					'expectedHookedBlocks' => $expected_hooked_blocks,
+					'hookedBlocks'         => $hooked_blocks[ $case['anchorName'] ] ?? null,
 				)
 			);
 
@@ -1096,16 +1096,16 @@ final class BlocksSurface {
 	}
 
 	private static function block_hooks_case( \ComponentFuzz\FuzzContext $ctx ): array {
-		$token           = self::slug( $ctx, 'hook-token' );
-		$anchor_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'anchor' ), 'hook-anchor' );
-		$before_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'before' ), 'hook-before' );
+		$token               = self::slug( $ctx, 'hook-token' );
+		$anchor_name         = 'component-fuzz/' . self::slug( $ctx->fork( 'anchor' ), 'hook-anchor' );
+		$before_name         = 'component-fuzz/' . self::slug( $ctx->fork( 'before' ), 'hook-before' );
 		$ignored_before_name = 'component-fuzz/' . self::slug( $ctx->fork( 'ignored-before' ), 'hook-ignored-before' );
-		$filter_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'filter' ), 'hook-filter' );
-		$after_name      = 'component-fuzz/' . self::slug( $ctx->fork( 'after' ), 'hook-after' );
-		$first_name      = 'component-fuzz/' . self::slug( $ctx->fork( 'first' ), 'hook-first' );
-		$last_name       = 'component-fuzz/' . self::slug( $ctx->fork( 'last' ), 'hook-last' );
-		$single_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'single' ), 'hook-single' );
-		$suppressed_name = 'component-fuzz/' . self::slug( $ctx->fork( 'suppressed' ), 'hook-suppressed' );
+		$filter_name         = 'component-fuzz/' . self::slug( $ctx->fork( 'filter' ), 'hook-filter' );
+		$after_name          = 'component-fuzz/' . self::slug( $ctx->fork( 'after' ), 'hook-after' );
+		$first_name          = 'component-fuzz/' . self::slug( $ctx->fork( 'first' ), 'hook-first' );
+		$last_name           = 'component-fuzz/' . self::slug( $ctx->fork( 'last' ), 'hook-last' );
+		$single_name         = 'component-fuzz/' . self::slug( $ctx->fork( 'single' ), 'hook-single' );
+		$suppressed_name     = 'component-fuzz/' . self::slug( $ctx->fork( 'suppressed' ), 'hook-suppressed' );
 
 		$anchor_block = self::parsed_block(
 			$anchor_name,
@@ -1131,7 +1131,7 @@ final class BlocksSurface {
 		);
 
 		$registrations = array(
-			$anchor_name     => array(
+			$anchor_name         => array(
 				'title'       => 'Component Fuzz Hook Anchor',
 				'api_version' => 3,
 				'attributes'  => array(
@@ -1141,7 +1141,7 @@ final class BlocksSurface {
 					),
 				),
 			),
-			$before_name     => array(
+			$before_name         => array(
 				'title'       => 'Component Fuzz Hook Before',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'before' ),
@@ -1151,26 +1151,26 @@ final class BlocksSurface {
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'before' ),
 			),
-			$filter_name     => array(
+			$filter_name         => array(
 				'title'       => 'Component Fuzz Hook Filter',
 				'api_version' => 3,
 			),
-			$after_name      => array(
+			$after_name          => array(
 				'title'       => 'Component Fuzz Hook After',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'after' ),
 			),
-			$first_name      => array(
+			$first_name          => array(
 				'title'       => 'Component Fuzz Hook First Child',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'first_child' ),
 			),
-			$last_name       => array(
+			$last_name           => array(
 				'title'       => 'Component Fuzz Hook Last Child',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'last_child' ),
 			),
-			$single_name     => array(
+			$single_name         => array(
 				'title'       => 'Component Fuzz Hook Single',
 				'api_version' => 3,
 				'block_hooks' => array( $anchor_name => 'after' ),
@@ -1178,7 +1178,7 @@ final class BlocksSurface {
 					'multiple' => false,
 				),
 			),
-			$suppressed_name => array(
+			$suppressed_name     => array(
 				'title'       => 'Component Fuzz Hook Suppressed',
 				'api_version' => 3,
 				'supports'    => array(
@@ -1188,18 +1188,18 @@ final class BlocksSurface {
 		);
 
 		return array(
-			'token'          => $token,
-			'anchorName'     => $anchor_name,
-			'beforeName'     => $before_name,
+			'token'             => $token,
+			'anchorName'        => $anchor_name,
+			'beforeName'        => $before_name,
 			'ignoredBeforeName' => $ignored_before_name,
-			'filterName'     => $filter_name,
-			'afterName'      => $after_name,
-			'firstName'      => $first_name,
-			'lastName'       => $last_name,
-			'singleName'     => $single_name,
-			'suppressedName' => $suppressed_name,
-			'anchorBlock'    => $anchor_block,
-			'registrations'  => $registrations,
+			'filterName'        => $filter_name,
+			'afterName'         => $after_name,
+			'firstName'         => $first_name,
+			'lastName'          => $last_name,
+			'singleName'        => $single_name,
+			'suppressedName'    => $suppressed_name,
+			'anchorBlock'       => $anchor_block,
+			'registrations'     => $registrations,
 		);
 	}
 
@@ -1437,6 +1437,12 @@ final class BlocksSurface {
 		}
 
 		return false;
+	}
+
+	private static function hooked_blocks_match( array $actual, array $expected ): bool {
+		ksort( $actual );
+		ksort( $expected );
+		return $expected === $actual;
 	}
 
 	private static function log_contains( array $log, ?string $name, ?string $parent ): bool {
