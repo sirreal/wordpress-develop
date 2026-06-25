@@ -25,6 +25,7 @@ final class ContentSurface {
 		self::check_key_and_class_sanitizers( $result, $inputs );
 		self::check_slashing_helpers( $result, $inputs );
 		self::check_post_fields( $result, $inputs );
+		self::check_sanitize_post_consistency( $result, $inputs );
 		self::check_term_fields( $result, $inputs );
 		self::check_metadata_serialization( $result, $inputs );
 		self::check_extended_content_splitting( $result, $inputs );
@@ -398,6 +399,238 @@ final class ContentSurface {
 			}
 		}
 		self::record( $result, 'sanitize_post_field.safe_contexts', empty( $failures ), array( 'cases' => $cases ), $failures );
+	}
+
+	private static function check_sanitize_post_consistency( array &$result, array $inputs ): void {
+		if ( ! \function_exists( 'sanitize_post' ) || ! \function_exists( 'sanitize_post_field' ) ) {
+			self::skip( $result, 'sanitize_post', 'sanitize_post() or sanitize_post_field() is unavailable.' );
+			return;
+		}
+
+		$contexts         = array( 'raw', 'db', 'edit', 'display', 'attribute', 'js' );
+		$post_cases       = self::sanitize_post_cases( $inputs['posts'] );
+		$failures         = array();
+		$cases            = 0;
+		$field_cases      = 0;
+		$hook_probe_cases = 0;
+		$can_probe_hooks  = \function_exists( 'add_filter' ) && \function_exists( 'remove_filter' ) && \function_exists( 'current_filter' );
+		$probe_fields     = array_unique(
+			array_merge(
+				self::sanitize_post_case_fields( $post_cases ),
+				array(
+					'filter',
+					'post_author',
+					'post_mime_type',
+					'guid',
+					'comment_count',
+					'to_ping',
+					'pinged',
+					'component_fuzz_absent_field',
+				)
+			)
+		);
+
+		foreach ( $post_cases as $case ) {
+			foreach ( $contexts as $context ) {
+				$post        = $case['post'];
+				$post_id     = array_key_exists( 'ID', $post ) ? (int) $post['ID'] : 0;
+				$array_call  = self::call_guarded(
+					static function () use ( $post, $context ) {
+						return \sanitize_post( $post, $context );
+					}
+				);
+				$object_post = (object) $post;
+				$object_call = self::call_guarded(
+					static function () use ( $object_post, $context ) {
+						return \sanitize_post( $object_post, $context );
+					}
+				);
+				++$cases;
+
+				if ( ! $array_call['ok'] ) {
+					$failures[] = self::call_failure(
+						'sanitize-post-array-throwable',
+						'sanitize_post() threw for an array post.',
+						$array_call,
+						array(
+							'case'    => $case['label'],
+							'context' => $context,
+						)
+					);
+					continue;
+				}
+				if ( ! $object_call['ok'] ) {
+					$failures[] = self::call_failure(
+						'sanitize-post-object-throwable',
+						'sanitize_post() threw for an object post.',
+						$object_call,
+						array(
+							'case'    => $case['label'],
+							'context' => $context,
+						)
+					);
+					continue;
+				}
+				if ( ! is_array( $array_call['value'] ) ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-array-return-type',
+						'message' => 'sanitize_post() did not preserve an array input type.',
+						'case'    => $case['label'],
+						'context' => $context,
+						'type'    => gettype( $array_call['value'] ),
+					);
+					continue;
+				}
+				if ( ! is_object( $object_call['value'] ) ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-object-return-type',
+						'message' => 'sanitize_post() did not preserve an object input type.',
+						'case'    => $case['label'],
+						'context' => $context,
+						'type'    => gettype( $object_call['value'] ),
+					);
+					continue;
+				}
+				if ( $object_call['value'] !== $object_post ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-object-instance-changed',
+						'message' => 'sanitize_post() returned a different object instance.',
+						'case'    => $case['label'],
+						'context' => $context,
+					);
+				}
+
+				$object_as_array = get_object_vars( $object_call['value'] );
+				if ( $array_call['value'] !== $object_as_array ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-array-object-mismatch',
+						'message' => 'sanitize_post() produced different field values for equivalent array and object posts.',
+						'case'    => $case['label'],
+						'context' => $context,
+						'array'   => self::describe_value( $array_call['value'] ),
+						'object'  => self::describe_value( $object_as_array ),
+					);
+				}
+
+				if ( ! array_key_exists( 'filter', $array_call['value'] ) || $context !== $array_call['value']['filter'] ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-array-filter-marker-mismatch',
+						'message' => 'sanitize_post() did not stamp the array result with the requested filter context.',
+						'case'    => $case['label'],
+						'context' => $context,
+						'filter'  => self::describe_value( $array_call['value']['filter'] ?? null ),
+					);
+				}
+				if ( ! array_key_exists( 'filter', $object_as_array ) || $context !== $object_as_array['filter'] ) {
+					$failures[] = array(
+						'name'    => 'sanitize-post-object-filter-marker-mismatch',
+						'message' => 'sanitize_post() did not stamp the object result with the requested filter context.',
+						'case'    => $case['label'],
+						'context' => $context,
+						'filter'  => self::describe_value( $object_as_array['filter'] ?? null ),
+					);
+				}
+
+				$expected_fields = $post;
+				if ( ! array_key_exists( 'ID', $expected_fields ) ) {
+					$expected_fields['ID'] = 0;
+				}
+
+				foreach ( $expected_fields as $field => $value ) {
+					$field_call = self::call_guarded(
+						static function () use ( $field, $value, $post_id, $context ) {
+							return \sanitize_post_field( (string) $field, $value, $post_id, $context );
+						}
+					);
+					++$field_cases;
+
+					if ( ! $field_call['ok'] ) {
+						$failures[] = self::call_failure(
+							'sanitize-post-field-oracle-throwable',
+							'sanitize_post_field() threw while building the sanitize_post() field oracle.',
+							$field_call,
+							array(
+								'case'    => $case['label'],
+								'context' => $context,
+								'field'   => (string) $field,
+							)
+						);
+						continue;
+					}
+
+					if ( ! array_key_exists( $field, $array_call['value'] ) || $field_call['value'] !== $array_call['value'][ $field ] ) {
+						$failures[] = array(
+							'name'     => 'sanitize-post-array-field-oracle-mismatch',
+							'message'  => 'sanitize_post() array output did not match sanitize_post_field() for a generated field.',
+							'case'     => $case['label'],
+							'context'  => $context,
+							'field'    => (string) $field,
+							'expected' => self::describe_value( $field_call['value'] ),
+							'actual'   => self::describe_value( $array_call['value'][ $field ] ?? null ),
+						);
+					}
+					if ( ! array_key_exists( $field, $object_as_array ) || $field_call['value'] !== $object_as_array[ $field ] ) {
+						$failures[] = array(
+							'name'     => 'sanitize-post-object-field-oracle-mismatch',
+							'message'  => 'sanitize_post() object output did not match sanitize_post_field() for a generated field.',
+							'case'     => $case['label'],
+							'context'  => $context,
+							'field'    => (string) $field,
+							'expected' => self::describe_value( $field_call['value'] ),
+							'actual'   => self::describe_value( $object_as_array[ $field ] ?? null ),
+						);
+					}
+				}
+
+				if ( $can_probe_hooks ) {
+					$hook_probe = self::probe_sanitize_post_filter_hooks( $post, $context, $probe_fields );
+					++$hook_probe_cases;
+					if ( ! $hook_probe['call']['ok'] ) {
+						$failures[] = self::call_failure(
+							'sanitize-post-filter-probe-throwable',
+							'sanitize_post() threw during the filter locality probe.',
+							$hook_probe['call'],
+							array(
+								'case'    => $case['label'],
+								'context' => $context,
+							)
+						);
+						continue;
+					}
+
+					$expected_hooks = self::sanitize_post_filter_hooks( array_keys( $expected_fields ), $context );
+					$actual_hooks   = $hook_probe['hooks'];
+					sort( $expected_hooks );
+					sort( $actual_hooks );
+					if ( $expected_hooks !== $actual_hooks ) {
+						$failures[] = array(
+							'name'     => 'sanitize-post-filter-locality-mismatch',
+							'message'  => 'sanitize_post() did not invoke the expected field filter hooks for the generated fields and context.',
+							'case'     => $case['label'],
+							'context'  => $context,
+							'expected' => $expected_hooks,
+							'actual'   => $actual_hooks,
+						);
+					}
+				}
+			}
+		}
+
+		if ( ! $can_probe_hooks ) {
+			self::skip( $result, 'sanitize_post.filter_locality', 'WordPress filter helpers are unavailable.' );
+		}
+
+		self::record(
+			$result,
+			'sanitize_post.object_array_field_consistency_filter_locality',
+			empty( $failures ),
+			array(
+				'cases'          => $cases,
+				'fieldCases'     => $field_cases,
+				'hookProbeCases' => $hook_probe_cases,
+			),
+			$failures
+		);
 	}
 
 	private static function check_term_fields( array &$result, array $inputs ): void {
@@ -871,6 +1104,107 @@ final class ContentSurface {
 		}
 
 		self::record( $result, 'get_post_class.no_post_class_splitting', empty( $failures ), array( 'cases' => $cases ), $failures );
+	}
+
+	private static function sanitize_post_cases( array $posts ): array {
+		$cases = array();
+		foreach ( $posts as $index => $post ) {
+			$cases[] = array(
+				'label' => 'generated-' . $index,
+				'post'  => $post,
+			);
+		}
+
+		if ( ! empty( $posts ) ) {
+			$missing_id = $posts[0];
+			unset( $missing_id['ID'] );
+			$cases[] = array(
+				'label' => 'generated-missing-id',
+				'post'  => $missing_id,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function sanitize_post_case_fields( array $post_cases ): array {
+		$fields = array();
+		foreach ( $post_cases as $case ) {
+			foreach ( array_keys( $case['post'] ) as $field ) {
+				$fields[] = (string) $field;
+			}
+		}
+
+		return array_values( array_unique( $fields ) );
+	}
+
+	private static function probe_sanitize_post_filter_hooks( array $post, string $context, array $probe_fields ): array {
+		$observed = array();
+		$callback = static function ( $value, ...$unused ) use ( &$observed ) {
+			unset( $unused );
+			$observed[] = \current_filter();
+			return $value;
+		};
+		$hooks    = array_values( array_unique( self::sanitize_post_filter_hooks( $probe_fields, $context ) ) );
+
+		foreach ( $hooks as $hook ) {
+			\add_filter( $hook, $callback, PHP_INT_MAX, 3 );
+		}
+
+		try {
+			$call = self::call_guarded(
+				static function () use ( $post, $context ) {
+					return \sanitize_post( $post, $context );
+				}
+			);
+		} finally {
+			foreach ( $hooks as $hook ) {
+				\remove_filter( $hook, $callback, PHP_INT_MAX );
+			}
+		}
+
+		return array(
+			'call'  => $call,
+			'hooks' => $observed,
+		);
+	}
+
+	private static function sanitize_post_filter_hooks( array $fields, string $context ): array {
+		$hooks = array();
+		foreach ( $fields as $field ) {
+			$field = (string) $field;
+			if ( 'raw' === $context || 'ancestors' === $field ) {
+				continue;
+			}
+
+			$prefixed = str_contains( $field, 'post_' );
+			if ( $prefixed ) {
+				$field_no_prefix = str_replace( 'post_', '', $field );
+			}
+
+			if ( 'edit' === $context ) {
+				if ( $prefixed ) {
+					$hooks[] = "edit_{$field}";
+					$hooks[] = "{$field_no_prefix}_edit_pre";
+				} else {
+					$hooks[] = "edit_post_{$field}";
+				}
+			} elseif ( 'db' === $context ) {
+				if ( $prefixed ) {
+					$hooks[] = "pre_{$field}";
+					$hooks[] = "{$field_no_prefix}_save_pre";
+				} else {
+					$hooks[] = "pre_post_{$field}";
+					$hooks[] = "{$field}_pre";
+				}
+			} elseif ( $prefixed ) {
+				$hooks[] = $field;
+			} else {
+				$hooks[] = "post_{$field}";
+			}
+		}
+
+		return $hooks;
 	}
 
 	private static function generate_inputs( array &$rng ): array {
