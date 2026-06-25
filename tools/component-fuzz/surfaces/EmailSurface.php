@@ -7,9 +7,11 @@ final class EmailSurface {
 	private const GENERATED_CASES = 32;
 	private const GENERATED_VIEW_CASES = 10;
 	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
+	private const GENERATED_LOCALPART_ALIAS_CASES = 8;
 	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
 	private const GENERATED_UTF8_LOCALPART_ORACLE_CASES = 16;
+	private const GENERATED_USER_SEARCH_CASES = 8;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -71,6 +73,8 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_comment_author_email_filters( $ctx ) );
 			$rows = array_merge( $rows, self::check_rest_email_schema_filter_modes( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_search_unicode_terms( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_canonical_domain_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
@@ -2442,6 +2446,294 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_user_email_indexes_generated_localpart_aliases( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.generated-localpart-aliases-clean',
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$cases         = self::generated_localpart_alias_cases( $ctx->fork( 'user-email-localpart-aliases' ) );
+		$failures      = array();
+		$observed      = array();
+		$hook_snapshot = self::snapshot_hook_globals();
+		$not_called    = static function (): array {
+			return array(
+				'threw'    => false,
+				'value'    => null,
+				'warnings' => array(),
+			);
+		};
+
+		self::reset_stub_content();
+		try {
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+
+			foreach ( $cases as $case_index => $case ) {
+				self::reset_stub_content();
+
+				$inserted            = array();
+				$lookups             = array();
+				$canonical_addresses = array();
+
+				foreach ( $case['addresses'] as $address_index => $input ) {
+					$parse     = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $input, 'unicode' ) );
+					$email     = $parse['value'] ?? null;
+					$canonical = $email instanceof \WP_Email_Address ? $email->get_unicode_address() : null;
+					$login     = 'cfz_alias_local_' . $ctx->iteration() . '_' . $case_index . '_' . $address_index . '_' . substr( sha1( $input ), 0, 8 );
+					$insert    = self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => $login,
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $input,
+								'role'       => 'subscriber',
+							)
+						)
+					);
+					$user_id   = $insert['value'] ?? null;
+					$inserted[] = $user_id;
+
+					$stored           = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
+					$exists_input     = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $input ) ) : $not_called();
+					$by_input         = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $input ) ) : $not_called();
+					$exists_canonical = is_int( $user_id ) && is_string( $canonical ) ? self::capture_warnings( static fn() => \email_exists( $canonical ) ) : $not_called();
+					$by_canonical     = is_int( $user_id ) && is_string( $canonical ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : $not_called();
+					$stored_user      = $stored['value'] ?? null;
+					$by_input_user    = $by_input['value'] ?? null;
+					$by_canonical_user = $by_canonical['value'] ?? null;
+
+					if ( is_string( $canonical ) ) {
+						$canonical_addresses[] = $canonical;
+					}
+
+					$ok = ! $parse['threw']
+						&& ! $insert['threw']
+						&& ! $stored['threw']
+						&& ! $exists_input['threw']
+						&& ! $by_input['threw']
+						&& ! $exists_canonical['threw']
+						&& ! $by_canonical['threw']
+						&& array() === $parse['warnings']
+						&& array() === $insert['warnings']
+						&& array() === $stored['warnings']
+						&& array() === $exists_input['warnings']
+						&& array() === $by_input['warnings']
+						&& array() === $exists_canonical['warnings']
+						&& array() === $by_canonical['warnings']
+						&& $email instanceof \WP_Email_Address
+						&& is_int( $user_id )
+						&& $stored_user instanceof \WP_User
+						&& $stored_user->ID === $user_id
+						&& $canonical === $stored_user->user_email
+						&& $exists_input['value'] === $user_id
+						&& $by_input_user instanceof \WP_User
+						&& $by_input_user->ID === $user_id
+						&& $exists_canonical['value'] === $user_id
+						&& $by_canonical_user instanceof \WP_User
+						&& $by_canonical_user->ID === $user_id;
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'label'           => $case['label'],
+							'input'           => self::describe_string( $input ),
+							'canonical'       => is_string( $canonical ) ? self::describe_string( $canonical ) : null,
+							'parse'           => self::describe_captured_call( $parse ),
+							'insert'          => self::describe_captured_call( $insert ),
+							'stored'          => self::describe_captured_call( $stored ),
+							'existsInput'     => self::describe_captured_call( $exists_input ),
+							'byInput'         => self::describe_captured_call( $by_input ),
+							'existsCanonical' => self::describe_captured_call( $exists_canonical ),
+							'byCanonical'     => self::describe_captured_call( $by_canonical ),
+						);
+					}
+
+					$lookups[] = array(
+						'input'     => self::describe_string( $input ),
+						'canonical' => is_string( $canonical ) ? self::describe_string( $canonical ) : null,
+						'userId'    => $user_id,
+						'warnings'  => count( $parse['warnings'] ) + count( $insert['warnings'] ) + count( $stored['warnings'] ) + count( $exists_input['warnings'] ) + count( $by_input['warnings'] ) + count( $exists_canonical['warnings'] ) + count( $by_canonical['warnings'] ),
+					);
+				}
+
+				$ids = array_values( array_filter( $inserted, 'is_int' ) );
+				if ( count( $ids ) !== count( $case['addresses'] ) || count( array_unique( $ids, SORT_REGULAR ) ) !== count( $case['addresses'] ) ) {
+					$failures[] = array(
+						'label'    => $case['label'],
+						'failure'  => 'inserted-ids-not-distinct',
+						'inserted' => self::describe_value( $inserted ),
+					);
+				}
+
+				if ( count( $canonical_addresses ) !== count( $case['addresses'] ) || count( array_unique( $canonical_addresses, SORT_REGULAR ) ) !== count( $case['addresses'] ) ) {
+					$failures[] = array(
+						'label'     => $case['label'],
+						'failure'   => 'canonical-addresses-not-distinct',
+						'addresses' => self::describe_value( $canonical_addresses ),
+					);
+				}
+
+				$duplicate = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => 'cfz_alias_local_duplicate_' . $ctx->iteration() . '_' . $case_index,
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $case['addresses'][1],
+							'role'       => 'subscriber',
+						)
+					)
+				);
+
+				if (
+					$duplicate['threw'] ||
+					array() !== $duplicate['warnings'] ||
+					! \is_wp_error( $duplicate['value'] ?? null ) ||
+					'existing_user_email' !== $duplicate['value']->get_error_code()
+				) {
+					$failures[] = array(
+						'label'     => $case['label'],
+						'failure'   => 'exact-duplicate-not-rejected-cleanly',
+						'duplicate' => self::describe_captured_call( $duplicate ),
+					);
+				}
+
+				$observed[] = array(
+					'label'        => $case['label'],
+					'profile'      => $case['profile'],
+					'domain'       => self::describe_string( $case['domain'] ),
+					'addressCount' => count( $case['addresses'] ),
+					'insertedIds'  => self::describe_value( $inserted ),
+					'lookups'      => self::describe_value( $lookups ),
+					'duplicateOk'  => ! $duplicate['threw'] && array() === $duplicate['warnings'] && \is_wp_error( $duplicate['value'] ?? null ),
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				'email.user-email-indexes.generated-localpart-aliases-clean',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function check_user_email_search_unicode_terms( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! class_exists( 'WP_User_Query' ) ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-search.unicode-terms-byte-preserving',
+					'WP_User_Query is unavailable.'
+				),
+			);
+		}
+
+		$cases         = self::generated_user_search_cases( $ctx->fork( 'user-email-search-unicode-terms' ) );
+		$failures      = array();
+		$observed      = array();
+		$hook_snapshot = self::snapshot_hook_globals();
+
+		try {
+			foreach ( $cases as $case ) {
+				$unicode_parse = self::call( static fn() => \WP_Email_Address::from_string( $case['unicodeAddress'], 'unicode' ) );
+				$folded_parse  = self::call( static fn() => \WP_Email_Address::from_string( $case['foldedAddress'], 'unicode' ) );
+				$exact_query   = self::prepare_user_email_search_query( $case['unicodeAddress'] );
+				$wild_query    = self::prepare_user_email_search_query( '*' . $case['unicodeAddress'] . '*' );
+				$folded_query  = self::prepare_user_email_search_query( '*' . $case['foldedAddress'] . '*' );
+				$exact_where   = is_array( $exact_query['value'] ?? null ) ? (string) ( $exact_query['value']['queryWhere'] ?? '' ) : '';
+				$wild_where    = is_array( $wild_query['value'] ?? null ) ? (string) ( $wild_query['value']['queryWhere'] ?? '' ) : '';
+				$folded_where  = is_array( $folded_query['value'] ?? null ) ? (string) ( $folded_query['value']['queryWhere'] ?? '' ) : '';
+				$exact_likes   = self::sql_like_literals( $exact_where, 'user_email' );
+				$wild_likes    = self::sql_like_literals( $wild_where, 'user_email' );
+				$folded_likes  = self::sql_like_literals( $folded_where, 'user_email' );
+				$exact_other   = self::sql_like_literals_for_columns( $exact_where, array( 'user_login', 'user_url', 'user_nicename', 'display_name' ) );
+				$wild_other    = self::sql_like_literals_for_columns( $wild_where, array( 'user_login', 'user_url', 'user_nicename', 'display_name' ) );
+				$folded_other  = self::sql_like_literals_for_columns( $folded_where, array( 'user_login', 'user_url', 'user_nicename', 'display_name' ) );
+				$expected_wild = '%' . $case['unicodeAddress'] . '%';
+				$folded_wild   = '%' . $case['foldedAddress'] . '%';
+
+				$ok = ! $unicode_parse['threw']
+					&& ! $folded_parse['threw']
+					&& ! $exact_query['threw']
+					&& ! $wild_query['threw']
+					&& ! $folded_query['threw']
+					&& $unicode_parse['value'] instanceof \WP_Email_Address
+					&& $folded_parse['value'] instanceof \WP_Email_Address
+					&& array() === ( $exact_query['warnings'] ?? array() )
+					&& array() === ( $wild_query['warnings'] ?? array() )
+					&& array() === ( $folded_query['warnings'] ?? array() )
+					&& array( $case['unicodeAddress'] ) === $exact_likes
+					&& array( $expected_wild ) === $wild_likes
+					&& array( $folded_wild ) === $folded_likes
+					&& array() === $exact_other
+					&& array() === $wild_other
+					&& array() === $folded_other
+					&& $case['unicodeAddress'] !== $case['foldedAddress']
+					&& $expected_wild !== $folded_wild
+					&& bin2hex( $expected_wild ) !== bin2hex( $folded_wild );
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'        => $case['label'],
+						'profile'      => $case['profile'],
+						'unicode'      => self::describe_string( $case['unicodeAddress'] ),
+						'folded'       => self::describe_string( $case['foldedAddress'] ),
+						'unicodeParse' => self::describe_call( $unicode_parse ),
+						'foldedParse'  => self::describe_call( $folded_parse ),
+						'exactQuery'   => self::describe_captured_call( $exact_query ),
+						'wildQuery'    => self::describe_captured_call( $wild_query ),
+						'foldedQuery'  => self::describe_captured_call( $folded_query ),
+						'exactLikes'   => self::describe_value( $exact_likes ),
+						'wildLikes'    => self::describe_value( $wild_likes ),
+						'foldedLikes'  => self::describe_value( $folded_likes ),
+						'exactOther'   => self::describe_value( $exact_other ),
+						'wildOther'    => self::describe_value( $wild_other ),
+						'foldedOther'  => self::describe_value( $folded_other ),
+					);
+				}
+
+				$observed[] = array(
+					'label'       => $case['label'],
+					'profile'     => $case['profile'],
+					'unicode'     => self::describe_string( $case['unicodeAddress'] ),
+					'folded'      => self::describe_string( $case['foldedAddress'] ),
+					'exactLikes'  => self::describe_value( $exact_likes ),
+					'wildLikes'   => self::describe_value( $wild_likes ),
+					'foldedLikes' => self::describe_value( $folded_likes ),
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.user-email-search.unicode-terms-byte-preserving',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
 	private static function check_user_email_indexes_distinct_domains( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! self::can_reset_stub_content() ) {
 			return array(
@@ -3747,6 +4039,76 @@ final class EmailSurface {
 			&& $unicode_roundtrip->get_unicode_address() === $email->get_unicode_address();
 	}
 
+	private static function prepare_user_email_search_query( string $search ): array {
+		$query = new \WP_User_Query();
+
+		return self::capture_warnings(
+			static function () use ( $query, $search ): array {
+				$query->prepare_query(
+					array(
+						'blog_id'       => 0,
+						'cache_results' => false,
+						'count_total'   => false,
+						'fields'        => 'ID',
+						'number'        => 1,
+						'orderby'       => 'ID',
+						'search'        => $search,
+					)
+				);
+
+				return array(
+					'queryWhere' => (string) $query->query_where,
+					'queryVars'  => $query->query_vars,
+				);
+			}
+		);
+	}
+
+	private static function sql_like_literals_for_columns( string $sql, array $columns ): array {
+		$out = array();
+
+		foreach ( $columns as $column ) {
+			$literals = self::sql_like_literals( $sql, $column );
+			if ( array() !== $literals ) {
+				$out[ $column ] = $literals;
+			}
+		}
+
+		return $out;
+	}
+
+	private static function sql_like_literals( string $sql, string $column ): array {
+		$column = preg_quote( $column, '/' );
+		if ( ! preg_match_all( '/(?<![A-Za-z0-9_])`?' . $column . '`?\s+LIKE\s+\'((?:\\\\.|[^\'\\\\])*)\'/i', $sql, $matches ) ) {
+			return array();
+		}
+
+		return array_map( array( self::class, 'unescape_sql_literal' ), $matches[1] );
+	}
+
+	private static function unescape_sql_literal( string $literal ): string {
+		$out    = '';
+		$length = strlen( $literal );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			if ( '\\' !== $literal[ $i ] || $i + 1 >= $length ) {
+				$out .= $literal[ $i ];
+				continue;
+			}
+
+			$next = $literal[ ++$i ];
+			if ( '0' === $next ) {
+				$out .= "\0";
+			} elseif ( in_array( $next, array( '\\', "'", '"' ), true ) ) {
+				$out .= $next;
+			} else {
+				$out .= '\\' . $next;
+			}
+		}
+
+		return $out;
+	}
+
 	private static function can_reset_stub_content(): bool {
 		return isset( $GLOBALS['wpdb'] )
 			&& is_object( $GLOBALS['wpdb'] )
@@ -3963,6 +4325,166 @@ final class EmailSurface {
 		}
 
 		return $samples;
+	}
+
+	private static function generated_localpart_alias_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label'  => 'latin-acute',
+				'locals' => array( 'jose', "jos\u{00E9}", "jose\u{0301}" ),
+			),
+			array(
+				'label'  => 'latin-ring',
+				'locals' => array( 'angstrom', "\u{00E5}ngstrom", "a\u{030A}ngstrom" ),
+			),
+			array(
+				'label'  => 'greek-tonos',
+				'locals' => array( "\u{03B1}\u{03BB}\u{03C6}\u{03B1}", "\u{03AC}\u{03BB}\u{03C6}\u{03B1}", "\u{03B1}\u{0301}\u{03BB}\u{03C6}\u{03B1}" ),
+			),
+			array(
+				'label'  => 'cyrillic-io',
+				'locals' => array( "\u{0435}mail", "\u{0451}mail", "\u{0435}\u{0308}mail" ),
+			),
+		);
+		$domains  = array(
+			'example.org',
+			'sub-domain.example',
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = "gr\u{00E5}.org";
+			$domains[] = "b\u{00FC}cher.de";
+		}
+
+		$cases = array(
+			array(
+				'label'     => 'anchor-report-accented-local-domain',
+				'profile'   => 'latin-acute-report',
+				'domain'    => self::has_idn() ? "gr\u{00E5}.org" : 'example.org',
+				'addresses' => self::addresses_for_localparts(
+					array(
+						'josejose',
+						"jos\u{00E9}jos\u{00E9}",
+						"jose\u{0301}jose\u{0301}",
+					),
+					self::has_idn() ? "gr\u{00E5}.org" : 'example.org'
+				),
+			),
+			array(
+				'label'     => 'anchor-normalization-sensitive-local',
+				'profile'   => 'latin-acute',
+				'domain'    => 'example.org',
+				'addresses' => self::addresses_for_localparts(
+					array( 'jose', "jos\u{00E9}", "jose\u{0301}" ),
+					'example.org'
+				),
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_LOCALPART_ALIAS_CASES; $i++ ) {
+			$profile = $ctx->choice( $profiles );
+			$domain  = $ctx->choice( $domains );
+			$suffix  = (string) $ctx->int( 100, 999 );
+			$locals  = array();
+
+			foreach ( $profile['locals'] as $local ) {
+				$locals[] = $local . $suffix;
+			}
+
+			$cases[] = array(
+				'label'     => 'generated-localpart-alias-' . $i . '-' . $profile['label'],
+				'profile'   => $profile['label'],
+				'domain'    => $domain,
+				'addresses' => self::addresses_for_localparts( $locals, $domain ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_user_search_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label'   => 'latin-acute',
+				'unicode' => "jos\u{00E9}",
+				'folded'  => 'jose',
+			),
+			array(
+				'label'   => 'latin-combining',
+				'unicode' => "jose\u{0301}",
+				'folded'  => 'jose',
+			),
+			array(
+				'label'   => 'latin-ring',
+				'unicode' => "\u{00E5}ngstrom",
+				'folded'  => 'angstrom',
+			),
+			array(
+				'label'   => 'latin-ring-combining',
+				'unicode' => "a\u{030A}ngstrom",
+				'folded'  => 'angstrom',
+			),
+			array(
+				'label'   => 'greek-tonos',
+				'unicode' => "\u{03AC}\u{03BB}\u{03C6}\u{03B1}",
+				'folded'  => "\u{03B1}\u{03BB}\u{03C6}\u{03B1}",
+			),
+			array(
+				'label'   => 'cyrillic-io',
+				'unicode' => "\u{0451}mail",
+				'folded'  => "\u{0435}mail",
+			),
+		);
+		$domains  = array(
+			'example.org',
+			'sub-domain.example',
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = "gr\u{00E5}.org";
+			$domains[] = "b\u{00FC}cher.de";
+		}
+
+		$anchor_domain = self::has_idn() ? "gr\u{00E5}.org" : 'example.org';
+		$cases         = array(
+			array(
+				'label'          => 'anchor-report-accented-local-search',
+				'profile'        => 'latin-acute-report',
+				'unicodeAddress' => "jos\u{00E9}jos\u{00E9}@" . $anchor_domain,
+				'foldedAddress'  => 'josejose@' . $anchor_domain,
+			),
+			array(
+				'label'          => 'anchor-normalized-local-search',
+				'profile'        => 'latin-combining',
+				'unicodeAddress' => "jose\u{0301}@example.org",
+				'foldedAddress'  => 'jose@example.org',
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_USER_SEARCH_CASES; $i++ ) {
+			$profile = $ctx->choice( $profiles );
+			$domain  = $ctx->choice( $domains );
+			$suffix  = (string) $ctx->int( 100, 999 );
+
+			$cases[] = array(
+				'label'          => 'generated-user-search-' . $i . '-' . $profile['label'],
+				'profile'        => $profile['label'],
+				'unicodeAddress' => $profile['unicode'] . $suffix . '@' . $domain,
+				'foldedAddress'  => $profile['folded'] . $suffix . '@' . $domain,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function addresses_for_localparts( array $locals, string $domain ): array {
+		$addresses = array();
+
+		foreach ( $locals as $local ) {
+			$addresses[] = $local . '@' . $domain;
+		}
+
+		return $addresses;
 	}
 
 	private static function generated_unicode_filter_view_cases( \ComponentFuzz\FuzzContext $ctx ): array {

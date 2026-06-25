@@ -190,11 +190,12 @@ database, network requests, or a configured site.
   optional Unicode API availability skips, disabled-filter fail-closed behavior,
   invalid UTF-8, generated malformed address variants across filter/charset
   modes, selected boundary lengths,
-  normalization-sensitive local parts, comment-author email filtering, REST user
-  email schema validation across Unicode/ASCII filter modes, and user email
-  lookup/duplicate behavior for accent-distinct local parts/domains, canonical
-  Unicode-domain save/update collision behavior, password-reset Unicode
-  recipient paths, and clickable mailto rendering boundaries.
+  normalization-sensitive local parts, generated accent-distinct local-part
+  alias/index paths, byte-preserving user email search SQL, comment-author email
+  filtering, REST user email schema validation across Unicode/ASCII filter modes,
+  and user email lookup/duplicate behavior for accent-distinct local parts/domains,
+  canonical Unicode-domain save/update collision behavior, password-reset
+  Unicode recipient paths, and clickable mailto rendering boundaries.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,
