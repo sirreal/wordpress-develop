@@ -1029,13 +1029,15 @@ final class ShortcodesSurface {
 	}
 
 	private static function check_escaped_shortcode_boundaries( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
-		$tag          = self::tag( $ctx, 'escaped-boundary' );
-		$self_escaped = '[' . $tag . ' ' . $cases[0]['text'] . ' /]';
+		$tag              = self::tag( $ctx, 'escaped-boundary' );
+		$self_escaped     = '[' . $tag . ' ' . $cases[0]['text'] . ' /]';
 		$enclosed_escaped = '[' . $tag . ' ' . $cases[1]['text'] . ']literal-body[/' . $tag . ']';
-		$real_shortcode = '[' . $tag . ' ' . $cases[2]['text'] . ' /]';
-		$source       = 'pre [' . $self_escaped . '] mid [' . $enclosed_escaped . '] real ' . $real_shortcode . ' post';
-		$calls        = array();
-		$callback     = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+		$self_source      = '[' . $self_escaped . ']';
+		$enclosed_source  = '[' . $enclosed_escaped . ']';
+		$real_shortcode   = '[' . $tag . ' ' . $cases[2]['text'] . ' /]';
+		$source           = 'pre ' . $self_source . ' mid ' . $enclosed_source . ' real ' . $real_shortcode . ' post';
+		$calls            = array();
+		$callback         = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
 			$calls[] = array(
 				'tag'     => (string) $shortcode_tag,
 				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
@@ -1058,6 +1060,8 @@ final class ShortcodesSurface {
 			$failures,
 			str_contains( $rendered, $self_escaped )
 				&& str_contains( $rendered, $enclosed_escaped )
+				&& ! str_contains( $rendered, $self_source )
+				&& ! str_contains( $rendered, $enclosed_source )
 				&& str_contains( $rendered, 'real<' . $tag . '>' )
 				&& 1 === count( $render_calls )
 				&& $render_calls[0]['tag'] === $tag
@@ -1074,6 +1078,8 @@ final class ShortcodesSurface {
 			$failures,
 			str_contains( $stripped, $self_escaped )
 				&& str_contains( $stripped, $enclosed_escaped )
+				&& ! str_contains( $stripped, $self_source )
+				&& ! str_contains( $stripped, $enclosed_source )
 				&& ! str_contains( $stripped, $real_shortcode )
 				&& array() === $calls,
 			'strip_shortcodes unwraps escaped shortcode delimiters and removes adjacent real tags without invoking callbacks',
@@ -1241,9 +1247,10 @@ final class ShortcodesSurface {
 		$calls     = array();
 		$callback  = self::recording_callback( $calls, false );
 		$escaped_literal = '[' . $enclosing . ' ' . $cases[2]['text'] . ' /]';
+		$escaped_source  = '[' . $escaped_literal . ']';
 		$html_literal    = '[' . $enclosing . ' ' . $cases[3]['text'] . ' /]';
 		$unknown_literal = '[' . $unknown . ' ' . $cases[4]['text'] . ' /]';
-		$source    = 'alpha [' . $enclosing . ' ' . $cases[0]['text'] . ']remove-body [' . $unknown . ' /][/' . $enclosing . '] beta [' . $self_close . ' ' . $cases[1]['text'] . ' /] gamma [' . $escaped_literal . '] delta <a title="' . $html_literal . '" data-unknown="' . $unknown_literal . '">link</a> epsilon ' . $unknown_literal . ' zeta';
+		$source    = 'alpha [' . $enclosing . ' ' . $cases[0]['text'] . ']remove-body [' . $unknown . ' /][/' . $enclosing . '] beta [' . $self_close . ' ' . $cases[1]['text'] . ' /] gamma ' . $escaped_source . ' delta <a title="' . $html_literal . '" data-unknown="' . $unknown_literal . '">link</a> epsilon ' . $unknown_literal . ' zeta';
 		$failures  = array();
 
 		self::replace_registry( array() );
@@ -1263,6 +1270,7 @@ final class ShortcodesSurface {
 				&& ! str_contains( $stripped, 'remove-body' )
 				&& ! str_contains( $stripped, '[' . $self_close )
 				&& str_contains( $stripped, $escaped_literal )
+				&& ! str_contains( $stripped, $escaped_source )
 				&& str_contains( $stripped, 'title="' . $html_literal . '"' )
 				&& str_contains( $stripped, 'data-unknown="' . $unknown_literal . '"' )
 				&& str_contains( $stripped, 'epsilon ' . $unknown_literal )
@@ -1557,6 +1565,38 @@ final class ShortcodesSurface {
 				'discovered' => $isolated_discovered,
 				'calls'      => $isolated_calls,
 				'rendered'   => self::describe_string( $isolated_rendered ),
+			)
+		);
+
+		$calls = array();
+		self::replace_registry( array() );
+		\add_shortcode( $prefix, $callback );
+		\add_shortcode( $colon, $callback );
+		\add_shortcode( $dot, $callback );
+		$punctuation_only_source = 'punctuated [' . $colon . ' ' . $cases[5]['text'] . ' /] [' . $dot . ' ' . $cases[6]['text'] . ' /]';
+		$punctuation_only_discovered = \get_shortcode_tags_in_content( $punctuation_only_source );
+		$punctuation_only_rendered   = \do_shortcode( $punctuation_only_source );
+		$punctuation_only_stripped   = \strip_shortcodes( $punctuation_only_source );
+		$punctuation_only_calls      = $calls;
+
+		self::collect_failure(
+			$failures,
+			array( $prefix, $prefix ) === $punctuation_only_discovered
+				&& array( $colon, $dot ) === array_column( $punctuation_only_calls, 'tag' )
+				&& isset( $punctuation_only_calls[0]['atts'], $punctuation_only_calls[1]['atts'] )
+				&& self::expected_atts( $cases[5] ) === $punctuation_only_calls[0]['atts']
+				&& self::expected_atts( $cases[6] ) === $punctuation_only_calls[1]['atts']
+				&& str_contains( $punctuation_only_rendered, 'edge<' . $colon . '>' )
+				&& str_contains( $punctuation_only_rendered, 'edge<' . $dot . '>' )
+				&& ! str_contains( $punctuation_only_stripped, '[' . $colon . ' ' )
+				&& ! str_contains( $punctuation_only_stripped, '[' . $dot . ' ' ),
+			'content-only colon and dot forms are discovered through the registered prefix but still render and strip through their full registered tag names',
+			array(
+				'source'     => self::describe_string( $punctuation_only_source ),
+				'discovered' => $punctuation_only_discovered,
+				'calls'      => $punctuation_only_calls,
+				'rendered'   => self::describe_string( $punctuation_only_rendered ),
+				'stripped'   => self::describe_string( $punctuation_only_stripped ),
 			)
 		);
 
