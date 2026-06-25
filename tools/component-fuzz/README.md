@@ -353,9 +353,11 @@ database, network requests, or a configured site.
   option registration/rendering, layout column rendering and legacy filters,
   filter locality, and state restoration without redirecting or dying request
   handlers.
-- `post-types`: post type and post status registry defaults, support feature
-  registration, capability generation, query/archive normalization, unregister
-  cleanup, archive/feed link filters, and status filtering.
+- `post-types`: post type and post status registry defaults, registration
+  filter/action/meta-box lifecycle, REST route registration boundaries and
+  late-route ordering, support feature registration, capability generation,
+  query/archive normalization, unregister cleanup, archive/feed link filters,
+  and status filtering.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
   confirmation descriptions, request-key hash/expiration validation, export

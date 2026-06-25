@@ -32,6 +32,8 @@ final class PostTypesSurface {
 			self::reset_registries();
 
 			$rows[] = self::check_post_type_registration_matrix( $ctx );
+			$rows[] = self::check_registration_filters_actions_and_meta_box_lifecycle( $ctx );
+			$rows[] = self::check_rest_route_registration_boundaries( $ctx );
 			$rows[] = self::check_invalid_post_type_names_do_not_leak( $ctx );
 			$rows[] = self::check_support_feature_mutation( $ctx );
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
@@ -75,7 +77,22 @@ final class PostTypesSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP', 'WP_Error', 'WP_Post_Type', 'WP_Rewrite', 'WP_Taxonomy' ) as $class ) {
+		self::load_rest_route_dependencies();
+
+		foreach (
+			array(
+				'WP',
+				'WP_Error',
+				'WP_Post_Type',
+				'WP_Rewrite',
+				'WP_REST_Autosaves_Controller',
+				'WP_REST_Controller',
+				'WP_REST_Posts_Controller',
+				'WP_REST_Revisions_Controller',
+				'WP_REST_Server',
+				'WP_Taxonomy',
+			) as $class
+		) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -86,6 +103,8 @@ final class PostTypesSurface {
 				'add_filter',
 				'add_post_type_support',
 				'add_query_arg',
+				'create_initial_rest_routes',
+				'do_action',
 				'get_post_type_archive_feed_link',
 				'get_post_type_archive_link',
 				'get_all_post_type_supports',
@@ -98,6 +117,7 @@ final class PostTypesSurface {
 				'get_post_types',
 				'get_post_types_by_support',
 				'has_action',
+				'has_filter',
 				'is_post_type_viewable',
 				'is_wp_error',
 				'post_type_exists',
@@ -107,6 +127,7 @@ final class PostTypesSurface {
 				'register_taxonomy',
 				'remove_filter',
 				'remove_post_type_support',
+				'rest_get_server',
 				'sanitize_key',
 				'sanitize_title_with_dashes',
 				'trailingslashit',
@@ -120,6 +141,42 @@ final class PostTypesSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_rest_route_dependencies(): void {
+		$root  = dirname( __DIR__, 3 );
+		$files = array(
+			'wp-includes/rest-api/endpoints/class-wp-rest-autosaves-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-application-passwords-controller.php',
+			'wp-includes/rest-api/search/class-wp-rest-search-handler.php',
+			'wp-includes/rest-api/search/class-wp-rest-post-search-handler.php',
+			'wp-includes/rest-api/search/class-wp-rest-term-search-handler.php',
+			'wp-includes/rest-api/search/class-wp-rest-post-format-search-handler.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-search-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-block-renderer-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-sidebars-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-widget-types-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-widgets-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-block-directory-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-pattern-directory-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-site-health-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-url-details-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-menu-locations-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-edit-site-export-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-navigation-fallback-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-font-collections-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-categories-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-list-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-icons-controller.php',
+		);
+
+		foreach ( $files as $file ) {
+			$path = $root . '/src/' . $file;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
 	}
 
 	private static function check_post_type_registration_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -293,6 +350,556 @@ final class PostTypesSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function check_registration_filters_actions_and_meta_box_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_registries();
+
+		$failures       = array();
+		$case           = $ctx->fork( 'lifecycle-hooks' );
+		$post_type      = self::post_type_name( $case->fork( 'type' ), 'hooks' );
+		$token          = self::safe_token( $case->identifier( 4, 10 ) );
+		$query_var      = 'filtered query ' . $token;
+		$sanitized_qv   = \sanitize_title_with_dashes( $query_var );
+		$global_calls   = array();
+		$dynamic_calls  = array();
+		$action_calls   = array();
+		$meta_box_calls = array();
+		$view_calls     = array();
+		$unregistered   = array();
+
+		$meta_box_cb = static function ( $post ) use ( &$meta_box_calls ): void {
+			$meta_box_calls[] = is_object( $post ) ? ( $post->post_type ?? null ) : null;
+		};
+
+		$global_filter = static function ( array $args, string $seen_post_type ) use ( &$global_calls, $post_type, $token, $meta_box_cb ): array {
+			$global_calls[] = array(
+				'postType'     => $seen_post_type,
+				'basePublic'   => $args['public'] ?? null,
+				'baseRest'     => $args['show_in_rest'] ?? null,
+				'baseSupports' => $args['supports'] ?? null,
+			);
+
+			if ( $seen_post_type !== $post_type ) {
+				return $args;
+			}
+
+			$args['public']               = true;
+			$args['show_in_rest']         = true;
+			$args['rest_base']            = 'global-rest-' . $token;
+			$args['register_meta_box_cb'] = $meta_box_cb;
+			$args['labels']               = array(
+				'name'          => 'Global Items ' . $token,
+				'singular_name' => 'Global Item ' . $token,
+			);
+
+			return $args;
+		};
+
+		$dynamic_filter = static function ( array $args, string $seen_post_type ) use ( &$dynamic_calls, $post_type, $token, $query_var ): array {
+			$dynamic_calls[] = array(
+				'postType'     => $seen_post_type,
+				'globalPublic' => $args['public'] ?? null,
+				'globalRest'   => $args['show_in_rest'] ?? null,
+				'globalBase'   => $args['rest_base'] ?? null,
+			);
+
+			if ( $seen_post_type !== $post_type ) {
+				return $args;
+			}
+
+			$args['publicly_queryable'] = false;
+			$args['show_ui']            = true;
+			$args['show_in_menu']       = 'tools.php';
+			$args['query_var']          = $query_var;
+			$args['rest_base']          = 'dynamic-rest-' . $token;
+			$args['supports']           = array( 'editor', 'revisions' );
+			$args['capability_type']    = array( 'filtered_item', 'filtered_items' );
+			$args['map_meta_cap']       = true;
+			$args['rewrite']            = false;
+			$args['labels']['name']     = 'Dynamic Items ' . $token;
+
+			return $args;
+		};
+
+		$registered_action = static function ( string $seen_post_type, \WP_Post_Type $object ) use ( &$action_calls, $post_type, $meta_box_cb ): void {
+			$action_calls[] = array(
+				'hook'          => 'registered_post_type',
+				'postType'      => $seen_post_type,
+				'objectSame'    => $object === \get_post_type_object( $seen_post_type ),
+				'exists'        => \post_type_exists( $seen_post_type ),
+				'metaBoxHook'   => \has_action( 'add_meta_boxes_' . $post_type, $meta_box_cb ),
+				'futureHook'    => \has_action( 'future_' . $seen_post_type, '_future_post_hook' ),
+			);
+		};
+
+		$registered_specific_action = static function ( string $seen_post_type, \WP_Post_Type $object ) use ( &$action_calls ): void {
+			$action_calls[] = array(
+				'hook'       => 'registered_post_type_dynamic',
+				'postType'   => $seen_post_type,
+				'objectSame' => $object === \get_post_type_object( $seen_post_type ),
+				'exists'     => \post_type_exists( $seen_post_type ),
+			);
+		};
+
+		$unregistered_action = static function ( string $seen_post_type ) use ( &$unregistered, $meta_box_cb ): void {
+			$unregistered[] = array(
+				'postType'      => $seen_post_type,
+				'exists'        => \post_type_exists( $seen_post_type ),
+				'object'        => \get_post_type_object( $seen_post_type ),
+				'metaBoxHook'   => \has_action( 'add_meta_boxes_' . $seen_post_type, $meta_box_cb ),
+				'futureHook'    => \has_action( 'future_' . $seen_post_type, '_future_post_hook' ),
+			);
+		};
+
+		$viewability_non_bool = static function ( bool $is_viewable, \WP_Post_Type $object ) use ( &$view_calls, $post_type ) {
+			if ( $object->name === $post_type ) {
+				$view_calls[] = array( 'mode' => 'string', 'base' => $is_viewable );
+				return '1';
+			}
+
+			return $is_viewable;
+		};
+
+		$viewability_bool = static function ( bool $is_viewable, \WP_Post_Type $object ) use ( &$view_calls, $post_type ): bool {
+			if ( $object->name === $post_type ) {
+				$view_calls[] = array( 'mode' => 'bool', 'base' => $is_viewable );
+				return true;
+			}
+
+			return $is_viewable;
+		};
+
+		$object            = null;
+		$view_default      = null;
+		$view_non_bool     = null;
+		$view_bool         = null;
+		$unregister_result = null;
+		$supports_after_register = array();
+		$meta_box_hook_after_register = false;
+
+		\add_filter( 'register_post_type_args', $global_filter, 10, 2 );
+		\add_filter( 'register_' . $post_type . '_post_type_args', $dynamic_filter, 10, 2 );
+		\add_action( 'registered_post_type', $registered_action, 10, 2 );
+		\add_action( 'registered_post_type_' . $post_type, $registered_specific_action, 10, 2 );
+		\add_action( 'unregistered_post_type', $unregistered_action, 10, 1 );
+
+		try {
+			$object = \register_post_type(
+				$post_type,
+				array(
+					'public'       => false,
+					'show_in_rest' => false,
+					'rewrite'      => true,
+					'query_var'    => false,
+					'supports'     => false,
+				)
+			);
+
+			\do_action(
+				'add_meta_boxes_' . $post_type,
+				(object) array(
+					'ID'        => $case->int( 1, 9999 ),
+					'post_type' => $post_type,
+				)
+			);
+
+			$supports_after_register      = \get_all_post_type_supports( $post_type );
+			$meta_box_hook_after_register = \has_action( 'add_meta_boxes_' . $post_type, $meta_box_cb );
+			$view_default = \is_post_type_viewable( $post_type );
+			\add_filter( 'is_post_type_viewable', $viewability_non_bool, 10, 2 );
+			$view_non_bool = \is_post_type_viewable( $post_type );
+			\remove_filter( 'is_post_type_viewable', $viewability_non_bool, 10 );
+			\add_filter( 'is_post_type_viewable', $viewability_bool, 10, 2 );
+			$view_bool = \is_post_type_viewable( $post_type );
+			\remove_filter( 'is_post_type_viewable', $viewability_bool, 10 );
+
+			$unregister_result = \unregister_post_type( $post_type );
+		} finally {
+			\remove_filter( 'register_post_type_args', $global_filter, 10 );
+			\remove_filter( 'register_' . $post_type . '_post_type_args', $dynamic_filter, 10 );
+			\remove_filter( 'is_post_type_viewable', $viewability_non_bool, 10 );
+			\remove_filter( 'is_post_type_viewable', $viewability_bool, 10 );
+			\remove_action( 'registered_post_type', $registered_action, 10 );
+			\remove_action( 'registered_post_type_' . $post_type, $registered_specific_action, 10 );
+			\remove_action( 'unregistered_post_type', $unregistered_action, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$object instanceof \WP_Post_Type
+				&& array(
+					array(
+						'postType'     => $post_type,
+						'basePublic'   => false,
+						'baseRest'     => false,
+						'baseSupports' => false,
+					),
+				) === $global_calls
+				&& array(
+					array(
+						'postType'     => $post_type,
+						'globalPublic' => true,
+						'globalRest'   => true,
+						'globalBase'   => 'global-rest-' . $token,
+					),
+				) === $dynamic_calls
+				&& true === $object->public
+				&& false === $object->publicly_queryable
+				&& true === $object->show_ui
+				&& 'tools.php' === $object->show_in_menu
+				&& $sanitized_qv === $object->query_var
+				&& 'dynamic-rest-' . $token === $object->rest_base
+				&& 'Dynamic Items ' . $token === $object->labels->name
+				&& isset( $supports_after_register['editor'], $supports_after_register['autosave'], $supports_after_register['revisions'] ),
+			'registration filters apply in global-then-dynamic order before object hooks',
+			array(
+				'postType'     => $post_type,
+				'globalCalls'  => $global_calls,
+				'dynamicCalls' => $dynamic_calls,
+				'object'       => $object instanceof \WP_Post_Type ? self::post_type_summary( $object ) : self::describe_value( $object ),
+				'supports'     => $supports_after_register,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'hook'          => 'registered_post_type',
+					'postType'      => $post_type,
+					'objectSame'    => true,
+					'exists'        => true,
+					'metaBoxHook'   => 10,
+					'futureHook'    => 5,
+				),
+				array(
+					'hook'       => 'registered_post_type_dynamic',
+					'postType'   => $post_type,
+					'objectSame' => true,
+					'exists'     => true,
+				),
+			) === $action_calls
+				&& array( $post_type ) === $meta_box_calls
+				&& 10 === $meta_box_hook_after_register,
+			'registered post type actions see live object and meta-box callback is invocable',
+			array(
+				'actionCalls'  => $action_calls,
+				'metaBoxCalls' => $meta_box_calls,
+				'metaBoxHook'  => $meta_box_hook_after_register,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $view_default
+				&& false === $view_non_bool
+				&& true === $view_bool
+				&& array(
+					array( 'mode' => 'string', 'base' => false ),
+					array( 'mode' => 'bool', 'base' => false ),
+				) === $view_calls,
+			'is_post_type_viewable filter accepts strict boolean true only',
+			array(
+				'default' => $view_default,
+				'string'  => $view_non_bool,
+				'bool'    => $view_bool,
+				'calls'   => $view_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $unregister_result
+				&& array(
+					array(
+						'postType'      => $post_type,
+						'exists'        => false,
+						'object'        => null,
+						'metaBoxHook'   => false,
+						'futureHook'    => false,
+					),
+				) === $unregistered
+				&& false === \has_filter( 'register_post_type_args', $global_filter )
+				&& false === \has_filter( 'register_' . $post_type . '_post_type_args', $dynamic_filter )
+				&& false === \has_filter( 'is_post_type_viewable', $viewability_non_bool )
+				&& false === \has_filter( 'is_post_type_viewable', $viewability_bool )
+				&& false === \has_action( 'registered_post_type', $registered_action )
+				&& false === \has_action( 'registered_post_type_' . $post_type, $registered_specific_action )
+				&& false === \has_action( 'unregistered_post_type', $unregistered_action )
+				&& false === \has_action( 'add_meta_boxes_' . $post_type, $meta_box_cb ),
+			'unregistered_post_type action runs after object, hooks, and meta boxes are removed',
+			array(
+				'unregisterResult' => $unregister_result,
+				'unregistered'     => $unregistered,
+				'filterState'      => array(
+					'global'      => \has_filter( 'register_post_type_args', $global_filter ),
+					'dynamic'     => \has_filter( 'register_' . $post_type . '_post_type_args', $dynamic_filter ),
+					'viewString'  => \has_filter( 'is_post_type_viewable', $viewability_non_bool ),
+					'viewBool'    => \has_filter( 'is_post_type_viewable', $viewability_bool ),
+					'registered'  => \has_action( 'registered_post_type', $registered_action ),
+					'specific'    => \has_action( 'registered_post_type_' . $post_type, $registered_specific_action ),
+					'unregister'  => \has_action( 'unregistered_post_type', $unregistered_action ),
+					'metaBoxHook' => \has_action( 'add_meta_boxes_' . $post_type, $meta_box_cb ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.registration-filters-actions-and-meta-box-lifecycle',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_rest_route_registration_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_rest_server;
+
+		self::reset_registries();
+
+		$failures = array();
+		$case     = $ctx->fork( 'rest-routes' );
+		$token    = self::safe_token( $case->identifier( 4, 10 ) );
+		$routes   = array();
+
+		$route_cases = array(
+			array(
+				'label'     => 'early full controllers',
+				'postType'  => self::post_type_name( $case->fork( 'early' ), 'rte' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 1, 4 ),
+				'base'      => 'early-' . $token,
+				'args'      => array(
+					'public'                  => true,
+					'show_in_rest'            => true,
+					'rewrite'                 => false,
+					'query_var'               => false,
+					'supports'                => array( 'editor', 'revisions' ),
+					'late_route_registration' => false,
+				),
+				'main'      => true,
+				'revisions' => true,
+				'autosaves' => true,
+				'late'      => false,
+			),
+			array(
+				'label'     => 'late full controllers',
+				'postType'  => self::post_type_name( $case->fork( 'late' ), 'rtl' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 5, 8 ),
+				'base'      => 'late-' . $token,
+				'args'      => array(
+					'public'                  => true,
+					'show_in_rest'            => true,
+					'rewrite'                 => false,
+					'query_var'               => false,
+					'supports'                => array( 'editor', 'revisions' ),
+					'late_route_registration' => true,
+				),
+				'main'      => true,
+				'revisions' => true,
+				'autosaves' => true,
+				'late'      => true,
+			),
+			array(
+				'label'     => 'editor only autosaves',
+				'postType'  => self::post_type_name( $case->fork( 'autosaves' ), 'rta' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 9, 12 ),
+				'base'      => 'autosaves-' . $token,
+				'args'      => array(
+					'public'       => true,
+					'show_in_rest' => true,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'editor' ),
+				),
+				'main'      => true,
+				'revisions' => false,
+				'autosaves' => true,
+				'late'      => false,
+			),
+			array(
+				'label'     => 'revisions without autosaves',
+				'postType'  => self::post_type_name( $case->fork( 'revisions' ), 'rtr' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 13, 16 ),
+				'base'      => 'revisions-' . $token,
+				'args'      => array(
+					'public'       => true,
+					'show_in_rest' => true,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'title', 'revisions' ),
+				),
+				'main'      => true,
+				'revisions' => true,
+				'autosaves' => false,
+				'late'      => false,
+			),
+			array(
+				'label'     => 'rest disabled',
+				'postType'  => self::post_type_name( $case->fork( 'disabled' ), 'rtd' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 17, 20 ),
+				'base'      => 'disabled-' . $token,
+				'args'      => array(
+					'public'       => true,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'editor', 'revisions' ),
+				),
+				'main'      => false,
+				'revisions' => false,
+				'autosaves' => false,
+				'late'      => false,
+			),
+			array(
+				'label'     => 'invalid main controller',
+				'postType'  => self::post_type_name( $case->fork( 'invalid-main' ), 'rtm' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 21, 24 ),
+				'base'      => 'invalid-main-' . $token,
+				'args'      => array(
+					'public'                => true,
+					'show_in_rest'          => true,
+					'rewrite'               => false,
+					'query_var'             => false,
+					'supports'              => array( 'editor', 'revisions' ),
+					'rest_controller_class' => \stdClass::class,
+				),
+				'main'      => false,
+				'revisions' => false,
+				'autosaves' => false,
+				'late'      => false,
+			),
+			array(
+				'label'     => 'invalid ancillary controllers',
+				'postType'  => self::post_type_name( $case->fork( 'invalid-ancillary' ), 'rti' ),
+				'namespace' => 'component-fuzz/v' . $case->int( 25, 28 ),
+				'base'      => 'invalid-ancillary-' . $token,
+				'args'      => array(
+					'public'                          => true,
+					'show_in_rest'                    => true,
+					'rewrite'                         => false,
+					'query_var'                       => false,
+					'supports'                        => array( 'editor', 'revisions' ),
+					'autosave_rest_controller_class'  => \stdClass::class,
+					'revisions_rest_controller_class' => \stdClass::class,
+				),
+				'main'      => true,
+				'revisions' => false,
+				'autosaves' => false,
+				'late'      => false,
+			),
+		);
+
+		foreach ( $route_cases as $index => &$route_case ) {
+			$route_case['args']['rest_namespace'] = $route_case['namespace'];
+			$route_case['args']['rest_base']      = $route_case['base'];
+			$registered = \register_post_type( $route_case['postType'], $route_case['args'] );
+
+			self::collect_failure(
+				$failures,
+				$registered instanceof \WP_Post_Type,
+				"REST route post type registration succeeds case {$index}",
+				array(
+					'case'   => self::rest_route_case_summary( $route_case ),
+					'actual' => self::describe_value( $registered ),
+				)
+			);
+		}
+		unset( $route_case );
+
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+
+		try {
+			$wp_rest_server = new \WP_REST_Server();
+			\create_initial_rest_routes();
+
+			foreach ( $route_cases as $index => $route_case ) {
+				$namespace = $route_case['namespace'];
+				$base      = $route_case['base'];
+				$routes    = \rest_get_server()->get_routes( $namespace );
+				$route_keys = array_keys( $routes );
+				$route_base = '/' . trim( $namespace, '/' ) . '/' . $base;
+				$expected   = array(
+					'mainCollection'      => $route_base,
+					'mainItem'            => $route_base . '/(?P<id>[\d]+)',
+					'revisionsCollection' => $route_base . '/(?P<parent>[\d]+)/revisions',
+					'revisionsItem'       => $route_base . '/(?P<parent>[\d]+)/revisions/(?P<id>[\d]+)',
+					'autosavesCollection' => $route_base . '/(?P<id>[\d]+)/autosaves',
+					'autosavesItem'       => $route_base . '/(?P<parent>[\d]+)/autosaves/(?P<id>[\d]+)',
+				);
+				$present    = array(
+					'mainCollection'      => self::route_exists( $routes, $expected['mainCollection'] ),
+					'mainItem'            => self::route_exists( $routes, $expected['mainItem'] ),
+					'revisionsCollection' => self::route_exists( $routes, $expected['revisionsCollection'] ),
+					'revisionsItem'       => self::route_exists( $routes, $expected['revisionsItem'] ),
+					'autosavesCollection' => self::route_exists( $routes, $expected['autosavesCollection'] ),
+					'autosavesItem'       => self::route_exists( $routes, $expected['autosavesItem'] ),
+				);
+
+				self::collect_failure(
+					$failures,
+					$route_case['main'] === ( $present['mainCollection'] && $present['mainItem'] )
+						&& $route_case['revisions'] === ( $present['revisionsCollection'] && $present['revisionsItem'] )
+						&& $route_case['autosaves'] === ( $present['autosavesCollection'] && $present['autosavesItem'] ),
+					"REST route presence follows show_in_rest, controller validity, and supports case {$index}",
+					array(
+						'case'     => self::rest_route_case_summary( $route_case ),
+						'expected' => array(
+							'main'      => $route_case['main'],
+							'revisions' => $route_case['revisions'],
+							'autosaves' => $route_case['autosaves'],
+						),
+						'present'  => $present,
+						'routes'   => $route_keys,
+					)
+				);
+
+				if ( $route_case['main'] && $route_case['revisions'] && $route_case['autosaves'] ) {
+					$main_index      = self::route_index( $route_keys, $expected['mainCollection'] );
+					$revisions_index = self::route_index( $route_keys, $expected['revisionsCollection'] );
+					$autosaves_index = self::route_index( $route_keys, $expected['autosavesCollection'] );
+
+					self::collect_failure(
+						$failures,
+						null !== $main_index
+							&& null !== $revisions_index
+							&& null !== $autosaves_index
+							&& (
+								$route_case['late']
+									? $revisions_index < $main_index && $autosaves_index < $main_index
+									: $main_index < $revisions_index && $main_index < $autosaves_index
+							),
+						"REST route order follows late_route_registration case {$index}",
+						array(
+							'case'     => self::rest_route_case_summary( $route_case ),
+							'indexes'  => array(
+								'main'      => $main_index,
+								'revisions' => $revisions_index,
+								'autosaves' => $autosaves_index,
+							),
+							'routes'   => $route_keys,
+						)
+					);
+				}
+			}
+		} finally {
+			if ( $had_rest_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_rest_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'post-types.rest-routes.show-in-rest-supports-and-late-registration',
+			array() === $failures,
+			array(
+				'cases'    => count( $route_cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1903,6 +2510,31 @@ final class PostTypesSurface {
 			'autosavesClass'      => $object->autosave_rest_controller_class,
 			'autosavesController' => is_object( $autosaves ) ? get_class( $autosaves ) : null,
 		);
+	}
+
+	private static function rest_route_case_summary( array $case ): array {
+		return array(
+			'label'       => $case['label'],
+			'postType'    => $case['postType'],
+			'namespace'   => $case['namespace'],
+			'base'        => $case['base'],
+			'showInRest'  => $case['args']['show_in_rest'],
+			'supports'    => $case['args']['supports'],
+			'mainClass'   => $case['args']['rest_controller_class'] ?? null,
+			'revisionCls' => $case['args']['revisions_rest_controller_class'] ?? null,
+			'autosaveCls' => $case['args']['autosave_rest_controller_class'] ?? null,
+			'late'        => $case['late'],
+		);
+	}
+
+	private static function route_exists( array $routes, string $route ): bool {
+		return array_key_exists( $route, $routes );
+	}
+
+	private static function route_index( array $routes, string $route ): ?int {
+		$index = array_search( $route, $routes, true );
+
+		return false === $index ? null : $index;
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
