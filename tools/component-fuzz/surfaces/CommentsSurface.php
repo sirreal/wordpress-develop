@@ -836,6 +836,30 @@ final class CommentsSurface {
 					),
 				),
 				array(
+					'name'    => 'post-id-constraint-excludes-off-post-older-comments',
+					'comment' => 'first-comment',
+					'args'    => array(
+						'type'      => 'comment',
+						'per_page'  => 2,
+						'max_depth' => 1,
+					),
+					'options' => array(
+						'default_comments_page' => 'newest',
+					),
+				),
+				array(
+					'name'    => 'parent-constraint-excludes-child-comments',
+					'comment' => 'middle-comment',
+					'args'    => array(
+						'type'      => 'comment',
+						'per_page'  => 3,
+						'max_depth' => 1,
+					),
+					'options' => array(
+						'default_comments_page' => 'newest',
+					),
+				),
+				array(
 					'name'    => 'pings-type-counts-pingback-and-trackback',
 					'comment' => 'first-trackback',
 					'args'    => array(
@@ -880,8 +904,10 @@ final class CommentsSurface {
 				$comment_id      = $fixture['aliases'][ $scenario['comment'] ];
 				$args            = $scenario['args'];
 				$expected_page   = self::expected_permalink_comment_page( $fixture['comments'], $comment_id, $args, $options );
+				$query_offset    = count( $query_events );
 				$page_call       = self::call( static fn() => \get_page_of_comment( $comment_id, $args ) );
 				$link_call       = self::call( static fn() => \get_comment_link( $comment_id, $args ) );
+				$scenario_queries = array_slice( $query_events, $query_offset );
 				$link            = ! $link_call['threw'] && is_string( $link_call['value'] ) ? $link_call['value'] : '';
 				$expects_cpage   = ! ( 'oldest' === $options['default_comments_page'] && 1 === $expected_page );
 				$scenario_results[] = array(
@@ -894,6 +920,8 @@ final class CommentsSurface {
 					'cpageOk'       => $expects_cpage ? self::comment_link_has_cpage( $link, $expected_page ) : ! self::comment_link_has_any_cpage( $link ),
 					'pageOk'        => ! $page_call['threw'] && $expected_page === $page_call['value'],
 					'linkNoThrow'   => ! $link_call['threw'] && is_string( $link_call['value'] ),
+					'queryShapeOk'  => self::permalink_query_events_match( $scenario_queries, $fixture['comments'], $comment_id, $args, $options ),
+					'queries'       => $scenario_queries,
 					'expectedCpage' => $expects_cpage ? $expected_page : null,
 				);
 			}
@@ -970,12 +998,69 @@ final class CommentsSurface {
 				|| empty( $result['linkNoThrow'] )
 				|| empty( $result['anchorOk'] )
 				|| empty( $result['cpageOk'] )
+				|| empty( $result['queryShapeOk'] )
 			) {
 				return false;
 			}
 		}
 
 		return true;
+	}
+
+	private static function permalink_query_events_match( array $events, array $comments, int $comment_id, array $args, array $options ): bool {
+		$target = self::permalink_query_target_comment( $comments, $comment_id, $args, $options );
+		if ( ! $target instanceof \WP_Comment || 2 !== count( $events ) ) {
+			return false;
+		}
+
+		$expected_type  = (string) ( $args['type'] ?? 'all' );
+		$expected_count = self::count_permalink_fixture_comments(
+			$comments,
+			array(
+				'type'       => $expected_type,
+				'post_id'    => (int) $target->comment_post_ID,
+				'parent'     => 0,
+				'date_query' => array(
+					array(
+						'before' => (string) $target->comment_date_gmt,
+					),
+				),
+			)
+		);
+
+		foreach ( $events as $event ) {
+			if (
+				(int) ( $event['postId'] ?? 0 ) !== (int) $target->comment_post_ID
+				|| (string) ( $event['type'] ?? '' ) !== $expected_type
+				|| '0' !== (string) ( $event['parent'] ?? '' )
+				|| (string) ( $event['before'] ?? '' ) !== (string) $target->comment_date_gmt
+				|| (int) ( $event['count'] ?? -1 ) !== $expected_count
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function permalink_query_target_comment( array $comments, int $comment_id, array $args, array $options ): ?\WP_Comment {
+		if ( ! isset( $comments[ $comment_id ] ) ) {
+			return null;
+		}
+
+		$comment   = $comments[ $comment_id ];
+		$max_depth = $args['max_depth'] ?? '';
+		if ( '' === $max_depth ) {
+			$max_depth = $options['thread_comments'] ? $options['thread_comments_depth'] : -1;
+		}
+
+		if ( (int) $max_depth > 1 && '0' !== (string) $comment->comment_parent ) {
+			$parent_args              = $args;
+			$parent_args['max_depth'] = $max_depth;
+			return self::permalink_query_target_comment( $comments, (int) $comment->comment_parent, $parent_args, $options );
+		}
+
+		return $comment;
 	}
 
 	private static function force_query_style_comment_links(): void {
@@ -1006,6 +1091,7 @@ final class CommentsSurface {
 			'last-comment'            => array( 17, $post_id, 'comment', 0, '2026-06-01 00:00:07' ),
 			'child-of-middle-comment' => array( 18, $post_id, 'comment', $base_id + 15, '2026-06-01 00:00:08' ),
 			'other-post-comment'      => array( 19, $other_post_id, 'comment', 0, '2026-06-01 00:00:00' ),
+			'early-child-comment'     => array( 20, $post_id, 'comment', $base_id + 12, '2026-06-01 00:00:03' ),
 		);
 		$comments      = array();
 		$aliases       = array();
