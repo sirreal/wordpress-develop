@@ -38,6 +38,7 @@ final class DiscoverySurface {
 			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
 			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
 			$rows[] = self::check_sitemap_renderer_xml( $ctx );
+			$rows[] = self::check_sitemap_renderer_field_boundaries( $ctx );
 			$rows[] = self::check_sitemap_renderer_stylesheet_filters( $ctx );
 			$rows[] = self::check_sitemap_max_url_filter( $ctx );
 		} catch ( \Throwable $e ) {
@@ -468,6 +469,86 @@ final class DiscoverySurface {
 		);
 	}
 
+	private static function check_sitemap_renderer_field_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures          = array();
+		$renderer          = new \WP_Sitemaps_Renderer();
+		$unsupported_url   = 'unsupported-url-' . self::field_token( $ctx->fork( 'unsupported-url' ) ) . '<script>alert(1)</script>';
+		$unsupported_index = 'unsupported-index-' . self::field_token( $ctx->fork( 'unsupported-index' ) ) . '<script>alert(2)</script>';
+		$lastmod           = '2026-06-' . sprintf( '%02d', 1 + $ctx->int( 0, 20 ) ) . 'T12:34:56+00:00';
+		$url_xml           = $renderer->get_sitemap_xml(
+			array(
+				array(
+					'loc'             => 'https://example.test/render-field-boundary?unsafe=<tag>&quote="',
+					'lastmod'         => $lastmod,
+					'changefreq'      => 'daily',
+					'priority'        => '0.' . $ctx->int( 1, 9 ),
+					'component:fuzz'  => $unsupported_url,
+					'image:image'     => array( 'loc' => $unsupported_url ),
+				),
+			)
+		);
+		$index_xml         = $renderer->get_sitemap_index_xml(
+			array(
+				array(
+					'loc'           => 'https://example.test/wp-sitemap-posts-post-1.xml?unsafe=<tag>&quote="',
+					'lastmod'       => $lastmod,
+					'changefreq'    => 'daily',
+					'componentFuzz' => $unsupported_index,
+				),
+			)
+		);
+
+		$parsed_url   = is_string( $url_xml ) ? @simplexml_load_string( $url_xml ) : false;
+		$parsed_index = is_string( $index_xml ) ? @simplexml_load_string( $index_xml ) : false;
+
+		self::collect_failure(
+			$failures,
+			is_string( $url_xml )
+				&& false !== $parsed_url
+				&& 1 === count( $parsed_url->url )
+				&& 1 === substr_count( $url_xml, '<loc>' )
+				&& 1 === substr_count( $url_xml, '<lastmod>' )
+				&& 1 === substr_count( $url_xml, '<changefreq>' )
+				&& 1 === substr_count( $url_xml, '<priority>' )
+				&& ! str_contains( $url_xml, 'component:fuzz' )
+				&& ! str_contains( $url_xml, 'image:image' )
+				&& ! str_contains( $url_xml, 'unsupported-url-' )
+				&& ! str_contains( $url_xml, '<tag>' )
+				&& ! str_contains( $url_xml, '<script' ),
+			'sitemap renderer keeps supported URL fields and drops unsupported extension fields',
+			array(
+				'xml'         => self::describe_string( is_string( $url_xml ) ? $url_xml : '' ),
+				'unsupported' => self::describe_string( $unsupported_url ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $index_xml )
+				&& false !== $parsed_index
+				&& 1 === count( $parsed_index->sitemap )
+				&& 1 === substr_count( $index_xml, '<loc>' )
+				&& 1 === substr_count( $index_xml, '<lastmod>' )
+				&& ! str_contains( $index_xml, '<changefreq>' )
+				&& ! str_contains( $index_xml, 'componentFuzz' )
+				&& ! str_contains( $index_xml, 'unsupported-index-' )
+				&& ! str_contains( $index_xml, '<tag>' )
+				&& ! str_contains( $index_xml, '<script' ),
+			'sitemap index renderer keeps index fields and drops unsupported sitemap-only fields',
+			array(
+				'xml'         => self::describe_string( is_string( $index_xml ) ? $index_xml : '' ),
+				'unsupported' => self::describe_string( $unsupported_index ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.renderer-field-boundaries',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
 	private static function check_sitemap_renderer_stylesheet_filters( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures           = array();
 		$token              = substr( hash( 'sha1', self::NAME . ':stylesheet:' . $ctx->seed() ), 0, 12 );
@@ -651,6 +732,10 @@ final class DiscoverySurface {
 		}
 
 		return $cases;
+	}
+
+	private static function field_token( \ComponentFuzz\FuzzContext $ctx ): string {
+		return substr( hash( 'sha1', self::NAME . ':field:' . $ctx->seed() ), 0, 10 );
 	}
 
 	private static function sitemap_url_cases( \ComponentFuzz\FuzzContext $ctx ): array {

@@ -167,8 +167,9 @@ database, network requests, or a configured site.
   contracts, and safe human time diffs.
 - `discovery`: robots meta directives, sitemap enablement and robots.txt
   injection, provider registration/replacement filters, query/permalink sitemap
-  URL/index expansion, escaped sitemap XML rendering, stylesheet URL filters,
-  and sitemap max-URL filters without DB-backed providers.
+  URL/index expansion, escaped sitemap XML rendering, unsupported sitemap field
+  boundaries, stylesheet URL filters, and sitemap max-URL filters without
+  DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
