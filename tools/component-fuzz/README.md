@@ -478,10 +478,12 @@ database, network requests, or a configured site.
   HTML/XML filtering, feed metadata escaping, default feed normalization, self
   links, comment feed-link generation/filtering, and Atom text construction.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
-  registry query consistency, argument/callback/default-term normalization,
-  query-var and rewrite side-effect boundaries, term sanitization and field
+  registration filter/action locality, registry query consistency,
+  argument/callback/default-term normalization, query-var and rewrite
+  side-effect boundaries, REST controller creation, term sanitization and field
   filters, slug/name normalization, synthetic `WP_Term` behavior, hierarchy
-  helper edge cases, and cheap term-link paths.
+  helper edge cases, `get_terms()` short-circuit contracts, and cheap term-link
+  paths.
 - `taxonomy-relationships`: in-memory wpdb-backed object/term assignment
   coverage, including `wp_set_object_terms()` replace/append behavior,
   field-variant agreement, scoped removal, membership/object lookup helpers,
@@ -626,6 +628,9 @@ asserts add/read/update/delete, unique keys, serialized array values, cache
 invalidation, metadata hooks, and post-delete cleanup. Rich post-to-term
 relationship behavior is covered by `taxonomy-relationships`, still limited to
 the recognized term relationship SQL shapes emitted by the targeted core APIs.
+The `taxonomy` surface remains no-DB; term-query coverage short-circuits through
+`terms_pre_query` and asserts query parsing/filter contracts rather than SQL
+hydration.
 The `bookmark-links` surface extends that stub only for the `wp_links` shapes
 emitted by bookmark APIs and safe link CRUD: ID lookups, visibility/search,
 include/exclude/category joins through `link_category`, supported order/limit

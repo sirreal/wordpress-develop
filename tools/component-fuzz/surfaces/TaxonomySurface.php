@@ -32,6 +32,7 @@ final class TaxonomySurface {
 			self::prepare_runtime( $case );
 
 			$rows[] = self::check_registry_lifecycle( $ctx, $case );
+			$rows[] = self::check_registration_filter_action_locality( $ctx, $case );
 			$rows[] = self::check_taxonomy_list_queries( $ctx, $case );
 			$rows[] = self::check_object_shape_and_normalization( $ctx, $case );
 			$rows[] = self::check_registration_side_effect_boundaries( $ctx, $case );
@@ -39,6 +40,7 @@ final class TaxonomySurface {
 			$rows[] = self::check_term_field_filter_boundaries( $ctx, $case );
 			$rows[] = self::check_synthetic_term_objects( $ctx, $case );
 			$rows[] = self::check_hierarchy_helper_edges( $ctx, $case );
+			$rows[] = self::check_term_query_short_circuit_contracts( $ctx, $case );
 			$rows[] = self::check_term_link_cheap_paths( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -73,7 +75,7 @@ final class TaxonomySurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP', 'WP_Rewrite', 'WP_Taxonomy', 'WP_Term' ) as $class ) {
+		foreach ( array( 'WP', 'WP_Rewrite', 'WP_REST_Terms_Controller', 'WP_Taxonomy', 'WP_Term', 'WP_Term_Query' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -84,6 +86,7 @@ final class TaxonomySurface {
 				'add_filter',
 				'get_ancestors',
 				'get_object_taxonomies',
+				'get_terms',
 				'get_taxonomies',
 				'get_taxonomy',
 				'get_taxonomy_labels',
@@ -208,6 +211,230 @@ final class TaxonomySurface {
 				'invalidRegisterError'   => \is_wp_error( $invalid_register )
 					? $invalid_register->get_error_code()
 					: $invalid_register,
+			)
+		);
+	}
+
+	private static function check_registration_filter_action_locality( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$taxonomy           = $case['taxonomies']['hooked'];
+		$other_taxonomy     = $case['taxonomies']['hookedOther'];
+		$object_type        = $case['objectTypes'][0];
+		$second_type        = $case['objectTypes'][1];
+		$query_input        = 'Hook Query ' . $case['token'] . ' ' . $case['unicode'];
+		$expected_query_var = \sanitize_title_with_dashes( $query_input );
+		$events             = array();
+		$filters            = array();
+
+		$registered          = null;
+		$other               = null;
+		$controller_one      = null;
+		$controller_two      = null;
+		$associated          = null;
+		$disassociated       = null;
+		$target_unregistered = null;
+		$other_unregistered  = null;
+		$filters_restored    = false;
+
+		$args_filter = static function ( array $args, string $seen_taxonomy, array $seen_object_types ) use ( &$events, $taxonomy, $object_type, $query_input, $case ): array {
+			$events[] = array(
+				'hook'        => 'register_args_filter',
+				'taxonomy'    => $seen_taxonomy,
+				'objectTypes' => $seen_object_types,
+				'public'      => $args['public'] ?? null,
+				'queryVar'    => $args['query_var'] ?? null,
+			);
+
+			if ( $taxonomy !== $seen_taxonomy || array( $object_type ) !== $seen_object_types ) {
+				return $args;
+			}
+
+			$args['public']             = false;
+			$args['publicly_queryable'] = true;
+			$args['query_var']          = $query_input;
+			$args['rewrite']            = false;
+			$args['show_in_rest']       = true;
+			$args['rest_namespace']     = 'component-fuzz/v1';
+			$args['args']               = array(
+				'orderby'        => 'slug',
+				'hide_empty'     => false,
+				'component_fuzz' => $case['token'],
+			);
+
+			return $args;
+		};
+		$registered_action = static function ( string $seen_taxonomy, $seen_object_type, array $args ) use ( &$events ): void {
+			$events[] = array(
+				'hook'          => 'registered_taxonomy',
+				'taxonomy'      => $seen_taxonomy,
+				'objectType'    => $seen_object_type,
+				'argsName'      => $args['name'] ?? null,
+				'argsQueryVar'  => $args['query_var'] ?? null,
+				'restNamespace' => $args['rest_namespace'] ?? null,
+				'showInRest'    => $args['show_in_rest'] ?? null,
+			);
+		};
+		$specific_registered_action = static function ( string $seen_taxonomy, $seen_object_type, array $args ) use ( &$events, $taxonomy ): void {
+			$events[] = array(
+				'hook'          => 'registered_taxonomy_specific',
+				'expectedHook'  => 'registered_taxonomy_' . $taxonomy,
+				'taxonomy'      => $seen_taxonomy,
+				'objectType'    => $seen_object_type,
+				'argsName'      => $args['name'] ?? null,
+				'argsQueryVar'  => $args['query_var'] ?? null,
+				'restNamespace' => $args['rest_namespace'] ?? null,
+				'showInRest'    => $args['show_in_rest'] ?? null,
+			);
+		};
+		$object_registered_action = static function ( string $seen_taxonomy, string $seen_object_type ) use ( &$events ): void {
+			$events[] = array(
+				'hook'       => 'registered_taxonomy_for_object_type',
+				'taxonomy'   => $seen_taxonomy,
+				'objectType' => $seen_object_type,
+			);
+		};
+		$object_unregistered_action = static function ( string $seen_taxonomy, string $seen_object_type ) use ( &$events ): void {
+			$events[] = array(
+				'hook'       => 'unregistered_taxonomy_for_object_type',
+				'taxonomy'   => $seen_taxonomy,
+				'objectType' => $seen_object_type,
+			);
+		};
+		$unregistered_action = static function ( string $seen_taxonomy ) use ( &$events ): void {
+			$events[] = array(
+				'hook'     => 'unregistered_taxonomy',
+				'taxonomy' => $seen_taxonomy,
+			);
+		};
+
+		try {
+			self::add_filter_record( $filters, 'register_' . $taxonomy . '_taxonomy_args', $args_filter, 10, 3 );
+			self::add_filter_record( $filters, 'registered_taxonomy', $registered_action, 10, 3 );
+			self::add_filter_record( $filters, 'registered_taxonomy_' . $taxonomy, $specific_registered_action, 10, 3 );
+			self::add_filter_record( $filters, 'registered_taxonomy_for_object_type', $object_registered_action, 10, 2 );
+			self::add_filter_record( $filters, 'unregistered_taxonomy_for_object_type', $object_unregistered_action, 10, 2 );
+			self::add_filter_record( $filters, 'unregistered_taxonomy', $unregistered_action, 10, 1 );
+
+			$registered = \register_taxonomy(
+				$taxonomy,
+				$object_type,
+				array(
+					'labels'    => array(
+						'name'          => 'Hooked ' . $case['token'],
+						'singular_name' => 'Hooked Term ' . $case['token'],
+					),
+					'public'    => true,
+					'query_var' => true,
+					'rewrite'   => true,
+				)
+			);
+
+			if ( $registered instanceof \WP_Taxonomy ) {
+				$controller_one = $registered->get_rest_controller();
+				$controller_two = $registered->get_rest_controller();
+				$associated     = \register_taxonomy_for_object_type( $taxonomy, $second_type );
+				$disassociated  = \unregister_taxonomy_for_object_type( $taxonomy, $second_type );
+			}
+
+			$other = \register_taxonomy(
+				$other_taxonomy,
+				$object_type,
+				array(
+					'public'    => true,
+					'query_var' => true,
+					'rewrite'   => false,
+				)
+			);
+
+			if ( \taxonomy_exists( $taxonomy ) ) {
+				$target_unregistered = \unregister_taxonomy( $taxonomy );
+			}
+			if ( \taxonomy_exists( $other_taxonomy ) ) {
+				$other_unregistered = \unregister_taxonomy( $other_taxonomy );
+			}
+		} finally {
+			if ( \taxonomy_exists( $taxonomy ) ) {
+				\unregister_taxonomy( $taxonomy );
+			}
+			if ( \taxonomy_exists( $other_taxonomy ) ) {
+				\unregister_taxonomy( $other_taxonomy );
+			}
+			self::remove_filter_records( $filters );
+			$filters_restored = self::filters_absent( $filters );
+		}
+
+		$filter_events       = self::events_named( $events, 'register_args_filter' );
+		$registered_events   = self::events_named( $events, 'registered_taxonomy' );
+		$specific_events     = self::events_named( $events, 'registered_taxonomy_specific' );
+		$object_add_events   = self::events_named( $events, 'registered_taxonomy_for_object_type' );
+		$object_drop_events  = self::events_named( $events, 'unregistered_taxonomy_for_object_type' );
+		$unregistered_events = self::events_named( $events, 'unregistered_taxonomy' );
+
+		$filter_ok = 1 === count( $filter_events )
+			&& $taxonomy === $filter_events[0]['taxonomy']
+			&& array( $object_type ) === $filter_events[0]['objectTypes'];
+		$registered_ok = $registered instanceof \WP_Taxonomy
+			&& false === $registered->public
+			&& true === $registered->publicly_queryable
+			&& false === $registered->show_ui
+			&& false === $registered->show_in_nav_menus
+			&& true === $registered->show_in_rest
+			&& 'component-fuzz/v1' === $registered->rest_namespace
+			&& $expected_query_var === $registered->query_var
+			&& $controller_one instanceof \WP_REST_Terms_Controller
+			&& $controller_one === $controller_two
+			&& array(
+				'orderby'        => 'slug',
+				'hide_empty'     => false,
+				'component_fuzz' => $case['token'],
+			) === $registered->args;
+		$other_ok = $other instanceof \WP_Taxonomy
+			&& true === $other->public
+			&& false === $other->show_in_rest
+			&& $other_taxonomy === $other->query_var;
+		$association_ok = true === $associated
+			&& true === $disassociated
+			&& true === $target_unregistered
+			&& true === $other_unregistered
+			&& ! \taxonomy_exists( $taxonomy )
+			&& ! \taxonomy_exists( $other_taxonomy );
+		$actions_ok = array( $taxonomy, $other_taxonomy ) === array_column( $registered_events, 'taxonomy' )
+			&& 1 === count( $specific_events )
+			&& $taxonomy === $specific_events[0]['taxonomy']
+			&& $expected_query_var === $specific_events[0]['argsQueryVar']
+			&& 1 === count( $object_add_events )
+			&& $taxonomy === $object_add_events[0]['taxonomy']
+			&& $second_type === $object_add_events[0]['objectType']
+			&& 1 === count( $object_drop_events )
+			&& $taxonomy === $object_drop_events[0]['taxonomy']
+			&& $second_type === $object_drop_events[0]['objectType']
+			&& array( $taxonomy, $other_taxonomy ) === array_column( $unregistered_events, 'taxonomy' );
+
+		return $ctx->result(
+			'taxonomy.registration.filters-actions-and-rest-locality',
+			$filter_ok && $registered_ok && $other_ok && $association_ok && $actions_ok && $filters_restored,
+			self::case_data( $case ) + array(
+				'filterOk'             => $filter_ok,
+				'registeredOk'         => $registered_ok,
+				'otherOk'              => $other_ok,
+				'associationOk'        => $association_ok,
+				'actionsOk'            => $actions_ok,
+				'filtersRestored'      => $filters_restored,
+				'expectedQueryVar'     => $expected_query_var,
+				'actualQueryVar'       => $registered instanceof \WP_Taxonomy ? $registered->query_var : null,
+				'restNamespace'        => $registered instanceof \WP_Taxonomy ? $registered->rest_namespace : null,
+				'controllerClass'      => is_object( $controller_one ) ? get_class( $controller_one ) : null,
+				'associated'           => $associated,
+				'disassociated'        => $disassociated,
+				'targetUnregistered'   => $target_unregistered,
+				'otherUnregistered'    => $other_unregistered,
+				'filterEvents'         => $filter_events,
+				'registeredEvents'     => $registered_events,
+				'specificEvents'       => $specific_events,
+				'objectAddEvents'      => $object_add_events,
+				'objectDropEvents'     => $object_drop_events,
+				'unregisteredEvents'   => $unregistered_events,
 			)
 		);
 	}
@@ -1023,6 +1250,302 @@ final class TaxonomySurface {
 		);
 	}
 
+	private static function check_term_query_short_circuit_contracts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$hier_taxonomy    = $case['taxonomies']['termQueryHier'];
+		$flat_taxonomy    = $case['taxonomies']['termQueryFlat'];
+		$missing_taxonomy = $case['taxonomies']['termQueryMissing'];
+		$hier_tax         = \register_taxonomy(
+			$hier_taxonomy,
+			$case['objectTypes'][0],
+			array(
+				'public'       => true,
+				'hierarchical' => true,
+				'query_var'    => false,
+				'rewrite'      => false,
+			)
+		);
+		$flat_tax         = \register_taxonomy(
+			$flat_taxonomy,
+			$case['objectTypes'][0],
+			array(
+				'public'       => true,
+				'hierarchical' => false,
+				'query_var'    => false,
+				'rewrite'      => false,
+			)
+		);
+
+		if ( \is_wp_error( $hier_tax ) || \is_wp_error( $flat_tax ) ) {
+			return $ctx->fail(
+				'taxonomy.term-query.short-circuit-contracts',
+				self::case_data( $case ) + array(
+					'hierError' => \is_wp_error( $hier_tax ) ? $hier_tax->get_error_code() : null,
+					'flatError' => \is_wp_error( $flat_tax ) ? $flat_tax->get_error_code() : null,
+				)
+			);
+		}
+
+		$events             = array();
+		$filters            = array();
+		$flat_terms         = null;
+		$hier_all_terms     = null;
+		$count_result       = null;
+		$suppressed_terms   = null;
+		$legacy_terms       = null;
+		$invalid_terms      = null;
+		$term_sequence      = 0;
+		$base               = 810000 + (int) hexdec( substr( sha1( $case['token'] . 'term-query' ), 0, 4 ) );
+		$queries_before     = self::wpdb_num_queries();
+		$queries_after      = null;
+		$filters_restored   = false;
+		$invalid_no_filters = false;
+
+		$defaults_filter = static function ( array $defaults, ?array $taxonomies ) use ( &$events ): array {
+			$events[] = array(
+				'hook'       => 'get_terms_defaults',
+				'taxonomies' => $taxonomies,
+				'fields'     => $defaults['fields'] ?? null,
+				'hideEmpty'  => $defaults['hide_empty'] ?? null,
+			);
+			return $defaults;
+		};
+		$parse_query_action = static function ( \WP_Term_Query $query ) use ( &$events ): void {
+			$events[] = array(
+				'hook'         => 'parse_term_query',
+				'taxonomies'   => $query->query_vars['taxonomy'] ?? null,
+				'fields'       => $query->query_vars['fields'] ?? null,
+				'number'       => $query->query_vars['number'] ?? null,
+				'offset'       => $query->query_vars['offset'] ?? null,
+				'childOf'      => $query->query_vars['child_of'] ?? null,
+				'hierarchical' => $query->query_vars['hierarchical'] ?? null,
+				'padCounts'    => $query->query_vars['pad_counts'] ?? null,
+				'get'          => $query->query_vars['get'] ?? null,
+			);
+		};
+		$pre_get_terms_action = static function ( \WP_Term_Query $query ) use ( &$events ): void {
+			$events[] = array(
+				'hook'         => 'pre_get_terms',
+				'taxonomies'   => $query->query_vars['taxonomy'] ?? null,
+				'fields'       => $query->query_vars['fields'] ?? null,
+				'hierarchical' => $query->query_vars['hierarchical'] ?? null,
+				'padCounts'    => $query->query_vars['pad_counts'] ?? null,
+				'get'          => $query->query_vars['get'] ?? null,
+			);
+		};
+		$args_filter = static function ( array $args, array $taxonomies ) use ( &$events ): array {
+			$events[] = array(
+				'hook'         => 'get_terms_args',
+				'taxonomies'   => $taxonomies,
+				'fields'       => $args['fields'] ?? null,
+				'number'       => $args['number'] ?? null,
+				'offset'       => $args['offset'] ?? null,
+				'childOf'      => $args['child_of'] ?? null,
+				'childless'    => $args['childless'] ?? null,
+				'hideEmpty'    => $args['hide_empty'] ?? null,
+				'hierarchical' => $args['hierarchical'] ?? null,
+				'padCounts'    => $args['pad_counts'] ?? null,
+				'get'          => $args['get'] ?? null,
+			);
+			return $args;
+		};
+		$terms_pre_query = static function ( $terms, \WP_Term_Query $query ) use ( &$events, &$term_sequence, $base, $flat_taxonomy, $case ) {
+			unset( $terms );
+
+			$taxonomies = (array) ( $query->query_vars['taxonomy'] ?? array() );
+			$fields     = $query->query_vars['fields'] ?? '';
+			$events[]   = array(
+				'hook'             => 'terms_pre_query',
+				'taxonomies'       => $taxonomies,
+				'fields'           => $fields,
+				'number'           => $query->query_vars['number'] ?? null,
+				'offset'           => $query->query_vars['offset'] ?? null,
+				'childOf'          => $query->query_vars['child_of'] ?? null,
+				'childless'        => $query->query_vars['childless'] ?? null,
+				'hideEmpty'        => $query->query_vars['hide_empty'] ?? null,
+				'hierarchical'     => $query->query_vars['hierarchical'] ?? null,
+				'padCounts'        => $query->query_vars['pad_counts'] ?? null,
+				'get'              => $query->query_vars['get'] ?? null,
+				'requestHasSelect' => is_string( $query->request ) && str_contains( $query->request, 'SELECT' ),
+			);
+
+			if ( 'count' === $fields ) {
+				return '7';
+			}
+
+			$taxonomy = $taxonomies[0] ?? $flat_taxonomy;
+			$offset   = $base + ( 10 * $term_sequence );
+			++$term_sequence;
+
+			return array(
+				new \WP_Term( self::hierarchy_term( $offset + 1, $taxonomy, 'short-a-' . $case['token'], 'Short A ' . $case['token'], 0 ) ),
+				new \WP_Term( self::hierarchy_term( $offset + 2, $taxonomy, 'short-b-' . $case['token'], 'Short B ' . $case['token'], 0 ) ),
+			);
+		};
+		$get_terms_filter = static function ( array $terms, $taxonomies, array $args, \WP_Term_Query $query ) use ( &$events ): array {
+			$events[] = array(
+				'hook'       => 'get_terms',
+				'taxonomies' => $taxonomies,
+				'fields'     => $query->query_vars['fields'] ?? null,
+				'count'      => count( $terms ),
+				'argsFields' => $args['fields'] ?? null,
+			);
+			return $terms;
+		};
+
+		try {
+			self::add_filter_record( $filters, 'get_terms_defaults', $defaults_filter, 10, 2 );
+			self::add_filter_record( $filters, 'parse_term_query', $parse_query_action, 10, 1 );
+			self::add_filter_record( $filters, 'pre_get_terms', $pre_get_terms_action, 10, 1 );
+			self::add_filter_record( $filters, 'get_terms_args', $args_filter, 10, 2 );
+			self::add_filter_record( $filters, 'terms_pre_query', $terms_pre_query, 10, 2 );
+			self::add_filter_record( $filters, 'get_terms', $get_terms_filter, 10, 4 );
+
+			$flat_terms = \get_terms(
+				array(
+					'taxonomy'      => $flat_taxonomy,
+					'hide_empty'    => true,
+					'hierarchical'  => true,
+					'pad_counts'    => true,
+					'number'        => -5,
+					'offset'        => -3,
+					'fields'        => 'all',
+					'cache_results' => false,
+				)
+			);
+			$hier_all_terms = \get_terms(
+				array(
+					'taxonomy'      => $hier_taxonomy,
+					'get'           => 'all',
+					'hide_empty'    => true,
+					'hierarchical'  => true,
+					'pad_counts'    => true,
+					'childless'     => true,
+					'child_of'      => 19,
+					'fields'        => 'all',
+					'cache_results' => false,
+				)
+			);
+			$count_result = \get_terms(
+				array(
+					'taxonomy'      => $flat_taxonomy,
+					'fields'        => 'count',
+					'cache_results' => false,
+				)
+			);
+			$suppressed_terms = \get_terms(
+				array(
+					'taxonomy'        => $flat_taxonomy,
+					'fields'          => 'all',
+					'suppress_filter' => true,
+					'cache_results'   => false,
+				)
+			);
+			$legacy_terms     = \get_terms(
+				$hier_taxonomy,
+				array(
+					'hide_empty'    => false,
+					'fields'        => 'all',
+					'cache_results' => false,
+				)
+			);
+
+			$events_before_invalid = count( $events );
+			$invalid_terms         = \get_terms( array( 'taxonomy' => $missing_taxonomy ) );
+			$invalid_no_filters    = $events_before_invalid === count( $events );
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_restored = self::filters_absent( $filters );
+			$queries_after    = self::wpdb_num_queries();
+
+			if ( \taxonomy_exists( $hier_taxonomy ) ) {
+				\unregister_taxonomy( $hier_taxonomy );
+			}
+			if ( \taxonomy_exists( $flat_taxonomy ) ) {
+				\unregister_taxonomy( $flat_taxonomy );
+			}
+		}
+
+		$default_events   = self::events_named( $events, 'get_terms_defaults' );
+		$parse_events     = self::events_named( $events, 'parse_term_query' );
+		$pre_get_events   = self::events_named( $events, 'pre_get_terms' );
+		$args_events      = self::events_named( $events, 'get_terms_args' );
+		$pre_query_events = self::events_named( $events, 'terms_pre_query' );
+		$final_events     = self::events_named( $events, 'get_terms' );
+		$flat_pre_query   = $pre_query_events[0] ?? array();
+		$hier_pre_query   = $pre_query_events[1] ?? array();
+		$count_pre_query  = $pre_query_events[2] ?? array();
+
+		$filter_sequence_ok = 5 === count( $default_events )
+			&& 5 === count( $parse_events )
+			&& 5 === count( $pre_get_events )
+			&& 5 === count( $args_events )
+			&& 5 === count( $pre_query_events )
+			&& 3 === count( $final_events )
+			&& $invalid_no_filters
+			&& $filters_restored;
+		$flat_query_ok     = array( $flat_taxonomy ) === ( $flat_pre_query['taxonomies'] ?? null )
+			&& 'all' === ( $flat_pre_query['fields'] ?? null )
+			&& 5 === ( $flat_pre_query['number'] ?? null )
+			&& 3 === ( $flat_pre_query['offset'] ?? null )
+			&& false === ( $flat_pre_query['hierarchical'] ?? null )
+			&& false === ( $flat_pre_query['padCounts'] ?? null )
+			&& true === ( $flat_pre_query['hideEmpty'] ?? null )
+			&& true === ( $flat_pre_query['requestHasSelect'] ?? null )
+			&& self::terms_have_taxonomy( $flat_terms, $flat_taxonomy );
+		$hier_all_ok       = array( $hier_taxonomy ) === ( $hier_pre_query['taxonomies'] ?? null )
+			&& 'all' === ( $hier_pre_query['get'] ?? null )
+			&& 0 === ( $hier_pre_query['childOf'] ?? null )
+			&& false === ( $hier_pre_query['childless'] ?? null )
+			&& 0 === ( $hier_pre_query['hideEmpty'] ?? null )
+			&& false === ( $hier_pre_query['hierarchical'] ?? null )
+			&& false === ( $hier_pre_query['padCounts'] ?? null )
+			&& self::terms_have_taxonomy( $hier_all_terms, $hier_taxonomy );
+		$count_ok          = array( $flat_taxonomy ) === ( $count_pre_query['taxonomies'] ?? null )
+			&& 'count' === ( $count_pre_query['fields'] ?? null )
+			&& '7' === $count_result
+			&& ! in_array( 'count', array_column( $final_events, 'fields' ), true );
+		$suppressed_ok     = self::terms_have_taxonomy( $suppressed_terms, $flat_taxonomy )
+			&& 1 === count(
+				array_filter(
+					$final_events,
+					static function ( array $event ) use ( $flat_taxonomy ): bool {
+						return array( $flat_taxonomy ) === ( $event['taxonomies'] ?? null );
+					}
+				)
+			);
+		$legacy_ok         = self::terms_have_taxonomy( $legacy_terms, $hier_taxonomy )
+			&& array( $hier_taxonomy ) === ( $pre_query_events[4]['taxonomies'] ?? null );
+		$invalid_ok        = \is_wp_error( $invalid_terms )
+			&& 'invalid_taxonomy' === $invalid_terms->get_error_code();
+		$db_untouched      = null === $queries_before
+			|| null === $queries_after
+			|| $queries_before === $queries_after;
+
+		return $ctx->result(
+			'taxonomy.term-query.short-circuit-contracts',
+			$filter_sequence_ok && $flat_query_ok && $hier_all_ok && $count_ok && $suppressed_ok && $legacy_ok && $invalid_ok && $db_untouched,
+			self::case_data( $case ) + array(
+				'filterSequenceOk' => $filter_sequence_ok,
+				'flatQueryOk'      => $flat_query_ok,
+				'hierAllOk'        => $hier_all_ok,
+				'countOk'          => $count_ok,
+				'suppressedOk'     => $suppressed_ok,
+				'legacyOk'         => $legacy_ok,
+				'invalidOk'        => $invalid_ok,
+				'dbUntouched'      => $db_untouched,
+				'queriesBefore'    => $queries_before,
+				'queriesAfter'     => $queries_after,
+				'flatPreQuery'     => $flat_pre_query,
+				'hierPreQuery'     => $hier_pre_query,
+				'countPreQuery'    => $count_pre_query,
+				'finalEvents'      => $final_events,
+				'invalidError'     => \is_wp_error( $invalid_terms ) ? $invalid_terms->get_error_code() : null,
+			)
+		);
+	}
+
 	private static function check_term_link_cheap_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::reset_taxonomy_registry();
 
@@ -1141,6 +1664,8 @@ final class TaxonomySurface {
 			'token'               => $token,
 			'taxonomies'          => array(
 				'primary'       => 'cf_tax_' . substr( $token, 0, 18 ),
+				'hooked'        => 'cf_hook_' . substr( $token, 0, 18 ),
+				'hookedOther'   => 'cf_hook_o_' . substr( $token, 0, 16 ),
 				'listA'         => 'cf_list_a_' . substr( $token, 0, 15 ),
 				'listB'         => 'cf_list_b_' . substr( $token, 0, 15 ),
 				'normalization' => 'cf_norm_' . substr( $token, 0, 18 ),
@@ -1151,6 +1676,9 @@ final class TaxonomySurface {
 				'filter'        => 'cf_flt_' . substr( $token, 0, 20 ),
 				'termObject'    => 'cf_term_' . substr( $token, 0, 18 ),
 				'hierarchy'     => 'cf_hier_' . substr( $token, 0, 19 ),
+				'termQueryHier' => 'cf_tq_h_' . substr( $token, 0, 19 ),
+				'termQueryFlat' => 'cf_tq_f_' . substr( $token, 0, 19 ),
+				'termQueryMissing' => 'cf_tq_m_' . substr( $token, 0, 19 ),
 				'linkQuery'     => 'cf_lq_' . substr( $token, 0, 20 ),
 				'linkRewrite'   => 'cf_lr_' . substr( $token, 0, 20 ),
 			),
@@ -1510,6 +2038,39 @@ final class TaxonomySurface {
 		}
 
 		return true;
+	}
+
+	private static function events_named( array $events, string $hook ): array {
+		return array_values(
+			array_filter(
+				$events,
+				static function ( array $event ) use ( $hook ): bool {
+					return $hook === ( $event['hook'] ?? null );
+				}
+			)
+		);
+	}
+
+	private static function terms_have_taxonomy( $terms, string $taxonomy ): bool {
+		if ( ! is_array( $terms ) || array() === $terms ) {
+			return false;
+		}
+
+		foreach ( $terms as $term ) {
+			if ( ! ( $term instanceof \WP_Term ) || $taxonomy !== $term->taxonomy ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wpdb_num_queries(): ?int {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'num_queries' ) ) {
+			return (int) $GLOBALS['wpdb']->num_queries;
+		}
+
+		return null;
 	}
 
 	private static function snapshot_globals(): array {
