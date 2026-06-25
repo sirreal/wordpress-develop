@@ -1178,6 +1178,10 @@ final class RestSiteEditorSurface {
 		$filter     = self::install_export_template_filter( $case, $filter_log );
 		$filename   = null;
 		$zip        = null;
+		$zip_opened = false;
+		$zip_close_error = null;
+		$unlink_result = null;
+		$zip_cleanup_ok = true;
 
 		try {
 			self::reset_runtime_caches();
@@ -1199,23 +1203,23 @@ final class RestSiteEditorSurface {
 				);
 			} else {
 				$zip = new \ZipArchive();
-				$opened = true === $zip->open( $filename );
+				$zip_opened = true === $zip->open( $filename );
 
 				self::collect_failure(
 					$failures,
 					file_exists( $filename )
 						&& filesize( $filename ) > 0
 						&& self::path_is_within( $filename, \get_temp_dir() )
-						&& $opened,
+						&& $zip_opened,
 					'export ZIP is created inside the expected temp directory and can be opened',
 					array(
 						'filename' => self::preview( $filename ),
 						'tempDir'  => self::preview( \get_temp_dir() ),
-						'opened'   => $opened,
+						'opened'   => $zip_opened,
 					)
 				);
 
-				if ( $opened ) {
+				if ( $zip_opened ) {
 					self::inspect_block_template_export_zip( $zip, $case, $failures );
 				}
 			}
@@ -1237,13 +1241,33 @@ final class RestSiteEditorSurface {
 			);
 		} finally {
 			\remove_filter( 'pre_get_block_templates', $filter, 10 );
-			if ( $zip instanceof \ZipArchive ) {
-				$zip->close();
+			if ( $zip instanceof \ZipArchive && $zip_opened ) {
+				try {
+					$zip->close();
+				} catch ( \Throwable $e ) {
+					$zip_close_error = self::describe_throwable( $e );
+				}
 			}
 			if ( is_string( $filename ) && '' !== $filename && file_exists( $filename ) ) {
-				@unlink( $filename );
+				$unlink_result  = @unlink( $filename );
+				$zip_cleanup_ok = ! file_exists( $filename );
 			}
 		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_get_block_templates', $filter )
+				&& null === $zip_close_error
+				&& $zip_cleanup_ok,
+			'export generator cleanup removes scoped filters, closes opened archives, and deletes the temporary ZIP',
+			array(
+				'filterRemoved' => false === \has_filter( 'pre_get_block_templates', $filter ),
+				'zipOpened'     => $zip_opened,
+				'closeError'    => $zip_close_error,
+				'unlinkResult'  => $unlink_result,
+				'zipRemaining'  => is_string( $filename ) && '' !== $filename && file_exists( $filename ),
+			)
+		);
 
 		return self::result(
 			$ctx,
