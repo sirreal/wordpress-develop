@@ -8,6 +8,7 @@ final class EnvironmentLoadSurface {
 	public const NAME = 'environment-load';
 
 	private const UTF8_CASES = 12;
+	private const REQUEST_MEDIA_GENERATED_CASES = 16;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
@@ -35,6 +36,7 @@ final class EnvironmentLoadSurface {
 			$rows[] = self::check_installing_and_maintenance_flags( $ctx->fork( 'installing' ), $snapshot );
 			$rows[] = self::check_runtime_filters_and_request_guards( $ctx->fork( 'request-guards' ) );
 			$rows[] = self::check_json_xml_request_guards( $ctx->fork( 'json-xml' ) );
+			$rows[] = self::check_generated_request_media_matrix( $ctx->fork( 'request-media-matrix' ) );
 			$rows = array_merge( $rows, self::check_https_helpers( $ctx->fork( 'https' ) ) );
 			$rows[] = self::check_utf8_validation_and_scanning( $ctx->fork( 'utf8-scan' ) );
 			$rows[] = self::check_utf8_compat_helpers( $ctx->fork( 'utf8-compat' ) );
@@ -991,6 +993,256 @@ final class EnvironmentLoadSurface {
 				'failures'   => array_slice( $failures, 0, 8 ),
 			)
 		);
+	}
+
+	private static function check_generated_request_media_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$original_server = $_SERVER;
+		$cases           = self::request_media_header_cases( $ctx );
+		$overlap_cases   = 0;
+
+		try {
+			foreach ( $cases as $index => $case ) {
+				$_SERVER = self::default_server();
+
+				if ( null !== $case['accept'] ) {
+					$_SERVER['HTTP_ACCEPT'] = $case['accept'];
+				}
+
+				if ( null !== $case['contentType'] ) {
+					$_SERVER['CONTENT_TYPE'] = $case['contentType'];
+				}
+
+				$server_before = $_SERVER;
+				$expected      = array(
+					'jsonMediaAccept'  => null !== $case['accept'] && self::expected_json_media_type( $case['accept'] ),
+					'jsonMediaContent' => null !== $case['contentType'] && self::expected_json_media_type( $case['contentType'] ),
+					'jsonRequest'      => ( null !== $case['accept'] && self::expected_json_media_type( $case['accept'] ) )
+						|| ( null !== $case['contentType'] && self::expected_json_media_type( $case['contentType'] ) ),
+					'xmlRequest'       => self::expected_xml_accept_header( $case['accept'] )
+						|| self::expected_xml_content_type( $case['contentType'] ),
+				);
+				$actual        = array(
+					'jsonMediaAccept'  => null !== $case['accept'] ? \wp_is_json_media_type( $case['accept'] ) : false,
+					'jsonMediaContent' => null !== $case['contentType'] ? \wp_is_json_media_type( $case['contentType'] ) : false,
+					'jsonRequest'      => \wp_is_json_request(),
+					'xmlRequest'       => \wp_is_xml_request(),
+				);
+				$repeat        = array(
+					'jsonRequest' => \wp_is_json_request(),
+					'xmlRequest'  => \wp_is_xml_request(),
+				);
+
+				if ( $expected['jsonRequest'] && $expected['xmlRequest'] ) {
+					++$overlap_cases;
+				}
+
+				self::collect_failure(
+					$failures,
+					$actual === $expected
+						&& $repeat['jsonRequest'] === $actual['jsonRequest']
+						&& $repeat['xmlRequest'] === $actual['xmlRequest']
+						&& $_SERVER === $server_before,
+					"Generated JSON/XML request media matrix case {$index}",
+					array(
+						'label'        => $case['label'],
+						'accept'       => $case['accept'],
+						'contentType'  => $case['contentType'],
+						'expected'     => $expected,
+						'actual'       => $actual,
+						'repeat'       => $repeat,
+						'serverBefore' => $server_before,
+						'serverAfter'  => $_SERVER,
+					)
+				);
+			}
+		} finally {
+			$_SERVER = $original_server;
+		}
+
+		return self::result(
+			$ctx,
+			'environment-load.request-media.generated-json-xml-matrix',
+			array() === $failures,
+			array(
+				'cases'          => count( $cases ),
+				'generatedCases' => self::REQUEST_MEDIA_GENERATED_CASES,
+				'overlapCases'   => $overlap_cases,
+				'failures'       => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function request_media_header_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'       => 'json-accept-uppercase',
+				'accept'      => 'text/html, APPLICATION/VND.WP+JSON; q=0.9',
+				'contentType' => null,
+			),
+			array(
+				'label'       => 'json-content-type-with-charset',
+				'accept'      => null,
+				'contentType' => 'application/problem+json; charset=UTF-8',
+			),
+			array(
+				'label'       => 'xml-accept-with-json-content-type',
+				'accept'      => 'text/html, application/rss+xml',
+				'contentType' => 'application/json',
+			),
+			array(
+				'label'       => 'json-accept-with-exact-xml-content-type',
+				'accept'      => 'application/json;q=1.0',
+				'contentType' => 'text/xml',
+			),
+			array(
+				'label'       => 'xml-content-type-parameters-fail-closed',
+				'accept'      => 'text/html',
+				'contentType' => 'text/xml; charset=UTF-8',
+			),
+			array(
+				'label'       => 'xml-case-sensitive-negative',
+				'accept'      => 'application/RSS+XML',
+				'contentType' => 'TEXT/XML',
+			),
+			array(
+				'label'       => 'json-oembed-vendor-overlap',
+				'accept'      => 'application/vnd.component+json+oembed',
+				'contentType' => 'application/xml+oembed',
+			),
+			array(
+				'label'       => 'non-json-lookalikes',
+				'accept'      => 'application/jsonp, text/json, application/json+xml',
+				'contentType' => 'application/hal+json+zip',
+			),
+		);
+
+		for ( $i = 0; $i < self::REQUEST_MEDIA_GENERATED_CASES; ++$i ) {
+			$case_ctx = $ctx->fork( 'case-' . $i );
+			$cases[]  = array(
+				'label'       => 'generated-' . $i,
+				'accept'      => self::generated_media_header( $case_ctx->fork( 'accept' ), true ),
+				'contentType' => self::generated_media_header( $case_ctx->fork( 'content-type' ), false ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_media_header( \ComponentFuzz\FuzzContext $ctx, bool $allow_list ): ?string {
+		if ( $ctx->bool( 20 ) ) {
+			return null;
+		}
+
+		$json_subtype = $ctx->choice(
+			array(
+				'json',
+				self::media_token( $ctx->fork( 'json-vendor' ) ) . '+json',
+				'json+oembed',
+				self::media_token( $ctx->fork( 'json-oembed-vendor' ) ) . '+json+oembed',
+			)
+		);
+		$pool = array(
+			'application/' . $json_subtype,
+			'application/' . $json_subtype . '; charset=UTF-8',
+			'application/' . strtoupper( $json_subtype ),
+			'text/html',
+			'text/json',
+			'application/jsonp',
+			'application/json+xml',
+			'application/' . self::media_token( $ctx->fork( 'bad-json' ) ) . '+json+zip',
+			'text/xml',
+			'application/rss+xml',
+			'application/atom+xml',
+			'application/rdf+xml',
+			'application/xml+oembed',
+			'TEXT/XML',
+			$ctx->ascii( 0, 18 ),
+		);
+
+		if ( ! $allow_list ) {
+			return $ctx->choice( $pool );
+		}
+
+		$parts = array();
+		$count = $ctx->int( 1, 4 );
+		for ( $i = 0; $i < $count; ++$i ) {
+			$part = $ctx->choice( $pool );
+			if ( $ctx->bool( 40 ) ) {
+				$part .= '; q=0.' . $ctx->int( 1, 9 );
+			}
+			$parts[] = $part;
+		}
+
+		return implode( $ctx->choice( array( ', ', ',', ' , ' ) ), $parts );
+	}
+
+	private static function expected_json_media_type( string $header ): bool {
+		foreach ( explode( ',', $header ) as $part ) {
+			$media_type = strtolower( trim( explode( ';', $part, 2 )[0] ) );
+			if ( '' === $media_type ) {
+				continue;
+			}
+
+			$pieces = explode( '/', $media_type, 2 );
+			if ( 2 !== count( $pieces ) || 'application' !== $pieces[0] ) {
+				continue;
+			}
+
+			$subtype = $pieces[1];
+			if ( 'json' === $subtype || 'json+oembed' === $subtype ) {
+				return true;
+			}
+
+			if ( self::ends_with( $subtype, '+json' ) || self::ends_with( $subtype, '+json+oembed' ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function expected_xml_accept_header( ?string $header ): bool {
+		if ( null === $header ) {
+			return false;
+		}
+
+		foreach ( self::xml_media_types() as $type ) {
+			if ( str_contains( $header, $type ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function expected_xml_content_type( ?string $content_type ): bool {
+		return null !== $content_type && in_array( $content_type, self::xml_media_types(), true );
+	}
+
+	private static function xml_media_types(): array {
+		return array(
+			'text/xml',
+			'application/rss+xml',
+			'application/atom+xml',
+			'application/rdf+xml',
+			'text/xml+oembed',
+			'application/xml+oembed',
+		);
+	}
+
+	private static function media_token( \ComponentFuzz\FuzzContext $ctx ): string {
+		$token = strtolower( preg_replace( '/[^a-zA-Z0-9.-]+/', '', $ctx->identifier( 3, 10 ) ) );
+
+		return '' === $token ? 'component' : $token;
+	}
+
+	private static function ends_with( string $haystack, string $needle ): bool {
+		if ( '' === $needle ) {
+			return true;
+		}
+
+		return substr( $haystack, -strlen( $needle ) ) === $needle;
 	}
 
 	private static function check_https_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
