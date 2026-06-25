@@ -37,6 +37,7 @@ final class NetworkMediaSurface {
 			self::exercise_url_scheme_apis( $rng, $result );
 			self::exercise_path_apis( $rng, $result );
 			self::exercise_filename_apis( $rng, $result );
+			self::exercise_upload_iframe_src_apis( $rng, $result );
 			self::exercise_multisite_quota_apis( $rng, $result );
 			self::exercise_multisite_upload_policy_apis( $rng, $result );
 
@@ -685,6 +686,142 @@ final class NetworkMediaSurface {
 				}
 			}
 		}
+	}
+
+	private static function exercise_upload_iframe_src_apis( array &$rng, array &$result ): void {
+		$required = array(
+			'add_filter',
+			'add_query_arg',
+			'get_upload_iframe_src',
+			'has_filter',
+			'remove_filter',
+			'wp_parse_url',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'upload-iframe-src', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		++$result['caseCount'];
+		self::feature( $result, 'upload-iframe-src' );
+
+		$token            = substr( bin2hex( self::rng_bytes( $rng, 6 ) ), 0, 8 );
+		$fallback_post_id = 1000 + self::rng_int( $rng, 1, 500 );
+		$explicit_post_id = $fallback_post_id + self::rng_int( $rng, 1, 100 );
+		$tab              = 'cfz-tab-' . $token;
+		$seen             = array();
+		$filter           = static function ( string $src ) use ( &$seen, $token ): string {
+			$seen[] = $src;
+			return add_query_arg( 'cfz_upload_filter', $token, $src );
+		};
+		$had_post_id      = array_key_exists( 'post_ID', $GLOBALS );
+		$previous_post_id = $GLOBALS['post_ID'] ?? null;
+		$before_filter    = \has_filter( 'image_upload_iframe_src', $filter );
+
+		\add_filter( 'image_upload_iframe_src', $filter );
+		try {
+			$GLOBALS['post_ID'] = $fallback_post_id;
+			$image              = self::call_api(
+				$result,
+				'get_upload_iframe_src.image-filtered',
+				array(
+					'type' => 'image',
+					'tab'  => $tab,
+				),
+				static function () use ( $tab ) {
+					return get_upload_iframe_src( 'image', 0, $tab );
+				}
+			);
+			$media              = self::call_api(
+				$result,
+				'get_upload_iframe_src.media-type',
+				array(
+					'type'   => 'media',
+					'postId' => $explicit_post_id,
+				),
+				static function () use ( $explicit_post_id ) {
+					return get_upload_iframe_src( 'media', $explicit_post_id, null );
+				}
+			);
+		} finally {
+			\remove_filter( 'image_upload_iframe_src', $filter );
+			if ( $had_post_id ) {
+				$GLOBALS['post_ID'] = $previous_post_id;
+			} else {
+				unset( $GLOBALS['post_ID'] );
+			}
+		}
+
+		$image_args = is_string( $image['value'] ?? null ) ? self::url_query_args( $image['value'] ) : array();
+		$media_args = is_string( $media['value'] ?? null ) ? self::url_query_args( $media['value'] ) : array();
+		$seen_args  = isset( $seen[0] ) ? self::url_query_args( $seen[0] ) : array();
+
+		self::check_invariant(
+			$result,
+			$image['ok']
+				&& is_string( $image['value'] ?? null )
+				&& str_contains( $image['value'], 'media-upload.php' )
+				&& (string) $fallback_post_id === (string) ( $image_args['post_id'] ?? '' )
+				&& 'image' === ( $image_args['type'] ?? null )
+				&& $tab === ( $image_args['tab'] ?? null )
+				&& '1' === (string) ( $image_args['TB_iframe'] ?? '' )
+				&& $token === ( $image_args['cfz_upload_filter'] ?? null )
+				&& 1 === count( $seen )
+				&& ! isset( $seen_args['TB_iframe'] )
+				&& $tab === ( $seen_args['tab'] ?? null ),
+			'get_upload_iframe_src:image-filter-fallback-post-and-tab-query',
+			array(
+				'type' => 'image',
+				'tab'  => $tab,
+			),
+			array(
+				'url'       => $image['value'] ?? null,
+				'args'      => $image_args,
+				'seen'      => $seen,
+				'seenArgs'  => $seen_args,
+				'filterWas' => $before_filter,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$media['ok']
+				&& is_string( $media['value'] ?? null )
+				&& str_contains( $media['value'], 'media-upload.php' )
+				&& (string) $explicit_post_id === (string) ( $media_args['post_id'] ?? '' )
+				&& ! isset( $media_args['type'] )
+				&& ! isset( $media_args['tab'] )
+				&& '1' === (string) ( $media_args['TB_iframe'] ?? '' ),
+			'get_upload_iframe_src:media-type-omits-type-and-uses-explicit-post',
+			array(
+				'type'   => 'media',
+				'postId' => $explicit_post_id,
+			),
+			array(
+				'url'  => $media['value'] ?? null,
+				'args' => $media_args,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			false === \has_filter( 'image_upload_iframe_src', $filter )
+				&& $before_filter === \has_filter( 'image_upload_iframe_src', $filter )
+				&& (
+					$had_post_id
+						? $GLOBALS['post_ID'] === $previous_post_id
+						: ! array_key_exists( 'post_ID', $GLOBALS )
+				),
+			'get_upload_iframe_src:filter-and-post-global-restored',
+			$token,
+			array(
+				'hadPostId' => $had_post_id,
+				'postId'    => $GLOBALS['post_ID'] ?? null,
+				'hasFilter' => \has_filter( 'image_upload_iframe_src', $filter ),
+			)
+		);
 	}
 
 	private static function exercise_multisite_quota_apis( array &$rng, array &$result ): void {
@@ -1845,6 +1982,18 @@ final class NetworkMediaSurface {
 			'ext'  => $ext,
 			'type' => $value['type'] ?? null,
 		);
+	}
+
+	private static function url_query_args( string $url ): array {
+		$query = \wp_parse_url( $url, PHP_URL_QUERY );
+		if ( ! is_string( $query ) ) {
+			return array();
+		}
+
+		$args = array();
+		parse_str( $query, $args );
+
+		return $args;
 	}
 
 	private static function call_api( array &$result, string $api, $input, callable $callback ): array {
