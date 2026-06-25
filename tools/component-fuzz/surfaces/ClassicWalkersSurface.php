@@ -59,6 +59,7 @@ final class ClassicWalkersSurface {
 			$rows[] = self::check_paged_walk( $ctx );
 			$rows[] = self::check_generated_tree_walk_and_reverse_paging( $ctx );
 			$rows[] = self::check_nav_menu_walker( $ctx );
+			$rows[] = self::check_nav_menu_item_matrix( $ctx );
 			$rows[] = self::check_page_walker( $ctx );
 			$rows[] = self::check_category_walker( $ctx );
 			$rows[] = self::check_dropdown_walkers_and_filters( $ctx );
@@ -755,6 +756,286 @@ final class ClassicWalkersSurface {
 			array(
 				'failures' => $failures,
 				'itemIds'  => array_column( $items, 'ID' ),
+			)
+		);
+	}
+
+	private static function check_nav_menu_item_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$base_id      = self::base_id( $ctx, 'nav-matrix' );
+		$class_calls  = array();
+		$id_calls     = array();
+		$li_calls     = array();
+		$link_calls   = array();
+		$subnav_calls = array();
+		$root         = self::menu_item(
+			$base_id + 1,
+			1,
+			0,
+			'Matrix root <script>alert(21)</script> ' . $ctx->identifier( 3, 8 ),
+			'https://example.test/root',
+			false
+		);
+		$parent       = self::menu_item(
+			$base_id + 2,
+			2,
+			(int) $root->ID,
+			'Matrix parent ' . $ctx->identifier( 3, 8 ),
+			'https://example.test/parent',
+			false
+		);
+		$current      = self::menu_item(
+			$base_id + 3,
+			3,
+			(int) $parent->ID,
+			'Matrix current <script>alert(22)</script> ' . $ctx->identifier( 3, 8 ),
+			'https://example.test/current?x=<script>',
+			true
+		);
+		$sibling      = self::menu_item(
+			$base_id + 4,
+			4,
+			(int) $parent->ID,
+			'Matrix sibling ' . $ctx->identifier( 3, 8 ),
+			'https://example.test/sibling',
+			false
+		);
+		$other_root   = self::menu_item(
+			$base_id + 5,
+			5,
+			0,
+			'Matrix other ' . $ctx->identifier( 3, 8 ),
+			'https://example.test/other',
+			false
+		);
+
+		$root->classes       = array( 'matrix-root', 'current-menu-ancestor', 'menu-item-has-children' );
+		$parent->classes     = array( 'matrix-parent', 'current-menu-parent', 'menu-item-has-children' );
+		$current->classes    = array( 'matrix-current', 'current-menu-item', 'cfz-unsafe<script>' );
+		$sibling->classes    = array( 'matrix-sibling' );
+		$other_root->classes = array( 'matrix-other-root' );
+
+		$items          = array( $root, $parent, $current, $sibling, $other_root );
+		$expected_ids   = array_map( 'intval', array_column( $items, 'ID' ) );
+		$expected_depth = array( 0, 1, 2, 2, 0 );
+		$current_id     = (int) $current->ID;
+		$args           = (object) array(
+			'before'       => '',
+			'after'        => '',
+			'link_before'  => '',
+			'link_after'   => '',
+			'item_spacing' => $ctx->choice( array( 'preserve', 'discard' ) ),
+		);
+
+		$class_filter = static function ( array $classes, $menu_item, $args, int $depth ) use ( &$class_calls ): array {
+			unset( $args );
+
+			$class_calls[] = array(
+				'id'       => (int) $menu_item->ID,
+				'depth'    => $depth,
+				'current'  => (bool) $menu_item->current,
+				'ancestor' => in_array( 'current-menu-ancestor', $classes, true ),
+				'parent'   => in_array( 'current-menu-parent', $classes, true ),
+			);
+
+			$classes[] = 'cfz-matrix-depth-' . $depth;
+			if ( $menu_item->current ) {
+				$classes[] = 'cfz-matrix-filter-current';
+			}
+
+			return $classes;
+		};
+
+		$id_filter = static function ( string $item_id, $menu_item, $args, int $depth ) use ( &$id_calls ): string {
+			unset( $args );
+
+			$id_calls[] = array(
+				'id'      => (int) $menu_item->ID,
+				'depth'   => $depth,
+				'default' => $item_id,
+			);
+
+			return 'cfz-li-"<' . (int) $menu_item->ID . '>-d' . $depth;
+		};
+
+		$li_attr_filter = static function ( array $atts, $menu_item, $args, int $depth ) use ( &$li_calls ): array {
+			unset( $args );
+
+			$li_calls[] = array(
+				'id'         => (int) $menu_item->ID,
+				'depth'      => $depth,
+				'current'    => (bool) $menu_item->current,
+				'defaultId'  => (string) ( $atts['id'] ?? '' ),
+				'classNames' => (string) ( $atts['class'] ?? '' ),
+			);
+
+			$atts['data-cfz-depth'] = (string) $depth;
+			if ( $menu_item->current ) {
+				$atts['data-cfz-current'] = '"<current-' . (int) $menu_item->ID . '>';
+			} else {
+				$atts['data-cfz-current'] = '';
+			}
+			$atts['data-cfz-drop'] = array( 'not scalar' );
+
+			return $atts;
+		};
+
+		$link_attr_filter = static function ( array $atts, $menu_item, $args, int $depth ) use ( &$link_calls ): array {
+			unset( $args );
+
+			$link_calls[] = array(
+				'id'          => (int) $menu_item->ID,
+				'depth'       => $depth,
+				'ariaCurrent' => (string) ( $atts['aria-current'] ?? '' ),
+			);
+
+			$atts['data-cfz-link'] = '"<link-' . (int) $menu_item->ID . '>';
+
+			return $atts;
+		};
+
+		$submenu_attr_filter = static function ( array $atts, $args, int $depth ) use ( &$subnav_calls ): array {
+			unset( $args );
+
+			$subnav_calls[] = array(
+				'depth' => $depth,
+				'class' => (string) ( $atts['class'] ?? '' ),
+			);
+
+			$atts['data-cfz-submenu-depth'] = (string) $depth;
+
+			return $atts;
+		};
+
+		$output = self::with_temporary_filters(
+			array(
+				array(
+					'hook'         => 'nav_menu_css_class',
+					'callback'     => $class_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+				array(
+					'hook'         => 'nav_menu_item_id',
+					'callback'     => $id_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+				array(
+					'hook'         => 'nav_menu_item_attributes',
+					'callback'     => $li_attr_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+				array(
+					'hook'         => 'nav_menu_link_attributes',
+					'callback'     => $link_attr_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 4,
+				),
+				array(
+					'hook'         => 'nav_menu_submenu_attributes',
+					'callback'     => $submenu_attr_filter,
+					'priority'     => 10,
+					'acceptedArgs' => 3,
+				),
+			),
+			static function () use ( $items, $args ): string {
+				return ( new \Walker_Nav_Menu() )->walk( $items, 0, $args );
+			}
+		);
+
+		$li_tags = self::opening_tags( $output, 'li' );
+		$a_tags  = self::opening_tags( $output, 'a' );
+		$ul_tags = self::opening_tags( $output, 'ul' );
+		$opening_tag_text = implode( '', array_merge( $li_tags, $a_tags, $ul_tags ) );
+
+		self::collect_failure(
+			$failures,
+			self::balanced_enough( $output, array( 'li', 'ul', 'a' ) )
+				&& 5 === count( $li_tags )
+				&& 5 === count( $a_tags )
+				&& 2 === count( $ul_tags ),
+			'Walker_Nav_Menu matrix emits balanced item/link/submenu counts for a generated hierarchy',
+			array(
+				'liCount' => count( $li_tags ),
+				'aCount'  => count( $a_tags ),
+				'ulCount' => count( $ul_tags ),
+				'output'  => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array_column( $class_calls, 'id' ) === $expected_ids
+				&& array_column( $id_calls, 'id' ) === $expected_ids
+				&& array_column( $li_calls, 'id' ) === $expected_ids
+				&& array_column( $link_calls, 'id' ) === $expected_ids
+				&& array_column( $class_calls, 'depth' ) === $expected_depth
+				&& array_column( $id_calls, 'depth' ) === $expected_depth
+				&& array_column( $li_calls, 'depth' ) === $expected_depth
+				&& array_column( $link_calls, 'depth' ) === $expected_depth,
+			'Walker_Nav_Menu matrix filters observe generated item preorder and depth',
+			array(
+				'classCalls' => $class_calls,
+				'idCalls'    => $id_calls,
+				'liCalls'    => $li_calls,
+				'linkCalls'  => $link_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( true, false, false, false, false ) === array_column( $class_calls, 'ancestor' )
+				&& array( false, true, false, false, false ) === array_column( $class_calls, 'parent' )
+				&& array( false, false, true, false, false ) === array_column( $class_calls, 'current' )
+				&& array( '', '', 'page', '', '' ) === array_column( $link_calls, 'ariaCurrent' ),
+			'Walker_Nav_Menu current, parent, ancestor, and aria state stay local to generated items',
+			array(
+				'classCalls' => $class_calls,
+				'linkCalls'  => $link_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::nav_menu_matrix_tags_match_state( $li_tags, $a_tags, $expected_ids, $expected_depth, $current_id )
+				&& ! str_contains( strtolower( $opening_tag_text ), '<script' )
+				&& ! str_contains( $output, 'data-cfz-drop' ),
+			'Walker_Nav_Menu item attributes are escaped, scoped, and omit non-scalar matrix data',
+			array(
+				'liTags' => $li_tags,
+				'aTags'  => $a_tags,
+				'output' => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( 0, 1 ) === array_column( $subnav_calls, 'depth' )
+				&& array( 'sub-menu', 'sub-menu' ) === array_column( $subnav_calls, 'class' )
+				&& self::tags_contain_in_order(
+					$ul_tags,
+					array(
+						'data-cfz-submenu-depth="0"',
+						'data-cfz-submenu-depth="1"',
+					)
+				),
+			'Walker_Nav_Menu submenu attribute filters remain depth-local for nested generated branches',
+			array(
+				'subnavCalls' => $subnav_calls,
+				'ulTags'      => $ul_tags,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.public.nav-menu-item-matrix-locality',
+			array() === $failures,
+			array(
+				'failures'  => $failures,
+				'itemIds'   => $expected_ids,
+				'currentId' => $current_id,
 			)
 		);
 	}
@@ -2171,6 +2452,81 @@ final class ClassicWalkersSurface {
 			$close_count = preg_match_all( '/<\/' . preg_quote( $tag, '/' ) . '\s*>/i', $html );
 
 			if ( $open_count !== $close_count ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function opening_tags( string $html, string $tag ): array {
+		preg_match_all( '/<' . preg_quote( $tag, '/' ) . '\b[^>]*>/i', $html, $matches );
+
+		return $matches[0];
+	}
+
+	private static function nav_menu_matrix_tags_match_state(
+		array $li_tags,
+		array $a_tags,
+		array $expected_ids,
+		array $expected_depth,
+		int $current_id
+	): bool {
+		if ( count( $li_tags ) !== count( $expected_ids ) || count( $a_tags ) !== count( $expected_ids ) ) {
+			return false;
+		}
+
+		foreach ( $expected_ids as $index => $item_id ) {
+			$li_tag     = $li_tags[ $index ];
+			$a_tag      = $a_tags[ $index ];
+			$depth      = $expected_depth[ $index ];
+			$is_current = $current_id === $item_id;
+
+			if (
+				! str_contains( $li_tag, 'id="cfz-li-&quot;&lt;' . $item_id . '&gt;-d' . $depth . '"' )
+				|| ! str_contains( $li_tag, 'data-cfz-depth="' . $depth . '"' )
+				|| ! str_contains( $li_tag, 'cfz-matrix-depth-' . $depth )
+				|| ! str_contains( $a_tag, 'data-cfz-link="&quot;&lt;link-' . $item_id . '&gt;"' )
+			) {
+				return false;
+			}
+
+			if ( $is_current ) {
+				if (
+					! str_contains( $li_tag, 'current-menu-item' )
+					|| ! str_contains( $li_tag, 'cfz-matrix-filter-current' )
+					|| ! str_contains( $li_tag, 'data-cfz-current="&quot;&lt;current-' . $item_id . '&gt;"' )
+					|| ! str_contains( $a_tag, 'aria-current="page"' )
+				) {
+					return false;
+				}
+				continue;
+			}
+
+			if (
+				str_contains( $li_tag, 'current-menu-item' )
+				|| str_contains( $li_tag, 'cfz-matrix-filter-current' )
+				|| str_contains( $li_tag, 'data-cfz-current' )
+				|| str_contains( $a_tag, 'aria-current' )
+			) {
+				return false;
+			}
+		}
+
+		return str_contains( $li_tags[0], 'current-menu-ancestor' )
+			&& str_contains( $li_tags[1], 'current-menu-parent' )
+			&& str_contains( $li_tags[2], 'cfz-unsafe&lt;script&gt;' )
+			&& ! str_contains( $li_tags[3], 'current-menu-' )
+			&& ! str_contains( $li_tags[4], 'current-menu-' );
+	}
+
+	private static function tags_contain_in_order( array $tags, array $needles ): bool {
+		if ( count( $tags ) !== count( $needles ) ) {
+			return false;
+		}
+
+		foreach ( $needles as $index => $needle ) {
+			if ( ! str_contains( $tags[ $index ], $needle ) ) {
 				return false;
 			}
 		}
