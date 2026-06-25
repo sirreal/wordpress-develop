@@ -32,6 +32,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_compat_media_markup( $ctx->fork( 'compat-markup' ) );
 			$rows[] = self::check_image_form_controls( $ctx->fork( 'image-controls' ) );
 			$rows[] = self::check_image_editor_chrome( $ctx->fork( 'image-editor-chrome' ) );
+			$rows[] = self::check_edit_form_image_details_and_compat( $ctx->fork( 'edit-form-details' ) );
 			$rows[] = self::check_thumbnail_icon_and_image_helpers( $ctx->fork( 'thumb-icons' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
 			$rows[] = self::skipped_exiting_upload_helpers( $ctx );
@@ -69,6 +70,7 @@ final class AdminMediaChromeSurface {
 				'attachment_submitbox_metadata',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'edit_form_image_editor',
 				'get_attachment_fields_to_edit',
 				'get_compat_media_markup',
 				'get_media_item',
@@ -86,6 +88,7 @@ final class AdminMediaChromeSurface {
 				'wp_image_editor',
 				'wp_insert_post',
 				'wp_mime_type_icon',
+				'wp_editor',
 				'wp_set_current_user',
 			) as $function
 		) {
@@ -570,6 +573,160 @@ final class AdminMediaChromeSurface {
 		return self::row(
 			$ctx,
 			'admin-media-chrome.image-editor-chrome',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_edit_form_image_details_and_compat( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$alt_value    = 'Edit alt " <script>alert(1)</script> &' . $ctx->identifier( 3, 8 );
+		$attachment   = self::seed_attachment(
+			$ctx,
+			'image/jpeg',
+			array(
+				'alt'          => $alt_value,
+				'post_title'   => 'Edit form title <script>alert(1)</script> ' . $ctx->identifier( 3, 8 ),
+				'post_excerpt' => 'Edit caption <script>alert(1)</script> &' . $ctx->text( 0, 16 ),
+				'post_content' => 'Edit description <script>alert(1)</script> ' . $ctx->text( 0, 16 ),
+				'width'        => $ctx->int( 320, 1600 ),
+				'height'       => $ctx->int( 240, 1200 ),
+			)
+		);
+		$edit_value   = 'edit compat " <script>alert(1)</script> &' . $ctx->identifier( 3, 8 );
+		$hidden_value = "edit hidden <script>alert(1)</script> '" . $ctx->identifier( 3, 8 );
+		$modal_value  = 'modal only ' . $ctx->identifier( 3, 8 );
+		$events       = array(
+			'fields'   => array(),
+			'tinymce'  => array(),
+			'settings' => array(),
+		);
+
+		$fields_filter = static function ( array $fields, \WP_Post $post ) use ( &$events, $attachment, $edit_value, $hidden_value, $modal_value ): array {
+			$events['fields'][] = $post->ID;
+			if ( (int) $post->ID !== (int) $attachment->ID ) {
+				return $fields;
+			}
+
+			$fields['cfz_edit_detail'] = array(
+				'label'         => 'Edit detail',
+				'value'         => $edit_value,
+				'required'      => true,
+				'show_in_edit'  => true,
+				'show_in_modal' => false,
+			);
+			$fields['cfz_edit_hidden'] = array(
+				'input'         => 'hidden',
+				'value'         => $hidden_value,
+				'show_in_edit'  => true,
+				'show_in_modal' => false,
+			);
+			$fields['cfz_modal_only']  = array(
+				'label'         => 'Modal only',
+				'value'         => $modal_value,
+				'show_in_edit'  => false,
+				'show_in_modal' => true,
+			);
+
+			return $fields;
+		};
+
+		$tinymce_filter = static function ( bool $enabled ) use ( &$events ): bool {
+			$events['tinymce'][] = $enabled;
+			return false;
+		};
+
+		$settings_filter = static function ( array $settings, string $editor_id ) use ( &$events ): array {
+			if ( 'attachment_content' === $editor_id ) {
+				$events['settings'][] = array(
+					'editorId'      => $editor_id,
+					'textareaName'  => $settings['textarea_name'] ?? null,
+					'mediaButtons'  => $settings['media_buttons'] ?? null,
+					'quicktagNames' => is_array( $settings['quicktags'] ?? null ) ? array_keys( $settings['quicktags'] ) : array(),
+				);
+			}
+
+			return $settings;
+		};
+
+		$globals_snapshot = self::snapshot_globals( array( '_GET', '_POST', '_REQUEST' ) );
+		self::load_editor_class();
+		$editor_snapshot = self::snapshot_editor_statics();
+		$editor_restored = false;
+
+		\add_filter( 'attachment_fields_to_edit', $fields_filter, 10, 2 );
+		\add_filter( 'activate_tinymce_for_media_description', $tinymce_filter );
+		\add_filter( 'wp_editor_settings', $settings_filter, 10, 2 );
+		try {
+			unset( $_GET['image-editor'] );
+			$edit_post = \sanitize_post( $attachment, 'edit' );
+			$html      = self::capture_output(
+				static function () use ( $edit_post ): void {
+					\edit_form_image_editor( $edit_post );
+				}
+			);
+		} finally {
+			\remove_filter( 'attachment_fields_to_edit', $fields_filter, 10 );
+			\remove_filter( 'activate_tinymce_for_media_description', $tinymce_filter );
+			\remove_filter( 'wp_editor_settings', $settings_filter, 10 );
+			self::restore_state( $globals_snapshot );
+			self::restore_editor_statics( $editor_snapshot );
+			$editor_restored = $editor_snapshot === self::snapshot_editor_statics();
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $html )
+				&& str_contains( $html, 'wp_attachment_holder' )
+				&& str_contains( $html, 'media-head-' . $attachment->ID )
+				&& str_contains( $html, 'id="attachment_alt"' )
+				&& str_contains( $html, 'id="attachment_caption"' )
+				&& str_contains( $html, 'id="attachment_content"' )
+				&& str_contains( $html, 'id="image-edit-context" value="edit-attachment"' )
+				&& str_contains( $html, \esc_attr( $alt_value ) )
+				&& ! str_contains( $html, $alt_value )
+				&& self::html_has_no_raw_script( $html ),
+			'edit_form_image_editor() renders image details fields from sanitized attachment data without raw generated script text',
+			array( 'html' => self::describe_string( $html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $html, 'compat-attachment-fields' )
+				&& str_contains( $html, 'compat-field-cfz_edit_detail form-required' )
+				&& str_contains( $html, \esc_attr( $edit_value ) )
+				&& str_contains( $html, \esc_attr( $hidden_value ) )
+				&& ! str_contains( $html, 'compat-field-cfz_modal_only' )
+				&& ! str_contains( $html, $edit_value )
+				&& ! str_contains( $html, $hidden_value ),
+			'edit attachment compat markup includes edit-only required and hidden fields while escaping generated values',
+			array(
+				'events' => $events,
+				'html'   => self::describe_string( $html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'attachment_fields_to_edit', $fields_filter )
+				&& false === \has_filter( 'activate_tinymce_for_media_description', $tinymce_filter )
+				&& false === \has_filter( 'wp_editor_settings', $settings_filter )
+				&& array( $attachment->ID ) === $events['fields']
+				&& array( false ) === $events['tinymce']
+				&& 1 === count( $events['settings'] )
+				&& 'content' === ( $events['settings'][0]['textareaName'] ?? null )
+				&& false === ( $events['settings'][0]['mediaButtons'] ?? null )
+				&& $editor_restored,
+			'edit form filters, request globals, and editor statics are restored after rendering',
+			array(
+				'events'         => $events,
+				'editorRestored' => $editor_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.edit-form-image-details-compat',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -1163,6 +1320,18 @@ final class AdminMediaChromeSurface {
 		return $snapshot;
 	}
 
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
 	private static function restore_state( array $snapshot ): void {
 		foreach ( $snapshot as $name => $entry ) {
 			if ( $entry['exists'] ) {
@@ -1171,6 +1340,60 @@ final class AdminMediaChromeSurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function load_editor_class(): void {
+		if ( ! class_exists( '_WP_Editors', false ) && defined( 'ABSPATH' ) && defined( 'WPINC' ) ) {
+			require_once ABSPATH . WPINC . '/class-wp-editor.php';
+		}
+	}
+
+	private static function snapshot_editor_statics(): array {
+		$statics = array();
+		foreach ( self::editor_static_property_names() as $property ) {
+			$statics[ $property ] = self::clone_value( self::get_editor_static_property( $property ) );
+		}
+
+		return $statics;
+	}
+
+	private static function restore_editor_statics( array $snapshot ): void {
+		foreach ( $snapshot as $property => $value ) {
+			self::set_editor_static_property( (string) $property, $value );
+		}
+	}
+
+	private static function editor_static_property_names(): array {
+		return array(
+			'mce_locale',
+			'mce_settings',
+			'qt_settings',
+			'plugins',
+			'qt_buttons',
+			'ext_plugins',
+			'baseurl',
+			'first_init',
+			'this_tinymce',
+			'this_quicktags',
+			'has_tinymce',
+			'has_quicktags',
+			'has_medialib',
+			'editor_buttons_css',
+			'drag_drop_upload',
+			'translation',
+			'tinymce_scripts_printed',
+			'link_dialog_printed',
+		);
+	}
+
+	private static function get_editor_static_property( string $property ) {
+		$reflection = new \ReflectionProperty( '_WP_Editors', $property );
+		return $reflection->getValue();
+	}
+
+	private static function set_editor_static_property( string $property, $value ): void {
+		$reflection = new \ReflectionProperty( '_WP_Editors', $property );
+		$reflection->setValue( null, $value );
 	}
 
 	private static function clone_value( $value ) {

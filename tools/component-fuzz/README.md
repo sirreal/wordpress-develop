@@ -56,7 +56,8 @@ database, network requests, or a configured site.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
-  thumbnail/icon helper filters, and safe media button/uploader bypass output.
+  edit attachment details form output, thumbnail/icon helper filters, and safe
+  media button/uploader bypass output.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, model-selection
   preferences across provider/model collisions, prompt builder ability
