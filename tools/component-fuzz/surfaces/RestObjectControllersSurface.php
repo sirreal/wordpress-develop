@@ -2000,7 +2000,25 @@ final class RestObjectControllersSurface {
 		$schema           = $params[ $param ];
 		$schema_valid     = \rest_validate_value_from_schema( $case['value'], $schema, $param );
 		$schema_sanitized = \rest_sanitize_value_from_schema( $case['value'], $schema, $param );
-		$callback_valid   = null;
+		$pipeline_request = self::request( 'GET', $request->get_route(), array( $param => $case['value'] ) );
+		$pipeline_request->set_attributes( array( 'args' => $params ) );
+		$pipeline_valid       = $pipeline_request->has_valid_params();
+		$pipeline_sanitized   = null;
+		$pipeline_param       = null;
+		$pipeline_error       = $pipeline_valid instanceof \WP_Error ? $pipeline_valid : null;
+		$pipeline_error_phase = $pipeline_error instanceof \WP_Error ? 'validate' : null;
+		if ( true === $pipeline_valid ) {
+			$pipeline_sanitized = $pipeline_request->sanitize_params();
+			if ( $pipeline_sanitized instanceof \WP_Error ) {
+				$pipeline_error       = $pipeline_sanitized;
+				$pipeline_error_phase = 'sanitize';
+			} else {
+				$pipeline_param = $pipeline_request->get_param( $param );
+			}
+		}
+
+		$pipeline_error_data = $pipeline_error instanceof \WP_Error ? $pipeline_error->get_error_data() : null;
+		$callback_valid      = null;
 		$callback_sanitized = null;
 		$callback_failures = array();
 
@@ -2033,10 +2051,24 @@ final class RestObjectControllersSurface {
 			$ok = $ok && self::sanitized_result_matches( $callback_sanitized, $case['callbackSanitized'] ?? null, $case['callbackSanitizeError'] ?? null );
 		}
 
+		if ( $case['schemaValid'] ) {
+			$expected_pipeline_param = $case['requestSanitized'] ?? $case['callbackSanitized'] ?? $case['schemaSanitized'] ?? null;
+			$ok                      = $ok
+				&& true === $pipeline_valid
+				&& true === $pipeline_sanitized
+				&& $expected_pipeline_param === $pipeline_param;
+		} else {
+			$ok = $ok
+				&& $pipeline_error instanceof \WP_Error
+				&& 'rest_invalid_param' === $pipeline_error->get_error_code()
+				&& is_array( $pipeline_error_data )
+				&& isset( $pipeline_error_data['params'][ $param ] );
+		}
+
 		self::collect_failure(
 			$failures,
 			$ok,
-			'collection parameter schema and callbacks match deterministic matrix',
+			'collection parameter schema, callbacks, and request pipeline match deterministic matrix',
 			array(
 				'controller'        => $controller,
 				'param'             => $param,
@@ -2047,6 +2079,12 @@ final class RestObjectControllersSurface {
 				'callbackValid'     => $callback_valid,
 				'callbackSanitized' => $callback_sanitized,
 				'callbackFailures'  => $callback_failures,
+				'pipelineValid'     => $pipeline_valid,
+				'pipelineSanitized' => $pipeline_sanitized,
+				'pipelineParam'     => $pipeline_param,
+				'pipelineError'     => $pipeline_error,
+				'pipelineErrorData' => $pipeline_error_data,
+				'pipelineErrorPhase' => $pipeline_error_phase,
 				'paramSummary'      => self::param_summary( array( $param => $schema ) ),
 			)
 		);
