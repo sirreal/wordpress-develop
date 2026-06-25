@@ -542,7 +542,9 @@ database, network requests, or a configured site.
   coverage, including `wp_set_object_terms()` replace/append behavior,
   field-variant agreement, multi-object `all_with_object_id` mapping, scoped
   removal, membership/object lookup helpers, invalid-input fail-closed paths,
-  and `get_the_terms()` relationship cache population/invalidation.
+  `get_the_terms()` relationship cache population/invalidation, and generated
+  multi-object `update_object_term_cache()`/`clean_object_term_cache()`
+  priming, empty-entry, warm-cache, and re-prime invariants.
 - `template-hierarchy`: no-DB classic PHP template hierarchy coverage,
   including child/parent lookup priority, query-template filters, direct
   archive/page/search/404/embed helper filters and path confinement,

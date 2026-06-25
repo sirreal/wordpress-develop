@@ -46,6 +46,9 @@ final class TaxonomyRelationshipsSurface {
 			$rows[] = self::check_get_the_terms_cache( $ctx->fork( 'cache' ), $case );
 
 			self::prepare_runtime( $case );
+			$rows[] = self::check_object_term_cache_priming_and_cleaning( $ctx->fork( 'cache-prime-clean' ), $case );
+
+			self::prepare_runtime( $case );
 			$rows[] = self::check_filter_action_locality( $ctx->fork( 'hooks' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -79,6 +82,7 @@ final class TaxonomyRelationshipsSurface {
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'get_objects_in_term',
+				'get_object_taxonomies',
 				'get_post',
 				'get_taxonomy',
 				'get_term',
@@ -89,14 +93,20 @@ final class TaxonomyRelationshipsSurface {
 				'post_type_exists',
 				'register_post_type',
 				'register_taxonomy',
+				'register_taxonomy_for_object_type',
 				'remove_action',
 				'remove_filter',
 				'sanitize_title',
 				'term_exists',
 				'taxonomy_exists',
+				'clean_object_term_cache',
+				'update_object_term_cache',
+				'wp_cache_add_multiple',
 				'wp_cache_delete',
+				'wp_cache_delete_multiple',
 				'wp_cache_flush',
 				'wp_cache_get',
+				'wp_cache_get_multiple',
 				'wp_get_object_terms',
 				'wp_insert_post',
 				'wp_insert_term',
@@ -944,6 +954,174 @@ final class TaxonomyRelationshipsSurface {
 		);
 	}
 
+	private static function check_object_term_cache_priming_and_cleaning( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$post_type_ready = \register_taxonomy_for_object_type( $case['primaryTaxonomy'], 'post' )
+			&& \register_taxonomy_for_object_type( $case['secondaryTaxonomy'], 'post' );
+
+		$primary   = self::insert_fixture_terms( $case['primaryTaxonomy'], $case['primaryTerms'], 'cache-prime' );
+		$secondary = self::insert_fixture_terms( $case['secondaryTaxonomy'], $case['secondaryTerms'], 'cache-prime' );
+
+		if ( isset( $primary['error'] ) || isset( $secondary['error'] ) ) {
+			return $ctx->fail(
+				'taxonomy-relationships.object-term-cache-prime-clean',
+				array(
+					'case'       => self::case_summary( $case ),
+					'registered' => $post_type_ready,
+					'primary'    => $primary['error'] ?? null,
+					'secondary'  => $secondary['error'] ?? null,
+				)
+			);
+		}
+
+		$first_post_id  = self::create_host_post_for_type( $case, 'cache-prime-first', 'post' );
+		$second_post_id = self::create_host_post_for_type( $case, 'cache-prime-second', 'post' );
+		$third_post_id  = self::create_host_post_for_type( $case, 'cache-prime-empty-primary', 'post' );
+
+		if ( \is_wp_error( $first_post_id ) || \is_wp_error( $second_post_id ) || \is_wp_error( $third_post_id ) ) {
+			return $ctx->fail(
+				'taxonomy-relationships.object-term-cache-prime-clean',
+				array(
+					'case'   => self::case_summary( $case ),
+					'errors' => array(
+						'first'  => self::error_summary( $first_post_id ),
+						'second' => self::error_summary( $second_post_id ),
+						'third'  => self::error_summary( $third_post_id ),
+					),
+				)
+			);
+		}
+
+		$object_ids = self::to_ints( array( $first_post_id, $second_post_id, $third_post_id ) );
+		$taxonomies  = \get_object_taxonomies( 'post' );
+		$expected_cache = self::empty_relationship_cache_map( $object_ids, $taxonomies );
+		$expected_cache[ $case['primaryTaxonomy'] ][ $object_ids[0] ] = self::term_ids( array( $primary['alpha'], $primary['beta'] ) );
+		$expected_cache[ $case['primaryTaxonomy'] ][ $object_ids[1] ] = self::term_ids( array( $primary['gamma'] ) );
+		$expected_cache[ $case['secondaryTaxonomy'] ][ $object_ids[0] ] = self::term_ids( array( $secondary['one'] ) );
+		$expected_cache[ $case['secondaryTaxonomy'] ][ $object_ids[2] ] = self::term_ids( array( $secondary['two'] ) );
+		$expected_cache = self::normalize_relationship_cache_map( $expected_cache );
+
+		$set_first_primary = \wp_set_object_terms(
+			$object_ids[0],
+			array( $primary['alpha']['term_id'], $primary['beta']['slug'] ),
+			$case['primaryTaxonomy'],
+			false
+		);
+		$set_first_secondary = \wp_set_object_terms( $object_ids[0], array( $secondary['one']['term_id'] ), $case['secondaryTaxonomy'], false );
+		$set_second_primary  = \wp_set_object_terms( $object_ids[1], array( $primary['gamma']['term_id'] ), $case['primaryTaxonomy'], false );
+		$set_third_secondary = \wp_set_object_terms( $object_ids[2], array( $secondary['two']['slug'] ), $case['secondaryTaxonomy'], false );
+
+		foreach ( $taxonomies as $taxonomy ) {
+			\wp_cache_delete_multiple( $object_ids, "{$taxonomy}_relationships" );
+		}
+
+		$cache_before = self::relationship_cache_map( $object_ids, $taxonomies );
+		$update_shape = $ctx->choice( array( 'array', 'csv' ) );
+		$repeat_shape = 'array' === $update_shape ? 'csv' : 'array';
+		$first_update  = \update_object_term_cache( self::object_id_input( $object_ids, $update_shape ), 'post' );
+		$cache_first   = self::relationship_cache_map( $object_ids, $taxonomies );
+		$second_update = \update_object_term_cache( self::object_id_input( $object_ids, $repeat_shape ), 'post' );
+		$cache_second  = self::relationship_cache_map( $object_ids, $taxonomies );
+
+		$clean_events = array();
+		$clean_object_term_cache = static function ( $cleaned_object_ids, $object_type ) use ( &$clean_events ) {
+			$clean_events[] = array(
+				'objectIds'  => self::to_ints( $cleaned_object_ids ),
+				'objectType' => (string) $object_type,
+			);
+		};
+
+		\add_action( 'clean_object_term_cache', $clean_object_term_cache, 10, 2 );
+		try {
+			$clean_result = \clean_object_term_cache( $object_ids, 'post' );
+		} finally {
+			\remove_action( 'clean_object_term_cache', $clean_object_term_cache, 10 );
+		}
+
+		$cache_cleaned = self::relationship_cache_map( $object_ids, $taxonomies );
+		$reprime_update = \update_object_term_cache( self::object_id_input( $object_ids, $update_shape ), 'post' );
+		$cache_reprime  = self::relationship_cache_map( $object_ids, $taxonomies );
+
+		$failures = array();
+		self::collect_failure(
+			$failures,
+			$post_type_ready
+				&& self::same_int_set( $set_first_primary, self::tt_ids( array( $primary['alpha'], $primary['beta'] ) ) )
+				&& self::same_int_set( $set_first_secondary, self::tt_ids( array( $secondary['one'] ) ) )
+				&& self::same_int_set( $set_second_primary, self::tt_ids( array( $primary['gamma'] ) ) )
+				&& self::same_int_set( $set_third_secondary, self::tt_ids( array( $secondary['two'] ) ) )
+				&& self::relationship_cache_all_false( $cache_before ),
+			'deleted relationship cache groups are empty before explicit priming',
+			array(
+				'postTypeReady'      => $post_type_ready,
+				'setFirstPrimary'    => $set_first_primary,
+				'setFirstSecondary'  => $set_first_secondary,
+				'setSecondPrimary'   => $set_second_primary,
+				'setThirdSecondary'  => $set_third_secondary,
+				'cacheBefore'        => $cache_before,
+				'taxonomies'         => $taxonomies,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $first_update
+				&& false === $second_update
+				&& self::relationship_cache_maps_equal( $cache_first, $expected_cache )
+				&& self::relationship_cache_maps_equal( $cache_second, $expected_cache ),
+			'update_object_term_cache primes every post taxonomy relationship group and is false on a warm cache',
+			array(
+				'updateShape'  => $update_shape,
+				'repeatShape'  => $repeat_shape,
+				'firstUpdate'  => $first_update,
+				'secondUpdate' => $second_update,
+				'expected'     => $expected_cache,
+				'cacheFirst'   => $cache_first,
+				'cacheSecond'  => $cache_second,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $clean_result
+				&& self::relationship_cache_all_false( $cache_cleaned )
+				&& 1 === count( $clean_events )
+				&& self::same_int_list( $clean_events[0]['objectIds'] ?? array(), $object_ids )
+				&& 'post' === ( $clean_events[0]['objectType'] ?? null )
+				&& false === \has_filter( 'clean_object_term_cache', $clean_object_term_cache ),
+			'clean_object_term_cache clears every post taxonomy group and restores action locality',
+			array(
+				'cleanResult'  => $clean_result,
+				'cleanEvents'  => $clean_events,
+				'cacheCleaned' => $cache_cleaned,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $reprime_update
+				&& self::relationship_cache_maps_equal( $cache_reprime, $expected_cache )
+				&& self::relationship_cache_maps_equal( $cache_reprime, $cache_first ),
+			're-priming after cleaning restores the same object/taxonomy cache map',
+			array(
+				'reprimeUpdate' => $reprime_update,
+				'cacheReprime'  => $cache_reprime,
+				'cacheFirst'    => $cache_first,
+			)
+		);
+
+		return $ctx->result(
+			'taxonomy-relationships.object-term-cache-prime-clean',
+			array() === $failures,
+			array(
+				'case'        => self::case_summary( $case ),
+				'objectIds'   => $object_ids,
+				'taxonomies'  => $taxonomies,
+				'updateShape' => $update_shape,
+				'failures'    => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_filter_action_locality( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$fixture = self::create_fixture( $case, 'hooks' );
 		if ( isset( $fixture['error'] ) ) {
@@ -1265,10 +1443,14 @@ final class TaxonomyRelationshipsSurface {
 	}
 
 	private static function create_host_post( array $case, string $label, string $status = 'publish' ) {
+		return self::create_host_post_for_type( $case, $label, $case['postType'], $status );
+	}
+
+	private static function create_host_post_for_type( array $case, string $label, string $post_type, string $status = 'publish' ) {
 		return \wp_insert_post(
 			\wp_slash(
 				array(
-					'post_type'    => $case['postType'],
+					'post_type'    => $post_type,
 					'post_title'   => 'Relationship ' . $label . ' ' . $case['token'],
 					'post_content' => 'Relationship fixture content ' . $label,
 					'post_status'  => $status,
@@ -1655,6 +1837,74 @@ final class TaxonomyRelationshipsSurface {
 		return $out;
 	}
 
+	private static function relationship_cache_map( array $object_ids, array $taxonomies ): array {
+		$map = array();
+
+		foreach ( array_map( 'strval', $taxonomies ) as $taxonomy ) {
+			$group = "{$taxonomy}_relationships";
+			foreach ( self::to_ints( $object_ids ) as $object_id ) {
+				$value = \wp_cache_get( $object_id, $group );
+				$map[ $taxonomy ][ $object_id ] = false === $value ? false : self::sorted_ints( $value );
+			}
+		}
+
+		return self::normalize_relationship_cache_map( $map );
+	}
+
+	private static function empty_relationship_cache_map( array $object_ids, array $taxonomies ): array {
+		$map = array();
+
+		foreach ( array_map( 'strval', $taxonomies ) as $taxonomy ) {
+			foreach ( self::to_ints( $object_ids ) as $object_id ) {
+				$map[ $taxonomy ][ $object_id ] = array();
+			}
+		}
+
+		return $map;
+	}
+
+	private static function normalize_relationship_cache_map( array $map ): array {
+		ksort( $map );
+
+		foreach ( $map as &$by_object_id ) {
+			ksort( $by_object_id, SORT_NUMERIC );
+			foreach ( $by_object_id as &$term_ids ) {
+				if ( false !== $term_ids ) {
+					$term_ids = self::sorted_ints( $term_ids );
+				}
+			}
+			unset( $term_ids );
+		}
+		unset( $by_object_id );
+
+		return $map;
+	}
+
+	private static function relationship_cache_all_false( array $map ): bool {
+		foreach ( $map as $by_object_id ) {
+			foreach ( $by_object_id as $value ) {
+				if ( false !== $value ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function relationship_cache_maps_equal( array $actual, array $expected ): bool {
+		return self::normalize_relationship_cache_map( $actual ) === self::normalize_relationship_cache_map( $expected );
+	}
+
+	private static function object_id_input( array $object_ids, string $shape ) {
+		$object_ids = self::to_ints( $object_ids );
+		if ( 'csv' === $shape ) {
+			return implode( ', ', $object_ids );
+		}
+
+		return $object_ids;
+	}
+
 	private static function term_query_args( string $fields ): array {
 		return array(
 			'fields'                 => $fields,
@@ -1914,6 +2164,13 @@ final class TaxonomyRelationshipsSurface {
 
 	private static function to_ints( $values ): array {
 		return array_map( 'intval', is_array( $values ) ? $values : array() );
+	}
+
+	private static function sorted_ints( $values ): array {
+		$out = self::to_ints( $values );
+		sort( $out, SORT_NUMERIC );
+
+		return $out;
 	}
 
 	private static function compact_scalars( $values ): array {
