@@ -1572,6 +1572,8 @@ final class MetadataSurface {
 
 		$lazyloader  = new \WP_Metadata_Lazyloader();
 		$object_ids  = array( 5101 + $ctx->int( 1, 500 ), 5102 + $ctx->int( 1, 500 ) );
+		$queued_ids  = array( $object_ids[0], $object_ids[1], $object_ids[0] );
+		$unique_ids  = array_values( array_unique( $object_ids ) );
 		$extra_id    = 5999 + $ctx->int( 1, 500 );
 		$cache_key   = self::meta_key( $ctx->fork( 'lazy-cache-key' ), 'lazy' );
 		$cache_value = self::metadata_value( $ctx->fork( 'lazy-cache-value' ) );
@@ -1605,7 +1607,7 @@ final class MetadataSurface {
 
 		$invalid_queue = $lazyloader->queue_objects( 'post', $object_ids );
 		$invalid_reset = $lazyloader->reset_queue( 'user' );
-		$lazyloader->queue_objects( 'comment', array( $object_ids[0], $object_ids[1], $object_ids[0] ) );
+		$lazyloader->queue_objects( 'comment', $queued_ids );
 		$pending_before = self::get_object_property( $lazyloader, 'pending_objects' );
 		$has_filter     = false !== \has_filter( 'get_comment_metadata', array( $lazyloader, 'lazyload_meta_callback' ) );
 		$callback_value = $lazyloader->lazyload_meta_callback( null, $extra_id, '', false, 'comment' );
@@ -1622,15 +1624,15 @@ final class MetadataSurface {
 		\remove_action( 'metadata_lazyloader_queued_objects', $action, 10 );
 		\remove_filter( 'update_comment_metadata_cache', $cache_filter, 10 );
 
-		$expected_cache_ids = array( $object_ids[0], $object_ids[1], $extra_id );
+		$pending_ids        = array_keys( $pending_before['comment'] ?? array() );
+		$expected_cache_ids = array_merge( $unique_ids, array( $extra_id ) );
 
 		$ok = $invalid_queue instanceof \WP_Error
 			&& 'invalid_object_type' === $invalid_queue->get_error_code()
 			&& $invalid_reset instanceof \WP_Error
 			&& 'invalid_object_type' === $invalid_reset->get_error_code()
 			&& $has_filter
-			&& isset( $pending_before['comment'][ $object_ids[0] ], $pending_before['comment'][ $object_ids[1] ] )
-			&& 2 === count( $pending_before['comment'] )
+			&& self::same_value( $unique_ids, $pending_ids )
 			&& null === $callback_value
 			&& isset( $pending_after['comment'] )
 			&& array() === $pending_after['comment']
@@ -1641,7 +1643,7 @@ final class MetadataSurface {
 			&& self::same_value( $cache_value, $cached_extra )
 			&& isset( $events[0] )
 			&& 'comment' === $events[0]['objectType']
-			&& array( $object_ids[0], $object_ids[1], $object_ids[0] ) === $events[0]['ids']
+			&& $queued_ids === $events[0]['ids']
 			&& true === $events[0]['sameInstance']
 			&& $term_has_filter
 			&& null === $term_reset
@@ -1653,8 +1655,11 @@ final class MetadataSurface {
 			$ok,
 			array(
 				'objectIds'        => $object_ids,
+				'queuedIds'        => $queued_ids,
+				'uniqueIds'        => $unique_ids,
 				'extraId'          => $extra_id,
 				'pendingBefore'    => $pending_before,
+				'pendingIds'       => $pending_ids,
 				'pendingAfter'     => $pending_after,
 				'cacheCalls'       => $cache_calls,
 				'cachedFirst'      => $cached_first,
