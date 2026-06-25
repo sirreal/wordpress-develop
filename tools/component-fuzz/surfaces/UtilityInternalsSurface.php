@@ -27,6 +27,7 @@ final class UtilityInternalsSurface {
 		try {
 			$rows[] = self::check_list_util_filter_pluck_sort( $ctx->fork( 'list' ) );
 			$rows[] = self::check_list_util_chained_state( $ctx->fork( 'list-chain' ) );
+			$rows[] = self::check_parse_and_array_path_helpers( $ctx->fork( 'parse-array' ) );
 			$rows[] = self::check_token_map_lookup_and_precompute( $ctx->fork( 'token-map' ) );
 			$rows[] = self::check_matches_map_regex( $ctx->fork( 'matches' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'prefixer' ) );
@@ -87,6 +88,14 @@ final class UtilityInternalsSurface {
 				'wp_list_filter',
 				'wp_list_pluck',
 				'wp_list_sort',
+				'wp_parse_list',
+				'wp_parse_id_list',
+				'wp_parse_slug_list',
+				'wp_array_slice_assoc',
+				'wp_recursive_ksort',
+				'wp_is_numeric_array',
+				'_wp_array_get',
+				'_wp_array_set',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -248,6 +257,145 @@ final class UtilityInternalsSurface {
 				'rows'     => self::summarize_list( $list ),
 				'failures' => $failures,
 			)
+		);
+	}
+
+	private static function check_parse_and_array_path_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$slug        = strtolower( str_replace( '_', '-', $ctx->identifier( 4, 8 ) ) );
+		$list_string = " {$slug},{$slug}-two\t{$ctx->identifier( 3, 6 )}\nrepeat,repeat ,0 ";
+		$list_array  = array(
+			'first'  => $slug,
+			'nested' => array( 'drop' ),
+			'object' => (object) array( 'drop' => true ),
+			'false'  => false,
+			'int'    => $ctx->int( 1, 99 ),
+			'null'   => null,
+		);
+
+		$parsed_string          = \wp_parse_list( $list_string );
+		$expected_parsed_string = preg_split( '/[\s,]+/', $list_string, -1, PREG_SPLIT_NO_EMPTY );
+		$parsed_array           = \wp_parse_list( $list_array );
+		$expected_parsed_array  = array_filter( $list_array, 'is_scalar' );
+
+		$id_input     = array( '10', '-5', '10', 'bad', 0, '5.9', false, $ctx->int( 11, 30 ) );
+		$parsed_ids   = \wp_parse_id_list( $id_input );
+		$expected_ids = array_unique( array_map( 'absint', $id_input ) );
+		$slug_input   = array( 'Hello World', 'C++ Thing', 'Hello World', $slug . ' Extra' );
+		$parsed_slugs = \wp_parse_slug_list( $slug_input );
+		$expected_slugs = array_unique( array_map( 'sanitize_title', $slug_input ) );
+
+		self::collect_failure(
+			$failures,
+			$expected_parsed_string === $parsed_string
+				&& $expected_parsed_array === $parsed_array
+				&& $expected_ids === $parsed_ids
+				&& $expected_slugs === $parsed_slugs,
+			'parse-list helpers split strings, preserve scalar array entries, and normalize IDs/slugs',
+			array(
+				'parsedString' => $parsed_string,
+				'parsedArray'  => $parsed_array,
+				'ids'          => $parsed_ids,
+				'slugs'        => $parsed_slugs,
+			)
+		);
+
+		$source = array(
+			'z'          => array(
+				'b' => 2,
+				'a' => 1,
+			),
+			'a'          => array(
+				'd' => 4,
+				'c' => array(
+					'y' => null,
+					'x' => 'value-' . $slug,
+				),
+			),
+			'keep'       => 'yes-' . $slug,
+			'nullValue'  => null,
+		);
+		$slice = \wp_array_slice_assoc( $source, array( 'keep', 'nullValue', 'missing', 'a' ) );
+
+		$sorted = $source;
+		\wp_recursive_ksort( $sorted );
+		$expected_sorted = array(
+			'a'         => array(
+				'c' => array(
+					'x' => 'value-' . $slug,
+					'y' => null,
+				),
+				'd' => 4,
+			),
+			'keep'      => 'yes-' . $slug,
+			'nullValue' => null,
+			'z'         => array(
+				'a' => 1,
+				'b' => 2,
+			),
+		);
+
+		$mutated = $source;
+		\_wp_array_set( $mutated, array( 'a', 'c', 'generated' ), 'set-' . $slug );
+		\_wp_array_set( $mutated, array( 'scalar', 'child' ), 'replaced-' . $slug );
+		\_wp_array_set( $mutated, array( 'numeric', 0, 'leaf' ), $ctx->int( 100, 999 ) );
+		$invalid = $mutated;
+		\_wp_array_set( $invalid, array( 'invalid', new \stdClass() ), 'nope' );
+
+		self::collect_failure(
+			$failures,
+			array(
+				'keep' => 'yes-' . $slug,
+				'a'    => $source['a'],
+			) === $slice
+				&& $expected_sorted === $sorted
+				&& 'set-' . $slug === \_wp_array_get( $mutated, array( 'a', 'c', 'generated' ), 'missing' )
+				&& null === \_wp_array_get( $source, array( 'a', 'c', 'y' ), 'missing' )
+				&& 'missing' === \_wp_array_get( $source, array( 'a', 'missing' ), 'missing' )
+				&& 'missing' === \_wp_array_get( $source, array(), 'missing' )
+				&& 'replaced-' . $slug === \_wp_array_get( $mutated, array( 'scalar', 'child' ), 'missing' )
+				&& $invalid === $mutated,
+			'array helpers slice isset keys, sort recursively, and get/set nested paths with fail-closed invalid paths',
+			array(
+				'slice'   => $slice,
+				'sorted'  => $sorted,
+				'mutated' => $mutated,
+				'invalid' => $invalid,
+			)
+		);
+
+		$numeric_sparse = array(
+			2 => 'two',
+			4 => 'four',
+		);
+		$numeric_string_keys = array(
+			'0' => 'zero',
+			'1' => 'one',
+		);
+		$mixed_string_keys = array(
+			'01' => 'one',
+			0    => 'zero',
+		);
+		self::collect_failure(
+			$failures,
+			true === \wp_is_numeric_array( $numeric_sparse )
+				&& true === \wp_is_numeric_array( $numeric_string_keys )
+				&& true === \wp_is_numeric_array( array() )
+				&& false === \wp_is_numeric_array( $mixed_string_keys )
+				&& false === \wp_is_numeric_array( 'not-an-array' ),
+			'wp_is_numeric_array accepts sparse numeric keys and rejects string-keyed/non-array values',
+			array(
+				'numericSparse'     => $numeric_sparse,
+				'numericStringKeys' => array_keys( $numeric_string_keys ),
+				'mixedStringKeys'   => array_keys( $mixed_string_keys ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'utility-internals.parse-list-and-array-path-helpers',
+			array() === $failures,
+			array( 'failures' => $failures )
 		);
 	}
 

@@ -371,9 +371,9 @@ database, network requests, or a configured site.
 - `utility-internals`: no-DB low-level utility coverage for `WP_List_Util`,
   list helper wrappers, `WP_Token_Map`, `WP_MatchesMapRegex`, and
   `WP_URL_Pattern_Prefixer`, including reference filter/pluck/sort oracles,
-  chained filter/sort/pluck state, token lookup/precomputed table round trips,
-  rewrite match substitution, URL-pattern prefix escaping/idempotence
-  boundaries, and state restoration.
+  chained filter/sort/pluck state, parse-list and array-path helper contracts,
+  token lookup/precomputed table round trips, rewrite match substitution,
+  URL-pattern prefix escaping/idempotence boundaries, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen
