@@ -34,6 +34,7 @@ final class UserPreferencesSurface {
 			$rows[] = self::check_hidden_meta_box_preferences( $ctx->fork( 'hidden-metaboxes' ) );
 			$rows[] = self::check_meta_box_order_preferences( $ctx->fork( 'metabox-order' ) );
 			$rows[] = self::check_screen_option_registration( $ctx->fork( 'screen-options' ) );
+			$rows[] = self::check_screen_options_visibility_cache( $ctx->fork( 'screen-options-cache' ) );
 			$rows[] = self::check_screen_layout_rendering( $ctx->fork( 'screen-layout' ) );
 			$rows[] = self::check_screen_options_rendering_composition( $ctx->fork( 'screen-options-render' ) );
 			$rows[] = $ctx->skip(
@@ -924,6 +925,145 @@ final class UserPreferencesSurface {
 			'user-preferences.screen-options.registration-defaults-and-filters',
 			$failures,
 			array( 'screenId' => $screen_id )
+		);
+	}
+
+	private static function check_screen_options_visibility_cache( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$user_id            = self::seed_user( $ctx );
+		$settings_screen_id = 'cfz_prefs_settings_' . self::slug( $ctx, 'settings-screen' );
+		$hidden_screen_id   = 'cfz_prefs_hidden_' . self::slug( $ctx, 'hidden-screen' );
+		$plain_screen_id    = 'cfz_prefs_plain_' . self::slug( $ctx, 'plain-screen' );
+		$settings_marker    = 'cfz-settings-marker-' . self::slug( $ctx, 'settings-marker' );
+		$per_page_option    = 'cfz_hidden_screen_per_page_' . self::slug( $ctx, 'per-page' );
+		$per_page_default   = $ctx->int( 3, 199 );
+		$events             = array(
+			'settings' => array(),
+			'show'     => array(),
+		);
+		$settings_filter    = static function ( string $settings, \WP_Screen $screen ) use ( &$events, $settings_screen_id, $settings_marker ): string {
+			$events['settings'][] = array(
+				'id'       => $screen->id,
+				'previous' => $settings,
+			);
+
+			if ( $settings_screen_id !== $screen->id ) {
+				return $settings;
+			}
+
+			return $settings . '<fieldset class="cfz-settings-cache"><legend>' . \esc_html( $settings_marker ) . '</legend></fieldset>';
+		};
+		$show_filter        = static function ( bool $show_screen, \WP_Screen $screen ) use ( &$events, $hidden_screen_id ): bool {
+			$events['show'][] = array(
+				'id'   => $screen->id,
+				'show' => $show_screen,
+			);
+
+			return $hidden_screen_id === $screen->id ? false : $show_screen;
+		};
+
+		\wp_set_current_user( $user_id );
+
+		\add_filter( 'screen_settings', $settings_filter, 10, 2 );
+		try {
+			$settings_screen = \convert_to_screen( $settings_screen_id );
+			$settings_first  = $settings_screen->show_screen_options();
+			\remove_filter( 'screen_settings', $settings_filter, 10 );
+			$settings_second = $settings_screen->show_screen_options();
+			$settings_output = self::capture_output(
+				static function () use ( $settings_screen ): void {
+					$settings_screen->render_screen_options( array( 'wrap' => false ) );
+				}
+			);
+		} finally {
+			\remove_filter( 'screen_settings', $settings_filter, 10 );
+		}
+
+		$hidden_screen = \convert_to_screen( $hidden_screen_id );
+		$hidden_screen->add_option(
+			'per_page',
+			array(
+				'label'   => 'Hidden screen items',
+				'default' => $per_page_default,
+				'option'  => $per_page_option,
+			)
+		);
+
+		\add_filter( 'screen_options_show_screen', $show_filter, 10, 2 );
+		try {
+			$hidden_first = $hidden_screen->show_screen_options();
+			\remove_filter( 'screen_options_show_screen', $show_filter, 10 );
+			$hidden_second = $hidden_screen->show_screen_options();
+		} finally {
+			\remove_filter( 'screen_options_show_screen', $show_filter, 10 );
+		}
+
+		$plain_screen = \convert_to_screen( $plain_screen_id );
+		$plain_show   = $plain_screen->show_screen_options();
+
+		self::collect_failure(
+			$failures,
+			true === $settings_first
+				&& true === $settings_second
+				&& str_contains( $settings_output, $settings_marker )
+				&& ! str_contains( $settings_output, '<script' )
+				&& array(
+					array(
+						'id'       => $settings_screen_id,
+						'previous' => '',
+					),
+				) === $events['settings']
+				&& false === \has_filter( 'screen_settings', $settings_filter ),
+			'WP_Screen::show_screen_options() treats generated screen_settings output as visible and caches that decision after filters are removed',
+			array(
+				'screenId'       => $settings_screen_id,
+				'first'          => $settings_first,
+				'second'         => $settings_second,
+				'settingsEvents' => $events['settings'],
+				'output'         => $settings_output,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === $hidden_first
+				&& false === $hidden_second
+				&& array(
+					array(
+						'id'   => $hidden_screen_id,
+						'show' => true,
+					),
+				) === $events['show']
+				&& false === \has_filter( 'screen_options_show_screen', $show_filter ),
+			'WP_Screen::show_screen_options() lets filters hide an otherwise visible registered option screen and caches the hidden decision',
+			array(
+				'screenId'   => $hidden_screen_id,
+				'first'      => $hidden_first,
+				'second'     => $hidden_second,
+				'showEvents' => $events['show'],
+				'option'     => $per_page_option,
+				'default'    => $per_page_default,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === $plain_show,
+			'WP_Screen::show_screen_options() remains false for generated screens with no columns, metaboxes, options, or settings',
+			array(
+				'screenId' => $plain_screen_id,
+				'show'     => $plain_show,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'user-preferences.screen-options.visibility-cache-and-filters',
+			$failures,
+			array(
+				'userId'           => $user_id,
+				'settingsScreenId' => $settings_screen_id,
+				'hiddenScreenId'   => $hidden_screen_id,
+				'plainScreenId'    => $plain_screen_id,
+			)
 		);
 	}
 
