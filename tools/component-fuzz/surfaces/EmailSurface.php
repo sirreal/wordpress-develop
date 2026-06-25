@@ -23,6 +23,20 @@ final class EmailSurface {
 			);
 		}
 
+		$unicode_missing = self::missing_unicode_requirements();
+		if ( array() !== $unicode_missing ) {
+			return array_merge(
+				self::check_core_ascii_email_baseline( $ctx ),
+				array(
+					$ctx->skip(
+						'email.unicode-email-optional-apis-available',
+						'Optional WordPress Unicode email APIs are unavailable in this checkout.',
+						array( 'missing' => implode( ', ', $unicode_missing ) )
+					),
+				)
+			);
+		}
+
 		$rows     = array();
 		$snapshot = self::snapshot_hook_globals();
 
@@ -34,6 +48,7 @@ final class EmailSurface {
 			self::install_email_filters( 'unicode' );
 			$rows[] = self::check_unicode_filters( $ctx );
 			$rows = array_merge( $rows, self::check_direct_filter_callbacks( $ctx ) );
+			$rows = array_merge( $rows, self::check_disabled_filter_fail_closed( $ctx ) );
 			$rows = array_merge( $rows, self::check_whatwg_examples( $ctx ) );
 			$rows = array_merge( $rows, self::check_whatwg_ascii_oracle( $ctx ) );
 			$rows = array_merge( $rows, self::check_sanitizer_recovery( $ctx ) );
@@ -92,10 +107,6 @@ final class EmailSurface {
 				'is_wp_error',
 				'make_clickable',
 				'sanitize_email',
-				'wp_is_unicode_email',
-				'wp_sanitize_unicode_email',
-				'wp_is_ascii_email',
-				'wp_sanitize_ascii_email',
 				'wp_cache_flush',
 				'wp_insert_user',
 				'wp_is_valid_utf8',
@@ -106,14 +117,116 @@ final class EmailSurface {
 			}
 		}
 
-		if ( ! class_exists( 'WP_Email_Address' ) ) {
-			$missing[] = 'class WP_Email_Address';
-		}
 		if ( ! class_exists( 'WP_User' ) ) {
 			$missing[] = 'class WP_User';
 		}
 
 		return $missing;
+	}
+
+	private static function missing_unicode_requirements(): array {
+		$missing = array();
+		foreach (
+			array(
+				'wp_is_unicode_email',
+				'wp_sanitize_unicode_email',
+				'wp_is_ascii_email',
+				'wp_sanitize_ascii_email',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( 'WP_Email_Address' ) ) {
+			$missing[] = 'class WP_Email_Address';
+		}
+
+		return $missing;
+	}
+
+	private static function check_core_ascii_email_baseline( \ComponentFuzz\FuzzContext $ctx ): array {
+		$valid         = 'user+tag@example.com';
+		$unicode       = "jos\u{00E9}@example.com";
+		$invalid_cases = array(
+			'missing-at'  => 'missing-at.example.com',
+			'empty-local' => '@example.com',
+			'empty-domain' => 'user@',
+			'double-at'   => 'bad@@example.com',
+		);
+		$failures      = array();
+		$observed      = array();
+
+		$valid_is_email  = self::call( static fn() => \is_email( $valid ) );
+		$valid_sanitized = self::call( static fn() => \sanitize_email( $valid ) );
+
+		if (
+			$valid_is_email['threw'] ||
+			$valid_sanitized['threw'] ||
+			$valid !== $valid_is_email['value'] ||
+			$valid !== $valid_sanitized['value']
+		) {
+			$failures[] = array(
+				'label'         => 'ascii-valid',
+				'input'         => self::describe_string( $valid ),
+				'isEmail'       => self::describe_call( $valid_is_email ),
+				'sanitizeEmail' => self::describe_call( $valid_sanitized ),
+			);
+		}
+
+		$observed[] = array(
+			'label'         => 'ascii-valid',
+			'input'         => self::describe_string( $valid ),
+			'isEmail'       => self::describe_call( $valid_is_email ),
+			'sanitizeEmail' => self::describe_call( $valid_sanitized ),
+		);
+
+		foreach ( $invalid_cases as $label => $input ) {
+			$is_email  = self::call( static fn() => \is_email( $input ) );
+			$sanitized = self::call( static fn() => \sanitize_email( $input ) );
+
+			if (
+				$is_email['threw'] ||
+				$sanitized['threw'] ||
+				false !== $is_email['value'] ||
+				'' !== $sanitized['value']
+			) {
+				$failures[] = array(
+					'label'         => $label,
+					'input'         => self::describe_string( $input ),
+					'isEmail'       => self::describe_call( $is_email ),
+					'sanitizeEmail' => self::describe_call( $sanitized ),
+				);
+			}
+
+			$observed[] = array(
+				'label'         => $label,
+				'input'         => self::describe_string( $input ),
+				'isEmail'       => self::describe_call( $is_email ),
+				'sanitizeEmail' => self::describe_call( $sanitized ),
+			);
+		}
+
+		$unicode_is_email  = self::call( static fn() => \is_email( $unicode ) );
+		$unicode_sanitized = self::call( static fn() => \sanitize_email( $unicode ) );
+		$observed[]        = array(
+			'label'         => 'unicode-observed-without-optional-oracles',
+			'input'         => self::describe_string( $unicode ),
+			'isEmail'       => self::describe_call( $unicode_is_email ),
+			'sanitizeEmail' => self::describe_call( $unicode_sanitized ),
+		);
+
+		return array(
+			$ctx->result(
+				'email.core-ascii-baseline-without-unicode-oracles',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
+		);
 	}
 
 	private static function check_unicode_filters( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -323,6 +436,61 @@ final class EmailSurface {
 					'asciiContext'         => self::describe_call( $is_ascii_context ),
 					'punycodeUnicode'      => self::describe_call( $is_punycode_unicode ),
 					'sanitizePunycodeUnicode' => self::describe_call( $sanitize_punycode_unicode ),
+				)
+			),
+		);
+	}
+
+	private static function check_disabled_filter_fail_closed( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases    = array(
+			array( 'label' => 'ascii', 'input' => 'user@example.com' ),
+			array( 'label' => 'unicode-local', 'input' => "gr\u{00E5}@example.com" ),
+			array( 'label' => 'unicode-domain', 'input' => "mail@gr\u{00E5}.org" ),
+			array( 'label' => 'punycode-domain', 'input' => 'mail@xn--bcher-kva.de' ),
+		);
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			\remove_all_filters( 'is_email' );
+			\remove_all_filters( 'sanitize_email' );
+
+			foreach ( $cases as $case ) {
+				$is_email  = self::call( static fn() => \is_email( $case['input'] ) );
+				$sanitized = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$ok        = ! $is_email['threw']
+					&& ! $sanitized['threw']
+					&& false === $is_email['value']
+					&& '' === $sanitized['value'];
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'         => $case['label'],
+						'input'         => self::describe_string( $case['input'] ),
+						'isEmail'       => self::describe_call( $is_email ),
+						'sanitizeEmail' => self::describe_call( $sanitized ),
+					);
+				}
+
+				$observed[] = array(
+					'label'         => $case['label'],
+					'input'         => self::describe_string( $case['input'] ),
+					'isEmail'       => self::describe_call( $is_email ),
+					'sanitizeEmail' => self::describe_call( $sanitized ),
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.filters.disabled-fail-closed',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
 				)
 			),
 		);

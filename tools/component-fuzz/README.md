@@ -177,6 +177,7 @@ database, network requests, or a configured site.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
+  optional Unicode API availability skips, disabled-filter fail-closed behavior,
   invalid UTF-8, malformed address structure, selected boundary lengths,
   normalization-sensitive local parts, comment-author email filtering, REST user
   email schema validation across Unicode/ASCII filter modes, and user email
