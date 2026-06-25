@@ -40,6 +40,7 @@ final class PostTypesSurface {
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
 			$rows[] = self::check_post_type_archive_link_helpers( $ctx );
 			$rows[] = self::check_post_status_defaults_and_filters( $ctx );
+			$rows[] = self::check_post_status_name_sanitization_and_overwrite( $ctx->fork( 'status-name-sanitization' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -1566,6 +1567,130 @@ final class PostTypesSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_post_status_name_sanitization_and_overwrite( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_registries();
+
+		$failures = array();
+		$base     = self::status_name( $ctx->fork( 'alias' ), 'alias' );
+		$alias_a  = strtoupper( $base ) . '!!';
+		$alias_b  = $base . '$$';
+		$raw_cases = array(
+			array(
+				'label' => 'alias-first',
+				'raw'   => $alias_a,
+				'args'  => array(
+					'public' => true,
+					'label'  => 'Alias First ' . $ctx->int( 10, 99 ),
+				),
+			),
+			array(
+				'label' => 'alias-overwrite',
+				'raw'   => $alias_b,
+				'args'  => array(
+					'private' => true,
+					'label'   => 'Alias Second ' . $ctx->int( 100, 199 ),
+				),
+			),
+			array(
+				'label' => 'spaces-and-slashes',
+				'raw'   => '  ' . $ctx->identifier( 4, 8 ) . '/Status ' . $ctx->int( 1, 9 ) . '  ',
+				'args'  => array(
+					'protected' => true,
+				),
+			),
+			array(
+				'label' => 'unicode-empty-key',
+				'raw'   => $ctx->choice( array( "☃", "éé", "中文", "مرحبا" ) ),
+				'args'  => array(
+					'internal' => true,
+					'label'    => 'Unicode Empty Key',
+				),
+			),
+		);
+
+		$expected_by_key = array();
+		$registered      = array();
+
+		foreach ( $raw_cases as $index => $case ) {
+			$key      = \sanitize_key( $case['raw'] );
+			$status   = \register_post_status( $case['raw'], $case['args'] );
+			$expected = self::expected_status_props( $key, $case['args'] );
+			$raw_key_leaked = $case['raw'] !== $key && array_key_exists( $case['raw'], $GLOBALS['wp_post_statuses'] ?? array() );
+
+			self::collect_failure(
+				$failures,
+				is_object( $status )
+					&& $status === ( $GLOBALS['wp_post_statuses'][ $key ] ?? null )
+					&& $key === $status->name
+					&& $expected['label'] === $status->label
+					&& $expected['public'] === $status->public
+					&& $expected['private'] === $status->private
+					&& $expected['protected'] === $status->protected
+					&& $expected['internal'] === $status->internal
+					&& ! $raw_key_leaked,
+				"post status sanitized key registration case {$index}",
+				array(
+					'case'     => $case,
+					'key'      => $key,
+					'expected' => $expected,
+					'actual'   => is_object( $status ) ? self::status_summary( $status ) : self::describe_value( $status ),
+					'rawLeaked' => $raw_key_leaked,
+				)
+			);
+
+			$expected_by_key[ $key ] = $expected;
+			$registered[]           = array(
+				'label' => $case['label'],
+				'raw'   => $case['raw'],
+				'key'   => $key,
+			);
+		}
+
+		foreach ( $expected_by_key as $key => $expected ) {
+			$status = \get_post_status_object( $key );
+			self::collect_failure(
+				$failures,
+				is_object( $status )
+					&& $expected['label'] === $status->label
+					&& $expected['public'] === $status->public
+					&& $expected['private'] === $status->private
+					&& $expected['protected'] === $status->protected
+					&& $expected['internal'] === $status->internal,
+				"post status lookup matches last sanitized registration {$key}",
+				array(
+					'key'      => $key,
+					'expected' => $expected,
+					'actual'   => is_object( $status ) ? self::status_summary( $status ) : self::describe_value( $status ),
+				)
+			);
+		}
+
+		$private_names = \get_post_stati( array( 'private' => true ), 'names' );
+		$public_names  = \get_post_stati( array( 'public' => true ), 'names' );
+		self::collect_failure(
+			$failures,
+			in_array( \sanitize_key( $alias_b ), $private_names, true )
+				&& ! in_array( \sanitize_key( $alias_a ), $public_names, true ),
+			'post status duplicate sanitized key uses latest registration in filters',
+			array(
+				'aliasKey'     => \sanitize_key( $alias_a ),
+				'privateNames' => $private_names,
+				'publicNames'  => $public_names,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.status.sanitized-name-overwrite-contract',
+			array() === $failures,
+			array(
+				'registered' => $registered,
+				'keys'       => array_keys( $expected_by_key ),
+				'failures'   => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
