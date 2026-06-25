@@ -77,6 +77,20 @@ class Tests_Blocks_WpBlockMetadataRegistry extends WP_UnitTestCase {
 		$this->assertSame( $manifest_data['test-block'], WP_Block_Metadata_Registry::get_metadata( $path . '/test-block' ) );
 	}
 
+	public function test_register_collection_rejects_dot_segment_plugin_root_path() {
+		$this->setExpectedIncorrectUsage( 'WP_Block_Metadata_Registry::register_collection' );
+
+		$result = WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR . '/.', $this->temp_manifest_file );
+		$this->assertFalse( $result, 'Plugin root path with a dot segment should not be registered' );
+	}
+
+	public function test_register_collection_rejects_dot_segment_plugin_root_parent_path() {
+		$this->setExpectedIncorrectUsage( 'WP_Block_Metadata_Registry::register_collection' );
+
+		$result = WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR . '/..', $this->temp_manifest_file );
+		$this->assertFalse( $result, 'Plugin root parent path with a dot segment should not be registered' );
+	}
+
 	public function test_has_metadata() {
 			$path          = WP_PLUGIN_DIR . '/another/test/path';
 			$manifest_data = array(

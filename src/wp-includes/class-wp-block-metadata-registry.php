@@ -82,7 +82,7 @@ class WP_Block_Metadata_Registry {
 	 * @return bool True if the collection was registered successfully, false otherwise.
 	 */
 	public static function register_collection( $path, $manifest ) {
-		$path = rtrim( wp_normalize_path( $path ), '/' );
+		$path = self::normalize_collection_path( $path );
 
 		$collection_roots = self::get_default_collection_roots();
 
@@ -112,7 +112,7 @@ class WP_Block_Metadata_Registry {
 		$collection_roots = array_unique(
 			array_map(
 				static function ( $allowed_root ) {
-					return rtrim( wp_normalize_path( $allowed_root ), '/' );
+					return self::normalize_collection_path( $allowed_root );
 				},
 				$collection_roots
 			)
@@ -161,7 +161,7 @@ class WP_Block_Metadata_Registry {
 	 * @return array|null The block metadata for the block, or null if not found.
 	 */
 	public static function get_metadata( $file_or_folder ) {
-		$file_or_folder = wp_normalize_path( $file_or_folder );
+		$file_or_folder = self::normalize_collection_path( $file_or_folder );
 
 		$path = self::find_collection_path( $file_or_folder );
 		if ( ! $path ) {
@@ -196,7 +196,7 @@ class WP_Block_Metadata_Registry {
 	 * @return string[] List of block metadata file paths, or an empty array if the given `$path` is invalid.
 	 */
 	public static function get_collection_block_metadata_files( $path ) {
-		$path = rtrim( wp_normalize_path( $path ), '/' );
+		$path = self::normalize_collection_path( $path );
 
 		if ( ! isset( self::$collections[ $path ] ) ) {
 			_doing_it_wrong(
@@ -221,6 +221,47 @@ class WP_Block_Metadata_Registry {
 			},
 			array_keys( $collection['metadata'] )
 		);
+	}
+
+	/**
+	 * Normalizes a collection path and collapses dot segments.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $path File or directory path.
+	 * @return string Normalized path without trailing slashes.
+	 */
+	private static function normalize_collection_path( $path ) {
+		$path = wp_normalize_path( $path );
+
+		$drive = '';
+		if ( preg_match( '#^[A-Za-z]:#', $path, $matches ) ) {
+			$drive = $matches[0];
+			$path  = substr( $path, 2 );
+		}
+
+		$is_absolute = str_starts_with( $path, '/' );
+		$parts       = array();
+
+		foreach ( explode( '/', $path ) as $part ) {
+			if ( '' === $part || '.' === $part ) {
+				continue;
+			}
+			if ( '..' === $part ) {
+				if ( array() !== $parts && '..' !== end( $parts ) ) {
+					array_pop( $parts );
+					continue;
+				}
+				if ( ! $is_absolute ) {
+					$parts[] = $part;
+				}
+				continue;
+			}
+			$parts[] = $part;
+		}
+
+		$normalized = ( $is_absolute ? '/' : '' ) . implode( '/', $parts );
+		return rtrim( $drive . $normalized, '/' );
 	}
 
 	/**

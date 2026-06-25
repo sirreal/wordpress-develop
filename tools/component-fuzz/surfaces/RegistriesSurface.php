@@ -719,6 +719,12 @@ final class RegistriesSurface {
 			$invalid_root     = self::capture_doing_it_wrong(
 				static fn() => \WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR, $manifest_path )
 			);
+			$dot_root         = self::capture_doing_it_wrong(
+				static fn() => \WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR . '/.', $manifest_path )
+			);
+			$dot_parent       = self::capture_doing_it_wrong(
+				static fn() => \WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR . '/..', $manifest_path )
+			);
 			$missing_manifest = self::capture_doing_it_wrong(
 				static fn() => \WP_Block_Metadata_Registry::register_collection( $collection_path . '-missing', $manifest_path . '-missing' )
 			);
@@ -726,13 +732,19 @@ final class RegistriesSurface {
 			self::collect_failure(
 				$failures,
 				false === $invalid_root['value']
+					&& false === $dot_root['value']
+					&& false === $dot_parent['value']
 					&& false === $missing_manifest['value']
 					&& self::has_warning( $invalid_root )
+					&& self::has_warning( $dot_root )
+					&& self::has_warning( $dot_parent )
 					&& self::has_warning( $missing_manifest )
 					&& $before_invalid === self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' ),
 				'invalid block metadata collections warn and do not mutate the registry',
 				array(
 					'invalidRoot'     => $invalid_root,
+					'dotRoot'         => $dot_root,
+					'dotParent'       => $dot_parent,
 					'missingManifest' => $missing_manifest,
 				)
 			);
