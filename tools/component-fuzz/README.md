@@ -13,8 +13,9 @@ database, network requests, or a configured site.
 
 - `abilities`: Abilities API category and ability registry lifecycles,
   action-gated registration, metadata/default preparation, filtered discovery,
-  schema validation, permission checks, execution, validation filters, callback
-  exception handling, and unregister behavior.
+  schema validation, custom subclass execution, permission checks, execution,
+  query pipeline ordering, validation filters, callback exception handling, and
+  unregister/re-register behavior.
 - `account-security`: no-DB account recovery and security APIs, including
   application password lifecycle/hash/authentication behavior, recovery
   key/cookie validation, and paused extension storage transitions.
