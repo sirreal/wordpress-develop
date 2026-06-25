@@ -40,6 +40,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_revisions_controller( $ctx, $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_attachments_controller( $ctx, $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
+			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-object-controllers.templates-controller.skipped',
@@ -133,6 +134,7 @@ final class RestObjectControllersSurface {
 				'is_wp_error',
 				'register_post_meta',
 				'register_rest_field',
+				'register_rest_route',
 				'remove_filter',
 				'rest_ensure_response',
 				'rest_get_route_for_post',
@@ -1648,6 +1650,272 @@ final class RestObjectControllersSurface {
 		);
 	}
 
+	private static function check_route_registry_behavior( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+				new \WP_REST_Revisions_Controller( 'post' ),
+				new \WP_REST_Attachments_Controller( 'attachment' ),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			$routes          = $server->get_routes( 'wp/v2' );
+			$registered_keys = array_keys( $routes );
+			sort( $registered_keys );
+			$expected_routes = array(
+				'/wp/v2/categories',
+				'/wp/v2/categories/(?P<id>[\d]+)',
+				'/wp/v2/comments',
+				'/wp/v2/comments/(?P<id>[\d]+)',
+				'/wp/v2/media',
+				'/wp/v2/media/(?P<id>[\d]+)',
+				'/wp/v2/media/(?P<id>[\d]+)/edit',
+				'/wp/v2/media/(?P<id>[\d]+)/post-process',
+				'/wp/v2/posts',
+				'/wp/v2/posts/(?P<id>[\d]+)',
+				'/wp/v2/posts/(?P<parent>[\d]+)/revisions',
+				'/wp/v2/posts/(?P<parent>[\d]+)/revisions/(?P<id>[\d]+)',
+				'/wp/v2/users',
+				'/wp/v2/users/(?P<id>[\d]+)',
+				'/wp/v2/users/me',
+			);
+			$missing_routes = array_values( array_diff( $expected_routes, $registered_keys ) );
+
+			$posts_methods         = self::route_methods( $routes['/wp/v2/posts'] ?? array() );
+			$post_item_methods     = self::route_methods( $routes['/wp/v2/posts/(?P<id>[\d]+)'] ?? array() );
+			$term_item_methods     = self::route_methods( $routes['/wp/v2/categories/(?P<id>[\d]+)'] ?? array() );
+			$revision_item_methods = self::route_methods( $routes['/wp/v2/posts/(?P<parent>[\d]+)/revisions/(?P<id>[\d]+)'] ?? array() );
+			$media_edit_methods    = self::route_methods( $routes['/wp/v2/media/(?P<id>[\d]+)/edit'] ?? array() );
+			$media_process_methods = self::route_methods( $routes['/wp/v2/media/(?P<id>[\d]+)/post-process'] ?? array() );
+			$users_me_methods      = self::route_methods( $routes['/wp/v2/users/me'] ?? array() );
+
+			self::collect_failure(
+				$failures,
+				in_array( 'wp/v2', $server->get_namespaces(), true )
+					&& array() === $missing_routes
+					&& in_array( 'GET', $posts_methods, true )
+					&& in_array( 'POST', $posts_methods, true )
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $post_item_methods
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $term_item_methods
+					&& array( 'DELETE', 'GET' ) === $revision_item_methods
+					&& array( 'POST' ) === $media_edit_methods
+					&& array( 'POST' ) === $media_process_methods
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $users_me_methods
+					&& is_callable( $server->get_route_options( '/wp/v2/posts' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/categories' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/comments' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/users' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/posts/(?P<parent>[\d]+)/revisions' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/media' )['schema'] ?? null ),
+				'object controllers register expected wp/v2 routes, methods, and schemas',
+				array(
+					'expectedRoutes'       => $expected_routes,
+					'registeredRoutes'     => $registered_keys,
+					'missingRoutes'        => $missing_routes,
+					'postsMethods'         => $posts_methods,
+					'postItemMethods'      => $post_item_methods,
+					'termItemMethods'      => $term_item_methods,
+					'revisionItemMethods'  => $revision_item_methods,
+					'mediaEditMethods'     => $media_edit_methods,
+					'mediaProcessMethods'  => $media_process_methods,
+					'usersMeMethods'       => $users_me_methods,
+				)
+			);
+
+			$cap_filter = self::install_cap_filter(
+				array(
+					'edit_categories',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'read',
+					'upload_files',
+				)
+			);
+			$dispatch_filter_restored = false;
+			try {
+				$post_request = self::request(
+					'GET',
+					'/wp/v2/posts/' . $fixtures['post'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,title,slug',
+					)
+				);
+				$post_response = $server->dispatch( $post_request );
+
+				$term_request = self::request(
+					'GET',
+					'/wp/v2/categories/' . $fixtures['term'],
+					array( '_fields' => 'id,name,slug' )
+				);
+				$term_response = $server->dispatch( $term_request );
+
+				$comment_request = self::request(
+					'GET',
+					'/wp/v2/comments/' . $fixtures['comment'],
+					array( '_fields' => 'id,post,status' )
+				);
+				$comment_response = $server->dispatch( $comment_request );
+
+				$user_request = self::request(
+					'GET',
+					'/wp/v2/users/' . $fixtures['author'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,username,email',
+					)
+				);
+				$user_response = $server->dispatch( $user_request );
+
+				$revision_request = self::request(
+					'GET',
+					'/wp/v2/posts/' . $fixtures['post'] . '/revisions/' . $fixtures['revision'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title',
+					)
+				);
+				$revision_response = $server->dispatch( $revision_request );
+
+				$attachment_request = self::request(
+					'GET',
+					'/wp/v2/media/' . $fixtures['attachment'],
+					array( '_fields' => 'id,media_type,mime_type' )
+				);
+				$attachment_response = $server->dispatch( $attachment_request );
+			} finally {
+				$dispatch_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			$post_data       = $post_response instanceof \WP_REST_Response ? $post_response->get_data() : array();
+			$term_data       = $term_response instanceof \WP_REST_Response ? $term_response->get_data() : array();
+			$comment_data    = $comment_response instanceof \WP_REST_Response ? $comment_response->get_data() : array();
+			$user_data       = $user_response instanceof \WP_REST_Response ? $user_response->get_data() : array();
+			$revision_data   = $revision_response instanceof \WP_REST_Response ? $revision_response->get_data() : array();
+			$attachment_data = $attachment_response instanceof \WP_REST_Response ? $attachment_response->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$post_response instanceof \WP_REST_Response
+					&& 200 === $post_response->get_status()
+					&& $fixtures['post'] === (int) ( $post_data['id'] ?? 0 )
+					&& $case['postTitle'] === ( $post_data['title']['raw'] ?? null )
+					&& (string) $fixtures['post'] === (string) ( $post_request->get_url_params()['id'] ?? '' )
+					&& $term_response instanceof \WP_REST_Response
+					&& 200 === $term_response->get_status()
+					&& $fixtures['term'] === (int) ( $term_data['id'] ?? 0 )
+					&& $case['termName'] === ( $term_data['name'] ?? null )
+					&& (string) $fixtures['term'] === (string) ( $term_request->get_url_params()['id'] ?? '' )
+					&& $comment_response instanceof \WP_REST_Response
+					&& 200 === $comment_response->get_status()
+					&& $fixtures['comment'] === (int) ( $comment_data['id'] ?? 0 )
+					&& $fixtures['post'] === (int) ( $comment_data['post'] ?? 0 )
+					&& (string) $fixtures['comment'] === (string) ( $comment_request->get_url_params()['id'] ?? '' )
+					&& $user_response instanceof \WP_REST_Response
+					&& 200 === $user_response->get_status()
+					&& $fixtures['author'] === (int) ( $user_data['id'] ?? 0 )
+					&& $case['authorEmail'] === ( $user_data['email'] ?? null )
+					&& (string) $fixtures['author'] === (string) ( $user_request->get_url_params()['id'] ?? '' )
+					&& $revision_response instanceof \WP_REST_Response
+					&& 200 === $revision_response->get_status()
+					&& $fixtures['revision'] === (int) ( $revision_data['id'] ?? 0 )
+					&& $fixtures['post'] === (int) ( $revision_data['parent'] ?? 0 )
+					&& (string) $fixtures['post'] === (string) ( $revision_request->get_url_params()['parent'] ?? '' )
+					&& (string) $fixtures['revision'] === (string) ( $revision_request->get_url_params()['id'] ?? '' )
+					&& $attachment_response instanceof \WP_REST_Response
+					&& 200 === $attachment_response->get_status()
+					&& $fixtures['attachment'] === (int) ( $attachment_data['id'] ?? 0 )
+					&& 'image' === ( $attachment_data['media_type'] ?? null )
+					&& 'image/jpeg' === ( $attachment_data['mime_type'] ?? null )
+					&& (string) $fixtures['attachment'] === (string) ( $attachment_request->get_url_params()['id'] ?? '' )
+					&& $dispatch_filter_restored,
+				'registered object routes dispatch to controller callbacks with URL params and fixture-backed data',
+				array(
+					'postData'               => $post_data,
+					'postUrlParams'          => $post_request->get_url_params(),
+					'termData'               => $term_data,
+					'termUrlParams'          => $term_request->get_url_params(),
+					'commentData'            => $comment_data,
+					'commentUrlParams'       => $comment_request->get_url_params(),
+					'userData'               => $user_data,
+					'userUrlParams'          => $user_request->get_url_params(),
+					'revisionData'           => $revision_data,
+					'revisionUrlParams'      => $revision_request->get_url_params(),
+					'attachmentData'         => $attachment_data,
+					'attachmentUrlParams'    => $attachment_request->get_url_params(),
+					'dispatchFilterRestored' => $dispatch_filter_restored,
+				)
+			);
+
+			$head_response     = $server->dispatch( self::request( 'HEAD', '/wp/v2/posts/' . $fixtures['post'] ) );
+			$missing_response  = $server->dispatch( self::request( 'GET', '/wp/v2/not-an-object-controller' ) );
+			$readonly_response = $server->dispatch( self::request( 'DELETE', '/wp/v2/posts' ) );
+
+			self::collect_failure(
+				$failures,
+				$head_response instanceof \WP_REST_Response
+					&& 200 === $head_response->get_status()
+					&& array() === $head_response->get_data()
+					&& self::response_error_ok( $missing_response, 'rest_no_route', 404 )
+					&& self::response_error_ok( $readonly_response, 'rest_no_route', 404 ),
+				'registered object route dispatch preserves HEAD fallback and represented no-route errors',
+				array(
+					'headData'      => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+					'missingRoute'  => $missing_response,
+					'readonlyRoute' => $readonly_response,
+				)
+			);
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-registry-dispatch-errors',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function object_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token = substr( hash( 'sha1', (string) $ctx->seed() . ':' . $ctx->iteration() ), 0, 10 );
 
@@ -2178,6 +2446,37 @@ final class RestObjectControllersSurface {
 
 		$data = $value->get_error_data();
 		return is_array( $data ) && $status === (int) ( $data['status'] ?? 0 );
+	}
+
+	private static function response_error_ok( $response, string $code, int $status ): bool {
+		if ( ! $response instanceof \WP_REST_Response || $status !== $response->get_status() ) {
+			return false;
+		}
+
+		$data = $response->get_data();
+		return is_array( $data )
+			&& $code === ( $data['code'] ?? null )
+			&& isset( $data['data'] )
+			&& is_array( $data['data'] )
+			&& $status === (int) ( $data['data']['status'] ?? 0 );
+	}
+
+	private static function route_methods( array $handlers ): array {
+		$methods = array();
+		foreach ( $handlers as $handler ) {
+			if ( ! is_array( $handler ) || ! isset( $handler['methods'] ) || ! is_array( $handler['methods'] ) ) {
+				continue;
+			}
+			foreach ( $handler['methods'] as $method => $enabled ) {
+				if ( $enabled ) {
+					$methods[] = (string) $method;
+				}
+			}
+		}
+
+		$methods = array_values( array_unique( $methods ) );
+		sort( $methods );
+		return $methods;
 	}
 
 	private static function content_counts(): array {
