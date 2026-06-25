@@ -39,13 +39,19 @@ final class ShortcodesSurface {
 			$rows[] = self::check_attribute_parsing( $ctx->fork( 'attribute-parsing' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_defaults( $ctx->fork( 'attribute-defaults' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_filter_contract( $ctx->fork( 'attribute-filter' ), $attribute_cases );
+			$rows[] = self::check_shortcode_atts_filter_locality_matrix( $ctx->fork( 'attribute-filter-locality' ), $attribute_cases );
 			$rows[] = self::check_rendering_contracts( $ctx->fork( 'rendering' ), $attribute_cases );
+			$rows[] = self::check_nested_parse_boundaries( $ctx->fork( 'nested-boundaries' ), $attribute_cases );
+			$rows[] = self::check_callback_mutation_during_render( $ctx->fork( 'callback-mutation' ), $attribute_cases );
 			$rows[] = self::check_shortcode_tag_filter_contracts( $ctx->fork( 'tag-filters' ), $attribute_cases );
 			$rows[] = self::check_escaped_shortcodes( $ctx->fork( 'escaping' ), $attribute_cases );
+			$rows[] = self::check_escaped_shortcode_boundaries( $ctx->fork( 'escaping-boundaries' ), $attribute_cases );
 			$rows[] = self::check_html_attribute_behavior( $ctx->fork( 'html-attributes' ) );
 			$rows[] = self::check_strip_and_has_shortcode( $ctx->fork( 'strip-has' ), $attribute_cases );
+			$rows[] = self::check_strip_preservation_contracts( $ctx->fork( 'strip-preservation' ), $attribute_cases );
 			$rows[] = self::check_strip_tagnames_filter_contract( $ctx->fork( 'strip-filter' ), $attribute_cases );
 			$rows[] = self::check_tag_discovery_and_apply_alias( $ctx->fork( 'tag-discovery' ), $attribute_cases );
+			$rows[] = self::check_tag_name_edges_and_alias_collisions( $ctx->fork( 'tag-edges' ), $attribute_cases );
 			$rows[] = self::check_malformed_and_nested_cases( $ctx->fork( 'malformed-nested' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -482,6 +488,112 @@ final class ShortcodesSurface {
 		);
 	}
 
+	private static function check_shortcode_atts_filter_locality_matrix( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$fragment     = self::safe_fragment( $ctx->fork( 'edge-fragment' ), 7, false );
+		$edge_tag     = 'cfz-atts.' . $fragment . ':edge';
+		$neighbor_tag = $edge_tag . '-neighbor';
+		$prefix_tag   = 'cfz-atts.' . $fragment;
+		$case         = $cases[5];
+		$known_keys   = array_keys( $case['expectedNamed'] );
+		$pairs        = array(
+			$known_keys[0] => 'default-one',
+			$known_keys[1] => 'default-two',
+			'matrix_only'  => 'default-matrix',
+		);
+		$atts         = $case['expectedNamed'] + array(
+			'unknown_matrix' => 'drop-me',
+			0                => 'drop-positional',
+		);
+		$seen         = array();
+		$make_filter  = static function ( string $hook_tag ) use ( &$seen ) {
+			return static function ( $out, $filter_pairs, $filter_atts, $shortcode ) use ( &$seen, $hook_tag ) {
+				$seen[] = array(
+					'hookTag'   => $hook_tag,
+					'shortcode' => $shortcode,
+					'out'       => $out,
+					'pairs'     => $filter_pairs,
+					'atts'      => $filter_atts,
+				);
+
+				$out['matrix_only']  = 'filtered-' . $hook_tag;
+				$out['filter_marker'] = $hook_tag;
+				return $out;
+			};
+		};
+		$filters      = array(
+			$edge_tag     => $make_filter( $edge_tag ),
+			$neighbor_tag => $make_filter( $neighbor_tag ),
+			$prefix_tag   => $make_filter( $prefix_tag ),
+		);
+		$failures     = array();
+
+		foreach ( $filters as $tag => $filter ) {
+			\add_filter( "shortcode_atts_{$tag}", $filter, 10, 4 );
+		}
+
+		try {
+			$edge      = \shortcode_atts( $pairs, $atts, $edge_tag );
+			$neighbor  = \shortcode_atts( $pairs, $atts, $neighbor_tag );
+			$prefix    = \shortcode_atts( $pairs, $atts, $prefix_tag );
+			$no_filter = \shortcode_atts( $pairs, $atts, '' );
+		} finally {
+			foreach ( $filters as $tag => $filter ) {
+				\remove_filter( "shortcode_atts_{$tag}", $filter, 10 );
+			}
+		}
+
+		$base_expected = array(
+			$known_keys[0] => $case['expectedNamed'][ $known_keys[0] ],
+			$known_keys[1] => $case['expectedNamed'][ $known_keys[1] ],
+			'matrix_only'  => 'default-matrix',
+		);
+		$expected_edge = $base_expected + array(
+			'filter_marker' => $edge_tag,
+		);
+		$expected_edge['matrix_only'] = 'filtered-' . $edge_tag;
+		$expected_neighbor = $base_expected + array(
+			'filter_marker' => $neighbor_tag,
+		);
+		$expected_neighbor['matrix_only'] = 'filtered-' . $neighbor_tag;
+		$expected_prefix = $base_expected + array(
+			'filter_marker' => $prefix_tag,
+		);
+		$expected_prefix['matrix_only'] = 'filtered-' . $prefix_tag;
+
+		self::collect_failure(
+			$failures,
+			$expected_edge === $edge
+				&& $expected_neighbor === $neighbor
+				&& $expected_prefix === $prefix
+				&& $base_expected === $no_filter
+				&& array( $edge_tag, $neighbor_tag, $prefix_tag ) === array_column( $seen, 'hookTag' )
+				&& array( $edge_tag, $neighbor_tag, $prefix_tag ) === array_column( $seen, 'shortcode' )
+				&& $base_expected === $seen[0]['out']
+				&& $pairs === $seen[0]['pairs']
+				&& $atts === $seen[0]['atts'],
+			'shortcode_atts dynamic filters are exact-hook local for punctuation-rich and prefix-related shortcode names',
+			array(
+				'tags'      => array( $edge_tag, $neighbor_tag, $prefix_tag ),
+				'edge'      => $edge,
+				'neighbor'  => $neighbor,
+				'prefix'    => $prefix,
+				'noFilter'  => $no_filter,
+				'seen'      => $seen,
+				'base'      => $base_expected,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.attributes-filter-exact-hook-locality',
+			$failures,
+			array(
+				'tags'     => array( $edge_tag, $neighbor_tag, $prefix_tag ),
+				'caseText' => self::describe_string( $case['text'] ),
+			)
+		);
+	}
+
 	private static function check_rendering_contracts( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
 		$outer       = self::tag( $ctx, 'outer' );
 		$inner       = self::tag( $ctx, 'inner' );
@@ -558,6 +670,235 @@ final class ShortcodesSurface {
 				'source'     => self::describe_string( $source ),
 				'outputSha1' => sha1( $output ),
 				'callCount'  => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_nested_parse_boundaries( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$outer        = self::tag( $ctx, 'boundary-outer' );
+		$inner        = self::tag( $ctx, 'boundary-inner' );
+		$sibling      = self::tag( $ctx, 'boundary-sibling' );
+		$inner_source = '[' . $inner . ' ' . $cases[1]['text'] . ']inner-body[/' . $inner . ']';
+		$same_source  = '[' . $outer . ' ' . $cases[2]['text'] . ' /]';
+		$outer_body   = 'A ' . $inner_source . ' B ' . $same_source . ' C';
+		$source       = 'pre [' . $outer . ' ' . $cases[0]['text'] . ']' . $outer_body . '[/' . $outer . '] mid [' . $sibling . ' ' . $cases[3]['text'] . ' /] post';
+		$calls        = array();
+		$callback     = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'boundary<' . (string) $shortcode_tag . '>';
+		};
+		$expected_calls = array(
+			array(
+				'tag'     => $outer,
+				'atts'    => self::expected_atts( $cases[0] ),
+				'content' => $outer_body,
+			),
+			array(
+				'tag'     => $sibling,
+				'atts'    => self::expected_atts( $cases[3] ),
+				'content' => '',
+			),
+		);
+		$failures       = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $outer, $callback );
+		\add_shortcode( $inner, $callback );
+		\add_shortcode( $sibling, $callback );
+
+		$discovered = \get_shortcode_tags_in_content( $source );
+		$rendered   = \do_shortcode( $source );
+		$has_outer  = \has_shortcode( $source, $outer );
+		$has_inner  = \has_shortcode( $source, $inner );
+		$has_sibling = \has_shortcode( $source, $sibling );
+
+		self::collect_failure(
+			$failures,
+			array( $outer, $inner, $outer, $sibling ) === $discovered
+				&& true === $has_outer
+				&& true === $has_inner
+				&& true === $has_sibling,
+			'get_shortcode_tags_in_content and has_shortcode recurse through enclosing content while preserving duplicate source-order discoveries',
+			array(
+				'expected' => array( $outer, $inner, $outer, $sibling ),
+				'actual'   => $discovered,
+				'has'      => array(
+					'outer'   => $has_outer,
+					'inner'   => $has_inner,
+					'sibling' => $has_sibling,
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_calls === $calls
+				&& 1 === self::call_tags( $calls, $outer )
+				&& 0 === self::call_tags( $calls, $inner )
+				&& 1 === self::call_tags( $calls, $sibling )
+				&& str_contains( $rendered, 'boundary<' . $outer . '>' )
+				&& str_contains( $rendered, 'boundary<' . $sibling . '>' )
+				&& ! str_contains( $rendered, 'inner-body' ),
+			'do_shortcode treats nested shortcodes as raw enclosing content unless callbacks recurse explicitly',
+			array(
+				'source'     => self::describe_string( $source ),
+				'rendered'   => self::describe_string( $rendered ),
+				'expected'   => $expected_calls,
+				'actual'     => $calls,
+				'difference' => self::first_value_difference( $expected_calls, $calls ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.nested-parser-boundaries',
+			$failures,
+			array(
+				'tags'       => array( $outer, $inner, $sibling ),
+				'outputSha1' => sha1( $rendered ),
+			)
+		);
+	}
+
+	private static function check_callback_mutation_during_render( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$mutator     = self::tag( $ctx, 'mutation-mutator' );
+		$target      = self::tag( $ctx, 'mutation-target' );
+		$added       = self::tag( $ctx, 'mutation-added' );
+		$preexisting = static function () {
+			return 'preexisting';
+		};
+		$start       = array(
+			'preexisting_shortcode' => $preexisting,
+		);
+		$calls       = array();
+		$added_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'added',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'added<' . (string) $shortcode_tag . '>';
+		};
+		$replacement_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'replacement',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'replacement<' . (string) $shortcode_tag . '>';
+		};
+		$original_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'original',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'original<' . (string) $shortcode_tag . '>';
+		};
+		$mutating_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls, $mutator, $target, $added, $replacement_callback, $added_callback ) {
+			$calls[] = array(
+				'phase'          => 'mutator',
+				'tag'            => (string) $shortcode_tag,
+				'atts'           => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content'        => (string) $content,
+				'registryBefore' => array_keys( $GLOBALS['shortcode_tags'] ?? array() ),
+			);
+
+			\remove_shortcode( $mutator );
+			\add_shortcode( $target, $replacement_callback );
+			\add_shortcode( $added, $added_callback );
+
+			return 'mutated<' . (string) $shortcode_tag . '>';
+		};
+		$source      = 'pre [' . $mutator . ' ' . $cases[0]['text'] . ' /] mid [' . $target . ' ' . $cases[1]['text'] . ' /] new [' . $added . ' ' . $cases[2]['text'] . ' /] post';
+		$failures    = array();
+		$first_output = '';
+		$second_output = '';
+		$first_calls = array();
+		$after_first_registry = array();
+
+		self::replace_registry( $start );
+		$local_snapshot = self::snapshot_registry();
+		try {
+			\add_shortcode( $mutator, $mutating_callback );
+			\add_shortcode( $target, $original_callback );
+
+			$first_output         = \do_shortcode( $source );
+			$first_calls          = $calls;
+			$after_first_registry = $GLOBALS['shortcode_tags'];
+			$second_output        = \do_shortcode( $first_output );
+		} finally {
+			self::restore_registry( $local_snapshot );
+		}
+
+		$restored_snapshot = self::snapshot_registry();
+		$phases_after_first = array_column( $first_calls, 'phase' );
+		$phases_after_second = array_column( $calls, 'phase' );
+
+		self::collect_failure(
+			$failures,
+			array( 'mutator', 'replacement' ) === $phases_after_first
+				&& array( 'mutator', 'replacement', 'added' ) === $phases_after_second
+				&& isset( $after_first_registry[ $target ], $after_first_registry[ $added ] )
+				&& ! isset( $after_first_registry[ $mutator ] )
+				&& $after_first_registry[ $target ] === $replacement_callback
+				&& $after_first_registry[ $added ] === $added_callback,
+			'callbacks can remove themselves, replace later callbacks, and add tags without calling stale callbacks in the same pass',
+			array(
+				'source'             => self::describe_string( $source ),
+				'firstOutput'        => self::describe_string( $first_output ),
+				'secondOutput'       => self::describe_string( $second_output ),
+				'firstCalls'         => $first_calls,
+				'allCalls'           => $calls,
+				'afterFirstRegistry' => array_keys( $after_first_registry ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $first_output, 'mutated<' . $mutator . '>' )
+				&& str_contains( $first_output, 'replacement<' . $target . '>' )
+				&& str_contains( $first_output, '[' . $added )
+				&& ! str_contains( $first_output, 'original<' . $target . '>' )
+				&& str_contains( $second_output, 'added<' . $added . '>' )
+				&& ! str_contains( $second_output, '[' . $added ),
+			'do_shortcode freezes the candidate tag set per pass but resolves callbacks from the live registry at invocation time',
+			array(
+				'firstOutput'  => self::describe_string( $first_output ),
+				'secondOutput' => self::describe_string( $second_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$restored_snapshot === $local_snapshot,
+			'local shortcode registry snapshot is restored after callback mutation and removal coverage',
+			array(
+				'before' => array_keys( $local_snapshot['value'] ),
+				'after'  => array_keys( $restored_snapshot['value'] ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.callback-mutation-during-render',
+			$failures,
+			array(
+				'tags'        => array( $mutator, $target, $added ),
+				'firstSha1'   => sha1( $first_output ),
+				'secondSha1'  => sha1( $second_output ),
+				'phaseCounts' => array_count_values( $phases_after_second ),
 			)
 		);
 	}
@@ -683,6 +1024,73 @@ final class ShortcodesSurface {
 			$failures,
 			array(
 				'tag' => $tag,
+			)
+		);
+	}
+
+	private static function check_escaped_shortcode_boundaries( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$tag          = self::tag( $ctx, 'escaped-boundary' );
+		$self_escaped = '[' . $tag . ' ' . $cases[0]['text'] . ' /]';
+		$enclosed_escaped = '[' . $tag . ' ' . $cases[1]['text'] . ']literal-body[/' . $tag . ']';
+		$real_shortcode = '[' . $tag . ' ' . $cases[2]['text'] . ' /]';
+		$source       = 'pre [' . $self_escaped . '] mid [' . $enclosed_escaped . '] real ' . $real_shortcode . ' post';
+		$calls        = array();
+		$callback     = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'real<' . (string) $shortcode_tag . '>';
+		};
+		$failures     = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $tag, $callback );
+
+		$rendered = \do_shortcode( $source );
+		$render_calls = $calls;
+		$calls    = array();
+		$stripped = \strip_shortcodes( $source );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $rendered, $self_escaped )
+				&& str_contains( $rendered, $enclosed_escaped )
+				&& str_contains( $rendered, 'real<' . $tag . '>' )
+				&& 1 === count( $render_calls )
+				&& $render_calls[0]['tag'] === $tag
+				&& $render_calls[0]['atts'] === self::expected_atts( $cases[2] ),
+			'escaped self-closing and enclosing shortcodes are unwrapped literally while adjacent real shortcodes render once',
+			array(
+				'source'      => self::describe_string( $source ),
+				'rendered'    => self::describe_string( $rendered ),
+				'renderCalls' => $render_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $stripped, $self_escaped )
+				&& str_contains( $stripped, $enclosed_escaped )
+				&& ! str_contains( $stripped, $real_shortcode )
+				&& array() === $calls,
+			'strip_shortcodes unwraps escaped shortcode delimiters and removes adjacent real tags without invoking callbacks',
+			array(
+				'stripped' => self::describe_string( $stripped ),
+				'calls'    => $calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.escaped-boundaries-and-strip',
+			$failures,
+			array(
+				'tag'         => $tag,
+				'renderSha1'  => sha1( $rendered ),
+				'strippedSha1' => sha1( $stripped ),
 			)
 		);
 	}
@@ -822,6 +1230,61 @@ final class ShortcodesSurface {
 			array(
 				'tags'      => array( $outer, $inner ),
 				'callCount' => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_strip_preservation_contracts( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$enclosing = self::tag( $ctx, 'strip-preserve-enclosing' );
+		$self_close = self::tag( $ctx, 'strip-preserve-self' );
+		$unknown   = self::tag( $ctx, 'strip-preserve-unknown' );
+		$calls     = array();
+		$callback  = self::recording_callback( $calls, false );
+		$escaped_literal = '[' . $enclosing . ' ' . $cases[2]['text'] . ' /]';
+		$html_literal    = '[' . $enclosing . ' ' . $cases[3]['text'] . ' /]';
+		$unknown_literal = '[' . $unknown . ' ' . $cases[4]['text'] . ' /]';
+		$source    = 'alpha [' . $enclosing . ' ' . $cases[0]['text'] . ']remove-body [' . $unknown . ' /][/' . $enclosing . '] beta [' . $self_close . ' ' . $cases[1]['text'] . ' /] gamma [' . $escaped_literal . '] delta <a title="' . $html_literal . '" data-unknown="' . $unknown_literal . '">link</a> epsilon ' . $unknown_literal . ' zeta';
+		$failures  = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $enclosing, $callback );
+		\add_shortcode( $self_close, $callback );
+
+		$stripped = \strip_shortcodes( $source );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $stripped, 'alpha ' )
+				&& str_contains( $stripped, ' beta ' )
+				&& str_contains( $stripped, ' gamma ' )
+				&& str_contains( $stripped, ' delta ' )
+				&& str_contains( $stripped, ' epsilon ' )
+				&& str_contains( $stripped, ' zeta' )
+				&& ! str_contains( $stripped, 'remove-body' )
+				&& ! str_contains( $stripped, '[' . $self_close )
+				&& str_contains( $stripped, $escaped_literal )
+				&& str_contains( $stripped, 'title="' . $html_literal . '"' )
+				&& str_contains( $stripped, 'data-unknown="' . $unknown_literal . '"' )
+				&& str_contains( $stripped, 'epsilon ' . $unknown_literal )
+				&& array() === $calls,
+			'strip_shortcodes removes registered source tags while preserving escaped, HTML-attribute, unknown, and surrounding text in the same pass',
+			array(
+				'source'         => self::describe_string( $source ),
+				'stripped'       => self::describe_string( $stripped ),
+				'escapedLiteral' => self::describe_string( $escaped_literal ),
+				'htmlLiteral'    => self::describe_string( $html_literal ),
+				'unknownLiteral' => self::describe_string( $unknown_literal ),
+				'calls'          => $calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.strip-preservation-contracts',
+			$failures,
+			array(
+				'tags'        => array( $enclosing, $self_close, $unknown ),
+				'strippedSha1' => sha1( $stripped ),
 			)
 		);
 	}
@@ -971,6 +1434,140 @@ final class ShortcodesSurface {
 			array(
 				'tags'       => array( $outer, $inner, $solo ),
 				'outputSha1' => sha1( $rendered ),
+			)
+		);
+	}
+
+	private static function check_tag_name_edges_and_alias_collisions( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$base       = 'cfzedge' . self::safe_fragment( $ctx->fork( 'base' ), 7, false );
+		$prefix     = $base;
+		$hyphen     = $base . '-x';
+		$colon      = $base . ':alias';
+		$dot        = $base . '.v1';
+		$alias_one  = $base . '_alias_one';
+		$alias_two  = $base . '_alias_two';
+		$unknown    = $base . '-unknown';
+		$calls      = array();
+		$callback   = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'shared',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'edge<' . (string) $shortcode_tag . '>';
+		};
+		$alias_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'alias-original',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'alias<' . (string) $shortcode_tag . '>';
+		};
+		$replacement_callback = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'phase'   => 'alias-replacement',
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return 'replacement-alias<' . (string) $shortcode_tag . '>';
+		};
+		$source     = 'start [' . $unknown . ' /] [' . $prefix . ' /] [' . $hyphen . ' ' . $cases[0]['text'] . ' /] [' . $colon . ' ' . $cases[1]['text'] . ' /] [' . $dot . ' ' . $cases[2]['text'] . ' /] [' . $alias_one . ' /] [' . $alias_two . ' /] end';
+		$failures   = array();
+
+		self::replace_registry( array() );
+		\add_shortcode( $prefix, $callback );
+		\add_shortcode( $hyphen, $callback );
+		\add_shortcode( $colon, $callback );
+		\add_shortcode( $dot, $callback );
+		\add_shortcode( $alias_one, $alias_callback );
+		\add_shortcode( $alias_two, $alias_callback );
+		\add_shortcode( $alias_one, $replacement_callback );
+
+		$discovered = \get_shortcode_tags_in_content( $source );
+		$rendered   = \do_shortcode( $source );
+		$stripped   = \strip_shortcodes( $source );
+		$call_tags  = array_column( $calls, 'tag' );
+		$call_phases = array_column( $calls, 'phase' );
+		$colliding_punctuation_as_attrs = isset( $calls[2]['atts'][0], $calls[3]['atts'][0] )
+			&& ':alias' === $calls[2]['atts'][0]
+			&& '.v1' === $calls[3]['atts'][0];
+
+		self::collect_failure(
+			$failures,
+			array( $prefix, $hyphen, $prefix, $prefix, $alias_one, $alias_two ) === $discovered
+				&& array( $prefix, $hyphen, $prefix, $prefix, $alias_one, $alias_two ) === $call_tags
+				&& array( 'shared', 'shared', 'shared', 'shared', 'alias-replacement', 'alias-original' ) === $call_phases
+				&& $colliding_punctuation_as_attrs,
+			'prefix-related tag names preserve current regex boundaries: hyphen suffixes are distinct, while colon/dot suffixes bind to the registered prefix as positional attributes',
+			array(
+				'source'     => self::describe_string( $source ),
+				'discovered' => $discovered,
+				'callTags'   => $call_tags,
+				'callPhases' => $call_phases,
+				'calls'      => $calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $GLOBALS['shortcode_tags'][ $alias_one ], $GLOBALS['shortcode_tags'][ $alias_two ] )
+				&& $GLOBALS['shortcode_tags'][ $alias_one ] === $replacement_callback
+				&& $GLOBALS['shortcode_tags'][ $alias_two ] === $alias_callback
+				&& \shortcode_exists( $colon )
+				&& \shortcode_exists( $dot )
+				&& str_contains( $rendered, '[' . $unknown . ' /]' )
+				&& str_contains( $stripped, '[' . $unknown . ' /]' )
+				&& ! str_contains( $stripped, '[' . $hyphen . ' ' )
+				&& ! str_contains( $stripped, ':alias' )
+				&& ! str_contains( $stripped, '.v1' ),
+			're-registering one alias replaces only that tag while prefix-colliding punctuation forms strip through the matched prefix and unregistered prefix-like tags remain literal',
+			array(
+				'registryKeys' => array_keys( $GLOBALS['shortcode_tags'] ),
+				'rendered'     => self::describe_string( $rendered ),
+				'stripped'     => self::describe_string( $stripped ),
+				'unknown'      => $unknown,
+			)
+		);
+
+		$calls = array();
+		self::replace_registry( array() );
+		\add_shortcode( $colon, $callback );
+		\add_shortcode( $dot, $callback );
+		$isolated_source = 'isolated [' . $colon . ' ' . $cases[3]['text'] . ' /] [' . $dot . ' ' . $cases[4]['text'] . ' /]';
+		$isolated_discovered = \get_shortcode_tags_in_content( $isolated_source );
+		$isolated_rendered   = \do_shortcode( $isolated_source );
+		$isolated_calls      = $calls;
+
+		self::collect_failure(
+			$failures,
+			array( $colon, $dot ) === $isolated_discovered
+				&& array( $colon, $dot ) === array_column( $isolated_calls, 'tag' )
+				&& str_contains( $isolated_rendered, 'edge<' . $colon . '>' )
+				&& str_contains( $isolated_rendered, 'edge<' . $dot . '>' ),
+			'colon and dot shortcode tags render as full tag names when no registered prefix competes with them',
+			array(
+				'source'     => self::describe_string( $isolated_source ),
+				'discovered' => $isolated_discovered,
+				'calls'      => $isolated_calls,
+				'rendered'   => self::describe_string( $isolated_rendered ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.tag-name-edge-collisions',
+			$failures,
+			array(
+				'tags'        => array( $prefix, $hyphen, $colon, $dot, $alias_one, $alias_two, $unknown ),
+				'outputSha1'  => sha1( $rendered ),
+				'strippedSha1' => sha1( $stripped ),
 			)
 		);
 	}
