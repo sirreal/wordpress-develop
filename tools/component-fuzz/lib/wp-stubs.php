@@ -871,6 +871,20 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
+				$values = $this->component_fuzz_in_values( $query, $column );
+				if ( array() === $values ) {
+					continue;
+				}
+				$value_map = array_fill_keys( array_map( 'strval', $values ), true );
+				$rows      = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value_map ) {
+						return isset( $value_map[ (string) $row[ $column ] ] );
+					}
+				);
+			}
+
 			$post_types = $this->component_fuzz_in_values( $query, 'post_type' );
 			if ( array() !== $post_types ) {
 				$type_map = array_fill_keys( $post_types, true );
@@ -1476,19 +1490,23 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$tt_map     = array();
 				foreach ( $this->component_fuzz_term_relationship_rows as $relationship ) {
 					if ( isset( $object_map[ (int) $relationship['object_id'] ] ) ) {
-						$tt_map[ (int) $relationship['term_taxonomy_id'] ] = (int) $relationship['object_id'];
+						$tt_map[ (int) $relationship['term_taxonomy_id'] ][] = (int) $relationship['object_id'];
 					}
 				}
-				$rows = array_filter(
-					$rows,
-					static function ( $row ) use ( $tt_map ) {
-						return isset( $tt_map[ (int) $row['term_taxonomy_id'] ] );
+
+				$expanded_rows = array();
+				foreach ( $rows as $row ) {
+					$tt_id = (int) $row['term_taxonomy_id'];
+					if ( ! isset( $tt_map[ $tt_id ] ) ) {
+						continue;
 					}
-				);
-				foreach ( $rows as &$row ) {
-					$row['object_id'] = $tt_map[ (int) $row['term_taxonomy_id'] ];
+
+					foreach ( array_unique( $tt_map[ $tt_id ] ) as $object_id ) {
+						$row['object_id'] = $object_id;
+						$expanded_rows[]  = $row;
+					}
 				}
-				unset( $row );
+				$rows = $expanded_rows;
 			}
 
 			$rows = $this->component_fuzz_sort_term_rows( $query, array_values( $rows ) );
@@ -1500,6 +1518,24 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( preg_match( '/SELECT\s+t\.term_id\s*,\s*t\.slug\s*,\s*tt\.term_taxonomy_id\s*,\s*tt\.taxonomy/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'term_id', 'slug', 'term_taxonomy_id', 'taxonomy' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+(?:DISTINCT\s+)?t\.term_id\s*,\s*tr\.object_id\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows(
+					$rows,
+					array(
+						'term_id',
+						'name',
+						'slug',
+						'term_group',
+						'term_taxonomy_id',
+						'taxonomy',
+						'description',
+						'parent',
+						'count',
+						'object_id',
+					)
+				);
 			}
 
 			if ( preg_match( '/SELECT\s+t\.term_id\b/i', $query ) || preg_match( '/SELECT\s+DISTINCT\s+t\.term_id\b/i', $query ) ) {
@@ -1743,7 +1779,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_compare_value( $query, $column ) {
 			$column = preg_quote( $column, '/' );
-			if ( preg_match( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+			if ( preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
 				return $this->component_fuzz_unquote_sql_value( $matches[1] );
 			}
 
@@ -1752,7 +1788,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_not_compare_value( $query, $column ) {
 			$column = preg_quote( $column, '/' );
-			if ( preg_match( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s*!=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+			if ( preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*!=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
 				return $this->component_fuzz_unquote_sql_value( $matches[1] );
 			}
 
@@ -1761,7 +1797,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_less_than_value( $query, $column ) {
 			$column = preg_quote( $column, '/' );
-			if ( preg_match( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s*<\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+			if ( preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*<\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
 				return $this->component_fuzz_unquote_sql_value( $matches[1] );
 			}
 
@@ -1770,7 +1806,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_in_values( $query, $column ) {
 			$column = preg_quote( $column, '/' );
-			if ( ! preg_match( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches ) ) {
+			if ( ! preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches ) ) {
 				return array();
 			}
 
@@ -1781,7 +1817,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$column   = preg_quote( $column, '/' );
 			$operator = preg_quote( $operator, '/' );
 
-			if ( ! preg_match_all( '/(?:`?[a-z_]+`?\.)?`?' . $column . '`?\s*' . $operator . '\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+			if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*' . $operator . '\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
 				return array();
 			}
 

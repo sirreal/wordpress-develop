@@ -62,6 +62,7 @@ final class DefaultWidgetsSurface {
 
 		foreach (
 			array(
+				'Component_Fuzz_WPDB_Stub',
 				'WP_Widget_Archives',
 				'WP_Widget_Calendar',
 				'WP_Widget_Categories',
@@ -85,6 +86,10 @@ final class DefaultWidgetsSurface {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'in-memory wpdb stub';
 		}
 
 		foreach (
@@ -821,6 +826,7 @@ final class DefaultWidgetsSurface {
 		$failures = array();
 		$token    = $ctx->identifier( 4, 9 );
 		$menu     = self::make_term( 850 + $ctx->int( 1, 99 ), 'Menu ' . $token, 'menu-' . strtolower( $token ), 'nav_menu', 2 );
+		$fixture  = self::seed_nav_menu_fixture( $menu, $token );
 		$cases    = array(
 			array(
 				'label'      => 'html5',
@@ -838,10 +844,13 @@ final class DefaultWidgetsSurface {
 			),
 		);
 		$seen     = array(
-			'titles'  => array(),
-			'formats' => array(),
-			'args'    => array(),
-			'pre'     => array(),
+			'titles'      => array(),
+			'formats'     => array(),
+			'args'        => array(),
+			'itemLookups' => array(),
+			'objects'     => array(),
+			'htmlItems'   => array(),
+			'menus'       => array(),
 		);
 		$outputs  = array();
 
@@ -879,10 +888,63 @@ final class DefaultWidgetsSurface {
 
 			return $nav_menu_args;
 		};
-		$pre_nav_filter = static function ( $output, \stdClass $nav_args ) use ( &$seen, &$current_case, $token ): string {
-			unset( $output );
+		$get_items_filter = static function ( $items, \WP_Term $queried_menu, array $args ) use ( &$seen, &$current_case ) {
+			$ids = array();
+			foreach ( (array) $items as $item ) {
+				if ( is_object( $item ) && isset( $item->ID ) ) {
+					$ids[] = (int) $item->ID;
+				}
+			}
 
-			$seen['pre'][] = array(
+			$seen['itemLookups'][] = array(
+				'case'        => $current_case['label'] ?? null,
+				'menuId'      => (int) $queried_menu->term_id,
+				'count'       => count( (array) $items ),
+				'ids'         => $ids,
+				'postType'    => $args['post_type'] ?? null,
+				'postStatus'  => $args['post_status'] ?? null,
+				'taxTerms'    => $args['tax_query'][0]['terms'] ?? null,
+				'updateCache' => $args['update_menu_item_cache'] ?? null,
+			);
+
+			return $items;
+		};
+		$objects_filter   = static function ( array $sorted_menu_items, \stdClass $nav_args ) use ( &$seen, &$current_case ): array {
+			$classes = array();
+			$ids     = array();
+
+			foreach ( $sorted_menu_items as $item ) {
+				if ( ! is_object( $item ) || ! isset( $item->ID ) ) {
+					continue;
+				}
+
+				$ids[]                      = (int) $item->ID;
+				$classes[ (int) $item->ID ] = array_values( (array) ( $item->classes ?? array() ) );
+			}
+
+			$seen['objects'][] = array(
+				'case'      => $current_case['label'] ?? null,
+				'menuIdArg' => $nav_args->menu_id ?? null,
+				'ids'       => $ids,
+				'classes'   => $classes,
+			);
+
+			return $sorted_menu_items;
+		};
+		$html_items_filter = static function ( string $items, \stdClass $nav_args ) use ( &$seen, &$current_case, $token ): string {
+			$seen['htmlItems'][] = array(
+				'case'              => $current_case['label'] ?? null,
+				'menuIdArg'         => $nav_args->menu_id ?? null,
+				'hasParentTitle'    => str_contains( $items, 'Parent ' . $token ),
+				'hasChildTitle'     => str_contains( $items, 'Child ' . $token ),
+				'hasChildClass'     => str_contains( $items, 'menu-item-has-children' ),
+				'hasCustomItemLink' => str_contains( $items, 'https://example.test/nav/' . rawurlencode( strtolower( $token ) ) . '/parent' ),
+			);
+
+			return $items;
+		};
+		$nav_menu_filter  = static function ( string $nav_menu, \stdClass $nav_args ) use ( &$seen, &$current_case ): string {
+			$seen['menus'][] = array(
 				'case'       => $current_case['label'],
 				'menuId'     => $nav_args->menu instanceof \WP_Term ? $nav_args->menu->term_id : null,
 				'container'  => $nav_args->container ?? null,
@@ -890,9 +952,10 @@ final class DefaultWidgetsSurface {
 				'menuIdArg'  => $nav_args->menu_id ?? null,
 				'itemsWrap'  => $nav_args->items_wrap ?? null,
 				'fallbackCb' => $nav_args->fallback_cb ?? null,
+				'preview'    => self::preview( $nav_menu ),
 			);
 
-			return '<ul class="component-fuzz-nav-menu" data-case="' . \esc_attr( $current_case['label'] ) . '"><li><a href="https://example.test/nav">' . \esc_html( $token ) . '</a></li></ul>';
+			return $nav_menu;
 		};
 
 		$theme_features_before = $GLOBALS['_wp_theme_features'] ?? null;
@@ -900,7 +963,10 @@ final class DefaultWidgetsSurface {
 		\add_filter( 'widget_title', $title_filter, 10, 3 );
 		\add_filter( 'navigation_widgets_format', $format_filter );
 		\add_filter( 'widget_nav_menu_args', $widget_args_filter, 10, 4 );
-		\add_filter( 'pre_wp_nav_menu', $pre_nav_filter, 10, 2 );
+		\add_filter( 'wp_get_nav_menu_items', $get_items_filter, 10, 3 );
+		\add_filter( 'wp_nav_menu_objects', $objects_filter, 10, 2 );
+		\add_filter( 'wp_nav_menu_items', $html_items_filter, 10, 2 );
+		\add_filter( 'wp_nav_menu', $nav_menu_filter, 10, 2 );
 		try {
 			foreach ( $cases as $case ) {
 				$current_case = $case;
@@ -933,7 +999,10 @@ final class DefaultWidgetsSurface {
 				)
 			);
 		} finally {
-			\remove_filter( 'pre_wp_nav_menu', $pre_nav_filter, 10 );
+			\remove_filter( 'wp_nav_menu', $nav_menu_filter, 10 );
+			\remove_filter( 'wp_nav_menu_items', $html_items_filter, 10 );
+			\remove_filter( 'wp_nav_menu_objects', $objects_filter, 10 );
+			\remove_filter( 'wp_get_nav_menu_items', $get_items_filter, 10 );
 			\remove_filter( 'widget_nav_menu_args', $widget_args_filter, 10 );
 			\remove_filter( 'navigation_widgets_format', $format_filter );
 			\remove_filter( 'widget_title', $title_filter, 10 );
@@ -949,15 +1018,23 @@ final class DefaultWidgetsSurface {
 			$failures,
 			str_contains( $outputs['html5'] ?? '', '<section id="nav_menu-36" class="widget widget_nav_menu">' )
 				&& str_contains( $outputs['html5'] ?? '', 'data-nav-title="nav_menu"' )
-				&& str_contains( $outputs['html5'] ?? '', 'data-case="html5"' )
+				&& str_contains( $outputs['html5'] ?? '', '<nav ' )
+				&& str_contains( $outputs['html5'] ?? '', 'aria-label="Primary ' . $token . ' filtered"' )
+				&& str_contains( $outputs['html5'] ?? '', 'id="component-fuzz-html5"' )
+				&& str_contains( $outputs['html5'] ?? '', 'Parent ' . $token )
+				&& str_contains( $outputs['html5'] ?? '', 'Child ' . $token )
+				&& str_contains( $outputs['html5'] ?? '', 'menu-item-has-children' )
 				&& str_contains( $outputs['xhtml'] ?? '', '<section id="nav_menu-37" class="widget widget_nav_menu">' )
-				&& str_contains( $outputs['xhtml'] ?? '', 'data-case="xhtml"' )
+				&& str_contains( $outputs['xhtml'] ?? '', 'id="component-fuzz-xhtml"' )
+				&& str_contains( $outputs['xhtml'] ?? '', 'Parent ' . $token )
+				&& ! str_contains( $outputs['xhtml'] ?? '', '<nav ' )
 				&& '' === $empty_output,
-			'Nav Menu widget renders selected menu output and returns early when no menu is selected',
+			'Nav Menu widget renders real selected menu output through core walker and returns early when no menu is selected',
 			array(
-				'html5' => self::preview( $outputs['html5'] ?? '' ),
-				'xhtml' => self::preview( $outputs['xhtml'] ?? '' ),
-				'empty' => self::preview( $empty_output ),
+				'html5'  => self::preview( $outputs['html5'] ?? '' ),
+				'xhtml'  => self::preview( $outputs['xhtml'] ?? '' ),
+				'empty'  => self::preview( $empty_output ),
+				'fixture' => $fixture,
 			)
 		);
 
@@ -966,11 +1043,20 @@ final class DefaultWidgetsSurface {
 			2 === count( $seen['titles'] )
 				&& 2 === count( $seen['formats'] )
 				&& 2 === count( $seen['args'] )
-				&& 2 === count( $seen['pre'] )
+				&& 2 === count( $seen['itemLookups'] )
+				&& 2 === count( $seen['objects'] )
+				&& 2 === count( $seen['htmlItems'] )
+				&& 2 === count( $seen['menus'] )
 				&& 'nav_menu' === ( $seen['titles'][0]['idBase'] ?? null )
 				&& 'html5' === ( $seen['formats'][0]['case'] ?? null )
-				&& 'xhtml' === ( $seen['formats'][1]['case'] ?? null ),
-			'Nav Menu widget title and navigation-format filters fire once for each selected menu render',
+				&& 'xhtml' === ( $seen['formats'][1]['case'] ?? null )
+				&& array( $fixture['parentId'], $fixture['childId'] ) === ( $seen['itemLookups'][0]['ids'] ?? null )
+				&& array( $fixture['parentId'], $fixture['childId'] ) === ( $seen['objects'][0]['ids'] ?? null )
+				&& in_array( 'menu-item-has-children', $seen['objects'][0]['classes'][ $fixture['parentId'] ] ?? array(), true )
+				&& true === ( $seen['htmlItems'][0]['hasParentTitle'] ?? null )
+				&& true === ( $seen['htmlItems'][0]['hasChildTitle'] ?? null )
+				&& true === ( $seen['htmlItems'][0]['hasChildClass'] ?? null ),
+			'Nav Menu widget performs real item lookup, object filtering, and walker rendering for each selected menu render',
 			array( 'seen' => $seen )
 		);
 
@@ -989,19 +1075,23 @@ final class DefaultWidgetsSurface {
 
 		self::collect_failure(
 			$failures,
-			'nav' === ( $seen['pre'][0]['container'] ?? null )
-				&& 'Primary ' . $token . ' filtered' === ( $seen['pre'][0]['ariaLabel'] ?? null )
-				&& 'component-fuzz-html5' === ( $seen['pre'][0]['menuIdArg'] ?? null )
-				&& 'div' === ( $seen['pre'][1]['container'] ?? null )
-				&& '' === ( $seen['pre'][1]['ariaLabel'] ?? null )
-				&& 'component-fuzz-xhtml' === ( $seen['pre'][1]['menuIdArg'] ?? null )
+			'nav' === ( $seen['menus'][0]['container'] ?? null )
+				&& 'Primary ' . $token . ' filtered' === ( $seen['menus'][0]['ariaLabel'] ?? null )
+				&& 'component-fuzz-html5' === ( $seen['menus'][0]['menuIdArg'] ?? null )
+				&& 'div' === ( $seen['menus'][1]['container'] ?? null )
+				&& '' === ( $seen['menus'][1]['ariaLabel'] ?? null )
+				&& 'component-fuzz-xhtml' === ( $seen['menus'][1]['menuIdArg'] ?? null )
 				&& false === \has_filter( 'widget_nav_menu_args', $widget_args_filter )
-				&& false === \has_filter( 'pre_wp_nav_menu', $pre_nav_filter ),
-			'wp_nav_menu receives normalized defaults after widget args filtering and filters are restored',
+				&& false === \has_filter( 'wp_get_nav_menu_items', $get_items_filter )
+				&& false === \has_filter( 'wp_nav_menu_objects', $objects_filter )
+				&& false === \has_filter( 'wp_nav_menu', $nav_menu_filter ),
+			'wp_nav_menu reaches final normalized defaults after widget args filtering and filters are restored',
 			array(
-				'pre'                 => $seen['pre'],
-				'widgetArgsFilter'    => \has_filter( 'widget_nav_menu_args', $widget_args_filter ),
-				'preWpNavMenuFilter'  => \has_filter( 'pre_wp_nav_menu', $pre_nav_filter ),
+				'menus'                 => $seen['menus'],
+				'widgetArgsFilter'      => \has_filter( 'widget_nav_menu_args', $widget_args_filter ),
+				'getNavMenuItemsFilter' => \has_filter( 'wp_get_nav_menu_items', $get_items_filter ),
+				'navMenuObjectsFilter'  => \has_filter( 'wp_nav_menu_objects', $objects_filter ),
+				'wpNavMenuFilter'       => \has_filter( 'wp_nav_menu', $nav_menu_filter ),
 			)
 		);
 
@@ -1541,6 +1631,138 @@ final class DefaultWidgetsSurface {
 		return $term;
 	}
 
+	private static function seed_nav_menu_fixture( \WP_Term $menu, string $token ): array {
+		$wpdb     = self::stub_wpdb();
+		$term_id  = (int) $menu->term_id;
+		$tt_id    = (int) $menu->term_taxonomy_id;
+		$base_url = 'https://example.test/nav/' . rawurlencode( strtolower( $token ) );
+
+		$wpdb->insert(
+			$wpdb->terms,
+			array(
+				'term_id'    => $term_id,
+				'name'       => $menu->name,
+				'slug'       => $menu->slug,
+				'term_group' => 0,
+			)
+		);
+		$wpdb->insert(
+			$wpdb->term_taxonomy,
+			array(
+				'term_taxonomy_id' => $tt_id,
+				'term_id'          => $term_id,
+				'taxonomy'         => 'nav_menu',
+				'description'      => '',
+				'parent'           => 0,
+				'count'            => 2,
+			)
+		);
+
+		$parent_id = 50000 + ( $term_id * 2 );
+		$child_id  = $parent_id + 1;
+
+		self::seed_nav_menu_item(
+			$parent_id,
+			$tt_id,
+			'Parent ' . $token,
+			$base_url . '/parent',
+			1,
+			0,
+			array( 'cfz-parent-' . strtolower( $token ) )
+		);
+		self::seed_nav_menu_item(
+			$child_id,
+			$tt_id,
+			'Child ' . $token,
+			$base_url . '/child',
+			2,
+			$parent_id,
+			array( 'cfz-child-' . strtolower( $token ) )
+		);
+
+		return array(
+			'menuId'   => $term_id,
+			'ttId'     => $tt_id,
+			'parentId' => $parent_id,
+			'childId'  => $child_id,
+		);
+	}
+
+	private static function seed_nav_menu_item(
+		int $post_id,
+		int $term_taxonomy_id,
+		string $title,
+		string $url,
+		int $order,
+		int $parent_id,
+		array $classes
+	): void {
+		$wpdb = self::stub_wpdb();
+
+		$wpdb->insert(
+			$wpdb->posts,
+			array(
+				'ID'                    => $post_id,
+				'post_author'           => 1,
+				'post_date'             => '2026-06-23 12:00:00',
+				'post_date_gmt'         => '2026-06-23 10:00:00',
+				'post_content'          => '',
+				'post_title'            => $title,
+				'post_excerpt'          => 'Title attribute for ' . $title,
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'menu-item-' . $post_id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-23 12:00:00',
+				'post_modified_gmt'     => '2026-06-23 10:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => $url,
+				'menu_order'            => $order,
+				'post_type'             => 'nav_menu_item',
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+			)
+		);
+		$wpdb->insert(
+			$wpdb->term_relationships,
+			array(
+				'object_id'        => $post_id,
+				'term_taxonomy_id' => $term_taxonomy_id,
+				'term_order'       => $order,
+			)
+		);
+
+		foreach (
+			array(
+				'_menu_item_type'             => 'custom',
+				'_menu_item_object'           => 'custom',
+				'_menu_item_object_id'        => $post_id,
+				'_menu_item_menu_item_parent' => $parent_id,
+				'_menu_item_url'              => $url,
+				'_menu_item_target'           => '',
+				'_menu_item_classes'          => $classes,
+				'_menu_item_xfn'              => '',
+			) as $meta_key => $meta_value
+		) {
+			$wpdb->insert(
+				$wpdb->postmeta,
+				array(
+					'post_id'    => $post_id,
+					'meta_key'   => $meta_key,
+					'meta_value' => \maybe_serialize( $meta_value ),
+				)
+			);
+		}
+	}
+
+	private static function stub_wpdb(): \Component_Fuzz_WPDB_Stub {
+		return $GLOBALS['wpdb'];
+	}
+
 	private static function make_comment( int $id, int $post_id, string $author, string $content ): \WP_Comment {
 		return new \WP_Comment(
 			(object) array(
@@ -1735,7 +1957,7 @@ final class DefaultWidgetsSurface {
 	private static function restore_state( array $snapshot ): void {
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
@@ -1744,9 +1966,6 @@ final class DefaultWidgetsSurface {
 		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
 			$GLOBALS['wpdb']->component_fuzz_reset_content();
-		}
-		if ( function_exists( 'wp_cache_flush' ) ) {
-			\wp_cache_flush();
 		}
 		self::set_calendar_instance( (int) $snapshot['calendarInstance'] );
 	}
@@ -1770,7 +1989,7 @@ final class DefaultWidgetsSurface {
 				continue;
 			}
 
-			if ( in_array( $name, array( 'wp_filter', 'wp_widget_factory', 'wp_registered_widgets', 'wp_registered_sidebars' ), true )
+			if ( in_array( $name, array( 'wp_filter', 'wp_object_cache', 'wp_widget_factory', 'wp_registered_widgets', 'wp_registered_sidebars' ), true )
 				&& $entry['value'] != $GLOBALS[ $name ]
 			) {
 				return false;
