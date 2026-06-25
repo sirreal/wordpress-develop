@@ -28,6 +28,7 @@ final class OptionsAutoloadSurface {
 			$rows[] = self::check_alloptions_autoload_membership_and_transitions( $ctx );
 			$rows[] = self::check_bulk_autoload_mutators_and_cache_coherence( $ctx );
 			$rows[] = self::check_get_option_filters( $ctx );
+			$rows[] = self::check_filter_cache_boundaries_across_prime_and_mutation( $ctx );
 			$rows[] = self::check_pre_update_filters_transform_and_veto( $ctx );
 			$rows[] = self::check_option_lifecycle_actions( $ctx );
 			$rows[] = self::check_prime_option_caches_stability( $ctx );
@@ -512,6 +513,337 @@ final class OptionsAutoloadSurface {
 				'defaultMissingGot'    => self::describe_value( $default_missing_got ),
 				'defaultExistingGot'   => self::describe_value( $default_existing_got ),
 				'optionGot'            => self::describe_value( $option_got ),
+			)
+		);
+	}
+
+	private static function check_filter_cache_boundaries_across_prime_and_mutation( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$pre_key              = self::option_name( $ctx, 'pre-option-cache-boundary' );
+		$default_key          = self::option_name( $ctx, 'default-option-cache-boundary' );
+		$pre_value            = self::wrapped_value( 'pre-short-circuit-cache-boundary', self::value( $ctx->fork( 'pre-cache-value' ) ) );
+		$pre_fallback         = self::missing_default( $pre_key );
+		$pre_second_fallback  = self::wrapped_value( 'pre-second-fallback', self::value( $ctx->fork( 'pre-cache-fallback' ) ) );
+		$default_return       = self::wrapped_value( 'filtered-default-cache-boundary', self::value( $ctx->fork( 'filtered-default-return' ) ) );
+		$first_fallback       = self::missing_default( $default_key );
+		$second_fallback      = self::wrapped_value( 'second-missing-fallback', self::value( $ctx->fork( 'second-missing-fallback' ) ) );
+		$after_delete_fallback = self::wrapped_value( 'after-delete-fallback', self::value( $ctx->fork( 'after-delete-fallback' ) ) );
+		$stored               = self::wrapped_value( 'filter-boundary-stored', self::value( $ctx->fork( 'filter-boundary-stored' ) ) );
+		$updated              = self::wrapped_value( 'filter-boundary-updated', self::value( $ctx->fork( 'filter-boundary-updated' ) ) );
+		$pre_seen             = array();
+		$default_seen         = array();
+		$option_seen          = array();
+		$events               = array();
+
+		$pre_filter = static function ( $pre_option, $option, $default_value ) use ( &$events, &$pre_seen, $pre_value ) {
+			$events[]   = array( 'hook' => 'pre_option', 'option' => $option );
+			$pre_seen[] = array(
+				'pre'     => $pre_option,
+				'option'  => $option,
+				'default' => $default_value,
+			);
+			return $pre_value;
+		};
+		$default_filter = static function ( $default_value, $option, $passed_default ) use ( &$default_seen, &$events, $default_return ) {
+			$events[]       = array( 'hook' => 'default_option', 'option' => $option );
+			$default_seen[] = array(
+				'default'       => $default_value,
+				'option'        => $option,
+				'passedDefault' => $passed_default,
+			);
+			return $default_return;
+		};
+		$option_filter = static function ( $value, $option ) use ( &$events, &$option_seen ) {
+			$events[]      = array( 'hook' => 'option', 'option' => $option );
+			$option_seen[] = array(
+				'value'  => $value,
+				'option' => $option,
+			);
+			return array(
+				'label'   => 'option-filtered-cache-boundary',
+				'payload' => $value,
+			);
+		};
+
+		add_filter( "pre_option_{$pre_key}", $pre_filter, 10, 3 );
+		add_filter( "default_option_{$default_key}", $default_filter, 10, 3 );
+		add_filter( "option_{$default_key}", $option_filter, 10, 2 );
+
+		try {
+			wp_load_alloptions( true );
+			$query_before_pre = self::last_query();
+			$pre_first        = get_option( $pre_key, $pre_fallback );
+			$query_after_pre  = self::last_query();
+			$pre_not_after_get = wp_cache_get( 'notoptions', 'options' );
+			$pre_cache_found_after_get = null;
+			$pre_cache_after_get = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_get );
+			$all_after_pre_get = wp_cache_get( 'alloptions', 'options' );
+
+			wp_prime_option_caches( array( $pre_key ) );
+			$pre_not_after_prime = wp_cache_get( 'notoptions', 'options' );
+			$pre_cache_found_after_prime = null;
+			$pre_cache_after_prime = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_prime );
+			$all_after_pre_prime = wp_cache_get( 'alloptions', 'options' );
+			$pre_second          = get_option( $pre_key, $pre_second_fallback );
+
+			$missing_first       = get_option( $default_key, $first_fallback );
+			$query_after_missing = self::last_query();
+			$not_after_first     = wp_cache_get( 'notoptions', 'options' );
+			$default_cache_found_after_first = null;
+			$default_cache_after_first       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_first );
+			$all_after_first = wp_cache_get( 'alloptions', 'options' );
+			$missing_second  = get_option( $default_key, $second_fallback );
+			$query_after_second_missing = self::last_query();
+
+			wp_prime_option_caches( array( $default_key ) );
+			$query_after_prime_missing = self::last_query();
+			$not_after_prime_missing   = wp_cache_get( 'notoptions', 'options' );
+			$default_cache_found_after_prime_missing = null;
+			$default_cache_after_prime_missing       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_prime_missing );
+			$all_after_prime_missing = wp_cache_get( 'alloptions', 'options' );
+
+			$add                     = add_option( $default_key, $stored, '', true );
+			$default_calls_after_add = count( $default_seen );
+			$option_calls_after_add  = count( $option_seen );
+			$store_after_add         = self::option_store();
+			$not_after_add           = wp_cache_get( 'notoptions', 'options' );
+			$all_after_add           = wp_load_alloptions( true );
+			$default_cache_found_after_add = null;
+			$default_cache_after_add       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_add );
+			$after_add_read               = get_option( $default_key, self::missing_default( $default_key ) );
+
+			$update             = update_option( $default_key, $updated, false );
+			$store_after_update = self::option_store();
+			$not_after_update   = wp_cache_get( 'notoptions', 'options' );
+			$all_after_update   = wp_load_alloptions( true );
+			$default_cache_found_after_update = null;
+			$default_cache_after_update       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_update );
+			$query_before_prime_update        = self::last_query();
+			wp_prime_option_caches( array( $default_key ) );
+			$query_after_prime_update = self::last_query();
+			$default_cache_found_after_prime_update = null;
+			$default_cache_after_prime_update       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_prime_update );
+			$after_update_read = get_option( $default_key, self::missing_default( $default_key ) );
+
+			$delete             = delete_option( $default_key );
+			$store_after_delete = self::option_store();
+			$not_after_delete   = wp_cache_get( 'notoptions', 'options' );
+			$all_after_delete   = wp_load_alloptions( true );
+			$default_cache_found_after_delete = null;
+			$default_cache_after_delete       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_delete );
+			$after_delete_read = get_option( $default_key, $after_delete_fallback );
+		} finally {
+			remove_filter( "pre_option_{$pre_key}", $pre_filter, 10 );
+			remove_filter( "default_option_{$default_key}", $default_filter, 10 );
+			remove_filter( "option_{$default_key}", $option_filter, 10 );
+		}
+
+		$expected_event_order = array(
+			"pre_option:{$pre_key}",
+			"pre_option:{$pre_key}",
+			"default_option:{$default_key}",
+			"default_option:{$default_key}",
+			"option:{$default_key}",
+			"option:{$default_key}",
+			"default_option:{$default_key}",
+			"option:{$default_key}",
+			"default_option:{$default_key}",
+		);
+		$event_order          = array_map(
+			static function ( array $event ): string {
+				return $event['hook'] . ':' . $event['option'];
+			},
+			$events
+		);
+		$expected_add_read    = array(
+			'label'   => 'option-filtered-cache-boundary',
+			'payload' => $stored,
+		);
+		$expected_update_read = array(
+			'label'   => 'option-filtered-cache-boundary',
+			'payload' => $updated,
+		);
+		$failures             = array();
+
+		self::collect_failure(
+			$failures,
+			self::same_value( $pre_value, $pre_first )
+				&& self::same_value( $pre_value, $pre_second )
+				&& $query_before_pre === $query_after_pre
+				&& ( ! is_array( $pre_not_after_get ) || ! isset( $pre_not_after_get[ $pre_key ] ) )
+				&& false === $pre_cache_after_get
+				&& false === $pre_cache_found_after_get
+				&& is_array( $all_after_pre_get )
+				&& ! isset( $all_after_pre_get[ $pre_key ] )
+				&& is_array( $pre_not_after_prime )
+				&& isset( $pre_not_after_prime[ $pre_key ] )
+				&& false === $pre_cache_after_prime
+				&& false === $pre_cache_found_after_prime
+				&& is_array( $all_after_pre_prime )
+				&& ! isset( $all_after_pre_prime[ $pre_key ] ),
+			'pre_option short-circuits reads without positive or negative cache pollution until explicit priming',
+			array(
+				'preKey'             => $pre_key,
+				'queryStableOnGet'   => $query_before_pre === $query_after_pre,
+				'notoptionAfterGet'  => is_array( $pre_not_after_get ) && isset( $pre_not_after_get[ $pre_key ] ),
+				'notoptionAfterPrime' => is_array( $pre_not_after_prime ) && isset( $pre_not_after_prime[ $pre_key ] ),
+				'cacheFoundAfterGet' => $pre_cache_found_after_get,
+				'cacheFoundAfterPrime' => $pre_cache_found_after_prime,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_value( $default_return, $missing_first )
+				&& self::same_value( $default_return, $missing_second )
+				&& is_array( $not_after_first )
+				&& isset( $not_after_first[ $default_key ] )
+				&& false === $default_cache_after_first
+				&& false === $default_cache_found_after_first
+				&& is_array( $all_after_first )
+				&& ! isset( $all_after_first[ $default_key ] )
+				&& $query_after_missing === $query_after_second_missing
+				&& $query_after_second_missing === $query_after_prime_missing
+				&& is_array( $not_after_prime_missing )
+				&& isset( $not_after_prime_missing[ $default_key ] )
+				&& false === $default_cache_after_prime_missing
+				&& false === $default_cache_found_after_prime_missing
+				&& is_array( $all_after_prime_missing )
+				&& ! isset( $all_after_prime_missing[ $default_key ] ),
+			'default_option filtered misses repeat from notoptions and are not converted into positive caches by priming',
+			array(
+				'defaultKey'             => $default_key,
+				'queryStableSecondGet'   => $query_after_missing === $query_after_second_missing,
+				'queryStablePrime'       => $query_after_second_missing === $query_after_prime_missing,
+				'notoptionAfterFirst'    => is_array( $not_after_first ) && isset( $not_after_first[ $default_key ] ),
+				'notoptionAfterPrime'    => is_array( $not_after_prime_missing ) && isset( $not_after_prime_missing[ $default_key ] ),
+				'cacheFoundAfterFirst'   => $default_cache_found_after_first,
+				'cacheFoundAfterPrime'   => $default_cache_found_after_prime_missing,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $add
+				&& 2 === $default_calls_after_add
+				&& 0 === $option_calls_after_add
+				&& isset( $store_after_add[ $default_key ] )
+				&& self::stored_value( $stored ) === ( $store_after_add[ $default_key ]['option_value'] ?? null )
+				&& 'on' === ( $store_after_add[ $default_key ]['autoload'] ?? null )
+				&& is_array( $not_after_add )
+				&& ! isset( $not_after_add[ $default_key ] )
+				&& isset( $all_after_add[ $default_key ] )
+				&& self::stored_value( $stored ) === $all_after_add[ $default_key ]
+				&& false === $default_cache_after_add
+				&& false === $default_cache_found_after_add
+				&& self::same_value( $expected_add_read, $after_add_read )
+				&& self::stored_value( $stored ) === $all_after_add[ $default_key ],
+			'add_option clears the negative cache and stores raw autoloaded values despite active default and option filters',
+			array(
+				'defaultKey'          => $default_key,
+				'add'                 => $add,
+				'defaultCallsAfterAdd' => $default_calls_after_add,
+				'optionCallsAfterAdd' => $option_calls_after_add,
+				'autoloadAfterAdd'    => $store_after_add[ $default_key ]['autoload'] ?? null,
+				'notoptionAfterAdd'   => is_array( $not_after_add ) && isset( $not_after_add[ $default_key ] ),
+				'inAlloptionsAfterAdd' => isset( $all_after_add[ $default_key ] ),
+				'cacheFoundAfterAdd'  => $default_cache_found_after_add,
+				'afterAddRead'        => self::describe_value( $after_add_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $update
+				&& isset( $store_after_update[ $default_key ] )
+				&& self::stored_value( $updated ) === ( $store_after_update[ $default_key ]['option_value'] ?? null )
+				&& 'off' === ( $store_after_update[ $default_key ]['autoload'] ?? null )
+				&& is_array( $not_after_update )
+				&& ! isset( $not_after_update[ $default_key ] )
+				&& is_array( $all_after_update )
+				&& ! isset( $all_after_update[ $default_key ] )
+				&& true === $default_cache_found_after_update
+				&& self::stored_value( $updated ) === $default_cache_after_update
+				&& $query_before_prime_update === $query_after_prime_update
+				&& true === $default_cache_found_after_prime_update
+				&& self::stored_value( $updated ) === $default_cache_after_prime_update
+				&& self::same_value( $expected_update_read, $after_update_read ),
+			'update_option moves filtered options out of alloptions without stale negative or positive cache entries',
+			array(
+				'defaultKey'           => $default_key,
+				'update'               => $update,
+				'autoloadAfterUpdate'  => $store_after_update[ $default_key ]['autoload'] ?? null,
+				'notoptionAfterUpdate' => is_array( $not_after_update ) && isset( $not_after_update[ $default_key ] ),
+				'inAlloptionsAfterUpdate' => is_array( $all_after_update ) && isset( $all_after_update[ $default_key ] ),
+				'cacheFoundAfterUpdate' => $default_cache_found_after_update,
+				'primeQueryStable'     => $query_before_prime_update === $query_after_prime_update,
+				'afterUpdateRead'      => self::describe_value( $after_update_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $delete
+				&& ! isset( $store_after_delete[ $default_key ] )
+				&& is_array( $not_after_delete )
+				&& isset( $not_after_delete[ $default_key ] )
+				&& is_array( $all_after_delete )
+				&& ! isset( $all_after_delete[ $default_key ] )
+				&& false === $default_cache_after_delete
+				&& false === $default_cache_found_after_delete
+				&& self::same_value( $default_return, $after_delete_read ),
+			'delete_option restores only the negative cache while filtered defaults continue to avoid positive cache pollution',
+			array(
+				'defaultKey'            => $default_key,
+				'delete'                => $delete,
+				'notoptionAfterDelete'  => is_array( $not_after_delete ) && isset( $not_after_delete[ $default_key ] ),
+				'inAlloptionsAfterDelete' => is_array( $all_after_delete ) && isset( $all_after_delete[ $default_key ] ),
+				'cacheFoundAfterDelete' => $default_cache_found_after_delete,
+				'afterDeleteRead'       => self::describe_value( $after_delete_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_event_order === $event_order
+				&& 2 === count( $pre_seen )
+				&& false === ( $pre_seen[0]['pre'] ?? null )
+				&& false === ( $pre_seen[1]['pre'] ?? null )
+				&& self::same_value( $pre_fallback, $pre_seen[0]['default'] ?? null )
+				&& self::same_value( $pre_second_fallback, $pre_seen[1]['default'] ?? null )
+				&& 4 === count( $default_seen )
+				&& self::same_value( $first_fallback, $default_seen[0]['default'] ?? null )
+				&& true === ( $default_seen[0]['passedDefault'] ?? null )
+				&& self::same_value( $second_fallback, $default_seen[1]['default'] ?? null )
+				&& true === ( $default_seen[1]['passedDefault'] ?? null )
+				&& false === ( $default_seen[2]['default'] ?? null )
+				&& false === ( $default_seen[2]['passedDefault'] ?? null )
+				&& self::same_value( $after_delete_fallback, $default_seen[3]['default'] ?? null )
+				&& true === ( $default_seen[3]['passedDefault'] ?? null )
+				&& 3 === count( $option_seen )
+				&& self::same_value( $stored, $option_seen[0]['value'] ?? null )
+				&& self::same_value( $stored, $option_seen[1]['value'] ?? null )
+				&& self::same_value( $updated, $option_seen[2]['value'] ?? null ),
+			'filter call order and callback arguments stay local to the expected option/cache paths',
+			array(
+				'expectedEvents' => $expected_event_order,
+				'events'         => $event_order,
+				'preCalls'       => count( $pre_seen ),
+				'defaultCalls'   => count( $default_seen ),
+				'optionCalls'    => count( $option_seen ),
+			)
+		);
+
+		return $ctx->result(
+			'options-autoload.filtered-defaults-prime-and-mutations-preserve-cache-boundaries',
+			array() === $failures,
+			array(
+				'preKey'       => $pre_key,
+				'defaultKey'   => $default_key,
+				'storedRawSha1' => sha1( self::stored_value( $stored ) ),
+				'updatedRawSha1' => sha1( self::stored_value( $updated ) ),
+				'failures'     => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1027,6 +1359,14 @@ final class OptionsAutoloadSurface {
 		}
 
 		return array();
+	}
+
+	private static function last_query(): ?string {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'last_query' ) ) {
+			return $GLOBALS['wpdb']->last_query;
+		}
+
+		return null;
 	}
 
 	private static function first_entry_with_membership( array $entries, bool $should_autoload ): array {
