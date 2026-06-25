@@ -1217,7 +1217,7 @@ final class SecuritySurface {
 		$scheme          = 'auth';
 		$now             = time();
 		$session_expires = $now + HOUR_IN_SECONDS + $ctx->int( 60, 600 );
-		$grace_expires   = $now - $ctx->int( 1, HOUR_IN_SECONDS - 5 );
+		$grace_expires   = $now - 5 * MINUTE_IN_SECONDS;
 		$outside_expires = $now - HOUR_IN_SECONDS - $ctx->int( 10, 600 );
 
 		$had_method      = array_key_exists( 'REQUEST_METHOD', $_SERVER );
@@ -1564,6 +1564,8 @@ final class SecuritySurface {
 		$failures        = array();
 		$fallback        = 'http://example.test/wp/wp-admin/fallback.php?from=metamorphic';
 		$token           = self::token( $ctx->fork( 'redirect-metamorphic-token' ), 8 );
+		$trim_chars      = " \t\n\r\0\x08\x0B";
+		$generated_path  = 'http://example.test/wp-admin/' . self::random_string( $ctx->fork( 'redirect-generated-path' ), $ctx->int( 0, 96 ) );
 		$previous_hosts  = self::$allowed_redirect_hosts;
 		$previous_events = self::$allowed_redirect_host_events;
 
@@ -1571,41 +1573,49 @@ final class SecuritySurface {
 
 		$cases = array(
 			array(
-				'label' => 'trimmed relative path expands from current admin directory',
-				'input' => " \tsettings.php?updated=1&token=" . rawurlencode( $token ) . "\n",
+				'label'    => 'trimmed relative path expands from current admin directory',
+				'input'    => " \tsettings.php?updated=1&token=" . rawurlencode( $token ) . "\n",
+				'expected' => '/wp-admin/settings.php?updated=1&token=' . rawurlencode( $token ),
 			),
 			array(
-				'label' => 'same-host CRLF and spaces are sanitized',
-				'input' => "http://example.test/wp-admin/path with spaces?x=1%0d%0aInjected:bad&token={$token}",
+				'label'    => 'same-host CRLF and spaces are sanitized',
+				'input'    => "http://example.test/wp-admin/path with spaces?x=1%0d%0aInjected:bad&token={$token}",
+				'expected' => \wp_sanitize_redirect( "http://example.test/wp-admin/path with spaces?x=1%0d%0aInjected:bad&token={$token}" ),
 			),
 			array(
-				'label' => 'query-contained absolute URL stays data, not redirect host',
-				'input' => '/wp-admin/admin.php?redirect=http://evil.test/%0d%0a&token=' . rawurlencode( $token ),
+				'label'    => 'query-contained absolute URL stays data, not redirect host',
+				'input'    => '/wp-admin/admin.php?redirect=http://evil.test/%0d%0a&token=' . rawurlencode( $token ),
+				'expected' => '/wp-admin/admin.php?redirect=http://evil.test/&token=' . rawurlencode( $token ),
 			),
 			array(
-				'label' => 'protocol-relative same host normalizes before host validation',
-				'input' => '//example.test/wp-admin/profile.php?token=' . rawurlencode( $token ),
+				'label'    => 'protocol-relative same host normalizes before host validation',
+				'input'    => '//example.test/wp-admin/profile.php?token=' . rawurlencode( $token ),
+				'expected' => 'http://example.test/wp-admin/profile.php?token=' . rawurlencode( $token ),
 			),
 			array(
-				'label' => 'uppercase home host follows current case-sensitive host boundary',
-				'input' => 'https://EXAMPLE.TEST/wp-admin/?token=' . rawurlencode( $token ),
+				'label'    => 'uppercase home host follows current case-sensitive host boundary',
+				'input'    => 'https://EXAMPLE.TEST/wp-admin/?token=' . rawurlencode( $token ),
+				'expected' => $fallback,
 			),
 			array(
-				'label' => 'disallowed scheme remains a fallback after sanitization',
-				'input' => 'javascript:alert(1)',
+				'label'    => 'disallowed scheme remains a fallback after sanitization',
+				'input'    => 'javascript:alert(1)',
+				'expected' => $fallback,
 			),
 			array(
-				'label' => 'hostless scheme remains a fallback after sanitization',
-				'input' => 'https:example.test/wp-admin/?token=' . rawurlencode( $token ),
+				'label'    => 'hostless scheme remains a fallback after sanitization',
+				'input'    => 'https:example.test/wp-admin/?token=' . rawurlencode( $token ),
+				'expected' => $fallback,
 			),
 			array(
-				'label' => 'generated same-host bytes are sanitize-idempotent',
-				'input' => 'http://example.test/wp-admin/' . self::random_string( $ctx->fork( 'redirect-generated-path' ), $ctx->int( 0, 96 ) ),
+				'label'    => 'generated same-host bytes are sanitize-idempotent',
+				'input'    => $generated_path,
+				'expected' => \wp_sanitize_redirect( trim( $generated_path, $trim_chars ) ),
 			),
 		);
 
 		foreach ( $cases as $index => $case ) {
-			$trimmed             = trim( $case['input'], " \t\n\r\0\x08\x0B" );
+			$trimmed             = trim( $case['input'], $trim_chars );
 			$sanitized           = \wp_sanitize_redirect( $case['input'] );
 			$trimmed_sanitized   = \wp_sanitize_redirect( $trimmed );
 			$sanitized_twice     = \wp_sanitize_redirect( $sanitized );
@@ -1617,6 +1627,7 @@ final class SecuritySurface {
 				$failures,
 				$sanitized === $sanitized_twice
 					&& $trimmed_sanitized === \wp_sanitize_redirect( $trimmed_sanitized )
+					&& $case['expected'] === $validated
 					&& $validated === $validated_sanitized
 					&& $validated === $validated_trimmed
 					&& self::redirect_value_is_clean( $sanitized )
@@ -1628,6 +1639,7 @@ final class SecuritySurface {
 					'sanitized'          => self::describe_string( $sanitized ),
 					'trimmedSanitized'   => self::describe_string( $trimmed_sanitized ),
 					'sanitizedTwice'     => self::describe_string( $sanitized_twice ),
+					'expected'           => self::describe_string( $case['expected'] ),
 					'validated'          => self::describe_string( $validated ),
 					'validatedSanitized' => self::describe_string( $validated_sanitized ),
 					'validatedTrimmed'   => self::describe_string( $validated_trimmed ),
