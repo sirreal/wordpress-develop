@@ -286,7 +286,8 @@ database, network requests, or a configured site.
   excerpts, balanced tags, URL extraction, link attribute helpers, and embed
   helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
-  GD/Imagick availability, output format filters, resize/save metadata,
+  GD/Imagick availability, output format filters, abstract editor
+  filename/quality/EXIF-orientation contracts, resize/save metadata,
   intermediate and generated sub-sizes, missing sub-size detection, and
   cache/filter-backed attachment metadata helpers with temp-file cleanup.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
