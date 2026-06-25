@@ -308,8 +308,9 @@ database, network requests, or a configured site.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
   boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
-  attachment row and postmeta creation in the in-memory wpdb stub, download
-  short-circuit cleanup, metadata update failure paths, and cleanup restoration.
+  attachment row/post field/postmeta creation in the in-memory wpdb stub,
+  download short-circuit cleanup, metadata update failure paths, and cleanup
+  restoration.
 - `media-metadata`: local audio/video metadata parser coverage over generated
   bounded byte fixtures, including `wp_read_audio_metadata()` and
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper

@@ -1129,6 +1129,9 @@ final class MediaIngestSurface {
 						'post_mime_type' => $post->post_mime_type,
 						'guid'           => $post->guid,
 						'post_title'     => $post->post_title,
+						'post_content'   => $post->post_content,
+						'post_excerpt'   => $post->post_excerpt,
+						'post_date'      => $post->post_date,
 					)
 					: self::describe_result( $post ),
 			)
@@ -1195,6 +1198,20 @@ final class MediaIngestSurface {
 			);
 		}
 
+		foreach ( self::expected_post_fields( $case ) as $field => $expected ) {
+			self::collect_failure(
+				$failures,
+				$post instanceof \WP_Post && (string) $expected === (string) $post->{$field},
+				'media_handle_* preserves expected attachment post fields from desc and postData',
+				array(
+					'case'     => self::case_summary( $case ),
+					'field'    => $field,
+					'expected' => self::describe_result( $expected ),
+					'actual'   => $post instanceof \WP_Post ? self::describe_result( $post->{$field} ) : null,
+				)
+			);
+		}
+
 		self::collect_failure(
 			$failures,
 			( $after['posts'] ?? 0 ) === ( $before['posts'] ?? 0 ) + 1
@@ -1217,7 +1234,10 @@ final class MediaIngestSurface {
 			'fileExists'               => is_string( $attached_file ) && file_exists( $attached_file ),
 			'metadataKeys'             => is_array( $metadata ) ? array_keys( $metadata ) : array(),
 			'mime'                     => $post instanceof \WP_Post ? $post->post_mime_type : null,
+			'expectedPostFields'       => self::expected_post_fields( $case ),
+			'postContent'              => $post instanceof \WP_Post ? $post->post_content : null,
 			'postDate'                 => $post instanceof \WP_Post ? $post->post_date : null,
+			'postExcerpt'              => $post instanceof \WP_Post ? $post->post_excerpt : null,
 			'postParent'               => $post instanceof \WP_Post ? (int) $post->post_parent : null,
 			'postTitle'                => $post instanceof \WP_Post ? $post->post_title : null,
 			'sourceExists'             => file_exists( $source_path ),
@@ -1274,9 +1294,45 @@ final class MediaIngestSurface {
 			) {
 				return false;
 			}
+
+			foreach ( $attachment['expectedPostFields'] ?? array() as $field => $expected ) {
+				$summary_key = self::attachment_summary_key_for_post_field( (string) $field );
+				if ( null === $summary_key || (string) $expected !== (string) ( $attachment[ $summary_key ] ?? null ) ) {
+					return false;
+				}
+			}
 		}
 
 		return true;
+	}
+
+	private static function expected_post_fields( array $case ): array {
+		$fields = array(
+			'expectedPostTitle'   => 'post_title',
+			'expectedPostContent' => 'post_content',
+			'expectedPostExcerpt' => 'post_excerpt',
+			'expectedPostDate'    => 'post_date',
+		);
+		$expected = array();
+
+		foreach ( $fields as $case_key => $post_field ) {
+			if ( array_key_exists( $case_key, $case ) ) {
+				$expected[ $post_field ] = $case[ $case_key ];
+			}
+		}
+
+		return $expected;
+	}
+
+	private static function attachment_summary_key_for_post_field( string $field ): ?string {
+		$map = array(
+			'post_title'   => 'postTitle',
+			'post_content' => 'postContent',
+			'post_excerpt' => 'postExcerpt',
+			'post_date'    => 'postDate',
+		);
+
+		return $map[ $field ] ?? null;
 	}
 
 	private static function events_include_context( array $events, string $context ): bool {
@@ -1362,15 +1418,36 @@ final class MediaIngestSurface {
 			self::png_success_case( $ctx->fork( 'upload-dimension-like' ), 'upload', 'upload-dimension-like-image', 'PNG', 'component-fuzz-150x150.PNG' ),
 		);
 
+		$upload_post_ctx  = $ctx->fork( 'upload-postdata-fields' );
+		$sideload_ctx     = $ctx->fork( 'sideload-postdata-fields' );
+		$upload_title     = 'Component fuzz text ' . $upload_post_ctx->identifier( 3, 8 );
+		$upload_content   = 'Upload body ' . $upload_post_ctx->identifier( 3, 8 );
+		$upload_excerpt   = 'Upload caption ' . $upload_post_ctx->identifier( 3, 8 );
+		$sideload_title   = 'Sideloaded image ' . $sideload_ctx->identifier( 3, 8 );
+		$sideload_content = 'Sideload body ' . $sideload_ctx->identifier( 3, 8 );
+		$sideload_excerpt = 'Sideload caption ' . $sideload_ctx->identifier( 3, 8 );
+		$sideload_date    = sprintf( '2026-%02d-%02d 10:00:00', $sideload_ctx->int( 1, 12 ), $sideload_ctx->int( 1, 28 ) );
+
 		$cases[2]['postData'] = array(
-			'ID'         => 987000 + $ctx->iteration(),
-			'post_title' => 'Component fuzz text ' . $ctx->identifier( 3, 8 ),
+			'ID'           => 987000 + $ctx->iteration(),
+			'post_title'   => $upload_title,
+			'post_content' => $upload_content,
+			'post_excerpt' => $upload_excerpt,
 		);
 		$cases[2]['forbiddenPostId'] = $cases[2]['postData']['ID'];
+		$cases[2]['expectedPostTitle']   = $upload_title;
+		$cases[2]['expectedPostContent'] = $upload_content;
+		$cases[2]['expectedPostExcerpt'] = $upload_excerpt;
 		$cases[3]['postData'] = array(
-			'post_date' => sprintf( '2026-%02d-%02d 10:00:00', $ctx->int( 1, 12 ), $ctx->int( 1, 28 ) ),
+			'post_content' => $sideload_content,
+			'post_excerpt' => $sideload_excerpt,
+			'post_date'    => $sideload_date,
 		);
-		$cases[3]['desc']     = 'Sideloaded image ' . $ctx->identifier( 3, 8 );
+		$cases[3]['desc']                = $sideload_title;
+		$cases[3]['expectedPostTitle']   = $sideload_title;
+		$cases[3]['expectedPostContent'] = $sideload_content;
+		$cases[3]['expectedPostExcerpt'] = $sideload_excerpt;
+		$cases[3]['expectedPostDate']    = $sideload_date;
 		$cases[5]['collisionGroup'] = 'text-collision';
 		$cases[6]['collisionGroup'] = 'text-collision';
 		$cases[7]['expectedBasenameContains'] = '-1.';
