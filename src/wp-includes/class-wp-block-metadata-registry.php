@@ -234,6 +234,15 @@ class WP_Block_Metadata_Registry {
 	private static function normalize_collection_path( $path ) {
 		$path = wp_normalize_path( $path );
 
+		$prefix = '';
+		if ( preg_match( '#^([A-Za-z][A-Za-z0-9+.-]*://)(.*)$#', $path, $matches ) ) {
+			$prefix = $matches[1];
+			$path   = $matches[2];
+		} elseif ( str_starts_with( $path, '//' ) ) {
+			$prefix = '//';
+			$path   = substr( $path, 2 );
+		}
+
 		$drive = '';
 		if ( preg_match( '#^[A-Za-z]:#', $path, $matches ) ) {
 			$drive = $matches[0];
@@ -261,7 +270,7 @@ class WP_Block_Metadata_Registry {
 		}
 
 		$normalized = ( $is_absolute ? '/' : '' ) . implode( '/', $parts );
-		return rtrim( $drive . $normalized, '/' );
+		return $prefix . rtrim( $drive . $normalized, '/' );
 	}
 
 	/**

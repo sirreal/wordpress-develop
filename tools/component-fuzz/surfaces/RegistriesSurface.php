@@ -637,6 +637,8 @@ final class RegistriesSurface {
 		$normalized_path = rtrim( \wp_normalize_path( $collection_path ), '/' );
 		$sibling_path    = $normalized_path . '-sibling';
 		$root_prefix_path = rtrim( \wp_normalize_path( WP_CONTENT_DIR . '/plugin' ), '/' );
+		$unc_path        = '//component-fuzz-' . $token . '/share/blocks';
+		$stream_path     = 'file://component-fuzz-' . $token . '/blocks';
 		$block_names     = array(
 			self::slug( $ctx->fork( 'alpha' ), 'alpha' ),
 			self::slug( $ctx->fork( 'beta' ), 'beta' ),
@@ -681,7 +683,19 @@ final class RegistriesSurface {
 			$sibling_has_metadata    = \WP_Block_Metadata_Registry::has_metadata( $sibling_path . '/' . $block_names[1] . '/block.json' );
 			$root_prefix_registered  = \WP_Block_Metadata_Registry::register_collection( $root_prefix_path, $manifest_path );
 			$root_prefix_metadata    = \WP_Block_Metadata_Registry::get_metadata( $root_prefix_path . '/' . $block_names[2] );
+			$unc_registered          = \WP_Block_Metadata_Registry::register_collection( $unc_path . '/.', $manifest_path );
+			$stream_registered       = \WP_Block_Metadata_Registry::register_collection( $stream_path . '/.', $manifest_path );
+			$unc_files               = \WP_Block_Metadata_Registry::get_collection_block_metadata_files( $unc_path );
+			$stream_files            = \WP_Block_Metadata_Registry::get_collection_block_metadata_files( $stream_path );
 			$last_matched            = self::get_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection' );
+			$expected_unc_files      = array_map(
+				static fn( string $block_name ): string => $unc_path . '/' . $block_name . '/block.json',
+				$block_names
+			);
+			$expected_stream_files   = array_map(
+				static fn( string $block_name ): string => $stream_path . '/' . $block_name . '/block.json',
+				$block_names
+			);
 
 			self::collect_failure(
 				$failures,
@@ -695,12 +709,18 @@ final class RegistriesSurface {
 					&& false === $sibling_has_metadata
 					&& true === $root_prefix_registered
 					&& $manifest_data[ $block_names[2] ] === $root_prefix_metadata
+					&& true === $unc_registered
+					&& true === $stream_registered
+					&& $expected_unc_files === $unc_files
+					&& $expected_stream_files === $stream_files
 					&& $root_prefix_path === $last_matched,
-				'block metadata collection lookups normalize paths, cache metadata, reject sibling path prefixes, and allow root-name prefix siblings',
+				'block metadata collection lookups normalize paths, cache metadata, reject sibling path prefixes, allow root-name prefix siblings, and preserve virtual path prefixes',
 				array(
 					'path'                  => $normalized_path,
 					'siblingPath'           => $sibling_path,
 					'rootPrefixPath'        => $root_prefix_path,
+					'uncPath'               => $unc_path,
+					'streamPath'            => $stream_path,
 					'blockNames'            => $block_names,
 					'metadataWasLazy'       => $metadata_was_lazy,
 					'expectedMetadataFiles' => $expected_metadata_files,
@@ -711,6 +731,10 @@ final class RegistriesSurface {
 					'siblingHasMetadata'    => $sibling_has_metadata,
 					'rootPrefixRegistered'  => $root_prefix_registered,
 					'rootPrefixMetadata'    => $root_prefix_metadata,
+					'uncRegistered'         => $unc_registered,
+					'streamRegistered'      => $stream_registered,
+					'uncFiles'              => $unc_files,
+					'streamFiles'           => $stream_files,
 					'lastMatched'           => $last_matched,
 				)
 			);

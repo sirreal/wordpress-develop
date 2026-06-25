@@ -91,6 +91,42 @@ class Tests_Blocks_WpBlockMetadataRegistry extends WP_UnitTestCase {
 		$this->assertFalse( $result, 'Plugin root parent path with a dot segment should not be registered' );
 	}
 
+	public function test_get_collection_block_metadata_files_preserves_unc_path_prefix() {
+		$path          = '//server/share/prefix-plugin/blocks';
+		$manifest_data = array(
+			'test-block' => array(
+				'name'  => 'test-block',
+				'title' => 'Test Block',
+			),
+		);
+
+		file_put_contents( $this->temp_manifest_file, '<?php return ' . var_export( $manifest_data, true ) . ';' );
+
+		$this->assertTrue( WP_Block_Metadata_Registry::register_collection( $path . '/.', $this->temp_manifest_file ) );
+		$this->assertSame(
+			array( $path . '/test-block/block.json' ),
+			WP_Block_Metadata_Registry::get_collection_block_metadata_files( $path )
+		);
+	}
+
+	public function test_get_collection_block_metadata_files_preserves_stream_wrapper_prefix() {
+		$path          = 'file://block-metadata-registry/blocks';
+		$manifest_data = array(
+			'test-block' => array(
+				'name'  => 'test-block',
+				'title' => 'Test Block',
+			),
+		);
+
+		file_put_contents( $this->temp_manifest_file, '<?php return ' . var_export( $manifest_data, true ) . ';' );
+
+		$this->assertTrue( WP_Block_Metadata_Registry::register_collection( $path . '/.', $this->temp_manifest_file ) );
+		$this->assertSame(
+			array( $path . '/test-block/block.json' ),
+			WP_Block_Metadata_Registry::get_collection_block_metadata_files( $path )
+		);
+	}
+
 	public function test_has_metadata() {
 			$path          = WP_PLUGIN_DIR . '/another/test/path';
 			$manifest_data = array(
