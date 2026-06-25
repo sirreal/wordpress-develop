@@ -42,6 +42,7 @@ final class NetworkMediaSurface {
 			if ( null === $temp_root ) {
 				self::skip_once( $result, 'temporary-files', 'Could not create an isolated directory under sys_get_temp_dir().' );
 			} else {
+				self::exercise_multisite_check_upload_size_apis( $rng, $result, $temp_root );
 				self::exercise_filetype_and_unique_apis( $rng, $result, $temp_root );
 				self::exercise_sideload_helpers( $rng, $result, $temp_root );
 			}
@@ -865,6 +866,159 @@ final class NetworkMediaSurface {
 				array(
 					'expected' => $expected['overQuota'],
 					'actual'   => $over_display['value'] ?? null,
+				)
+			);
+		}
+	}
+
+	private static function exercise_multisite_check_upload_size_apis( array &$rng, array &$result, string $temp_root ): void {
+		self::load_admin_multisite_helpers();
+
+		$required = array(
+			'check_upload_size',
+			'add_filter',
+			'remove_filter',
+			'has_filter',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'check_upload_size', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		$upload_size_dir = $temp_root . DIRECTORY_SEPARATOR . 'check-upload-size';
+		self::ensure_dir( $upload_size_dir );
+
+		foreach ( self::check_upload_size_cases( $rng ) as $index => $case ) {
+			++$result['caseCount'];
+			self::feature( $result, 'check_upload_size' );
+
+			$tmp_name = $upload_size_dir . DIRECTORY_SEPARATOR . 'case-' . $index . '.bin';
+			file_put_contents( $tmp_name, str_repeat( 'x', $case['fileSize'] ) );
+
+			$file = array(
+				'name'     => $case['name'],
+				'type'     => 'application/octet-stream',
+				'tmp_name' => $tmp_name,
+				'error'    => $case['inputError'],
+				'size'     => $case['fileSize'],
+			);
+
+			$site_option_filter = static function ( $pre_site_option, string $option ) use ( $case ) {
+				unset( $pre_site_option );
+				if ( 'blog_upload_space' === $option ) {
+					return $case['allowedMb'];
+				}
+				if ( 'upload_space_check_disabled' === $option ) {
+					return $case['disabled'];
+				}
+				if ( 'fileupload_maxk' === $option ) {
+					return $case['fileuploadMaxK'];
+				}
+
+				return false;
+			};
+			$blog_space_filter  = static function () use ( $case ) {
+				return $case['allowedMb'];
+			};
+			$used_filter        = static function () use ( $case ) {
+				return $case['usedMb'];
+			};
+			$before_site_filter = \has_filter( 'pre_site_option', $site_option_filter );
+			$before_blog_filter = \has_filter( 'pre_option_blog_upload_space', $blog_space_filter );
+			$before_used_filter = \has_filter( 'pre_get_space_used', $used_filter );
+			$post_snapshot      = $_POST;
+			$buffer_level       = ob_get_level();
+
+			\add_filter( 'pre_site_option', $site_option_filter, 10, 2 );
+			\add_filter( 'pre_option_blog_upload_space', $blog_space_filter );
+			\add_filter( 'pre_get_space_used', $used_filter );
+
+			try {
+				$_POST['html-upload'] = '1';
+				$checked              = self::call_api(
+					$result,
+					'check_upload_size',
+					$case,
+					static function () use ( $file ) {
+						ob_start();
+						$checked = check_upload_size( $file );
+						$output  = ob_get_clean();
+						return array(
+							'file'   => $checked,
+							'output' => $output,
+						);
+					}
+				);
+			} finally {
+				while ( ob_get_level() > $buffer_level ) {
+					ob_end_clean();
+				}
+				$_POST = $post_snapshot;
+				\remove_filter( 'pre_get_space_used', $used_filter );
+				\remove_filter( 'pre_option_blog_upload_space', $blog_space_filter );
+				\remove_filter( 'pre_site_option', $site_option_filter, 10 );
+			}
+
+			if ( ! $checked['ok'] || ! is_array( $checked['value'] ) || ! is_array( $checked['value']['file'] ?? null ) ) {
+				self::check_invariant(
+					$result,
+					false,
+					'check_upload_size:return-shape',
+					$case,
+					array( 'actual' => $checked )
+				);
+				continue;
+			}
+
+			$checked_file = $checked['value']['file'];
+			$expected_ok  = 'ok' === $case['expected'];
+
+			self::check_invariant(
+				$result,
+				$file['name'] === ( $checked_file['name'] ?? null )
+					&& $file['tmp_name'] === ( $checked_file['tmp_name'] ?? null )
+					&& $file['size'] === ( $checked_file['size'] ?? null ),
+				'check_upload_size:file-identity-preserved',
+				$case,
+				array(
+					'input'  => $file,
+					'actual' => $checked_file,
+				)
+			);
+			self::check_invariant(
+				$result,
+				$expected_ok
+					? $case['inputError'] === ( $checked_file['error'] ?? null )
+					: ( isset( $checked_file['error'] ) && '' !== (string) $checked_file['error'] && 0 !== $checked_file['error'] ),
+				'check_upload_size:error-contract',
+				$case,
+				array(
+					'expected' => $case['expected'],
+					'input'    => $file,
+					'actual'   => $checked_file,
+				)
+			);
+			self::check_invariant(
+				$result,
+				'' === ( $checked['value']['output'] ?? null )
+					&& $post_snapshot === $_POST
+					&& $before_site_filter === \has_filter( 'pre_site_option', $site_option_filter )
+					&& $before_blog_filter === \has_filter( 'pre_option_blog_upload_space', $blog_space_filter )
+					&& $before_used_filter === \has_filter( 'pre_get_space_used', $used_filter ),
+				'check_upload_size:state-output-filters-restored',
+				$case,
+				array(
+					'output'            => $checked['value']['output'] ?? null,
+					'postBefore'        => $post_snapshot,
+					'postAfter'         => $_POST,
+					'siteFilterBefore'  => $before_site_filter,
+					'siteFilterAfter'   => \has_filter( 'pre_site_option', $site_option_filter ),
+					'blogFilterBefore'  => $before_blog_filter,
+					'blogFilterAfter'   => \has_filter( 'pre_option_blog_upload_space', $blog_space_filter ),
+					'usedFilterBefore'  => $before_used_filter,
+					'usedFilterAfter'   => \has_filter( 'pre_get_space_used', $used_filter ),
 				)
 			);
 		}
@@ -1910,6 +2064,89 @@ final class NetworkMediaSurface {
 				'disabled'       => self::rng_int( $rng, 0, 4 ) === 0 ? 1 : 0,
 				'fileuploadMaxK' => self::rng_int( $rng, 1, 65536 ),
 				'inputLimit'     => self::rng_int( $rng, 1, 96 ) * MB_IN_BYTES,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function check_upload_size_cases( array &$rng ): array {
+		$cases = array(
+			array(
+				'label'          => 'disabled-check-leaves-large-file-alone',
+				'name'           => 'disabled-large.bin',
+				'fileSize'       => 3 * KB_IN_BYTES,
+				'inputError'     => 0,
+				'allowedMb'      => 1,
+				'usedMb'         => 2,
+				'disabled'       => 1,
+				'fileuploadMaxK' => 1,
+				'expected'       => 'ok',
+			),
+			array(
+				'label'          => 'preexisting-upload-error-is-preserved',
+				'name'           => 'already-failed.bin',
+				'fileSize'       => 512,
+				'inputError'     => UPLOAD_ERR_NO_FILE,
+				'allowedMb'      => 1,
+				'usedMb'         => 0,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 1,
+				'expected'       => 'ok',
+			),
+			array(
+				'label'          => 'small-file-under-limits',
+				'name'           => 'small.bin',
+				'fileSize'       => 512,
+				'inputError'     => 0,
+				'allowedMb'      => 5,
+				'usedMb'         => 1,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 8,
+				'expected'       => 'ok',
+			),
+			array(
+				'label'          => 'fileupload-max-k-blocks-large-file',
+				'name'           => 'too-large.bin',
+				'fileSize'       => 4 * KB_IN_BYTES,
+				'inputError'     => 0,
+				'allowedMb'      => 10,
+				'usedMb'         => 0,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 1,
+				'expected'       => 'error',
+			),
+			array(
+				'label'          => 'over-quota-blocks-even-small-file',
+				'name'           => 'over-quota.bin',
+				'fileSize'       => 256,
+				'inputError'     => 0,
+				'allowedMb'      => 1,
+				'usedMb'         => 2,
+				'disabled'       => 0,
+				'fileuploadMaxK' => 16,
+				'expected'       => 'error',
+			),
+		);
+
+		for ( $i = 0; $i < 4; ++$i ) {
+			$allowed  = self::rng_int( $rng, 1, 8 );
+			$used     = self::rng_int( $rng, 0, 10 );
+			$file_kb  = self::rng_int( $rng, 1, 12 );
+			$max_kb   = self::rng_int( $rng, 1, 12 );
+			$disabled = self::rng_int( $rng, 0, 5 ) === 0 ? 1 : 0;
+			$will_error = ! $disabled && ( $used >= $allowed || $file_kb > $max_kb );
+
+			$cases[] = array(
+				'label'          => 'generated-check-upload-size-' . $i,
+				'name'           => 'generated-' . $i . '.bin',
+				'fileSize'       => $file_kb * KB_IN_BYTES,
+				'inputError'     => 0,
+				'allowedMb'      => $allowed,
+				'usedMb'         => $used,
+				'disabled'       => $disabled,
+				'fileuploadMaxK' => $max_kb,
+				'expected'       => $will_error ? 'error' : 'ok',
 			);
 		}
 
