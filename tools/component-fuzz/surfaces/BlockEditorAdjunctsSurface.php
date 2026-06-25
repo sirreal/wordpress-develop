@@ -82,6 +82,7 @@ final class BlockEditorAdjunctsSurface {
 		foreach (
 			array(
 				'WP_Block_Editor_Context',
+				'WP_Block_Template',
 				'WP_Block_Type_Registry',
 				'WP_REST_Response',
 				'WP_Scripts',
@@ -108,13 +109,18 @@ final class BlockEditorAdjunctsSurface {
 				'get_default_block_editor_settings',
 				'get_legacy_widget_block_editor_settings',
 				'has_filter',
+				'parse_blocks',
 				'register_block_type',
 				'remove_filter',
+				'serialize_blocks',
 				'unregister_block_type',
 				'wp_add_inline_style',
 				'wp_get_first_block',
 				'wp_register_script',
 				'wp_register_style',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 				'wp_scripts',
 				'wp_styles',
 			) as $function
@@ -557,6 +563,7 @@ final class BlockEditorAdjunctsSurface {
 		$failures = array();
 		$tree     = self::block_tree_case( $ctx->fork( 'block-tree' ), $case );
 		$original = $tree['blocks'];
+		$post_case = self::post_content_block_case( $ctx->fork( 'post-content' ), $case );
 
 		$found   = \wp_get_first_block( $tree['blocks'], $tree['targetName'] );
 		$missing = \wp_get_first_block( $tree['blocks'], $tree['missingName'] );
@@ -572,6 +579,28 @@ final class BlockEditorAdjunctsSurface {
 				'found'      => $found,
 				'expected'   => $tree['expectedBlock'],
 				'missing'    => $missing,
+			)
+		);
+
+		$post_tree_before          = \parse_blocks( $post_case['templateContent'] );
+		$post_tree_snapshot        = $post_tree_before;
+		$first_post_content_block  = \wp_get_first_block( $post_tree_before, 'core/post-content' );
+		$missing_post_content_tree = \parse_blocks( $post_case['missingTemplateContent'] );
+		$missing_post_content      = \wp_get_first_block( $missing_post_content_tree, 'core/post-content' );
+
+		self::record_if_false(
+			$failures,
+			isset( $first_post_content_block['attrs'] )
+				&& $post_case['expectedAttrs'] === $first_post_content_block['attrs']
+				&& $post_case['laterAttrs'] !== $first_post_content_block['attrs']
+				&& array() === $missing_post_content
+				&& $post_tree_before === $post_tree_snapshot,
+			'core/post-content tree probe finds the first depth-first target and leaves parsed blocks untouched',
+			array(
+				'expectedAttrs' => $post_case['expectedAttrs'],
+				'foundAttrs'    => $first_post_content_block['attrs'] ?? null,
+				'laterAttrs'    => $post_case['laterAttrs'],
+				'missing'       => $missing_post_content,
 			)
 		);
 
@@ -594,11 +623,39 @@ final class BlockEditorAdjunctsSurface {
 			array( 'attributes' => $post_content_attrs )
 		);
 
+		$selected_result = self::exercise_selected_post_content_attributes( $post_case );
+		self::record_if_false(
+			$failures,
+			$post_case['expectedAttrs'] === $selected_result['attributes']
+				&& null === $selected_result['missingAttributes']
+				&& $selected_result['globalsStableAfterTarget']
+				&& $selected_result['globalsStableAfterMissing']
+				&& $selected_result['globalsRestored']
+				&& $selected_result['filtersRemoved']
+				&& $selected_result['cacheRestored']
+				&& $post_tree_snapshot === \parse_blocks( $post_case['templateContent'] ),
+			'selected post content attribute helper returns first target attrs, guards missing target, and restores state',
+			array(
+				'expectedAttrs'             => $post_case['expectedAttrs'],
+				'attributes'                => $selected_result['attributes'],
+				'missingAttributes'         => $selected_result['missingAttributes'],
+				'templateQueries'           => $selected_result['templateQueries'],
+				'globalsStableAfterTarget'  => $selected_result['globalsStableAfterTarget'],
+				'globalsStableAfterMissing' => $selected_result['globalsStableAfterMissing'],
+				'globalsRestored'           => $selected_result['globalsRestored'],
+				'filtersRemoved'            => $selected_result['filtersRemoved'],
+				'cacheRestored'             => $selected_result['cacheRestored'],
+			)
+		);
+
 		return self::row(
 			$ctx,
-			'block-editor-adjuncts.block-tree-and-post-content-helpers.guarded',
+			'block-editor-adjuncts.block-tree-and-post-content-helpers.first-match-selected-post-and-restored',
 			$failures,
-			array( 'targetName' => $tree['targetName'] )
+			array(
+				'targetName'   => $tree['targetName'],
+				'templateSlug' => $post_case['templateSlug'],
+			)
 		);
 	}
 
@@ -612,6 +669,18 @@ final class BlockEditorAdjunctsSurface {
 		self::write_file( $theme_file, $theme_css );
 
 		$path_slug = rawurlencode( $slug );
+		$block_theme_root = $temp_root . DIRECTORY_SEPARATOR . 'themes';
+		$block_theme_slug = 'cfz-block-theme-' . $slug;
+		$block_theme_dir  = $block_theme_root . DIRECTORY_SEPARATOR . $block_theme_slug;
+
+		self::write_file(
+			$block_theme_dir . DIRECTORY_SEPARATOR . 'style.css',
+			"/*\nTheme Name: Component Fuzz Block Theme {$slug}\n*/\n"
+		);
+		self::write_file(
+			$block_theme_dir . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'index.html',
+			'<!-- wp:paragraph --><p>Component fuzz block theme index.</p><!-- /wp:paragraph -->'
+		);
 
 		return array(
 			'slug'                    => $slug,
@@ -676,6 +745,8 @@ final class BlockEditorAdjunctsSurface {
 			'themeStyleFile'          => $theme_file,
 			'themeStyleUri'           => $theme_uri,
 			'themeCssMarker'          => $theme_marker,
+			'blockThemeRoot'          => $block_theme_root,
+			'blockThemeSlug'          => $block_theme_slug,
 			'bindingBlockName'        => 'component-fuzz/' . $slug . '-binding',
 			'bindingAttributes'       => array( 'content', 'url-' . $slug ),
 			'iframeBlockName'         => 'component-fuzz/' . $slug . '-iframe',
@@ -802,6 +873,322 @@ final class BlockEditorAdjunctsSurface {
 			'missingName'   => $missing,
 			'expectedBlock' => $target,
 		);
+	}
+
+	private static function post_content_block_case( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$template_slug = 'selected-' . self::slug( $ctx, 'template' );
+		$post          = self::synthetic_post( $ctx->fork( 'selected-post' ), 'selected-global-post' );
+		$post->ID      = $ctx->int( 2000000, 2999999 );
+
+		$expected_attrs = self::post_content_attrs(
+			$ctx->fork( 'expected-attrs' ),
+			$case['slug'],
+			'first'
+		);
+		$later_attrs    = self::post_content_attrs(
+			$ctx->fork( 'later-attrs' ),
+			$case['slug'],
+			'later'
+		);
+
+		$target = self::block(
+			'core/post-content',
+			$expected_attrs,
+			array(),
+			'<main class="component-fuzz-post-content">Selected post content target.</main>'
+		);
+		$later  = self::block(
+			'core/post-content',
+			$later_attrs,
+			array(),
+			'<section class="component-fuzz-post-content-later">Later post content decoy.</section>'
+		);
+
+		$template_blocks = array(
+			self::block(
+				'core/group',
+				array(
+					'className' => 'component-fuzz-selected-wrapper',
+					'layout'    => array( 'type' => 'constrained' ),
+				),
+				array(
+					self::block(
+						'core/paragraph',
+						array( 'placeholder' => $ctx->identifier( 4, 12 ) ),
+						array(),
+						'<p>Intro before selected content.</p>'
+					),
+					self::block(
+						'core/columns',
+						array( 'isStackedOnMobile' => $ctx->bool() ),
+						array(
+							self::block(
+								'core/column',
+								array( 'width' => $ctx->int( 20, 45 ) . '%' ),
+								array(
+									self::block(
+										'component-fuzz/post-content',
+										array( 'decoy' => 'same suffix, different namespace' ),
+										array(),
+										'<p>Decoy custom post content block.</p>'
+									),
+								)
+							),
+							self::block(
+								'core/column',
+								array( 'width' => $ctx->int( 46, 80 ) . '%' ),
+								array( $target )
+							),
+						)
+					),
+				)
+			),
+			$later,
+		);
+
+		$missing_template_blocks = array(
+			self::block(
+				'core/group',
+				array( 'className' => 'component-fuzz-missing-wrapper' ),
+				array(
+					self::block(
+						'core/post-excerpt',
+						array( 'moreText' => 'No post content target ' . $case['slug'] ),
+						array(),
+						'<p>Excerpt only.</p>'
+					),
+					self::block(
+						'component-fuzz/post-content',
+						array( 'decoy' => 'missing target guard' ),
+						array(),
+						'<p>Namespaced decoy only.</p>'
+					),
+				)
+			),
+		);
+
+		return array(
+			'post'                   => $post,
+			'templateSlug'           => $template_slug,
+			'templateContent'        => \serialize_blocks( $template_blocks ),
+			'missingTemplateContent' => \serialize_blocks( $missing_template_blocks ),
+			'expectedAttrs'          => $expected_attrs,
+			'laterAttrs'             => $later_attrs,
+			'themeRoot'              => $case['blockThemeRoot'],
+			'themeSlug'              => $case['blockThemeSlug'],
+		);
+	}
+
+	private static function exercise_selected_post_content_attributes( array $post_case ): array {
+		$post             = $post_case['post'];
+		$selected_content = $post_case['templateContent'];
+		$template_queries = array();
+		$filters          = array();
+
+		$post_exists_before    = array_key_exists( 'post', $GLOBALS );
+		$post_before           = $post_exists_before ? $GLOBALS['post'] : null;
+		$post_id_exists_before = array_key_exists( 'post_ID', $GLOBALS );
+		$post_id_before        = $post_id_exists_before ? $GLOBALS['post_ID'] : null;
+		$theme_dirs_exists_before = array_key_exists( 'wp_theme_directories', $GLOBALS );
+		$theme_dirs_before        = $theme_dirs_exists_before ? $GLOBALS['wp_theme_directories'] : null;
+
+		$cached_before = \wp_cache_get( (int) $post->ID, 'posts', false, $cache_found_before );
+
+		$stylesheet_filter = static function () use ( $post_case ): string {
+			return $post_case['themeSlug'];
+		};
+		$theme_root_filter = static function () use ( $post_case ): string {
+			return $post_case['themeRoot'];
+		};
+		$post_meta_filter  = static function ( $value, int $object_id, string $meta_key, bool $single ) use ( $post_case ) {
+			if (
+				$single
+				&& (int) $post_case['post']->ID === $object_id
+				&& '_wp_page_template' === $meta_key
+			) {
+				return $post_case['templateSlug'];
+			}
+
+			return $value;
+		};
+		$templates_filter  = static function ( $templates, array $query, string $template_type ) use ( &$template_queries, &$selected_content, $post_case ) {
+			$template_queries[] = array(
+				'type'  => $template_type,
+				'query' => $query,
+			);
+
+			if ( 'wp_template' !== $template_type ) {
+				return $templates;
+			}
+
+			$slugs = isset( $query['slug__in'] ) && is_array( $query['slug__in'] ) ? $query['slug__in'] : array();
+			if ( array() !== $slugs && ! in_array( $post_case['templateSlug'], $slugs, true ) ) {
+				return array();
+			}
+
+			$template                 = new \WP_Block_Template();
+			$template->id             = $post_case['themeSlug'] . '//' . $post_case['templateSlug'];
+			$template->theme          = $post_case['themeSlug'];
+			$template->slug           = $post_case['templateSlug'];
+			$template->type           = 'wp_template';
+			$template->content        = $selected_content;
+			$template->source         = 'theme';
+			$template->origin         = 'theme';
+			$template->has_theme_file = true;
+			$template->is_custom      = false;
+			$template->post_types     = array( $post_case['post']->post_type );
+
+			return array( $template );
+		};
+
+		$filters = array(
+			array( 'pre_option_stylesheet', $stylesheet_filter, 10, 1 ),
+			array( 'pre_option_template', $stylesheet_filter, 10, 1 ),
+			array( 'stylesheet', $stylesheet_filter, 10, 1 ),
+			array( 'template', $stylesheet_filter, 10, 1 ),
+			array( 'pre_option_stylesheet_root', $theme_root_filter, 10, 1 ),
+			array( 'pre_option_template_root', $theme_root_filter, 10, 1 ),
+			array( 'theme_root', $theme_root_filter, 10, 1 ),
+			array( 'get_post_metadata', $post_meta_filter, 10, 5 ),
+			array( 'pre_get_block_templates', $templates_filter, 10, 3 ),
+		);
+
+		foreach ( $filters as $filter ) {
+			\add_filter( $filter[0], $filter[1], $filter[2], $filter[3] );
+		}
+
+		$theme_dirs = is_array( $theme_dirs_before ) ? $theme_dirs_before : array();
+		if ( defined( 'WP_CONTENT_DIR' ) ) {
+			$theme_dirs[] = WP_CONTENT_DIR . '/themes';
+		}
+		$theme_dirs[]                   = $post_case['themeRoot'];
+		$GLOBALS['wp_theme_directories'] = array_values( array_unique( array_filter( $theme_dirs, 'is_string' ) ) );
+		$GLOBALS['post']                 = $post;
+		$GLOBALS['post_ID']              = (int) $post->ID;
+		\wp_cache_set( (int) $post->ID, $post, 'posts' );
+
+		$attributes                   = null;
+		$missing_attributes           = null;
+		$globals_stable_after_target  = false;
+		$globals_stable_after_missing = false;
+		$globals_restored             = false;
+		$filters_removed              = false;
+		$cache_restored               = false;
+
+		try {
+			$attributes                  = \wp_get_post_content_block_attributes();
+			$globals_stable_after_target = self::selected_post_globals_match( $post );
+
+			$selected_content             = $post_case['missingTemplateContent'];
+			$missing_attributes           = \wp_get_post_content_block_attributes();
+			$globals_stable_after_missing = self::selected_post_globals_match( $post );
+		} finally {
+			foreach ( $filters as $filter ) {
+				\remove_filter( $filter[0], $filter[1], $filter[2] );
+			}
+
+			if ( $post_exists_before ) {
+				$GLOBALS['post'] = $post_before;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			if ( $post_id_exists_before ) {
+				$GLOBALS['post_ID'] = $post_id_before;
+			} else {
+				unset( $GLOBALS['post_ID'] );
+			}
+
+			if ( $theme_dirs_exists_before ) {
+				$GLOBALS['wp_theme_directories'] = $theme_dirs_before;
+			} else {
+				unset( $GLOBALS['wp_theme_directories'] );
+			}
+
+			if ( $cache_found_before ) {
+				\wp_cache_set( (int) $post->ID, $cached_before, 'posts' );
+			} else {
+				\wp_cache_delete( (int) $post->ID, 'posts' );
+			}
+		}
+
+		$cache_after = \wp_cache_get( (int) $post->ID, 'posts', false, $cache_found_after );
+
+		$globals_restored = self::global_restored( 'post', $post_exists_before, $post_before )
+			&& self::global_restored( 'post_ID', $post_id_exists_before, $post_id_before )
+			&& self::global_restored( 'wp_theme_directories', $theme_dirs_exists_before, $theme_dirs_before );
+		$filters_removed  = self::filters_removed( $filters );
+		$cache_restored   = $cache_found_before === $cache_found_after
+			&& ( ! $cache_found_before || $cached_before === $cache_after );
+
+		return array(
+			'attributes'                => $attributes,
+			'missingAttributes'         => $missing_attributes,
+			'templateQueries'           => $template_queries,
+			'globalsStableAfterTarget'  => $globals_stable_after_target,
+			'globalsStableAfterMissing' => $globals_stable_after_missing,
+			'globalsRestored'           => $globals_restored,
+			'filtersRemoved'            => $filters_removed,
+			'cacheRestored'             => $cache_restored,
+		);
+	}
+
+	private static function post_content_attrs( \ComponentFuzz\FuzzContext $ctx, string $slug, string $role ): array {
+		return array(
+			'align'              => $ctx->choice( array( 'wide', 'full', '' ) ),
+			'tagName'            => $ctx->choice( array( 'main', 'section', 'article' ) ),
+			'className'          => 'component-fuzz-post-content-' . $role . '-' . $slug,
+			'componentFuzzRole'  => $role,
+			'componentFuzzToken' => $ctx->identifier( 6, 14 ),
+			'layout'             => array(
+				'type'        => $ctx->choice( array( 'constrained', 'default' ) ),
+				'contentSize' => $ctx->int( 320, 960 ) . 'px',
+				'wideSize'    => $ctx->int( 961, 1440 ) . 'px',
+			),
+			'style'              => array(
+				'spacing' => array(
+					'padding' => array(
+						'top'    => $ctx->int( 0, 8 ) . 'rem',
+						'bottom' => $ctx->int( 0, 8 ) . 'rem',
+					),
+				),
+			),
+			'lock'               => array(
+				'move'   => $ctx->bool(),
+				'remove' => $ctx->bool(),
+			),
+		);
+	}
+
+	private static function block( string $name, array $attrs = array(), array $inner_blocks = array(), string $inner_html = '' ): array {
+		return array(
+			'blockName'    => $name,
+			'attrs'        => $attrs,
+			'innerBlocks'  => $inner_blocks,
+			'innerHTML'    => $inner_html,
+			'innerContent' => array() === $inner_blocks ? array( $inner_html ) : array_fill( 0, count( $inner_blocks ), null ),
+		);
+	}
+
+	private static function selected_post_globals_match( \WP_Post $post ): bool {
+		return ( $GLOBALS['post'] ?? null ) === $post
+			&& isset( $GLOBALS['post_ID'] )
+			&& (int) $GLOBALS['post_ID'] === (int) $post->ID;
+	}
+
+	private static function global_restored( string $name, bool $existed, $value ): bool {
+		$exists = array_key_exists( $name, $GLOBALS );
+		return $existed === $exists && ( ! $exists || $GLOBALS[ $name ] === $value );
+	}
+
+	private static function filters_removed( array $filters ): bool {
+		foreach ( $filters as $filter ) {
+			if ( false !== \has_filter( $filter[0], $filter[1] ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function install_theme_supports( array $case ): void {
@@ -1042,6 +1429,7 @@ final class BlockEditorAdjunctsSurface {
 					'post',
 					'post_ID',
 					'editor_styles',
+					'wp_theme_directories',
 					'_wp_theme_features',
 					'_wp_additional_image_sizes',
 				)
