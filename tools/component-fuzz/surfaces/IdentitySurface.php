@@ -34,6 +34,7 @@ final class IdentitySurface {
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_user_contact_methods( $result, $rng );
 			self::exercise_urls( $result, $rng );
+			self::exercise_avatar_helpers( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
 			self::exercise_comment_cookies( $result, $rng );
 			self::exercise_current_commenter( $result, $rng );
@@ -370,6 +371,236 @@ final class IdentitySurface {
 				}
 			}
 		);
+	}
+
+	private static function exercise_avatar_helpers( array &$result, array &$rng ): void {
+		if ( ! self::have_functions( array( 'add_filter', 'remove_filter', 'has_filter', 'get_avatar_data', 'get_avatar_url', 'get_avatar', 'wp_parse_str', 'wp_parse_url' ), $result, 'avatar_helpers' ) ) {
+			return;
+		}
+
+		$cases = self::avatar_cases( $rng );
+
+		self::run_case(
+			$result,
+			'avatar_helpers',
+			static function () use ( &$result, $cases ): void {
+				$option_default = 'retro';
+				$option_rating  = 'PG';
+				$option_filters = array(
+					'pre_option_avatar_default' => static function () use ( $option_default ): string {
+						return $option_default;
+					},
+					'pre_option_avatar_rating'  => static function () use ( $option_rating ): string {
+						return $option_rating;
+					},
+					'pre_option_show_avatars'   => static function (): int {
+						return 1;
+					},
+				);
+
+				$before_filters = array();
+				foreach ( $option_filters as $hook => $filter ) {
+					$before_filters[ $hook ] = \has_filter( $hook, $filter );
+					\add_filter( $hook, $filter, 999, 3 );
+				}
+
+				try {
+					foreach ( $cases as $case ) {
+						$expected = self::expected_avatar_data( $case, $option_default, $option_rating );
+						$actual   = \get_avatar_data( $case['id'], $case['args'] );
+						$url      = \get_avatar_url( $case['id'], $case['args'] );
+						$observed = self::avatar_url_observation( $actual['url'] ?? false );
+						$input    = self::describe_avatar_case( $case );
+
+						self::check( $result, 'get_avatar_data.generated_dimensions_are_normalized', self::avatar_dimensions_match( $actual, $expected ), $input, self::avatar_dimension_expectation( $expected ), self::avatar_dimension_observation( $actual ) );
+						self::check( $result, 'get_avatar_data.generated_flags_are_canonical', ( $actual['default'] ?? null ) === $expected['default'] && ( $actual['force_default'] ?? null ) === $expected['forceDefault'] && ( $actual['rating'] ?? null ) === $expected['rating'] && true === ( $actual['found_avatar'] ?? null ), $input, self::avatar_flag_expectation( $expected ), self::avatar_flag_observation( $actual ) );
+						self::check( $result, 'get_avatar_data.generated_hash_and_query_contract', self::avatar_url_matches_expected( $observed, $expected ), $input, self::avatar_url_expectation( $expected ), $observed );
+						self::check( $result, 'get_avatar_url.aliases_get_avatar_data_url', ( $actual['url'] ?? null ) === $url, $input, $actual['url'] ?? null, $url );
+					}
+
+					self::exercise_avatar_filter_pipeline( $result, $cases[0] );
+					self::exercise_avatar_html_short_circuit( $result, $cases[1] );
+				} finally {
+					foreach ( $option_filters as $hook => $filter ) {
+						\remove_filter( $hook, $filter, 999 );
+					}
+				}
+
+				$after_filters = array();
+				foreach ( $option_filters as $hook => $filter ) {
+					$after_filters[ $hook ] = \has_filter( $hook, $filter );
+				}
+
+				self::check( $result, 'avatar_helpers.option_filters_restored', $before_filters === $after_filters, array_keys( $option_filters ), $before_filters, $after_filters );
+			}
+		);
+	}
+
+	private static function exercise_avatar_filter_pipeline( array &$result, array $case ): void {
+		$token     = substr( hash( 'sha256', $case['label'] . '|filter' ), 0, 10 );
+		$short_url = 'https://avatars.example.test/' . $token . '.png?source=pre';
+		$events    = array(
+			'pre'  => array(),
+			'url'  => array(),
+			'data' => array(),
+		);
+
+		$pre_filter = static function ( array $args, $id_or_email ) use ( &$events, $short_url ): array {
+			$events['pre'][] = array(
+				'args' => $args,
+				'id'   => $id_or_email,
+			);
+
+			$args['url']          = $short_url;
+			$args['found_avatar'] = true;
+			return $args;
+		};
+		$url_filter = static function ( string $url, $id_or_email, array $args ) use ( &$events ): string {
+			$events['url'][] = array(
+				'url'  => $url,
+				'id'   => $id_or_email,
+				'args' => $args,
+			);
+
+			return $url . '&unexpected=1';
+		};
+		$data_filter = static function ( array $args, $id_or_email ) use ( &$events, $token ): array {
+			$events['data'][] = array(
+				'args' => $args,
+				'id'   => $id_or_email,
+			);
+
+			$args['url'] .= '&filtered=' . $token;
+			return $args;
+		};
+
+		$before_filters = array(
+			'pre_get_avatar_data' => \has_filter( 'pre_get_avatar_data', $pre_filter ),
+			'get_avatar_url'      => \has_filter( 'get_avatar_url', $url_filter ),
+			'get_avatar_data'     => \has_filter( 'get_avatar_data', $data_filter ),
+		);
+
+		\add_filter( 'pre_get_avatar_data', $pre_filter, 999, 2 );
+		\add_filter( 'get_avatar_url', $url_filter, 999, 3 );
+		\add_filter( 'get_avatar_data', $data_filter, 999, 2 );
+
+		$args = array(
+			'size'          => '44',
+			'height'        => '0',
+			'width'         => '12',
+			'default'       => 'mysteryman',
+			'force_default' => true,
+			'rating'        => 'PG',
+		);
+
+		try {
+			$data = \get_avatar_data( $case['id'], $args );
+			$url  = \get_avatar_url( $case['id'], $args );
+		} finally {
+			\remove_filter( 'pre_get_avatar_data', $pre_filter, 999 );
+			\remove_filter( 'get_avatar_url', $url_filter, 999 );
+			\remove_filter( 'get_avatar_data', $data_filter, 999 );
+		}
+
+		$after_filters = array(
+			'pre_get_avatar_data' => \has_filter( 'pre_get_avatar_data', $pre_filter ),
+			'get_avatar_url'      => \has_filter( 'get_avatar_url', $url_filter ),
+			'get_avatar_data'     => \has_filter( 'get_avatar_data', $data_filter ),
+		);
+		$expected_url  = $short_url . '&filtered=' . $token;
+		$first_args    = $events['pre'][0]['args'] ?? array();
+		$input         = self::describe_avatar_case( $case );
+
+		self::check( $result, 'get_avatar_data.pre_filter_short_circuits_url_generation', $expected_url === ( $data['url'] ?? null ) && $expected_url === $url && array() === $events['url'], $input, array( 'url' => $expected_url, 'urlFilterCalls' => 0 ), array( 'dataUrl' => $data['url'] ?? null, 'getAvatarUrl' => $url, 'urlEvents' => $events['url'] ) );
+		self::check( $result, 'get_avatar_data.filters_receive_normalized_args_and_identity', 2 === count( $events['pre'] ) && 2 === count( $events['data'] ) && self::same_avatar_id( $case['id'], $events['pre'][0]['id'] ?? null ) && 44 === ( $first_args['size'] ?? null ) && 44 === ( $first_args['height'] ?? null ) && 12 === ( $first_args['width'] ?? null ) && 'mm' === ( $first_args['default'] ?? null ) && true === ( $first_args['force_default'] ?? null ) && 'pg' === ( $first_args['rating'] ?? null ) && false === ( $first_args['found_avatar'] ?? null ), $input, 'normalized pre/data filter events', $events );
+		self::check( $result, 'get_avatar_data.filter_pipeline_restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+	}
+
+	private static function exercise_avatar_html_short_circuit( array &$result, array $case ): void {
+		$token      = substr( hash( 'sha256', $case['label'] . '|html' ), 0, 10 );
+		$pre_html   = '<img alt="short" data-token="' . $token . '" />';
+		$final_html = $pre_html . '<!--avatar-filtered-' . $token . '-->';
+		$events     = array(
+			'pre'   => array(),
+			'final' => array(),
+		);
+
+		$pre_filter = static function ( $avatar, $id_or_email, array $args ) use ( &$events, $pre_html ): string {
+			$events['pre'][] = array(
+				'avatar' => $avatar,
+				'id'     => $id_or_email,
+				'args'   => $args,
+			);
+
+			return $pre_html;
+		};
+		$final_filter = static function ( string $avatar, $id_or_email, int $size, string $default_value, string $alt, array $args ) use ( &$events, $token ): string {
+			$events['final'][] = array(
+				'avatar'  => $avatar,
+				'id'      => $id_or_email,
+				'size'    => $size,
+				'default' => $default_value,
+				'alt'     => $alt,
+				'args'    => $args,
+			);
+
+			return $avatar . '<!--avatar-filtered-' . $token . '-->';
+		};
+
+		$before_filters = array(
+			'pre_get_avatar' => \has_filter( 'pre_get_avatar', $pre_filter ),
+			'get_avatar'     => \has_filter( 'get_avatar', $final_filter ),
+		);
+
+		\add_filter( 'pre_get_avatar', $pre_filter, 999, 3 );
+		\add_filter( 'get_avatar', $final_filter, 999, 6 );
+
+		$wp_query_exists = array_key_exists( 'wp_query', $GLOBALS );
+		$wp_query_before = $GLOBALS['wp_query'] ?? null;
+		$GLOBALS['wp_query'] = new class() {
+			public bool $before_loop = false;
+			public bool $in_the_loop = false;
+
+			public function is_main_query(): bool {
+				return false;
+			}
+		};
+
+		try {
+			$avatar = \get_avatar(
+				$case['id'],
+				'52',
+				'mystery',
+				'Alt ' . $token,
+				array(
+					'force_display' => true,
+					'height'        => 0,
+					'width'         => '31',
+					'class'         => array( 'identity-avatar-' . $token ),
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_get_avatar', $pre_filter, 999 );
+			\remove_filter( 'get_avatar', $final_filter, 999 );
+			if ( $wp_query_exists ) {
+				$GLOBALS['wp_query'] = $wp_query_before;
+			} else {
+				unset( $GLOBALS['wp_query'] );
+			}
+		}
+
+		$after_filters = array(
+			'pre_get_avatar' => \has_filter( 'pre_get_avatar', $pre_filter ),
+			'get_avatar'     => \has_filter( 'get_avatar', $final_filter ),
+		);
+		$pre_args      = $events['pre'][0]['args'] ?? array();
+		$final_event   = $events['final'][0] ?? array();
+		$input         = self::describe_avatar_case( $case );
+
+		self::check( $result, 'get_avatar.pre_filter_short_circuits_html_then_final_filter_runs', $final_html === $avatar && 1 === count( $events['pre'] ) && 1 === count( $events['final'] ), $input, $final_html, array( 'avatar' => $avatar, 'events' => $events ) );
+		self::check( $result, 'get_avatar.filters_receive_normalized_identity_args', self::same_avatar_id( $case['id'], $events['pre'][0]['id'] ?? null ) && null === ( $events['pre'][0]['avatar'] ?? null ) && 52 === ( $pre_args['size'] ?? null ) && 52 === ( $pre_args['height'] ?? null ) && '31' === ( $pre_args['width'] ?? null ) && 'mystery' === ( $pre_args['default'] ?? null ) && 'Alt ' . $token === ( $pre_args['alt'] ?? null ) && $pre_html === ( $final_event['avatar'] ?? null ) && 52 === ( $final_event['size'] ?? null ) && 'mystery' === ( $final_event['default'] ?? null ) && 'Alt ' . $token === ( $final_event['alt'] ?? null ), $input, 'normalized pre/final avatar filter args', $events );
+		self::check( $result, 'get_avatar.filter_pipeline_restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+		self::check( $result, 'get_avatar.wp_query_global_restored', $wp_query_exists === array_key_exists( 'wp_query', $GLOBALS ) && ( ! $wp_query_exists || $wp_query_before === $GLOBALS['wp_query'] ), $input, self::summarize( $wp_query_before ), self::summarize( $GLOBALS['wp_query'] ?? null ) );
 	}
 
 	private static function exercise_text_and_comment_helpers( array &$result, array &$rng ): void {
@@ -774,6 +1005,326 @@ final class IdentitySurface {
 		}
 
 		return $chars;
+	}
+
+	private static function avatar_cases( array &$rng ): array {
+		$token      = substr( hash( 'sha256', self::rand_bytes( $rng, 16 ) ), 0, 10 );
+		$sha_email  = 'hash-source-' . $token . '@example.test';
+		$user_email = 'avatar-user-' . $token . '@example.test';
+		$cases      = array(
+			array(
+				'label' => 'mixed_email_alias_default',
+				'id'    => '  Mixed.' . $token . '+Tag@Example.TEST  ',
+				'args'  => array(
+					'size'          => '0',
+					'height'        => '27',
+					'width'         => 0,
+					'default'       => 'mysteryman',
+					'force_default' => false,
+					'rating'        => 'PG',
+				),
+			),
+			array(
+				'label' => 'sha256_hash_force_default',
+				'id'    => hash( 'sha256', strtolower( $sha_email ) ) . '@sha256.gravatar.com',
+				'args'  => array(
+					'size'          => self::rand_int( $rng, 24, 96 ),
+					'height'        => null,
+					'width'         => '17',
+					'default'       => 'gravatar_default',
+					'force_default' => true,
+					'rating'        => 'X',
+				),
+			),
+			array(
+				'label' => 'option_backed_defaults',
+				'id'    => 'option-default-' . $token . '@example.test',
+				'args'  => array(
+					'size'   => self::rand_int( $rng, 32, 128 ),
+					'height' => 'bad-height',
+					'width'  => self::rand_int( $rng, 32, 128 ),
+				),
+			),
+			array(
+				'label' => 'email_initials',
+				'id'    => 'first_last-' . $token . '@example.test',
+				'args'  => array(
+					'size'          => self::rand_int( $rng, 48, 96 ),
+					'height'        => self::rand_int( $rng, 12, 36 ),
+					'width'         => 'bad-width',
+					'default'       => 'initials',
+					'force_default' => false,
+					'rating'        => 'g',
+				),
+			),
+		);
+
+		if ( class_exists( 'WP_User' ) ) {
+			$cases[] = array(
+				'label' => 'wp_user_initials',
+				'id'    => self::fake_avatar_user(
+					self::rand_int( $rng, 1000, 9999 ),
+					'avatar_user_' . $token,
+					$user_email,
+					'Ada Lovelace',
+					'Ada',
+					'Lovelace'
+				),
+				'args'  => array(
+					'size'          => self::rand_int( $rng, 36, 120 ),
+					'height'        => null,
+					'width'         => '-18',
+					'default'       => 'initials',
+					'force_default' => true,
+					'rating'        => 'R',
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function expected_avatar_data( array $case, string $option_default, string $option_rating ): array {
+		$args           = $case['args'];
+		$size           = self::normalize_avatar_dimension( $args['size'] ?? 96, 96 );
+		$height         = self::normalize_avatar_dimension( $args['height'] ?? null, $size );
+		$width          = self::normalize_avatar_dimension( $args['width'] ?? null, $size );
+		$default        = self::normalize_avatar_default( $args['default'] ?? $option_default, $option_default );
+		$force_default  = (bool) ( $args['force_default'] ?? false );
+		$rating         = strtolower( (string) ( $args['rating'] ?? $option_rating ) );
+		$email_hash     = self::expected_avatar_hash( $case['id'] );
+		$expected_query = array(
+			's' => (string) $size,
+			'r' => $rating,
+		);
+
+		if ( false !== $default ) {
+			$expected_query['d'] = (string) $default;
+		}
+		if ( $force_default ) {
+			$expected_query['f'] = 'y';
+		}
+
+		$initials = self::expected_avatar_initials( $case['id'], $default );
+		if ( null !== $initials ) {
+			$expected_query['initials'] = $initials;
+		}
+
+		ksort( $expected_query );
+
+		return array(
+			'size'         => $size,
+			'height'       => $height,
+			'width'        => $width,
+			'default'      => $default,
+			'forceDefault' => $force_default,
+			'rating'       => $rating,
+			'hash'         => $email_hash,
+			'query'        => $expected_query,
+		);
+	}
+
+	private static function normalize_avatar_dimension( $value, int $fallback ): int {
+		if ( is_numeric( $value ) ) {
+			$value = abs( (int) $value );
+			return $value ? $value : $fallback;
+		}
+
+		return $fallback;
+	}
+
+	private static function normalize_avatar_default( $default, string $option_default ) {
+		if ( empty( $default ) ) {
+			$default = $option_default;
+		}
+
+		if ( in_array( $default, array( 'mm', 'mystery', 'mysteryman' ), true ) ) {
+			return 'mm';
+		}
+		if ( 'gravatar_default' === $default ) {
+			return false;
+		}
+
+		return $default;
+	}
+
+	private static function expected_avatar_hash( $id_or_email ): string {
+		if ( is_string( $id_or_email ) ) {
+			if ( str_contains( $id_or_email, '@sha256.gravatar.com' ) || str_contains( $id_or_email, '@md5.gravatar.com' ) ) {
+				return explode( '@', $id_or_email )[0];
+			}
+
+			return hash( 'sha256', strtolower( trim( $id_or_email ) ) );
+		}
+
+		if ( $id_or_email instanceof \WP_User ) {
+			return hash( 'sha256', strtolower( trim( $id_or_email->user_email ) ) );
+		}
+
+		return '';
+	}
+
+	private static function expected_avatar_initials( $id_or_email, $default ): ?string {
+		if ( 'initials' !== $default ) {
+			return null;
+		}
+
+		$name = '';
+		if ( $id_or_email instanceof \WP_User ) {
+			if ( '' !== $id_or_email->display_name ) {
+				$name = $id_or_email->display_name;
+			} elseif ( '' !== $id_or_email->first_name && '' !== $id_or_email->last_name ) {
+				$name = $id_or_email->first_name . ' ' . $id_or_email->last_name;
+			} else {
+				$name = $id_or_email->user_login;
+			}
+		} elseif ( is_string( $id_or_email ) && str_contains( $id_or_email, '@' ) ) {
+			$name = str_replace( array( '.', '_', '-' ), ' ', substr( $id_or_email, 0, strpos( $id_or_email, '@' ) ) );
+		}
+
+		if ( '' === $name ) {
+			return null;
+		}
+
+		if ( ! str_contains( $name, ' ' ) || preg_match( '/\p{Han}|\p{Hiragana}|\p{Katakana}|\p{Hangul}/u', $name ) ) {
+			return mb_substr( $name, 0, min( 2, mb_strlen( $name, 'UTF-8' ) ), 'UTF-8' );
+		}
+
+		return mb_substr( $name, 0, 1, 'UTF-8' ) . mb_substr( $name, strrpos( $name, ' ' ) + 1, 1, 'UTF-8' );
+	}
+
+	private static function avatar_url_observation( $url ): array {
+		if ( ! is_string( $url ) ) {
+			return array(
+				'url'   => $url,
+				'parts' => false,
+				'query' => array(),
+			);
+		}
+
+		$parts = \wp_parse_url( $url );
+		$query = array();
+		if ( is_array( $parts ) && isset( $parts['query'] ) ) {
+			\wp_parse_str( $parts['query'], $query );
+		}
+		ksort( $query );
+
+		return array(
+			'url'    => $url,
+			'scheme' => is_array( $parts ) ? ( $parts['scheme'] ?? null ) : null,
+			'host'   => is_array( $parts ) ? ( $parts['host'] ?? null ) : null,
+			'path'   => is_array( $parts ) ? ( $parts['path'] ?? null ) : null,
+			'query'  => $query,
+		);
+	}
+
+	private static function avatar_url_matches_expected( array $observed, array $expected ): bool {
+		return 'https' === ( $observed['scheme'] ?? null )
+			&& 'secure.gravatar.com' === ( $observed['host'] ?? null )
+			&& '/avatar/' . $expected['hash'] === ( $observed['path'] ?? null )
+			&& $expected['query'] === ( $observed['query'] ?? array() );
+	}
+
+	private static function avatar_dimensions_match( array $actual, array $expected ): bool {
+		return ( $actual['size'] ?? null ) === $expected['size']
+			&& ( $actual['height'] ?? null ) === $expected['height']
+			&& ( $actual['width'] ?? null ) === $expected['width'];
+	}
+
+	private static function avatar_dimension_expectation( array $expected ): array {
+		return array(
+			'size'   => $expected['size'],
+			'height' => $expected['height'],
+			'width'  => $expected['width'],
+		);
+	}
+
+	private static function avatar_dimension_observation( array $actual ): array {
+		return array(
+			'size'   => $actual['size'] ?? null,
+			'height' => $actual['height'] ?? null,
+			'width'  => $actual['width'] ?? null,
+		);
+	}
+
+	private static function avatar_flag_expectation( array $expected ): array {
+		return array(
+			'default'      => $expected['default'],
+			'forceDefault' => $expected['forceDefault'],
+			'rating'       => $expected['rating'],
+			'foundAvatar'  => true,
+		);
+	}
+
+	private static function avatar_flag_observation( array $actual ): array {
+		return array(
+			'default'      => $actual['default'] ?? null,
+			'forceDefault' => $actual['force_default'] ?? null,
+			'rating'       => $actual['rating'] ?? null,
+			'foundAvatar'  => $actual['found_avatar'] ?? null,
+		);
+	}
+
+	private static function avatar_url_expectation( array $expected ): array {
+		return array(
+			'scheme' => 'https',
+			'host'   => 'secure.gravatar.com',
+			'path'   => '/avatar/' . $expected['hash'],
+			'query'  => $expected['query'],
+		);
+	}
+
+	private static function fake_avatar_user( int $user_id, string $login, string $email, string $display_name, string $first_name, string $last_name ): \WP_User {
+		$reflection = new \ReflectionClass( 'WP_User' );
+		$user       = $reflection->newInstanceWithoutConstructor();
+		$user->ID   = $user_id;
+		$user->data = (object) array(
+			'ID'                  => $user_id,
+			'user_login'          => $login,
+			'user_pass'           => '',
+			'user_nicename'       => $login,
+			'user_email'          => $email,
+			'user_url'            => '',
+			'user_registered'     => '2024-01-01 00:00:00',
+			'user_activation_key' => '',
+			'user_status'         => '0',
+			'display_name'        => $display_name,
+			'first_name'          => $first_name,
+			'last_name'           => $last_name,
+		);
+		$user->filter = null;
+
+		return $user;
+	}
+
+	private static function describe_avatar_case( array $case ): array {
+		return array(
+			'label' => $case['label'],
+			'id'    => self::describe_avatar_id( $case['id'] ),
+			'args'  => $case['args'],
+		);
+	}
+
+	private static function describe_avatar_id( $id_or_email ) {
+		if ( $id_or_email instanceof \WP_User ) {
+			return array(
+				'type'        => 'WP_User',
+				'ID'          => $id_or_email->ID,
+				'userLogin'   => $id_or_email->user_login,
+				'userEmail'   => $id_or_email->user_email,
+				'displayName' => $id_or_email->display_name,
+			);
+		}
+
+		return $id_or_email;
+	}
+
+	private static function same_avatar_id( $expected, $actual ): bool {
+		if ( is_object( $expected ) || is_object( $actual ) ) {
+			return $expected === $actual;
+		}
+
+		return $expected === $actual;
 	}
 
 	private static function string_corpus( array &$rng ): array {
