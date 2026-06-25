@@ -33,6 +33,7 @@ final class AdminAjaxSurface {
 			$rows[] = self::check_json_response_helpers( $ctx->fork( 'json-helpers' ) );
 			$rows[] = self::check_ajax_response_xml_boundaries( $ctx->fork( 'ajax-response' ) );
 			$rows[] = self::check_nonce_and_capability_failures( $ctx->fork( 'nonce-cap' ) );
+			$rows[] = self::check_heartbeat_nonce_branches( $ctx->fork( 'heartbeat-nonce-branches' ) );
 			$rows[] = self::check_selected_safe_ajax_handlers( $ctx->fork( 'safe-handlers' ) );
 			$rows[] = self::check_compression_test_handler( $ctx->fork( 'compression-test' ) );
 			$rows[] = self::check_malformed_request_globals_restore( $ctx->fork( 'request-restore' ) );
@@ -111,6 +112,7 @@ final class AdminAjaxSurface {
 				'wp_send_json_error',
 				'wp_send_json_success',
 				'wp_set_current_user',
+				'wp_slash',
 				'wp_unslash',
 				'wp_verify_nonce',
 			) as $function
@@ -547,6 +549,281 @@ final class AdminAjaxSurface {
 			'admin-ajax.nonce-cap.failure-boundaries',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_heartbeat_nonce_branches( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'wp_ajax_heartbeat' ) ) {
+			return self::row(
+				$ctx,
+				'admin-ajax.heartbeat.nonce-branch-hooks',
+				true,
+				array( 'missing' => array( 'wp_ajax_heartbeat' ) ),
+				'skipped'
+			);
+		}
+
+		$failures           = array();
+		$local              = self::snapshot_superglobals();
+		$user_snapshot      = self::snapshot_globals( array( 'current_user', 'userdata', 'user_ID' ) );
+		$db_before          = self::db_content_counts();
+		$valid_screen_raw   = self::hostile_string( $ctx->fork( 'valid-screen' ) );
+		$valid_screen       = \sanitize_key( $valid_screen_raw );
+		$valid_data         = array(
+			'token'  => self::safe_label( $ctx->fork( 'valid-token' ) ),
+			'nested' => array(
+				'label'  => self::safe_label( $ctx->fork( 'valid-nested-label' ) ),
+				'unsafe' => self::hostile_string( $ctx->fork( 'valid-unsafe' ) ),
+			),
+			'slashy' => 'quote " apostrophe \' slash \\',
+		);
+		$valid_events       = array();
+		$valid_received     = array();
+		$valid_send         = array();
+		$valid_tick         = array();
+		$valid_capture      = null;
+		$invalid_screen_raw = self::hostile_string( $ctx->fork( 'invalid-screen' ) );
+		$invalid_screen     = \sanitize_key( $invalid_screen_raw );
+		$invalid_nonce      = 'invalid-' . self::safe_label( $ctx->fork( 'invalid-nonce' ) );
+		$invalid_data       = array(
+			'token'  => self::safe_label( $ctx->fork( 'invalid-token' ) ),
+			'unsafe' => self::hostile_string( $ctx->fork( 'invalid-unsafe' ) ),
+			'slashy' => 'invalid " nonce \\ payload',
+		);
+		$invalid_events     = array();
+		$refresh_calls      = array();
+		$verify_failures    = array();
+		$invalid_capture    = null;
+
+		try {
+			$valid_nonce = \wp_create_nonce( 'heartbeat-nonce' );
+			self::set_request_globals(
+				array(),
+				array(
+					'action'    => 'heartbeat',
+					'_nonce'    => $valid_nonce,
+					'data'      => \wp_slash( $valid_data ),
+					'screen_id' => $valid_screen_raw,
+				)
+			);
+
+			$heartbeat_received = static function ( array $response, array $data, string $screen_id ) use ( &$valid_events, &$valid_received ): array {
+				$valid_events[]   = 'received';
+				$valid_received[] = array(
+					'data'     => $data,
+					'response' => $response,
+					'screenId' => $screen_id,
+				);
+
+				$response['cfz_valid_received'] = $data['token'] ?? '';
+				$response['cfz_valid_nested']   = $data['nested']['label'] ?? '';
+				return $response;
+			};
+			$heartbeat_send     = static function ( array $response, string $screen_id ) use ( &$valid_events, &$valid_send ): array {
+				$valid_events[] = 'send';
+				$valid_send[]   = array(
+					'response' => $response,
+					'screenId' => $screen_id,
+				);
+
+				$response['cfz_valid_send_screen'] = $screen_id;
+				return $response;
+			};
+			$heartbeat_tick     = static function ( array $response, string $screen_id ) use ( &$valid_events, &$valid_tick ): void {
+				$valid_events[] = 'tick';
+				$valid_tick[]   = array(
+					'response' => $response,
+					'screenId' => $screen_id,
+				);
+			};
+			$unexpected_refresh = static function ( array $response ) use ( &$valid_events ): array {
+				$valid_events[] = 'unexpected-refresh';
+				return $response;
+			};
+
+			\add_filter( 'heartbeat_received', $heartbeat_received, 10, 3 );
+			\add_filter( 'heartbeat_send', $heartbeat_send, 10, 2 );
+			\add_action( 'heartbeat_tick', $heartbeat_tick, 10, 2 );
+			\add_filter( 'wp_refresh_nonces', $unexpected_refresh, 10, 3 );
+			try {
+				$valid_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_heartbeat();
+					},
+					true
+				);
+			} finally {
+				\remove_filter( 'heartbeat_received', $heartbeat_received, 10 );
+				\remove_filter( 'heartbeat_send', $heartbeat_send, 10 );
+				\remove_action( 'heartbeat_tick', $heartbeat_tick, 10 );
+				\remove_filter( 'wp_refresh_nonces', $unexpected_refresh, 10 );
+			}
+
+			self::set_request_globals(
+				array(),
+				array(
+					'action'    => 'heartbeat',
+					'_nonce'    => $invalid_nonce,
+					'data'      => \wp_slash( $invalid_data ),
+					'screen_id' => $invalid_screen_raw,
+				)
+			);
+
+			$refresh_nonces       = static function ( array $response, array $data, string $screen_id ) use ( &$invalid_events, &$refresh_calls ): array {
+				$invalid_events[] = 'refresh-nonces';
+				$refresh_calls[]  = array(
+					'data'     => $data,
+					'response' => $response,
+					'screenId' => $screen_id,
+				);
+
+				$response['cfz_refreshed']      = $data['token'] ?? '';
+				$response['cfz_refresh_screen'] = $screen_id;
+				return $response;
+			};
+			$verify_nonce_failed  = static function ( $nonce, $action, $user, $token ) use ( &$invalid_events, &$verify_failures ): void {
+				$invalid_events[]  = 'verify-failed';
+				$verify_failures[] = array(
+					'action' => $action,
+					'nonce'  => $nonce,
+					'token'  => $token,
+					'userId' => is_object( $user ) && isset( $user->ID ) ? (int) $user->ID : null,
+				);
+			};
+			$unexpected_heartbeat = static function ( $response ) use ( &$invalid_events ): array {
+				$invalid_events[] = 'unexpected-heartbeat-filter';
+				return is_array( $response ) ? $response : array();
+			};
+			$unexpected_tick      = static function () use ( &$invalid_events ): void {
+				$invalid_events[] = 'unexpected-heartbeat-tick';
+			};
+
+			\add_filter( 'wp_refresh_nonces', $refresh_nonces, 10, 3 );
+			\add_action( 'wp_verify_nonce_failed', $verify_nonce_failed, 10, 4 );
+			\add_filter( 'heartbeat_received', $unexpected_heartbeat, 10, 3 );
+			\add_filter( 'heartbeat_send', $unexpected_heartbeat, 10, 2 );
+			\add_action( 'heartbeat_tick', $unexpected_tick, 10, 2 );
+			try {
+				$invalid_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_heartbeat();
+					},
+					true
+				);
+			} finally {
+				\remove_filter( 'wp_refresh_nonces', $refresh_nonces, 10 );
+				\remove_action( 'wp_verify_nonce_failed', $verify_nonce_failed, 10 );
+				\remove_filter( 'heartbeat_received', $unexpected_heartbeat, 10 );
+				\remove_filter( 'heartbeat_send', $unexpected_heartbeat, 10 );
+				\remove_action( 'heartbeat_tick', $unexpected_tick, 10 );
+			}
+		} finally {
+			self::restore_superglobals( $local );
+			self::restore_globals( $user_snapshot );
+		}
+
+		$valid_decoded = null === $valid_capture ? null : json_decode( self::terminal_body( $valid_capture ), true );
+		self::collect_failure(
+			$failures,
+			is_array( $valid_decoded )
+				&& array( 'received', 'send', 'tick' ) === $valid_events
+				&& array( $valid_data ) === array_column( $valid_received, 'data' )
+				&& array( array() ) === array_column( $valid_received, 'response' )
+				&& array( $valid_screen ) === array_column( $valid_received, 'screenId' )
+				&& array( $valid_screen ) === array_column( $valid_send, 'screenId' )
+				&& array( $valid_screen ) === array_column( $valid_tick, 'screenId' )
+				&& false === array_key_exists( 'server_time', $valid_tick[0]['response'] ?? array() )
+				&& ( $valid_data['token'] ?? null ) === ( $valid_decoded['cfz_valid_received'] ?? null )
+				&& ( $valid_data['nested']['label'] ?? null ) === ( $valid_decoded['cfz_valid_nested'] ?? null )
+				&& $valid_screen === ( $valid_decoded['cfz_valid_send_screen'] ?? null )
+				&& isset( $valid_decoded['server_time'] )
+				&& is_int( $valid_decoded['server_time'] )
+				&& ! array_key_exists( 'nonces_expired', $valid_decoded )
+				&& null !== $valid_capture
+				&& $valid_capture['captured']
+				&& 1 === count( $valid_capture['dieCalls'] )
+				&& self::raw_die_response_is_null( $valid_capture['dieCalls'][0] ?? array() )
+				&& $valid_capture['bufferBalanced']
+				&& $valid_capture['filtersRestored']
+				&& false === \has_filter( 'heartbeat_received', $heartbeat_received )
+				&& false === \has_filter( 'heartbeat_send', $heartbeat_send )
+				&& false === \has_action( 'heartbeat_tick', $heartbeat_tick )
+				&& false === \has_filter( 'wp_refresh_nonces', $unexpected_refresh ),
+			'wp_ajax_heartbeat() valid nonce runs received/send/tick hooks in order with unslashed data and sanitized screen id',
+			array(
+				'capture'       => $valid_capture,
+				'decoded'       => $valid_decoded,
+				'events'        => $valid_events,
+				'receivedCalls' => $valid_received,
+				'sendCalls'     => $valid_send,
+				'tickCalls'     => $valid_tick,
+			)
+		);
+
+		$invalid_decoded = null === $invalid_capture ? null : json_decode( self::terminal_body( $invalid_capture ), true );
+		self::collect_failure(
+			$failures,
+			is_array( $invalid_decoded )
+				&& array( 'verify-failed', 'refresh-nonces' ) === $invalid_events
+				&& array( $invalid_data ) === array_column( $refresh_calls, 'data' )
+				&& array( array() ) === array_column( $refresh_calls, 'response' )
+				&& array( $invalid_screen ) === array_column( $refresh_calls, 'screenId' )
+				&& array( 'heartbeat-nonce' ) === array_column( $verify_failures, 'action' )
+				&& array( $invalid_nonce ) === array_column( $verify_failures, 'nonce' )
+				&& ( $invalid_data['token'] ?? null ) === ( $invalid_decoded['cfz_refreshed'] ?? null )
+				&& $invalid_screen === ( $invalid_decoded['cfz_refresh_screen'] ?? null )
+				&& true === ( $invalid_decoded['nonces_expired'] ?? null )
+				&& ! array_key_exists( 'server_time', $invalid_decoded )
+				&& null !== $invalid_capture
+				&& $invalid_capture['captured']
+				&& 1 === count( $invalid_capture['dieCalls'] )
+				&& self::raw_die_response_is_null( $invalid_capture['dieCalls'][0] ?? array() )
+				&& $invalid_capture['bufferBalanced']
+				&& $invalid_capture['filtersRestored']
+				&& false === \has_filter( 'wp_refresh_nonces', $refresh_nonces )
+				&& false === \has_action( 'wp_verify_nonce_failed', $verify_nonce_failed )
+				&& false === \has_filter( 'heartbeat_received', $unexpected_heartbeat )
+				&& false === \has_filter( 'heartbeat_send', $unexpected_heartbeat )
+				&& false === \has_action( 'heartbeat_tick', $unexpected_tick ),
+			'wp_ajax_heartbeat() invalid nonce refreshes nonces and exits before heartbeat filters or server_time',
+			array(
+				'capture'        => $invalid_capture,
+				'decoded'        => $invalid_decoded,
+				'events'         => $invalid_events,
+				'refreshCalls'   => $refresh_calls,
+				'verifyFailures' => $verify_failures,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::superglobals_match( $local )
+				&& self::globals_match( $user_snapshot )
+				&& $db_before === self::db_content_counts(),
+			'wp_ajax_heartbeat() nonce branch checks restore request/user globals and avoid DB content mutation',
+			array(
+				'dbBefore' => $db_before,
+				'dbAfter'  => self::db_content_counts(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-ajax.heartbeat.nonce-branch-hooks',
+			array() === $failures,
+			array(
+				'cases'    => array(
+					'valid'   => array(
+						'bytes'  => null === $valid_capture ? 0 : strlen( self::terminal_body( $valid_capture ) ),
+						'events' => $valid_events,
+					),
+					'invalid' => array(
+						'bytes'  => null === $invalid_capture ? 0 : strlen( self::terminal_body( $invalid_capture ) ),
+						'events' => $invalid_events,
+					),
+				),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
 		);
 	}
 
