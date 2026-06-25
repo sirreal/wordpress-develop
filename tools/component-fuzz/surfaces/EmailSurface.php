@@ -1973,7 +1973,8 @@ final class EmailSurface {
 			if ( function_exists( 'wp_filter_kses' ) ) {
 				\add_filter( 'pre_user_email', 'wp_filter_kses' );
 			}
-			\add_filter( 'pre_wp_mail', $mail_filter, 10, 2 );
+			\remove_all_filters( 'pre_wp_mail' );
+			\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
 
 			foreach ( $cases as $index => $case ) {
 				self::reset_stub_content();
@@ -2003,6 +2004,8 @@ final class EmailSurface {
 				$stored              = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
 				$exists              = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $canonical ) ) : $not_called();
 				$by_email            = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : $not_called();
+				$machine_exists      = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $machine ) ) : $not_called();
+				$machine_by_email    = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $machine ) ) : $not_called();
 				$duplicate           = is_int( $user_id )
 					? self::capture_warnings(
 						static fn() => \wp_insert_user(
@@ -2049,7 +2052,10 @@ final class EmailSurface {
 					: $not_called();
 				$stored_user         = $stored['value'] ?? null;
 				$by_email_user       = $by_email['value'] ?? null;
+				$machine_email_user  = $machine_by_email['value'] ?? null;
 				$updated_user        = $stored_after_update['value'] ?? null;
+				$other_after_collision = is_int( $other_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $other_id ) ) : $not_called();
+				$other_after_user    = $other_after_collision['value'] ?? null;
 
 				$ok = ! $canonical_sanitized['threw']
 					&& ! $machine_sanitized['threw']
@@ -2059,11 +2065,14 @@ final class EmailSurface {
 					&& ! $stored['threw']
 					&& ! $exists['threw']
 					&& ! $by_email['threw']
+					&& ! $machine_exists['threw']
+					&& ! $machine_by_email['threw']
 					&& ! $duplicate['threw']
 					&& ! $self_update['threw']
 					&& ! $stored_after_update['threw']
 					&& ! $other_insert['threw']
 					&& ! $collision_update['threw']
+					&& ! $other_after_collision['threw']
 					&& array() === $canonical_sanitized['warnings']
 					&& array() === $machine_sanitized['warnings']
 					&& array() === $canonical_valid['warnings']
@@ -2072,11 +2081,14 @@ final class EmailSurface {
 					&& array() === $stored['warnings']
 					&& array() === $exists['warnings']
 					&& array() === $by_email['warnings']
+					&& array() === $machine_exists['warnings']
+					&& array() === $machine_by_email['warnings']
 					&& array() === $duplicate['warnings']
 					&& array() === $self_update['warnings']
 					&& array() === $stored_after_update['warnings']
 					&& array() === $other_insert['warnings']
 					&& array() === $collision_update['warnings']
+					&& array() === $other_after_collision['warnings']
 					&& $canonical === $canonical_sanitized['value']
 					&& $canonical === $machine_sanitized['value']
 					&& $canonical === $canonical_valid['value']
@@ -2088,6 +2100,8 @@ final class EmailSurface {
 					&& $by_email_user instanceof \WP_User
 					&& $by_email_user->ID === $user_id
 					&& $canonical === $by_email_user->user_email
+					&& false === $machine_exists['value']
+					&& false === $machine_email_user
 					&& \is_wp_error( $duplicate['value'] ?? null )
 					&& 'existing_user_email' === $duplicate['value']->get_error_code()
 					&& $self_update['value'] === $user_id
@@ -2096,6 +2110,9 @@ final class EmailSurface {
 					&& is_int( $other_id )
 					&& \is_wp_error( $collision_update['value'] ?? null )
 					&& 'existing_user_email' === $collision_update['value']->get_error_code()
+					&& $other_after_user instanceof \WP_User
+					&& $other_after_user->ID === $other_id
+					&& $other_email === $other_after_user->user_email
 					&& count( $mail_calls ) === $mail_count_before;
 
 				if ( ! $ok ) {
@@ -2111,11 +2128,14 @@ final class EmailSurface {
 						'stored'             => self::describe_captured_call( $stored ),
 						'exists'             => self::describe_captured_call( $exists ),
 						'byEmail'            => self::describe_captured_call( $by_email ),
+						'machineExists'      => self::describe_captured_call( $machine_exists ),
+						'machineByEmail'     => self::describe_captured_call( $machine_by_email ),
 						'duplicate'          => self::describe_captured_call( $duplicate ),
 						'selfUpdate'         => self::describe_captured_call( $self_update ),
 						'storedAfterUpdate'  => self::describe_captured_call( $stored_after_update ),
 						'otherInsert'        => self::describe_captured_call( $other_insert ),
 						'collisionUpdate'    => self::describe_captured_call( $collision_update ),
+						'otherAfterCollision' => self::describe_captured_call( $other_after_collision ),
 						'mailCalls'          => self::describe_value( array_slice( $mail_calls, $mail_count_before ) ),
 					);
 				}
@@ -2129,8 +2149,10 @@ final class EmailSurface {
 					'userId'            => $user_id,
 					'otherId'           => $other_id,
 					'storedCanonical'   => $stored_user instanceof \WP_User && $canonical === $stored_user->user_email,
+					'machineLookupMiss' => false === ( $machine_exists['value'] ?? null ) && false === $machine_email_user,
 					'duplicateRejected' => \is_wp_error( $duplicate['value'] ?? null ),
 					'collisionRejected' => \is_wp_error( $collision_update['value'] ?? null ),
+					'collisionLeftOtherUnchanged' => $other_after_user instanceof \WP_User && $other_email === $other_after_user->user_email,
 					'mailCalls'         => count( $mail_calls ) - $mail_count_before,
 				);
 			}
