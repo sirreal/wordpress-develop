@@ -819,7 +819,10 @@ final class TemplateLinksSurface {
 		$month           = $ctx->int( 1, 12 );
 		$day             = $ctx->int( 1, 28 );
 		$author_id       = 100 + $ctx->int( 1, 900 );
-		$author_nicename = 'space name/slash%2F<tag>-utf8-'
+		$author_slug     = trim( preg_replace( '/[^a-z0-9-]+/', '-', strtolower( $ctx->identifier( 4, 10 ) ) ), '-' );
+		$author_nicename = 'author-' . $author_slug . '-' . $ctx->int( 10, 99 );
+		$dirty_author_id = $author_id + 1000;
+		$dirty_nicename  = 'space name/slash%2F<tag>-utf8-'
 			. "\xE2\x98\x83"
 			. '-' . "\xC3\xA9"
 			. '-case-' . $ctx->int( 10, 99 );
@@ -827,6 +830,7 @@ final class TemplateLinksSurface {
 		$day_padded      = sprintf( '%02d', $day );
 		$plain_links     = array();
 		$pretty_links    = array();
+		$dirty_author    = null;
 		$date_events     = array();
 		$author_events   = array();
 
@@ -890,13 +894,14 @@ final class TemplateLinksSurface {
 
 			self::with_permalink_structure(
 				'/%year%/%monthnum%/%postname%/',
-				static function () use ( $year, $month, $day, $author_id, $author_nicename, &$pretty_links ): void {
+				static function () use ( $year, $month, $day, $author_id, $author_nicename, $dirty_author_id, $dirty_nicename, &$pretty_links, &$dirty_author ): void {
 					$pretty_links = array(
 						'year'   => \get_year_link( $year ),
 						'month'  => \get_month_link( $year, $month ),
 						'day'    => \get_day_link( $year, $month, $day ),
 						'author' => \get_author_posts_url( $author_id, $author_nicename ),
 					);
+					$dirty_author = \get_author_posts_url( $dirty_author_id, $dirty_nicename );
 				}
 			);
 		} finally {
@@ -926,7 +931,11 @@ final class TemplateLinksSurface {
 			$pretty_links['month'] ?? '',
 			$pretty_links['day'] ?? '',
 		);
-		$escaped_author  = \esc_url( (string) ( $pretty_links['author'] ?? '' ) );
+		$author_urls     = array(
+			$plain_links['author'] ?? '',
+			$pretty_links['author'] ?? '',
+		);
+		$escaped_dirty   = \esc_url( (string) $dirty_author );
 
 		self::collect_failure(
 			$failures,
@@ -941,6 +950,18 @@ final class TemplateLinksSurface {
 				&& ! self::contains_raw_dangerous_html( implode( "\n", $date_urls ) )
 				&& array( 'year', 'month', 'day', 'year', 'month', 'day' ) === array_column( $date_events, 'helper' )
 				&& array( $year, $year, $year, $year, $year, $year ) === array_column( $date_events, 'year' )
+				&& array( null, $month, $month, null, $month, $month ) === array_map(
+					static function ( array $event ) {
+						return $event['month'] ?? null;
+					},
+					$date_events
+				)
+				&& array( null, null, $day, null, null, $day ) === array_map(
+					static function ( array $event ) {
+						return $event['day'] ?? null;
+					},
+					$date_events
+				)
 				&& false === \has_filter( 'year_link', $year_filter, 10 )
 				&& false === \has_filter( 'month_link', $month_filter, 10 )
 				&& false === \has_filter( 'day_link', $day_filter, 10 ),
@@ -958,25 +979,39 @@ final class TemplateLinksSurface {
 			$failures,
 			( $plain_links['author'] ?? null ) === $expected_plain['author']
 				&& ( $pretty_links['author'] ?? null ) === $expected_pretty['author']
-				&& $escaped_author !== ( $pretty_links['author'] ?? '' )
-				&& str_contains( $escaped_author, 'space%20name/slash%2F' )
-				&& str_contains( $escaped_author, 'tag-utf8-' . "\xE2\x98\x83" . '-' . "\xC3\xA9" )
-				&& ! str_contains( $escaped_author, '<' )
-				&& ! str_contains( $escaped_author, ' ' )
-				&& ! self::contains_raw_dangerous_html( $escaped_author )
-				&& self::is_http_or_relative_url( $escaped_author )
-				&& 2 === count( $author_events )
-				&& array( $author_id, $author_id ) === array_column( $author_events, 'authorId' )
-				&& array( $author_nicename, $author_nicename ) === array_column( $author_events, 'nicename' )
+				&& self::all_urls_are_http_or_relative( $author_urls )
+				&& ! self::contains_raw_dangerous_html( implode( "\n", $author_urls ) )
+				&& 3 === count( $author_events )
+				&& array( $expected_plain['author'], $expected_pretty['author'], $dirty_author ) === array_column( $author_events, 'link' )
+				&& array( $author_id, $author_id, $dirty_author_id ) === array_column( $author_events, 'authorId' )
+				&& array( $author_nicename, $author_nicename, $dirty_nicename ) === array_column( $author_events, 'nicename' )
 				&& false === \has_filter( 'author_link', $author_filter, 10 ),
-			'author archive helper honors plain query fallback, pretty author base, and display escaping for generated nicename bytes',
+			'author archive helper honors plain query fallback, pretty author base, and expected filter payloads',
 			array(
 				'authorId'       => $author_id,
 				'authorNicename' => $author_nicename,
 				'plainAuthor'    => $plain_links['author'] ?? null,
 				'prettyAuthor'   => $pretty_links['author'] ?? null,
-				'escapedAuthor'  => $escaped_author,
+				'dirtyAuthor'    => $dirty_author,
 				'authorEvents'   => $author_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $dirty_author )
+				&& str_starts_with( $escaped_dirty, 'http://example.test/author/' )
+				&& str_ends_with( $escaped_dirty, '/' )
+				&& ! str_contains( $escaped_dirty, '<' )
+				&& ! str_contains( $escaped_dirty, ' ' )
+				&& ! self::contains_raw_dangerous_html( $escaped_dirty )
+				&& self::is_http_or_relative_url( $escaped_dirty ),
+			'author archive helper dirty nicename bytes stay escapable and local',
+			array(
+				'dirtyAuthorId'   => $dirty_author_id,
+				'dirtyNicename'   => $dirty_nicename,
+				'dirtyAuthor'     => $dirty_author,
+				'escapedDirtyUrl' => $escaped_dirty,
 			)
 		);
 
