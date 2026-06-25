@@ -549,8 +549,8 @@ database, network requests, or a configured site.
   language attributes and filter ordering/locality, document title stability,
   resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and
   shortlink head output, synthetic post preview/edit/delete/shortlink/permalink
-  helpers, previous/next adjacent post relation links, and cached bookmark
-  field/list rendering.
+  helpers, date and author archive URL branches, previous/next adjacent post
+  relation links, and cached bookmark field/list rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, direct widget/control callbacks, generated sidebars, widget ID
   parsing, sidebar option cache/filter behavior, sidebar assignment

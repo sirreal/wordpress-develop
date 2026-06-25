@@ -45,6 +45,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_page_and_paginate_links( $ctx );
 			$rows[] = self::check_search_feed_site_and_admin_links( $ctx );
 			$rows[] = self::check_post_link_helpers( $ctx );
+			$rows[] = self::check_archive_link_helpers( $ctx );
 			$rows[] = self::check_adjacent_post_link_helpers( $ctx );
 			$rows[] = self::check_canonical_and_shortlink_outputs( $ctx );
 			$rows[] = self::check_bookmark_fields_and_lists( $ctx );
@@ -190,14 +191,17 @@ final class TemplateLinksSurface {
 				'esc_url',
 				'get_admin_url',
 				'get_adjacent_post_rel_link',
+				'get_author_posts_url',
 				'get_body_class',
 				'get_bookmark',
 				'get_bookmark_field',
+				'get_day_link',
 				'get_edit_post_link',
 				'get_delete_post_link',
 				'get_feed_link',
 				'get_home_url',
 				'get_language_attributes',
+				'get_month_link',
 				'get_next_post_link',
 				'get_pagenum_link',
 				'get_permalink',
@@ -206,6 +210,7 @@ final class TemplateLinksSurface {
 				'get_search_feed_link',
 				'get_search_link',
 				'get_site_url',
+				'get_year_link',
 				'language_attributes',
 				'adjacent_posts_rel_link',
 				'adjacent_posts_rel_link_wp_head',
@@ -803,6 +808,181 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.links.synthetic-post-helpers',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_archive_link_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$year            = $ctx->int( 1970, 2035 );
+		$month           = $ctx->int( 1, 12 );
+		$day             = $ctx->int( 1, 28 );
+		$author_id       = 100 + $ctx->int( 1, 900 );
+		$author_nicename = 'space name/slash%2F<tag>-utf8-'
+			. "\xE2\x98\x83"
+			. '-' . "\xC3\xA9"
+			. '-case-' . $ctx->int( 10, 99 );
+		$month_padded    = sprintf( '%02d', $month );
+		$day_padded      = sprintf( '%02d', $day );
+		$plain_links     = array();
+		$pretty_links    = array();
+		$date_events     = array();
+		$author_events   = array();
+
+		$year_filter = static function ( string $link, int $filtered_year ) use ( &$date_events ): string {
+			$date_events[] = array(
+				'helper' => 'year',
+				'link'   => $link,
+				'year'   => $filtered_year,
+			);
+
+			return $link;
+		};
+		$month_filter = static function ( string $link, int $filtered_year, int $filtered_month ) use ( &$date_events ): string {
+			$date_events[] = array(
+				'helper' => 'month',
+				'link'   => $link,
+				'year'   => $filtered_year,
+				'month'  => $filtered_month,
+			);
+
+			return $link;
+		};
+		$day_filter = static function ( string $link, int $filtered_year, int $filtered_month, int $filtered_day ) use ( &$date_events ): string {
+			$date_events[] = array(
+				'helper' => 'day',
+				'link'   => $link,
+				'year'   => $filtered_year,
+				'month'  => $filtered_month,
+				'day'    => $filtered_day,
+			);
+
+			return $link;
+		};
+		$author_filter = static function ( string $link, int $filtered_author_id, string $filtered_nicename ) use ( &$author_events ): string {
+			$author_events[] = array(
+				'link'     => $link,
+				'authorId' => $filtered_author_id,
+				'nicename' => $filtered_nicename,
+			);
+
+			return $link;
+		};
+
+		\add_filter( 'year_link', $year_filter, 10, 2 );
+		\add_filter( 'month_link', $month_filter, 10, 3 );
+		\add_filter( 'day_link', $day_filter, 10, 4 );
+		\add_filter( 'author_link', $author_filter, 10, 3 );
+
+		try {
+			self::with_permalink_structure(
+				'',
+				static function () use ( $year, $month, $day, $author_id, $author_nicename, &$plain_links ): void {
+					$plain_links = array(
+						'year'   => \get_year_link( $year ),
+						'month'  => \get_month_link( $year, $month ),
+						'day'    => \get_day_link( $year, $month, $day ),
+						'author' => \get_author_posts_url( $author_id, $author_nicename ),
+					);
+				}
+			);
+
+			self::with_permalink_structure(
+				'/%year%/%monthnum%/%postname%/',
+				static function () use ( $year, $month, $day, $author_id, $author_nicename, &$pretty_links ): void {
+					$pretty_links = array(
+						'year'   => \get_year_link( $year ),
+						'month'  => \get_month_link( $year, $month ),
+						'day'    => \get_day_link( $year, $month, $day ),
+						'author' => \get_author_posts_url( $author_id, $author_nicename ),
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'year_link', $year_filter, 10 );
+			\remove_filter( 'month_link', $month_filter, 10 );
+			\remove_filter( 'day_link', $day_filter, 10 );
+			\remove_filter( 'author_link', $author_filter, 10 );
+		}
+
+		$expected_plain  = array(
+			'year'   => "http://example.test/?m={$year}",
+			'month'  => "http://example.test/?m={$year}{$month_padded}",
+			'day'    => "http://example.test/?m={$year}{$month_padded}{$day_padded}",
+			'author' => "http://example.test/?author={$author_id}",
+		);
+		$expected_pretty = array(
+			'year'   => "http://example.test/{$year}/",
+			'month'  => "http://example.test/{$year}/{$month_padded}/",
+			'day'    => "http://example.test/{$year}/{$month_padded}/{$day_padded}/",
+			'author' => "http://example.test/author/{$author_nicename}/",
+		);
+		$date_urls       = array(
+			$plain_links['year'] ?? '',
+			$plain_links['month'] ?? '',
+			$plain_links['day'] ?? '',
+			$pretty_links['year'] ?? '',
+			$pretty_links['month'] ?? '',
+			$pretty_links['day'] ?? '',
+		);
+		$escaped_author  = \esc_url( (string) ( $pretty_links['author'] ?? '' ) );
+
+		self::collect_failure(
+			$failures,
+			( $plain_links['year'] ?? null ) === $expected_plain['year']
+				&& ( $plain_links['month'] ?? null ) === $expected_plain['month']
+				&& ( $plain_links['day'] ?? null ) === $expected_plain['day']
+				&& ( $pretty_links['year'] ?? null ) === $expected_pretty['year']
+				&& ( $pretty_links['month'] ?? null ) === $expected_pretty['month']
+				&& ( $pretty_links['day'] ?? null ) === $expected_pretty['day']
+				&& $plain_links['year'] !== $pretty_links['year']
+				&& self::all_urls_are_http_or_relative( $date_urls )
+				&& ! self::contains_raw_dangerous_html( implode( "\n", $date_urls ) )
+				&& array( 'year', 'month', 'day', 'year', 'month', 'day' ) === array_column( $date_events, 'helper' )
+				&& array( $year, $year, $year, $year, $year, $year ) === array_column( $date_events, 'year' )
+				&& false === \has_filter( 'year_link', $year_filter, 10 )
+				&& false === \has_filter( 'month_link', $month_filter, 10 )
+				&& false === \has_filter( 'day_link', $day_filter, 10 ),
+			'date archive helpers produce exact plain query and pretty permalink URLs with expected filter payloads',
+			array(
+				'expectedPlain'  => $expected_plain,
+				'expectedPretty' => $expected_pretty,
+				'plainLinks'     => $plain_links,
+				'prettyLinks'    => $pretty_links,
+				'dateEvents'     => $date_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $plain_links['author'] ?? null ) === $expected_plain['author']
+				&& ( $pretty_links['author'] ?? null ) === $expected_pretty['author']
+				&& $escaped_author !== ( $pretty_links['author'] ?? '' )
+				&& str_contains( $escaped_author, 'space%20name/slash%2F' )
+				&& str_contains( $escaped_author, 'tag-utf8-' . "\xE2\x98\x83" . '-' . "\xC3\xA9" )
+				&& ! str_contains( $escaped_author, '<' )
+				&& ! str_contains( $escaped_author, ' ' )
+				&& ! self::contains_raw_dangerous_html( $escaped_author )
+				&& self::is_http_or_relative_url( $escaped_author )
+				&& 2 === count( $author_events )
+				&& array( $author_id, $author_id ) === array_column( $author_events, 'authorId' )
+				&& array( $author_nicename, $author_nicename ) === array_column( $author_events, 'nicename' )
+				&& false === \has_filter( 'author_link', $author_filter, 10 ),
+			'author archive helper honors plain query fallback, pretty author base, and display escaping for generated nicename bytes',
+			array(
+				'authorId'       => $author_id,
+				'authorNicename' => $author_nicename,
+				'plainAuthor'    => $plain_links['author'] ?? null,
+				'prettyAuthor'   => $pretty_links['author'] ?? null,
+				'escapedAuthor'  => $escaped_author,
+				'authorEvents'   => $author_events,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.links.archive-url-helpers',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
