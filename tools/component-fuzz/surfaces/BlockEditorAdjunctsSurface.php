@@ -604,47 +604,36 @@ final class BlockEditorAdjunctsSurface {
 			)
 		);
 
-		$post_id_before     = $GLOBALS['post_ID'] ?? null;
-		$GLOBALS['post_ID'] = 0;
-		try {
-			$post_content_attrs = \wp_get_post_content_block_attributes();
-		} finally {
-			if ( null === $post_id_before ) {
-				unset( $GLOBALS['post_ID'] );
-			} else {
-				$GLOBALS['post_ID'] = $post_id_before;
-			}
-		}
-
-		self::record_if_false(
-			$failures,
-			null === $post_content_attrs,
-			'post content block attribute helper returns null without a selected post',
-			array( 'attributes' => $post_content_attrs )
-		);
-
 		$selected_result = self::exercise_selected_post_content_attributes( $post_case );
 		self::record_if_false(
 			$failures,
 			$post_case['expectedAttrs'] === $selected_result['attributes']
+				&& null === $selected_result['noSelectedAttributes']
 				&& null === $selected_result['missingAttributes']
+				&& $selected_result['globalsStableAfterNoSelected']
 				&& $selected_result['globalsStableAfterTarget']
 				&& $selected_result['globalsStableAfterMissing']
 				&& $selected_result['globalsRestored']
 				&& $selected_result['filtersRemoved']
 				&& $selected_result['cacheRestored']
+				&& $selected_result['themeCacheRestored']
+				&& $selected_result['templateQueriesStrict']
 				&& $post_tree_snapshot === \parse_blocks( $post_case['templateContent'] ),
-			'selected post content attribute helper returns first target attrs, guards missing target, and restores state',
+			'selected post content attribute helper returns first target attrs, guards no selected or missing target, and restores state',
 			array(
 				'expectedAttrs'             => $post_case['expectedAttrs'],
 				'attributes'                => $selected_result['attributes'],
+				'noSelectedAttributes'      => $selected_result['noSelectedAttributes'],
 				'missingAttributes'         => $selected_result['missingAttributes'],
 				'templateQueries'           => $selected_result['templateQueries'],
+				'templateQueriesStrict'     => $selected_result['templateQueriesStrict'],
+				'globalsStableAfterNoSelected' => $selected_result['globalsStableAfterNoSelected'],
 				'globalsStableAfterTarget'  => $selected_result['globalsStableAfterTarget'],
 				'globalsStableAfterMissing' => $selected_result['globalsStableAfterMissing'],
 				'globalsRestored'           => $selected_result['globalsRestored'],
 				'filtersRemoved'            => $selected_result['filtersRemoved'],
 				'cacheRestored'             => $selected_result['cacheRestored'],
+				'themeCacheRestored'        => $selected_result['themeCacheRestored'],
 			)
 		);
 
@@ -993,6 +982,7 @@ final class BlockEditorAdjunctsSurface {
 		$theme_dirs_before        = $theme_dirs_exists_before ? $GLOBALS['wp_theme_directories'] : null;
 
 		$cached_before = \wp_cache_get( (int) $post->ID, 'posts', false, $cache_found_before );
+		$theme_cache_before = self::theme_cache_snapshot( $post_case['themeRoot'], $post_case['themeSlug'] );
 
 		$stylesheet_filter = static function () use ( $post_case ): string {
 			return $post_case['themeSlug'];
@@ -1022,7 +1012,7 @@ final class BlockEditorAdjunctsSurface {
 			}
 
 			$slugs = isset( $query['slug__in'] ) && is_array( $query['slug__in'] ) ? $query['slug__in'] : array();
-			if ( array() !== $slugs && ! in_array( $post_case['templateSlug'], $slugs, true ) ) {
+			if ( array( $post_case['templateSlug'] ) !== array_values( $slugs ) ) {
 				return array();
 			}
 
@@ -1067,15 +1057,25 @@ final class BlockEditorAdjunctsSurface {
 		$GLOBALS['post_ID']              = (int) $post->ID;
 		\wp_cache_set( (int) $post->ID, $post, 'posts' );
 
+		$no_selected_attributes        = null;
 		$attributes                   = null;
 		$missing_attributes           = null;
+		$globals_stable_after_no_selected = false;
 		$globals_stable_after_target  = false;
 		$globals_stable_after_missing = false;
 		$globals_restored             = false;
 		$filters_removed              = false;
 		$cache_restored               = false;
+		$theme_cache_restored         = false;
 
 		try {
+			$GLOBALS['post_ID']          = 0;
+			$no_selected_attributes      = \wp_get_post_content_block_attributes();
+			$globals_stable_after_no_selected = ( $GLOBALS['post'] ?? null ) === $post
+				&& isset( $GLOBALS['post_ID'] )
+				&& 0 === (int) $GLOBALS['post_ID'];
+
+			$GLOBALS['post_ID']          = (int) $post->ID;
 			$attributes                  = \wp_get_post_content_block_attributes();
 			$globals_stable_after_target = self::selected_post_globals_match( $post );
 
@@ -1110,9 +1110,12 @@ final class BlockEditorAdjunctsSurface {
 			} else {
 				\wp_cache_delete( (int) $post->ID, 'posts' );
 			}
+
+			self::restore_theme_cache_snapshot( $theme_cache_before );
 		}
 
 		$cache_after = \wp_cache_get( (int) $post->ID, 'posts', false, $cache_found_after );
+		$theme_cache_after = self::theme_cache_snapshot( $post_case['themeRoot'], $post_case['themeSlug'] );
 
 		$globals_restored = self::global_restored( 'post', $post_exists_before, $post_before )
 			&& self::global_restored( 'post_ID', $post_id_exists_before, $post_id_before )
@@ -1120,17 +1123,91 @@ final class BlockEditorAdjunctsSurface {
 		$filters_removed  = self::filters_removed( $filters );
 		$cache_restored   = $cache_found_before === $cache_found_after
 			&& ( ! $cache_found_before || $cached_before === $cache_after );
+		$theme_cache_restored = self::theme_cache_snapshot_restored( $theme_cache_before, $theme_cache_after );
+		$template_queries_strict = self::template_queries_strict( $template_queries, $post_case['templateSlug'] );
 
 		return array(
+			'noSelectedAttributes'        => $no_selected_attributes,
 			'attributes'                => $attributes,
 			'missingAttributes'         => $missing_attributes,
 			'templateQueries'           => $template_queries,
+			'templateQueriesStrict'     => $template_queries_strict,
+			'globalsStableAfterNoSelected' => $globals_stable_after_no_selected,
 			'globalsStableAfterTarget'  => $globals_stable_after_target,
 			'globalsStableAfterMissing' => $globals_stable_after_missing,
 			'globalsRestored'           => $globals_restored,
 			'filtersRemoved'            => $filters_removed,
 			'cacheRestored'             => $cache_restored,
+			'themeCacheRestored'        => $theme_cache_restored,
 		);
+	}
+
+	private static function theme_cache_snapshot( string $theme_root, string $theme_slug ): array {
+		$hash     = md5( $theme_root . '/' . $theme_slug );
+		$snapshot = array();
+
+		foreach ( array( 'theme', 'screenshot', 'headers', 'post_templates' ) as $prefix ) {
+			$key                 = $prefix . '-' . $hash;
+			$value               = \wp_cache_get( $key, 'themes', false, $found );
+			$snapshot[ $prefix ] = array(
+				'key'   => $key,
+				'found' => (bool) $found,
+				'value' => $value,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_theme_cache_snapshot( array $snapshot ): void {
+		foreach ( $snapshot as $entry ) {
+			if ( ! is_array( $entry ) || ! isset( $entry['key'] ) || ! is_string( $entry['key'] ) ) {
+				continue;
+			}
+
+			if ( ! empty( $entry['found'] ) ) {
+				\wp_cache_set( $entry['key'], $entry['value'] ?? null, 'themes' );
+			} else {
+				\wp_cache_delete( $entry['key'], 'themes' );
+			}
+		}
+	}
+
+	private static function theme_cache_snapshot_restored( array $before, array $after ): bool {
+		foreach ( $before as $prefix => $entry ) {
+			if ( ! isset( $after[ $prefix ] ) || ! is_array( $entry ) || ! is_array( $after[ $prefix ] ) ) {
+				return false;
+			}
+
+			if ( (bool) ( $entry['found'] ?? false ) !== (bool) ( $after[ $prefix ]['found'] ?? false ) ) {
+				return false;
+			}
+
+			if ( ! empty( $entry['found'] ) && ( $entry['value'] ?? null ) !== ( $after[ $prefix ]['value'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function template_queries_strict( array $template_queries, string $template_slug ): bool {
+		$strict_queries = 0;
+
+		foreach ( $template_queries as $query ) {
+			if ( ! is_array( $query ) || 'wp_template' !== ( $query['type'] ?? null ) ) {
+				continue;
+			}
+
+			$args = isset( $query['query'] ) && is_array( $query['query'] ) ? $query['query'] : array();
+			if ( array( $template_slug ) !== array_values( (array) ( $args['slug__in'] ?? array() ) ) ) {
+				return false;
+			}
+
+			++$strict_queries;
+		}
+
+		return 2 === $strict_queries;
 	}
 
 	private static function post_content_attrs( \ComponentFuzz\FuzzContext $ctx, string $slug, string $role ): array {
