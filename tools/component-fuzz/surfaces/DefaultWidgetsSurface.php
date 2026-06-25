@@ -1084,6 +1084,7 @@ final class DefaultWidgetsSurface {
 				&& false === \has_filter( 'widget_nav_menu_args', $widget_args_filter )
 				&& false === \has_filter( 'wp_get_nav_menu_items', $get_items_filter )
 				&& false === \has_filter( 'wp_nav_menu_objects', $objects_filter )
+				&& false === \has_filter( 'wp_nav_menu_items', $html_items_filter )
 				&& false === \has_filter( 'wp_nav_menu', $nav_menu_filter ),
 			'wp_nav_menu reaches final normalized defaults after widget args filtering and filters are restored',
 			array(
@@ -1091,6 +1092,7 @@ final class DefaultWidgetsSurface {
 				'widgetArgsFilter'      => \has_filter( 'widget_nav_menu_args', $widget_args_filter ),
 				'getNavMenuItemsFilter' => \has_filter( 'wp_get_nav_menu_items', $get_items_filter ),
 				'navMenuObjectsFilter'  => \has_filter( 'wp_nav_menu_objects', $objects_filter ),
+				'navMenuItemsFilter'    => \has_filter( 'wp_nav_menu_items', $html_items_filter ),
 				'wpNavMenuFilter'       => \has_filter( 'wp_nav_menu', $nav_menu_filter ),
 			)
 		);
@@ -1950,6 +1952,9 @@ final class DefaultWidgetsSurface {
 			'contentCounts'    => isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
 				? $GLOBALS['wpdb']->component_fuzz_content_counts()
 				: array(),
+			'wpdbRuntime'      => isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_get_runtime_state()
+				: array(),
 			'calendarInstance' => self::get_calendar_instance(),
 		);
 	}
@@ -1966,6 +1971,7 @@ final class DefaultWidgetsSurface {
 		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
 			$GLOBALS['wpdb']->component_fuzz_reset_content();
+			$GLOBALS['wpdb']->component_fuzz_restore_runtime_state( $snapshot['wpdbRuntime'] ?? array() );
 		}
 		self::set_calendar_instance( (int) $snapshot['calendarInstance'] );
 	}
@@ -1976,6 +1982,9 @@ final class DefaultWidgetsSurface {
 				return false;
 			}
 			if ( $snapshot['contentCounts'] !== $GLOBALS['wpdb']->component_fuzz_content_counts() ) {
+				return false;
+			}
+			if ( $snapshot['wpdbRuntime'] !== $GLOBALS['wpdb']->component_fuzz_get_runtime_state() ) {
 				return false;
 			}
 		}

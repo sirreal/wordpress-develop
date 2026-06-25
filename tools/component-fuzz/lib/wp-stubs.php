@@ -138,6 +138,30 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $this->component_fuzz_queries;
 		}
 
+		public function component_fuzz_get_runtime_state() {
+			return array(
+				'last_query'      => $this->last_query,
+				'last_error'      => $this->last_error,
+				'rows_affected'   => $this->rows_affected,
+				'insert_id'       => $this->insert_id,
+				'num_rows'        => $this->num_rows,
+				'num_queries'     => $this->num_queries,
+				'queries'         => $this->component_fuzz_queries,
+				'last_found_rows' => $this->component_fuzz_last_found_rows,
+			);
+		}
+
+		public function component_fuzz_restore_runtime_state( array $state ) {
+			$this->last_query                     = (string) ( $state['last_query'] ?? '' );
+			$this->last_error                     = (string) ( $state['last_error'] ?? '' );
+			$this->rows_affected                  = (int) ( $state['rows_affected'] ?? 0 );
+			$this->insert_id                      = (int) ( $state['insert_id'] ?? 0 );
+			$this->num_rows                       = (int) ( $state['num_rows'] ?? 0 );
+			$this->num_queries                    = (int) ( $state['num_queries'] ?? 0 );
+			$this->component_fuzz_queries         = is_array( $state['queries'] ?? null ) ? array_values( $state['queries'] ) : array();
+			$this->component_fuzz_last_found_rows = (int) ( $state['last_found_rows'] ?? 0 );
+		}
+
 		public function component_fuzz_reset_content() {
 			$this->component_fuzz_posts                 = array();
 			$this->component_fuzz_terms                 = array();
@@ -1510,6 +1534,11 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			$rows = $this->component_fuzz_sort_term_rows( $query, array_values( $rows ) );
+			if ( preg_match( '/SELECT\s+DISTINCT\s+t\.term_id\b/i', $query )
+				&& ! preg_match( '/SELECT\s+DISTINCT\s+t\.term_id\s*,\s*tr\.object_id\b/i', $query )
+			) {
+				$rows = $this->component_fuzz_distinct_rows( $rows, array( 'term_id' ) );
+			}
 			$rows = $this->component_fuzz_apply_limit( $query, $rows );
 
 			if ( preg_match( '/SELECT\s+tt\.term_id\b/i', $query ) ) {
@@ -1707,6 +1736,27 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $projected;
+		}
+
+		private function component_fuzz_distinct_rows( array $rows, array $columns ) {
+			$seen     = array();
+			$distinct = array();
+
+			foreach ( $rows as $row ) {
+				$key_values = array();
+				foreach ( $columns as $column ) {
+					$key_values[] = $row[ $column ] ?? null;
+				}
+				$key = serialize( $key_values );
+				if ( isset( $seen[ $key ] ) ) {
+					continue;
+				}
+
+				$seen[ $key ] = true;
+				$distinct[]   = $row;
+			}
+
+			return $distinct;
 		}
 
 		private function component_fuzz_apply_limit( $query, array $rows ) {
