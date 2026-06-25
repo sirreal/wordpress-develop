@@ -44,6 +44,7 @@ final class FeedParsersSurface {
 			$rows[] = self::check_magpie_atom_normalization( $ctx->fork( 'magpie-atom' ), $case );
 			$rows[] = self::check_atomlib_file_parser( $ctx->fork( 'atomlib' ), $case );
 			$rows[] = self::check_simplepie_raw_parser_and_sanitizer( $ctx->fork( 'simplepie' ), $case );
+			$rows[] = self::check_simplepie_file_http_adapter( $ctx->fork( 'simplepie-file-http' ), $case );
 			$rows[] = self::check_feed_cache_adapters( $ctx->fork( 'cache' ), $case );
 			$rows[] = self::check_legacy_helpers_and_file_boundaries( $ctx->fork( 'legacy' ), $case );
 		} catch ( \Throwable $e ) {
@@ -156,6 +157,7 @@ final class FeedParsersSurface {
 				'get_transient',
 				'is_client_error',
 				'is_error',
+				'is_wp_error',
 				'is_info',
 				'is_redirect',
 				'is_server_error',
@@ -167,6 +169,9 @@ final class FeedParsersSurface {
 				'simplexml_load_string',
 				'wp_cache_flush',
 				'wp_safe_remote_request',
+				'wp_remote_retrieve_body',
+				'wp_remote_retrieve_headers',
+				'wp_remote_retrieve_response_code',
 				'wp_kses_post',
 			) as $function
 		) {
@@ -592,6 +597,160 @@ final class FeedParsersSurface {
 		);
 	}
 
+	private static function check_simplepie_file_http_adapter( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures         = array();
+		$status_code      = $ctx->choice( array( 200, 203, 206 ) );
+		$success_url      = 'https://feeds.example.test/' . rawurlencode( $case['token'] ) . '/http-adapter.xml?v=' . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$error_url        = 'https://feeds.example.test/' . rawurlencode( $case['token'] ) . '/http-error.xml?v=' . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$timeout          = $ctx->int( 2, 8 );
+		$redirects        = $ctx->int( 0, 4 );
+		$request_headers  = array(
+			'Accept'        => 'application/rss+xml',
+			'If-None-Match' => '"' . $case['token'] . '"',
+			'X-Fuzz'       => $case['items'][0]['token'],
+		);
+		$user_agent       = 'ComponentFuzz/' . $case['token'];
+		$success_requests = array();
+		$error_requests   = array();
+
+		$success_stub = static function ( $preempt, array $parsed_args, string $url ) use ( $case, &$success_requests, $status_code, $success_url ) {
+			$success_requests[] = array(
+				'url'         => $url,
+				'timeout'     => $parsed_args['timeout'] ?? null,
+				'redirection' => $parsed_args['redirection'] ?? null,
+				'headers'     => $parsed_args['headers'] ?? null,
+				'userAgent'   => $parsed_args['user-agent'] ?? null,
+				'preempt'     => false === $preempt ? 'false' : get_debug_type( $preempt ),
+			);
+
+			if ( $success_url !== $url ) {
+				return new \WP_Error( 'component_fuzz_unexpected_feed_url', 'Unexpected feed adapter URL.' );
+			}
+
+			return array(
+				'headers'  => array(
+					'content-type' => array(
+						'text/plain; charset=US-ASCII',
+						'application/rss+xml; charset=UTF-8',
+					),
+					'etag'         => '"' . $case['token'] . '"',
+					'set-cookie'   => array(
+						'first=' . $case['token'],
+						'second=' . $case['items'][0]['token'],
+					),
+					'x-fuzz'       => array( 'alpha', 'beta' ),
+				),
+				'body'     => $case['rssXml'],
+				'response' => array(
+					'code'    => $status_code,
+					'message' => 'Component Fuzz',
+				),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+		};
+
+		$file = self::with_preempted_http_request(
+			$success_stub,
+			static function () use ( $request_headers, $success_url, $timeout, $redirects, $user_agent ) {
+				return new \WP_SimplePie_File( $success_url, $timeout, $redirects, $request_headers, $user_agent );
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			$file instanceof \WP_SimplePie_File
+				&& true === $file->success
+				&& null === $file->error
+				&& $success_url === $file->url
+				&& \SimplePie\SimplePie::FILE_SOURCE_REMOTE === $file->method
+				&& $case['rssXml'] === $file->body
+				&& $status_code === $file->status_code,
+			'WP_SimplePie_File maps a preempted HTTP success response onto SimplePie file state',
+			array(
+				'url'        => $file instanceof \WP_SimplePie_File ? $file->url : null,
+				'success'    => $file instanceof \WP_SimplePie_File ? $file->success : null,
+				'error'      => $file instanceof \WP_SimplePie_File ? $file->error : null,
+				'method'     => $file instanceof \WP_SimplePie_File ? $file->method : null,
+				'statusCode' => $file instanceof \WP_SimplePie_File ? $file->status_code : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$file instanceof \WP_SimplePie_File
+				&& 'application/rss+xml; charset=UTF-8' === ( $file->headers['content-type'] ?? null )
+				&& '"' . $case['token'] . '"' === ( $file->headers['etag'] ?? null )
+				&& 'first=' . $case['token'] . ', second=' . $case['items'][0]['token'] === ( $file->headers['set-cookie'] ?? null )
+				&& 'alpha, beta' === ( $file->headers['x-fuzz'] ?? null ),
+			'WP_SimplePie_File normalizes repeated HTTP headers using SimplePie-compatible rules',
+			array( 'headers' => $file instanceof \WP_SimplePie_File ? $file->headers : null )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $success_requests )
+				&& $success_url === ( $success_requests[0]['url'] ?? null )
+				&& $timeout === ( $success_requests[0]['timeout'] ?? null )
+				&& $redirects === ( $success_requests[0]['redirection'] ?? null )
+				&& $request_headers === ( $success_requests[0]['headers'] ?? null )
+				&& $user_agent === ( $success_requests[0]['userAgent'] ?? null )
+				&& 'false' === ( $success_requests[0]['preempt'] ?? null ),
+			'WP_SimplePie_File passes generated timeout, redirect, header, and user-agent arguments to the HTTP layer',
+			array( 'requests' => $success_requests )
+		);
+
+		$error_stub = static function ( $preempt, array $parsed_args, string $url ) use ( &$error_requests, $error_url ) {
+			$error_requests[] = array(
+				'url'     => $url,
+				'timeout' => $parsed_args['timeout'] ?? null,
+				'preempt' => false === $preempt ? 'false' : get_debug_type( $preempt ),
+			);
+
+			if ( $error_url !== $url ) {
+				return new \WP_Error( 'component_fuzz_unexpected_feed_url', 'Unexpected feed adapter URL.' );
+			}
+
+			return new \WP_Error( 'component_fuzz_http_error', 'Synthetic feed transport failure.' );
+		};
+
+		$error_file = self::with_preempted_http_request(
+			$error_stub,
+			static function () use ( $error_url, $timeout, $redirects, $request_headers, $user_agent ) {
+				return new \WP_SimplePie_File( $error_url, $timeout, $redirects, $request_headers, $user_agent );
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			$error_file instanceof \WP_SimplePie_File
+				&& false === $error_file->success
+				&& 'WP HTTP Error: Synthetic feed transport failure.' === $error_file->error
+				&& $request_headers === $error_file->headers
+				&& null === $error_file->body
+				&& 0 === $error_file->status_code
+				&& 1 === count( $error_requests ),
+			'WP_SimplePie_File maps preempted WP_Error responses to bounded failure state',
+			array(
+				'error'    => $error_file instanceof \WP_SimplePie_File ? $error_file->error : null,
+				'headers'  => $error_file instanceof \WP_SimplePie_File ? $error_file->headers : null,
+				'body'     => $error_file instanceof \WP_SimplePie_File ? $error_file->body : null,
+				'requests' => $error_requests,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'feed-parsers.simplepie-file.http-response-normalization-and-error-state',
+			$failures,
+			array(
+				'successUrl' => $success_url,
+				'errorUrl'   => $error_url,
+				'statusCode' => $status_code,
+			)
+		);
+	}
+
 	private static function check_feed_cache_adapters( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		$name     = 'cfz_' . strtolower( $case['token'] ) . '_' . strtolower( $ctx->identifier( 4, 10 ) );
@@ -984,6 +1143,20 @@ final class FeedParsersSurface {
 	private static function install_no_network_guard(): void {
 		self::$http_requests = array();
 		\add_filter( 'pre_http_request', array( self::class, 'block_http_request' ), 10, 3 );
+	}
+
+	private static function with_preempted_http_request( callable $stub, callable $callback ) {
+		$guard_removed = \remove_filter( 'pre_http_request', array( self::class, 'block_http_request' ), 10 );
+		\add_filter( 'pre_http_request', $stub, 10, 3 );
+
+		try {
+			return $callback();
+		} finally {
+			\remove_filter( 'pre_http_request', $stub, 10 );
+			if ( $guard_removed ) {
+				\add_filter( 'pre_http_request', array( self::class, 'block_http_request' ), 10, 3 );
+			}
+		}
 	}
 
 	private static function reset_runtime(): void {
