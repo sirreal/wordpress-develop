@@ -30,6 +30,7 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_synthetic_list_table( $ctx->fork( 'list-table' ) );
 			$rows[] = self::check_list_table_action_and_month_helpers( $ctx->fork( 'list-table-helpers' ) );
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
+			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
 			$rows[] = self::skipped_core_list_table_subclasses( $ctx->fork( 'core-list-table-skips' ) );
 			$rows[] = self::skipped_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrapper-skips' ) );
 		} catch ( \Throwable $e ) {
@@ -1022,6 +1023,115 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
+	private static function check_admin_form_controls( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$server_snapshot = self::snapshot_server( array( 'REQUEST_URI' ) );
+		$action          = 'cfz_form_' . \sanitize_key( $ctx->identifier( 3, 8 ) );
+		$nonce_name      = 'cfz_nonce_' . \sanitize_key( $ctx->fork( 'nonce' )->identifier( 3, 8 ) );
+		$submit_name     = 'cfz_submit_' . \sanitize_key( $ctx->fork( 'submit' )->identifier( 3, 8 ) );
+		$button_id       = 'cfz-button-' . \sanitize_key( $ctx->fork( 'button' )->identifier( 3, 8 ) );
+		$label           = 'Save ' . self::hostile_label( $ctx->fork( 'label' ) );
+		$result          = array();
+
+		$buffer_level = ob_get_level();
+		try {
+			$_SERVER['REQUEST_URI'] = '/wp-admin/admin.php?page=' . rawurlencode( $action ) . '&unsafe=<script>alert(1)</script>&quote="bad"';
+
+			$result['nonce_with_referer']    = \wp_nonce_field( $action, $nonce_name, true, false );
+			$result['nonce_without_referer'] = \wp_nonce_field( $action, $nonce_name, false, false );
+
+			ob_start();
+			\wp_nonce_field( $action, $nonce_name, true, true );
+			$result['nonce_echo'] = (string) ob_get_clean();
+
+			$result['selected_match'] = \selected( $action, $action, false );
+			$result['selected_miss']  = \selected( $action, $action . '-miss', false );
+
+			ob_start();
+			\selected( $action, $action, true );
+			$result['selected_echo'] = (string) ob_get_clean();
+
+			ob_start();
+			\submit_button(
+				$label,
+				'primary large',
+				$submit_name,
+				false,
+				array(
+					'id'       => $button_id,
+					'data-cfz' => $label,
+				)
+			);
+			$result['submit_button'] = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			self::restore_server( $server_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $result['nonce_with_referer'] ?? null )
+				&& str_contains( $result['nonce_with_referer'], 'name="' . $nonce_name . '"' )
+				&& str_contains( $result['nonce_with_referer'], 'name="_wp_http_referer"' )
+				&& is_string( $result['nonce_without_referer'] ?? null )
+				&& str_contains( $result['nonce_without_referer'], 'name="' . $nonce_name . '"' )
+				&& ! str_contains( $result['nonce_without_referer'], '_wp_http_referer' )
+				&& $result['nonce_echo'] === $result['nonce_with_referer']
+				&& self::html_has_no_unsafe_raw_markup( $result['nonce_with_referer'] ),
+			'nonce fields include custom names, optional referer fields, and escaped referer state',
+			array(
+				'withReferer'    => $result['nonce_with_referer'] ?? null,
+				'withoutReferer' => $result['nonce_without_referer'] ?? null,
+				'echo'           => $result['nonce_echo'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			" selected='selected'" === ( $result['selected_match'] ?? null )
+				&& '' === ( $result['selected_miss'] ?? null )
+				&& ( $result['selected_echo'] ?? null ) === ( $result['selected_match'] ?? null ),
+			'selected helper returns and echoes only exact-match selection attributes',
+			array(
+				'match' => $result['selected_match'] ?? null,
+				'miss'  => $result['selected_miss'] ?? null,
+				'echo'  => $result['selected_echo'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $result['submit_button'] ?? null )
+				&& str_contains( $result['submit_button'], 'type="submit"' )
+				&& str_contains( $result['submit_button'], 'name="' . $submit_name . '"' )
+				&& str_contains( $result['submit_button'], 'id="' . $button_id . '"' )
+				&& str_contains( $result['submit_button'], 'class="button button-primary button-large"' )
+				&& str_contains( $result['submit_button'], 'data-cfz=' )
+				&& self::html_has_no_unsafe_raw_markup( $result['submit_button'] ),
+			'submit_button renders escaped generated labels, ids, names, classes, and custom attributes',
+			array( 'submitButton' => $result['submit_button'] ?? null )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::server_matches( $server_snapshot, array( 'REQUEST_URI' ) ),
+			'admin form control helper request URI state is restored',
+			array( 'requestUri' => $_SERVER['REQUEST_URI'] ?? null )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.form-controls.nonce-selected-submit',
+			array() === $failures,
+			array(
+				'action'   => $action,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function skipped_core_list_table_subclasses( \ComponentFuzz\FuzzContext $ctx ): array {
 		return $ctx->skip(
 			'admin-workflows.list-table.core-subclasses-skipped',
@@ -1547,6 +1657,20 @@ final class AdminWorkflowsSurface {
 				unset( $_SERVER[ $name ] );
 			}
 		}
+	}
+
+	private static function server_matches( array $snapshot, array $names ): bool {
+		foreach ( $names as $name ) {
+			$exists = array_key_exists( $name, $_SERVER );
+			if ( $exists !== $snapshot[ $name ]['exists'] ) {
+				return false;
+			}
+			if ( $exists && $_SERVER[ $name ] !== $snapshot[ $name ]['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function clone_value( $value ) {
