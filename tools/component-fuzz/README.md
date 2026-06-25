@@ -157,8 +157,9 @@ database, network requests, or a configured site.
 - `default-widgets`: classic default widget subclass coverage, including
   constructor/options contracts, saved-instance callback lifecycles, update
   sanitization, form escaping, filtered rendering for text/custom
-  HTML/search/meta/list widgets, cache-backed calendar/archive output, and
-  local RSS fixtures without network requests.
+  HTML/search/meta/list/nav-menu widgets, cache-backed calendar/archive output,
+  navigation widget argument filters, and local RSS fixtures without network
+  requests.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
   setting sanitize/validate/post value flows, slashed customized JSON ingestion
   and programmatic post-value merge precedence, multidimensional option

@@ -33,6 +33,7 @@ final class DefaultWidgetsSurface {
 			$rows[] = self::check_form_escaping( $ctx->fork( 'forms' ) );
 			$rows[] = self::check_text_and_html_rendering( $ctx->fork( 'text-html' ) );
 			$rows[] = self::check_simple_widget_rendering( $ctx->fork( 'simple-render' ) );
+			$rows[] = self::check_nav_menu_widget_rendering( $ctx->fork( 'nav-menu-render' ) );
 			$rows[] = self::check_list_widget_rendering( $ctx->fork( 'list-render' ) );
 			$rows[] = self::check_rss_widget_rendering( $ctx->fork( 'rss-render' ) );
 		} catch ( \Throwable $e ) {
@@ -90,16 +91,20 @@ final class DefaultWidgetsSurface {
 			array(
 				'add_action',
 				'add_filter',
+				'add_theme_support',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'current_theme_supports',
 				'current_user_can',
 				'delete_option',
 				'fetch_feed',
 				'get_calendar',
 				'get_option',
+				'has_filter',
 				'get_search_form',
 				'remove_action',
 				'remove_filter',
+				'remove_theme_support',
 				'sanitize_text_field',
 				'update_option',
 				'wp_cache_flush',
@@ -109,6 +114,7 @@ final class DefaultWidgetsSurface {
 				'wp_get_archives',
 				'wp_list_categories',
 				'wp_list_pages',
+				'wp_nav_menu',
 				'wp_recursive_ksort',
 				'wp_set_current_user',
 				'wp_tag_cloud',
@@ -809,6 +815,202 @@ final class DefaultWidgetsSurface {
 		);
 
 		return self::result( $ctx, 'default-widgets.render.search-meta-calendar-wrappers', $failures );
+	}
+
+	private static function check_nav_menu_widget_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = $ctx->identifier( 4, 9 );
+		$menu     = self::make_term( 850 + $ctx->int( 1, 99 ), 'Menu ' . $token, 'menu-' . strtolower( $token ), 'nav_menu', 2 );
+		$cases    = array(
+			array(
+				'label'      => 'html5',
+				'number'     => 36,
+				'title'      => 'Primary ' . $token,
+				'format'     => 'html5',
+				'themeHtml5' => true,
+			),
+			array(
+				'label'      => 'xhtml',
+				'number'     => 37,
+				'title'      => 'Legacy ' . $token,
+				'format'     => 'xhtml',
+				'themeHtml5' => false,
+			),
+		);
+		$seen     = array(
+			'titles'  => array(),
+			'formats' => array(),
+			'args'    => array(),
+			'pre'     => array(),
+		);
+		$outputs  = array();
+
+		$current_case = null;
+
+		$title_filter = static function ( string $title, array $instance, string $id_base ) use ( &$seen ): string {
+			$seen['titles'][] = array(
+				'idBase'     => $id_base,
+				'title'      => $title,
+				'navMenuSet' => isset( $instance['nav_menu'] ),
+			);
+			return $title . ' <span data-nav-title="' . \esc_attr( $id_base ) . '">filtered</span>';
+		};
+		$format_filter = static function ( string $format ) use ( &$seen, &$current_case ): string {
+			$seen['formats'][] = array(
+				'case'  => $current_case['label'] ?? null,
+				'input' => $format,
+			);
+			return $current_case['format'] ?? $format;
+		};
+		$widget_args_filter = static function ( array $nav_menu_args, \WP_Term $nav_menu, array $args, array $instance ) use ( &$seen, &$current_case ): array {
+			$nav_menu_args['menu_id'] = 'component-fuzz-' . $current_case['label'];
+
+			$seen['args'][] = array(
+				'case'          => $current_case['label'],
+				'menuId'        => $nav_menu->term_id,
+				'widgetId'      => $args['widget_id'] ?? null,
+				'instanceTitle' => $instance['title'] ?? null,
+				'hasContainer'  => array_key_exists( 'container', $nav_menu_args ),
+				'container'     => $nav_menu_args['container'] ?? null,
+				'ariaLabel'     => $nav_menu_args['container_aria_label'] ?? null,
+				'itemsWrap'     => $nav_menu_args['items_wrap'] ?? null,
+				'menuIdArg'     => $nav_menu_args['menu_id'],
+			);
+
+			return $nav_menu_args;
+		};
+		$pre_nav_filter = static function ( $output, \stdClass $nav_args ) use ( &$seen, &$current_case, $token ): string {
+			unset( $output );
+
+			$seen['pre'][] = array(
+				'case'       => $current_case['label'],
+				'menuId'     => $nav_args->menu instanceof \WP_Term ? $nav_args->menu->term_id : null,
+				'container'  => $nav_args->container ?? null,
+				'ariaLabel'  => $nav_args->container_aria_label ?? null,
+				'menuIdArg'  => $nav_args->menu_id ?? null,
+				'itemsWrap'  => $nav_args->items_wrap ?? null,
+				'fallbackCb' => $nav_args->fallback_cb ?? null,
+			);
+
+			return '<ul class="component-fuzz-nav-menu" data-case="' . \esc_attr( $current_case['label'] ) . '"><li><a href="https://example.test/nav">' . \esc_html( $token ) . '</a></li></ul>';
+		};
+
+		$theme_features_before = $GLOBALS['_wp_theme_features'] ?? null;
+
+		\add_filter( 'widget_title', $title_filter, 10, 3 );
+		\add_filter( 'navigation_widgets_format', $format_filter );
+		\add_filter( 'widget_nav_menu_args', $widget_args_filter, 10, 4 );
+		\add_filter( 'pre_wp_nav_menu', $pre_nav_filter, 10, 2 );
+		try {
+			foreach ( $cases as $case ) {
+				$current_case = $case;
+				if ( $case['themeHtml5'] ) {
+					\add_theme_support( 'html5', array( 'navigation-widgets' ) );
+				} else {
+					\remove_theme_support( 'html5' );
+				}
+
+				$outputs[ $case['label'] ] = self::render_widget(
+					new \WP_Nav_Menu_Widget(),
+					$case['number'],
+					array(
+						'title'    => $case['title'],
+						'nav_menu' => $menu,
+					)
+				);
+			}
+
+			$current_case = array(
+				'label'  => 'empty',
+				'format' => 'html5',
+			);
+			$empty_output = self::render_widget(
+				new \WP_Nav_Menu_Widget(),
+				38,
+				array(
+					'title'    => 'Empty ' . $token,
+					'nav_menu' => 0,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_wp_nav_menu', $pre_nav_filter, 10 );
+			\remove_filter( 'widget_nav_menu_args', $widget_args_filter, 10 );
+			\remove_filter( 'navigation_widgets_format', $format_filter );
+			\remove_filter( 'widget_title', $title_filter, 10 );
+
+			if ( null === $theme_features_before ) {
+				unset( $GLOBALS['_wp_theme_features'] );
+			} else {
+				$GLOBALS['_wp_theme_features'] = $theme_features_before;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $outputs['html5'] ?? '', '<section id="nav_menu-36" class="widget widget_nav_menu">' )
+				&& str_contains( $outputs['html5'] ?? '', 'data-nav-title="nav_menu"' )
+				&& str_contains( $outputs['html5'] ?? '', 'data-case="html5"' )
+				&& str_contains( $outputs['xhtml'] ?? '', '<section id="nav_menu-37" class="widget widget_nav_menu">' )
+				&& str_contains( $outputs['xhtml'] ?? '', 'data-case="xhtml"' )
+				&& '' === $empty_output,
+			'Nav Menu widget renders selected menu output and returns early when no menu is selected',
+			array(
+				'html5' => self::preview( $outputs['html5'] ?? '' ),
+				'xhtml' => self::preview( $outputs['xhtml'] ?? '' ),
+				'empty' => self::preview( $empty_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $seen['titles'] )
+				&& 2 === count( $seen['formats'] )
+				&& 2 === count( $seen['args'] )
+				&& 2 === count( $seen['pre'] )
+				&& 'nav_menu' === ( $seen['titles'][0]['idBase'] ?? null )
+				&& 'html5' === ( $seen['formats'][0]['case'] ?? null )
+				&& 'xhtml' === ( $seen['formats'][1]['case'] ?? null ),
+			'Nav Menu widget title and navigation-format filters fire once for each selected menu render',
+			array( 'seen' => $seen )
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $seen['args'][0]['hasContainer'] ?? null )
+				&& 'nav' === ( $seen['args'][0]['container'] ?? null )
+				&& 'Primary ' . $token . ' filtered' === ( $seen['args'][0]['ariaLabel'] ?? null )
+				&& '<ul id="%1$s" class="%2$s">%3$s</ul>' === ( $seen['args'][0]['itemsWrap'] ?? null )
+				&& false === ( $seen['args'][1]['hasContainer'] ?? null )
+				&& 'component-fuzz-html5' === ( $seen['args'][0]['menuIdArg'] ?? null )
+				&& 'component-fuzz-xhtml' === ( $seen['args'][1]['menuIdArg'] ?? null ),
+			'widget_nav_menu_args receives HTML5 container args only in HTML5 mode and can mutate menu_id',
+			array( 'args' => $seen['args'] )
+		);
+
+		self::collect_failure(
+			$failures,
+			'nav' === ( $seen['pre'][0]['container'] ?? null )
+				&& 'Primary ' . $token . ' filtered' === ( $seen['pre'][0]['ariaLabel'] ?? null )
+				&& 'component-fuzz-html5' === ( $seen['pre'][0]['menuIdArg'] ?? null )
+				&& 'div' === ( $seen['pre'][1]['container'] ?? null )
+				&& '' === ( $seen['pre'][1]['ariaLabel'] ?? null )
+				&& 'component-fuzz-xhtml' === ( $seen['pre'][1]['menuIdArg'] ?? null )
+				&& false === \has_filter( 'widget_nav_menu_args', $widget_args_filter )
+				&& false === \has_filter( 'pre_wp_nav_menu', $pre_nav_filter ),
+			'wp_nav_menu receives normalized defaults after widget args filtering and filters are restored',
+			array(
+				'pre'                 => $seen['pre'],
+				'widgetArgsFilter'    => \has_filter( 'widget_nav_menu_args', $widget_args_filter ),
+				'preWpNavMenuFilter'  => \has_filter( 'pre_wp_nav_menu', $pre_nav_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'default-widgets.render.nav-menu-widget-filtered-output',
+			$failures,
+			array( 'seen' => $seen )
+		);
 	}
 
 	private static function check_list_widget_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
