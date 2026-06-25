@@ -432,10 +432,11 @@ database, network requests, or a configured site.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, collection-param sanitization,
-  permission gates, route registration/dispatch, REST links, invalid IDs/types,
-  sanitized content/meta fields, safe create/update/delete error paths,
-  upload-no-data paths, and deterministic state restoration without live
-  uploads, remote requests, or a live database.
+  permission gates, route registration/dispatch, route index/help-data
+  projection, REST links, invalid IDs/types, sanitized content/meta fields,
+  safe create/update/delete error paths, upload-no-data paths, and
+  deterministic state restoration without live uploads, remote requests, or a
+  live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
   global styles, template/template-part response shaping, template revisions
   and autosaves, navigation fallback, direct block-template ZIP export

@@ -1742,6 +1742,68 @@ final class RestObjectControllersSurface {
 				)
 			);
 
+			$post_collection_data = $server->get_data_for_route(
+				'/wp/v2/posts',
+				$routes['/wp/v2/posts'] ?? array(),
+				'help'
+			);
+			$post_item_data       = $server->get_data_for_route(
+				'/wp/v2/posts/(?P<id>[\d]+)',
+				$routes['/wp/v2/posts/(?P<id>[\d]+)'] ?? array(),
+				'help'
+			);
+			$users_me_data        = $server->get_data_for_route(
+				'/wp/v2/users/me',
+				$routes['/wp/v2/users/me'] ?? array(),
+				'help'
+			);
+
+			self::collect_failure(
+				$failures,
+				self::route_data_has_methods( $post_collection_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_methods( $post_item_data, array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) )
+					&& self::route_data_has_methods( $users_me_data, array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) )
+					&& self::route_data_has_endpoint_args(
+						$post_collection_data,
+						array( 'GET' ),
+						array( 'context', 'page', 'per_page', 'status' )
+					)
+					&& self::route_data_has_endpoint_args(
+						$post_collection_data,
+						array( 'POST' ),
+						array( 'content', 'status', 'title' )
+					)
+					&& self::route_data_has_endpoint_args(
+						$post_item_data,
+						array( 'GET' ),
+						array( 'context' )
+					)
+					&& self::route_data_has_endpoint_args(
+						$post_item_data,
+						array( 'DELETE' ),
+						array( 'force' )
+					)
+					&& self::route_data_endpoint_allows_batch( $post_collection_data, array( 'GET' ) )
+					&& self::route_data_endpoint_allows_batch( $post_collection_data, array( 'POST' ) )
+					&& self::route_data_schema_has_properties(
+						$post_collection_data,
+						array( 'id', 'slug', 'title', $case['postAdditionalField'] )
+					)
+					&& self::route_data_schema_contexts_match(
+						$post_collection_data,
+						$case['postAdditionalField'],
+						array( 'edit' )
+					)
+					&& \rest_url( 'wp/v2/posts' ) === self::route_data_self_href( $post_collection_data )
+					&& null === self::route_data_self_href( $post_item_data ),
+				'object route index data exposes schemas, endpoint args, batch flags, and link projection',
+				array(
+					'postCollectionData' => $post_collection_data,
+					'postItemData'       => $post_item_data,
+					'usersMeData'        => $users_me_data,
+				)
+			);
+
 			$cap_filter = self::install_cap_filter(
 				array(
 					'edit_categories',
@@ -2477,6 +2539,95 @@ final class RestObjectControllersSurface {
 		$methods = array_values( array_unique( $methods ) );
 		sort( $methods );
 		return $methods;
+	}
+
+	private static function route_data_has_methods( ?array $data, array $expected_methods ): bool {
+		if ( null === $data || ! isset( $data['methods'] ) || ! is_array( $data['methods'] ) ) {
+			return false;
+		}
+
+		$methods = array_values( array_unique( array_map( 'strval', $data['methods'] ) ) );
+		sort( $methods );
+		sort( $expected_methods );
+		return $expected_methods === $methods;
+	}
+
+	private static function route_data_has_endpoint_args( ?array $data, array $methods, array $args ): bool {
+		$endpoint = self::route_data_endpoint_for_methods( $data, $methods );
+		if ( null === $endpoint || ! isset( $endpoint['args'] ) || ! is_array( $endpoint['args'] ) ) {
+			return false;
+		}
+
+		foreach ( $args as $arg ) {
+			if ( ! array_key_exists( $arg, $endpoint['args'] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function route_data_endpoint_allows_batch( ?array $data, array $methods ): bool {
+		$endpoint = self::route_data_endpoint_for_methods( $data, $methods );
+		if ( null === $endpoint || ! isset( $endpoint['allow_batch'] ) || ! is_array( $endpoint['allow_batch'] ) ) {
+			return false;
+		}
+
+		return true === ( $endpoint['allow_batch']['v1'] ?? null );
+	}
+
+	private static function route_data_schema_has_properties( ?array $data, array $properties ): bool {
+		if ( null === $data || ! isset( $data['schema']['properties'] ) || ! is_array( $data['schema']['properties'] ) ) {
+			return false;
+		}
+
+		foreach ( $properties as $property ) {
+			if ( ! array_key_exists( $property, $data['schema']['properties'] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function route_data_schema_contexts_match( ?array $data, string $property, array $contexts ): bool {
+		if ( null === $data || ! isset( $data['schema']['properties'][ $property ] ) ) {
+			return false;
+		}
+
+		$actual_contexts = $data['schema']['properties'][ $property ]['context'] ?? null;
+		if ( ! is_array( $actual_contexts ) ) {
+			return false;
+		}
+
+		sort( $actual_contexts );
+		sort( $contexts );
+		return $contexts === $actual_contexts;
+	}
+
+	private static function route_data_self_href( ?array $data ): ?string {
+		return is_array( $data )
+			? ( $data['_links']['self'][0]['href'] ?? null )
+			: null;
+	}
+
+	private static function route_data_endpoint_for_methods( ?array $data, array $methods ): ?array {
+		if ( null === $data || ! isset( $data['endpoints'] ) || ! is_array( $data['endpoints'] ) ) {
+			return null;
+		}
+
+		sort( $methods );
+		foreach ( $data['endpoints'] as $endpoint ) {
+			if ( ! isset( $endpoint['methods'] ) || ! is_array( $endpoint['methods'] ) ) {
+				continue;
+			}
+
+			$endpoint_methods = array_values( array_unique( array_map( 'strval', $endpoint['methods'] ) ) );
+			sort( $endpoint_methods );
+			if ( $methods === $endpoint_methods ) {
+				return $endpoint;
+			}
+		}
+
+		return null;
 	}
 
 	private static function content_counts(): array {
