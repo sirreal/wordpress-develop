@@ -351,7 +351,8 @@ database, network requests, or a configured site.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
-  case-insensitive download headers, Content-Disposition filename sanitization,
+  case-insensitive download headers, Content-Disposition/content-type filename
+  derivation and sanitization matrix,
   signature soft-fail/hard-fail temp-file behavior, URL extension/MIME
   boundaries, extension-filtered sideload return types and metadata,
   temp-file cleanup, size/type rejection, sideload prefilter cleanup and

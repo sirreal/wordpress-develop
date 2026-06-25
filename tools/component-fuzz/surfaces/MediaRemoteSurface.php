@@ -43,6 +43,7 @@ final class MediaRemoteSurface {
 				self::prepare_runtime( $temp_root );
 
 				$rows[] = self::check_download_url_contracts( $ctx->fork( 'download-url' ), $download_paths );
+				$rows[] = self::check_download_url_filename_derivation_matrix( $ctx->fork( 'download-url-filenames' ), $download_paths );
 				$rows[] = self::check_download_url_signature_contracts( $ctx->fork( 'download-url-signatures' ), $download_paths );
 				$rows[] = self::check_media_sideload_image_flows( $ctx->fork( 'media-sideload-image' ), $temp_root, $download_paths );
 				$rows[] = self::check_media_handle_sideload_branches( $ctx->fork( 'media-handle-sideload' ), $temp_root );
@@ -333,6 +334,306 @@ final class MediaRemoteSurface {
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
+	}
+
+	private static function check_download_url_filename_derivation_matrix( \ComponentFuzz\FuzzContext $ctx, array &$download_paths ): array {
+		$failures = array();
+		$events   = array();
+		$cases    = self::download_url_filename_matrix_cases( $ctx );
+		$routes   = array();
+
+		foreach ( $cases as $case ) {
+			$routes[ $case['url'] ] = array(
+				'body'    => $case['body'],
+				'code'    => 200,
+				'headers' => $case['headers'],
+			);
+		}
+
+		$http_filter = self::http_interceptor( $routes, $events, $download_paths );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+		try {
+			foreach ( $cases as $case ) {
+				$downloaded = \download_url( $case['url'], 13 );
+				$basename   = is_string( $downloaded ) ? basename( $downloaded ) : '';
+				$expected   = self::expected_download_url_filename_case( $case );
+
+				$matches_expected = false;
+				if ( 'exact' === $expected['mode'] ) {
+					$matches_expected = $basename === $expected['basename'];
+				} elseif ( '' !== $basename ) {
+					$matches_expected = str_starts_with( $basename, $expected['prefix'] )
+						&& $expected['extension'] === pathinfo( $basename, PATHINFO_EXTENSION );
+				}
+
+				self::collect_failure(
+					$failures,
+					is_string( $downloaded )
+						&& is_file( $downloaded )
+						&& $matches_expected
+						&& false === strpbrk( $basename, "/\\" )
+						&& 0 === \validate_file( $basename )
+						&& $case['body'] === file_get_contents( $downloaded ),
+					'download_url derives deterministic temp basenames from Content-Disposition, Content-Type, or URL path',
+					array(
+						'label'    => $case['label'],
+						'result'   => self::describe_result( $downloaded ),
+						'basename' => $basename,
+						'expected' => $expected,
+						'headers'  => $case['headers'],
+					)
+				);
+
+				if ( isset( $case['unexpectedBasename'] ) ) {
+					self::collect_failure(
+						$failures,
+						'' !== $basename && $basename !== $case['unexpectedBasename'] && ! str_starts_with( $basename, pathinfo( $case['unexpectedBasename'], PATHINFO_FILENAME ) ),
+						'download_url ignores unsupported Content-Disposition filename contexts',
+						array(
+							'label'              => $case['label'],
+							'basename'           => $basename,
+							'unexpectedBasename' => $case['unexpectedBasename'],
+							'headers'            => $case['headers'],
+						)
+					);
+				}
+
+				if ( is_string( $downloaded ) ) {
+					$download_paths[] = $downloaded;
+					@unlink( $downloaded );
+				}
+			}
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		$registered_events = array_filter(
+			$events,
+			static function ( array $event ): bool {
+				return ! empty( $event['registered'] );
+			}
+		);
+		$streamed_events   = array_filter(
+			$registered_events,
+			static function ( array $event ): bool {
+				return ! empty( $event['stream'] ) && is_string( $event['filename'] ?? null ) && '' !== $event['filename'];
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $routes ) === count( $registered_events )
+				&& count( $registered_events ) === count( $streamed_events )
+				&& array() === array_filter(
+					$events,
+					static function ( array $event ): bool {
+						return empty( $event['registered'] );
+					}
+				)
+				&& self::tracked_paths_absent( $download_paths ),
+			'download_url filename matrix uses only registered no-network HTTP fixtures and cleans temp paths',
+			array(
+				'events'              => $events,
+				'trackedPathsCleaned' => self::tracked_paths_absent( $download_paths ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_http_request', $http_filter ),
+			'download_url filename matrix removes HTTP interception filters',
+			array( 'preHttp' => \has_filter( 'pre_http_request', $http_filter ) )
+		);
+
+		return $ctx->result(
+			'media-remote.download-url-filename-derivation-matrix',
+			array() === $failures,
+			array(
+				'cases'    => array_map(
+					static function ( array $case ): array {
+						return array(
+							'label'   => $case['label'],
+							'url'     => $case['url'],
+							'headers' => $case['headers'],
+						);
+					},
+					$cases
+				),
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function download_url_filename_matrix_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$suffix = preg_replace( '/[^a-z0-9]+/', '-', strtolower( $ctx->identifier( 5, 8 ) ) );
+		$suffix = is_string( $suffix ) ? trim( $suffix, '-' ) : '';
+		if ( '' === $suffix ) {
+			$suffix = 'seed-' . $ctx->seed();
+		}
+
+		$case_specs = array(
+			array(
+				'label'   => 'mixed-case-disposition-prefix',
+				'path'    => 'matrix-mixed-case-' . $suffix . '.bin',
+				'headers' => array(
+					'cOnTeNt-DiSpOsItIoN' => 'Attachment; Filename=Remote Mixed ' . $suffix . '.JPG',
+					'CONTENT-TYPE'         => 'application/octet-stream',
+				),
+			),
+			array(
+				'label'   => 'quoted-path-traversal-disposition',
+				'path'    => 'matrix-traversal-source-' . $suffix . '.tmp',
+				'headers' => array(
+					'Content-Disposition' => 'attachment; filename="../../Remote Path ' . $suffix . ' Photo.PNG"',
+					'Content-Type'        => 'application/octet-stream',
+				),
+			),
+			array(
+				'label'   => 'quoted-whitespace-disposition',
+				'path'    => 'matrix-whitespace-source-' . $suffix,
+				'headers' => array(
+					'Content-Disposition' => 'attachment; filename="   Remote   Space   ' . $suffix . '   Name .PNG   "',
+					'Content-Type'        => 'application/octet-stream',
+				),
+			),
+			array(
+				'label'   => 'inline-disposition-ignored-with-png-type',
+				'path'    => 'matrix-inline-url-' . $suffix . '.dat',
+				'headers' => array(
+					'Content-Disposition' => 'inline; filename="ignored-inline-' . $suffix . '.jpg"',
+					'Content-Type'        => 'image/png',
+				),
+				'unexpectedBasename' => 'ignored-inline-' . $suffix . '.jpg',
+			),
+			array(
+				'label'   => 'filename-only-disposition-ignored-unknown-type',
+				'path'    => 'matrix-filename-only-url-' . $suffix . '.zip',
+				'headers' => array(
+					'Content-Disposition' => 'filename="ignored-filename-only-' . $suffix . '.jpg"',
+					'Content-Type'        => 'application/x-component-fuzz',
+				),
+				'unexpectedBasename' => 'ignored-filename-only-' . $suffix . '.jpg',
+			),
+			array(
+				'label'   => 'form-data-disposition-ignored',
+				'path'    => 'matrix-form-data-url-' . $suffix,
+				'headers' => array(
+					'Content-Disposition' => 'form-data; name="file"; filename="ignored-form-data-' . $suffix . '.jpg"',
+					'Content-Type'        => 'application/x-component-fuzz',
+				),
+				'unexpectedBasename' => 'ignored-form-data-' . $suffix . '.jpg',
+			),
+			array(
+				'label'   => 'disposition-tmp-followed-by-png-type',
+				'path'    => 'matrix-disposition-tmp-source-' . $suffix . '.dat',
+				'headers' => array(
+					'Content-Disposition' => 'attachment; filename=matrix-disposition-' . $suffix . '.tmp',
+					'Content-Type'        => 'image/png',
+				),
+			),
+			array(
+				'label'   => 'disposition-tmp-unknown-type',
+				'path'    => 'matrix-disposition-unknown-source-' . $suffix . '.dat',
+				'headers' => array(
+					'Content-Disposition' => 'attachment; filename=matrix-unknown-' . $suffix . '.tmp',
+					'Content-Type'        => 'application/x-component-fuzz',
+				),
+			),
+			array(
+				'label'   => 'url-basename-png-type-without-disposition',
+				'path'    => 'matrix-url-png-' . $suffix,
+				'headers' => array(
+					'Content-Type' => 'image/png',
+				),
+			),
+			array(
+				'label'   => 'url-basename-unknown-type-without-disposition',
+				'path'    => 'matrix-url-unknown-' . $suffix . '.jpeg',
+				'headers' => array(
+					'Content-Type' => 'application/x-component-fuzz',
+				),
+			),
+		);
+
+		$cases = array();
+		foreach ( $case_specs as $index => $case ) {
+			$case['url']  = 'https://example.test/component-fuzz/' . $case['path'] . '?case=' . rawurlencode( (string) $case['label'] );
+			$case['body'] = "component fuzz filename matrix {$index}\n" . $case['label'];
+			unset( $case['path'] );
+
+			$cases[] = $case;
+		}
+
+		return $cases;
+	}
+
+	private static function expected_download_url_filename_case( array $case ): array {
+		$disposition_basename = self::expected_download_url_disposition_basename( self::route_header( $case['headers'], 'Content-Disposition' ) );
+		$content_type         = self::route_header( $case['headers'], 'Content-Type' );
+		$content_extension    = null === $content_type ? null : self::extension_for_mime_type( (string) $content_type );
+
+		if ( null !== $disposition_basename ) {
+			if ( 'tmp' === pathinfo( $disposition_basename, PATHINFO_EXTENSION ) && null !== $content_extension ) {
+				$disposition_basename = substr( $disposition_basename, 0, -4 ) . '.' . $content_extension;
+			}
+
+			return array(
+				'mode'     => 'exact',
+				'basename' => $disposition_basename,
+			);
+		}
+
+		$stem = self::download_url_temp_basename_stem( $case['url'] );
+
+		return array(
+			'mode'      => 'url-temp',
+			'prefix'    => '' === $stem ? '' : $stem . '-',
+			'extension' => null === $content_extension ? 'tmp' : $content_extension,
+		);
+	}
+
+	private static function expected_download_url_disposition_basename( $content_disposition ): ?string {
+		if ( null === $content_disposition || '' === (string) $content_disposition ) {
+			return null;
+		}
+
+		$content_disposition = strtolower( (string) $content_disposition );
+		if ( ! str_starts_with( $content_disposition, 'attachment; filename=' ) ) {
+			return null;
+		}
+
+		$disposition_name = \sanitize_file_name( substr( $content_disposition, 21 ) );
+		if ( '' !== $disposition_name && 0 === \validate_file( $disposition_name ) ) {
+			return $disposition_name;
+		}
+
+		return null;
+	}
+
+	private static function download_url_temp_basename_stem( string $url ): string {
+		$url_path = parse_url( $url, PHP_URL_PATH );
+		if ( ! is_string( $url_path ) || '' === $url_path ) {
+			return '';
+		}
+
+		$basename = basename( $url_path );
+		$stem     = preg_replace( '|\.[^.]*$|', '', $basename );
+
+		if ( ! is_string( $stem ) || '' === $stem ) {
+			return '';
+		}
+
+		$probe_suffix = '-componentfuzz';
+		$probe        = \sanitize_file_name( $stem . $probe_suffix . '.tmp' );
+		$probe_stem   = pathinfo( $probe, PATHINFO_FILENAME );
+
+		if ( str_ends_with( $probe_stem, $probe_suffix ) ) {
+			return substr( $probe_stem, 0, -strlen( $probe_suffix ) );
+		}
+
+		return $probe_stem;
 	}
 
 	private static function check_download_url_signature_contracts( \ComponentFuzz\FuzzContext $ctx, array &$download_paths ): array {
@@ -1227,25 +1528,21 @@ final class MediaRemoteSurface {
 			return array();
 		}
 
-		$paths   = array();
-		$headers = $route['headers'] ?? array();
+		$paths            = array();
+		$headers          = $route['headers'] ?? array();
+		$current_filename = $filename;
 
-		$content_disposition_header = self::route_header( $headers, 'Content-Disposition' );
-		if ( null !== $content_disposition_header ) {
-			$content_disposition = strtolower( (string) $content_disposition_header );
-			if ( str_starts_with( $content_disposition, 'attachment; filename=' ) ) {
-				$disposition_name = \sanitize_file_name( substr( $content_disposition, 21 ) );
-				if ( $disposition_name && 0 === \validate_file( $disposition_name ) ) {
-					$paths[] = dirname( $filename ) . DIRECTORY_SEPARATOR . $disposition_name;
-				}
-			}
+		$disposition_name = self::expected_download_url_disposition_basename( self::route_header( $headers, 'Content-Disposition' ) );
+		if ( null !== $disposition_name ) {
+			$current_filename = dirname( $filename ) . DIRECTORY_SEPARATOR . $disposition_name;
+			$paths[]          = $current_filename;
 		}
 
 		$content_type = self::route_header( $headers, 'content-type' );
-		if ( 'tmp' === pathinfo( $filename, PATHINFO_EXTENSION ) && null !== $content_type ) {
+		if ( 'tmp' === pathinfo( $current_filename, PATHINFO_EXTENSION ) && null !== $content_type ) {
 			$extension = self::extension_for_mime_type( (string) $content_type );
 			if ( null !== $extension ) {
-				$paths[] = substr( $filename, 0, -4 ) . '.' . $extension;
+				$paths[] = substr( $current_filename, 0, -4 ) . '.' . $extension;
 			}
 		}
 
