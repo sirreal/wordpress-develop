@@ -39,6 +39,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_users_controller( $ctx, $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_revisions_controller( $ctx, $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_attachments_controller( $ctx, $case, $fixtures, $additional_field_calls );
+			$rows[] = self::check_collection_parameter_matrix( $ctx, $case );
 			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
 			$rows[] = self::skip(
@@ -1573,6 +1574,577 @@ final class RestObjectControllersSurface {
 				),
 			)
 		);
+	}
+
+	private static function check_collection_parameter_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$matrix_size = 0;
+		$wp_sprintf_filter_added = false;
+		if ( function_exists( 'wp_sprintf_l' ) && false === \has_filter( 'wp_sprintf', 'wp_sprintf_l' ) ) {
+			\add_filter( 'wp_sprintf', 'wp_sprintf_l', 10, 2 );
+			$wp_sprintf_filter_added = true;
+		}
+
+		$controllers = array(
+			'posts'       => array(
+				'controller'       => new \WP_REST_Posts_Controller( 'post' ),
+				'route'            => '/wp/v2/posts',
+				'orderbyAllowed'   => array( 'author', 'date', 'id', 'include', 'include_slugs', 'modified', 'parent', 'relevance', 'slug', 'title' ),
+				'orderbyRejected'  => array( 'date_gmt', 'email', 'term_group' ),
+				'parameterCases'   => self::post_collection_parameter_cases( $case ),
+			),
+			'terms'       => array(
+				'controller'       => new \WP_REST_Terms_Controller( 'category' ),
+				'route'            => '/wp/v2/categories',
+				'orderbyAllowed'   => array( 'count', 'description', 'id', 'include', 'include_slugs', 'name', 'slug', 'term_group' ),
+				'orderbyRejected'  => array( 'date', 'email', 'parent' ),
+				'parameterCases'   => self::term_collection_parameter_cases( $case ),
+			),
+			'comments'    => array(
+				'controller'       => new \WP_REST_Comments_Controller(),
+				'route'            => '/wp/v2/comments',
+				'orderbyAllowed'   => array( 'date', 'date_gmt', 'id', 'include', 'parent', 'post', 'type' ),
+				'orderbyRejected'  => array( 'email', 'name', 'slug' ),
+				'parameterCases'   => self::comment_collection_parameter_cases( $case ),
+			),
+			'users'       => array(
+				'controller'       => new \WP_REST_Users_Controller(),
+				'route'            => '/wp/v2/users',
+				'orderbyAllowed'   => array( 'email', 'id', 'include', 'include_slugs', 'name', 'registered_date', 'slug', 'url' ),
+				'orderbyRejected'  => array( 'date_gmt', 'parent', 'term_group' ),
+				'parameterCases'   => self::user_collection_parameter_cases( $case ),
+			),
+			'revisions'   => array(
+				'controller'       => new \WP_REST_Revisions_Controller( 'post' ),
+				'route'            => '/wp/v2/posts/1/revisions',
+				'orderbyAllowed'   => array( 'date', 'id', 'include', 'include_slugs', 'relevance', 'slug', 'title' ),
+				'orderbyRejected'  => array( 'author', 'modified', 'parent' ),
+				'parameterCases'   => self::revision_collection_parameter_cases(),
+			),
+			'attachments' => array(
+				'controller'       => new \WP_REST_Attachments_Controller( 'attachment' ),
+				'route'            => '/wp/v2/media',
+				'orderbyAllowed'   => array( 'author', 'date', 'id', 'include', 'include_slugs', 'modified', 'parent', 'relevance', 'slug', 'title' ),
+				'orderbyRejected'  => array( 'date_gmt', 'email', 'term_group' ),
+				'parameterCases'   => self::attachment_collection_parameter_cases( $case ),
+			),
+		);
+
+		foreach ( $controllers as $name => $spec ) {
+			$params  = $spec['controller']->get_collection_params();
+			$request = self::request( 'GET', $spec['route'] );
+			$request->set_attributes( array( 'args' => $params ) );
+
+			self::collect_failure(
+				$failures,
+				isset( $params['context'], $params['order'], $params['orderby'], $params['per_page'] ),
+				'collection controller exposes shared collection params for matrix checks',
+				array(
+					'controller' => $name,
+					'params'     => self::param_summary( $params ),
+				)
+			);
+
+			$cases = array_merge( self::shared_collection_parameter_cases( $case ), $spec['parameterCases'] );
+			foreach ( $cases as $param_case ) {
+				++$matrix_size;
+				self::assert_collection_parameter_case( $failures, $name, $params, $request, $param_case );
+			}
+
+			self::assert_orderby_matrix( $failures, $name, $params, $spec['orderbyAllowed'], $spec['orderbyRejected'] );
+		}
+
+		self::assert_private_post_status_gate( $failures );
+
+		$wp_sprintf_filter_restored = true;
+		if ( $wp_sprintf_filter_added ) {
+			\remove_filter( 'wp_sprintf', 'wp_sprintf_l', 10 );
+			$wp_sprintf_filter_restored = false === \has_filter( 'wp_sprintf', 'wp_sprintf_l' );
+			self::collect_failure(
+				$failures,
+				$wp_sprintf_filter_restored,
+				'temporary wp_sprintf list formatter filter is restored after enum matrix checks',
+				array( 'filterRestored' => $wp_sprintf_filter_restored )
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.param-sanitize-validate-matrix',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'matrixSize' => $matrix_size,
+				'failures'   => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function shared_collection_parameter_cases( array $case ): array {
+		$search_raw = "  Find <b>{$case['token']}</b>\n";
+
+		return array(
+			array(
+				'param'             => 'context',
+				'value'             => 'View!!',
+				'schemaValid'       => false,
+				'schemaError'       => 'rest_not_in_enum',
+				'schemaSanitized'   => 'View!!',
+				'callbackValid'     => false,
+				'callbackError'     => 'rest_not_in_enum',
+				'callbackSanitized' => 'view',
+			),
+			array(
+				'param'             => 'search',
+				'value'             => $search_raw,
+				'schemaValid'       => true,
+				'schemaSanitized'   => $search_raw,
+				'callbackValid'     => true,
+				'callbackSanitized' => \sanitize_text_field( $search_raw ),
+			),
+			array(
+				'param'             => 'per_page',
+				'value'             => 1,
+				'schemaValid'       => true,
+				'schemaSanitized'   => 1,
+				'callbackValid'     => true,
+				'callbackSanitized' => 1,
+			),
+			array(
+				'param'             => 'per_page',
+				'value'             => 100,
+				'schemaValid'       => true,
+				'schemaSanitized'   => 100,
+				'callbackValid'     => true,
+				'callbackSanitized' => 100,
+			),
+			array(
+				'param'             => 'per_page',
+				'value'             => 0,
+				'schemaValid'       => false,
+				'schemaError'       => 'rest_out_of_bounds',
+				'schemaSanitized'   => 0,
+				'callbackValid'     => false,
+				'callbackError'     => 'rest_out_of_bounds',
+				'callbackSanitized' => 0,
+			),
+			array(
+				'param'             => 'per_page',
+				'value'             => 101,
+				'schemaValid'       => false,
+				'schemaError'       => 'rest_out_of_bounds',
+				'schemaSanitized'   => 101,
+				'callbackValid'     => false,
+				'callbackError'     => 'rest_out_of_bounds',
+				'callbackSanitized' => 101,
+			),
+			array(
+				'param'           => 'order',
+				'value'           => 'desc',
+				'schemaValid'     => true,
+				'schemaSanitized' => 'desc',
+			),
+			array(
+				'param'           => 'order',
+				'value'           => 'ASC',
+				'schemaValid'     => false,
+				'schemaError'     => 'rest_not_in_enum',
+				'schemaSanitized' => 'ASC',
+			),
+		);
+	}
+
+	private static function post_collection_parameter_cases( array $case ): array {
+		$slug_value = 'Post-Slug-' . $case['token'] . ',second-' . $case['token'];
+
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '7', '09' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 7, 9 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '4,8',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 4, 8 ),
+			),
+			array(
+				'param'           => 'slug',
+				'value'           => $slug_value,
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'Post-Slug-' . $case['token'], 'second-' . $case['token'] ),
+			),
+			array(
+				'param'           => 'search_columns',
+				'value'           => 'post_title,post_excerpt',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'post_title', 'post_excerpt' ),
+			),
+			array(
+				'param'           => 'search_columns',
+				'value'           => array( 'post_title', 'not_a_post_column' ),
+				'schemaValid'     => false,
+				'schemaError'     => 'rest_not_in_enum',
+				'schemaSanitized' => array( 'post_title', 'not_a_post_column' ),
+			),
+			array(
+				'param'             => 'status',
+				'value'             => 'publish',
+				'schemaValid'       => true,
+				'schemaSanitized'   => array( 'publish' ),
+				'callbackSanitized' => array( 'publish' ),
+			),
+		);
+	}
+
+	private static function term_collection_parameter_cases( array $case ): array {
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '11', '12' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 11, 12 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '13,14',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 13, 14 ),
+			),
+			array(
+				'param'           => 'slug',
+				'value'           => 'Term-Slug-' . $case['token'] . ',child-' . $case['token'],
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'Term-Slug-' . $case['token'], 'child-' . $case['token'] ),
+			),
+		);
+	}
+
+	private static function comment_collection_parameter_cases( array $case ): array {
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '21', '22' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 21, 22 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '23,24',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 23, 24 ),
+			),
+			array(
+				'param'           => 'post',
+				'value'           => '25,26',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 25, 26 ),
+			),
+			array(
+				'param'           => 'parent',
+				'value'           => array( '27', '28' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 27, 28 ),
+			),
+			array(
+				'param'             => 'status',
+				'value'             => 'Approved!!',
+				'schemaValid'       => true,
+				'schemaSanitized'   => 'Approved!!',
+				'callbackValid'     => true,
+				'callbackSanitized' => 'approved',
+			),
+			array(
+				'param'             => 'type',
+				'value'             => 'Comment!!',
+				'schemaValid'       => true,
+				'schemaSanitized'   => 'Comment!!',
+				'callbackValid'     => true,
+				'callbackSanitized' => 'comment',
+			),
+		);
+	}
+
+	private static function user_collection_parameter_cases( array $case ): array {
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '31', '32' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 31, 32 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '33,34',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 33, 34 ),
+			),
+			array(
+				'param'           => 'slug',
+				'value'           => 'User-Slug-' . $case['token'] . ',author-' . $case['token'],
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'User-Slug-' . $case['token'], 'author-' . $case['token'] ),
+			),
+			array(
+				'param'           => 'roles',
+				'value'           => 'editor,subscriber',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'editor', 'subscriber' ),
+			),
+			array(
+				'param'           => 'capabilities',
+				'value'           => array( 'edit_posts', 'read' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'edit_posts', 'read' ),
+			),
+			array(
+				'param'           => 'search_columns',
+				'value'           => 'email,username',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'email', 'username' ),
+			),
+			array(
+				'param'           => 'search_columns',
+				'value'           => array( 'email', 'post_title' ),
+				'schemaValid'     => false,
+				'schemaError'     => 'rest_not_in_enum',
+				'schemaSanitized' => array( 'email', 'post_title' ),
+			),
+		);
+	}
+
+	private static function revision_collection_parameter_cases(): array {
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '41', '42' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 41, 42 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '43,44',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 43, 44 ),
+			),
+		);
+	}
+
+	private static function attachment_collection_parameter_cases( array $case ): array {
+		return array(
+			array(
+				'param'           => 'include',
+				'value'           => array( '51', '52' ),
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 51, 52 ),
+			),
+			array(
+				'param'           => 'exclude',
+				'value'           => '53,54',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 53, 54 ),
+			),
+			array(
+				'param'           => 'slug',
+				'value'           => 'Media-Slug-' . $case['token'] . ',attachment-' . $case['token'],
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'Media-Slug-' . $case['token'], 'attachment-' . $case['token'] ),
+			),
+			array(
+				'param'           => 'media_type',
+				'value'           => 'image',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'image' ),
+			),
+			array(
+				'param'           => 'media_type',
+				'value'           => 'not-a-media-type',
+				'schemaValid'     => false,
+				'schemaError'     => 'rest_not_in_enum',
+				'schemaSanitized' => array( 'not-a-media-type' ),
+			),
+			array(
+				'param'           => 'mime_type',
+				'value'           => 'image/jpeg,text/plain',
+				'schemaValid'     => true,
+				'schemaSanitized' => array( 'image/jpeg', 'text/plain' ),
+			),
+			array(
+				'param'             => 'status',
+				'value'             => 'inherit',
+				'schemaValid'       => true,
+				'schemaSanitized'   => array( 'inherit' ),
+				'callbackSanitized' => array( 'inherit' ),
+			),
+		);
+	}
+
+	private static function assert_collection_parameter_case( array &$failures, string $controller, array $params, \WP_REST_Request $request, array $case ): void {
+		$param = $case['param'];
+		if ( ! isset( $params[ $param ] ) || ! is_array( $params[ $param ] ) ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'collection parameter matrix target is present',
+				array(
+					'controller' => $controller,
+					'param'      => $param,
+					'available'  => array_keys( $params ),
+				)
+			);
+			return;
+		}
+
+		$schema           = $params[ $param ];
+		$schema_valid     = \rest_validate_value_from_schema( $case['value'], $schema, $param );
+		$schema_sanitized = \rest_sanitize_value_from_schema( $case['value'], $schema, $param );
+		$callback_valid   = null;
+		$callback_sanitized = null;
+		$callback_failures = array();
+
+		if ( isset( $schema['validate_callback'] ) ) {
+			if ( is_callable( $schema['validate_callback'] ) ) {
+				$callback_valid = call_user_func( $schema['validate_callback'], $case['value'], $request, $param );
+			} else {
+				$callback_failures[] = 'validate_callback is not callable';
+			}
+		}
+
+		if ( isset( $schema['sanitize_callback'] ) ) {
+			if ( is_callable( $schema['sanitize_callback'] ) ) {
+				$callback_sanitized = call_user_func( $schema['sanitize_callback'], $case['value'], $request, $param );
+			} else {
+				$callback_failures[] = 'sanitize_callback is not callable';
+			}
+		}
+
+		$expected_callback_valid = $case['callbackValid'] ?? $case['schemaValid'];
+		$ok = array() === $callback_failures
+			&& self::validation_result_matches( $schema_valid, (bool) $case['schemaValid'], $case['schemaError'] ?? null )
+			&& self::sanitized_result_matches( $schema_sanitized, $case['schemaSanitized'] ?? null, $case['schemaSanitizeError'] ?? null );
+
+		if ( null !== $callback_valid || array_key_exists( 'callbackValid', $case ) || array_key_exists( 'callbackError', $case ) ) {
+			$ok = $ok && self::validation_result_matches( $callback_valid, (bool) $expected_callback_valid, $case['callbackError'] ?? null );
+		}
+
+		if ( null !== $callback_sanitized || array_key_exists( 'callbackSanitized', $case ) || array_key_exists( 'callbackSanitizeError', $case ) ) {
+			$ok = $ok && self::sanitized_result_matches( $callback_sanitized, $case['callbackSanitized'] ?? null, $case['callbackSanitizeError'] ?? null );
+		}
+
+		self::collect_failure(
+			$failures,
+			$ok,
+			'collection parameter schema and callbacks match deterministic matrix',
+			array(
+				'controller'        => $controller,
+				'param'             => $param,
+				'value'             => $case['value'],
+				'expected'          => $case,
+				'schemaValid'       => $schema_valid,
+				'schemaSanitized'   => $schema_sanitized,
+				'callbackValid'     => $callback_valid,
+				'callbackSanitized' => $callback_sanitized,
+				'callbackFailures'  => $callback_failures,
+				'paramSummary'      => self::param_summary( array( $param => $schema ) ),
+			)
+		);
+	}
+
+	private static function assert_orderby_matrix( array &$failures, string $controller, array $params, array $allowed, array $rejected ): void {
+		$actual = $params['orderby']['enum'] ?? null;
+		if ( ! is_array( $actual ) ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'collection orderby enum is available for matrix checks',
+				array(
+					'controller' => $controller,
+					'params'     => self::param_summary( $params ),
+				)
+			);
+			return;
+		}
+
+		$actual_sorted  = array_values( $actual );
+		$allowed_sorted = array_values( $allowed );
+		sort( $actual_sorted );
+		sort( $allowed_sorted );
+
+		$allowed_ok = true;
+		foreach ( $allowed as $value ) {
+			$allowed_ok = $allowed_ok && true === \rest_validate_value_from_schema( $value, $params['orderby'], 'orderby' );
+		}
+
+		$rejected_results = array();
+		$rejected_ok      = true;
+		foreach ( $rejected as $value ) {
+			$result                    = \rest_validate_value_from_schema( $value, $params['orderby'], 'orderby' );
+			$rejected_results[ $value ] = $result;
+			$rejected_ok               = $rejected_ok && self::validation_result_matches( $result, false, 'rest_not_in_enum' );
+		}
+
+		self::collect_failure(
+			$failures,
+			$actual_sorted === $allowed_sorted && $allowed_ok && $rejected_ok,
+			'collection orderby enum differs by controller and rejects foreign values',
+			array(
+				'controller'      => $controller,
+				'actual'          => $actual,
+				'expectedAllowed' => $allowed,
+				'rejected'        => $rejected_results,
+			)
+		);
+	}
+
+	private static function assert_private_post_status_gate( array &$failures ): void {
+		$controller = new \WP_REST_Posts_Controller( 'post' );
+		$params     = $controller->get_collection_params();
+		$request    = self::request( 'GET', '/wp/v2/posts' );
+		$request->set_attributes( array( 'args' => $params ) );
+
+		$private_denied = call_user_func( $params['status']['sanitize_callback'], 'private', $request, 'status' );
+		$cap_filter     = self::install_cap_filter( array( 'edit_posts', 'read_private_posts' ) );
+		$filter_restored = false;
+		try {
+			$private_allowed = call_user_func( $params['status']['sanitize_callback'], 'private', $request, 'status' );
+		} finally {
+			$filter_restored = self::remove_cap_filter( $cap_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::error_matches( $private_denied, 'rest_forbidden_status', 403 )
+				&& array( 'private' ) === $private_allowed
+				&& $filter_restored,
+			'private post status collection sanitizer remains capability-gated and restores filters',
+			array(
+				'privateDenied' => $private_denied,
+				'privateAllowed' => $private_allowed,
+				'filterRestored' => $filter_restored,
+			)
+		);
+	}
+
+	private static function validation_result_matches( $result, bool $expected_valid, ?string $expected_error = null ): bool {
+		if ( $expected_valid ) {
+			return true === $result;
+		}
+
+		if ( ! $result instanceof \WP_Error ) {
+			return false;
+		}
+
+		return null === $expected_error || $expected_error === $result->get_error_code();
+	}
+
+	private static function sanitized_result_matches( $result, $expected_value = null, ?string $expected_error = null ): bool {
+		if ( null !== $expected_error ) {
+			return $result instanceof \WP_Error && $expected_error === $result->get_error_code();
+		}
+
+		return $expected_value === $result;
 	}
 
 	private static function check_additional_field_registry( \ComponentFuzz\FuzzContext $ctx, array $case, array $additional_field_calls ): array {

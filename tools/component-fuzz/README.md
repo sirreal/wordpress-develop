@@ -469,8 +469,9 @@ database, network requests, or a configured site.
   values, and state restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
-  including schema/context/_fields filtering, collection-param sanitization,
-  permission gates, route registration/dispatch, route index/help-data
+  including schema/context/_fields filtering, deterministic collection
+  parameter sanitizer/validation matrices, permission gates, route
+  registration/dispatch, route index/help-data
   projection, REST links, invalid IDs/types, sanitized content/meta fields,
   safe create/update/delete error paths, upload-no-data paths, and
   deterministic state restoration without live uploads, remote requests, or a
