@@ -36,10 +36,11 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_recent_posts_rendering( $ctx->fork( 'recent-posts' ) );
 			$rows[] = self::check_recent_comment_rows( $ctx->fork( 'recent-comment-row' ) );
 			$rows[] = self::check_recent_comments_rendering( $ctx->fork( 'recent-comments' ) );
+			$rows[] = self::check_cached_rss_widget( $ctx->fork( 'cached-rss' ) );
 			$rows[] = $ctx->skip(
 				'admin-dashboard.unsafe-dispatch-and-remote-paths',
-				'wp_dashboard_setup() POST handling redirects/exits, and dashboard RSS/events widgets can reach remote HTTP; '
-					. 'lower-level safe dashboard helpers are covered directly.'
+				'wp_dashboard_setup() POST handling redirects/exits, dashboard events can reach remote HTTP, and full RSS feed parsing '
+					. 'is covered by feed surfaces; the cached dashboard RSS helper is covered directly.'
 			);
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -88,28 +89,36 @@ final class AdminDashboardSurface {
 				'admin_url',
 				'convert_to_screen',
 				'current_user_can',
+				'delete_transient',
 				'do_meta_boxes',
 				'esc_attr',
 				'esc_html',
 				'esc_url',
 				'get_current_screen',
 				'get_edit_post_link',
+				'get_transient',
+				'get_user_locale',
 				'has_filter',
 				'post_type_exists',
 				'remove_filter',
 				'set_current_screen',
+				'set_transient',
 				'submit_button',
 				'wp_add_dashboard_widget',
 				'wp_cache_flush',
 				'wp_create_nonce',
 				'wp_dashboard',
+				'wp_dashboard_cached_rss_widget',
 				'wp_dashboard_recent_comments',
 				'wp_dashboard_recent_drafts',
 				'wp_dashboard_recent_posts',
 				'wp_dashboard_trigger_widget_control',
+				'wp_doing_ajax',
+				'wp_get_admin_notice',
 				'wp_insert_user',
 				'wp_nonce_field',
 				'wp_set_current_user',
+				'wp_strip_all_tags',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -976,6 +985,129 @@ final class AdminDashboardSurface {
 		);
 	}
 
+	private static function check_cached_rss_widget( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures  = array();
+		$token     = self::slug( $ctx->fork( 'token' ), 'rss' );
+		$widget_id = 'cfz_dashboard_rss_' . $token;
+		$feed_url  = 'https://example.test/dashboard/' . rawurlencode( $token ) . '/news.xml';
+		$feed_args = array(
+			'url'          => $feed_url,
+			'title'        => 'News <b>' . $token . '</b>',
+			'items'        => $ctx->int( 1, 4 ),
+			'show_summary' => $ctx->bool(),
+			'show_author'  => $ctx->bool(),
+			'show_date'    => $ctx->bool(),
+		);
+		$feeds     = array( $feed_url => $feed_args );
+		$cache_key = 'dash_v2_' . md5( $widget_id . '_' . \get_user_locale() );
+		$calls     = array();
+		$callback  = static function ( string $called_widget_id, array $check_urls, array $called_feed_args ) use ( &$calls, $token ): void {
+			$calls[] = array(
+				'widgetId'  => $called_widget_id,
+				'checkUrls' => array_keys( $check_urls ),
+				'title'     => $called_feed_args['title'] ?? null,
+				'items'     => $called_feed_args['items'] ?? null,
+			);
+
+			echo '<section class="cfz-dashboard-rss" data-widget="' . \esc_attr( $called_widget_id ) . '">';
+			echo '<a href="' . \esc_url( $called_feed_args['url'] ?? '' ) . '">' . \esc_html( \wp_strip_all_tags( $called_feed_args['title'] ?? '' ) ) . '</a>';
+			echo '<span data-rss-token="' . \esc_attr( $token ) . '"></span>';
+			echo '</section>';
+		};
+
+		$loading_return = null;
+		$ajax_return    = null;
+		$cached_return  = null;
+
+		\delete_transient( $cache_key );
+		$loading = self::capture_output(
+			static function () use ( $callback, $feeds, $feed_args, $widget_id, &$loading_return ): void {
+				$loading_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+			}
+		);
+		$loading_calls = $calls;
+
+		$ajax_filter = static function (): bool {
+			return true;
+		};
+
+		\add_filter( 'wp_doing_ajax', $ajax_filter );
+		try {
+			$ajax = self::capture_output(
+				static function () use ( $callback, $feeds, $feed_args, $widget_id, &$ajax_return ): void {
+					$ajax_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+				}
+			);
+		} finally {
+			\remove_filter( 'wp_doing_ajax', $ajax_filter );
+		}
+
+		$cached_value = \get_transient( $cache_key );
+		$cached       = self::capture_output(
+			static function () use ( $callback, $feeds, $feed_args, $widget_id, &$cached_return ): void {
+				$cached_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+			}
+		);
+		\delete_transient( $cache_key );
+
+		self::collect_failure(
+			$failures,
+			false === $loading_return
+				&& str_contains( $loading, 'widget-loading hide-if-no-js' )
+				&& str_contains( $loading, 'This widget requires JavaScript.' )
+				&& array() === $loading_calls,
+			'cached dashboard RSS widget emits loading fallback without AJAX or cache',
+			array(
+				'return' => $loading_return,
+				'html'   => self::preview_string( $loading ),
+				'calls'  => $loading_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $ajax_return
+				&& 1 === count( $calls )
+				&& $widget_id === ( $calls[0]['widgetId'] ?? null )
+				&& array_keys( $feeds ) === ( $calls[0]['checkUrls'] ?? null )
+				&& str_contains( $ajax, 'class="cfz-dashboard-rss"' )
+				&& str_contains( $ajax, 'data-rss-token="' . \esc_attr( $token ) . '"' )
+				&& $ajax === $cached_value,
+			'cached dashboard RSS widget calls the callback only during AJAX generation and stores exact output',
+			array(
+				'return' => $ajax_return,
+				'calls'  => $calls,
+				'html'   => self::preview_string( $ajax ),
+				'cache'  => self::preview( $cached_value ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $cached_return
+				&& $ajax === $cached
+				&& 1 === count( $calls )
+				&& false === \has_filter( 'wp_doing_ajax', $ajax_filter ),
+			'cached dashboard RSS widget returns cached output without rerunning the callback and removes AJAX filter',
+			array(
+				'return'     => $cached_return,
+				'cachedHtml' => self::preview_string( $cached ),
+				'calls'      => $calls,
+				'filter'     => \has_filter( 'wp_doing_ajax', $ajax_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.helpers.cached-rss-widget-cache-branches',
+			$failures,
+			array(
+				'widgetId' => $widget_id,
+				'cacheKey' => $cache_key,
+			)
+		);
+	}
+
 	private static function reset_runtime(): void {
 		if ( function_exists( 'create_initial_post_types' ) ) {
 			\create_initial_post_types();
@@ -1380,6 +1512,20 @@ final class AdminDashboardSurface {
 			'message' => $message,
 			'data'    => self::preview( $data ),
 		);
+	}
+
+	private static function capture_output( callable $callback ): string {
+		$level = ob_get_level();
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			throw $e;
+		}
 	}
 
 	private static function preview( $value ) {
