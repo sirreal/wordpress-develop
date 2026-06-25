@@ -7,6 +7,7 @@ final class EmailSurface {
 	private const GENERATED_CASES = 32;
 	private const GENERATED_VIEW_CASES = 10;
 	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
+	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -55,6 +56,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_malformed_utf8_byte_matrix( $ctx ) );
 			$rows = array_merge( $rows, self::check_unicode_localpart_byte_boundaries( $ctx ) );
 			$rows = array_merge( $rows, self::check_construction_mode_consistency( $ctx ) );
+			$rows = array_merge( $rows, self::check_generated_unicode_filter_view_matrix( $ctx ) );
 
 			foreach ( $cases as $case_index => $case ) {
 				$rows = array_merge( $rows, self::check_unicode_case( $ctx, $case_index, $case ) );
@@ -1079,6 +1081,229 @@ final class EmailSurface {
 		return array(
 			'observed' => $observed,
 			'failures' => $failures,
+		);
+	}
+
+	private static function check_generated_unicode_filter_view_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::has_idn() ) {
+			return array(
+				$ctx->skip(
+					'email.generated-unicode.filter-view-matrix',
+					'idn_to_ascii() or idn_to_utf8() is unavailable.'
+				),
+			);
+		}
+
+		$cases         = self::generated_unicode_filter_view_cases( $ctx->fork( 'unicode-filter-view-matrix' ) );
+		$failures      = array();
+		$observed      = array();
+		$hook_snapshot = self::snapshot_hook_globals();
+		$wpdb_snapshot = self::snapshot_wpdb_charset();
+
+		try {
+			foreach ( $cases as $case ) {
+				if ( null !== $case['conversionError'] ) {
+					$failures[] = array(
+						'label'  => $case['label'],
+						'domain' => $case['domainLabel'],
+						'error'  => $case['conversionError'],
+					);
+					continue;
+				}
+
+				$input_parse        = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+				$ascii_view_parse   = self::call( static fn() => \WP_Email_Address::from_string( $case['expectedAsciiAddress'], 'unicode' ) );
+				$unicode_view_parse = self::call( static fn() => \WP_Email_Address::from_string( $case['expectedUnicodeAddress'], 'unicode' ) );
+				$ascii_mode_parse   = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'ascii' ) );
+
+				self::install_email_filters( 'unicode' );
+				$unicode_is_email       = self::call( static fn() => \is_email( $case['input'] ) );
+				$unicode_sanitized      = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$unicode_filter_state   = array(
+					'isUnicode'       => \has_filter( 'is_email', 'wp_is_unicode_email' ),
+					'sanitizeUnicode' => \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ),
+					'isAscii'         => \has_filter( 'is_email', 'wp_is_ascii_email' ),
+					'sanitizeAscii'   => \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' ),
+				);
+
+				self::install_email_filters( 'ascii' );
+				$ascii_is_email       = self::call( static fn() => \is_email( $case['input'] ) );
+				$ascii_sanitized      = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$ascii_filter_state   = array(
+					'isUnicode'       => \has_filter( 'is_email', 'wp_is_unicode_email' ),
+					'sanitizeUnicode' => \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ),
+					'isAscii'         => \has_filter( 'is_email', 'wp_is_ascii_email' ),
+					'sanitizeAscii'   => \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' ),
+				);
+
+				self::restore_hook_globals( $hook_snapshot );
+				self::restore_wpdb_charset( $wpdb_snapshot );
+				\remove_all_filters( 'is_email' );
+				\remove_all_filters( 'sanitize_email' );
+				self::install_email_filters_from_default_filters( 'utf8mb4' );
+				$default_utf8mb4_is_email    = self::call( static fn() => \is_email( $case['input'] ) );
+				$default_utf8mb4_sanitized   = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$default_utf8mb4_filter_state = array(
+					'isUnicode'       => \has_filter( 'is_email', 'wp_is_unicode_email' ),
+					'sanitizeUnicode' => \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ),
+					'isAscii'         => \has_filter( 'is_email', 'wp_is_ascii_email' ),
+					'sanitizeAscii'   => \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' ),
+				);
+
+				self::restore_hook_globals( $hook_snapshot );
+				self::restore_wpdb_charset( $wpdb_snapshot );
+				\remove_all_filters( 'is_email' );
+				\remove_all_filters( 'sanitize_email' );
+				self::install_email_filters_from_default_filters( 'latin1' );
+				$default_ascii_is_email    = self::call( static fn() => \is_email( $case['input'] ) );
+				$default_ascii_sanitized   = self::call( static fn() => \sanitize_email( $case['input'] ) );
+				$default_ascii_filter_state = array(
+					'isUnicode'       => \has_filter( 'is_email', 'wp_is_unicode_email' ),
+					'sanitizeUnicode' => \has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ),
+					'isAscii'         => \has_filter( 'is_email', 'wp_is_ascii_email' ),
+					'sanitizeAscii'   => \has_filter( 'sanitize_email', 'wp_sanitize_ascii_email' ),
+				);
+
+				self::restore_hook_globals( $hook_snapshot );
+				self::restore_wpdb_charset( $wpdb_snapshot );
+
+				$input_email        = $input_parse['value'] ?? null;
+				$ascii_view_email   = $ascii_view_parse['value'] ?? null;
+				$unicode_view_email = $unicode_view_parse['value'] ?? null;
+				$ascii_mode_email   = $ascii_mode_parse['value'] ?? null;
+				$expected_views     = array(
+					'localpart'      => $case['local'],
+					'asciiDomain'    => $case['asciiDomain'],
+					'unicodeDomain'  => $case['unicodeDomain'],
+					'asciiAddress'   => $case['expectedAsciiAddress'],
+					'unicodeAddress' => $case['expectedUnicodeAddress'],
+				);
+				$ascii_mode_expected_is_email  = $case['asciiModeValid'] ? $case['expectedUnicodeAddress'] : false;
+				$ascii_mode_expected_sanitized = $case['asciiModeValid'] ? $case['expectedUnicodeAddress'] : '';
+
+				$parse_ok = ! $input_parse['threw']
+					&& ! $ascii_view_parse['threw']
+					&& ! $unicode_view_parse['threw']
+					&& $input_email instanceof \WP_Email_Address
+					&& $ascii_view_email instanceof \WP_Email_Address
+					&& $unicode_view_email instanceof \WP_Email_Address
+					&& $expected_views === self::address_raw_views( $input_email )
+					&& $expected_views === self::address_raw_views( $ascii_view_email )
+					&& $expected_views === self::address_raw_views( $unicode_view_email );
+
+				$ascii_parse_ok = ! $ascii_mode_parse['threw']
+					&& (
+						$case['asciiModeValid']
+							? $ascii_mode_email instanceof \WP_Email_Address
+								&& $expected_views === self::address_raw_views( $ascii_mode_email )
+							: null === $ascii_mode_email
+					);
+
+				$unicode_filter_ok = ! $unicode_is_email['threw']
+					&& ! $unicode_sanitized['threw']
+					&& $case['expectedUnicodeAddress'] === $unicode_is_email['value']
+					&& $case['expectedUnicodeAddress'] === $unicode_sanitized['value']
+					&& 10 === $unicode_filter_state['isUnicode']
+					&& 10 === $unicode_filter_state['sanitizeUnicode']
+					&& false === $unicode_filter_state['isAscii']
+					&& false === $unicode_filter_state['sanitizeAscii'];
+
+				$ascii_filter_ok = ! $ascii_is_email['threw']
+					&& ! $ascii_sanitized['threw']
+					&& $ascii_mode_expected_is_email === $ascii_is_email['value']
+					&& $ascii_mode_expected_sanitized === $ascii_sanitized['value']
+					&& 10 === $ascii_filter_state['isAscii']
+					&& 10 === $ascii_filter_state['sanitizeAscii']
+					&& false === $ascii_filter_state['isUnicode']
+					&& false === $ascii_filter_state['sanitizeUnicode'];
+
+				$default_filter_ok = ! $default_utf8mb4_is_email['threw']
+					&& ! $default_utf8mb4_sanitized['threw']
+					&& ! $default_ascii_is_email['threw']
+					&& ! $default_ascii_sanitized['threw']
+					&& $case['expectedUnicodeAddress'] === $default_utf8mb4_is_email['value']
+					&& $case['expectedUnicodeAddress'] === $default_utf8mb4_sanitized['value']
+					&& $ascii_mode_expected_is_email === $default_ascii_is_email['value']
+					&& $ascii_mode_expected_sanitized === $default_ascii_sanitized['value']
+					&& 10 === $default_utf8mb4_filter_state['isUnicode']
+					&& 10 === $default_utf8mb4_filter_state['sanitizeUnicode']
+					&& false === $default_utf8mb4_filter_state['isAscii']
+					&& false === $default_utf8mb4_filter_state['sanitizeAscii']
+					&& 10 === $default_ascii_filter_state['isAscii']
+					&& 10 === $default_ascii_filter_state['sanitizeAscii']
+					&& false === $default_ascii_filter_state['isUnicode']
+					&& false === $default_ascii_filter_state['sanitizeUnicode'];
+
+				$view_shape_ok = $input_email instanceof \WP_Email_Address
+					&& self::is_ascii( $input_email->get_ascii_domain() )
+					&& self::is_ascii( $case['local'] ) === self::is_ascii( $input_email->get_ascii_address() )
+					&& $case['hasUnicodeDomain'] === ( $input_email->get_ascii_domain() !== $input_email->get_unicode_domain() )
+					&& $case['hasUnicodeLocal'] === ! self::is_ascii( $input_email->get_localpart() );
+
+				$ok = $parse_ok
+					&& $ascii_parse_ok
+					&& $unicode_filter_ok
+					&& $ascii_filter_ok
+					&& $default_filter_ok
+					&& $view_shape_ok;
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'              => $case['label'],
+						'input'              => self::describe_string( $case['input'] ),
+						'inputDomainView'    => $case['inputDomainView'],
+						'expectedViews'      => self::describe_value( $expected_views ),
+						'inputParse'         => self::describe_call( $input_parse ),
+						'asciiViewParse'     => self::describe_call( $ascii_view_parse ),
+						'unicodeViewParse'   => self::describe_call( $unicode_view_parse ),
+						'asciiModeParse'     => self::describe_call( $ascii_mode_parse ),
+						'unicodeIsEmail'     => self::describe_call( $unicode_is_email ),
+						'unicodeSanitized'   => self::describe_call( $unicode_sanitized ),
+						'asciiIsEmail'       => self::describe_call( $ascii_is_email ),
+						'asciiSanitized'     => self::describe_call( $ascii_sanitized ),
+						'defaultUtf8mb4Is'   => self::describe_call( $default_utf8mb4_is_email ),
+						'defaultUtf8mb4San'  => self::describe_call( $default_utf8mb4_sanitized ),
+						'defaultAsciiIs'     => self::describe_call( $default_ascii_is_email ),
+						'defaultAsciiSan'    => self::describe_call( $default_ascii_sanitized ),
+						'unicodeFilterState' => self::describe_value( $unicode_filter_state ),
+						'asciiFilterState'   => self::describe_value( $ascii_filter_state ),
+						'defaultUtf8mb4FilterState' => self::describe_value( $default_utf8mb4_filter_state ),
+						'defaultAsciiFilterState' => self::describe_value( $default_ascii_filter_state ),
+						'parseOk'            => $parse_ok,
+						'asciiParseOk'       => $ascii_parse_ok,
+						'unicodeFilterOk'    => $unicode_filter_ok,
+						'asciiFilterOk'      => $ascii_filter_ok,
+						'defaultFilterOk'    => $default_filter_ok,
+						'viewShapeOk'        => $view_shape_ok,
+					);
+				}
+
+				$observed[] = array(
+					'label'             => $case['label'],
+					'inputDomainView'   => $case['inputDomainView'],
+					'localUtf8'         => $case['hasUnicodeLocal'],
+					'domainIdn'         => $case['hasUnicodeDomain'],
+					'asciiModeValid'    => $case['asciiModeValid'],
+					'unicodeAddress'    => self::describe_string( $case['expectedUnicodeAddress'] ),
+					'asciiAddress'      => self::describe_string( $case['expectedAsciiAddress'] ),
+					'asciiAddressAscii' => $input_email instanceof \WP_Email_Address ? self::is_ascii( $input_email->get_ascii_address() ) : null,
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::restore_wpdb_charset( $wpdb_snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.generated-unicode.filter-view-matrix',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
 		);
 	}
 
@@ -3398,6 +3623,144 @@ final class EmailSurface {
 		return $samples;
 	}
 
+	private static function generated_unicode_filter_view_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$locals = array(
+			array( 'label' => 'ascii', 'value' => 'user' ),
+			array( 'label' => 'ascii-plus', 'value' => 'USER+tag' ),
+			array( 'label' => 'whatwg-atext', 'value' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-' ),
+			array( 'label' => 'latin-composed', 'value' => "gr\u{00E5}" ),
+			array( 'label' => 'latin-combining', 'value' => "jose\u{0301}" ),
+			array( 'label' => 'devanagari', 'value' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}" ),
+			array( 'label' => 'greek', 'value' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
+			array( 'label' => 'cyrillic', 'value' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}" ),
+			array( 'label' => 'hiragana', 'value' => "\u{3086}\u{3046}\u{3056}\u{3042}" ),
+			array( 'label' => 'cjk', 'value' => "\u{7528}\u{6237}" ),
+		);
+		$domain_specs = array(
+			array( 'label' => 'ascii-example', 'domain' => 'example.com' ),
+			array( 'label' => 'ascii-subdomain', 'domain' => 'sub-domain.example' ),
+			array( 'label' => 'whatwg-single-label', 'domain' => 'localhost' ),
+			array( 'label' => 'latin-ring', 'domain' => "gr\u{00E5}.org" ),
+			array( 'label' => 'latin-diaeresis', 'domain' => "b\u{00FC}cher.de" ),
+			array( 'label' => 'eszett', 'domain' => "fa\u{00DF}.de" ),
+			array( 'label' => 'cjk', 'domain' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" ),
+			array( 'label' => 'greek', 'domain' => "\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
+			array( 'label' => 'cyrillic', 'domain' => "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" ),
+			array( 'label' => 'hiragana', 'domain' => "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" ),
+		);
+		$domains      = array();
+
+		foreach ( $domain_specs as $domain_spec ) {
+			$domains[ $domain_spec['label'] ] = self::unicode_matrix_domain(
+				$domain_spec['label'],
+				$domain_spec['domain']
+			);
+		}
+
+		$cases = array(
+			self::unicode_matrix_case(
+				'anchor-utf8-local-ascii-domain',
+				"gr\u{00E5}",
+				$domains['ascii-example'],
+				'unicode'
+			),
+			self::unicode_matrix_case(
+				'anchor-ascii-local-unicode-domain',
+				'mail',
+				$domains['latin-ring'],
+				'unicode'
+			),
+			self::unicode_matrix_case(
+				'anchor-utf8-local-unicode-domain',
+				"jose\u{0301}",
+				$domains['latin-diaeresis'],
+				'unicode'
+			),
+			self::unicode_matrix_case(
+				'anchor-utf8-local-punycode-domain',
+				"\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}",
+				$domains['latin-diaeresis'],
+				'ascii'
+			),
+			self::unicode_matrix_case(
+				'anchor-whatwg-atext-punycode-domain',
+				'azAZ09.!#$%&\'*+/=?^_`{|}~-',
+				$domains['cjk'],
+				'ascii'
+			),
+			self::unicode_matrix_case(
+				'anchor-ascii-only-whatwg-domain',
+				'USER+tag',
+				$domains['whatwg-single-label'],
+				'unicode'
+			),
+		);
+
+		$domain_values = array_values( $domains );
+		for ( $i = 0; $i < self::GENERATED_UNICODE_MATRIX_CASES; $i++ ) {
+			$local  = $ctx->choice( $locals );
+			$domain = $ctx->choice( $domain_values );
+			$view   = $domain['isIdn'] && $ctx->bool() ? 'ascii' : 'unicode';
+
+			$cases[] = self::unicode_matrix_case(
+				'generated-filter-view-' . $i . '-' . $local['label'] . '-' . $domain['label'],
+				$local['value'],
+				$domain,
+				$view
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function unicode_matrix_domain( string $label, string $unicode_domain ): array {
+		$ascii_domain     = $unicode_domain;
+		$decoded_domain   = $unicode_domain;
+		$conversion_error = null;
+
+		if ( ! self::is_ascii( $unicode_domain ) ) {
+			$ascii_domain = idn_to_ascii( $unicode_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+			if ( false === $ascii_domain ) {
+				$conversion_error = 'idn_to_ascii failed';
+				$ascii_domain     = '';
+			} else {
+				$decoded_domain = idn_to_utf8( $ascii_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+				if ( false === $decoded_domain ) {
+					$conversion_error = 'idn_to_utf8 failed';
+					$decoded_domain   = $unicode_domain;
+				}
+			}
+		}
+
+		return array(
+			'label'           => $label,
+			'ascii'           => $ascii_domain,
+			'unicode'         => $decoded_domain,
+			'isIdn'           => $ascii_domain !== $decoded_domain,
+			'conversionError' => $conversion_error,
+		);
+	}
+
+	private static function unicode_matrix_case( string $label, string $local, array $domain, string $input_domain_view ): array {
+		$input_domain = 'ascii' === $input_domain_view ? $domain['ascii'] : $domain['unicode'];
+
+		return array(
+			'label'                  => $label,
+			'local'                  => $local,
+			'domainLabel'            => $domain['label'],
+			'asciiDomain'            => $domain['ascii'],
+			'unicodeDomain'          => $domain['unicode'],
+			'inputDomainView'        => $input_domain_view,
+			'input'                  => $local . '@' . $input_domain,
+			'expectedAsciiAddress'   => $local . '@' . $domain['ascii'],
+			'expectedUnicodeAddress' => $local . '@' . $domain['unicode'],
+			'hasUnicodeLocal'        => ! self::is_ascii( $local ),
+			'hasUnicodeDomain'       => $domain['isIdn'],
+			'asciiModeValid'         => self::is_ascii( $local ) && ! $domain['isIdn'],
+			'conversionError'        => $domain['conversionError'],
+		);
+	}
+
 	private static function generated_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$locals = array(
 			array( 'value' => 'user', 'traits' => array() ),
@@ -3701,7 +4064,7 @@ final class EmailSurface {
 	private static function restore_hook_globals( array $snapshot ): void {
 		foreach ( $snapshot as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
