@@ -141,10 +141,11 @@ database, network requests, or a configured site.
   helpers, comment cookies, reply/cancel link rendering branches, and permalink
   pagination contracts for `get_page_of_comment()`/`get_comment_link()`.
 - `community-events`: no-network Community Events API client coverage,
-  including IP header selection and anonymization, minimal request bodies,
-  transient key/cache behavior, strict coordinate matching, cache expiration
-  normalization, search-triggered cache refresh behavior, event trimming and
-  WordCamp pinning, response normalization, and API error contracts.
+  including IP header selection and anonymization, minimal/fail-closed request
+  bodies, transient key/cache behavior, strict coordinate matching, cache
+  expiration normalization, search-triggered cache refresh behavior, event
+  trimming and WordCamp pinning, response normalization, and API error
+  contracts.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
   moderation short-circuits, update/status transition hooks, trash/untrash and

@@ -37,6 +37,7 @@ final class CommunityEventsSurface {
 
 			$rows[] = self::check_client_ip_anonymization( $ctx->fork( 'client-ip' ) );
 			$rows[] = self::check_request_arg_minimization( $ctx->fork( 'request-args' ) );
+			$rows[] = self::check_invalid_ip_request_arg_minimization( $ctx->fork( 'invalid-ip-request-args' ) );
 			$rows[] = self::check_cache_keys_and_event_trimming( $ctx->fork( 'cache-trim' ) );
 			$rows[] = self::check_coordinates_and_cache_expiration( $ctx->fork( 'coordinates-cache-expiration' ) );
 			$rows[] = self::check_successful_api_fetch_and_cache_hit( $ctx->fork( 'success-cache' ) );
@@ -243,6 +244,72 @@ final class CommunityEventsSurface {
 
 		return $ctx->result(
 			'community-events.request-args.minimal-location-body',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_invalid_ip_request_arg_minimization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$coords   = self::coordinate_location( $ctx->fork( 'coords' ), 'Invalid IP Coordinates' );
+		$search   = 'Invalid IP ' . $ctx->identifier( 4, 10 );
+		$timezone = $ctx->choice( array( '', 'UTC', 'Europe/Madrid' ) );
+		$cases    = array(
+			array(
+				'label'        => 'invalid-ip-with-coordinates',
+				'headers'      => array( 'REMOTE_ADDR' => 'not-an-ip-' . $ctx->identifier( 3, 8 ) ),
+				'userLocation' => $coords,
+				'search'       => '',
+				'expects'      => 'coordinates',
+			),
+			array(
+				'label'        => 'missing-ip-with-search',
+				'headers'      => array(),
+				'userLocation' => $coords,
+				'search'       => $search,
+				'expects'      => 'search',
+			),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			self::set_address_headers( $case['headers'] );
+			$probe = self::probe( 7200 + $ctx->iteration() + $index, $case['userLocation'] );
+			$args  = $probe->fuzz_request_args( $case['search'], $timezone );
+			$body  = $args['body'] ?? array();
+
+			$base_ok = array( 'body' ) === array_keys( $args )
+				&& false === ( $body['ip'] ?? null )
+				&& 5 === ( $body['number'] ?? null );
+
+			if ( 'coordinates' === $case['expects'] ) {
+				$shape_ok = $coords['latitude'] === ( $body['latitude'] ?? null )
+					&& $coords['longitude'] === ( $body['longitude'] ?? null )
+					&& ! isset( $body['locale'], $body['timezone'], $body['location'] );
+			} else {
+				$shape_ok = $search === ( $body['location'] ?? null )
+					&& isset( $body['locale'] )
+					&& ( '' === $timezone || $timezone === ( $body['timezone'] ?? null ) )
+					&& ! isset( $body['latitude'], $body['longitude'] );
+			}
+
+			self::collect_failure(
+				$failures,
+				$base_ok && $shape_ok,
+				"invalid IP request args case {$index}",
+				array(
+					'label'    => $case['label'],
+					'headers'  => $case['headers'],
+					'body'     => $body,
+					'timezone' => $timezone,
+				)
+			);
+		}
+
+		return $ctx->result(
+			'community-events.request-args.invalid-ip-fails-closed',
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
