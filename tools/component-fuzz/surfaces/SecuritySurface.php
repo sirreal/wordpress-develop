@@ -12,6 +12,9 @@ final class SecuritySurface {
 
 	private static int $nonce_life = 1000000000;
 
+	/** @var array<string,int> */
+	private static array $nonce_life_by_action = array();
+
 	/** @var array<int,array<string,array<string,int>>> */
 	private static array $session_tokens = array();
 
@@ -25,6 +28,9 @@ final class SecuritySurface {
 
 	/** @var string[] */
 	private static array $allowed_redirect_hosts = array();
+
+	/** @var array<int,array<string,mixed>> */
+	private static array $allowed_redirect_host_events = array();
 
 	private static ?string $safe_redirect_fallback = null;
 
@@ -50,13 +56,17 @@ final class SecuritySurface {
 
 			$rows[] = self::check_salts_and_hashes( $ctx );
 			$rows[] = self::check_password_hashing_contracts( $ctx );
+			$rows[] = self::check_password_and_fast_hash_filter_boundaries( $ctx );
 			$rows[] = self::check_nonce_metamorphic_behavior( $ctx );
+			$rows[] = self::check_nonce_tick_lifetime_boundaries( $ctx );
 			$rows[] = self::check_nonce_url_and_fields( $ctx );
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
+			$rows[] = self::check_auth_cookie_grace_period_and_session_edges( $ctx );
 			$rows[] = self::check_redirect_filters_without_headers( $ctx );
 			$rows[] = self::check_validate_redirect_matrix( $ctx );
+			$rows[] = self::check_redirect_sanitize_validate_metamorphic_behavior( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -88,8 +98,8 @@ final class SecuritySurface {
 	}
 
 	public static function filter_nonce_life( int $lifespan, $action = -1 ): int {
-		unset( $lifespan, $action );
-		return self::$nonce_life;
+		unset( $lifespan );
+		return self::$nonce_life_by_action[ self::action_key( $action ) ] ?? self::$nonce_life;
 	}
 
 	public static function filter_session_token_manager( string $manager ): string {
@@ -135,7 +145,12 @@ final class SecuritySurface {
 	}
 
 	public static function filter_allowed_redirect_hosts( array $hosts, string $host ): array {
-		unset( $host );
+		self::$allowed_redirect_host_events[] = array(
+			'hosts'   => $hosts,
+			'host'    => $host,
+			'allowed' => self::$allowed_redirect_hosts,
+		);
+
 		return array_values( array_unique( array_merge( $hosts, self::$allowed_redirect_hosts ) ) );
 	}
 
@@ -187,6 +202,7 @@ final class SecuritySurface {
 			array(
 				'add_filter',
 				'add_query_arg',
+				'apply_filters',
 				'check_admin_referer',
 				'check_ajax_referer',
 				'esc_attr',
@@ -195,16 +211,21 @@ final class SecuritySurface {
 				'get_userdata',
 				'hash_equals',
 				'hash_hmac_algos',
+				'has_filter',
 				'remove_filter',
 				'remove_query_arg',
 				'update_user_caches',
 				'wp_create_nonce',
 				'wp_check_password',
+				'wp_doing_ajax',
 				'wp_fast_hash',
 				'wp_generate_auth_cookie',
+				'wp_get_current_user',
+				'wp_get_session_token',
 				'wp_hash',
 				'wp_hash_password',
 				'wp_nonce_field',
+				'wp_nonce_tick',
 				'wp_nonce_url',
 				'wp_original_referer_field',
 				'wp_parse_auth_cookie',
@@ -229,6 +250,7 @@ final class SecuritySurface {
 		foreach (
 			array(
 				'AUTH_COOKIE',
+				'HOUR_IN_SECONDS',
 				'SECURE_AUTH_COOKIE',
 				'LOGGED_IN_COOKIE',
 			) as $constant
@@ -450,6 +472,176 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function check_password_and_fast_hash_filter_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$target_user_id = 71000 + $ctx->int( 0, 9999 );
+		$other_user_id  = $target_user_id + 10000;
+		$password       = 'filter-pass-' . self::token( $ctx->fork( 'password-filter-pass' ), 12 );
+
+		$algorithm_filter = static function ( string $algorithm ): string {
+			unset( $algorithm );
+			return PASSWORD_BCRYPT;
+		};
+		$cheap_options_filter = static function ( array $options, string $algorithm ): array {
+			if ( PASSWORD_BCRYPT === $algorithm ) {
+				$options['cost'] = 4;
+			}
+			return $options;
+		};
+
+		\add_filter( 'wp_hash_password_algorithm', $algorithm_filter );
+		\add_filter( 'wp_hash_password_options', $cheap_options_filter, 10, 2 );
+		try {
+			$hash              = \wp_hash_password( $password );
+			$override_password = $password . '|filter-override';
+			$baseline_valid    = \wp_check_password( $password, $hash, $target_user_id );
+			$baseline_override = \wp_check_password( $override_password, $hash, $target_user_id );
+
+			$check_events = array();
+			$check_filter = static function ( bool $check, string $candidate, string $candidate_hash, $user_id ) use ( &$check_events, $target_user_id, $override_password ): bool {
+				if ( count( $check_events ) < 6 ) {
+					$check_events[] = array(
+						'userId'       => $user_id,
+						'candidateSha' => sha1( $candidate ),
+						'hashSha'      => sha1( $candidate_hash ),
+						'incoming'     => $check,
+					);
+				}
+
+				if ( $target_user_id === (int) $user_id && $override_password === $candidate ) {
+					return true;
+				}
+
+				return $check;
+			};
+
+			\add_filter( 'check_password', $check_filter, 10, 4 );
+			try {
+				$target_override = \wp_check_password( $override_password, $hash, $target_user_id );
+				$other_override  = \wp_check_password( $override_password, $hash, $other_user_id );
+			} finally {
+				\remove_filter( 'check_password', $check_filter, 10 );
+			}
+
+			$after_check_filter = \wp_check_password( $override_password, $hash, $target_user_id );
+			self::collect_failure(
+				$failures,
+				true === $baseline_valid
+					&& false === $baseline_override
+					&& true === $target_override
+					&& false === $other_override
+					&& false === $after_check_filter
+					&& false === \has_filter( 'check_password', $check_filter ),
+				'check_password filter only overrides the targeted user and is removed',
+				array(
+					'targetUserId'      => $target_user_id,
+					'otherUserId'       => $other_user_id,
+					'hash'              => self::describe_string( $hash ),
+					'baselineValid'     => $baseline_valid,
+					'baselineOverride'  => $baseline_override,
+					'targetOverride'    => $target_override,
+					'otherOverride'     => $other_override,
+					'afterCheckFilter'  => $after_check_filter,
+					'filterStillActive' => \has_filter( 'check_password', $check_filter ),
+					'events'            => $check_events,
+				)
+			);
+
+			$baseline_needs_rehash = \wp_password_needs_rehash( $hash, $target_user_id );
+			$rehash_events         = array();
+			$rehash_filter         = static function ( bool $needs_rehash, string $candidate_hash, $user_id ) use ( &$rehash_events, $target_user_id ): bool {
+				if ( count( $rehash_events ) < 6 ) {
+					$rehash_events[] = array(
+						'userId'   => $user_id,
+						'hashSha'  => sha1( $candidate_hash ),
+						'incoming' => $needs_rehash,
+					);
+				}
+
+				if ( $target_user_id === (int) $user_id ) {
+					return ! $needs_rehash;
+				}
+
+				return $needs_rehash;
+			};
+
+			\add_filter( 'password_needs_rehash', $rehash_filter, 10, 3 );
+			try {
+				$target_needs_rehash = \wp_password_needs_rehash( $hash, $target_user_id );
+				$other_needs_rehash  = \wp_password_needs_rehash( $hash, $other_user_id );
+			} finally {
+				\remove_filter( 'password_needs_rehash', $rehash_filter, 10 );
+			}
+
+			$after_rehash_filter = \wp_password_needs_rehash( $hash, $target_user_id );
+			self::collect_failure(
+				$failures,
+				false === $baseline_needs_rehash
+					&& true === $target_needs_rehash
+					&& false === $other_needs_rehash
+					&& false === $after_rehash_filter
+					&& false === \has_filter( 'password_needs_rehash', $rehash_filter ),
+				'password_needs_rehash filter only overrides the targeted user and is removed',
+				array(
+					'targetUserId'      => $target_user_id,
+					'otherUserId'       => $other_user_id,
+					'baselineNeeds'     => $baseline_needs_rehash,
+					'targetNeeds'       => $target_needs_rehash,
+					'otherNeeds'        => $other_needs_rehash,
+					'afterRehashFilter' => $after_rehash_filter,
+					'filterStillActive' => \has_filter( 'password_needs_rehash', $rehash_filter ),
+					'events'            => $rehash_events,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_hash_password_options', $cheap_options_filter, 10 );
+			\remove_filter( 'wp_hash_password_algorithm', $algorithm_filter );
+		}
+
+		$message      = 'fast-filter-' . self::token( $ctx->fork( 'fast-filter-message' ), 16 );
+		$generic_hash = \wp_fast_hash( $message );
+		$malformed    = array(
+			'$generic$',
+			'$generic$' . substr( $generic_hash, 9, 12 ),
+			'$generic$' . str_repeat( '!', 40 ),
+		);
+
+		foreach ( $malformed as $index => $hash ) {
+			self::collect_failure(
+				$failures,
+				false === \wp_verify_fast_hash( $message, $hash ),
+				"wp_verify_fast_hash rejects malformed generic hash {$index}",
+				array(
+					'message' => self::describe_string( $message ),
+					'hash'    => self::describe_string( $hash ),
+					'actual'  => \wp_verify_fast_hash( $message, $hash ),
+				)
+			);
+		}
+
+		require_once ABSPATH . WPINC . '/class-phpass.php';
+		$legacy_hash = ( new \PasswordHash( 8, true ) )->HashPassword( $message );
+		self::collect_failure(
+			$failures,
+			true === \wp_verify_fast_hash( $message, $legacy_hash )
+				&& false === \wp_verify_fast_hash( $message . '|mutated', $legacy_hash ),
+			'wp_verify_fast_hash keeps legacy phpass compatibility without accepting mutations',
+			array(
+				'message'    => self::describe_string( $message ),
+				'legacyHash' => self::describe_string( $legacy_hash ),
+				'valid'      => \wp_verify_fast_hash( $message, $legacy_hash ),
+				'mutated'    => \wp_verify_fast_hash( $message . '|mutated', $legacy_hash ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.password-and-fast-hash.filter-locality-and-failures',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
 	private static function check_nonce_metamorphic_behavior( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$actions  = self::action_cases( $ctx->fork( 'nonce-actions' ) );
@@ -506,6 +698,130 @@ final class SecuritySurface {
 				'nonceLife' => self::$nonce_life,
 				'failures'  => array_slice( $failures, 0, 5 ),
 			)
+		);
+	}
+
+	private static function check_nonce_tick_lifetime_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$previous_life  = self::$nonce_life;
+		$previous_lives = self::$nonce_life_by_action;
+		$previous_users = self::$nonce_logged_out_users;
+
+		try {
+			$actions   = array_slice( self::action_cases( $ctx->fork( 'nonce-boundary-actions' ) ), 0, 7 );
+			$lifespans = array(
+				2,
+				3,
+				4,
+				5,
+				60 + $ctx->int( 0, 5 ),
+				86399 + $ctx->int( 0, 3 ),
+				1000000000 + $ctx->int( 0, 9999 ),
+			);
+
+			foreach ( $lifespans as $index => $lifespan ) {
+				$action                                   = $actions[ $index % count( $actions ) ];
+				$key                                      = self::action_key( $action );
+				self::$nonce_life_by_action[ $key ]       = $lifespan;
+				self::$nonce_logged_out_users[ $key ]     = 3000 + $index + $ctx->int( 0, 100 );
+				$before                                   = time();
+				$tick                                     = \wp_nonce_tick( $action );
+				$after                                    = time();
+				$expected_min                             = (int) ceil( $before / ( $lifespan / 2 ) );
+				$expected_max                             = (int) ceil( $after / ( $lifespan / 2 ) );
+
+				self::collect_failure(
+					$failures,
+					(int) $tick >= $expected_min && (int) $tick <= $expected_max,
+					"wp_nonce_tick honors nonce_life for action {$index}",
+					array(
+						'action'      => self::describe_value( $action ),
+						'nonceLife'   => $lifespan,
+						'before'      => $before,
+						'after'       => $after,
+						'actual'      => $tick,
+						'expectedMin' => $expected_min,
+						'expectedMax' => $expected_max,
+					)
+				);
+			}
+
+			$stable_life = 1000000000 + $ctx->int( 10000, 99999 );
+			foreach ( $actions as $index => $action ) {
+				$key                                  = self::action_key( $action );
+				self::$nonce_life_by_action[ $key ]   = $stable_life + $index;
+				self::$nonce_logged_out_users[ $key ] = 5000 + $index + $ctx->int( 0, 100 );
+
+				$tick          = \wp_nonce_tick( $action );
+				$created       = \wp_create_nonce( $action );
+				$current_nonce = self::nonce_for_tick( $tick, $action );
+				$old_nonce     = self::nonce_for_tick( $tick - 1, $action );
+				$expired_nonce = self::nonce_for_tick( $tick - 2, $action );
+
+				$current_result = \wp_verify_nonce( $current_nonce, $action );
+				$old_result     = \wp_verify_nonce( $old_nonce, $action );
+				$expired_result = \wp_verify_nonce( $expired_nonce, $action );
+
+				self::collect_failure(
+					$failures,
+					$created === $current_nonce
+						&& 1 === $current_result
+						&& 2 === $old_result
+						&& false === $expired_result,
+					"wp_verify_nonce partitions current, previous, and expired ticks {$index}",
+					array(
+						'action'        => self::describe_value( $action ),
+						'nonceLife'     => self::$nonce_life_by_action[ $key ],
+						'tick'          => $tick,
+						'created'       => $created,
+						'currentNonce'  => $current_nonce,
+						'oldNonce'      => $old_nonce,
+						'expiredNonce'  => $expired_nonce,
+						'currentResult' => $current_result,
+						'oldResult'     => $old_result,
+						'expiredResult' => $expired_result,
+					)
+				);
+			}
+
+			$action_a = 'life-a-' . self::token( $ctx->fork( 'nonce-life-a' ), 6 );
+			$action_b = 'life-b-' . self::token( $ctx->fork( 'nonce-life-b' ), 6 );
+			self::$nonce_life_by_action[ self::action_key( $action_a ) ] = 1000000000;
+			self::$nonce_life_by_action[ self::action_key( $action_b ) ] = 200000000;
+			self::$nonce_logged_out_users[ self::action_key( $action_a ) ] = 9001;
+			self::$nonce_logged_out_users[ self::action_key( $action_b ) ] = 9001;
+
+			$tick_a  = \wp_nonce_tick( $action_a );
+			$tick_b  = \wp_nonce_tick( $action_b );
+			$nonce_a = \wp_create_nonce( $action_a );
+			$nonce_b = \wp_create_nonce( $action_b );
+			self::collect_failure(
+				$failures,
+				(int) $tick_a !== (int) $tick_b
+					&& $nonce_a !== $nonce_b
+					&& 1 === \wp_verify_nonce( $nonce_a, $action_a )
+					&& 1 === \wp_verify_nonce( $nonce_b, $action_b ),
+				'action-scoped nonce_life values produce independent ticks',
+				array(
+					'actionA' => $action_a,
+					'actionB' => $action_b,
+					'tickA'   => $tick_a,
+					'tickB'   => $tick_b,
+					'nonceA'  => $nonce_a,
+					'nonceB'  => $nonce_b,
+				)
+			);
+		} finally {
+			self::$nonce_life             = $previous_life;
+			self::$nonce_life_by_action   = $previous_lives;
+			self::$nonce_logged_out_users = $previous_users;
+		}
+
+		return self::row(
+			$ctx,
+			'security.nonce.tick-boundary-and-lifetime-oracles',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
 	}
 
@@ -894,6 +1210,149 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function check_auth_cookie_grace_period_and_session_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$user            = self::synthetic_user( $ctx->fork( 'auth-grace-user' ) );
+		$other_user      = self::synthetic_user( $ctx->fork( 'auth-grace-other-user' ) );
+		$scheme          = 'auth';
+		$now             = time();
+		$session_expires = $now + HOUR_IN_SECONDS + $ctx->int( 60, 600 );
+		$grace_expires   = $now - $ctx->int( 1, HOUR_IN_SECONDS - 5 );
+		$outside_expires = $now - HOUR_IN_SECONDS - $ctx->int( 10, 600 );
+
+		$had_method      = array_key_exists( 'REQUEST_METHOD', $_SERVER );
+		$previous_method = $_SERVER['REQUEST_METHOD'] ?? null;
+		$had_grace       = array_key_exists( 'login_grace_period', $GLOBALS );
+		$previous_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+		self::$session_seed = 'auth-grace-' . $ctx->seed();
+		self::prime_synthetic_user( $user );
+		self::prime_synthetic_user( $other_user );
+
+		$ajax_filter = static function ( bool $doing_ajax ): bool {
+			unset( $doing_ajax );
+			return true;
+		};
+
+		try {
+			$token = self::token( $ctx->fork( 'auth-grace-token' ), 32 );
+			self::register_session_token( (int) $user->ID, $token, $session_expires );
+			$cookie = \wp_generate_auth_cookie( (int) $user->ID, $grace_expires, $scheme, $token );
+
+			$_SERVER['REQUEST_METHOD'] = 'GET';
+			unset( $GLOBALS['login_grace_period'] );
+			$get_result = \wp_validate_auth_cookie( $cookie, $scheme );
+			$get_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+			$_SERVER['REQUEST_METHOD'] = 'POST';
+			unset( $GLOBALS['login_grace_period'] );
+			$post_result = \wp_validate_auth_cookie( $cookie, $scheme );
+			$post_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+			\add_filter( 'wp_doing_ajax', $ajax_filter );
+			try {
+				$_SERVER['REQUEST_METHOD'] = 'GET';
+				unset( $GLOBALS['login_grace_period'] );
+				$ajax_result = \wp_validate_auth_cookie( $cookie, $scheme );
+				$ajax_grace  = $GLOBALS['login_grace_period'] ?? null;
+			} finally {
+				\remove_filter( 'wp_doing_ajax', $ajax_filter );
+			}
+
+			self::collect_failure(
+				$failures,
+				false === $get_result
+					&& null === $get_grace
+					&& (int) $user->ID === $post_result
+					&& 1 === $post_grace
+					&& (int) $user->ID === $ajax_result
+					&& 1 === $ajax_grace
+					&& false === \has_filter( 'wp_doing_ajax', $ajax_filter ),
+				'auth cookie grace period is limited to POST and Ajax requests',
+				array(
+					'user'              => self::describe_user( $user ),
+					'cookie'            => self::describe_string( $cookie ),
+					'cookieExpiration'  => $grace_expires,
+					'sessionExpiration' => $session_expires,
+					'getResult'         => $get_result,
+					'getGrace'          => $get_grace,
+					'postResult'        => $post_result,
+					'postGrace'         => $post_grace,
+					'ajaxResult'        => $ajax_result,
+					'ajaxGrace'         => $ajax_grace,
+					'ajaxFilter'        => \has_filter( 'wp_doing_ajax', $ajax_filter ),
+				)
+			);
+
+			$outside_token = self::token( $ctx->fork( 'auth-outside-token' ), 32 );
+			self::register_session_token( (int) $user->ID, $outside_token, $session_expires );
+			$outside_cookie = \wp_generate_auth_cookie( (int) $user->ID, $outside_expires, $scheme, $outside_token );
+
+			$_SERVER['REQUEST_METHOD'] = 'POST';
+			unset( $GLOBALS['login_grace_period'] );
+			$outside_result = \wp_validate_auth_cookie( $outside_cookie, $scheme );
+			$outside_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+			$expired_session_token = self::token( $ctx->fork( 'auth-expired-session-token' ), 32 );
+			self::register_session_token( (int) $user->ID, $expired_session_token, $now - 10 );
+			$expired_session_cookie = \wp_generate_auth_cookie( (int) $user->ID, $grace_expires, $scheme, $expired_session_token );
+
+			unset( $GLOBALS['login_grace_period'] );
+			$expired_session_result = \wp_validate_auth_cookie( $expired_session_cookie, $scheme );
+			$expired_session_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+			$wrong_user_token = self::token( $ctx->fork( 'auth-wrong-user-token' ), 32 );
+			self::register_session_token( (int) $other_user->ID, $wrong_user_token, $session_expires );
+			$wrong_user_cookie = \wp_generate_auth_cookie( (int) $user->ID, $grace_expires, $scheme, $wrong_user_token );
+
+			unset( $GLOBALS['login_grace_period'] );
+			$wrong_user_result = \wp_validate_auth_cookie( $wrong_user_cookie, $scheme );
+			$wrong_user_grace  = $GLOBALS['login_grace_period'] ?? null;
+
+			self::collect_failure(
+				$failures,
+				false === $outside_result
+					&& null === $outside_grace
+					&& false === $expired_session_result
+					&& null === $expired_session_grace
+					&& false === $wrong_user_result
+					&& null === $wrong_user_grace,
+				'auth cookie validation rejects outside-grace and bad session-token edges',
+				array(
+					'user'                   => self::describe_user( $user ),
+					'otherUser'              => self::describe_user( $other_user ),
+					'outsideExpiration'      => $outside_expires,
+					'outsideResult'          => $outside_result,
+					'outsideGrace'           => $outside_grace,
+					'expiredSessionResult'   => $expired_session_result,
+					'expiredSessionGrace'    => $expired_session_grace,
+					'wrongUserSessionResult' => $wrong_user_result,
+					'wrongUserSessionGrace'  => $wrong_user_grace,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_doing_ajax', $ajax_filter );
+			if ( $had_method ) {
+				$_SERVER['REQUEST_METHOD'] = $previous_method;
+			} else {
+				unset( $_SERVER['REQUEST_METHOD'] );
+			}
+
+			if ( $had_grace ) {
+				$GLOBALS['login_grace_period'] = $previous_grace;
+			} else {
+				unset( $GLOBALS['login_grace_period'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'security.auth-cookie.grace-period-and-session-token-edges',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
 	private static function check_redirect_filters_without_headers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -1101,6 +1560,137 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function check_redirect_sanitize_validate_metamorphic_behavior( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$fallback        = 'http://example.test/wp/wp-admin/fallback.php?from=metamorphic';
+		$token           = self::token( $ctx->fork( 'redirect-metamorphic-token' ), 8 );
+		$previous_hosts  = self::$allowed_redirect_hosts;
+		$previous_events = self::$allowed_redirect_host_events;
+
+		$_SERVER['REQUEST_URI'] = '/wp-admin/tools.php?page=component-fuzz-security&token=' . rawurlencode( $token );
+
+		$cases = array(
+			array(
+				'label' => 'trimmed relative path expands from current admin directory',
+				'input' => " \tsettings.php?updated=1&token=" . rawurlencode( $token ) . "\n",
+			),
+			array(
+				'label' => 'same-host CRLF and spaces are sanitized',
+				'input' => "http://example.test/wp-admin/path with spaces?x=1%0d%0aInjected:bad&token={$token}",
+			),
+			array(
+				'label' => 'query-contained absolute URL stays data, not redirect host',
+				'input' => '/wp-admin/admin.php?redirect=http://evil.test/%0d%0a&token=' . rawurlencode( $token ),
+			),
+			array(
+				'label' => 'protocol-relative same host normalizes before host validation',
+				'input' => '//example.test/wp-admin/profile.php?token=' . rawurlencode( $token ),
+			),
+			array(
+				'label' => 'uppercase home host follows current case-sensitive host boundary',
+				'input' => 'https://EXAMPLE.TEST/wp-admin/?token=' . rawurlencode( $token ),
+			),
+			array(
+				'label' => 'disallowed scheme remains a fallback after sanitization',
+				'input' => 'javascript:alert(1)',
+			),
+			array(
+				'label' => 'hostless scheme remains a fallback after sanitization',
+				'input' => 'https:example.test/wp-admin/?token=' . rawurlencode( $token ),
+			),
+			array(
+				'label' => 'generated same-host bytes are sanitize-idempotent',
+				'input' => 'http://example.test/wp-admin/' . self::random_string( $ctx->fork( 'redirect-generated-path' ), $ctx->int( 0, 96 ) ),
+			),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$trimmed             = trim( $case['input'], " \t\n\r\0\x08\x0B" );
+			$sanitized           = \wp_sanitize_redirect( $case['input'] );
+			$trimmed_sanitized   = \wp_sanitize_redirect( $trimmed );
+			$sanitized_twice     = \wp_sanitize_redirect( $sanitized );
+			$validated           = \wp_validate_redirect( $case['input'], $fallback );
+			$validated_sanitized = \wp_validate_redirect( $trimmed_sanitized, $fallback );
+			$validated_trimmed   = \wp_validate_redirect( $trimmed, $fallback );
+
+			self::collect_failure(
+				$failures,
+				$sanitized === $sanitized_twice
+					&& $trimmed_sanitized === \wp_sanitize_redirect( $trimmed_sanitized )
+					&& $validated === $validated_sanitized
+					&& $validated === $validated_trimmed
+					&& self::redirect_value_is_clean( $sanitized )
+					&& self::redirect_value_is_clean( $validated ),
+				"redirect sanitize/validate metamorphic case {$index}: {$case['label']}",
+				array(
+					'input'              => self::describe_string( $case['input'] ),
+					'trimmed'            => self::describe_string( $trimmed ),
+					'sanitized'          => self::describe_string( $sanitized ),
+					'trimmedSanitized'   => self::describe_string( $trimmed_sanitized ),
+					'sanitizedTwice'     => self::describe_string( $sanitized_twice ),
+					'validated'          => self::describe_string( $validated ),
+					'validatedSanitized' => self::describe_string( $validated_sanitized ),
+					'validatedTrimmed'   => self::describe_string( $validated_trimmed ),
+				)
+			);
+		}
+
+		self::$allowed_redirect_hosts       = array( 'allowed.example' );
+		self::$allowed_redirect_host_events = array();
+		\add_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10, 2 );
+		try {
+			$allowed_location    = 'https://allowed.example:8443/wp-admin/?token=' . rawurlencode( $token );
+			$disallowed_location = 'https://allowed.example.evil.test/wp-admin/?token=' . rawurlencode( $token );
+			$hostless_location   = '/wp-admin/hostless.php?token=' . rawurlencode( $token );
+			$events              = array();
+			$allowed_actual      = \wp_validate_redirect( $allowed_location, $fallback );
+			$disallowed_actual   = \wp_validate_redirect( $disallowed_location, $fallback );
+			$hostless_actual     = \wp_validate_redirect( $hostless_location, $fallback );
+			$events              = self::$allowed_redirect_host_events;
+		} finally {
+			\remove_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10 );
+			self::$allowed_redirect_hosts       = $previous_hosts;
+			self::$allowed_redirect_host_events = $previous_events;
+		}
+
+		$event_hosts = array();
+		foreach ( $events as $event ) {
+			$event_hosts[] = $event['host'];
+		}
+
+		self::collect_failure(
+			$failures,
+			\wp_sanitize_redirect( $allowed_location ) === $allowed_actual
+				&& $fallback === $disallowed_actual
+				&& \wp_sanitize_redirect( $hostless_location ) === $hostless_actual
+				&& in_array( 'allowed.example', $event_hosts, true )
+				&& in_array( 'allowed.example.evil.test', $event_hosts, true )
+				&& in_array( '', $event_hosts, true )
+				&& false === \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+			'allowed_redirect_hosts filter observes exact destination host boundaries',
+			array(
+				'allowedLocation'    => self::describe_string( $allowed_location ),
+				'allowedActual'      => self::describe_string( $allowed_actual ),
+				'disallowedLocation' => self::describe_string( $disallowed_location ),
+				'disallowedActual'   => self::describe_string( $disallowed_actual ),
+				'hostlessLocation'   => self::describe_string( $hostless_location ),
+				'hostlessActual'     => self::describe_string( $hostless_actual ),
+				'events'             => $events,
+				'filterStillActive'  => \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.redirect.sanitize-validate-metamorphic-boundaries',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ) + 1,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
 	private static function install_scoped_filters(): void {
 		\add_filter( 'pre_option_home', array( __CLASS__, 'filter_home_option' ), 10, 3 );
 		\add_filter( 'pre_option_siteurl', array( __CLASS__, 'filter_siteurl_option' ), 10, 3 );
@@ -1132,12 +1722,14 @@ final class SecuritySurface {
 	private static function reset_static_state(): void {
 		self::$nonce_logged_out_users = array();
 		self::$nonce_life             = 1000000000;
+		self::$nonce_life_by_action   = array();
 		self::$session_tokens         = array();
 		self::$session_seed           = 'security';
-		self::$redirect_events        = array();
-		self::$redirect_status_events = array();
-		self::$allowed_redirect_hosts = array();
-		self::$safe_redirect_fallback = null;
+		self::$redirect_events               = array();
+		self::$redirect_status_events        = array();
+		self::$allowed_redirect_hosts        = array();
+		self::$allowed_redirect_host_events  = array();
+		self::$safe_redirect_fallback        = null;
 	}
 
 	private static function synthetic_user( \ComponentFuzz\FuzzContext $ctx ): \stdClass {
@@ -1181,6 +1773,16 @@ final class SecuritySurface {
 		return hash_hmac( 'sha256', $user->user_login . '|' . $expiration . '|' . $token, $key );
 	}
 
+	private static function nonce_for_tick( $tick, $action ): string {
+		$user = \wp_get_current_user();
+		$uid  = (int) $user->ID;
+		if ( ! $uid ) {
+			$uid = \apply_filters( 'nonce_user_logged_out', $uid, $action );
+		}
+
+		return substr( \wp_hash( $tick . '|' . $action . '|' . $uid . '|' . \wp_get_session_token(), 'nonce' ), -12, 10 );
+	}
+
 	private static function cookie_name_for_scheme( string $scheme ): string {
 		if ( 'secure_auth' === $scheme ) {
 			return SECURE_AUTH_COOKIE;
@@ -1191,6 +1793,15 @@ final class SecuritySurface {
 		}
 
 		return AUTH_COOKIE;
+	}
+
+	private static function redirect_value_is_clean( string $value ): bool {
+		$lower = strtolower( $value );
+
+		return false === str_contains( $lower, '%0d' )
+			&& false === str_contains( $lower, '%0a' )
+			&& false === str_contains( $value, ' ' )
+			&& false === strpbrk( $value, "\r\n\0" );
 	}
 
 	private static function hidden_inputs( string $html ): array {
