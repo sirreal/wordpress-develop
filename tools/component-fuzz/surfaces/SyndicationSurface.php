@@ -36,6 +36,7 @@ final class SyndicationSurface {
 			$rows[] = self::check_oembed_output_filters( $ctx->fork( 'output-filters' ) );
 			$rows[] = self::check_oembed_no_network_shortcuts( $ctx->fork( 'no-network' ) );
 			$rows[] = self::check_feed_helpers( $ctx->fork( 'feed-helpers' ) );
+			$rows[] = self::check_feed_head_link_output( $ctx->fork( 'feed-head-links' ) );
 			$rows[] = self::check_feed_link_generation( $ctx->fork( 'feed-links' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -103,6 +104,7 @@ final class SyndicationSurface {
 				'esc_attr',
 				'esc_html',
 				'feed_content_type',
+				'feed_links',
 				'get_bloginfo_rss',
 				'get_default_feed',
 				'get_feed_link',
@@ -913,6 +915,168 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function check_feed_head_link_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$marker   = self::slug( $ctx, 4, 12 );
+
+		$GLOBALS['wp_rewrite'] = self::plain_rewrite_stub();
+		\add_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10, 3 );
+		\add_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10, 3 );
+
+		$unsupported_output  = '';
+		$posts_only_output   = '';
+		$comments_only_output = '';
+		$default_feed_filter = null;
+		$args_filter         = null;
+		$link_filter         = null;
+		$posts_gate_filter   = null;
+		$posts_off_filter    = null;
+		$comments_off_filter = null;
+		$comments_on_filter  = null;
+		$buffer_level        = ob_get_level();
+		try {
+			unset( $GLOBALS['_wp_theme_features']['automatic-feed-links'] );
+			ob_start();
+			\feed_links();
+			$unsupported_output = (string) ob_get_clean();
+
+			$GLOBALS['_wp_theme_features']['automatic-feed-links'] = true;
+			$default_feed_filter = static fn (): string => 'atom';
+			$args_calls          = array();
+			$args_filter         = static function ( array $args ) use ( &$args_calls, $marker ): array {
+				$args_calls[] = $args;
+
+				return array_merge(
+					$args,
+					array(
+						'separator' => '::' . $marker . '::',
+						'feedtitle' => '%1$s <b>%2$s</b> Feed',
+						'comstitle' => '%1$s <i>%2$s</i> Comments',
+					)
+				);
+			};
+			$link_calls          = array();
+			$link_filter         = static function ( string $url, string $feed ) use ( &$link_calls, $marker ): string {
+				$link_calls[] = array(
+					'url'  => $url,
+					'feed' => $feed,
+				);
+
+				return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . 'cfz=' . rawurlencode( $marker );
+			};
+
+			$posts_gate_calls    = array();
+			$posts_gate_filter   = static function ( bool $show ) use ( &$posts_gate_calls ): bool {
+				$posts_gate_calls[] = $show;
+				return true;
+			};
+			$comments_gate_calls = array();
+			$comments_off_filter = static function ( bool $show ) use ( &$comments_gate_calls ): bool {
+				$comments_gate_calls[] = $show;
+				return false;
+			};
+
+			\add_filter( 'default_feed', $default_feed_filter );
+			\add_filter( 'feed_links_args', $args_filter );
+			\add_filter( 'feed_link', $link_filter, 10, 2 );
+			\add_filter( 'feed_links_show_posts_feed', $posts_gate_filter );
+			\add_filter( 'feed_links_show_comments_feed', $comments_off_filter );
+			ob_start();
+			\feed_links();
+			$posts_only_output = (string) ob_get_clean();
+			\remove_filter( 'feed_links_show_posts_feed', $posts_gate_filter );
+			\remove_filter( 'feed_links_show_comments_feed', $comments_off_filter );
+
+			$posts_off_filter = static function ( bool $show ) use ( &$posts_gate_calls ): bool {
+				$posts_gate_calls[] = $show;
+				return false;
+			};
+			$comments_on_filter = static function ( bool $show ) use ( &$comments_gate_calls ): bool {
+				$comments_gate_calls[] = $show;
+				return true;
+			};
+
+			\add_filter( 'feed_links_show_posts_feed', $posts_off_filter );
+			\add_filter( 'feed_links_show_comments_feed', $comments_on_filter );
+			ob_start();
+			\feed_links();
+			$comments_only_output = (string) ob_get_clean();
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			if ( null !== $posts_gate_filter ) {
+				\remove_filter( 'feed_links_show_posts_feed', $posts_gate_filter );
+			}
+			if ( null !== $posts_off_filter ) {
+				\remove_filter( 'feed_links_show_posts_feed', $posts_off_filter );
+			}
+			if ( null !== $comments_off_filter ) {
+				\remove_filter( 'feed_links_show_comments_feed', $comments_off_filter );
+			}
+			if ( null !== $comments_on_filter ) {
+				\remove_filter( 'feed_links_show_comments_feed', $comments_on_filter );
+			}
+			if ( null !== $link_filter ) {
+				\remove_filter( 'feed_link', $link_filter, 10 );
+			}
+			if ( null !== $args_filter ) {
+				\remove_filter( 'feed_links_args', $args_filter );
+			}
+			if ( null !== $default_feed_filter ) {
+				\remove_filter( 'default_feed', $default_feed_filter );
+			}
+			\remove_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10 );
+			\remove_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10 );
+		}
+
+		$posts_link    = 'https://example.test/?feed=atom&cfz=' . rawurlencode( $marker );
+		$comments_link = 'https://example.test/?feed=comments-atom&cfz=' . rawurlencode( $marker );
+
+		self::collect_failure(
+			$failures,
+			'' === $unsupported_output
+				&& 1 === substr_count( $posts_only_output, '<link ' )
+				&& 1 === substr_count( $comments_only_output, '<link ' )
+				&& str_contains( $posts_only_output, 'type="application/atom+xml"' )
+				&& str_contains( $comments_only_output, 'type="application/atom+xml"' )
+				&& str_contains( $posts_only_output, 'title="Component &lt;b&gt;Fuzz&lt;/b&gt; &amp; &quot;Feeds&quot; &lt;b&gt;::' . \esc_attr( $marker ) . '::&lt;/b&gt; Feed"' )
+				&& str_contains( $comments_only_output, 'title="Component &lt;b&gt;Fuzz&lt;/b&gt; &amp; &quot;Feeds&quot; &lt;i&gt;::' . \esc_attr( $marker ) . '::&lt;/i&gt; Comments"' )
+				&& str_contains( $posts_only_output, 'href="' . \esc_url( $posts_link ) . '"' )
+				&& str_contains( $comments_only_output, 'href="' . \esc_url( $comments_link ) . '"' )
+				&& ! str_contains( $posts_only_output, 'Comments' )
+				&& ! str_contains( $comments_only_output, ' Feed"' )
+				&& array( true, true ) === $posts_gate_calls
+				&& array( true, true ) === $comments_gate_calls
+				&& array( 'atom', 'comments-atom' ) === array_column( $link_calls, 'feed' )
+				&& 2 === count( $args_calls )
+				&& false === \has_filter( 'default_feed', $default_feed_filter, 10 )
+				&& false === \has_filter( 'feed_links_args', $args_filter, 10 )
+				&& false === \has_filter( 'feed_link', $link_filter, 10 )
+				&& false === \has_filter( 'feed_links_show_posts_feed', $posts_gate_filter, 10 )
+				&& false === \has_filter( 'feed_links_show_posts_feed', $posts_off_filter, 10 )
+				&& false === \has_filter( 'feed_links_show_comments_feed', $comments_off_filter, 10 )
+				&& false === \has_filter( 'feed_links_show_comments_feed', $comments_on_filter, 10 ),
+			'feed_links honors theme support, posts/comments gates, default feed normalization, and escaped head output',
+			array(
+				'unsupportedOutput' => self::describe_string( $unsupported_output ?? '' ),
+				'postsOnlyOutput'   => self::describe_string( $posts_only_output ?? '' ),
+				'commentsOnlyOutput' => self::describe_string( $comments_only_output ?? '' ),
+				'postsGateCalls'    => $posts_gate_calls,
+				'commentsGateCalls' => $comments_gate_calls,
+				'linkCalls'         => $link_calls,
+				'argsCalls'         => $args_calls,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'syndication.feed.head-link-output-and-gates',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_feed_link_generation( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -1187,6 +1351,7 @@ final class SyndicationSurface {
 					'wp_filter',
 					'wp_filters',
 					'wp_rewrite',
+					'_wp_theme_features',
 				)
 			),
 			'server'         => array(
