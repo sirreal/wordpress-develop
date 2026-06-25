@@ -163,9 +163,10 @@ database, network requests, or a configured site.
 - `date-time`: deterministic no-DB date/time helper coverage, including
   `wp_date()`/`DateTimeImmutable` agreement, `date_i18n()` and `mysql2date()`
   timestamp oracles, timezone option filters, GMT/local round trips, ISO8601
-  offset parsing and datetime conversion, week windows, `current_time()`,
-  `current_datetime()`, timezone override offsets, date/human diff filter
-  contracts, and safe human time diffs.
+  offset parsing and datetime conversion across DST boundaries, week windows,
+  `current_time()`, `current_datetime()`, timezone override offsets,
+  `wp_checkdate()` validity/filter contracts, date/human diff filter contracts,
+  and safe human time diffs.
 - `discovery`: robots meta directives, sitemap enablement and robots.txt
   injection, provider registration/replacement filters, query/permalink sitemap
   URL/index expansion, escaped sitemap XML rendering, unsupported sitemap field

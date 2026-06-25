@@ -43,6 +43,8 @@ final class DateTimeSurface {
 				self::check_safe_format_option_filters( $ctx, $timestamps, $timezones, $formats ),
 				self::check_current_datetime_timezone_override_and_iso8601( $ctx, $timestamps, $timezones, $offsets ),
 				self::check_date_and_human_diff_filter_contracts( $ctx, $timestamps, $timezones, $formats ),
+				self::check_named_timezone_dst_boundaries_and_iso8601_modes( $ctx, $timezones, $offsets ),
+				self::check_wp_checkdate_contract( $ctx ),
 			);
 		} catch ( \Throwable $e ) {
 			$rows = array(
@@ -74,6 +76,7 @@ final class DateTimeSurface {
 				'wp_timezone_string',
 				'wp_timezone',
 				'wp_timezone_override_offset',
+				'wp_checkdate',
 				'get_weekstartend',
 				'human_time_diff',
 				'get_option',
@@ -913,6 +916,196 @@ final class DateTimeSurface {
 		);
 	}
 
+	private static function check_named_timezone_dst_boundaries_and_iso8601_modes( \ComponentFuzz\FuzzContext $ctx, array $timezones, array $offsets ): array {
+		$boundary_cases = self::dst_boundary_cases( $ctx->fork( 'dst-boundaries' ), $timezones );
+		$failures       = array();
+		$samples        = array();
+		$cases          = 0;
+		$utc            = new \DateTimeZone( 'UTC' );
+
+		foreach ( $boundary_cases as $index => $case ) {
+			$timezone_name = $case['timezone'];
+			$decoy_offset  = $offsets[ $index % count( $offsets ) ];
+
+			self::with_option_filters(
+				array(
+					'timezone_string' => $timezone_name,
+					'gmt_offset'      => $decoy_offset,
+				),
+				static function () use ( $case, $timezone_name, $decoy_offset, $utc, &$failures, &$samples, &$cases ): void {
+					$wp_timezone_name = \wp_timezone_string();
+					$timezone         = \wp_timezone();
+					$instant          = ( new \DateTimeImmutable( '@' . $case['timestamp'] ) )->setTimezone( $utc );
+					$local            = $instant->setTimezone( $timezone );
+					$explicit_iso     = $local->format( 'Ymd\TH:i:sO' );
+					$local_iso        = $local->format( 'Ymd\TH:i:s' );
+					$utc_iso          = $instant->format( 'Ymd\TH:i:s\Z' );
+					$expected_user    = $local->format( 'Y-m-d H:i:s' );
+					$expected_gmt     = $instant->format( 'Y-m-d H:i:s' );
+					$local_assumed    = new \DateTimeImmutable( $local_iso, $timezone );
+					$actual_default   = \iso8601_to_datetime( $explicit_iso );
+					$actual_user      = \iso8601_to_datetime( $explicit_iso, 'user' );
+					$actual_gmt       = \iso8601_to_datetime( $explicit_iso, 'gmt' );
+					$actual_gmt_upper = \iso8601_to_datetime( $explicit_iso, 'GMT' );
+					$actual_z_user    = \iso8601_to_datetime( $utc_iso, 'user' );
+					$actual_local     = \iso8601_to_datetime( $local_iso, 'user' );
+					$actual_local_gmt = \iso8601_to_datetime( $local_iso, 'gmt' );
+					$actual_from_gmt  = \get_date_from_gmt( $expected_gmt );
+					++$cases;
+
+					self::sample(
+						$samples,
+						array(
+							'timezone'     => $timezone_name,
+							'transition'   => $case['transition'],
+							'delta'        => $case['delta'],
+							'decoyOffset'  => $decoy_offset,
+							'explicitIso'  => $explicit_iso,
+							'localIso'     => $local_iso,
+							'expectedUser' => $expected_user,
+							'expectedGmt'  => $expected_gmt,
+						)
+					);
+
+					if (
+						$wp_timezone_name !== $timezone_name
+						|| $timezone->getName() !== $timezone_name
+						|| $actual_default !== $expected_user
+						|| $actual_user !== $expected_user
+						|| $actual_z_user !== $expected_user
+						|| $actual_gmt !== $expected_gmt
+						|| $actual_gmt_upper !== $expected_gmt
+						|| $actual_local !== $local_assumed->format( 'Y-m-d H:i:s' )
+						|| $actual_local_gmt !== $local_assumed->setTimezone( $utc )->format( 'Y-m-d H:i:s' )
+						|| $actual_from_gmt !== $expected_user
+					) {
+						$failures[] = array(
+							'api'             => 'iso8601_to_datetime/get_date_from_gmt/wp_timezone',
+							'timezone'        => $timezone_name,
+							'wpTimezoneString' => $wp_timezone_name,
+							'wpTimezoneName'   => $timezone->getName(),
+							'transition'      => $case['transition'],
+							'delta'           => $case['delta'],
+							'decoyOffset'     => $decoy_offset,
+							'explicitIso'     => $explicit_iso,
+							'localIso'        => $local_iso,
+							'utcIso'          => $utc_iso,
+							'expectedUser'    => $expected_user,
+							'actualDefault'   => self::describe_value( $actual_default ),
+							'actualUser'      => self::describe_value( $actual_user ),
+							'actualZUser'     => self::describe_value( $actual_z_user ),
+							'expectedGmt'     => $expected_gmt,
+							'actualGmt'       => self::describe_value( $actual_gmt ),
+							'actualGmtUpper'  => self::describe_value( $actual_gmt_upper ),
+							'expectedLocal'   => $local_assumed->format( 'Y-m-d H:i:s' ),
+							'actualLocal'     => self::describe_value( $actual_local ),
+							'expectedLocalGmt' => $local_assumed->setTimezone( $utc )->format( 'Y-m-d H:i:s' ),
+							'actualLocalGmt'  => self::describe_value( $actual_local_gmt ),
+							'actualFromGmt'   => self::describe_value( $actual_from_gmt ),
+						);
+					}
+				}
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'date-time.named-timezone-dst-boundary-iso8601-modes',
+			$failures,
+			array(
+				'cases'    => $cases,
+				'samples'  => $samples,
+				'failures' => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
+	private static function check_wp_checkdate_contract( \ComponentFuzz\FuzzContext $ctx ): array {
+		$date_cases = self::checkdate_cases( $ctx->fork( 'wp-checkdate' ) );
+		$failures   = array();
+		$samples    = array();
+		$seen       = array();
+		$filter     = static function ( bool $is_valid_date, string $source_date ) use ( &$seen ): bool {
+			$seen[] = array(
+				'isValidDate' => $is_valid_date,
+				'sourceDate'  => $source_date,
+			);
+
+			return ! $is_valid_date;
+		};
+
+		foreach ( $date_cases as $case ) {
+			$expected = self::expected_wp_checkdate( $case['month'], $case['day'], $case['year'] );
+			$actual   = \wp_checkdate( $case['month'], $case['day'], $case['year'], $case['source'] );
+
+			self::sample(
+				$samples,
+				array(
+					'month'    => $case['month'],
+					'day'      => $case['day'],
+					'year'     => $case['year'],
+					'source'   => $case['source'],
+					'expected' => $expected,
+					'actual'   => $actual,
+				)
+			);
+
+			if ( $actual !== $expected ) {
+				$failures[] = array(
+					'api'      => 'wp_checkdate',
+					'case'     => 'unfiltered validity',
+					'month'    => $case['month'],
+					'day'      => $case['day'],
+					'year'     => $case['year'],
+					'source'   => $case['source'],
+					'expected' => $expected,
+					'actual'   => self::describe_value( $actual ),
+				);
+			}
+		}
+
+		\add_filter( 'wp_checkdate', $filter, 10, 2 );
+		try {
+			foreach ( $date_cases as $index => $case ) {
+				$expected_default = self::expected_wp_checkdate( $case['month'], $case['day'], $case['year'] );
+				$actual_filtered  = \wp_checkdate( $case['month'], $case['day'], $case['year'], $case['source'] );
+				$seen_case        = $seen[ $index ] ?? null;
+
+				if (
+					$actual_filtered !== ( ! $expected_default )
+					|| ! is_array( $seen_case )
+					|| $seen_case['isValidDate'] !== $expected_default
+					|| $seen_case['sourceDate'] !== $case['source']
+				) {
+					$failures[] = array(
+						'api'             => 'wp_checkdate',
+						'case'            => 'filter payload and override',
+						'month'           => $case['month'],
+						'day'             => $case['day'],
+						'year'            => $case['year'],
+						'source'          => $case['source'],
+						'expectedDefault' => $expected_default,
+						'actualFiltered'  => self::describe_value( $actual_filtered ),
+						'seen'            => self::describe_value( $seen_case ),
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'wp_checkdate', $filter, 10 );
+		}
+
+		return self::result(
+			$ctx,
+			'date-time.wp-checkdate-generated-validity-and-filter-contract',
+			$failures,
+			array(
+				'cases'    => count( $date_cases ),
+				'samples'  => $samples,
+				'failures' => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
 	private static function check_runtime_restored( \ComponentFuzz\FuzzContext $ctx, array $snapshot ): array {
 		$failures = array();
 
@@ -1133,6 +1326,176 @@ final class DateTimeSurface {
 		return $cases;
 	}
 
+	private static function dst_boundary_cases( \ComponentFuzz\FuzzContext $ctx, array $timezones ): array {
+		$preferred = array(
+			'Europe/Madrid',
+			'Europe/London',
+			'America/New_York',
+			'America/St_Johns',
+			'Australia/Lord_Howe',
+			'Pacific/Auckland',
+			'Pacific/Chatham',
+		);
+		$names     = array_values( array_unique( array_merge( $preferred, $timezones ) ) );
+		$deltas    = array( -7200, -3600, -1, 0, 1, 1800, 3600, 7200 );
+		$cases     = array();
+		$start     = gmmktime( 0, 0, 0, 1, 1, 2019 );
+		$end       = gmmktime( 23, 59, 59, 12, 31, 2026 );
+
+		foreach ( $names as $timezone_name ) {
+			try {
+				$timezone = new \DateTimeZone( $timezone_name );
+			} catch ( \Throwable $e ) {
+				continue;
+			}
+
+			$transitions = $timezone->getTransitions( $start, $end );
+			if ( ! is_array( $transitions ) || count( $transitions ) < 2 ) {
+				continue;
+			}
+
+			$offset_changes = array();
+			$previous       = null;
+			foreach ( $transitions as $transition ) {
+				if ( null !== $previous && (int) $previous['offset'] !== (int) $transition['offset'] ) {
+					$offset_changes[] = $transition;
+				}
+				$previous = $transition;
+			}
+
+			if ( array() === $offset_changes ) {
+				continue;
+			}
+
+			$transition = $offset_changes[ $ctx->int( 0, count( $offset_changes ) - 1 ) ];
+			foreach ( $deltas as $delta ) {
+				$cases[] = array(
+					'timezone'   => $timezone_name,
+					'transition' => (int) $transition['ts'],
+					'delta'      => $delta,
+					'timestamp'  => (int) $transition['ts'] + $delta,
+				);
+
+				if ( count( $cases ) >= self::CASES + 14 ) {
+					break 2;
+				}
+			}
+		}
+
+		return $cases;
+	}
+
+	private static function checkdate_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'month'  => 1,
+				'day'    => 1,
+				'year'   => 1,
+				'source' => '1-1-1',
+			),
+			array(
+				'month'  => '02',
+				'day'    => '29',
+				'year'   => '2024',
+				'source' => '02/29/2024',
+			),
+			array(
+				'month'  => '2',
+				'day'    => '29',
+				'year'   => '2023',
+				'source' => '2/29/2023',
+			),
+			array(
+				'month'  => 0,
+				'day'    => 10,
+				'year'   => 2024,
+				'source' => '0/10/2024',
+			),
+			array(
+				'month'  => 13,
+				'day'    => 1,
+				'year'   => 2024,
+				'source' => '13/1/2024',
+			),
+			array(
+				'month'  => 12,
+				'day'    => 32,
+				'year'   => 2024,
+				'source' => '12/32/2024',
+			),
+			array(
+				'month'  => 1,
+				'day'    => 1,
+				'year'   => 0,
+				'source' => '1/1/0',
+			),
+			array(
+				'month'  => 1,
+				'day'    => 1,
+				'year'   => 32768,
+				'source' => '1/1/32768',
+			),
+			array(
+				'month'  => 'month',
+				'day'    => '1',
+				'year'   => '2024',
+				'source' => 'month/1/2024',
+			),
+			array(
+				'month'  => '2.9',
+				'day'    => '29.1',
+				'year'   => '2024.8',
+				'source' => '2.9/29.1/2024.8',
+			),
+		);
+
+		while ( count( $cases ) < self::CASES + 8 ) {
+			$month = $ctx->int( -2, 15 );
+			$day   = $ctx->int( -2, 35 );
+			$year  = $ctx->choice(
+				array(
+					$ctx->int( -2, 10 ),
+					$ctx->int( 1890, 2050 ),
+					$ctx->int( 32760, 32775 ),
+				)
+			);
+
+			if ( $ctx->bool() ) {
+				$month = (string) $month;
+			}
+
+			if ( $ctx->bool() ) {
+				$day = (string) $day;
+			}
+
+			if ( $ctx->bool() ) {
+				$year = (string) $year;
+			}
+
+			$cases[] = array(
+				'month'  => $month,
+				'day'    => $day,
+				'year'   => $year,
+				'source' => "{$month}/{$day}/{$year}",
+			);
+		}
+
+		$unique = array();
+		foreach ( $cases as $case ) {
+			$unique[ $case['source'] . '|' . gettype( $case['month'] ) . '|' . gettype( $case['day'] ) . '|' . gettype( $case['year'] ) ] = $case;
+		}
+
+		return array_values( $unique );
+	}
+
+	private static function expected_wp_checkdate( $month, $day, $year ): bool {
+		if ( ! is_numeric( $month ) || ! is_numeric( $day ) || ! is_numeric( $year ) ) {
+			return false;
+		}
+
+		return checkdate( (int) $month, (int) $day, (int) $year );
+	}
+
 	private static function date_i18n_format( string $format ): string {
 		if ( 'U' === $format ) {
 			return 'Y-m-d H:i:s';
@@ -1259,6 +1622,7 @@ final class DateTimeSurface {
 			'date_i18n',
 			'wp_date',
 			'human_time_diff',
+			'wp_checkdate',
 		);
 
 		$tracked_filters = array();
