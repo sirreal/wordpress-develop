@@ -16,6 +16,12 @@ final class AiClientSurface {
 	public const PROVIDER_ID = 'component-fuzz-ai';
 	public const MODEL_ID    = 'component-fuzz-text';
 
+	public const COLLISION_PROVIDER_A_ID = 'component-fuzz-collision-a';
+	public const COLLISION_PROVIDER_B_ID = 'component-fuzz-collision-b';
+	public const COLLISION_SHARED_MODEL  = 'component-fuzz-shared-model';
+	public const COLLISION_A_ONLY_MODEL  = 'component-fuzz-a-only-model';
+	public const COLLISION_B_ONLY_MODEL  = 'component-fuzz-b-only-model';
+
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
@@ -38,6 +44,7 @@ final class AiClientSurface {
 			$rows[] = self::check_invalid_value_rejection( $ctx );
 			$rows[] = self::check_enum_strictness( $ctx );
 			$rows[] = self::check_provider_registry_isolation( $ctx );
+			$rows[] = self::check_model_selection_preferences_and_provider_collisions( $ctx );
 			$rows[] = self::check_prompt_builder_and_events( $ctx );
 			$rows[] = self::check_ability_resolver_integration( $ctx );
 			$rows[] = self::check_cache_and_dispatcher_adapters( $ctx );
@@ -530,6 +537,132 @@ final class AiClientSurface {
 		return self::result(
 			$ctx,
 			'ai-client.provider-registry-registration-lookup-and-isolation',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_model_selection_preferences_and_provider_collisions(
+		\ComponentFuzz\FuzzContext $ctx
+	): array {
+		$failures = array();
+		$case     = $ctx->fork( 'model-selection' );
+		$registry = new \WordPress\AiClient\Providers\ProviderRegistry();
+
+		$registry->registerProvider( AiClientSurface_CollisionProviderA::class );
+		$registry->registerProvider( AiClientSurface_CollisionProviderB::class );
+
+		$prompt  = 'Choose model ' . self::safe_text( $case->fork( 'prompt' ), 5, 24 );
+		$history = new \WordPress\AiClient\Messages\DTO\UserMessage(
+			array(
+				new \WordPress\AiClient\Messages\DTO\MessagePart(
+					'History ' . self::safe_text( $case->fork( 'history' ), 4, 18 )
+				),
+			)
+		);
+
+		$model_only = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_model_preference( self::COLLISION_SHARED_MODEL )
+			->generate_text_result();
+
+		$provider_tuple = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_model_preference(
+				array( self::COLLISION_PROVIDER_B_ID, self::COLLISION_SHARED_MODEL )
+			)
+			->generate_text_result();
+
+		$provider_locked_by_id = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_provider( self::COLLISION_PROVIDER_B_ID )
+			->using_model_preference( self::COLLISION_SHARED_MODEL )
+			->generate_text_result();
+
+		$provider_locked_by_class = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_provider( AiClientSurface_CollisionProviderB::class )
+			->using_model_preference( self::COLLISION_SHARED_MODEL )
+			->generate_text_result();
+
+		$fallback = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_model_preference(
+				'missing-' . self::slug_piece( $case->fork( 'missing' ), 'model' ),
+				array( self::COLLISION_PROVIDER_B_ID, self::COLLISION_B_ONLY_MODEL )
+			)
+			->generate_text_result();
+
+		$discovery_order = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->generate_text_result();
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$model_only,
+				self::COLLISION_PROVIDER_A_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'model-only preference for shared model preserves first registered provider',
+			array( 'selection' => self::describe_ai_result_selection( $model_only ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$provider_tuple,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'provider/model tuple preference overrides shared model collision order',
+			array( 'selection' => self::describe_ai_result_selection( $provider_tuple ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$provider_locked_by_id,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_SHARED_MODEL
+			)
+				&& self::result_selects_provider_model(
+					$provider_locked_by_class,
+					self::COLLISION_PROVIDER_B_ID,
+					self::COLLISION_SHARED_MODEL
+				),
+			'provider lock by ID or class narrows shared model lookup to that provider',
+			array(
+				'idLock'    => self::describe_ai_result_selection( $provider_locked_by_id ),
+				'classLock' => self::describe_ai_result_selection( $provider_locked_by_class ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$fallback,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_B_ONLY_MODEL
+			),
+			'missing model preference falls through to the first matching later preference',
+			array( 'selection' => self::describe_ai_result_selection( $fallback ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$discovery_order,
+				self::COLLISION_PROVIDER_A_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'no model preference falls back to first matching provider/model discovery order',
+			array( 'selection' => self::describe_ai_result_selection( $discovery_order ) )
+		);
+
+		return self::result(
+			$ctx,
+			'ai-client.model-selection-preferences-and-provider-collisions',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
@@ -1594,6 +1727,28 @@ final class AiClientSurface {
 		);
 	}
 
+	private static function result_selects_provider_model( $result, string $provider_id, string $model_id ): bool {
+		return $result instanceof \WordPress\AiClient\Results\DTO\GenerativeAiResult
+			&& $provider_id === $result->getProviderMetadata()->getId()
+			&& $model_id === $result->getModelMetadata()->getId();
+	}
+
+	private static function describe_ai_result_selection( $result ): array {
+		if ( \is_wp_error( $result ) ) {
+			return self::describe_error( $result );
+		}
+
+		if ( ! $result instanceof \WordPress\AiClient\Results\DTO\GenerativeAiResult ) {
+			return array( 'value' => self::describe_value( $result ) );
+		}
+
+		return array(
+			'providerId' => $result->getProviderMetadata()->getId(),
+			'modelId'    => $result->getModelMetadata()->getId(),
+			'text'       => $result->toText(),
+		);
+	}
+
 	private static function describe_value( $value ) {
 		if ( is_object( $value ) ) {
 			return '[object ' . get_class( $value ) . ']';
@@ -1787,6 +1942,209 @@ final class AiClientSurface_FakeTextModel implements
 			$this->providerMetadata(),
 			$this->metadata(),
 			array( 'promptCount' => count( $prompt ) )
+		);
+	}
+}
+
+final class AiClientSurface_CollisionProviderA implements \WordPress\AiClient\Providers\Contracts\ProviderInterface {
+	public static function metadata(): \WordPress\AiClient\Providers\DTO\ProviderMetadata {
+		return new \WordPress\AiClient\Providers\DTO\ProviderMetadata(
+			AiClientSurface::COLLISION_PROVIDER_A_ID,
+			'Component Fuzz Collision A',
+			\WordPress\AiClient\Providers\Enums\ProviderTypeEnum::server()
+		);
+	}
+
+	public static function model(
+		string $modelId,
+		?\WordPress\AiClient\Providers\Models\DTO\ModelConfig $modelConfig = null
+	): \WordPress\AiClient\Providers\Models\Contracts\ModelInterface {
+		if ( ! in_array( $modelId, array( AiClientSurface::COLLISION_SHARED_MODEL, AiClientSurface::COLLISION_A_ONLY_MODEL ), true ) ) {
+			throw new \WordPress\AiClient\Common\Exception\InvalidArgumentException( 'Unknown collision model A: ' . $modelId );
+		}
+
+		return new AiClientSurface_CollisionTextModel(
+			self::metadata(),
+			$modelId,
+			$modelConfig ?? new \WordPress\AiClient\Providers\Models\DTO\ModelConfig()
+		);
+	}
+
+	public static function availability(): \WordPress\AiClient\Providers\Contracts\ProviderAvailabilityInterface {
+		return new AiClientSurface_FakeAvailability( true );
+	}
+
+	public static function modelMetadataDirectory(): \WordPress\AiClient\Providers\Contracts\ModelMetadataDirectoryInterface {
+		return new AiClientSurface_CollisionModelMetadataDirectory(
+			array( AiClientSurface::COLLISION_SHARED_MODEL, AiClientSurface::COLLISION_A_ONLY_MODEL )
+		);
+	}
+}
+
+final class AiClientSurface_CollisionProviderB implements \WordPress\AiClient\Providers\Contracts\ProviderInterface {
+	public static function metadata(): \WordPress\AiClient\Providers\DTO\ProviderMetadata {
+		return new \WordPress\AiClient\Providers\DTO\ProviderMetadata(
+			AiClientSurface::COLLISION_PROVIDER_B_ID,
+			'Component Fuzz Collision B',
+			\WordPress\AiClient\Providers\Enums\ProviderTypeEnum::server()
+		);
+	}
+
+	public static function model(
+		string $modelId,
+		?\WordPress\AiClient\Providers\Models\DTO\ModelConfig $modelConfig = null
+	): \WordPress\AiClient\Providers\Models\Contracts\ModelInterface {
+		if ( ! in_array( $modelId, array( AiClientSurface::COLLISION_SHARED_MODEL, AiClientSurface::COLLISION_B_ONLY_MODEL ), true ) ) {
+			throw new \WordPress\AiClient\Common\Exception\InvalidArgumentException( 'Unknown collision model B: ' . $modelId );
+		}
+
+		return new AiClientSurface_CollisionTextModel(
+			self::metadata(),
+			$modelId,
+			$modelConfig ?? new \WordPress\AiClient\Providers\Models\DTO\ModelConfig()
+		);
+	}
+
+	public static function availability(): \WordPress\AiClient\Providers\Contracts\ProviderAvailabilityInterface {
+		return new AiClientSurface_FakeAvailability( true );
+	}
+
+	public static function modelMetadataDirectory(): \WordPress\AiClient\Providers\Contracts\ModelMetadataDirectoryInterface {
+		return new AiClientSurface_CollisionModelMetadataDirectory(
+			array( AiClientSurface::COLLISION_SHARED_MODEL, AiClientSurface::COLLISION_B_ONLY_MODEL )
+		);
+	}
+}
+
+final class AiClientSurface_CollisionModelMetadataDirectory implements
+	\WordPress\AiClient\Providers\Contracts\ModelMetadataDirectoryInterface {
+
+	/** @var list<string> */
+	private array $model_ids;
+
+	/**
+	 * @param list<string> $model_ids Model identifiers exposed by the provider.
+	 */
+	public function __construct( array $model_ids ) {
+		$this->model_ids = array_values( $model_ids );
+	}
+
+	public function listModelMetadata(): array {
+		return array_map(
+			static fn( string $model_id ): \WordPress\AiClient\Providers\Models\DTO\ModelMetadata =>
+				AiClientSurface_CollisionTextModel::metadata_for( $model_id ),
+			$this->model_ids
+		);
+	}
+
+	public function hasModelMetadata( string $modelId ): bool {
+		return in_array( $modelId, $this->model_ids, true );
+	}
+
+	public function getModelMetadata( string $modelId ): \WordPress\AiClient\Providers\Models\DTO\ModelMetadata {
+		if ( ! $this->hasModelMetadata( $modelId ) ) {
+			throw new \WordPress\AiClient\Common\Exception\InvalidArgumentException( 'Unknown collision model: ' . $modelId );
+		}
+
+		return AiClientSurface_CollisionTextModel::metadata_for( $modelId );
+	}
+}
+
+final class AiClientSurface_CollisionTextModel implements
+	\WordPress\AiClient\Providers\Models\Contracts\ModelInterface,
+	\WordPress\AiClient\Providers\Models\TextGeneration\Contracts\TextGenerationModelInterface {
+
+	private \WordPress\AiClient\Providers\DTO\ProviderMetadata $provider_metadata;
+
+	private string $model_id;
+
+	private \WordPress\AiClient\Providers\Models\DTO\ModelConfig $config;
+
+	public function __construct(
+		\WordPress\AiClient\Providers\DTO\ProviderMetadata $provider_metadata,
+		string $model_id,
+		\WordPress\AiClient\Providers\Models\DTO\ModelConfig $config
+	) {
+		$this->provider_metadata = $provider_metadata;
+		$this->model_id          = $model_id;
+		$this->config            = $config;
+	}
+
+	public static function metadata_for( string $model_id ): \WordPress\AiClient\Providers\Models\DTO\ModelMetadata {
+		$options = array_map(
+			static fn( \WordPress\AiClient\Providers\Models\Enums\OptionEnum $option ) =>
+				new \WordPress\AiClient\Providers\Models\DTO\SupportedOption( $option ),
+			\WordPress\AiClient\Providers\Models\Enums\OptionEnum::cases()
+		);
+
+		return new \WordPress\AiClient\Providers\Models\DTO\ModelMetadata(
+			$model_id,
+			'Component Fuzz ' . $model_id,
+			array(
+				\WordPress\AiClient\Providers\Models\Enums\CapabilityEnum::textGeneration(),
+				\WordPress\AiClient\Providers\Models\Enums\CapabilityEnum::chatHistory(),
+			),
+			$options
+		);
+	}
+
+	public function metadata(): \WordPress\AiClient\Providers\Models\DTO\ModelMetadata {
+		return self::metadata_for( $this->model_id );
+	}
+
+	public function providerMetadata(): \WordPress\AiClient\Providers\DTO\ProviderMetadata {
+		return $this->provider_metadata;
+	}
+
+	public function setConfig( \WordPress\AiClient\Providers\Models\DTO\ModelConfig $config ): void {
+		$this->config = $config;
+	}
+
+	public function getConfig(): \WordPress\AiClient\Providers\Models\DTO\ModelConfig {
+		return $this->config;
+	}
+
+	public function generateTextResult( array $prompt ): \WordPress\AiClient\Results\DTO\GenerativeAiResult {
+		$last_text = '';
+		foreach ( $prompt as $message ) {
+			if ( ! $message instanceof \WordPress\AiClient\Messages\DTO\Message ) {
+				continue;
+			}
+			foreach ( $message->getParts() as $part ) {
+				if ( null !== $part->getText() ) {
+					$last_text = $part->getText();
+				}
+			}
+		}
+
+		$text = implode(
+			':',
+			array(
+				'component-fuzz-collision',
+				$this->provider_metadata->getId(),
+				$this->model_id,
+				$last_text,
+			)
+		);
+
+		return new \WordPress\AiClient\Results\DTO\GenerativeAiResult(
+			'collision-result-' . substr( sha1( $text ), 0, 12 ),
+			array(
+				new \WordPress\AiClient\Results\DTO\Candidate(
+					new \WordPress\AiClient\Messages\DTO\ModelMessage(
+						array( new \WordPress\AiClient\Messages\DTO\MessagePart( $text ) )
+					),
+					\WordPress\AiClient\Results\Enums\FinishReasonEnum::stop()
+				),
+			),
+			new \WordPress\AiClient\Results\DTO\TokenUsage( strlen( $last_text ), strlen( $text ), strlen( $last_text ) + strlen( $text ) ),
+			$this->providerMetadata(),
+			$this->metadata(),
+			array(
+				'providerId' => $this->provider_metadata->getId(),
+				'modelId'    => $this->model_id,
+				'promptCount' => count( $prompt ),
+			)
 		);
 	}
 }
