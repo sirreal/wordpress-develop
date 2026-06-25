@@ -174,9 +174,9 @@ database, network requests, or a configured site.
   invalid UTF-8, malformed address structure, selected boundary lengths,
   normalization-sensitive local parts, comment-author email filtering, REST user
   email schema validation across Unicode/ASCII filter modes, and user email
-  lookup/duplicate behavior for accent-distinct local parts/domains plus
-  password-reset Unicode recipient paths and clickable mailto rendering
-  boundaries.
+  lookup/duplicate behavior for accent-distinct local parts/domains, canonical
+  Unicode-domain save/update collision behavior, password-reset Unicode
+  recipient paths, and clickable mailto rendering boundaries.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,
