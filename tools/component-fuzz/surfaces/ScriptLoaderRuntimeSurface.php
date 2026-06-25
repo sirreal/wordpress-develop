@@ -438,8 +438,10 @@ final class ScriptLoaderRuntimeSurface {
 		$script_external = "{$script_prefix}-external";
 		$script_delayed  = "{$script_prefix}-delayed";
 		$strategy        = $script_ctx->choice( array( 'defer', 'async' ) );
+		$script_external_src = 'https://cdn.example.test/component-fuzz/' . rawurlencode( $script_external ) . '.js';
+		$script_delayed_src  = $script_base_url . "{$script_default_dir}{$script_delayed}.js";
 
-		\wp_register_script( $script_external, 'https://cdn.example.test/component-fuzz/' . rawurlencode( $script_external ) . '.js', array(), null );
+		\wp_register_script( $script_external, $script_external_src, array(), null );
 		\wp_register_script( $script_delayed, "{$script_default_dir}{$script_delayed}.js", array(), null, array( 'strategy' => $strategy ) );
 		$scripts->enqueue( array( $script_handles[ $script_concat_count - 1 ], $script_external, $script_delayed ) );
 
@@ -487,8 +489,10 @@ final class ScriptLoaderRuntimeSurface {
 
 		$style_external = "{$style_prefix}-external";
 		$style_alt      = "{$style_prefix}-alt";
+		$style_external_src = 'https://cdn.example.test/component-fuzz/' . rawurlencode( $style_external ) . '.css';
+		$style_alt_href     = rtrim( self::BASE_URL, '/' ) . "{$style_default_dir}{$style_alt}.css";
 
-		\wp_register_style( $style_external, 'https://cdn.example.test/component-fuzz/' . rawurlencode( $style_external ) . '.css', array(), null, 'screen' );
+		\wp_register_style( $style_external, $style_external_src, array(), null, 'screen' );
 		\wp_add_inline_style( $style_external, ".{$style_external} { color: #123456; }" );
 		\wp_register_style( $style_alt, "{$style_default_dir}{$style_alt}.css", array(), null, 'print' );
 		\wp_style_add_data( $style_alt, 'alt', true );
@@ -530,8 +534,8 @@ final class ScriptLoaderRuntimeSurface {
 			'loader-handles'          => $script_handles === $script_loader['handles'],
 			'excluded-handles'        => array() === array_values( array_intersect( $script_loader['handles'], array( $script_external, $script_delayed ) ) ),
 			'separate-tags'           => is_string( $script_external_tag ) && is_string( $script_delayed_tag ),
-			'external-tag'            => is_string( $script_external_tag ) && str_contains( $script_external_tag, 'https://cdn.example.test/component-fuzz/' ),
-			'strategy-tag'            => is_string( $script_delayed_tag ) && str_contains( $script_delayed_tag, " {$strategy}" ) && str_contains( $script_delayed_tag, 'data-wp-strategy="' . $strategy . '"' ),
+			'external-tag'            => is_string( $script_external_tag ) && array( $script_external_src ) === self::attribute_values( $script_external_tag, 'src' ),
+			'strategy-tag'            => is_string( $script_delayed_tag ) && array( $script_delayed_src ) === self::attribute_values( $script_delayed_tag, 'src' ) && str_contains( $script_delayed_tag, " {$strategy}" ) && str_contains( $script_delayed_tag, 'data-wp-strategy="' . $strategy . '"' ),
 			'concat-inline-sourceurl' => false !== $script_source_pos && false !== $script_loader_pos && $script_source_pos < $script_loader_pos,
 			'output-order'            => self::contains_in_order( $script_output, array_merge( $script_objects, array( 'load-scripts.php', "{$script_external}-js", "{$script_delayed}-js" ) ) ),
 			'done-order'              => array_merge( $script_handles, array( $script_external, $script_delayed ) ) === $script_done,
@@ -547,8 +551,8 @@ final class ScriptLoaderRuntimeSurface {
 			'loader-handles'          => $style_handles === $style_loader['handles'],
 			'excluded-handles'        => array() === array_values( array_intersect( $style_loader['handles'], array( $style_external, $style_alt ) ) ),
 			'separate-tags'           => is_string( $style_external_tag ) && is_string( $style_external_inline_tag ) && is_string( $style_alt_tag ),
-			'external-media'          => is_string( $style_external_tag ) && array( 'screen' ) === self::attribute_values( $style_external_tag, 'media' ),
-			'alt-tag'                 => is_string( $style_alt_tag ) && array( 'alternate stylesheet' ) === self::attribute_values( $style_alt_tag, 'rel' ) && array( 'print' ) === self::attribute_values( $style_alt_tag, 'media' ),
+			'external-media'          => is_string( $style_external_tag ) && array( $style_external_src ) === self::attribute_values( $style_external_tag, 'href' ) && array( 'screen' ) === self::attribute_values( $style_external_tag, 'media' ),
+			'alt-tag'                 => is_string( $style_alt_tag ) && array( $style_alt_href ) === self::attribute_values( $style_alt_tag, 'href' ) && array( 'alternate stylesheet' ) === self::attribute_values( $style_alt_tag, 'rel' ) && array( 'print' ) === self::attribute_values( $style_alt_tag, 'media' ),
 			'concat-inline-sourceurl' => false !== $style_source_pos && false !== $style_loader_pos && $style_loader_pos < $style_source_pos,
 			'output-order'            => self::contains_in_order( $style_output, array_merge( $style_handles, array( $style_source_url, "{$style_external}-css", "{$style_external}-inline-css", "{$style_alt}-css" ) ) ),
 			'done-order'              => array_merge( $style_handles, array( $style_external, $style_alt ) ) === $style_done,
@@ -1797,12 +1801,7 @@ final class ScriptLoaderRuntimeSurface {
 				$chunks = array();
 				$load   = $query['load'] ?? array();
 				if ( is_array( $load ) ) {
-					uksort(
-						$load,
-						static function ( string $left, string $right ): int {
-							return (int) str_replace( 'chunk_', '', $left ) <=> (int) str_replace( 'chunk_', '', $right );
-						}
-					);
+					ksort( $load );
 					$chunks = array_values( array_map( 'strval', $load ) );
 				}
 
