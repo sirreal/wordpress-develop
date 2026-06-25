@@ -50,6 +50,7 @@ final class PrivacySurface {
 			$rows[] = self::check_action_descriptions( $ctx->fork( 'action-descriptions' ) );
 			$rows[] = self::check_request_lifecycle_helpers( $ctx->fork( 'request-lifecycle' ) );
 			$rows[] = self::check_user_request_keys( $ctx->fork( 'request-keys' ) );
+			$rows[] = self::check_missing_user_request_key( $ctx->fork( 'missing-request-key' ) );
 			$rows[] = self::check_user_request_key_expiration_filters( $ctx->fork( 'request-key-expiration-filters' ) );
 			$rows[] = self::check_confirmation_messages( $ctx->fork( 'confirmation-messages' ) );
 			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
@@ -741,20 +742,40 @@ final class PrivacySurface {
 			}
 		}
 
-		$missing_request_call = self::call(
-			static function () use ( $key ) {
-				return \wp_validate_user_request_key( 91999, $key );
-			}
-		);
-
 		return self::row(
 			$ctx,
 			'privacy.user-request-key.fail-closed-hash-semantics',
 			array() === $failures,
 			array(
-				'cases'                => count( $cases ),
-				'missingRequestLookup' => self::describe_call( $missing_request_call ),
-				'failures'             => $failures,
+				'cases'    => count( $cases ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_missing_user_request_key( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing_request_id = 91990 + $ctx->int( 0, 999 );
+		$key                = 'missing|' . self::random_string( $ctx->fork( 'key' ), 24 );
+
+		\wp_cache_delete( $missing_request_id, 'posts' );
+		unset( self::$post_meta[ $missing_request_id ] );
+
+		$actual = self::call(
+			static function () use ( $missing_request_id, $key ) {
+				return \wp_validate_user_request_key( $missing_request_id, $key );
+			}
+		);
+
+		$ok = ! $actual['threw'] && self::is_error_code( $actual['value'], 'invalid_request' );
+
+		return self::row(
+			$ctx,
+			'privacy.user-request-key.missing-request-fails-closed',
+			$ok,
+			array(
+				'requestId' => $missing_request_id,
+				'key'       => self::describe_string( $key ),
+				'actual'    => self::describe_call( $actual ),
 			)
 		);
 	}

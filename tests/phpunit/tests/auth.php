@@ -993,6 +993,11 @@ class Tests_Auth extends WP_UnitTestCase {
 		$check = wp_validate_user_request_key( $request_id, '' );
 		$this->assertWPError( $check );
 		$this->assertSame( 'missing_key', $check->get_error_code() );
+
+		// A missing request should fail closed.
+		$check = wp_validate_user_request_key( 0, $key );
+		$this->assertWPError( $check );
+		$this->assertSame( 'invalid_request', $check->get_error_code() );
 	}
 
 	/**
