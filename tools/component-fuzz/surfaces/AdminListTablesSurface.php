@@ -32,6 +32,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_posts_media_tables( $ctx->fork( 'posts-media' ) );
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
+			$rows[] = self::check_network_themes_table( $ctx->fork( 'network-themes' ) );
 			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
 			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
 			$rows[] = self::check_network_tables( $ctx->fork( 'network-tables' ) );
@@ -98,7 +99,9 @@ final class AdminListTablesSurface {
 				'wp_create_nonce',
 				'wp_get_current_user',
 				'wp_get_theme',
+				'wp_get_themes',
 				'wp_insert_user',
+				'wp_is_auto_update_enabled_for_type',
 				'wp_nonce_url',
 				'wp_strip_all_tags',
 			) as $function
@@ -1166,6 +1169,313 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function check_network_themes_table( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$filters         = array();
+		$current_user    = self::synthetic_user( $ctx->fork( 'current-user' ), 54800, 'network-themes' );
+		$screen          = self::screen( 'themes-network' );
+		$enabled_slug    = 'cfz-network-enabled';
+		$disabled_slug   = 'cfz-network-secondary';
+		$theme_root      = trailingslashit( WP_CONTENT_DIR ) . 'themes';
+		$enabled_dir     = trailingslashit( $theme_root ) . $enabled_slug;
+		$disabled_dir    = trailingslashit( $theme_root ) . $disabled_slug;
+		$hostile_label   = self::hostile_label( $ctx->fork( 'network-theme-label' ) );
+		$custom_events   = array();
+		$result          = array();
+		$filters_removed = false;
+
+		$all_themes_filter = static function ( array $themes ) use ( $disabled_slug, $enabled_slug, $theme_root ): array {
+			unset( $themes );
+
+			return array(
+				$enabled_slug  => \wp_get_theme( $enabled_slug, $theme_root ),
+				$disabled_slug => \wp_get_theme( $disabled_slug, $theme_root ),
+			);
+		};
+		$allowed_themes_filter = static function () use ( $enabled_slug ): array {
+			return array( $enabled_slug => true );
+		};
+		$update_themes_filter = static function () use ( $disabled_slug, $enabled_slug ) {
+			return (object) array(
+				'last_checked' => 1763980800,
+				'checked'      => array(
+					$enabled_slug  => '1.0.0',
+					$disabled_slug => '1.0.0',
+				),
+				'response'     => array(
+					$disabled_slug => (object) array(
+						'theme'        => $disabled_slug,
+						'new_version'  => '9.9.9',
+						'url'          => 'https://example.test/themes/update/' . rawurlencode( $disabled_slug ),
+						'package'      => '',
+						'requires'     => '6.0',
+						'requires_php' => PHP_VERSION,
+					),
+				),
+				'no_update'    => array(
+					$enabled_slug => (object) array(
+						'theme'        => $enabled_slug,
+						'new_version'  => '1.0.0',
+						'url'          => 'https://example.test/themes/current/' . rawurlencode( $enabled_slug ),
+						'package'      => '',
+						'requires'     => '6.0',
+						'requires_php' => PHP_VERSION,
+					),
+				),
+			);
+		};
+		$auto_update_themes_filter = static function () use ( $enabled_slug ): array {
+			return array( $enabled_slug );
+		};
+		$themes_auto_update_filter = static function (): bool {
+			return true;
+		};
+		$columns_filter = static function ( array $columns ) use ( $hostile_label ): array {
+			$columns['cfz_ms_theme'] = \esc_html( 'Generated Network Theme ' . $hostile_label );
+			return $columns;
+		};
+		$custom_column_action = static function ( string $column_name, string $stylesheet, \WP_Theme $theme ) use ( &$custom_events ): void {
+			$custom_events[] = array(
+				'column'     => $column_name,
+				'stylesheet' => $stylesheet,
+				'name'       => $theme->get( 'Name' ),
+			);
+
+			if ( 'cfz_ms_theme' === $column_name ) {
+				echo '<span class="cfz-ms-theme" data-theme="' . \esc_attr( $stylesheet ) . '">' . \esc_html( $theme->get( 'Name' ) ) . '</span>';
+			}
+		};
+		$active_theme_filter = static function (): string {
+			return 'cfz-active-theme-not-under-test';
+		};
+		$cap_filter = self::cap_filter(
+			array(
+				'delete_themes',
+				'manage_network_themes',
+				'read',
+				'update_themes',
+			)
+		);
+
+		self::add_filter_record( $filters, 'all_themes', $all_themes_filter, 10, 1 );
+		self::add_filter_record( $filters, 'allowed_themes', $allowed_themes_filter, 10, 1 );
+		self::add_filter_record( $filters, 'pre_site_transient_update_themes', $update_themes_filter, 10, 1 );
+		self::add_filter_record( $filters, 'pre_site_option_auto_update_themes', $auto_update_themes_filter, 10, 3 );
+		self::add_filter_record( $filters, 'themes_auto_update_enabled', $themes_auto_update_filter, 10, 1 );
+		self::add_filter_record( $filters, "manage_{$screen->id}_columns", $columns_filter, 10, 1 );
+		self::add_filter_record( $filters, 'manage_themes_custom_column', $custom_column_action, 10, 3 );
+		self::add_filter_record( $filters, 'pre_option_stylesheet', $active_theme_filter, 10, 3 );
+		self::add_filter_record( $filters, 'pre_option_template', $active_theme_filter, 10, 3 );
+		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
+
+		try {
+			self::write_theme_fixture( $enabled_dir, 'Network Enabled ' . $hostile_label );
+			self::write_theme_fixture( $disabled_dir, 'Network Disabled ' . $hostile_label );
+			\register_theme_directory( $theme_root );
+			\search_theme_directories( true );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['pagenow']      = 'themes.php';
+			$GLOBALS['status']       = 'all';
+			$GLOBALS['page']         = 1;
+			$GLOBALS['s']            = '';
+			$_GET                    = array(
+				'theme_status' => 'all',
+				'orderby'      => 'name',
+				'order'        => 'asc',
+				'paged'        => 1,
+			);
+			$_POST                   = array();
+			$_REQUEST                = $_GET;
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/network/themes.php';
+			$_SERVER['REQUEST_URI']  = '/wp-admin/network/themes.php?theme_status=all&orderby=name&order=asc';
+
+			$table = self::list_table( 'WP_MS_Themes_List_Table', $screen );
+			$table->prepare_items();
+
+			$column_info  = $table->get_column_info();
+			$bulk         = self::invoke( $table, 'get_bulk_actions' );
+			$views        = self::invoke( $table, 'get_views' );
+			$row          = self::capture(
+				static function () use ( $table ): void {
+					$table->display_rows();
+				}
+			);
+			$ajax_allowed = $table->ajax_user_can();
+			$ajax_denied  = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen ) {
+					$table = self::list_table( 'WP_MS_Themes_List_Table', $screen );
+					return $table->ajax_user_can();
+				}
+			);
+
+			$result = compact(
+				'ajax_denied',
+				'ajax_allowed',
+				'bulk',
+				'column_info',
+				'custom_events',
+				'disabled_slug',
+				'enabled_slug',
+				'row',
+				'table',
+				'views'
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_removed = self::filters_removed( $filters );
+			self::remove_theme_fixture( $enabled_dir );
+			self::remove_theme_fixture( $disabled_dir );
+			\search_theme_directories( true );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+		}
+
+		$column_info   = $result['column_info'] ?? array();
+		$columns       = $column_info[0] ?? array();
+		$sortable      = $column_info[2] ?? array();
+		$primary       = $column_info[3] ?? null;
+		$row           = (string) ( $result['row'] ?? '' );
+		$views_html    = implode( '', $result['views'] ?? array() );
+		$enabled_slug  = (string) ( $result['enabled_slug'] ?? $enabled_slug );
+		$disabled_slug = (string) ( $result['disabled_slug'] ?? $disabled_slug );
+		$is_multisite  = \is_multisite();
+		$custom_columns = array_values( array_unique( array_column( $custom_events, 'column' ) ) );
+		$custom_stylesheets = array_values( array_unique( array_column( $custom_events, 'stylesheet' ) ) );
+		$expected_custom_stylesheets = array( $disabled_slug, $enabled_slug );
+		$expected_view_keys = array( 'all', 'enabled', 'upgrade', 'auto-update-enabled', 'auto-update-disabled' );
+		if ( $is_multisite ) {
+			$expected_view_keys[] = 'disabled';
+		}
+		sort( $custom_stylesheets );
+		sort( $expected_custom_stylesheets );
+
+		self::collect_failure(
+			$failures,
+			2 === count( $result['table']->items ?? array() )
+				&& isset( $result['table']->items[ $enabled_slug ], $result['table']->items[ $disabled_slug ] )
+				&& 2 === ( $result['table']->get_pagination_arg( 'total_items' ) ?? null )
+				&& 1 === ( $result['table']->get_pagination_arg( 'total_pages' ) ?? null )
+				&& array() === array_diff( $expected_view_keys, array_keys( $result['views'] ?? array() ) ),
+			'network themes prepare_items partitions generated allowed, upgrade, and auto-update fixtures',
+			array(
+				'expectedViewKeys' => $expected_view_keys,
+				'itemKeys'         => array_keys( $result['table']->items ?? array() ),
+				'isMultisite'      => $is_multisite,
+				'views'            => $result['views'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::stable_column_ids( $columns )
+				&& isset( $columns['cb'], $columns['name'], $columns['description'], $columns['auto-updates'], $columns['cfz_ms_theme'] )
+				&& isset( $sortable['name'] )
+				&& 'name' === $primary
+				&& $expected_custom_stylesheets === $custom_stylesheets
+				&& array( 'cfz_ms_theme' ) === $custom_columns,
+			'network themes columns, sortable primary column, and custom-column dispatch are stable',
+			array(
+				'columnInfo'        => $column_info,
+				'customColumns'     => $custom_columns,
+				'customEvents'      => $custom_events,
+				'customStylesheets' => $custom_stylesheets,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset(
+				$result['bulk']['enable-selected'],
+				$result['bulk']['disable-selected'],
+				$result['bulk']['update-selected'],
+				$result['bulk']['delete-selected'],
+				$result['bulk']['enable-auto-update-selected'],
+				$result['bulk']['disable-auto-update-selected']
+			)
+				&& false === ( $result['ajax_denied'] ?? null )
+				&& true === ( $result['ajax_allowed'] ?? null ),
+			'network themes bulk actions and ajax capability gates respect synthetic capabilities',
+			array(
+				'ajaxAllowed' => $result['ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['ajax_denied'] ?? null,
+				'bulk'        => $result['bulk'] ?? array(),
+			)
+		);
+
+		$enable_disabled_nonce  = \wp_create_nonce( 'enable-theme_' . $disabled_slug );
+		$disable_enabled_nonce  = \wp_create_nonce( 'disable-theme_' . $enabled_slug );
+		$disable_disabled_nonce = \wp_create_nonce( 'disable-theme_' . $disabled_slug );
+		$delete_nonce           = \wp_create_nonce( 'bulk-themes' );
+		$updates_nonce          = \wp_create_nonce( 'updates' );
+		$disabled_theme_action  = $is_multisite
+			? str_contains( $row, 'action=enable' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $disabled_slug ) )
+				&& str_contains( $row, '_wpnonce=' . $enable_disabled_nonce )
+				&& str_contains( $row, 'action=delete-selected' )
+				&& str_contains( $row, '_wpnonce=' . $delete_nonce )
+			: str_contains( $row, 'action=disable' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $disabled_slug ) )
+				&& str_contains( $row, '_wpnonce=' . $disable_disabled_nonce )
+				&& ! str_contains( $row, 'action=delete-selected' );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $row, 'data-slug="' . \esc_attr( $enabled_slug ) . '"' )
+				&& str_contains( $row, 'data-slug="' . \esc_attr( $disabled_slug ) . '"' )
+				&& str_contains( $row, 'name="checked[]"' )
+				&& str_contains( $row, 'action=disable' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $enabled_slug ) )
+				&& str_contains( $row, '_wpnonce=' . $disable_enabled_nonce )
+				&& $disabled_theme_action
+				&& str_contains( $row, 'action=enable-auto-update' )
+				&& str_contains( $row, 'action=disable-auto-update' )
+				&& str_contains( $row, '_wpnonce=' . $updates_nonce )
+				&& str_contains( $row, 'cfz-ms-theme' )
+				&& self::html_has_no_raw_script( $row . $views_html ),
+			'network theme row actions render exact generated theme URLs, nonces, auto-update controls, custom cells, and escaped metadata',
+			array(
+				'containsCheckbox'            => str_contains( $row, 'name="checked[]"' ),
+				'containsCustomCell'          => str_contains( $row, 'cfz-ms-theme' ),
+				'containsDisabledThemeAction' => $disabled_theme_action,
+				'containsDisabledDisableNonce' => str_contains( $row, '_wpnonce=' . $disable_disabled_nonce ),
+				'containsDisabledEnableNonce' => str_contains( $row, '_wpnonce=' . $enable_disabled_nonce ),
+				'containsDisabledSlug'        => str_contains( $row, 'data-slug="' . \esc_attr( $disabled_slug ) . '"' ),
+				'containsEnableAutoUpdate'    => str_contains( $row, 'action=enable-auto-update' ),
+				'containsEnabledDisableNonce' => str_contains( $row, '_wpnonce=' . $disable_enabled_nonce ),
+				'containsEnabledSlug'         => str_contains( $row, 'data-slug="' . \esc_attr( $enabled_slug ) . '"' ),
+				'containsDisableAutoUpdate'   => str_contains( $row, 'action=disable-auto-update' ),
+				'containsDeleteNonce'         => str_contains( $row, '_wpnonce=' . $delete_nonce ),
+				'containsUpdatesNonce'        => str_contains( $row, '_wpnonce=' . $updates_nonce ),
+				'isMultisite'                 => $is_multisite,
+				'rowNoScript'                 => self::html_has_no_raw_script( $row ),
+				'viewsNoScript'               => self::html_has_no_raw_script( $views_html ),
+				'row'                         => self::describe_string( $row ),
+				'rowScriptContext'            => self::raw_script_context( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'network theme fixture, option, column, update, auto-update, and capability filters are removed',
+			array( 'filtersRemoved' => $filters_removed )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.network-themes.generated-actions-nonces-columns',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
+			)
+		);
+	}
+
 	private static function check_application_passwords_table( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures         = array();
 		$filters          = array();
@@ -1729,6 +2039,7 @@ final class AdminListTablesSurface {
 					'WP_Plugins_List_Table',
 					'WP_Themes_List_Table',
 					'WP_Application_Passwords_List_Table',
+					'WP_MS_Themes_List_Table',
 					'WP_MS_Sites_List_Table',
 					'WP_MS_Users_List_Table',
 				),
@@ -1737,7 +2048,6 @@ final class AdminListTablesSurface {
 					'WP_Privacy_Data_Removal_Requests_List_Table',
 					'WP_Plugin_Install_List_Table',
 					'WP_Theme_Install_List_Table',
-					'WP_MS_Themes_List_Table',
 				),
 			)
 		);
