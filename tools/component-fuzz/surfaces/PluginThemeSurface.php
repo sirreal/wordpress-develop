@@ -35,6 +35,7 @@ final class PluginThemeSurface {
 			$rows[] = self::check_plugin_headers( $ctx, $case );
 			$rows[] = self::check_plugin_path_helpers( $ctx, $case );
 			$rows[] = self::check_plugin_dependency_metadata( $ctx, $case );
+			$rows[] = self::check_plugin_dependency_public_contracts( $ctx, $case );
 			$rows[] = self::check_theme_headers_and_relationships( $ctx, $case );
 			$rows[] = self::check_active_theme_file_helpers( $ctx, $case );
 			$rows[] = self::check_theme_error_paths( $ctx, $case );
@@ -103,6 +104,7 @@ final class PluginThemeSurface {
 				'wp_cache_delete',
 				'is_wp_error',
 				'add_filter',
+				'remove_filter',
 				'wp_normalize_path',
 			) as $function
 		) {
@@ -360,7 +362,13 @@ final class PluginThemeSurface {
 
 		$initialize = self::call(
 			static function () {
-				\WP_Plugin_Dependencies::initialize();
+				self::with_plugin_dependencies_screen(
+					false,
+					'component-fuzz.php',
+					static function (): void {
+						\WP_Plugin_Dependencies::initialize();
+					}
+				);
 				return true;
 			}
 		);
@@ -480,6 +488,323 @@ final class PluginThemeSurface {
 				'dependency' => $case['dependencies']['dependencySlug'],
 			)
 		);
+	}
+
+	private static function check_plugin_dependency_public_contracts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$dependencies   = $case['dependencies'];
+		$active_plugins = array();
+		$network_active = array();
+		$slug_filter    = static function ( string $slug ) use ( $dependencies ): string {
+			if ( $slug === $dependencies['aliasSlug'] ) {
+				return $dependencies['dependencySlug'];
+			}
+
+			return $slug;
+		};
+		$active_filter  = static function ( $pre_option = false ) use ( &$active_plugins ): array {
+			unset( $pre_option );
+			return $active_plugins;
+		};
+		$network_filter = static function ( $pre_option = false ) use ( &$network_active ): array {
+			unset( $pre_option );
+			return $network_active;
+		};
+
+		self::reset_plugin_dependency_state();
+		\wp_cache_set( 'plugins', array( '' => $case['dependencyPlugins'] ), 'plugins' );
+		\add_filter( 'wp_plugin_dependencies_slug', $slug_filter );
+		\add_filter( 'pre_option_active_plugins', $active_filter );
+		\add_filter( 'pre_site_option_active_sitewide_plugins', $network_filter );
+
+		$failures = array();
+
+		try {
+			$initialize = self::call(
+				static function () {
+					self::with_plugin_dependencies_screen(
+						false,
+						'component-fuzz.php',
+						static function (): void {
+							\WP_Plugin_Dependencies::initialize();
+						}
+					);
+					return true;
+				}
+			);
+
+			if ( $initialize['threw'] ) {
+				self::record_failure(
+					$failures,
+					'WP_Plugin_Dependencies.initialize.public-contracts.no-throw',
+					array( 'call' => self::describe_call( $initialize ) )
+				);
+			} else {
+				self::with_plugin_dependencies_screen(
+					false,
+					'component-fuzz.php',
+					static function () use ( &$failures, $case, &$active_plugins, &$network_active ): void {
+						self::assert_plugin_dependency_public_contracts( $failures, $case, $active_plugins, $network_active );
+					}
+				);
+			}
+		} finally {
+			\remove_filter( 'pre_site_option_active_sitewide_plugins', $network_filter );
+			\remove_filter( 'pre_option_active_plugins', $active_filter );
+			\remove_filter( 'wp_plugin_dependencies_slug', $slug_filter );
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme.plugin.dependency-public-contracts',
+			$failures,
+			array(
+				'dependency' => $dependencies['dependencySlug'],
+				'alias'      => $dependencies['aliasSlug'],
+				'addon'      => $dependencies['addonSlug'],
+			)
+		);
+	}
+
+	private static function assert_plugin_dependency_public_contracts(
+		array &$failures,
+		array $case,
+		array &$active_plugins,
+		array &$network_active
+	): void {
+		$plugins         = $case['dependencyPlugins'];
+		$dependencies    = $case['dependencies'];
+		$main_file       = $dependencies['mainFile'];
+		$dependency_file = $dependencies['dependencyFile'];
+		$addon_file      = $dependencies['addonFile'];
+		$dependency_slug = $dependencies['dependencySlug'];
+		$missing_slug    = $dependencies['missingSlug'];
+
+		$addon_dependencies = \WP_Plugin_Dependencies::get_dependencies( $addon_file );
+		if ( array( $dependency_slug ) !== $addon_dependencies ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.slug-filter-sanitizes-and-deduplicates-dependencies',
+				array(
+					'expected' => array( $dependency_slug ),
+					'actual'   => $addon_dependencies,
+					'raw'      => $plugins[ $addon_file ]['RequiresPlugins'],
+				)
+			);
+		}
+
+		$expected_dependents = array( $main_file, $addon_file );
+		$dependents          = \WP_Plugin_Dependencies::get_dependents( $dependency_slug );
+		if ( $expected_dependents !== $dependents ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.get-dependents-preserves-plugin-order',
+				array(
+					'expected' => $expected_dependents,
+					'actual'   => $dependents,
+				)
+			);
+		}
+
+		$expected_dependent_names = array( $plugins[ $addon_file ]['Name'], $plugins[ $main_file ]['Name'] );
+		sort( $expected_dependent_names );
+		$dependent_names = \WP_Plugin_Dependencies::get_dependent_names( $dependency_file );
+		if ( $expected_dependent_names !== $dependent_names ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.get-dependent-names-sorts-names',
+				array(
+					'expected' => $expected_dependent_names,
+					'actual'   => $dependent_names,
+				)
+			);
+		}
+
+		$expected_addon_dependency_names = array(
+			$dependency_slug => $plugins[ $dependency_file ]['Name'],
+		);
+		$addon_dependency_names          = \WP_Plugin_Dependencies::get_dependency_names( $addon_file );
+		if ( $expected_addon_dependency_names !== $addon_dependency_names ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.get-dependency-names-uses-installed-plugin-name-fallback',
+				array(
+					'expected' => $expected_addon_dependency_names,
+					'actual'   => $addon_dependency_names,
+				)
+			);
+		}
+
+		$expected_main_dependency_names = array(
+			$dependency_slug => $plugins[ $dependency_file ]['Name'],
+			$missing_slug    => $missing_slug,
+		);
+		$main_dependency_names          = \WP_Plugin_Dependencies::get_dependency_names( $main_file );
+		if ( $expected_main_dependency_names !== $main_dependency_names ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.get-dependency-names-falls-back-to-missing-slug',
+				array(
+					'expected' => $expected_main_dependency_names,
+					'actual'   => $main_dependency_names,
+				)
+			);
+		}
+
+		if ( false !== \WP_Plugin_Dependencies::get_dependency_data( $dependency_slug ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.get-dependency-data-is-false-without-admin-api-data',
+				array( 'actual' => \WP_Plugin_Dependencies::get_dependency_data( $dependency_slug ) )
+			);
+		}
+
+		$api_data = array(
+			$dependency_slug => array(
+				'name'         => 'API ' . $dependency_slug,
+				'Name'         => 'API ' . $dependency_slug,
+				'slug'         => $dependency_slug,
+				'last_updated' => 'component-fuzz',
+			),
+			$missing_slug    => array(
+				'name'         => 'Repository ' . $missing_slug,
+				'Name'         => 'Repository ' . $missing_slug,
+				'slug'         => $missing_slug,
+				'last_updated' => 'component-fuzz',
+			),
+		);
+		self::with_admin_plugin_dependencies_api_data(
+			$api_data,
+			static function () use ( &$failures, $api_data, $dependency_slug, $missing_slug, $main_file ) {
+				$dependency_data = \WP_Plugin_Dependencies::get_dependency_data( $dependency_slug );
+				if ( $api_data[ $dependency_slug ] !== $dependency_data ) {
+					self::record_failure(
+						$failures,
+						'WP_Plugin_Dependencies.get-dependency-data-returns-seeded-api-data',
+						array(
+							'expected' => $api_data[ $dependency_slug ],
+							'actual'   => $dependency_data,
+						)
+					);
+				}
+
+				$expected_api_names = array(
+					$dependency_slug => $api_data[ $dependency_slug ]['name'],
+					$missing_slug    => $api_data[ $missing_slug ]['name'],
+				);
+				$api_names          = \WP_Plugin_Dependencies::get_dependency_names( $main_file );
+				if ( $expected_api_names !== $api_names ) {
+					self::record_failure(
+						$failures,
+						'WP_Plugin_Dependencies.get-dependency-names-prefers-api-name-data',
+						array(
+							'expected' => $expected_api_names,
+							'actual'   => $api_names,
+						)
+					);
+				}
+			}
+		);
+
+		if ( ! \WP_Plugin_Dependencies::has_unmet_dependencies( $addon_file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.has-unmet-dependencies-detects-installed-inactive-dependency',
+				array( 'plugin' => $addon_file )
+			);
+		}
+
+		if ( \WP_Plugin_Dependencies::has_active_dependents( $dependency_file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.has-active-dependents-false-when-dependents-inactive',
+				array( 'plugin' => $dependency_file )
+			);
+		}
+
+		$active_plugins = array( $dependency_file );
+		if ( \WP_Plugin_Dependencies::has_unmet_dependencies( $addon_file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.has-unmet-dependencies-clears-when-installed-dependency-active',
+				array(
+					'plugin'        => $addon_file,
+					'activePlugins' => $active_plugins,
+				)
+			);
+		}
+
+		if ( ! \WP_Plugin_Dependencies::has_unmet_dependencies( $main_file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.has-unmet-dependencies-preserves-missing-dependency',
+				array(
+					'plugin'        => $main_file,
+					'activePlugins' => $active_plugins,
+					'missing'       => $missing_slug,
+				)
+			);
+		}
+
+		$active_plugins = array( $dependency_file, $addon_file );
+		$network_active = array( $main_file => 1 );
+		if ( ! \WP_Plugin_Dependencies::has_active_dependents( $dependency_file ) ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.has-active-dependents-uses-active-option-state',
+				array(
+					'plugin'        => $dependency_file,
+					'activePlugins' => $active_plugins,
+					'networkActive' => $network_active,
+				)
+			);
+		}
+	}
+
+	private static function with_admin_plugin_dependencies_api_data( array $api_data, callable $callback ): void {
+		$previous_api_data = self::get_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data' );
+		self::set_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data', $api_data );
+
+		try {
+			self::with_plugin_dependencies_screen( true, 'plugins.php', $callback );
+		} finally {
+			self::set_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data', $previous_api_data );
+		}
+	}
+
+	private static function with_plugin_dependencies_screen( bool $is_admin, string $pagenow, callable $callback ) {
+		$pagenow_exists   = array_key_exists( 'pagenow', $GLOBALS );
+		$previous_pagenow = $pagenow_exists ? $GLOBALS['pagenow'] : null;
+		$screen_exists    = array_key_exists( 'current_screen', $GLOBALS );
+		$previous_screen  = $screen_exists ? $GLOBALS['current_screen'] : null;
+
+		$GLOBALS['pagenow']        = $pagenow;
+		$GLOBALS['current_screen'] = new class( $is_admin ) {
+			private $is_admin;
+
+			public function __construct( bool $is_admin ) {
+				$this->is_admin = $is_admin;
+			}
+
+			public function in_admin(): bool {
+				return $this->is_admin;
+			}
+		};
+
+		try {
+			return $callback();
+		} finally {
+			if ( $pagenow_exists ) {
+				$GLOBALS['pagenow'] = $previous_pagenow;
+			} else {
+				unset( $GLOBALS['pagenow'] );
+			}
+
+			if ( $screen_exists ) {
+				$GLOBALS['current_screen'] = $previous_screen;
+			} else {
+				unset( $GLOBALS['current_screen'] );
+			}
+		}
 	}
 
 	private static function check_theme_headers_and_relationships( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
@@ -851,11 +1176,14 @@ final class PluginThemeSurface {
 			'UpdateURI'   => 'https://updates.example.test/themes/' . $parent_slug,
 		);
 
-		$dependency_main_slug = self::dependency_slug( $plugin_slug . '-main' );
-		$dependency_slug      = self::dependency_slug( 'dep-' . $plugin_slug );
-		$missing_slug         = self::dependency_slug( 'missing-' . $plugin_slug );
-		$dependency_main_file = $dependency_main_slug . '/' . $dependency_main_slug . '.php';
-		$dependency_file      = $dependency_slug . '/' . $dependency_slug . '.php';
+		$dependency_main_slug  = self::dependency_slug( $plugin_slug . '-main' );
+		$dependency_slug       = self::dependency_slug( 'dep-' . $plugin_slug );
+		$missing_slug          = self::dependency_slug( 'missing-' . $plugin_slug );
+		$dependency_alias      = self::dependency_slug( 'alias-' . $plugin_slug );
+		$dependency_addon_slug = self::dependency_slug( $plugin_slug . '-addon' );
+		$dependency_main_file  = $dependency_main_slug . '/' . $dependency_main_slug . '.php';
+		$dependency_file       = $dependency_slug . '/' . $dependency_slug . '.php';
+		$dependency_addon_file = $dependency_addon_slug . '/' . $dependency_addon_slug . '.php';
 
 		return array(
 			'tempRoot'           => $temp_root,
@@ -881,6 +1209,11 @@ final class PluginThemeSurface {
 					$dependency_main_slug,
 					'https://example.test/plugins/' . $dependency_slug
 				),
+				$dependency_addon_file => self::plugin_data_for_dependency_case(
+					'Addon ' . $dependency_addon_slug,
+					$dependency_alias . ', bad_slug, ' . $dependency_slug . ', ' . $dependency_alias,
+					'https://example.test/plugins/' . $dependency_addon_slug
+				),
 			),
 			'dependencies'       => array(
 				'mainSlug'       => $dependency_main_slug,
@@ -888,6 +1221,9 @@ final class PluginThemeSurface {
 				'dependencySlug' => $dependency_slug,
 				'dependencyFile' => $dependency_file,
 				'missingSlug'    => $missing_slug,
+				'aliasSlug'      => $dependency_alias,
+				'addonSlug'      => $dependency_addon_slug,
+				'addonFile'      => $dependency_addon_file,
 			),
 			'theme'              => array(
 				'root'                   => $theme_root,

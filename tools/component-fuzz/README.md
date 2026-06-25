@@ -336,7 +336,8 @@ database, network requests, or a configured site.
   priming stability, bulk autoload mutators, lifecycle action payload ordering,
   and safe option-name boundary cases.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
-  validation, no-DB plugin dependency metadata, theme headers, parent/child
+  validation, no-DB plugin dependency metadata, dependency slug/name/API-data
+  fallbacks, active dependency option states, theme headers, parent/child
   relationships, active theme file helpers, screenshots, and broken theme errors.
 - `plugin-theme-lifecycle`: no-network plugin/theme lifecycle coverage over
   generated temp fixtures, including plugin validation and requirement errors,
