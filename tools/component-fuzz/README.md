@@ -116,7 +116,7 @@ database, network requests, or a configured site.
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
   cancellation and same-host replacement cascades, fragment stripping, and
-  query-argument removal contracts.
+  generated query-argument removal and fragment stripping helper matrices.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu

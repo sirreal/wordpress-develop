@@ -39,6 +39,7 @@ final class CanonicalRoutingSurface {
 			$rows[] = self::check_unsafe_redirect_replacement_is_cancelled( $ctx->fork( 'unsafe-filter' ), $case );
 			$rows[] = self::check_trailing_slash_modes( $ctx->fork( 'slashes' ), $case );
 			$rows[] = self::check_canonical_helpers( $ctx->fork( 'helpers' ), $case );
+			$rows[] = self::check_canonical_helper_matrix( $ctx->fork( 'helper-matrix' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'canonical-routing.surface-no-throw',
@@ -114,6 +115,7 @@ final class CanonicalRoutingSurface {
 				'is_404',
 				'is_feed',
 				'redirect_canonical',
+				'remove_query_arg',
 				'remove_filter',
 				'strip_fragment_from_url',
 				'user_trailingslashit',
@@ -588,6 +590,113 @@ final class CanonicalRoutingSurface {
 		);
 	}
 
+	private static function check_canonical_helper_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$base_query = array(
+			'p'             => (string) $ctx->int( 100, 999 ),
+			'page_id'       => (string) $ctx->int( 1000, 1999 ),
+			'attachment_id' => (string) $ctx->int( 2000, 2999 ),
+			'name'          => 'post ' . $case['token'],
+			'empty'         => '',
+			'keep'          => $case['keep'],
+		);
+		$query_string = http_build_query( $base_query, '', '&', PHP_QUERY_RFC3986 );
+
+		$removal_cases = array(
+			array(
+				'label' => 'present-target-keys-survive-by-name',
+				'args'  => array( 'p', 'page_id', 'attachment_id', 'empty' ),
+				'url'   => self::HOME_URL . '/target/?p=999&attachment_id=0&empty=',
+			),
+			array(
+				'label' => 'empty-target-query-removes-all-checked-keys',
+				'args'  => array( 'p', 'page_id', 'attachment_id', 'name' ),
+				'url'   => self::HOME_URL . '/target/?',
+			),
+			array(
+				'label' => 'unrelated-target-query-removes-checked-preserves-other',
+				'args'  => array( 'p', 'page_id', 'attachment_id', 'missing' ),
+				'url'   => self::HOME_URL . '/target/?keep=' . rawurlencode( $case['keep'] ),
+			),
+			array(
+				'label' => 'encoded-values-do-not-affect-presence',
+				'args'  => array( 'name', 'keep', 'empty' ),
+				'url'   => self::HOME_URL . '/target/?name=' . rawurlencode( 'different ' . $case['token'] ) . '&keep=&empty=',
+			),
+		);
+
+		$failures = array();
+		foreach ( $removal_cases as $removal_case ) {
+			$result   = \_remove_qs_args_if_not_in_url( $query_string, $removal_case['args'], $removal_case['url'] );
+			$actual   = self::parse_query_string( $result );
+			$expected = self::expected_query_after_qs_removal( $base_query, $removal_case['args'], $removal_case['url'] );
+
+			if ( $expected !== $actual ) {
+				$failures[] = array(
+					'label'    => $removal_case['label'],
+					'url'      => $removal_case['url'],
+					'args'     => $removal_case['args'],
+					'result'   => $result,
+					'expected' => $expected,
+					'actual'   => $actual,
+				);
+			}
+		}
+
+		$fragment_query = http_build_query(
+			array(
+				'keep' => $case['keep'],
+				'name' => $base_query['name'],
+			),
+			'',
+			'&',
+			PHP_QUERY_RFC3986
+		);
+		$fragment_cases = array(
+			array(
+				'label'    => 'absolute-url-keeps-scheme-port-path-query',
+				'url'      => 'https://example.test:8443/site-base/path?' . $fragment_query . '#frag-' . rawurlencode( $case['token'] ),
+				'expected' => 'https://example.test:8443/site-base/path?' . $fragment_query,
+			),
+			array(
+				'label'    => 'protocol-relative-keeps-host-path-query',
+				'url'      => '//example.test/site-base/path?' . $fragment_query . '#frag',
+				'expected' => '//example.test/site-base/path?' . $fragment_query,
+			),
+			array(
+				'label'    => 'host-only-drops-fragment',
+				'url'      => 'http://example.test#frag-' . rawurlencode( $case['token'] ),
+				'expected' => 'http://example.test',
+			),
+			array(
+				'label'    => 'relative-url-without-host-is-unchanged',
+				'url'      => 'relative/path?' . $fragment_query . '#frag-' . rawurlencode( $case['token'] ),
+				'expected' => 'relative/path?' . $fragment_query . '#frag-' . rawurlencode( $case['token'] ),
+			),
+		);
+
+		foreach ( $fragment_cases as $fragment_case ) {
+			$stripped = \strip_fragment_from_url( $fragment_case['url'] );
+			if ( $fragment_case['expected'] !== $stripped ) {
+				$failures[] = array(
+					'label'    => $fragment_case['label'],
+					'url'      => $fragment_case['url'],
+					'expected' => $fragment_case['expected'],
+					'actual'   => $stripped,
+				);
+			}
+		}
+
+		return $ctx->result(
+			'canonical-routing.helper-query-fragment-matrix',
+			array() === $failures,
+			array(
+				'queryCases'    => count( $removal_cases ),
+				'fragmentCases' => count( $fragment_cases ),
+				'failures'      => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
 	private static function install_option_filters(): void {
 		$options = array(
 			'pre_option_home'                     => array( self::class, 'filter_home' ),
@@ -761,6 +870,34 @@ final class CanonicalRoutingSurface {
 		}
 
 		return $query;
+	}
+
+	private static function parse_query_string( string $query_string ): array {
+		$query = array();
+		parse_str( $query_string, $query );
+
+		return $query;
+	}
+
+	private static function expected_query_after_qs_removal( array $base_query, array $args_to_check, string $url ): array {
+		$parts = parse_url( $url );
+		if ( ! empty( $parts['query'] ) ) {
+			parse_str( $parts['query'], $target_query );
+
+			foreach ( $args_to_check as $arg ) {
+				if ( ! isset( $target_query[ $arg ] ) ) {
+					unset( $base_query[ $arg ] );
+				}
+			}
+
+			return $base_query;
+		}
+
+		foreach ( $args_to_check as $arg ) {
+			unset( $base_query[ $arg ] );
+		}
+
+		return $base_query;
 	}
 
 	private static function path_has_trailing_cleanup_junk( string $path ): bool {
