@@ -104,6 +104,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private $component_fuzz_meta = array();
 		private $component_fuzz_next_ids = array();
 		private $component_fuzz_queries = array();
+		private $component_fuzz_last_found_rows = 0;
 
 		public function __construct( array $options = array() ) {
 			$this->component_fuzz_reset_options( $options );
@@ -167,6 +168,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$this->rows_affected                        = 0;
 			$this->num_rows                             = 0;
 			$this->last_error                           = '';
+			$this->component_fuzz_last_found_rows        = 0;
 		}
 
 		public function component_fuzz_content_counts() {
@@ -251,6 +253,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( preg_match( '/\bSELECT\s+COUNT\(\*\)/i', $this->last_query ) ) {
 				return $this->component_fuzz_count_for_query( $this->last_query );
+			}
+
+			if ( preg_match( '/^\s*SELECT\s+FOUND_ROWS\s*\(\s*\)/i', $this->last_query ) ) {
+				return $this->component_fuzz_last_found_rows;
 			}
 
 			if ( preg_match( '/\bSELECT\s+MAX\(term_group\)\s+FROM\s+`?wp_terms`?/i', $this->last_query ) ) {
@@ -876,15 +882,11 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
-			usort(
-				$rows,
-				static function ( $a, $b ) use ( $query ) {
-					if ( preg_match( '/ORDER\s+BY\s+comment_ID\s+DESC/i', $query ) ) {
-						return (int) $b['comment_ID'] <=> (int) $a['comment_ID'];
-					}
-					return (int) $a['ID'] <=> (int) $b['ID'];
-				}
-			);
+			$rows = $this->component_fuzz_sort_post_rows( $query, array_values( $rows ) );
+
+			if ( preg_match( '/\bSQL_CALC_FOUND_ROWS\b/i', $query ) ) {
+				$this->component_fuzz_last_found_rows = count( $rows );
+			}
 
 			$rows = $this->component_fuzz_apply_limit( $query, $rows );
 
@@ -899,6 +901,40 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			if ( preg_match( '/SELECT\s+ID\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'ID' ) );
 			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_sort_post_rows( $query, array $rows ) {
+			usort(
+				$rows,
+				function ( $a, $b ) use ( $query ) {
+					if ( preg_match( '/ORDER\s+BY\s+FIELD\s*\(\s*(?:`?wp_posts`?\.)?`?ID`?\s*,\s*([^)]+)\)/i', $query, $matches ) ) {
+						$ordered_ids = array_values( array_unique( array_map( 'intval', $this->component_fuzz_csv_values( $matches[1] ) ) ) );
+						$positions   = array_flip( $ordered_ids );
+						$a_position  = $positions[ (int) $a['ID'] ] ?? PHP_INT_MAX;
+						$b_position  = $positions[ (int) $b['ID'] ] ?? PHP_INT_MAX;
+
+						if ( $a_position !== $b_position ) {
+							return $a_position <=> $b_position;
+						}
+					}
+
+					if ( preg_match( '/ORDER\s+BY\s+(?:`?wp_posts`?\.)?`?post_date`?\s+DESC/i', $query ) ) {
+						$comparison = strcmp( (string) $b['post_date'], (string) $a['post_date'] );
+						if ( 0 !== $comparison ) {
+							return $comparison;
+						}
+						return (int) $b['ID'] <=> (int) $a['ID'];
+					}
+
+					if ( preg_match( '/ORDER\s+BY\s+(?:`?wp_posts`?\.)?`?ID`?\s+DESC/i', $query ) ) {
+						return (int) $b['ID'] <=> (int) $a['ID'];
+					}
+
+					return (int) $a['ID'] <=> (int) $b['ID'];
+				}
+			);
 
 			return $rows;
 		}

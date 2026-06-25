@@ -659,6 +659,17 @@ final class QuerySurface {
 			);
 		}
 
+		$cache_snapshot = self::object_cache_group_snapshot( 'post-queries' );
+		if ( empty( $cache_snapshot['supported'] ) ) {
+			return array(
+				$ctx->skip(
+					'query.wp-query.cache-hit-reuses-seeded-results',
+					'Object cache group state cannot be restored after the cache-hit check.',
+					array( 'group' => 'post-queries' )
+				),
+			);
+		}
+
 		$case = array(
 			'label'     => 'seeded-wp-query-cache-hit',
 			'queryVars' => array(
@@ -675,29 +686,36 @@ final class QuerySurface {
 				'update_post_term_cache' => false,
 			),
 			'expect'    => array(
-				'postIds' => array( 3, 7 ),
+				'postIds' => array( 7, 3 ),
 			),
 		);
 
-		\wp_cache_flush_group( 'post-queries' );
+		$first  = array( 'ok' => false, 'value' => null );
+		$second = array( 'ok' => false, 'value' => null );
 
-		$first = self::call_guarded(
-			static function () use ( $case ) {
-				return self::wp_query_execution_observation( $case );
-			}
-		);
-		$second = self::call_guarded(
-			static function () use ( $case ) {
-				return self::wp_query_execution_observation( $case );
-			}
-		);
+		try {
+			\wp_cache_flush_group( 'post-queries' );
+
+			$first = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_execution_observation( $case );
+				}
+			);
+			$second = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_execution_observation( $case );
+				}
+			);
+		} finally {
+			self::restore_object_cache_group_snapshot( 'post-queries', $cache_snapshot );
+		}
 
 		$ok = $first['ok']
 			&& $second['ok']
 			&& self::is_wp_query_execution_observation( $first['value'] )
 			&& self::is_wp_query_execution_observation( $second['value'] )
-			&& array( 3, 7 ) === $first['value']['postIds']
-			&& array( 3, 7 ) === $second['value']['postIds']
+			&& array( 7, 3 ) === $first['value']['postIds']
+			&& array( 7, 3 ) === $second['value']['postIds']
 			&& $first['value']['queryCountDelta'] > 0
 			&& 0 === $second['value']['queryCountDelta']
 			&& self::wp_query_execution_observations_match( $first['value'], $second['value'] );
@@ -1640,7 +1658,7 @@ final class QuerySurface {
 				),
 				'expect'    => array(
 					'contains' => array( 'wp_posts.ID IN', 'FIELD(' ),
-					'postIds'  => array( 3, 7 ),
+					'postIds'  => array( 7, 3 ),
 				),
 			),
 			array(
@@ -1650,13 +1668,14 @@ final class QuerySurface {
 					array(
 						'fields'         => 'ids',
 						'post__in'       => array( 3, 7, 23 ),
+						'post_status'    => 'publish',
 						'post_type'      => 'post',
 						'posts_per_page' => -1,
 					)
 				),
 				'expect'    => array(
 					'contains' => array( 'wp_posts.ID', 'FROM wp_posts' ),
-					'postIds'  => array( 3, 7, 23 ),
+					'postIds'  => array( 23, 7, 3 ),
 				),
 			),
 			array(
@@ -1667,13 +1686,14 @@ final class QuerySurface {
 						'fields'         => 'ids',
 						'offset'         => 1,
 						'post__in'       => array( 3, 7, 23 ),
+						'post_status'    => 'publish',
 						'post_type'      => 'post',
 						'posts_per_page' => 2,
 					)
 				),
 				'expect'    => array(
 					'contains' => array( 'LIMIT 1, 2' ),
-					'postIds'  => array( 7, 23 ),
+					'postIds'  => array( 7, 3 ),
 				),
 			),
 			array(
@@ -1684,16 +1704,17 @@ final class QuerySurface {
 						'fields'         => 'ids',
 						'no_found_rows'  => false,
 						'post__in'       => array( 3, 7, 23 ),
+						'post_status'    => 'publish',
 						'post_type'      => 'post',
 						'posts_per_page' => 2,
 					)
 				),
 				'expect'    => array(
 					'contains'            => array( 'SQL_CALC_FOUND_ROWS', 'LIMIT 0, 2' ),
-					'foundPosts'          => 0,
+					'foundPosts'          => 3,
 					'foundRowsQueryCount' => 1,
-					'maxNumPages'         => 0,
-					'postIds'             => array( 3, 7 ),
+					'maxNumPages'         => 2,
+					'postIds'             => array( 23, 7 ),
 				),
 			),
 			array(
@@ -2621,7 +2642,8 @@ final class QuerySurface {
 		return '' !== $sql
 			&& str_contains( $sql, 'wp_posts' )
 			&& self::sql_string_is_balanced( $sql )
-			&& self::sql_has_no_unexpanded_placeholders( $sql );
+			&& self::sql_has_no_unexpanded_placeholders( $sql )
+			&& self::sql_has_no_empty_condition_groups( $sql );
 	}
 
 	private static function wp_query_recorded_sql_is_safe( array $queries ): bool {
@@ -2729,6 +2751,15 @@ final class QuerySurface {
 		return 1 === preg_match( '/\bLIMIT\s+\d+(?:\s*,\s*\d+)?\b/i', $sql );
 	}
 
+	private static function sql_has_no_empty_condition_groups( string $sql ): bool {
+		$sql_without_strings = preg_replace( "/'(?:''|\\\\'|[^'])*'/", "''", $sql );
+		if ( ! is_string( $sql_without_strings ) ) {
+			return false;
+		}
+
+		return 0 === preg_match( '/(?<![A-Za-z0-9_])\(\s*\)/', $sql_without_strings );
+	}
+
 	private static function found_rows_query_count( array $queries ): int {
 		$count = 0;
 		foreach ( $queries as $query ) {
@@ -2786,6 +2817,51 @@ final class QuerySurface {
 		};
 
 		return $query->component_fuzz_cache_key( $args, $sql );
+	}
+
+	private static function object_cache_group_snapshot( string $group ): array {
+		$object_cache = $GLOBALS['wp_object_cache'] ?? null;
+		if ( ! is_object( $object_cache ) || ! property_exists( $object_cache, 'cache' ) ) {
+			return array( 'supported' => false );
+		}
+
+		$property = new \ReflectionProperty( $object_cache, 'cache' );
+		$cache    = $property->getValue( $object_cache );
+		if ( ! is_array( $cache ) ) {
+			return array( 'supported' => false );
+		}
+
+		return array(
+			'supported' => true,
+			'exists'    => array_key_exists( $group, $cache ),
+			'value'     => $cache[ $group ] ?? null,
+		);
+	}
+
+	private static function restore_object_cache_group_snapshot( string $group, array $snapshot ): void {
+		if ( empty( $snapshot['supported'] ) ) {
+			return;
+		}
+
+		$object_cache = $GLOBALS['wp_object_cache'] ?? null;
+		if ( ! is_object( $object_cache ) || ! property_exists( $object_cache, 'cache' ) ) {
+			return;
+		}
+
+		$property = new \ReflectionProperty( $object_cache, 'cache' );
+		$cache    = $property->getValue( $object_cache );
+		if ( ! is_array( $cache ) ) {
+			return;
+		}
+
+		if ( ! empty( $snapshot['exists'] ) ) {
+			$cache[ $group ] = $snapshot['value'];
+			$property->setValue( $object_cache, $cache );
+			return;
+		}
+
+		unset( $cache[ $group ] );
+		$property->setValue( $object_cache, $cache );
 	}
 
 	private static function post_ids_from_results( $posts ): array {
