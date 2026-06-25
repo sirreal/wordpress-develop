@@ -37,6 +37,7 @@ final class MediaEditorSurface {
 			$rows[] = self::check_output_format_filters( $ctx->fork( 'output-format' ) );
 			$rows[] = self::check_editor_selection_filters( $ctx->fork( 'editor-selection' ) );
 			$rows[] = self::check_attachment_metadata_helpers( $ctx->fork( 'attachment-helpers' ), $temp_root );
+			$rows[] = self::check_abstract_editor_contracts( $ctx->fork( 'abstract-editor' ), $temp_root );
 
 			if ( null === $temp_root ) {
 				$rows[] = $ctx->skip(
@@ -230,6 +231,383 @@ final class MediaEditorSurface {
 			'media-editor.editor-selection.filters-supports',
 			array() === $failures,
 			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_abstract_editor_contracts( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {
+		$failures        = array();
+		$base_dir        = $temp_root ?? sys_get_temp_dir();
+		$source_mime     = $ctx->choice( array( 'image/jpeg', 'image/png' ) );
+		$output_mime     = ( 'image/jpeg' === $source_mime ) ? 'image/webp' : 'image/jpeg';
+		$source_ext      = self::extension_for_mime( $source_mime );
+		$output_ext      = self::extension_for_mime( $output_mime );
+		$width           = $ctx->int( 48, 512 );
+		$height          = $ctx->int( 48, 512 );
+		$source_name     = self::safe_image_basename( 'abstract source ' . $ctx->filename(), $source_ext );
+		$target_name     = self::safe_image_basename( 'abstract output ' . $ctx->filename(), $source_ext );
+		$source_file     = $base_dir . DIRECTORY_SEPARATOR . $source_name;
+		$target_file     = $base_dir . DIRECTORY_SEPARATOR . $target_name;
+		$editor          = self::make_fake_image_editor(
+			$source_file,
+			$source_mime,
+			array(
+				'width'  => $width,
+				'height' => $height,
+			)
+		);
+		$quality_values  = array(
+			'image/jpeg' => 79,
+			'image/png'  => 83,
+			'image/webp' => 91,
+		);
+		$default_quality = array(
+			'image/jpeg' => 82,
+			'image/png'  => 82,
+			'image/webp' => 86,
+		);
+		$quality_calls   = array();
+		$jpeg_calls      = array();
+		$output_calls    = array();
+
+		$output_filter = static function ( array $formats, string $filename, string $mime_type ) use ( &$output_calls, $source_mime, $output_mime ): array {
+			$output_calls[] = array(
+				'filename' => $filename,
+				'mime'     => $mime_type,
+			);
+
+			if ( $source_mime === $mime_type ) {
+				$formats[ $source_mime ] = $output_mime;
+			}
+
+			return $formats;
+		};
+		$quality_filter = static function ( $quality, string $mime_type, array $size ) use ( &$quality_calls, $quality_values ) {
+			$quality_calls[] = array(
+				'quality' => $quality,
+				'mime'    => $mime_type,
+				'size'    => $size,
+			);
+
+			return $quality_values[ $mime_type ] ?? $quality;
+		};
+		$jpeg_filter    = static function ( $quality, string $context ) use ( &$jpeg_calls ): int {
+			$jpeg_calls[] = array(
+				'quality' => $quality,
+				'context' => $context,
+			);
+
+			return max( 1, $quality - 5 );
+		};
+
+		$output_filter_active = false;
+		\add_filter( 'image_editor_output_format', $output_filter, 10, 3 );
+		\add_filter( 'wp_editor_set_quality', $quality_filter, 10, 3 );
+		\add_filter( 'jpeg_quality', $jpeg_filter, 10, 2 );
+		$output_filter_active = true;
+
+		try {
+			$converted_format         = $editor->component_fuzz_get_output_format( $target_file, $source_mime );
+			$quality_after_conversion = $editor->get_quality();
+
+			\remove_filter( 'image_editor_output_format', $output_filter, 10 );
+			$output_filter_active = false;
+
+			$reset_format         = $editor->component_fuzz_get_output_format( $target_file, $source_mime );
+			$quality_after_reset  = $editor->get_quality();
+		} finally {
+			if ( $output_filter_active ) {
+				\remove_filter( 'image_editor_output_format', $output_filter, 10 );
+			}
+			\remove_filter( 'wp_editor_set_quality', $quality_filter, 10 );
+			\remove_filter( 'jpeg_quality', $jpeg_filter, 10 );
+		}
+
+		$quality_filters_gone = false === \has_filter( 'wp_editor_set_quality', $quality_filter )
+			&& false === \has_filter( 'jpeg_quality', $jpeg_filter )
+			&& false === \has_filter( 'image_editor_output_format', $output_filter );
+
+		$quality_mimes        = array_column( $quality_calls, 'mime' );
+		$quality_defaults     = array_column( $quality_calls, 'quality' );
+		$expected_mimes       = array( $output_mime, $source_mime );
+		$expected_defaults    = array( $default_quality[ $output_mime ], $default_quality[ $source_mime ] );
+		$expected_conversion  = ( 'image/jpeg' === $output_mime ) ? 74 : $quality_values[ $output_mime ];
+		$expected_reset       = ( 'image/jpeg' === $source_mime ) ? 74 : $quality_values[ $source_mime ];
+		$quality_sizes_match  = true;
+		foreach ( $quality_calls as $call ) {
+			$quality_sizes_match = $quality_sizes_match
+				&& array(
+					'width'  => $width,
+					'height' => $height,
+				) === $call['size'];
+		}
+
+		self::collect_failure(
+			$failures,
+			self::same_path( self::replace_file_extension( $target_file, $output_ext ), $converted_format[0] ?? '' )
+				&& $output_ext === ( $converted_format[1] ?? null )
+				&& $output_mime === ( $converted_format[2] ?? null )
+				&& self::same_path( $target_file, $reset_format[0] ?? '' )
+				&& $source_ext === ( $reset_format[1] ?? null )
+				&& $source_mime === ( $reset_format[2] ?? null )
+				&& array( $source_mime ) === array_column( $output_calls, 'mime' )
+				&& $expected_mimes === $quality_mimes
+				&& $expected_defaults === $quality_defaults
+				&& $expected_conversion === $quality_after_conversion
+				&& $expected_reset === $quality_after_reset
+				&& 1 === count( $jpeg_calls )
+				&& 79 === ( $jpeg_calls[0]['quality'] ?? null )
+				&& 'image_resize' === ( $jpeg_calls[0]['context'] ?? null )
+				&& $quality_sizes_match
+				&& $quality_filters_gone,
+			'abstract editor output format conversion/reset updates filenames, mime type, and quality filters deterministically',
+			array(
+				'sourceMime'             => $source_mime,
+				'outputMime'             => $output_mime,
+				'targetFile'             => $target_file,
+				'convertedFormat'        => $converted_format ?? null,
+				'resetFormat'            => $reset_format ?? null,
+				'outputCalls'            => $output_calls,
+				'qualityCalls'           => $quality_calls,
+				'jpegCalls'              => $jpeg_calls,
+				'qualityAfterConversion' => $quality_after_conversion ?? null,
+				'qualityAfterReset'      => $quality_after_reset ?? null,
+				'qualityFiltersGone'     => $quality_filters_gone,
+			)
+		);
+
+		$source_base       = \wp_basename( $source_file, '.' . $source_ext );
+		$source_dir        = pathinfo( $source_file, PATHINFO_DIRNAME );
+		$dest_dir          = realpath( $base_dir ) ?: $source_dir;
+		$custom_suffix     = 'cf-' . $ctx->identifier( 2, 8 );
+		$default_filename  = $editor->generate_filename();
+		$empty_filename    = $editor->generate_filename( '', null, strtoupper( $output_ext ) );
+		$custom_filename   = $editor->generate_filename( $custom_suffix, $base_dir, $output_ext );
+		$expected_default  = trailingslashit( $source_dir ) . "{$source_base}-{$width}x{$height}.{$source_ext}";
+		$expected_empty    = trailingslashit( $source_dir ) . "{$source_base}.{$output_ext}";
+		$expected_custom   = trailingslashit( $dest_dir ) . "{$source_base}-{$custom_suffix}.{$output_ext}";
+		$fallback_file     = $base_dir . DIRECTORY_SEPARATOR . self::safe_image_basename( 'abstract fallback ' . $ctx->filename(), 'gif' );
+		$fallback_editor   = self::make_fake_image_editor(
+			$source_file,
+			$source_mime,
+			array(
+				'width'  => $width,
+				'height' => $height,
+			)
+		);
+		$default_calls     = array();
+		$default_filter    = static function ( string $mime_type ) use ( &$default_calls ): string {
+			$default_calls[] = $mime_type;
+			return 'image/png';
+		};
+
+		\add_filter( 'image_editor_default_mime_type', $default_filter );
+		try {
+			$fallback_format = $fallback_editor->component_fuzz_get_output_format( $fallback_file, 'image/gif' );
+		} finally {
+			\remove_filter( 'image_editor_default_mime_type', $default_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::same_path( $expected_default, $default_filename )
+				&& self::same_path( $expected_empty, $empty_filename )
+				&& self::same_path( $expected_custom, $custom_filename )
+				&& ! str_contains( \wp_basename( $empty_filename ), "-{$width}x{$height}" )
+				&& self::same_path( self::replace_file_extension( $fallback_file, 'png' ), $fallback_format[0] ?? '' )
+				&& 'png' === ( $fallback_format[1] ?? null )
+				&& 'image/png' === ( $fallback_format[2] ?? null )
+				&& array( 'image/jpeg' ) === $default_calls
+				&& false === \has_filter( 'image_editor_default_mime_type', $default_filter ),
+			'abstract editor filename generation honors default, custom, empty suffix, destination, extension, and fallback mime semantics',
+			array(
+				'sourceFile'       => $source_file,
+				'size'             => array(
+					'width'  => $width,
+					'height' => $height,
+				),
+				'defaultFilename'  => $default_filename,
+				'expectedDefault'  => $expected_default,
+				'emptyFilename'    => $empty_filename,
+				'expectedEmpty'    => $expected_empty,
+				'customFilename'   => $custom_filename,
+				'expectedCustom'   => $expected_custom,
+				'fallbackFile'     => $fallback_file,
+				'fallbackFormat'   => $fallback_format ?? null,
+				'defaultMimeCalls' => $default_calls,
+			)
+		);
+
+		$rotate_file       = $base_dir . DIRECTORY_SEPARATOR . 'missing-exif-' . getmypid() . '-' . $ctx->seed() . '-' . $ctx->iteration() . '.jpg';
+		$rotate_editor     = self::make_fake_image_editor(
+			$rotate_file,
+			'image/jpeg',
+			array(
+				'width'  => $width,
+				'height' => $height,
+			)
+		);
+		$orientation_cases = array(
+			array(
+				'orientation' => null,
+				'result'      => false,
+				'operations'  => array(),
+			),
+			array(
+				'orientation' => 1,
+				'result'      => false,
+				'operations'  => array(),
+			),
+			array(
+				'orientation' => 2,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type' => 'flip',
+						'horz' => false,
+						'vert' => true,
+					),
+				),
+			),
+			array(
+				'orientation' => 3,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type' => 'flip',
+						'horz' => true,
+						'vert' => true,
+					),
+				),
+			),
+			array(
+				'orientation' => 4,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type' => 'flip',
+						'horz' => true,
+						'vert' => false,
+					),
+				),
+			),
+			array(
+				'orientation' => 5,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type'  => 'rotate',
+						'angle' => 90,
+					),
+					array(
+						'type' => 'flip',
+						'horz' => true,
+						'vert' => false,
+					),
+				),
+			),
+			array(
+				'orientation' => 6,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type'  => 'rotate',
+						'angle' => 270,
+					),
+				),
+			),
+			array(
+				'orientation' => 7,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type'  => 'rotate',
+						'angle' => 90,
+					),
+					array(
+						'type' => 'flip',
+						'horz' => false,
+						'vert' => true,
+					),
+				),
+			),
+			array(
+				'orientation' => 8,
+				'result'      => true,
+				'operations'  => array(
+					array(
+						'type'  => 'rotate',
+						'angle' => 90,
+					),
+				),
+			),
+		);
+		$forced_orientation = null;
+		$orientation_calls  = array();
+		$orientation_filter = static function ( $orientation, string $file ) use ( &$forced_orientation, &$orientation_calls ) {
+			$orientation_calls[] = array(
+				'input'  => $orientation,
+				'forced' => $forced_orientation,
+				'file'   => $file,
+			);
+
+			return $forced_orientation;
+		};
+		$orientation_seen   = array();
+		$orientation_ok     = true;
+
+		\add_filter( 'wp_image_maybe_exif_rotate', $orientation_filter, 10, 2 );
+		try {
+			foreach ( $orientation_cases as $case ) {
+				$forced_orientation = $case['orientation'];
+				$rotate_editor->component_fuzz_reset_operations();
+				$result             = $rotate_editor->maybe_exif_rotate();
+				$operations         = $rotate_editor->component_fuzz_operations();
+				$orientation_seen[] = array(
+					'orientation' => $case['orientation'],
+					'result'      => $result,
+					'operations'  => $operations,
+				);
+				$orientation_ok     = $orientation_ok
+					&& $case['result'] === $result
+					&& $case['operations'] === $operations;
+			}
+		} finally {
+			\remove_filter( 'wp_image_maybe_exif_rotate', $orientation_filter, 10 );
+		}
+
+		$orientation_files_ok = true;
+		$orientation_forced   = array();
+		foreach ( $orientation_calls as $call ) {
+			$orientation_files_ok = $orientation_files_ok
+				&& null === $call['input']
+				&& self::same_path( $rotate_file, $call['file'] );
+			$orientation_forced[] = $call['forced'];
+		}
+
+		self::collect_failure(
+			$failures,
+			$orientation_ok
+				&& count( $orientation_cases ) === count( $orientation_calls )
+				&& array_column( $orientation_cases, 'orientation' ) === $orientation_forced
+				&& $orientation_files_ok
+				&& false === \has_filter( 'wp_image_maybe_exif_rotate', $orientation_filter ),
+			'abstract editor EXIF orientation filter maps rotations and flips in the documented order',
+			array(
+				'file'             => $rotate_file,
+				'orientationSeen'  => $orientation_seen,
+				'orientationCalls' => $orientation_calls,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-editor.abstract-editor.contracts',
+			array() === $failures,
+			array(
+				'sourceMime' => $source_mime,
+				'outputMime' => $output_mime,
+				'failures'   => $failures,
+			)
 		);
 	}
 
@@ -1074,6 +1452,112 @@ final class MediaEditorSurface {
 		}
 
 		return \sanitize_file_name( $base . '.' . $extension );
+	}
+
+	private static function replace_file_extension( string $path, string $extension ): string {
+		$dir = pathinfo( $path, PATHINFO_DIRNAME );
+		$ext = pathinfo( $path, PATHINFO_EXTENSION );
+
+		return trailingslashit( $dir ) . \wp_basename( $path, ".$ext" ) . '.' . strtolower( $extension );
+	}
+
+	private static function make_fake_image_editor( string $file, string $mime_type, array $size ) {
+		return new class( $file, $mime_type, $size ) extends \WP_Image_Editor {
+			private $operations = array();
+
+			public function __construct( string $file, string $mime_type, array $size ) {
+				parent::__construct( $file );
+
+				$this->mime_type = $mime_type;
+				$this->update_size( $size['width'] ?? 0, $size['height'] ?? 0 );
+			}
+
+			public static function test( $args = array() ) {
+				unset( $args );
+				return true;
+			}
+
+			public static function supports_mime_type( $mime_type ) {
+				return in_array( $mime_type, array( 'image/jpeg', 'image/png', 'image/webp' ), true );
+			}
+
+			public function load() {
+				return true;
+			}
+
+			public function save( $destfilename = null, $mime_type = null ) {
+				return array(
+					'path'      => $destfilename ?? $this->file,
+					'file'      => \wp_basename( $destfilename ?? $this->file ),
+					'width'     => $this->size['width'],
+					'height'    => $this->size['height'],
+					'mime-type' => $mime_type ?? $this->mime_type,
+					'filesize'  => 0,
+				);
+			}
+
+			public function resize( $max_w, $max_h, $crop = false ) {
+				unset( $crop );
+				$this->update_size( $max_w, $max_h );
+				return true;
+			}
+
+			public function multi_resize( $sizes ) {
+				unset( $sizes );
+				return array();
+			}
+
+			public function crop( $src_x, $src_y, $src_w, $src_h, $dst_w = null, $dst_h = null, $src_abs = false ) {
+				$this->operations[] = array(
+					'type'   => 'crop',
+					'srcX'   => $src_x,
+					'srcY'   => $src_y,
+					'srcW'   => $src_w,
+					'srcH'   => $src_h,
+					'dstW'   => $dst_w,
+					'dstH'   => $dst_h,
+					'srcAbs' => $src_abs,
+				);
+
+				return true;
+			}
+
+			public function rotate( $angle ) {
+				$this->operations[] = array(
+					'type'  => 'rotate',
+					'angle' => $angle,
+				);
+
+				return true;
+			}
+
+			public function flip( $horz, $vert ) {
+				$this->operations[] = array(
+					'type' => 'flip',
+					'horz' => $horz,
+					'vert' => $vert,
+				);
+
+				return true;
+			}
+
+			public function stream( $mime_type = null ) {
+				unset( $mime_type );
+				return true;
+			}
+
+			public function component_fuzz_get_output_format( ?string $filename = null, ?string $mime_type = null ): array {
+				return $this->get_output_format( $filename, $mime_type );
+			}
+
+			public function component_fuzz_operations(): array {
+				return $this->operations;
+			}
+
+			public function component_fuzz_reset_operations(): void {
+				$this->operations = array();
+			}
+		};
 	}
 
 	private static function upload_dir_filter( string $upload_root ): \Closure {
