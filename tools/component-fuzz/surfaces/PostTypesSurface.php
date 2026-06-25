@@ -32,6 +32,7 @@ final class PostTypesSurface {
 			self::reset_registries();
 
 			$rows[] = self::check_post_type_registration_matrix( $ctx );
+			$rows[] = self::check_duplicate_post_type_registration_replacement( $ctx->fork( 'duplicate-registration' ) );
 			$rows[] = self::check_registration_filters_actions_and_meta_box_lifecycle( $ctx );
 			$rows[] = self::check_rest_route_registration_boundaries( $ctx );
 			$rows[] = self::check_invalid_post_type_names_do_not_leak( $ctx );
@@ -340,6 +341,225 @@ final class PostTypesSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function check_duplicate_post_type_registration_replacement( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $_wp_post_type_features, $post_type_meta_caps, $wp, $wp_rewrite;
+
+		self::reset_registries();
+
+		$failures     = array();
+		$token        = self::safe_token( substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ) );
+		$post_type    = self::post_type_name( $ctx->fork( 'name' ), 'dupe' );
+		$duplicate    = strtoupper( $post_type );
+		$tax_first    = self::taxonomy_name( $ctx->fork( 'tax-first' ), 'tax_first' );
+		$tax_second   = self::taxonomy_name( $ctx->fork( 'tax-second' ), 'tax_second' );
+		$query_first  = 'First Query ' . $token;
+		$query_second = 'Second Query ' . $token;
+
+		$tax_first_object  = \register_taxonomy(
+			$tax_first,
+			array(),
+			array(
+				'public'    => false,
+				'rewrite'   => false,
+				'query_var' => false,
+			)
+		);
+		$tax_second_object = \register_taxonomy(
+			$tax_second,
+			array(),
+			array(
+				'public'    => false,
+				'rewrite'   => false,
+				'query_var' => false,
+			)
+		);
+
+		$first_args = array(
+			'label'           => 'Duplicate First ' . $token,
+			'public'          => true,
+			'has_archive'     => true,
+			'rewrite'         => array(
+				'slug'       => 'duplicate-first/' . $token,
+				'with_front' => false,
+				'pages'      => true,
+				'feeds'      => true,
+			),
+			'query_var'       => $query_first,
+			'taxonomies'      => array( $tax_first ),
+			'supports'        => array( 'title', 'editor', 'thumbnail' ),
+			'capability_type' => array( 'first_item', 'first_items' ),
+			'map_meta_cap'    => true,
+		);
+		$second_args = array(
+			'labels'          => array(
+				'name'          => 'Duplicate Second ' . $token,
+				'singular_name' => 'Duplicate Second Item ' . $token,
+			),
+			'public'          => true,
+			'hierarchical'    => true,
+			'has_archive'     => true,
+			'rewrite'         => array(
+				'slug'       => 'duplicate-second/' . $token,
+				'with_front' => false,
+				'pages'      => false,
+				'feeds'      => false,
+				'ep_mask'    => EP_NONE,
+			),
+			'query_var'       => $query_second,
+			'taxonomies'      => array( $tax_second ),
+			'supports'        => array( 'excerpt', 'comments' ),
+			'capability_type' => array( 'second_item', 'second_items' ),
+			'map_meta_cap'    => true,
+			'_edit_link'      => 'post.php?post=%d&duplicate=1',
+		);
+
+		$first       = \register_post_type( $post_type, $first_args );
+		$after_first = array(
+			'queryVars'       => is_object( $wp ) && isset( $wp->public_query_vars ) ? $wp->public_query_vars : array(),
+			'permastruct'     => is_object( $wp_rewrite ) && isset( $wp_rewrite->extra_permastructs[ $post_type ] )
+				? $wp_rewrite->extra_permastructs[ $post_type ]
+				: null,
+			'rewriteRegexes'  => self::rewrite_rule_regexes_for_post_type( $post_type ),
+			'supports'        => \get_all_post_type_supports( $post_type ),
+			'taxonomies'      => \get_object_taxonomies( $post_type, 'names' ),
+			'metaCaps'        => $first instanceof \WP_Post_Type ? self::cap_meta_registry_subset( $first->cap ) : array(),
+			'futureHook'      => \has_action( 'future_' . $post_type, '_future_post_hook' ),
+			'registeredClass' => is_object( $first ) ? get_class( $first ) : gettype( $first ),
+		);
+
+		$second            = \register_post_type( $duplicate, $second_args );
+		$expected          = self::expected_post_type_props( $post_type, $second_args );
+		$expected_cap      = self::expected_capabilities( $second_args );
+		$expected_supports = array_merge(
+			self::expected_supports( $first_args['supports'] ),
+			self::expected_supports( $second_args['supports'] )
+		);
+		$rewrite_regexes   = self::rewrite_rule_regexes_for_post_type( $post_type );
+		$first_query_var   = self::expected_query_var( $post_type, $query_first );
+		$second_query_var  = self::expected_query_var( $post_type, $query_second );
+		$first_rewrite     = self::expected_rewrite( $post_type, $first_args );
+		$second_rewrite    = self::expected_rewrite( $post_type, $second_args );
+		$after_second      = array(
+			'object'         => $second instanceof \WP_Post_Type ? self::post_type_summary( $second ) : self::describe_value( $second ),
+			'queryVars'      => is_object( $wp ) && isset( $wp->public_query_vars ) ? $wp->public_query_vars : array(),
+			'permastruct'    => is_object( $wp_rewrite ) && isset( $wp_rewrite->extra_permastructs[ $post_type ] )
+				? $wp_rewrite->extra_permastructs[ $post_type ]
+				: null,
+			'rewriteRegexes' => $rewrite_regexes,
+			'supports'       => \get_all_post_type_supports( $post_type ),
+			'taxonomies'     => \get_object_taxonomies( $post_type, 'names' ),
+			'metaCaps'       => $post_type_meta_caps ?? array(),
+			'futureHook'     => \has_action( 'future_' . $post_type, '_future_post_hook' ),
+		);
+
+		self::collect_failure(
+			$failures,
+			$tax_first_object instanceof \WP_Taxonomy
+				&& $tax_second_object instanceof \WP_Taxonomy
+				&& $first instanceof \WP_Post_Type
+				&& $second instanceof \WP_Post_Type
+				&& $first !== $second
+				&& $post_type === \sanitize_key( $duplicate )
+				&& $second === \get_post_type_object( $post_type )
+				&& \post_type_exists( $post_type )
+				&& self::post_type_props_match( $second, $expected )
+				&& self::maps_match( $expected_cap, (array) $second->cap ),
+			'duplicate post type registration replaces the global object with latest args',
+			array(
+				'postType'    => $post_type,
+				'duplicate'   => $duplicate,
+				'taxonomies'  => array( $tax_first, $tax_second ),
+				'afterFirst'  => $after_first,
+				'afterSecond' => $after_second,
+				'expected'    => $expected,
+				'expectedCap' => $expected_cap,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$first instanceof \WP_Post_Type
+				&& $second instanceof \WP_Post_Type
+				&& self::support_maps_match( $expected_supports, \get_all_post_type_supports( $post_type ) )
+				&& self::sets_match( array( $tax_first, $tax_second ), \get_object_taxonomies( $post_type, 'names' ) )
+				&& self::taxonomy_contains_object_type( $tax_first, $post_type )
+				&& self::taxonomy_contains_object_type( $tax_second, $post_type )
+				&& self::query_var_is_public( $first_query_var )
+				&& self::query_var_is_public( $second_query_var )
+				&& self::permastruct_uses_slug( $post_type, $second_rewrite['slug'] )
+				&& self::rewrite_regexes_include_slug( $rewrite_regexes, $first_rewrite['slug'] )
+				&& self::rewrite_regexes_include_slug( $rewrite_regexes, $second_rewrite['slug'] )
+				&& self::meta_cap_registry_matches( $first->cap, true )
+				&& self::meta_cap_registry_matches( $second->cap, true )
+				&& 5 === \has_action( 'future_' . $post_type, '_future_post_hook' ),
+			'duplicate post type registration keeps additive supports, taxonomy links, query vars, rewrite rules, and meta caps bounded',
+			array(
+				'postType'         => $post_type,
+				'expectedSupports' => $expected_supports,
+				'afterFirst'       => $after_first,
+				'afterSecond'      => $after_second,
+				'firstRewrite'     => $first_rewrite,
+				'secondRewrite'    => $second_rewrite,
+			)
+		);
+
+		$unregistered     = \unregister_post_type( $post_type );
+		$after_unregister = array(
+			'exists'               => \post_type_exists( $post_type ),
+			'object'               => \get_post_type_object( $post_type ),
+			'supports'             => $_wp_post_type_features[ $post_type ] ?? null,
+			'queryVars'            => is_object( $wp ) && isset( $wp->public_query_vars ) ? $wp->public_query_vars : array(),
+			'permastructs'         => is_object( $wp_rewrite ) && isset( $wp_rewrite->extra_permastructs )
+				? array_keys( $wp_rewrite->extra_permastructs )
+				: array(),
+			'rewriteRegexes'       => self::rewrite_rule_regexes_for_post_type( $post_type ),
+			'taxonomies'           => \get_object_taxonomies( $post_type, 'names' ),
+			'firstTaxonomyLinked'  => self::taxonomy_contains_object_type( $tax_first, $post_type ),
+			'secondTaxonomyLinked' => self::taxonomy_contains_object_type( $tax_second, $post_type ),
+			'firstQueryVarPublic'  => self::query_var_is_public( $first_query_var ),
+			'secondQueryVarPublic' => self::query_var_is_public( $second_query_var ),
+			'firstMetaCaps'        => $first instanceof \WP_Post_Type ? self::cap_meta_registry_subset( $first->cap ) : array(),
+			'secondMetaCaps'       => $second instanceof \WP_Post_Type ? self::cap_meta_registry_subset( $second->cap ) : array(),
+			'futureHook'           => \has_action( 'future_' . $post_type, '_future_post_hook' ),
+		);
+
+		self::collect_failure(
+			$failures,
+			$second instanceof \WP_Post_Type
+				&& true === $unregistered
+				&& ! \post_type_exists( $post_type )
+				&& null === \get_post_type_object( $post_type )
+				&& ! isset( $_wp_post_type_features[ $post_type ] )
+				&& ! self::taxonomy_contains_object_type( $tax_first, $post_type )
+				&& ! self::taxonomy_contains_object_type( $tax_second, $post_type )
+				&& ! self::query_var_is_public( $second_query_var )
+				&& (
+					! is_object( $wp_rewrite )
+					|| ! isset( $wp_rewrite->extra_permastructs )
+					|| ! array_key_exists( $post_type, $wp_rewrite->extra_permastructs )
+				)
+				&& ! self::rewrite_rules_contain_post_type( $post_type )
+				&& ! self::post_type_meta_caps_contain( $second->cap )
+				&& ! \has_action( 'future_' . $post_type, '_future_post_hook' ),
+			'unregister_post_type after duplicate registration removes the latest object and shared registries',
+			array(
+				'postType'          => $post_type,
+				'unregistered'      => $unregistered,
+				'afterUnregistered' => $after_unregister,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.duplicate-registration.replaces-object-and-bounds-side-registries',
+			array() === $failures,
+			array(
+				'postType' => $post_type,
+				'failures' => $failures,
 			)
 		);
 	}
@@ -2600,6 +2820,53 @@ final class PostTypesSurface {
 		}
 
 		return false;
+	}
+
+	private static function rewrite_rule_regexes_for_post_type( string $post_type ): array {
+		global $wp_rewrite;
+
+		if ( ! is_object( $wp_rewrite ) || ! isset( $wp_rewrite->extra_rules_top ) || ! is_array( $wp_rewrite->extra_rules_top ) ) {
+			return array();
+		}
+
+		$regexes = array();
+		foreach ( $wp_rewrite->extra_rules_top as $regex => $query ) {
+			if ( is_string( $query ) && str_contains( $query, 'post_type=' . $post_type ) ) {
+				$regexes[] = (string) $regex;
+			}
+		}
+
+		sort( $regexes );
+		return $regexes;
+	}
+
+	private static function rewrite_regexes_include_slug( array $regexes, string $slug ): bool {
+		foreach ( $regexes as $regex ) {
+			if ( is_string( $regex ) && str_starts_with( $regex, $slug ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function permastruct_uses_slug( string $post_type, string $slug ): bool {
+		global $wp_rewrite;
+
+		if ( ! is_object( $wp_rewrite ) || ! isset( $wp_rewrite->extra_permastructs[ $post_type ] ) ) {
+			return false;
+		}
+
+		return ( $wp_rewrite->extra_permastructs[ $post_type ]['struct'] ?? null ) === $slug . '/%' . $post_type . '%';
+	}
+
+	private static function query_var_is_public( $query_var ): bool {
+		global $wp;
+
+		return is_string( $query_var )
+			&& is_object( $wp )
+			&& isset( $wp->public_query_vars )
+			&& in_array( $query_var, $wp->public_query_vars, true );
 	}
 
 	private static function registry_shape(): array {
