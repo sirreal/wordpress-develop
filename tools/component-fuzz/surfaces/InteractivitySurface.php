@@ -88,6 +88,7 @@ final class InteractivitySurface {
 				'has_action',
 				'has_filter',
 				'do_action',
+				'remove_action',
 				'remove_filter',
 				'wp_add_inline_style',
 				'wp_enqueue_style',
@@ -481,9 +482,6 @@ final class InteractivitySurface {
 						. '|'
 						. ( $element['attributes']['data-case'] ?? '' );
 				},
-				'broken'      => static function (): string {
-					throw new \Error( 'Component fuzz derived state failure.' );
-				},
 			)
 		);
 		\wp_interactivity_state(
@@ -501,6 +499,9 @@ final class InteractivitySurface {
 						. '|'
 						. ( $element['attributes']['data-case'] ?? '' );
 				},
+				'broken'      => static function (): string {
+					throw new \Error( 'Component fuzz derived state failure.' );
+				},
 			)
 		);
 
@@ -513,7 +514,7 @@ final class InteractivitySurface {
 			. \wp_interactivity_data_wp_context( $nested_context, $case['otherNamespace'] )
 			. '><span data-case="nested" data-wp-text="state.description">nested old</span></div>'
 			. '<span data-case="outer-after" data-wp-text="state.description">outer after</span>'
-			. '<span data-case="broken" data-wp-text="state.broken">broken old</span>'
+			. '<span data-case="broken" data-wp-text="' . \esc_attr( $case['otherNamespace'] . '::state.broken' ) . '">broken old</span>'
 			. '<span data-case="post-broken" data-wp-text="state.description">post broken old</span>'
 			. '</section>';
 
@@ -541,6 +542,7 @@ final class InteractivitySurface {
 		$derived = $client_data['derivedStateClosures'] ?? array();
 
 		$warning_functions = array_column( $capture['warnings'], 'function' );
+		$warning           = $capture['warnings'][0] ?? array();
 		$ok                = false === ( $capture['threw'] ?? true )
 			&& \esc_html( $expected['outer-before'] ) === $bodies['outer-before']
 			&& \esc_html( $expected['nested'] ) === $bodies['nested']
@@ -550,7 +552,12 @@ final class InteractivitySurface {
 			&& array( 'state.description' ) === ( $derived[ $case['namespace'] ] ?? null )
 			&& array( 'state.description' ) === ( $derived[ $case['otherNamespace'] ] ?? null )
 			&& ! in_array( 'state.broken', $derived[ $case['namespace'] ] ?? array(), true )
-			&& in_array( 'WP_Interactivity_API::evaluate', $warning_functions, true )
+			&& ! in_array( 'state.broken', $derived[ $case['otherNamespace'] ] ?? array(), true )
+			&& 1 === count( $capture['warnings'] )
+			&& 'WP_Interactivity_API::evaluate' === ( $warning['function'] ?? null )
+			&& '6.6.0' === ( $warning['version'] ?? null )
+			&& str_contains( (string) ( $warning['message'] ?? '' ), 'state.broken' )
+			&& str_contains( (string) ( $warning['message'] ?? '' ), $case['otherNamespace'] )
 			&& false === \has_action( 'doing_it_wrong_run', $capture['listener'] ?? null )
 			&& false === \has_filter( 'doing_it_wrong_trigger_error', $capture['suppressor'] ?? null );
 
