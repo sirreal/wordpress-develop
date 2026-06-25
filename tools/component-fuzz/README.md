@@ -193,8 +193,9 @@ database, network requests, or a configured site.
   editor script enqueue decisions, TinyMCE translation snippets, media-view
   stylesheet helpers, and global restoration.
 - `fonts`: font-face CSS serialization and validation, font directory filters,
-  Font Library collection registration/JSON loading, and font utility
-  sanitization for family lists, face slugs, schemas, and MIME maps.
+  Font Library collection registration/JSON loading, REST font-face
+  preparation boundaries, and font utility sanitization for family lists, face
+  slugs, schemas, and MIME maps.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, temp names, direct filesystem sandboxing,
   metadata/time/chmod round trips, and missing-file failure values.
