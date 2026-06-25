@@ -53,6 +53,7 @@ final class FilesystemSurface {
 				self::ensure_dir( $direct_dir );
 
 				$rows[] = self::check_wp_unique_filename( $ctx, $filename_cases, $unique_dir );
+				$rows[] = self::check_wp_unique_filename_callbacks_and_case( $ctx, $unique_dir );
 				$rows[] = self::check_wp_tempnam( $ctx, $filename_cases, $temp_dir );
 				$rows[] = self::check_wp_filesystem_direct( $ctx, $filename_cases, $direct_dir );
 				$rows[] = self::check_wp_filesystem_direct_metadata( $ctx, $filename_cases, $direct_dir );
@@ -724,6 +725,119 @@ final class FilesystemSurface {
 			array(
 				'existingFixtures' => $existing,
 				'sandbox'          => self::describe_string( $dir ),
+			)
+		);
+	}
+
+	private static function check_wp_unique_filename_callbacks_and_case( \ComponentFuzz\FuzzContext $ctx, string $dir ): array {
+		if ( ! function_exists( 'wp_unique_filename' ) ) {
+			return $ctx->skip( 'filesystem.wp_unique_filename.callback-available', 'wp_unique_filename() is unavailable.' );
+		}
+
+		$failures       = array();
+		$case_basename  = 'Case-' . $ctx->int( 10, 99 );
+		$callback_token = 'cb-' . strtolower( $ctx->identifier( 4, 8 ) );
+		$callback_calls = array();
+		$filter_events  = array();
+		$filter         = static function ( string $filename, string $ext, string $seen_dir, $callback, array $alt_filenames, $number ) use ( &$filter_events ): string {
+			$filter_events[] = array(
+				'filename'    => $filename,
+				'ext'         => $ext,
+				'dir'         => $seen_dir,
+				'hasCallback' => is_callable( $callback ),
+				'alt'         => $alt_filenames,
+				'number'      => $number,
+			);
+
+			return $filename;
+		};
+		$callback       = static function ( string $seen_dir, string $name, string $ext ) use ( &$callback_calls, $callback_token ): string {
+			$callback_calls[] = array(
+				'dir'  => $seen_dir,
+				'name' => $name,
+				'ext'  => $ext,
+			);
+
+			return $callback_token . '-' . strtolower( preg_replace( '/[^a-z0-9]+/i', '-', $name ) ) . $ext;
+		};
+
+		file_put_contents( $dir . DIRECTORY_SEPARATOR . $case_basename . '.jpg', 'lowercase collision' );
+		file_put_contents( $dir . DIRECTORY_SEPARATOR . $case_basename . '-1.jpg', 'numbered lowercase collision' );
+
+		\add_filter( 'wp_unique_filename', $filter, 10, 6 );
+		try {
+			$uppercase = \wp_unique_filename( $dir, $case_basename . '.JPG' );
+			$callback_result = \wp_unique_filename( $dir, ' Callback Name ' . $ctx->int( 100, 999 ) . '.TXT ', $callback );
+		} finally {
+			$removed = \remove_filter( 'wp_unique_filename', $filter, 10 );
+		}
+
+		$case_ok = $case_basename . '-2.jpg' === $uppercase
+			&& 1 === count( $callback_calls )
+			&& $dir === ( $callback_calls[0]['dir'] ?? null )
+			&& '.TXT' === ( $callback_calls[0]['ext'] ?? null )
+			&& str_starts_with( $callback_result, $callback_token . '-' )
+			&& str_ends_with( $callback_result, '.TXT' );
+		if ( ! $case_ok ) {
+			self::record_failure(
+				$failures,
+				'wp_unique_filename lowercases uppercase image extensions after checking lowercase collisions and calls custom callbacks once',
+				array(
+					'value'    => $case_basename . '.JPG',
+					'source'   => 'generated',
+					'features' => array( 'uppercase-extension', 'collision' ),
+				),
+				array(
+					'caseBase'      => $case_basename,
+					'uppercase'     => $uppercase,
+					'callback'      => $callback_result,
+					'callbackCalls' => $callback_calls,
+				)
+			);
+		}
+
+		$filter_ok = 2 === count( $filter_events )
+			&& $case_basename . '-2.jpg' === ( $filter_events[0]['filename'] ?? null )
+			&& '.JPG' === ( $filter_events[0]['ext'] ?? null )
+			&& isset( $filter_events[0]['alt']['.jpg'] )
+			&& $case_basename . '-2.jpg' === $filter_events[0]['alt']['.jpg']
+			&& 2 === ( $filter_events[0]['number'] ?? null )
+			&& $callback_result === ( $filter_events[1]['filename'] ?? null )
+			&& true === ( $filter_events[1]['hasCallback'] ?? null )
+			&& array() === ( $filter_events[1]['alt'] ?? null )
+			&& '' === (string) ( $filter_events[1]['number'] ?? '' )
+			&& $removed
+			&& false === \has_filter( 'wp_unique_filename', $filter );
+		if ( ! $filter_ok ) {
+			self::record_failure(
+				$failures,
+				'wp_unique_filename filter exposes collision number and callback metadata, then is removed',
+				array(
+					'value'    => $case_basename . '.JPG',
+					'source'   => 'generated',
+					'features' => array( 'filter-metadata' ),
+				),
+				array(
+					'events'  => $filter_events,
+					'removed' => $removed ?? null,
+					'has'     => \has_filter( 'wp_unique_filename', $filter ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'filesystem.wp_unique_filename.callback-and-case-collisions',
+			array(
+				array(
+					'value'    => $case_basename . '.JPG',
+					'source'   => 'generated',
+					'features' => array( 'uppercase-extension', 'collision' ),
+				),
+			),
+			$failures,
+			array(
+				'sandbox' => self::describe_string( $dir ),
 			)
 		);
 	}
