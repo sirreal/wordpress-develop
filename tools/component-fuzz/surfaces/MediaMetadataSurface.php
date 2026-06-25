@@ -43,6 +43,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_id3_tag_and_timestamp_helpers( $ctx->fork( 'id3-helper' ) );
 				$rows[] = self::check_extension_key_and_attachment_helpers( $ctx->fork( 'helpers' ), $temp_root );
 				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
+				$rows[] = self::check_generated_metadata_replacement_oracles( $ctx->fork( 'metadata-shapes' ), $temp_root );
 				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
 				$rows[] = self::check_generate_attachment_metadata_branches( $ctx->fork( 'generate' ), $temp_root );
 			}
@@ -620,6 +621,204 @@ final class MediaMetadataSurface {
 		);
 	}
 
+	private static function check_generated_metadata_replacement_oracles( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures       = array();
+		$generated      = array();
+		$events         = array(
+			'get'    => array(),
+			'update' => array(),
+			'url'    => array(),
+		);
+		$upload_root    = $temp_root . DIRECTORY_SEPARATOR . 'metadata-shape-uploads';
+		$upload_url     = 'http://example.test/component-fuzz-media-shapes-' . $ctx->int( 1000, 9999 );
+		$attachment_ids = array();
+
+		$upload_filter = static function ( array $uploads ) use ( $upload_root, $upload_url ): array {
+			$uploads['basedir'] = $upload_root;
+			$uploads['baseurl'] = $upload_url;
+			$uploads['path']    = $upload_root;
+			$uploads['url']     = $upload_url;
+			$uploads['subdir']  = '';
+			$uploads['error']   = false;
+			return $uploads;
+		};
+		$update_filter = static function ( array $data, int $post_id ) use ( &$events, &$attachment_ids ): array {
+			if ( ! in_array( $post_id, $attachment_ids, true ) ) {
+				return $data;
+			}
+
+			$events['update'][] = array(
+				'id'     => $post_id,
+				'keys'   => array_keys( $data ),
+				'label'  => $data['component_fuzz_generation'] ?? null,
+				'sizes'  => isset( $data['sizes'] ) && is_array( $data['sizes'] ) ? array_keys( $data['sizes'] ) : array(),
+			);
+
+			return self::metadata_with_update_marker( $data, $post_id );
+		};
+		$get_filter    = static function ( $data, int $post_id ) use ( &$events, &$attachment_ids ) {
+			if ( ! in_array( $post_id, $attachment_ids, true ) ) {
+				return $data;
+			}
+
+			$events['get'][] = array(
+				'id'    => $post_id,
+				'type'  => gettype( $data ),
+				'label' => is_array( $data ) ? ( $data['component_fuzz_generation'] ?? null ) : null,
+			);
+
+			if ( is_array( $data ) ) {
+				$data['component_fuzz_get_filter'] = $post_id;
+			}
+
+			return $data;
+		};
+		$url_filter    = static function ( string $url, int $attachment_id ) use ( &$events, &$attachment_ids ): string {
+			if ( in_array( $attachment_id, $attachment_ids, true ) ) {
+				$events['url'][] = array(
+					'id'  => $attachment_id,
+					'url' => $url,
+				);
+			}
+
+			return $url;
+		};
+
+		\ComponentFuzz\ensure_dir( $upload_root );
+
+		\add_filter( 'upload_dir', $upload_filter );
+		\add_filter( 'wp_update_attachment_metadata', $update_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_metadata', $get_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_url', $url_filter, 10, 2 );
+		try {
+			foreach ( self::generated_metadata_cases( $ctx, $temp_root, $upload_root, $upload_url ) as $index => $case ) {
+				$case_ctx      = $ctx->fork( 'shape-case-' . $index );
+				$attachment_id = 875000 + ( $ctx->iteration() * 10 ) + $index;
+				$path          = self::write_fixture( $case['fixtureDir'], $case['filename'], self::media_fixture_bytes( $case_ctx, $case['kind'] ) );
+
+				if ( null === $path ) {
+					self::collect_failure( $failures, false, 'generated media metadata fixture is writable', $case );
+					continue;
+				}
+
+				$attachment_ids[] = $attachment_id;
+				self::seed_attachment_post( $attachment_id, $case['mime'], $case['attachedFile'] );
+				\wp_cache_delete( $attachment_id, 'post_meta' );
+				$attached_file_stored = \update_post_meta( $attachment_id, '_wp_attached_file', $case['attachedFile'] );
+
+				$first_metadata  = self::generated_attachment_metadata( $case_ctx->fork( 'first' ), $case['kind'], $case['relativeFile'], $case['mime'], filesize( $path ), 'first' );
+				$second_metadata = self::generated_attachment_metadata( $case_ctx->fork( 'second' ), $case['kind'], $case['relativeFile'], $case['mime'], filesize( $path ), 'second' );
+				$expected_first  = self::metadata_with_update_marker( $first_metadata, $attachment_id );
+				$expected_second = self::metadata_with_update_marker( $second_metadata, $attachment_id );
+
+				$first_updated         = \wp_update_attachment_metadata( $attachment_id, $first_metadata );
+				$first_unfiltered      = \wp_get_attachment_metadata( $attachment_id, true );
+				$first_filtered        = \wp_get_attachment_metadata( $attachment_id );
+				$second_updated        = \wp_update_attachment_metadata( $attachment_id, $second_metadata );
+				$second_unfiltered     = \wp_get_attachment_metadata( $attachment_id, true );
+				$second_filtered       = \wp_get_attachment_metadata( $attachment_id );
+				$same_update           = \wp_update_attachment_metadata( $attachment_id, $second_metadata );
+				$after_same_unfiltered = \wp_get_attachment_metadata( $attachment_id, true );
+				$attached_unfiltered   = \get_attached_file( $attachment_id, true );
+				$attachment_url        = \wp_get_attachment_url( $attachment_id );
+				$type_checks           = array(
+					'kind'      => \wp_attachment_is( $case['kind'], $attachment_id ),
+					'extension' => \wp_attachment_is( $case['extension'], $attachment_id ),
+					'image'     => \wp_attachment_is_image( $attachment_id ),
+				);
+
+				$generated[] = array(
+					'id'                 => $attachment_id,
+					'kind'               => $case['kind'],
+					'storage'            => $case['storage'],
+					'attachedStored'     => $attached_file_stored,
+					'firstUpdated'       => $first_updated,
+					'secondUpdated'      => $second_updated,
+					'sameUpdate'         => $same_update,
+					'attached'           => $attached_unfiltered,
+					'url'                => $attachment_url,
+					'typeChecks'         => $type_checks,
+					'expectedAttached'   => $case['expectedAttached'],
+					'expectedUrl'        => $case['expectedUrl'],
+					'firstKeys'          => is_array( $first_unfiltered ) ? array_keys( $first_unfiltered ) : array(),
+					'secondKeys'         => is_array( $second_unfiltered ) ? array_keys( $second_unfiltered ) : array(),
+					'secondFilteredKeys' => is_array( $second_filtered ) ? array_keys( $second_filtered ) : array(),
+				);
+
+				self::collect_failure(
+					$failures,
+					false !== $attached_file_stored
+						&& false !== $first_updated
+						&& false !== $second_updated
+						&& false === $same_update
+						&& $expected_first === $first_unfiltered
+						&& $expected_second === $second_unfiltered
+						&& $expected_second === $after_same_unfiltered
+						&& is_array( $first_filtered )
+						&& is_array( $second_filtered )
+						&& $attachment_id === ( $first_filtered['component_fuzz_get_filter'] ?? null )
+						&& $attachment_id === ( $second_filtered['component_fuzz_get_filter'] ?? null )
+						&& ! isset( $second_unfiltered['component_fuzz_get_filter'] )
+						&& ! array_key_exists( 'component_fuzz_stale_top', $second_unfiltered )
+						&& ! (
+							isset( $second_unfiltered['image_meta'] )
+							&& is_array( $second_unfiltered['image_meta'] )
+							&& array_key_exists( 'component_fuzz_stale_nested', $second_unfiltered['image_meta'] )
+						)
+						&& ! array_intersect( array_keys( $first_metadata['sizes'] ?? array() ), array_keys( $second_unfiltered['sizes'] ?? array() ) )
+						&& self::serializable_array_ok( $second_unfiltered )
+						&& $case['expectedAttached'] === $attached_unfiltered
+						&& $case['expectedUrl'] === $attachment_url
+						&& true === $type_checks['kind']
+						&& true === $type_checks['extension']
+						&& ( ( 'image' === $case['kind'] ) === $type_checks['image'] ),
+					'generated attachment metadata updates replace old shape, remain serializable, normalize file/URL paths, and preserve MIME/ext helpers',
+					array(
+						'case'             => end( $generated ),
+						'firstUnfiltered'  => $first_unfiltered,
+						'secondUnfiltered' => $second_unfiltered,
+						'secondFiltered'   => $second_filtered,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'wp_get_attachment_url', $url_filter, 10 );
+			\remove_filter( 'wp_get_attachment_metadata', $get_filter, 10 );
+			\remove_filter( 'wp_update_attachment_metadata', $update_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			9 === count( $events['update'] )
+				&& 6 === count( $events['get'] )
+				&& 3 === count( $events['url'] )
+				&& false === \has_filter( 'upload_dir', $upload_filter )
+				&& false === \has_filter( 'wp_update_attachment_metadata', $update_filter )
+				&& false === \has_filter( 'wp_get_attachment_metadata', $get_filter )
+				&& false === \has_filter( 'wp_get_attachment_url', $url_filter ),
+			'generated metadata shape filters fire for scoped reads/updates/URLs and are restored',
+			array(
+				'events'          => $events,
+				'uploadHasFilter' => \has_filter( 'upload_dir', $upload_filter ),
+				'updateHasFilter' => \has_filter( 'wp_update_attachment_metadata', $update_filter ),
+				'getHasFilter'    => \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+				'urlHasFilter'    => \has_filter( 'wp_get_attachment_url', $url_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.generated-metadata-replacement-and-url-oracles',
+			array() === $failures,
+			array(
+				'cases'    => $generated,
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_original_image_metadata_helpers( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
 		$failures        = array();
 		$events          = array(
@@ -1095,6 +1294,175 @@ final class MediaMetadataSurface {
 		);
 
 		return pack( 'N', 24 ) . 'ftyp' . $brands[0] . "\x00\x00\x00\x00" . $brands[0] . $brands[1];
+	}
+
+	private static function media_fixture_bytes( \ComponentFuzz\FuzzContext $ctx, string $kind ): string {
+		if ( 'audio' === $kind ) {
+			return "ID3\x04\x00\x00\x00\x00\x00\x00" . $ctx->bytes( 8, 24 );
+		}
+
+		if ( 'video' === $kind ) {
+			return self::mp4_like_bytes( $ctx ) . $ctx->bytes( 4, 16 );
+		}
+
+		return "\xFF\xD8\xFF\xE0" . $ctx->bytes( 8, 24 );
+	}
+
+	private static function generated_metadata_cases( \ComponentFuzz\FuzzContext $ctx, string $temp_root, string $upload_root, string $upload_url ): array {
+		$cases = array();
+		foreach (
+			array(
+				array(
+					'kind'      => 'image',
+					'extension' => 'jpg',
+					'mime'      => 'image/jpeg',
+					'storage'   => 'relative',
+				),
+				array(
+					'kind'      => 'audio',
+					'extension' => 'mp3',
+					'mime'      => 'audio/mpeg',
+					'storage'   => 'absolute',
+				),
+				array(
+					'kind'      => 'video',
+					'extension' => 'mp4',
+					'mime'      => 'video/mp4',
+					'storage'   => 'legacy',
+				),
+			) as $index => $base
+		) {
+			$case_ctx      = $ctx->fork( 'case-' . $index );
+			$year          = (string) $case_ctx->int( 2021, 2026 );
+			$month         = str_pad( (string) $case_ctx->int( 1, 12 ), 2, '0', STR_PAD_LEFT );
+			$subdir        = $year . '/' . $month;
+			$slug          = strtolower( str_replace( array( ':', '_' ), '-', $case_ctx->identifier( 5, 12 ) ) );
+			$filename      = $slug . '-' . $case_ctx->int( 10, 99 ) . '.' . $base['extension'];
+			$relative_file = $subdir . '/' . $filename;
+
+			if ( 'legacy' === $base['storage'] ) {
+				$fixture_dir       = $temp_root . '/legacy/wp-content/uploads/' . $subdir;
+				$attached_file     = $fixture_dir . '/' . $filename;
+				$expected_attached = $attached_file;
+			} else {
+				$fixture_dir       = $upload_root . '/' . $subdir;
+				$attached_file     = 'relative' === $base['storage'] ? $relative_file : $fixture_dir . '/' . $filename;
+				$expected_attached = 'relative' === $base['storage'] ? $upload_root . '/' . $relative_file : $attached_file;
+			}
+
+			$cases[] = array_merge(
+				$base,
+				array(
+					'fixtureDir'       => $fixture_dir,
+					'filename'         => $filename,
+					'relativeFile'     => $relative_file,
+					'attachedFile'     => $attached_file,
+					'expectedAttached' => $expected_attached,
+					'expectedUrl'      => $upload_url . '/' . $relative_file,
+				)
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_attachment_metadata( \ComponentFuzz\FuzzContext $ctx, string $kind, string $relative_file, string $mime, int $filesize, string $label ): array {
+		$width     = $ctx->int( 320, 2400 );
+		$height    = $ctx->int( 240, 1800 );
+		$size_slug = 'component-fuzz-' . $label . '-' . strtolower( str_replace( array( ':', '_' ), '-', $ctx->identifier( 3, 8 ) ) );
+		$size_file = preg_replace( '/(\.[^.]+)$/', '-' . max( 1, (int) floor( $width / 2 ) ) . 'x' . max( 1, (int) floor( $height / 2 ) ) . '$1', basename( $relative_file ) );
+		$metadata  = array(
+			'file'                      => $relative_file,
+			'filesize'                  => $filesize,
+			'mime_type'                 => $mime,
+			'component_fuzz_generation' => $label,
+			'component_fuzz_nested'     => array(
+				'chapters' => array(
+					array(
+						'title' => 'chapter-' . $ctx->identifier( 3, 8 ),
+						'start' => $ctx->int( 0, 120 ),
+					),
+				),
+				'flags'    => array(
+					'lossless' => $ctx->bool(),
+					'label'    => $label,
+				),
+			),
+		);
+
+		if ( 'first' === $label ) {
+			$metadata['component_fuzz_stale_top'] = 'removed-by-replacement';
+		}
+
+		if ( 'image' === $kind ) {
+			$metadata['width']      = $width;
+			$metadata['height']     = $height;
+			$metadata['sizes']      = array(
+				$size_slug => array(
+					'file'      => $size_file,
+					'width'     => max( 1, (int) floor( $width / 2 ) ),
+					'height'    => max( 1, (int) floor( $height / 2 ) ),
+					'mime-type' => $mime,
+				),
+			);
+			$metadata['image_meta'] = array(
+				'aperture'                     => '0',
+				'credit'                       => 'Component Fuzz ' . $label,
+				'created_timestamp'            => $ctx->int( 1000000000, 1999999999 ),
+				'orientation'                  => $ctx->choice( array( 1, 3, 6, 8 ) ),
+				'keywords'                     => array( 'media', $ctx->identifier( 3, 8 ) ),
+			);
+
+			if ( 'first' === $label ) {
+				$metadata['image_meta']['component_fuzz_stale_nested'] = 'removed-by-replacement';
+			}
+
+			return $metadata;
+		}
+
+		$metadata['length']           = $ctx->int( 1, 7200 );
+		$metadata['length_formatted'] = gmdate( 'i:s', $metadata['length'] );
+		$metadata['bitrate']          = $ctx->int( 32000, 320000 );
+
+		if ( 'audio' === $kind ) {
+			$metadata['fileformat']   = 'mp3';
+			$metadata['bitrate_mode'] = $ctx->choice( array( 'cbr', 'vbr' ) );
+			$metadata['artist']       = 'Component Artist ' . $label;
+			$metadata['album']        = 'Component Album ' . $ctx->identifier( 3, 8 );
+			$metadata['image']        = array(
+				'mime'   => 'image/jpeg',
+				'width'  => $ctx->int( 1, 10 ),
+				'height' => $ctx->int( 1, 10 ),
+			);
+
+			return $metadata;
+		}
+
+		$metadata['width']      = $width;
+		$metadata['height']     = $height;
+		$metadata['fileformat'] = 'mp4';
+		$metadata['dataformat'] = 'quicktime';
+		$metadata['codec']      = $ctx->choice( array( 'h264', 'hevc', 'mpeg4' ) );
+		$metadata['audio']      = array(
+			'dataformat' => 'mp4',
+			'codec'      => $ctx->choice( array( 'aac', 'alac' ) ),
+			'channels'   => $ctx->choice( array( 1, 2 ) ),
+		);
+
+		return $metadata;
+	}
+
+	private static function metadata_with_update_marker( array $metadata, int $attachment_id ): array {
+		$metadata['component_fuzz_update_filter'] = array(
+			'attachment' => $attachment_id,
+			'key_count'  => count( $metadata ),
+		);
+
+		if ( isset( $metadata['image_meta'] ) && is_array( $metadata['image_meta'] ) ) {
+			$metadata['image_meta']['component_fuzz_filtered'] = $attachment_id;
+		}
+
+		return $metadata;
 	}
 
 	private static function serializable_array_ok( array $value ): bool {
