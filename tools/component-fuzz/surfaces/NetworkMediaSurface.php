@@ -37,6 +37,7 @@ final class NetworkMediaSurface {
 			self::exercise_url_scheme_apis( $rng, $result );
 			self::exercise_path_apis( $rng, $result );
 			self::exercise_filename_apis( $rng, $result );
+			self::exercise_mime_catalog_apis( $rng, $result );
 			self::exercise_upload_iframe_src_apis( $rng, $result );
 			self::exercise_multisite_quota_apis( $rng, $result );
 			self::exercise_multisite_upload_policy_apis( $rng, $result );
@@ -686,6 +687,309 @@ final class NetworkMediaSurface {
 				}
 			}
 		}
+	}
+
+	private static function exercise_mime_catalog_apis( array &$rng, array &$result ): void {
+		$required = array(
+			'add_filter',
+			'get_allowed_mime_types',
+			'has_filter',
+			'remove_filter',
+			'sanitize_mime_type',
+			'wp_ext2type',
+			'wp_get_default_extension_for_mime_type',
+			'wp_get_ext_types',
+			'wp_get_mime_types',
+			'wp_match_mime_types',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'mime-catalog', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		++$result['caseCount'];
+		self::feature( $result, 'mime-catalog' );
+
+		$token       = 'cfz' . self::rng_int( $rng, 1000, 9999 );
+		$custom_ext  = $token;
+		$custom_type = 'component-fuzz-' . $token;
+		$custom_mime = 'application/x-component-fuzz-' . $token;
+		$ext_calls   = array();
+		$mime_calls  = array();
+		$upload_calls = array();
+		$sanitize_calls = array();
+		$ext_filter  = static function ( array $types ) use ( &$ext_calls, $custom_type, $custom_ext ): array {
+			$ext_calls[] = $types;
+			$types[ $custom_type ] = array( $custom_ext );
+			return $types;
+		};
+		$mime_filter = static function ( array $mimes ) use ( &$mime_calls, $custom_ext, $custom_mime ): array {
+			$mime_calls[] = $mimes;
+			$mimes[ $custom_ext ] = $custom_mime;
+			return $mimes;
+		};
+		$upload_filter = static function ( array $mimes, $user ) use ( &$upload_calls, $custom_ext, $custom_mime ): array {
+			$upload_calls[] = array(
+				'user' => $user,
+				'hasCustomBefore' => isset( $mimes[ $custom_ext ] ),
+			);
+			$mimes[ $custom_ext ] = $custom_mime;
+			return $mimes;
+		};
+		$sanitize_filter = static function ( string $sanitized, string $raw ) use ( &$sanitize_calls ): string {
+			$sanitize_calls[] = array(
+				'sanitized' => $sanitized,
+				'raw'       => $raw,
+			);
+			return $sanitized;
+		};
+		$before_ext_filter      = \has_filter( 'ext2type', $ext_filter );
+		$before_mime_filter     = \has_filter( 'mime_types', $mime_filter );
+		$before_upload_filter   = \has_filter( 'upload_mimes', $upload_filter );
+		$before_sanitize_filter = \has_filter( 'sanitize_mime_type', $sanitize_filter );
+
+		$catalog = self::call_api(
+			$result,
+			'wp_get_ext_types',
+			'catalog',
+			static function () {
+				return \wp_get_ext_types();
+			}
+		);
+		$mimes   = self::call_api(
+			$result,
+			'wp_get_mime_types',
+			'catalog',
+			static function () {
+				return \wp_get_mime_types();
+			}
+		);
+
+		self::check_invariant(
+			$result,
+			$catalog['ok']
+				&& is_array( $catalog['value'] ?? null )
+				&& isset( $catalog['value']['image'], $catalog['value']['audio'], $catalog['value']['video'] )
+				&& in_array( 'jpg', $catalog['value']['image'], true )
+				&& in_array( 'mp3', $catalog['value']['audio'], true )
+				&& in_array( 'mp4', $catalog['value']['video'], true ),
+			'wp_get_ext_types:core-media-buckets-present',
+			'catalog',
+			array( 'catalog' => $catalog['value'] ?? null )
+		);
+
+		self::check_invariant(
+			$result,
+			$mimes['ok']
+				&& is_array( $mimes['value'] ?? null )
+				&& 'image/jpeg' === ( $mimes['value']['jpg|jpeg|jpe'] ?? null )
+				&& 'audio/mpeg' === ( $mimes['value']['mp3|m4a|m4b'] ?? null )
+				&& 'video/mp4' === ( $mimes['value']['mp4|m4v'] ?? null ),
+			'wp_get_mime_types:core-media-mimes-present',
+			'catalog',
+			array( 'mimes' => array_slice( is_array( $mimes['value'] ?? null ) ? $mimes['value'] : array(), 0, 8, true ) )
+		);
+
+		$ext_cases = array(
+			array( 'ext' => 'jpg', 'expected' => 'image' ),
+			array( 'ext' => 'JPE', 'expected' => 'image' ),
+			array( 'ext' => 'mp3', 'expected' => 'audio' ),
+			array( 'ext' => 'M4V', 'expected' => 'video' ),
+			array( 'ext' => 'xlsx', 'expected' => 'spreadsheet' ),
+			array( 'ext' => 'unknown-' . $token, 'expected' => null ),
+		);
+		foreach ( $ext_cases as $case ) {
+			$actual = self::call_api(
+				$result,
+				'wp_ext2type',
+				$case,
+				static function () use ( $case ) {
+					return \wp_ext2type( $case['ext'] );
+				}
+			);
+
+			self::check_invariant(
+				$result,
+				$actual['ok'] && $case['expected'] === $actual['value'],
+				'wp_ext2type:catalog-classification',
+				$case,
+				array(
+					'expected' => $case['expected'],
+					'actual'   => $actual['value'] ?? null,
+				)
+			);
+		}
+
+		$mime_cases = array(
+			'image/jpeg'      => 'jpg',
+			'image/webp'      => 'webp',
+			'audio/mpeg'      => 'mp3',
+			'video/mp4'       => 'mp4',
+			'application/pdf' => 'pdf',
+			'application/x-component-fuzz-missing' => false,
+		);
+		foreach ( $mime_cases as $mime => $expected ) {
+			$actual = self::call_api(
+				$result,
+				'wp_get_default_extension_for_mime_type',
+				$mime,
+				static function () use ( $mime ) {
+					return \wp_get_default_extension_for_mime_type( $mime );
+				}
+			);
+
+			self::check_invariant(
+				$result,
+				$actual['ok'] && $expected === $actual['value'],
+				'wp_get_default_extension_for_mime_type:first-extension',
+				$mime,
+				array(
+					'expected' => $expected,
+					'actual'   => $actual['value'] ?? null,
+				)
+			);
+		}
+
+		$matches = self::call_api(
+			$result,
+			'wp_match_mime_types',
+			'media-wildcards',
+			static function () {
+				return \wp_match_mime_types(
+					array( 'image', 'application/*zip*', 'text/plain' ),
+					array( 'image/jpeg', 'image/webp', 'application/zip', 'application/x-gzip', 'text/plain', 'audio/mpeg' )
+				);
+			}
+		);
+
+		self::check_invariant(
+			$result,
+			$matches['ok']
+				&& array( 'image/jpeg', 'image/webp' ) === ( $matches['value']['image'] ?? null )
+				&& array( 'application/zip', 'application/x-gzip' ) === ( $matches['value']['application/*zip*'] ?? null )
+				&& array( 'text/plain' ) === ( $matches['value']['text/plain'] ?? null )
+				&& ! isset( $matches['value']['audio'] ),
+			'wp_match_mime_types:wildcard-and-exact-matches',
+			'media-wildcards',
+			array( 'matches' => $matches['value'] ?? null )
+		);
+
+		$raw_mime           = "text / x-{$token}; charset=utf-8 \xC3\xA9";
+		$expected_sanitized = (string) preg_replace( '/[^-+*.a-zA-Z0-9\/]/', '', $raw_mime );
+		\add_filter( 'sanitize_mime_type', $sanitize_filter, 10, 2 );
+		try {
+			$sanitized = self::call_api(
+				$result,
+				'sanitize_mime_type.filtered',
+				$raw_mime,
+				static function () use ( $raw_mime ) {
+					return \sanitize_mime_type( $raw_mime );
+				}
+			);
+		} finally {
+			\remove_filter( 'sanitize_mime_type', $sanitize_filter, 10 );
+		}
+
+		self::check_invariant(
+			$result,
+			$sanitized['ok']
+				&& $expected_sanitized === $sanitized['value']
+				&& array(
+					array(
+						'sanitized' => $expected_sanitized,
+						'raw'       => $raw_mime,
+					),
+				) === $sanitize_calls
+				&& $before_sanitize_filter === \has_filter( 'sanitize_mime_type', $sanitize_filter ),
+			'sanitize_mime_type:regex-filter-payload-and-restoration',
+			$raw_mime,
+			array(
+				'expected' => $expected_sanitized,
+				'actual'   => $sanitized['value'] ?? null,
+				'calls'    => $sanitize_calls,
+				'hasAfter' => \has_filter( 'sanitize_mime_type', $sanitize_filter ),
+			)
+		);
+
+		\add_filter( 'ext2type', $ext_filter );
+		\add_filter( 'mime_types', $mime_filter );
+		\add_filter( 'upload_mimes', $upload_filter, 10, 2 );
+		try {
+			$custom_ext_type = self::call_api(
+				$result,
+				'wp_ext2type.filtered',
+				$custom_ext,
+				static function () use ( $custom_ext ) {
+					return \wp_ext2type( strtoupper( $custom_ext ) );
+				}
+			);
+			$custom_default_ext = self::call_api(
+				$result,
+				'wp_get_default_extension_for_mime_type.filtered',
+				$custom_mime,
+				static function () use ( $custom_mime ) {
+					return \wp_get_default_extension_for_mime_type( $custom_mime );
+				}
+			);
+			$allowed = self::call_api(
+				$result,
+				'get_allowed_mime_types.filtered',
+				$custom_mime,
+				static function () {
+					return \get_allowed_mime_types();
+				}
+			);
+		} finally {
+			\remove_filter( 'ext2type', $ext_filter );
+			\remove_filter( 'mime_types', $mime_filter );
+			\remove_filter( 'upload_mimes', $upload_filter, 10 );
+		}
+
+		self::check_invariant(
+			$result,
+			$custom_ext_type['ok']
+				&& $custom_type === $custom_ext_type['value']
+				&& 1 === count( $ext_calls )
+				&& $before_ext_filter === \has_filter( 'ext2type', $ext_filter ),
+			'wp_ext2type:ext2type-filter-custom-extension-and-restoration',
+			$custom_ext,
+			array(
+				'expected' => $custom_type,
+				'actual'   => $custom_ext_type['value'] ?? null,
+				'calls'    => count( $ext_calls ),
+				'hasAfter' => \has_filter( 'ext2type', $ext_filter ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$custom_default_ext['ok']
+				&& $custom_ext === $custom_default_ext['value']
+				&& 2 === count( $mime_calls )
+				&& $allowed['ok']
+				&& is_array( $allowed['value'] ?? null )
+				&& $custom_mime === ( $allowed['value'][ $custom_ext ] ?? null )
+				&& array(
+					array(
+						'user' => null,
+						'hasCustomBefore' => true,
+					),
+				) === $upload_calls
+				&& $before_mime_filter === \has_filter( 'mime_types', $mime_filter )
+				&& $before_upload_filter === \has_filter( 'upload_mimes', $upload_filter ),
+			'wp_get_mime_types:get_allowed_mime_types-filter-chain-and-restoration',
+			$custom_mime,
+			array(
+				'defaultExt'    => $custom_default_ext['value'] ?? null,
+				'allowedCustom' => is_array( $allowed['value'] ?? null ) ? ( $allowed['value'][ $custom_ext ] ?? null ) : null,
+				'mimeCalls'     => count( $mime_calls ),
+				'uploadCalls'   => $upload_calls,
+				'hasMimeAfter'  => \has_filter( 'mime_types', $mime_filter ),
+				'hasUploadAfter' => \has_filter( 'upload_mimes', $upload_filter ),
+			)
+		);
 	}
 
 	private static function exercise_upload_iframe_src_apis( array &$rng, array &$result ): void {
