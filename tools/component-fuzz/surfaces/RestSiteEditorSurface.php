@@ -42,6 +42,7 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_template_revisions_autosaves( $ctx, $case, $fixtures );
 			$rows[] = self::check_navigation_fallback_controller( $ctx, $case, $fixtures );
 			$rows[] = self::check_edit_site_export_controller( $ctx );
+			$rows[] = self::check_block_templates_export_generator( $ctx, $case );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-site-editor.live-export.skipped',
@@ -183,6 +184,7 @@ final class RestSiteEditorSurface {
 				'sanitize_title',
 				'wp_cache_flush',
 				'wp_clean_theme_json_cache',
+				'wp_generate_block_templates_export_file',
 				'wp_insert_post',
 				'wp_insert_term',
 				'wp_insert_user',
@@ -1158,6 +1160,103 @@ final class RestSiteEditorSurface {
 		);
 	}
 
+	private static function check_block_templates_export_generator(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return self::skip(
+				$ctx,
+				'rest-site-editor.block-templates-export-generator.skipped',
+				'ZipArchive is unavailable, so the direct block template ZIP generator cannot run.',
+				array( 'extension' => 'zip' )
+			);
+		}
+
+		$failures   = array();
+		$filter_log = array();
+		$filter     = self::install_export_template_filter( $case, $filter_log );
+		$filename   = null;
+		$zip        = null;
+
+		try {
+			self::reset_runtime_caches();
+			$filename = \wp_generate_block_templates_export_file();
+
+			if ( \is_wp_error( $filename ) ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'block template export generator returns a ZIP filename',
+					array( 'error' => $filename )
+				);
+			} elseif ( ! is_string( $filename ) || '' === $filename ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'block template export generator returns a non-empty filename string',
+					array( 'filename' => $filename )
+				);
+			} else {
+				$zip = new \ZipArchive();
+				$opened = true === $zip->open( $filename );
+
+				self::collect_failure(
+					$failures,
+					file_exists( $filename )
+						&& filesize( $filename ) > 0
+						&& self::path_is_within( $filename, \get_temp_dir() )
+						&& $opened,
+					'export ZIP is created inside the expected temp directory and can be opened',
+					array(
+						'filename' => self::preview( $filename ),
+						'tempDir'  => self::preview( \get_temp_dir() ),
+						'opened'   => $opened,
+					)
+				);
+
+				if ( $opened ) {
+					self::inspect_block_template_export_zip( $zip, $case, $failures );
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				array(
+					array(
+						'type'  => 'wp_template',
+						'query' => array(),
+					),
+					array(
+						'type'  => 'wp_template_part',
+						'query' => array(),
+					),
+				) === $filter_log,
+				'export generator retrieves only the scoped template and template-part collections',
+				array( 'filterLog' => $filter_log )
+			);
+		} finally {
+			\remove_filter( 'pre_get_block_templates', $filter, 10 );
+			if ( $zip instanceof \ZipArchive ) {
+				$zip->close();
+			}
+			if ( is_string( $filename ) && '' !== $filename && file_exists( $filename ) ) {
+				@unlink( $filename );
+			}
+		}
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.block-templates-export-generator',
+			$failures,
+			array(
+				'case'      => self::case_summary( $case ),
+				'filterLog' => $filter_log,
+				'zipFile'   => is_string( $filename ) ? self::preview( basename( $filename ) ) : $filename,
+			)
+		);
+	}
+
 	private static function prepare_runtime(): void {
 		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_content();
@@ -1489,6 +1588,63 @@ final class RestSiteEditorSurface {
 		return $filter;
 	}
 
+	private static function install_export_template_filter( array $case, array &$filter_log ): callable {
+		$template = self::template_object(
+			$case,
+			array(
+				'content' => self::export_template_content( $case ),
+			)
+		);
+		$part     = self::template_object(
+			$case,
+			array(
+				'id'      => $case['templatePartId'],
+				'slug'    => $case['templatePartSlug'],
+				'type'    => 'wp_template_part',
+				'title'   => $case['templatePartTitle'],
+				'area'    => 'header',
+				'content' => $case['templatePartContent'],
+			)
+		);
+
+		$filter = static function ( $block_templates, array $query, string $template_type ) use (
+			$template,
+			$part,
+			&$filter_log
+		) {
+			$filter_log[] = array(
+				'type'  => $template_type,
+				'query' => $query,
+			);
+
+			if ( 'wp_template' === $template_type ) {
+				return array( clone $template );
+			}
+			if ( 'wp_template_part' === $template_type ) {
+				return array( clone $part );
+			}
+
+			return $block_templates;
+		};
+
+		\add_filter( 'pre_get_block_templates', $filter, 10, 3 );
+		return $filter;
+	}
+
+	private static function export_template_content( array $case ): string {
+		return '<!-- wp:template-part '
+			. \wp_json_encode(
+				array(
+					'slug'  => $case['templatePartSlug'],
+					'theme' => $case['themeSlug'],
+					'area'  => 'header',
+				),
+				JSON_UNESCAPED_SLASHES
+			)
+			. ' /-->'
+			. self::paragraph_block( 'Export template ' . $case['token'] );
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token            = substr( hash( 'sha1', self::NAME . ':' . $ctx->seed() ), 0, 10 );
 		$theme_slug       = 'cfz-site-' . $token;
@@ -1649,6 +1805,138 @@ final class RestSiteEditorSurface {
 
 	private static function link_href( array $links, string $rel ): ?string {
 		return $links[ $rel ][0]['href'] ?? null;
+	}
+
+	private static function inspect_block_template_export_zip(
+		\ZipArchive $zip,
+		array $case,
+		array &$failures
+	): void {
+		$template_entry      = 'templates/' . $case['templateSlug'] . '.html';
+		$template_part_entry = 'parts/' . $case['templatePartSlug'] . '.html';
+		$template_html       = $zip->getFromName( $template_entry );
+		$template_part_html  = $zip->getFromName( $template_part_entry );
+		$theme_json          = $zip->getFromName( 'theme.json' );
+		$theme_data          = is_string( $theme_json ) ? json_decode( $theme_json, true ) : null;
+		$zip_entries         = self::zip_entry_names( $zip );
+		$unsafe_entries      = array_values(
+			array_filter(
+				$zip_entries,
+				static function ( string $entry ): bool {
+					return self::zip_entry_leaks_path( $entry );
+				}
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false !== $zip->locateName( 'templates/' )
+				&& false !== $zip->locateName( 'parts/' )
+				&& false !== $zip->locateName( $template_entry )
+				&& false !== $zip->locateName( $template_part_entry ),
+			'export ZIP contains template and template-part directories and generated HTML entries',
+			array(
+				'templateEntry'     => $template_entry,
+				'templatePartEntry' => $template_part_entry,
+				'entries'           => $zip_entries,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false !== $zip->locateName( 'style.css' )
+				&& false !== $zip->locateName( 'theme.json' )
+				&& false !== $zip->locateName( 'styles/variation.json' ),
+			'export ZIP copies active theme fixture files',
+			array(
+				'styleCss'  => false !== $zip->locateName( 'style.css' ),
+				'themeJson' => false !== $zip->locateName( 'theme.json' ),
+				'variation' => false !== $zip->locateName( 'styles/variation.json' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $template_html )
+				&& str_contains( $template_html, '"slug":"' . $case['templatePartSlug'] . '"' )
+				&& str_contains( $template_html, '"area":"header"' )
+				&& ! str_contains( $template_html, '"theme":"' . $case['themeSlug'] . '"' )
+				&& $case['templatePartContent'] === $template_part_html,
+			'exported template HTML removes template-part theme attributes and preserves slug, area, and part content',
+			array(
+				'templateHtml'     => $template_html,
+				'templatePartHtml' => $template_part_html,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $theme_data )
+				&& 'https://schemas.wp.org/wp/' . substr( \wp_get_wp_version(), 0, 3 ) . '/theme.json' === ( $theme_data['$schema'] ?? null )
+				&& \WP_Theme_JSON::LATEST_SCHEMA === ( $theme_data['version'] ?? null )
+				&& $case['textColor'] === self::palette_color( $theme_data, 'fuzz-text' )
+				&& $case['existingCustomCss'] === ( $theme_data['styles']['css'] ?? null )
+				&& $case['textColor'] === ( $theme_data['styles']['color']['text'] ?? null ),
+			'exported theme.json is valid merged JSON with schema, palette, and user style data',
+			array(
+				'themeJson' => $theme_data,
+				'jsonError' => is_string( $theme_json ) ? json_last_error_msg() : 'missing theme.json',
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === $unsafe_entries,
+			'export ZIP entries are relative paths that cannot escape the archive root',
+			array( 'unsafeEntries' => $unsafe_entries )
+		);
+	}
+
+	private static function zip_entry_names( \ZipArchive $zip ): array {
+		$names = array();
+		for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+			$name = $zip->getNameIndex( $i );
+			if ( false !== $name ) {
+				$names[] = $name;
+			}
+		}
+
+		sort( $names );
+		return $names;
+	}
+
+	private static function zip_entry_leaks_path( string $entry ): bool {
+		if ( '' === $entry || str_starts_with( $entry, '/' ) || str_contains( $entry, '\\' ) ) {
+			return true;
+		}
+		if ( preg_match( '#(^|/)\.\.(/|$)#', $entry ) ) {
+			return true;
+		}
+
+		return 1 === preg_match( '#^[A-Za-z]:/#', $entry );
+	}
+
+	private static function path_is_within( string $path, string $directory ): bool {
+		$real_path      = realpath( $path );
+		$real_directory = realpath( $directory );
+		if ( false === $real_path || false === $real_directory ) {
+			return false;
+		}
+
+		$real_path      = \wp_normalize_path( $real_path );
+		$real_directory = rtrim( \wp_normalize_path( $real_directory ), '/' ) . '/';
+
+		return str_starts_with( $real_path, $real_directory );
+	}
+
+	private static function palette_color( array $theme_data, string $slug ): ?string {
+		foreach ( $theme_data['settings']['color']['palette'] ?? array() as $color ) {
+			if ( is_array( $color ) && $slug === ( $color['slug'] ?? null ) ) {
+				return $color['color'] ?? null;
+			}
+		}
+
+		return null;
 	}
 
 	private static function param_summary( array $params ): array {
