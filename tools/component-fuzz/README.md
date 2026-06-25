@@ -363,10 +363,11 @@ database, network requests, or a configured site.
   and status filtering.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
-  confirmation descriptions, request-key hash/expiration validation, export
-  group HTML escaping, exporter/eraser registry and processor shape contracts,
-  export directory/expiration cleanup filters, anonymization helpers, and
-  privacy policy suggestion/default text without mail or network delivery.
+  confirmation descriptions, request-key hash/expiration validation including
+  missing-request and global-post fallback fail-closed behavior, export group
+  HTML escaping, exporter/eraser registry and processor shape contracts, export
+  directory/expiration cleanup filters, anonymization helpers, and privacy
+  policy suggestion/default text without mail or network delivery.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, `WP_Query` SQL execution shape, and deterministic global

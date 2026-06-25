@@ -226,7 +226,7 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 8004 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 8013 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
@@ -538,10 +538,10 @@
 				</tr>
 				<tr>
 					<td><code>privacy</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 7577 passed, 63 skipped, 0 failed.</td>
-					<td>User requests, request keys, exporter/eraser registries, temp export paths, privacy policy content.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Singer the 3rd and Franklin the 3rd review findings fixed through <code>7c46819228</code></td>
+					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 8013 passed, 66 skipped, 0 failed; related PHPUnit: 143 tests, 358 assertions.</td>
+					<td>User requests, request keys, missing-request and global-post fallback fail-closed behavior, exporter/eraser registries, temp export paths, privacy policy content.</td>
 				</tr>
 				<tr>
 					<td><code>interactivity</code></td>
@@ -1523,10 +1523,10 @@
 					<td>7574 passed, 62 skipped, 0 failed at 2 iterations after interactivity directive edge integration.</td>
 				</tr>
 				<tr>
-					<td><code>3f967115f8</code></td>
+					<td><code>7c46819228</code></td>
 					<td><code>privacy</code></td>
-					<td>1300 passed, 0 skipped, 0 failed.</td>
-					<td>7577 passed, 63 skipped, 0 failed at 2 iterations after privacy lifecycle/export cleanup integration.</td>
+					<td>700 passed, 0 skipped, 0 failed.</td>
+					<td>8013 passed, 66 skipped, 0 failed at 2 iterations after request-key missing-request and global-post fallback fail-closed coverage plus review fixes.</td>
 				</tr>
 				<tr>
 					<td><code>df78e95206</code></td>
