@@ -30,6 +30,7 @@ final class AbilitiesSurface {
 				self::check_action_guards( $ctx ),
 				self::check_category_registry( $ctx ),
 				self::check_ability_registration_and_queries( $ctx ),
+				self::check_category_unregistration_preserves_abilities( $ctx ),
 				self::check_custom_subclass_query_and_reregister( $ctx ),
 				self::check_execution_pipeline( $ctx ),
 				self::check_validation_filter_and_exception_paths( $ctx ),
@@ -437,6 +438,194 @@ final class AbilitiesSurface {
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
+		);
+	}
+
+	private static function check_category_unregistration_preserves_abilities( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures   = array();
+		$categories = self::category_cases( $ctx->fork( 'cascade-categories' ) );
+		$removed    = $categories[0];
+		$kept       = $categories[1];
+		$names      = array(
+			'removedExisting' => self::ability_name( $ctx->fork( 'removed-existing' ), 'removed-existing' ),
+			'keptExisting'    => self::ability_name( $ctx->fork( 'kept-existing' ), 'kept-existing' ),
+			'blockedNew'      => self::ability_name( $ctx->fork( 'blocked-new' ), 'blocked-new' ),
+			'reopenedNew'     => self::ability_name( $ctx->fork( 'reopened-new' ), 'reopened-new' ),
+		);
+		$captured   = array(
+			'registered'           => array(),
+			'blockedAfterRemoval'  => null,
+			'reRegisteredCategory' => null,
+			'reopenedAbility'      => null,
+		);
+
+		self::reset_registries();
+		$category_action = self::install_category_action( array( $removed, $kept ) );
+		$ability_action  = static function () use ( $removed, $kept, $names, &$captured ): void {
+			$captured['registered']['removedExisting'] = \wp_register_ability(
+				$names['removedExisting'],
+				self::ability_args(
+					'Existing ability in the category later removed.',
+					$removed['slug'],
+					static fn( string $value ): string => 'removed:' . $value,
+					static fn(): bool => true,
+					array( 'type' => 'string' ),
+					array( 'type' => 'string' )
+				)
+			);
+			$captured['registered']['keptExisting']    = \wp_register_ability(
+				$names['keptExisting'],
+				self::ability_args(
+					'Existing ability in the category kept.',
+					$kept['slug'],
+					static fn( string $value ): string => 'kept:' . $value,
+					static fn(): bool => true,
+					array( 'type' => 'string' ),
+					array( 'type' => 'string' )
+				)
+			);
+		};
+
+		\add_action( 'wp_abilities_api_init', $ability_action );
+		\WP_Abilities_Registry::get_instance();
+		\remove_action( 'wp_abilities_api_init', $ability_action );
+		\remove_action( 'wp_abilities_api_categories_init', $category_action );
+
+		$existing_removed = \wp_get_ability( $names['removedExisting'] );
+		$existing_kept    = \wp_get_ability( $names['keptExisting'] );
+		$removed_category = \wp_unregister_ability_category( $removed['slug'] );
+		$has_removed_category_after_unregister = \wp_has_ability_category( $removed['slug'] );
+		$missing_removed_category = \wp_get_ability_category( $removed['slug'] );
+		$after_removed    = \wp_get_abilities( array( 'category' => $removed['slug'] ) );
+		$kept_after       = \wp_get_abilities( array( 'category' => $kept['slug'] ) );
+
+		$blocked_action = static function () use ( $removed, $names, &$captured ): void {
+			$captured['blockedAfterRemoval'] = \wp_register_ability(
+				$names['blockedNew'],
+				self::ability_args(
+					'Ability blocked while category is absent.',
+					$removed['slug'],
+					static fn( string $value ): string => 'blocked:' . $value,
+					static fn(): bool => true,
+					array( 'type' => 'string' ),
+					array( 'type' => 'string' )
+				)
+			);
+		};
+		\add_action( 'wp_abilities_api_init', $blocked_action );
+		\do_action( 'wp_abilities_api_init', \WP_Abilities_Registry::get_instance() );
+		\remove_action( 'wp_abilities_api_init', $blocked_action );
+
+		$reopen_category_action = static function () use ( $removed, &$captured ): void {
+			$captured['reRegisteredCategory'] = \wp_register_ability_category(
+				$removed['slug'],
+				self::category_args(
+					'Reopened ' . $removed['slug'],
+					array(
+						'reopened' => true,
+						'original' => $removed['args']['label'],
+					)
+				)
+			);
+		};
+		\add_action( 'wp_abilities_api_categories_init', $reopen_category_action );
+		\do_action( 'wp_abilities_api_categories_init', \WP_Ability_Categories_Registry::get_instance() );
+		\remove_action( 'wp_abilities_api_categories_init', $reopen_category_action );
+
+		$reopened_action = static function () use ( $removed, $names, &$captured ): void {
+			$captured['reopenedAbility'] = \wp_register_ability(
+				$names['reopenedNew'],
+				self::ability_args(
+					'Ability allowed after category is re-registered.',
+					$removed['slug'],
+					static fn( string $value ): string => 'reopened:' . $value,
+					static fn(): bool => true,
+					array( 'type' => 'string' ),
+					array( 'type' => 'string' )
+				)
+			);
+		};
+		\add_action( 'wp_abilities_api_init', $reopened_action );
+		\do_action( 'wp_abilities_api_init', \WP_Abilities_Registry::get_instance() );
+		\remove_action( 'wp_abilities_api_init', $reopened_action );
+
+		$after_reopen = \wp_get_abilities( array( 'category' => $removed['slug'] ) );
+
+		self::collect_failure(
+			$failures,
+			$existing_removed instanceof \WP_Ability
+				&& $existing_kept instanceof \WP_Ability
+				&& $removed_category instanceof \WP_Ability_Category
+				&& $removed_category->get_slug() === $removed['slug']
+				&& ! $has_removed_category_after_unregister
+				&& null === $missing_removed_category,
+			'category unregister removes only the category registry entry',
+			array(
+				'removedCategory' => $removed['slug'],
+				'removedReturn'   => self::describe_category( $removed_category ),
+				'missingLookup'   => self::describe_category( $missing_removed_category ),
+				'hasRemoved'      => $has_removed_category_after_unregister,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$existing_removed === \wp_get_ability( $names['removedExisting'] )
+				&& $existing_kept === \wp_get_ability( $names['keptExisting'] )
+				&& array( $names['removedExisting'] ) === array_keys( $after_removed )
+				&& array( $names['keptExisting'] ) === array_keys( $kept_after ),
+			'category unregister preserves existing abilities and category query membership',
+			array(
+				'removedCategory' => $removed['slug'],
+				'keptCategory'    => $kept['slug'],
+				'names'           => $names,
+				'afterRemoved'    => array_keys( $after_removed ),
+				'keptAfter'       => array_keys( $kept_after ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $captured['blockedAfterRemoval']
+				&& ! \wp_has_ability( $names['blockedNew'] ),
+			'new abilities cannot register into an unregistered category',
+			array(
+				'blockedReturn' => self::describe_ability( $captured['blockedAfterRemoval'] ),
+				'blockedName'   => $names['blockedNew'],
+				'hasBlocked'    => \wp_has_ability( $names['blockedNew'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$captured['reRegisteredCategory'] instanceof \WP_Ability_Category
+				&& \wp_has_ability_category( $removed['slug'] ),
+			'removed category can be re-registered during the category init action',
+			array(
+				'category'    => $removed['slug'],
+				'reRegistered' => self::describe_category( $captured['reRegisteredCategory'] ),
+				'hasCategory' => \wp_has_ability_category( $removed['slug'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$captured['reopenedAbility'] instanceof \WP_Ability
+				&& isset( $after_reopen[ $names['removedExisting'] ], $after_reopen[ $names['reopenedNew'] ] )
+				&& array( $names['removedExisting'], $names['reopenedNew'] ) === array_keys( $after_reopen ),
+			're-registered category accepts new abilities without losing preserved abilities',
+			array(
+				'removedCategory' => $removed['slug'],
+				'reopenedReturn'  => self::describe_ability( $captured['reopenedAbility'] ),
+				'afterReopen'     => array_keys( $after_reopen ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'abilities.category-unregister-preserves-existing-abilities',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
 	}
 
