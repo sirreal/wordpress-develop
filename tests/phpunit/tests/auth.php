@@ -994,8 +994,15 @@ class Tests_Auth extends WP_UnitTestCase {
 		$this->assertWPError( $check );
 		$this->assertSame( 'missing_key', $check->get_error_code() );
 
-		// A missing request should fail closed.
-		$check = wp_validate_user_request_key( 0, $key );
+		// A missing request should fail closed, even when get_post() could fall
+		// back to the global post.
+		$GLOBALS['post'] = get_post( $request_id );
+		try {
+			$check = wp_validate_user_request_key( 0, $key );
+		} finally {
+			unset( $GLOBALS['post'] );
+		}
+
 		$this->assertWPError( $check );
 		$this->assertSame( 'invalid_request', $check->get_error_code() );
 	}

@@ -754,28 +754,81 @@ final class PrivacySurface {
 	}
 
 	private static function check_missing_user_request_key( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
 		$missing_request_id = 91990 + $ctx->int( 0, 999 );
+		$valid_request_id   = 91250 + $ctx->int( 0, 99 );
 		$key                = 'missing|' . self::random_string( $ctx->fork( 'key' ), 24 );
-
-		\wp_cache_delete( $missing_request_id, 'posts' );
-		unset( self::$post_meta[ $missing_request_id ] );
-
-		$actual = self::call(
-			static function () use ( $missing_request_id, $key ) {
-				return \wp_validate_user_request_key( $missing_request_id, $key );
-			}
+		$hash               = \wp_fast_hash( $key );
+		$valid_post         = self::post_record(
+			array(
+				'ID'                => $valid_request_id,
+				'post_title'        => 'global-fallback@example.test',
+				'post_name'         => 'export_personal_data',
+				'post_status'       => 'request-pending',
+				'post_content'      => '{"key":"global-fallback"}',
+				'post_password'     => $hash,
+				'post_modified'     => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+				'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+			)
 		);
 
-		$ok = ! $actual['threw'] && self::is_error_code( $actual['value'], 'invalid_request' );
+		self::prime_request_post( $valid_post );
+		self::set_post_meta( (int) $valid_post->ID, array() );
+
+		$cases = array(
+			array(
+				'label' => 'uncached-missing-id',
+				'id'    => $missing_request_id,
+			),
+			array(
+				'label'  => 'zero-id-with-global-post',
+				'id'     => 0,
+				'global' => $valid_post,
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			\wp_cache_delete( (int) $case['id'], 'posts' );
+			unset( self::$post_meta[ (int) $case['id'] ] );
+
+			$had_global_post = array_key_exists( 'post', $GLOBALS );
+			$global_post     = $GLOBALS['post'] ?? null;
+			if ( isset( $case['global'] ) ) {
+				$GLOBALS['post'] = $case['global'];
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			$actual = self::call(
+				static function () use ( $case, $key ) {
+					return \wp_validate_user_request_key( $case['id'], $key );
+				}
+			);
+
+			if ( $had_global_post ) {
+				$GLOBALS['post'] = $global_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			if ( $actual['threw'] || ! self::is_error_code( $actual['value'], 'invalid_request' ) ) {
+				self::record_failure(
+					$failures,
+					'user-request-key.missing-request-case',
+					$case,
+					array( 'actual' => self::describe_call( $actual ) )
+				);
+			}
+		}
 
 		return self::row(
 			$ctx,
 			'privacy.user-request-key.missing-request-fails-closed',
-			$ok,
+			array() === $failures,
 			array(
-				'requestId' => $missing_request_id,
-				'key'       => self::describe_string( $key ),
-				'actual'    => self::describe_call( $actual ),
+				'cases'    => count( $cases ),
+				'key'      => self::describe_string( $key ),
+				'failures' => $failures,
 			)
 		);
 	}
