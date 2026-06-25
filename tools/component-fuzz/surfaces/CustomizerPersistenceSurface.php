@@ -31,6 +31,7 @@ final class CustomizerPersistenceSurface {
 		try {
 			$rows[] = self::check_changeset_uuid_and_value_normalization( $ctx->fork( 'changeset-normalization' ) );
 			$rows[] = self::check_changeset_post_content_parsing( $ctx->fork( 'changeset-parsing' ) );
+			$rows[] = self::check_changeset_lock_heartbeat_persistence( $ctx->fork( 'changeset-lock-heartbeat' ) );
 			$rows[] = self::check_save_changeset_post_transactions( $ctx->fork( 'changeset-save' ) );
 			$rows[] = self::check_custom_css_setting_validation_preview_update( $ctx->fork( 'custom-css-setting' ) );
 			$rows[] = self::check_custom_css_post_filters_and_round_trips( $ctx->fork( 'custom-css-post' ) );
@@ -69,6 +70,7 @@ final class CustomizerPersistenceSurface {
 				'WP_Post',
 				'WP_Query',
 				'WP_Rewrite',
+				'WP_User',
 				'Component_Fuzz_WPDB_Stub',
 			) as $class
 		) {
@@ -83,21 +85,29 @@ final class CustomizerPersistenceSurface {
 				'create_initial_post_types',
 				'current_user_can',
 				'get_post',
+				'get_current_user_id',
+				'get_option',
+				'get_post_meta',
 				'get_post_status',
 				'get_post_type',
 				'get_stylesheet',
 				'get_theme_mod',
+				'get_userdata',
 				'has_filter',
 				'is_wp_error',
 				'remove_filter',
 				'sanitize_title',
 				'set_theme_mod',
+				'update_post_meta',
 				'wp_cache_flush',
+				'wp_check_post_lock',
 				'wp_get_custom_css',
 				'wp_get_custom_css_post',
 				'wp_insert_post',
+				'wp_insert_user',
 				'wp_is_uuid',
 				'wp_json_encode',
+				'wp_set_current_user',
 				'wp_slash',
 				'wp_unslash',
 				'wp_update_custom_css_post',
@@ -331,6 +341,223 @@ final class CustomizerPersistenceSurface {
 		return self::row(
 			$ctx,
 			'customizer-persistence.changeset-post-content-parsing',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_changeset_lock_heartbeat_persistence( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures             = array();
+		$local_snapshot       = self::snapshot_globals(
+			array(
+				'current_user',
+				'user_ID',
+				'userdata',
+				'user_level',
+				'user_login',
+				'user_email',
+				'user_url',
+				'user_identity',
+				'wp_actions',
+				'wp_current_filter',
+				'wp_customize',
+				'wp_filter',
+				'wp_filters',
+			)
+		);
+		$content_counts_before = isset( $GLOBALS['wpdb'] )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: null;
+		$ajax_counts_before   = self::action_counts( self::customizer_ajax_action_names() );
+		$ajax_counts_after    = $ajax_counts_before;
+
+		try {
+			$uuid          = self::uuid( $ctx );
+			$owner_id      = self::insert_lock_user( $ctx->fork( 'owner' ), 'owner' );
+			$other_id      = self::insert_lock_user( $ctx->fork( 'other' ), 'other' );
+			$owner_user    = \get_userdata( $owner_id );
+			$other_user    = \get_userdata( $other_id );
+			$post_id       = self::insert_changeset_post( $uuid, array(), 'publish' );
+			$manager       = self::manager( $ctx, $uuid );
+			$base_response = array( 'component_fuzz' => 'preserve' );
+			$heartbeat     = array(
+				'check_changeset_lock' => true,
+				'changeset_uuid'       => $uuid,
+			);
+
+			\wp_set_current_user( $owner_id );
+			$manager->set_changeset_lock( $post_id );
+			$initial_lock = \get_post_meta( $post_id, '_edit_lock', true );
+			$initial      = self::parse_changeset_lock( $initial_lock );
+
+			\wp_set_current_user( $other_id );
+			$manager->set_changeset_lock( $post_id );
+			$other_attempt_lock              = \get_post_meta( $post_id, '_edit_lock', true );
+			$current_user_after_other_attempt = \get_current_user_id();
+
+			\wp_set_current_user( $owner_id );
+			$manager->refresh_changeset_lock( $post_id );
+			$owner_refresh_lock = \get_post_meta( $post_id, '_edit_lock', true );
+			$owner_refresh      = self::parse_changeset_lock( $owner_refresh_lock );
+
+			\wp_set_current_user( $other_id );
+			$other_response              = $manager->check_changeset_lock_with_heartbeat(
+				$base_response,
+				$heartbeat,
+				'customize'
+			);
+			$after_other_heartbeat_lock  = \get_post_meta( $post_id, '_edit_lock', true );
+			$after_other_heartbeat_check = \wp_check_post_lock( $post_id );
+
+			\wp_set_current_user( $owner_id );
+			$owner_response              = $manager->check_changeset_lock_with_heartbeat(
+				$base_response,
+				$heartbeat,
+				'customize'
+			);
+			$after_owner_heartbeat_lock  = \get_post_meta( $post_id, '_edit_lock', true );
+			$after_owner_heartbeat       = self::parse_changeset_lock( $after_owner_heartbeat_lock );
+			$after_owner_heartbeat_check = \wp_check_post_lock( $post_id );
+
+			\wp_set_current_user( $other_id );
+			$manager->set_changeset_lock( $post_id, true );
+			$takeover_lock = \get_post_meta( $post_id, '_edit_lock', true );
+			$takeover      = self::parse_changeset_lock( $takeover_lock );
+
+			$ajax_counts_after = self::action_counts( self::customizer_ajax_action_names() );
+
+			self::collect_failure(
+				$failures,
+				is_int( $owner_id )
+					&& $owner_id > 0
+					&& is_int( $other_id )
+					&& $other_id > 0
+					&& $owner_id !== $other_id
+					&& $owner_user instanceof \WP_User
+					&& $other_user instanceof \WP_User
+					&& is_int( $post_id )
+					&& $post_id > 0
+					&& $post_id === $manager->changeset_post_id(),
+				'changeset lock fixture creates two users and a resolvable changeset post',
+				array(
+					'ownerId'   => $owner_id,
+					'otherId'   => $other_id,
+					'ownerUser' => self::describe_lock_user( $owner_user ),
+					'otherUser' => self::describe_lock_user( $other_user ),
+					'postId'    => $post_id,
+					'foundPost' => $manager->changeset_post_id(),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::lock_belongs_to_user( $initial, $owner_id )
+					&& (int) $current_user_after_other_attempt === (int) $other_id
+					&& $other_attempt_lock === $initial_lock
+					&& self::lock_belongs_to_user( $owner_refresh, $owner_id )
+					&& (int) $owner_refresh['time'] >= (int) $initial['time'],
+				'set_changeset_lock writes unlocked changesets, preserves another user lock, and refreshes same-user locks',
+				array(
+					'initialLock'      => self::describe_lock( $initial_lock ),
+					'otherAttemptLock' => self::describe_lock( $other_attempt_lock ),
+					'ownerRefreshLock' => self::describe_lock( $owner_refresh_lock ),
+					'currentUserId'    => $current_user_after_other_attempt,
+				)
+			);
+
+			$reported_user = is_array( $other_response )
+				? ( $other_response['customize_changeset_lock_user'] ?? null )
+				: null;
+			self::collect_failure(
+				$failures,
+				is_array( $other_response )
+					&& 'preserve' === ( $other_response['component_fuzz'] ?? null )
+					&& is_array( $reported_user )
+					&& (int) $owner_id === (int) ( $reported_user['id'] ?? 0 )
+					&& $owner_user instanceof \WP_User
+					&& $owner_user->display_name === ( $reported_user['name'] ?? null )
+					&& $owner_refresh_lock === $after_other_heartbeat_lock
+					&& (int) $owner_id === (int) $after_other_heartbeat_check,
+				'heartbeat on the customize screen reports another valid user lock without refreshing it',
+				array(
+					'response'                 => self::describe_value( $other_response ),
+					'afterOtherHeartbeatLock'  => self::describe_lock( $after_other_heartbeat_lock ),
+					'afterOtherHeartbeatCheck' => $after_other_heartbeat_check,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $owner_response )
+					&& 'preserve' === ( $owner_response['component_fuzz'] ?? null )
+					&& ! array_key_exists( 'customize_changeset_lock_user', $owner_response )
+					&& self::lock_belongs_to_user( $after_owner_heartbeat, $owner_id )
+					&& (int) $after_owner_heartbeat['time'] >= (int) $owner_refresh['time']
+					&& false === $after_owner_heartbeat_check,
+				'heartbeat from the lock owner refreshes the changeset lock and does not report a lock user',
+				array(
+					'response'                => self::describe_value( $owner_response ),
+					'afterOwnerHeartbeatLock' => self::describe_lock( $after_owner_heartbeat_lock ),
+					'wpCheckPostLock'         => $after_owner_heartbeat_check,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::lock_belongs_to_user( $takeover, $other_id )
+					&& (int) $takeover['time'] >= (int) $after_owner_heartbeat['time'],
+				'set_changeset_lock with take_over=true lets a different current user replace the lock',
+				array(
+					'takeoverLock' => self::describe_lock( $takeover_lock ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$ajax_counts_before === $ajax_counts_after,
+				'lock and heartbeat coverage does not invoke Customizer AJAX actions',
+				array(
+					'before' => $ajax_counts_before,
+					'after'  => $ajax_counts_after,
+				)
+			);
+		} finally {
+			self::restore_globals( $local_snapshot );
+
+			if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+				$GLOBALS['wpdb']->component_fuzz_reset_content();
+			}
+
+			if ( function_exists( 'wp_cache_flush' ) ) {
+				\wp_cache_flush();
+			}
+		}
+
+		$content_counts_after = isset( $GLOBALS['wpdb'] )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: null;
+		$state_restored       = $content_counts_before === $content_counts_after;
+		foreach ( $local_snapshot as $name => $entry ) {
+			$state_restored = $state_restored && self::global_value_matches( $name, $entry );
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored,
+			'changeset lock invariant restores scoped current-user, filter/action, and content/meta state',
+			array(
+				'contentCountsBefore' => $content_counts_before,
+				'contentCountsAfter'  => $content_counts_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'customizer-persistence.changeset-lock-heartbeat-persistence',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -824,6 +1051,7 @@ final class CustomizerPersistenceSurface {
 					'customize_stashed_theme_mods'    => array(),
 					'page_for_posts'                  => '0',
 					'page_on_front'                   => '0',
+					'show_avatars'                    => 0,
 					'show_on_front'                   => 'posts',
 					'fresh_site'                      => '0',
 				)
@@ -858,6 +1086,12 @@ final class CustomizerPersistenceSurface {
 					'wp_query',
 					'wp_rewrite',
 					'wp_the_query',
+					'userdata',
+					'user_email',
+					'user_identity',
+					'user_level',
+					'user_login',
+					'user_url',
 				)
 			),
 			'options'            => isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
@@ -1062,6 +1296,59 @@ final class CustomizerPersistenceSurface {
 		return '' === $slug ? 'x' : $slug;
 	}
 
+	private static function insert_lock_user( \ComponentFuzz\FuzzContext $ctx, string $suffix ): int {
+		$token   = substr( md5( 'customizer-lock:' . $ctx->seed() . ':' . $ctx->iteration() . ':' . $suffix ), 0, 12 );
+		$user_id = \wp_insert_user(
+			array(
+				'display_name' => 'Customizer Lock ' . ucfirst( $suffix ) . ' ' . $token,
+				'role'         => 'subscriber',
+				'user_email'   => 'customizer-lock-' . $suffix . '-' . $token . '@example.test',
+				'user_login'   => 'customizer_lock_' . $suffix . '_' . $token,
+				'user_pass'    => 'component-fuzz-pass',
+			)
+		);
+
+		return is_int( $user_id ) ? $user_id : 0;
+	}
+
+	private static function parse_changeset_lock( $lock ): ?array {
+		if ( ! is_string( $lock ) ) {
+			return null;
+		}
+
+		if ( ! preg_match( '/^([0-9]+):([0-9]+)$/', $lock, $matches ) ) {
+			return null;
+		}
+
+		return array(
+			'time'   => (int) $matches[1],
+			'userId' => (int) $matches[2],
+		);
+	}
+
+	private static function lock_belongs_to_user( ?array $lock, int $user_id ): bool {
+		return is_array( $lock )
+			&& (int) $user_id === (int) ( $lock['userId'] ?? 0 )
+			&& (int) ( $lock['time'] ?? 0 ) > 0;
+	}
+
+	private static function customizer_ajax_action_names(): array {
+		return array(
+			'wp_ajax_customize_save',
+			'wp_ajax_customize_trash',
+			'wp_ajax_customize_refresh_nonces',
+			'wp_ajax_customize_override_changeset_lock',
+		);
+	}
+
+	private static function action_counts( array $names ): array {
+		$counts = array();
+		foreach ( $names as $name ) {
+			$counts[ $name ] = (int) ( $GLOBALS['wp_actions'][ $name ] ?? 0 );
+		}
+		return $counts;
+	}
+
 	private static function all_sanitize_calls_match( array $calls ): bool {
 		foreach ( $calls as $call ) {
 			if ( empty( $call['matches'] ) ) {
@@ -1092,6 +1379,25 @@ final class CustomizerPersistenceSurface {
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array() ): array {
 		return $ok ? $ctx->pass( $invariant, $data ) : $ctx->fail( $invariant, $data );
+	}
+
+	private static function describe_lock( $lock ): array {
+		return array(
+			'raw'    => is_string( $lock ) ? self::preview( $lock ) : self::describe_value( $lock ),
+			'parsed' => self::parse_changeset_lock( $lock ),
+		);
+	}
+
+	private static function describe_lock_user( $user ) {
+		if ( ! $user instanceof \WP_User ) {
+			return self::describe_value( $user );
+		}
+
+		return array(
+			'ID'           => $user->ID,
+			'user_login'   => $user->user_login,
+			'display_name' => $user->display_name,
+		);
 	}
 
 	private static function describe_post( $post ) {
