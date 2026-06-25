@@ -28,6 +28,7 @@ final class InstallSchemaSurface {
 
 		try {
 			$rows[] = self::check_wp_get_db_schema_table_sets( $ctx );
+			$rows[] = self::check_global_table_upgrade_gate( $ctx );
 			$rows[] = self::check_make_db_current_scope_wrappers( $ctx );
 			$rows[] = self::check_create_table_parser_variants( $ctx );
 			$rows[] = self::check_dbdelta_equivalent_noops( $ctx );
@@ -82,11 +83,16 @@ final class InstallSchemaSurface {
 		$missing = array();
 		foreach (
 			array(
+				'add_filter',
 				'apply_filters',
 				'dbDelta',
+				'has_filter',
+				'is_main_network',
+				'is_main_site',
 				'is_multisite',
 				'make_db_current',
 				'make_db_current_silent',
+				'remove_filter',
 				'wp_get_db_schema',
 				'wp_should_upgrade_global_tables',
 			) as $function
@@ -169,6 +175,78 @@ final class InstallSchemaSurface {
 			'install-schema.wp-get-db-schema-table-sets-and-prefixes',
 			$result['ok'],
 			$result
+		);
+	}
+
+	private static function check_global_table_upgrade_gate( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( defined( 'DO_NOT_UPGRADE_GLOBAL_TABLES' ) ) {
+			return $ctx->skip(
+				'install-schema.global-table-upgrade-gate-filter',
+				'DO_NOT_UPGRADE_GLOBAL_TABLES is defined for this process.'
+			);
+		}
+
+		$baseline = wp_should_upgrade_global_tables();
+		$seen     = array();
+		$deny     = static function ( bool $should_upgrade ) use ( &$seen ): bool {
+			$seen[] = array(
+				'filter' => 'deny',
+				'input'  => $should_upgrade,
+			);
+			return false;
+		};
+		$allow    = static function ( bool $should_upgrade ) use ( &$seen ): bool {
+			$seen[] = array(
+				'filter' => 'allow',
+				'input'  => $should_upgrade,
+			);
+			return true;
+		};
+
+		\add_filter( 'wp_should_upgrade_global_tables', $deny );
+		try {
+			$denied = wp_should_upgrade_global_tables();
+		} finally {
+			\remove_filter( 'wp_should_upgrade_global_tables', $deny );
+		}
+
+		\add_filter( 'wp_should_upgrade_global_tables', $allow );
+		try {
+			$allowed = wp_should_upgrade_global_tables();
+		} finally {
+			\remove_filter( 'wp_should_upgrade_global_tables', $allow );
+		}
+
+		$after = wp_should_upgrade_global_tables();
+		$ok    = is_bool( $baseline )
+			&& false === $denied
+			&& true === $allowed
+			&& $baseline === $after
+			&& array(
+				array(
+					'filter' => 'deny',
+					'input'  => $baseline,
+				),
+				array(
+					'filter' => 'allow',
+					'input'  => $baseline,
+				),
+			) === $seen
+			&& false === \has_filter( 'wp_should_upgrade_global_tables', $deny )
+			&& false === \has_filter( 'wp_should_upgrade_global_tables', $allow );
+
+		return $ctx->result(
+			'install-schema.global-table-upgrade-gate-filter',
+			$ok,
+			array(
+				'baseline'       => $baseline,
+				'denied'         => $denied,
+				'allowed'        => $allowed,
+				'after'          => $after,
+				'seen'           => $seen,
+				'denyHasFilter'  => \has_filter( 'wp_should_upgrade_global_tables', $deny ),
+				'allowHasFilter' => \has_filter( 'wp_should_upgrade_global_tables', $allow ),
+			)
 		);
 	}
 

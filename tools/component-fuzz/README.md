@@ -260,9 +260,9 @@ database, network requests, or a configured site.
   transfer semantics.
 - `install-schema`: no-DB install and upgrade schema coverage, including
   `wp_get_db_schema()` table sets, `make_db_current()`/silent wrapper scope
-  expansion, `dbDelta()` CREATE TABLE parsing, equivalent-schema no-ops,
-  isolated column/index diffs, SQL table allowlists, and malformed DDL
-  fail-closed behavior.
+  expansion, global-table upgrade gate filters, `dbDelta()` CREATE TABLE
+  parsing, equivalent-schema no-ops, isolated column/index diffs, SQL table
+  allowlists, and malformed DDL fail-closed behavior.
 - `interactivity`: server-side directive processing for context, bind, class,
   style, text, and each directives, explicit namespace/negation/length
   evaluation, context namespace stack merge/sort/restoration, derived
