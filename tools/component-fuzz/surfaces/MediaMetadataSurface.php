@@ -42,6 +42,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_audio_video_parser_failure_paths( $ctx->fork( 'parser' ), $temp_root );
 				$rows[] = self::check_id3_tag_and_timestamp_helpers( $ctx->fork( 'id3-helper' ) );
 				$rows[] = self::check_extension_key_and_attachment_helpers( $ctx->fork( 'helpers' ), $temp_root );
+				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
 				$rows[] = self::check_generate_attachment_metadata_branches( $ctx->fork( 'generate' ), $temp_root );
 			}
 		} catch ( \Throwable $e ) {
@@ -99,9 +100,11 @@ final class MediaMetadataSurface {
 				'wp_generate_attachment_metadata',
 				'wp_get_attachment_id3_keys',
 				'wp_get_audio_extensions',
+				'wp_get_attachment_metadata',
 				'wp_get_media_creation_timestamp',
 				'wp_get_upload_dir',
 				'wp_get_video_extensions',
+				'wp_update_attachment_metadata',
 				'wp_read_audio_metadata',
 				'wp_read_video_metadata',
 				'wp_set_current_user',
@@ -479,6 +482,133 @@ final class MediaMetadataSurface {
 		return self::row(
 			$ctx,
 			'media-metadata.extension-id3-key-and-attachment-helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_attachment_metadata_get_update_helpers( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures    = array();
+		$fixture_dir = $temp_root . DIRECTORY_SEPARATOR . 'metadata-roundtrip';
+		$file        = self::write_fixture( $fixture_dir, 'roundtrip-' . $ctx->identifier( 3, 8 ) . '.mp3', 'ID3' . $ctx->bytes( 8, 24 ) );
+
+		if ( null === $file ) {
+			return self::row(
+				$ctx,
+				'media-metadata.attachment-metadata-get-update-delete',
+				false,
+				array( 'failures' => array( array( 'message' => 'metadata round-trip fixture is writable' ) ) )
+			);
+		}
+
+		$attachment_id = 873000 + $ctx->iteration();
+		self::seed_attachment_post( $attachment_id, 'audio/mpeg', $file );
+
+		$metadata = array(
+			'file'       => basename( $file ),
+			'filesize'   => filesize( $file ),
+			'length'     => $ctx->int( 1, 999 ),
+			'mime_type'  => 'audio/mpeg',
+			'sizes'      => array(
+				'component-fuzz' => array(
+					'file'      => 'component-' . $ctx->identifier( 3, 8 ) . '.jpg',
+					'width'     => $ctx->int( 1, 20 ),
+					'height'    => $ctx->int( 1, 20 ),
+					'mime-type' => 'image/jpeg',
+				),
+			),
+			'image_meta' => array(
+				'created_timestamp' => $ctx->int( 1000000000, 1999999999 ),
+				'credit'            => 'Component Fuzz',
+			),
+		);
+		$events   = array(
+			'get'    => array(),
+			'update' => array(),
+		);
+
+		$update_filter = static function ( array $data, int $post_id ) use ( &$events, $attachment_id ): array {
+			$events['update'][]              = array(
+				'id'   => $post_id,
+				'keys' => array_keys( $data ),
+			);
+			if ( array() === $data ) {
+				return $data;
+			}
+
+			$data['component_fuzz_updated'] = $attachment_id === $post_id;
+			return $data;
+		};
+		$get_filter    = static function ( $data, int $post_id ) use ( &$events ): array {
+			$events['get'][] = array(
+				'id'   => $post_id,
+				'type' => gettype( $data ),
+			);
+			if ( is_array( $data ) ) {
+				$data['component_fuzz_get_filtered'] = $post_id;
+			}
+			return $data;
+		};
+
+		\add_filter( 'wp_update_attachment_metadata', $update_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_metadata', $get_filter, 10, 2 );
+		try {
+			$updated      = \wp_update_attachment_metadata( $attachment_id, $metadata );
+			$unfiltered   = \wp_get_attachment_metadata( $attachment_id, true );
+			$filtered     = \wp_get_attachment_metadata( $attachment_id );
+			$deleted      = \wp_update_attachment_metadata( $attachment_id, array() );
+			$after_delete = \wp_get_attachment_metadata( $attachment_id, true );
+		} finally {
+			\remove_filter( 'wp_get_attachment_metadata', $get_filter, 10 );
+			\remove_filter( 'wp_update_attachment_metadata', $update_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false !== $updated
+				&& is_array( $unfiltered )
+				&& is_array( $filtered )
+				&& true === ( $unfiltered['component_fuzz_updated'] ?? null )
+				&& ! isset( $unfiltered['component_fuzz_get_filtered'] )
+				&& true === ( $filtered['component_fuzz_updated'] ?? null )
+				&& $attachment_id === ( $filtered['component_fuzz_get_filtered'] ?? null )
+				&& $metadata['sizes'] === ( $unfiltered['sizes'] ?? null )
+				&& $metadata['image_meta'] === ( $unfiltered['image_meta'] ?? null )
+				&& false !== $deleted
+				&& false === $after_delete,
+			'wp_get/update_attachment_metadata round trips filtered metadata, honors unfiltered reads, and deletes on empty data',
+			array(
+				'updated'      => $updated,
+				'unfiltered'   => $unfiltered,
+				'filtered'     => $filtered,
+				'deleted'      => $deleted,
+				'afterDelete'  => $after_delete,
+				'events'       => $events,
+				'baseMetadata' => $metadata,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $events['update'] )
+				&& 1 === count( $events['get'] )
+				&& $attachment_id === ( $events['update'][0]['id'] ?? null )
+				&& $attachment_id === ( $events['update'][1]['id'] ?? null )
+				&& array() === ( $events['update'][1]['keys'] ?? null )
+				&& $attachment_id === ( $events['get'][0]['id'] ?? null )
+				&& false === \has_filter( 'wp_update_attachment_metadata', $update_filter )
+				&& false === \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+			'attachment metadata filters fire with expected payloads and are restored',
+			array(
+				'events'    => $events,
+				'hasUpdate' => \has_filter( 'wp_update_attachment_metadata', $update_filter ),
+				'hasGet'    => \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.attachment-metadata-get-update-delete',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);

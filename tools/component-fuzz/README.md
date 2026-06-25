@@ -318,7 +318,8 @@ database, network requests, or a configured site.
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
   filters, `wp_attachment_is()` MIME/extension branches, image/document
-  classification, MIME/extension disagreement, wrapper behavior, and
+  classification, MIME/extension disagreement, wrapper behavior, attachment
+  metadata get/update/delete filter contracts, and
   `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
