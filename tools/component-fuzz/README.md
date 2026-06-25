@@ -99,7 +99,8 @@ database, network requests, or a configured site.
   fallbacks, content sanitization on update, form escaping, `the_widget()`
   display callback/action flow, registered control rendering, widgets block
   editor support toggles, widget ID parsing, unregistered-widget cleanup, and
-  sidebars widget mapping for block widget instances.
+  sidebars widget mapping, `retrieve_widgets()` remapping/customizer
+  persistence boundaries, and lost/inactive block widget recovery.
 - `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
   including in-memory link rows and link categories for `get_bookmark()`,
   `get_bookmarks()`, `wp_list_bookmarks()` and `_walk_bookmarks()` escaping,
@@ -618,9 +619,10 @@ dispatch. The
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The
-`block-widgets` surface exercises `WP_Widget_Block` and sidebars widget option
-mapping without loading the browser widgets editor, performing REST persistence,
-or depending on theme files. The
+`block-widgets` surface exercises `WP_Widget_Block`, sidebars widget option
+mapping, and `retrieve_widgets()` remap/lost-widget recovery without loading the
+browser widgets editor, performing REST persistence, or depending on theme
+files. The
 Admin Media Chrome surface intentionally avoids upload dispatch, real
 attachments created by browser flows, `wp_media_attach_action()` redirects,
 AJAX image-editor actions, and media modal runtime behavior; it covers direct

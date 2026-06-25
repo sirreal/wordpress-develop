@@ -33,6 +33,7 @@ final class BlockWidgetsSurface {
 			$rows[] = self::check_widgets_block_editor_support( $ctx->fork( 'support' ) );
 			$rows[] = self::check_the_widget_and_control_rendering( $ctx->fork( 'the-widget-control' ) );
 			$rows[] = self::check_sidebars_widget_mapping( $ctx->fork( 'mapping' ) );
+			$rows[] = self::check_retrieve_widgets_remap_lost_inactive( $ctx->fork( 'retrieve-widgets' ) );
 			$rows[] = self::check_widget_id_and_cleanup_matrix( $ctx->fork( 'id-cleanup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -593,6 +594,96 @@ final class BlockWidgetsSurface {
 		return self::result( $ctx, 'block-widgets.sidebars.mapping-persistence-and-rendering', $failures );
 	}
 
+	private static function check_retrieve_widgets_remap_lost_inactive( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$fixture            = self::seed_retrieve_widgets_fixture( $ctx );
+		$persistent_updates = array();
+		$capture_persistent = static function ( $value, $old_value, string $option ) use ( &$persistent_updates ) {
+			$persistent_updates[] = array(
+				'value' => $value,
+				'old'   => $old_value,
+				'option' => $option,
+			);
+			return $value;
+		};
+
+		\add_filter( 'pre_update_option_sidebars_widgets', $capture_persistent, 10, 3 );
+		try {
+			$persistent_result = \retrieve_widgets( true );
+		} finally {
+			\remove_filter( 'pre_update_option_sidebars_widgets', $capture_persistent, 10 );
+		}
+
+		$persistent_stored = \get_option( 'sidebars_widgets', array() );
+		$persistent_global = $GLOBALS['sidebars_widgets'] ?? null;
+
+		self::collect_failure(
+			$failures,
+			self::retrieve_widgets_result_matches_fixture( $persistent_result, $fixture )
+				&& $persistent_global === $persistent_result,
+			'retrieve_widgets(true) remaps sidebars, carries inactive widgets, normalizes scalar slots, and adds only non-default lost instances',
+			array(
+				'fixture' => $fixture,
+				'result'  => $persistent_result,
+				'global'  => $persistent_global,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			1 === count( $persistent_updates )
+				&& 'sidebars_widgets' === ( $persistent_updates[0]['option'] ?? null )
+				&& $fixture['sentinelOption'] === ( $persistent_updates[0]['old'] ?? null )
+				&& 3 === ( $persistent_stored['array_version'] ?? null )
+				&& $persistent_result === self::sidebars_without_array_version( $persistent_stored ),
+			'retrieve_widgets(true) persists remapped sidebars through wp_set_sidebars_widgets()',
+			array(
+				'updates' => $persistent_updates,
+				'stored'  => $persistent_stored,
+			)
+		);
+
+		$customize_fixture = self::seed_retrieve_widgets_fixture( $ctx );
+		$customize_updates = array();
+		$capture_customize = static function ( $value, $old_value, string $option ) use ( &$customize_updates ) {
+			$customize_updates[] = array(
+				'value' => $value,
+				'old'   => $old_value,
+				'option' => $option,
+			);
+			return $value;
+		};
+
+		\add_filter( 'pre_update_option_sidebars_widgets', $capture_customize, 10, 3 );
+		try {
+			$customize_result = \retrieve_widgets( 'customize' );
+		} finally {
+			\remove_filter( 'pre_update_option_sidebars_widgets', $capture_customize, 10 );
+		}
+
+		$customize_stored = \get_option( 'sidebars_widgets', array() );
+		$customize_global = $GLOBALS['sidebars_widgets'] ?? null;
+
+		self::collect_failure(
+			$failures,
+			self::retrieve_widgets_result_matches_fixture( $customize_result, $customize_fixture )
+				&& $customize_global === $customize_result
+				&& $customize_result === $persistent_result
+				&& array() === $customize_updates
+				&& $customize_fixture['sentinelOption'] === $customize_stored,
+			'retrieve_widgets("customize") returns the remapped structure without persisting the sidebars option',
+			array(
+				'updates'          => $customize_updates,
+				'stored'           => $customize_stored,
+				'customizeResult'  => $customize_result,
+				'persistentResult' => $persistent_result,
+				'global'           => $customize_global,
+			)
+		);
+
+		return self::result( $ctx, 'block-widgets.sidebars.retrieve-widgets-remap-lost-inactive', $failures );
+	}
+
 	private static function check_widget_id_and_cleanup_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$cases    = array(
@@ -661,6 +752,120 @@ final class BlockWidgetsSurface {
 		);
 
 		return self::result( $ctx, 'block-widgets.sidebars.widget-id-and-cleanup-matrix', $failures );
+	}
+
+	private static function seed_retrieve_widgets_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_widget_factory;
+
+		self::reset_runtime();
+
+		$suffix         = substr( hash( 'crc32b', 'retrieve-widgets:' . $ctx->seed() ), 0, 6 );
+		$primary        = 'primary-retrieve-' . $suffix;
+		$footer         = 'footer-retrieve-' . $suffix;
+		$header         = 'header-retrieve-' . $suffix;
+		$old_primary    = 'sidebar-primary-legacy-' . $suffix;
+		$unmatched      = 'storage-legacy-' . $suffix;
+		$ids            = array(
+			'defaultLost' => 'block-1',
+			'primary'     => 'block-2',
+			'footer'      => 'block-3',
+			'orphaned'    => 'block-4',
+			'inactive'    => 'block-5',
+			'unmatched'   => 'block-6',
+			'lostMulti'   => 'block-7',
+		);
+		$missing_ids    = array( 'block-13', 'missing-widget-21' );
+		$sentinel       = array(
+			'sentinel-sidebar-' . $suffix => array( 'sentinel-widget-31' ),
+			'array_version'               => 3,
+		);
+		$widget_options = array( '_multiwidget' => 1 );
+
+		foreach ( range( 1, 7 ) as $number ) {
+			$widget_options[ $number ] = array(
+				'content' => '<!-- wp:paragraph --><p>Retrieve ' . $suffix . ' #' . $number . '</p><!-- /wp:paragraph -->',
+			);
+		}
+
+		foreach ( array( $primary, $footer, $header ) as $sidebar_id ) {
+			\register_sidebar(
+				array(
+					'id'            => $sidebar_id,
+					'name'          => 'Component Fuzz ' . $sidebar_id,
+					'before_widget' => '<section id="%1$s" class="widget %2$s">',
+					'after_widget'  => '</section>',
+				)
+			);
+		}
+
+		\update_option( 'widget_block', $widget_options );
+		\register_widget( 'WP_Widget_Block' );
+		$wp_widget_factory->_register_widgets();
+		\update_option( 'sidebars_widgets', $sentinel );
+
+		$seed = array(
+			$old_primary            => array( $ids['primary'], $missing_ids[0] ),
+			$footer                 => array( $ids['footer'], $missing_ids[1] ),
+			$header                 => 'scalar-widget-slot-' . $suffix,
+			$unmatched              => array( $ids['unmatched'] ),
+			'orphaned_widgets_' . $suffix => array( $ids['orphaned'], $missing_ids[0] ),
+			'wp_inactive_widgets'   => array( $ids['inactive'], $missing_ids[1] ),
+		);
+
+		$GLOBALS['_wp_sidebars_widgets'] = array();
+		$GLOBALS['sidebars_widgets']     = $seed;
+
+		return array(
+			'primary'           => $primary,
+			'footer'            => $footer,
+			'header'            => $header,
+			'oldPrimary'        => $old_primary,
+			'unmatched'         => $unmatched,
+			'ids'               => $ids,
+			'missingIds'        => $missing_ids,
+			'registeredWidgets' => array_keys( $GLOBALS['wp_registered_widgets'] ),
+			'seed'              => $seed,
+			'sentinelOption'    => $sentinel,
+		);
+	}
+
+	private static function retrieve_widgets_result_matches_fixture( array $result, array $fixture ): bool {
+		$ids      = $fixture['ids'];
+		$inactive = $result['wp_inactive_widgets'] ?? array();
+
+		foreach ( $result as $widgets ) {
+			if ( ! is_array( $widgets ) ) {
+				return false;
+			}
+		}
+
+		return array( $ids['primary'] ) === array_values( $result[ $fixture['primary'] ] ?? array() )
+			&& array( $ids['footer'] ) === array_values( $result[ $fixture['footer'] ] ?? array() )
+			&& array() === array_values( $result[ $fixture['header'] ] ?? array() )
+			&& in_array( $ids['orphaned'], $inactive, true )
+			&& in_array( $ids['inactive'], $inactive, true )
+			&& in_array( $ids['unmatched'], $inactive, true )
+			&& in_array( $ids['lostMulti'], $inactive, true )
+			&& ! in_array( $ids['defaultLost'], self::flatten_sidebars_widgets( $result ), true )
+			&& array() === array_intersect( $fixture['missingIds'], self::flatten_sidebars_widgets( $result ) );
+	}
+
+	private static function flatten_sidebars_widgets( array $sidebars_widgets ): array {
+		$flat = array();
+
+		foreach ( $sidebars_widgets as $widgets ) {
+			if ( is_array( $widgets ) ) {
+				$flat = array_merge( $flat, $widgets );
+			}
+		}
+
+		return $flat;
+	}
+
+	private static function sidebars_without_array_version( array $sidebars_widgets ): array {
+		unset( $sidebars_widgets['array_version'] );
+
+		return $sidebars_widgets;
 	}
 
 	private static function block_case( \ComponentFuzz\FuzzContext $ctx ): array {
