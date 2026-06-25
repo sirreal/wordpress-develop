@@ -392,9 +392,10 @@ database, network requests, or a configured site.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen
-  option registration/rendering, layout column rendering and legacy filters,
-  filter locality, and state restoration without redirecting or dying request
-  handlers.
+  option registration/rendering, composed Screen Options output for columns,
+  meta boxes, layout, pagination, view modes, and custom settings, layout
+  column rendering and legacy filters, filter locality, and state restoration
+  without redirecting or dying request handlers.
 - `post-types`: post type and post status registry defaults, registration
   filter/action/meta-box lifecycle, REST route registration boundaries and
   late-route ordering, support feature registration, capability generation,

@@ -35,6 +35,7 @@ final class UserPreferencesSurface {
 			$rows[] = self::check_meta_box_order_preferences( $ctx->fork( 'metabox-order' ) );
 			$rows[] = self::check_screen_option_registration( $ctx->fork( 'screen-options' ) );
 			$rows[] = self::check_screen_layout_rendering( $ctx->fork( 'screen-layout' ) );
+			$rows[] = self::check_screen_options_rendering_composition( $ctx->fork( 'screen-options-render' ) );
 			$rows[] = $ctx->skip(
 				'user-preferences.exiting-request-handlers',
 				'set_screen_options() redirects and AJAX preference handlers call wp_die(); lower-level helpers are covered directly.'
@@ -87,9 +88,11 @@ final class UserPreferencesSurface {
 				'has_filter',
 				'is_wp_error',
 				'postbox_classes',
+				'register_post_type',
 				'remove_filter',
 				'set_current_screen',
 				'set_user_setting',
+				'unregister_post_type',
 				'update_user_option',
 				'wp_cache_flush',
 				'wp_insert_user',
@@ -1064,6 +1067,277 @@ final class UserPreferencesSurface {
 		);
 	}
 
+	private static function check_screen_options_rendering_composition( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $mode, $wp_meta_boxes;
+
+		$failures            = array();
+		$user_id             = self::seed_user( $ctx );
+		$post_type           = 'cfz_pref_' . substr( self::slug( $ctx, 'post-type' ), 0, 8 );
+		$screen_id           = 'edit-' . $post_type;
+		$per_page_option     = str_replace( '-', '_', $screen_id . '_per_page' );
+		$per_page            = $ctx->int( 7, 77 );
+		$layout_default      = $ctx->int( 1, 2 );
+		$layout_saved        = 3;
+		$visible_column      = 'cfz_visible_' . self::slug( $ctx, 'visible-column' );
+		$hidden_column       = 'cfz_hidden_' . self::slug( $ctx, 'hidden-column' );
+		$empty_title_column  = 'cfz_empty_' . self::slug( $ctx, 'empty-column' );
+		$meta_visible        = 'cfz_box_visible_' . self::slug( $ctx, 'visible-box' );
+		$meta_hidden         = 'cfz_box_hidden_' . self::slug( $ctx, 'hidden-box' );
+		$submit_box          = 'submitdiv';
+		$settings_marker     = 'cfz-screen-settings-' . self::slug( $ctx, 'settings' );
+		$extra_post_type     = 'cfz_extra_' . self::slug( $ctx, 'extra-post-type' );
+		$filter_events       = array(
+			'columns'   => array(),
+			'settings'  => array(),
+			'viewModes' => array(),
+			'submit'    => array(),
+		);
+		$column_filter       = static function ( array $columns ) use ( &$filter_events, $visible_column, $hidden_column, $empty_title_column ): array {
+			$filter_events['columns'][] = array_keys( $columns );
+
+			return array(
+				'_title'             => 'Fuzz Columns',
+				'cb'                 => '<input type="checkbox" />',
+				'title'              => 'Title',
+				$visible_column      => 'Visible <strong>Column</strong>',
+				$hidden_column       => 'Hidden <em>Column</em>',
+				$empty_title_column  => '',
+				'comment'            => '<span class="screen-reader-text">Comments</span>',
+			);
+		};
+		$view_mode_filter    = static function ( array $post_types ) use ( &$filter_events, $post_type, $extra_post_type ): array {
+			$filter_events['viewModes'][] = $post_types;
+			$post_types[]                 = $post_type;
+			$post_types[]                 = $extra_post_type;
+
+			return $post_types;
+		};
+		$settings_filter     = static function ( string $settings, \WP_Screen $screen ) use ( &$filter_events, $screen_id, $settings_marker ): string {
+			$filter_events['settings'][] = array(
+				'id'       => $screen->id,
+				'previous' => '' !== $settings,
+			);
+
+			return $screen_id === $screen->id
+				? $settings . '<fieldset class="cfz-settings"><legend>' . \esc_html( $settings_marker ) . '</legend></fieldset>'
+				: $settings;
+		};
+		$submit_filter       = static function ( bool $show, \WP_Screen $screen ) use ( &$filter_events ): bool {
+			$filter_events['submit'][] = array(
+				'id'   => $screen->id,
+				'show' => $show,
+			);
+
+			return $show;
+		};
+
+		\register_post_type(
+			$post_type,
+			array(
+				'label'     => 'Component Fuzz Preferences',
+				'public'    => false,
+				'query_var' => false,
+				'rewrite'   => false,
+				'show_ui'   => true,
+			)
+		);
+		\wp_set_current_user( $user_id );
+		\set_current_screen( $screen_id );
+		$screen = \get_current_screen();
+		$screen->add_option(
+			'per_page',
+			array(
+				'label'   => 'Items <script>alert(1)</script> ' . self::slug( $ctx, 'label' ),
+				'default' => $per_page,
+				'option'  => $per_page_option,
+			)
+		);
+		$screen->add_option(
+			'layout_columns',
+			array(
+				'max'     => 3,
+				'default' => $layout_default,
+			)
+		);
+
+		\update_user_option( $user_id, 'manage' . $screen_id . 'columnshidden', array( $hidden_column ), false );
+		\update_user_option( $user_id, 'metaboxhidden_' . $screen_id, array( $meta_hidden ), false );
+		\update_user_option( $user_id, 'screen_layout_' . $screen_id, $layout_saved, false );
+		\update_user_option( $user_id, $per_page_option, $per_page + 11, false );
+		\set_user_setting( 'posts_list_mode', 'excerpt' );
+		unset( $mode );
+
+		$wp_meta_boxes[ $screen_id ] = array(
+			'normal' => array(
+				'high' => array(
+					$meta_visible => array(
+						'id'    => $meta_visible,
+						'title' => 'Visible <strong>Box</strong>',
+						'args'  => array(),
+					),
+					$meta_hidden  => array(
+						'id'    => $meta_hidden,
+						'title' => 'Hidden <em>Box</em>',
+						'args'  => array(),
+					),
+					$submit_box   => array(
+						'id'    => $submit_box,
+						'title' => 'Submit box is not hideable',
+						'args'  => array(),
+					),
+				),
+			),
+		);
+
+		\add_filter( "manage_{$screen_id}_columns", $column_filter, 10, 1 );
+		\add_filter( 'view_mode_post_types', $view_mode_filter, 10, 1 );
+		\add_filter( 'screen_settings', $settings_filter, 10, 2 );
+		\add_filter( 'screen_options_show_submit', $submit_filter, 20, 2 );
+		try {
+			$wrapped_output = self::capture_output(
+				static function () use ( $screen ): void {
+					$screen->render_screen_meta();
+				}
+			);
+			$bare_output    = self::capture_output(
+				static function () use ( $screen ): void {
+					$screen->render_screen_options( array( 'wrap' => false ) );
+				}
+			);
+		} finally {
+			\remove_filter( 'screen_options_show_submit', $submit_filter, 20 );
+			\remove_filter( 'screen_settings', $settings_filter, 10 );
+			\remove_filter( 'view_mode_post_types', $view_mode_filter, 10 );
+			\remove_filter( "manage_{$screen_id}_columns", $column_filter, 10 );
+			\unregister_post_type( $post_type );
+		}
+
+		$visible_column_tag = self::screen_option_checkbox_tag( $wrapped_output, $visible_column . '-hide' );
+		$hidden_column_tag  = self::screen_option_checkbox_tag( $wrapped_output, $hidden_column . '-hide' );
+		$visible_box_tag    = self::screen_option_checkbox_tag( $wrapped_output, $meta_visible . '-hide' );
+		$hidden_box_tag     = self::screen_option_checkbox_tag( $wrapped_output, $meta_hidden . '-hide' );
+		$list_mode_tag      = self::screen_option_radio_tag( $wrapped_output, 'mode', 'list' );
+		$excerpt_mode_tag   = self::screen_option_radio_tag( $wrapped_output, 'mode', 'excerpt' );
+		$per_page_value     = self::screen_option_input_value( $wrapped_output, $per_page_option );
+
+		self::collect_failure(
+			$failures,
+			$screen instanceof \WP_Screen
+				&& $screen_id === $screen->id
+				&& str_contains( $wrapped_output, 'id="screen-options-wrap"' )
+				&& str_contains( $wrapped_output, "id='adv-settings'" )
+				&& str_contains( $wrapped_output, 'screenoptionnonce' )
+				&& ! str_contains( $bare_output, 'id="screen-options-wrap"' )
+				&& str_contains( $bare_output, "id='adv-settings'" ),
+			'WP_Screen::render_screen_meta() composes wrapped options and render_screen_options() respects wrap=false while retaining the form and nonce for edit screens',
+			array(
+				'screenId' => $screen_id,
+				'wrapped'  => $wrapped_output,
+				'bare'     => $bare_output,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_string( $visible_column_tag )
+				&& is_string( $hidden_column_tag )
+				&& str_contains( $visible_column_tag, 'checked=' )
+				&& ! str_contains( $hidden_column_tag, 'checked=' )
+				&& ! str_contains( $wrapped_output, $empty_title_column . '-hide' )
+				&& ! str_contains( $wrapped_output, 'comment-hide' )
+				&& ! str_contains( $wrapped_output, '<strong>Column</strong>' )
+				&& ! str_contains( $wrapped_output, '<em>Column</em>' )
+				&& str_contains( $wrapped_output, 'Visible Column' )
+				&& str_contains( $wrapped_output, 'Hidden Column' ),
+			'render_list_table_columns_preferences() strips column-label markup, skips special/empty columns, and checks only visible saved columns',
+			array(
+				'visibleTag' => $visible_column_tag,
+				'hiddenTag'  => $hidden_column_tag,
+				'columns'    => array( $visible_column, $hidden_column, $empty_title_column ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_string( $visible_box_tag )
+				&& is_string( $hidden_box_tag )
+				&& str_contains( $visible_box_tag, 'checked=' )
+				&& ! str_contains( $hidden_box_tag, 'checked=' )
+				&& ! str_contains( $wrapped_output, $submit_box . '-hide' )
+				&& str_contains( $wrapped_output, 'Visible <strong>Box</strong>' )
+				&& str_contains( $wrapped_output, 'Hidden <em>Box</em>' ),
+			'render_meta_boxes_preferences() uses saved hidden metaboxes and omits non-hideable submit boxes',
+			array(
+				'visibleBoxTag' => $visible_box_tag,
+				'hiddenBoxTag'  => $hidden_box_tag,
+				'submitBox'     => $submit_box,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			(string) ( $per_page + 11 ) === $per_page_value
+				&& array( $layout_saved ) === self::screen_layout_checked_values( $wrapped_output )
+				&& range( 1, 3 ) === self::screen_layout_radio_values( $wrapped_output )
+				&& is_string( $list_mode_tag )
+				&& is_string( $excerpt_mode_tag )
+				&& ! str_contains( $list_mode_tag, 'checked=' )
+				&& str_contains( $excerpt_mode_tag, 'checked=' )
+				&& str_contains( $wrapped_output, $settings_marker ),
+			'render_screen_options() composes saved per-page, layout, view-mode, and custom screen settings into one screen',
+			array(
+				'perPageValue' => $per_page_value,
+				'layoutValues' => self::screen_layout_radio_values( $wrapped_output ),
+				'layoutChecked' => self::screen_layout_checked_values( $wrapped_output ),
+				'listModeTag'  => $list_mode_tag,
+				'excerptTag'   => $excerpt_mode_tag,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			1 === count( $filter_events['columns'] )
+				&& 1 === count( $filter_events['settings'] )
+				&& 2 === count( $filter_events['viewModes'] )
+				&& array(
+					array(
+						'id'   => $screen_id,
+						'show' => true,
+					),
+					array(
+						'id'   => $screen_id,
+						'show' => true,
+					),
+				) === $filter_events['submit']
+				&& false === \has_filter( "manage_{$screen_id}_columns", $column_filter )
+				&& false === \has_filter( 'view_mode_post_types', $view_mode_filter )
+				&& false === \has_filter( 'screen_settings', $settings_filter )
+				&& false === \has_filter( 'screen_options_show_submit', $submit_filter ),
+			'screen options rendering uses expected dynamic filters and removes surface filters after capture',
+			array(
+				'filterEvents' => $filter_events,
+				'hasColumns'   => \has_filter( "manage_{$screen_id}_columns", $column_filter ),
+				'hasViewModes' => \has_filter( 'view_mode_post_types', $view_mode_filter ),
+				'hasSettings'  => \has_filter( 'screen_settings', $settings_filter ),
+				'hasSubmit'    => \has_filter( 'screen_options_show_submit', $submit_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'user-preferences.screen-options.rendered-composition',
+			$failures,
+			array(
+				'userId'         => $user_id,
+				'screenId'       => $screen_id,
+				'perPageValue'   => $per_page_value,
+				'layoutValues'   => self::screen_layout_radio_values( $wrapped_output ),
+				'layoutChecked'  => self::screen_layout_checked_values( $wrapped_output ),
+				'hasListMode'    => is_string( $list_mode_tag ),
+				'hasExcerptMode' => is_string( $excerpt_mode_tag ),
+				'listChecked'    => is_string( $list_mode_tag ) && str_contains( $list_mode_tag, 'checked=' ),
+				'excerptChecked' => is_string( $excerpt_mode_tag ) && str_contains( $excerpt_mode_tag, 'checked=' ),
+				'hasSettings'    => str_contains( $wrapped_output, $settings_marker ),
+			)
+		);
+	}
+
 	private static function seed_user( \ComponentFuzz\FuzzContext $ctx, array $overrides = array() ): int {
 		$login = 'cfz_pref_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 ) . '_' . self::slug( $ctx, 'user' );
 		$id    = \wp_insert_user(
@@ -1211,6 +1485,28 @@ final class UserPreferencesSurface {
 		return $values;
 	}
 
+	private static function screen_option_checkbox_tag( string $html, string $input_id ): ?string {
+		if ( preg_match( '/<input[^>]+id="' . preg_quote( $input_id, '/' ) . '"[^>]*>/', $html, $matches ) ) {
+			return $matches[0];
+		}
+
+		return null;
+	}
+
+	private static function screen_option_radio_tag( string $html, string $name, string $value ): ?string {
+		if (
+			preg_match(
+				'/<input[^>]+name="' . preg_quote( $name, '/' ) . '"[^>]+value="' . preg_quote( $value, '/' ) . '"[^>]*>/',
+				$html,
+				$matches
+			)
+		) {
+			return $matches[0];
+		}
+
+		return null;
+	}
+
 	private static function contains_class( string $class_string, string $class ): bool {
 		return in_array( $class, preg_split( '/\s+/', trim( $class_string ) ), true );
 	}
@@ -1229,8 +1525,10 @@ final class UserPreferencesSurface {
 					'_POST',
 					'_REQUEST',
 					'_updated_user_settings',
+					'column_headers',
 					'current_screen',
 					'current_user',
+					'mode',
 					'screen_layout_columns',
 					'taxnow',
 					'typenow',
@@ -1239,6 +1537,8 @@ final class UserPreferencesSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_meta_boxes',
+					'wp_post_types',
 				)
 			),
 			'options' => $options,
