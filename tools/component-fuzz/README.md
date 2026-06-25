@@ -76,8 +76,8 @@ database, network requests, or a configured site.
 - `appearance-media`: no-upload appearance media helper coverage, including
   custom background POST normalization, custom header default processing and
   selection, frontend header/background helpers, custom header video markup and
-  settings, site icon sizes/meta tags, and state restoration without admin
-  upload/AJAX dispatch.
+  settings, synthetic custom-logo attachment markup/filter contracts, site icon
+  sizes/meta tags, and state restoration without admin upload/AJAX dispatch.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
   sign-on and clear-auth-cookie actions with cookie sending short-circuited,

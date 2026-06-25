@@ -33,6 +33,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_header_defaults_and_selection( $ctx->fork( 'headers' ) );
 			$rows[] = self::check_header_and_background_frontend_helpers( $ctx->fork( 'frontend' ) );
 			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
+			$rows[] = self::check_custom_logo_helpers( $ctx->fork( 'custom-logo' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
 			$rows[] = $ctx->skip(
 				'appearance-media.unsafe-upload-and-ajax-paths',
@@ -95,9 +96,11 @@ final class AppearanceMediaSurface {
 				'current_theme_supports',
 				'delete_option',
 				'display_header_text',
+				'esc_attr',
 				'esc_url',
 				'get_background_color',
 				'get_background_image',
+				'get_custom_logo',
 				'get_custom_header',
 				'get_custom_header_markup',
 				'get_header_image',
@@ -106,11 +109,13 @@ final class AppearanceMediaSurface {
 				'get_header_video_settings',
 				'get_header_video_url',
 				'get_option',
+				'get_post_meta',
 				'get_site_icon_url',
 				'get_stylesheet',
 				'get_template_directory_uri',
 				'get_theme_mod',
 				'get_theme_support',
+				'has_custom_logo',
 				'has_custom_header',
 				'has_filter',
 				'has_header_image',
@@ -120,14 +125,18 @@ final class AppearanceMediaSurface {
 				'is_random_header_image',
 				'remove_all_filters',
 				'remove_filter',
+				'remove_theme_support',
 				'remove_theme_mod',
 				'set_url_scheme',
 				'set_theme_mod',
+				'the_custom_logo',
 				'the_header_video_url',
 				'update_option',
 				'wp_check_filetype',
 				'wp_create_nonce',
+				'wp_delete_post',
 				'wp_get_mime_types',
+				'wp_insert_post',
 				'wp_nonce_tick',
 				'wp_site_icon',
 			) as $function
@@ -514,6 +523,187 @@ final class AppearanceMediaSurface {
 		);
 	}
 
+	private static function check_custom_logo_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$case           = self::custom_logo_case( $ctx );
+		$attachment_id  = null;
+		$attr_payloads  = array();
+		$output_payloads = array();
+
+		$slug_filter = static function ( $override, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( $case ) {
+			unset( $post_id, $post_status, $post_parent );
+			return ( 'attachment' === $post_type && $case['slug'] === $slug ) ? $slug : $override;
+		};
+		$file_filter = static function ( $file, int $attachment_id_arg ) use ( &$attachment_id, $case ) {
+			return ( null !== $attachment_id && $attachment_id_arg === $attachment_id ) ? $case['file'] : $file;
+		};
+		$source_filter = static function ( $image, int $attachment_id_arg, $size, bool $icon ) use ( &$attachment_id, $case ) {
+			unset( $size, $icon );
+			return ( null !== $attachment_id && $attachment_id_arg === $attachment_id )
+				? array( $case['src'], $case['width'], $case['height'], false )
+				: $image;
+		};
+		$meta_filter = static function ( $value, int $object_id, string $meta_key, bool $single, string $meta_type ) use ( &$attachment_id, $case ) {
+			if ( null === $attachment_id || $object_id !== $attachment_id || 'post' !== $meta_type ) {
+				return $value;
+			}
+			if ( '_wp_attachment_image_alt' === $meta_key ) {
+				return $single ? $case['altMeta'] : array( $case['altMeta'] );
+			}
+			return $value;
+		};
+		$attr_filter = static function ( array $attrs, int $custom_logo_id, int $blog_id ) use ( &$attachment_id, &$attr_payloads, $case ): array {
+			$attr_payloads[] = array(
+				'attrs' => $attrs,
+				'id'    => $custom_logo_id,
+				'blog'  => $blog_id,
+			);
+			if ( null !== $attachment_id && $custom_logo_id === $attachment_id ) {
+				$attrs['class']                 .= ' component-fuzz-logo-' . $case['token'];
+				$attrs['data-component-fuzz']    = 'logo <' . $case['token'] . '>';
+				$attrs['decoding']               = $case['decoding'];
+				$attrs['fetchpriority']          = $case['fetchpriority'];
+			}
+			return $attrs;
+		};
+		$output_filter = static function ( string $html, int $blog_id ) use ( &$output_payloads, $case ): string {
+			$output_payloads[] = array(
+				'html' => $html,
+				'blog' => $blog_id,
+			);
+			return $html . '<span data-component-fuzz-logo="' . \esc_attr( $case['token'] ) . '"></span>';
+		};
+
+		\add_filter( 'pre_wp_unique_post_slug', $slug_filter, 10, 6 );
+		\add_filter( 'get_attached_file', $file_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_image_src', $source_filter, 10, 4 );
+		\add_filter( 'get_post_metadata', $meta_filter, 10, 5 );
+		\add_filter( 'get_custom_logo_image_attributes', $attr_filter, 10, 3 );
+		\add_filter( 'get_custom_logo', $output_filter, 10, 2 );
+
+		try {
+			\add_theme_support( 'custom-logo', $case['support'] );
+			$attachment_id = \wp_insert_post(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_title'     => $case['title'],
+					'post_name'      => $case['slug'],
+					'post_mime_type' => $case['mime'],
+					'guid'           => $case['src'],
+				),
+				true,
+				false
+			);
+
+			if ( ! is_int( $attachment_id ) || $attachment_id <= 0 ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'synthetic logo attachment inserts without live uploads',
+					array( 'attachmentId' => self::describe_value( $attachment_id ) )
+				);
+				$attachment_id = null;
+			}
+
+			if ( null !== $attachment_id ) {
+				\set_theme_mod( 'custom_logo', $attachment_id );
+			}
+
+			$has_logo    = \has_custom_logo();
+			$html        = \get_custom_logo( $case['blogId'] );
+			$echoed      = self::capture( static fn() => \the_custom_logo( $case['blogId'] ) );
+			$support     = \get_theme_support( 'custom-logo' );
+			$width       = \get_theme_support( 'custom-logo', 'width' );
+			$height      = \get_theme_support( 'custom-logo', 'height' );
+			$flex_width  = \current_theme_supports( 'custom-logo', 'flex-width' );
+			$flex_height = \current_theme_supports( 'custom-logo', 'flex-height' );
+
+			self::collect_failure(
+				$failures,
+				null !== $attachment_id
+					&& true === $has_logo
+					&& is_array( $support )
+					&& $case['expectedSupport']['width'] === $width
+					&& $case['expectedSupport']['height'] === $height
+					&& $case['expectedSupport']['flexWidth'] === $flex_width
+					&& $case['expectedSupport']['flexHeight'] === $flex_height
+					&& str_contains( $html, 'class="custom-logo-link"' )
+					&& str_contains( $html, 'rel="home"' )
+					&& str_contains( $html, 'class="custom-logo component-fuzz-logo-' . $case['token'] . '"' )
+					&& str_contains( $html, 'src="' . \esc_attr( $case['src'] ) . '"' )
+					&& str_contains( $html, 'width="' . $case['width'] . '"' )
+					&& str_contains( $html, 'height="' . $case['height'] . '"' )
+					&& str_contains( $html, 'alt="' . \esc_attr( $case['expectedAlt'] ) . '"' )
+					&& str_contains( $html, 'data-component-fuzz="logo &lt;' . $case['token'] . '&gt;"' )
+					&& ( 'invalid' === $case['decoding'] ? ! str_contains( $html, 'decoding=' ) : str_contains( $html, 'decoding="' . $case['decoding'] . '"' ) )
+					&& ( '' === $case['fetchpriority'] ? ! str_contains( $html, 'fetchpriority=' ) : str_contains( $html, 'fetchpriority="' . $case['fetchpriority'] . '"' ) )
+					&& str_contains( $html, 'data-component-fuzz-logo="' . $case['token'] . '"' )
+					&& $html === $echoed
+					&& 2 === count( $attr_payloads )
+					&& 2 === count( $output_payloads )
+					&& ( $attr_payloads[0]['id'] ?? null ) === $attachment_id
+					&& ( $attr_payloads[0]['blog'] ?? null ) === $case['blogId']
+					&& ( $attr_payloads[1]['id'] ?? null ) === $attachment_id
+					&& ( $attr_payloads[1]['blog'] ?? null ) === $case['blogId']
+					&& ( $output_payloads[0]['blog'] ?? null ) === $case['blogId'],
+				'custom-logo helpers use synthetic image attachments, normalize support args, escape attributes, and preserve filter payloads',
+				array(
+					'case'           => $case,
+					'attachmentId'   => $attachment_id,
+					'hasLogo'        => $has_logo,
+					'support'        => self::describe_value( $support ),
+					'width'          => $width,
+					'height'         => $height,
+					'flexWidth'      => $flex_width,
+					'flexHeight'     => $flex_height,
+					'html'           => self::preview( $html ),
+					'echoed'         => self::preview( $echoed ),
+					'attrPayloads'   => self::describe_value( $attr_payloads ),
+					'outputPayloads' => self::describe_value( $output_payloads ),
+				)
+			);
+		} finally {
+			\remove_filter( 'get_custom_logo', $output_filter, 10 );
+			\remove_filter( 'get_custom_logo_image_attributes', $attr_filter, 10 );
+			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
+			\remove_filter( 'wp_get_attachment_image_src', $source_filter, 10 );
+			\remove_filter( 'get_attached_file', $file_filter, 10 );
+			\remove_filter( 'pre_wp_unique_post_slug', $slug_filter, 10 );
+			\remove_theme_mod( 'custom_logo' );
+			\remove_theme_support( 'custom-logo' );
+			if ( null !== $attachment_id ) {
+				\wp_delete_post( $attachment_id, true );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'get_custom_logo', $output_filter )
+				&& false === \has_filter( 'get_custom_logo_image_attributes', $attr_filter )
+				&& false === \has_filter( 'get_post_metadata', $meta_filter )
+				&& false === \has_filter( 'wp_get_attachment_image_src', $source_filter )
+				&& false === \has_filter( 'get_attached_file', $file_filter )
+				&& false === \has_filter( 'pre_wp_unique_post_slug', $slug_filter ),
+			'custom logo helper filters are removed after the case',
+			array(
+				'getCustomLogo'           => \has_filter( 'get_custom_logo', $output_filter ),
+				'customLogoAttributes'    => \has_filter( 'get_custom_logo_image_attributes', $attr_filter ),
+				'getPostMetadata'         => \has_filter( 'get_post_metadata', $meta_filter ),
+				'attachmentImageSource'   => \has_filter( 'wp_get_attachment_image_src', $source_filter ),
+				'getAttachedFile'         => \has_filter( 'get_attached_file', $file_filter ),
+				'preUniqueAttachmentSlug' => \has_filter( 'pre_wp_unique_post_slug', $slug_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.custom-logo.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
 	private static function check_site_icon_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures    = array();
 		$site_icon   = new \WP_Site_Icon();
@@ -650,6 +840,58 @@ final class AppearanceMediaSurface {
 				'thumbnail_url' => '%s/images/beta-thumb.jpg',
 				'description'   => 'Beta Header',
 				'alt_text'      => 'Beta & Header',
+			),
+		);
+	}
+
+	private static function custom_logo_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token   = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $ctx->identifier( 5, 12 ) ) );
+		$ext     = $ctx->choice( array( 'png', 'jpg', 'webp', 'gif' ) );
+		$mimes   = array(
+			'gif'  => 'image/gif',
+			'jpg'  => 'image/jpeg',
+			'png'  => 'image/png',
+			'webp' => 'image/webp',
+		);
+		$width   = $ctx->int( 48, 320 );
+		$height  = $ctx->int( 48, 240 );
+		$flex    = $ctx->bool();
+		$support = $flex
+			? array(
+				'flex-width'           => true,
+				'flex-height'          => true,
+				'header-text'          => array( 'site-title', 'site-description' ),
+				'unlink-homepage-logo' => false,
+			)
+			: array(
+				'width'                => $width,
+				'height'               => $height,
+				'flex-width'           => false,
+				'flex-height'          => false,
+				'header-text'          => array( 'site-title' ),
+				'unlink-homepage-logo' => false,
+			);
+
+		return array(
+			'token'           => $token,
+			'slug'            => 'component-fuzz-logo-' . $token,
+			'title'           => 'Component Fuzz Logo <' . $token . '>',
+			'file'            => '/tmp/component-fuzz-logo-' . $token . '.' . $ext,
+			'src'             => 'http://example.test/component-fuzz/logo-' . rawurlencode( $token ) . '.' . $ext . '?unsafe=<tag>',
+			'mime'            => $mimes[ $ext ],
+			'width'           => $width,
+			'height'          => $height,
+			'altMeta'         => 'Logo <' . $token . '>',
+			'expectedAlt'     => 'Logo',
+			'blogId'          => $ctx->int( 0, 3 ),
+			'decoding'        => $ctx->choice( array( 'async', 'sync', 'auto', 'invalid' ) ),
+			'fetchpriority'   => $ctx->choice( array( 'high', 'low', '' ) ),
+			'support'         => $support,
+			'expectedSupport' => array(
+				'width'      => $flex ? false : $width,
+				'height'     => $flex ? false : $height,
+				'flexWidth'  => true === $flex,
+				'flexHeight' => true === $flex,
 			),
 		);
 	}
