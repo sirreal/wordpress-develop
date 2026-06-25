@@ -34,6 +34,7 @@ final class ImportDiffSurface {
 			$rows[] = self::check_error_lifecycle_ordering( $ctx->fork( 'error-lifecycle' ) );
 			$rows[] = self::check_imported_post_lookup( $ctx->fork( 'post-lookup' ) );
 			$rows[] = self::check_imported_comment_lookup( $ctx->fork( 'comment-lookup' ) );
+			$rows[] = self::check_importer_base_helpers( $ctx->fork( 'importer-base-helpers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'import-diff.surface-no-throw',
@@ -486,6 +487,102 @@ final class ImportDiffSurface {
 		}
 
 		return self::result( $ctx, 'import-diff.importer.imported-comment-lookup', $failures );
+	}
+
+	private static function check_importer_base_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb, $wp_actions;
+
+		$failures       = array();
+		$importer       = new \WP_Importer();
+		$short          = 'a' . $ctx->identifier( 2, 3 );
+		$medium         = 'mid-' . $ctx->identifier( 4, 7 );
+		$long           = 'long-' . $ctx->identifier( 8, 14 );
+		$unicode        = "gr\xC3\xA5-" . $ctx->identifier( 2, 5 );
+		$space_token    = $ctx->identifier( 3, 6 );
+		$spaces         = "alpha\t" . $space_token . "\n\n beta  \r gamma";
+		$sorted         = array( $medium, $long, $short, $unicode );
+		$expected_order = $sorted;
+		usort(
+			$expected_order,
+			static function ( string $a, string $b ): int {
+				return strlen( $b ) - strlen( $a );
+			}
+		);
+
+		usort( $sorted, array( $importer, 'cmpr_strlen' ) );
+
+		self::collect_failure(
+			$failures,
+			$expected_order === $sorted
+				&& 0 === $importer->cmpr_strlen( 'aa', 'bb' )
+				&& $importer->cmpr_strlen( $short, $long ) > 0
+				&& $importer->cmpr_strlen( $long, $short ) < 0,
+			'WP_Importer::cmpr_strlen orders generated strings by descending byte length and treats equal byte lengths as equal',
+			array(
+				'expected' => $expected_order,
+				'actual'   => $sorted,
+				'lengths'  => array_map( 'strlen', $sorted ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'alpha ' . $space_token . ' beta gamma' === $importer->min_whitespace( $spaces ),
+			'WP_Importer::min_whitespace collapses generated tabs, newlines, carriage returns, and repeated spaces',
+			array(
+				'input'  => self::preview( $spaces ),
+				'output' => self::preview( (string) $importer->min_whitespace( $spaces ) ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			60 === $importer->bump_request_timeout( $ctx->int( 1, 30 ) ),
+			'WP_Importer::bump_request_timeout raises generated timeout values to the importer timeout',
+			array( 'timeout' => $importer->bump_request_timeout( $ctx->int( 1, 30 ) ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $importer->is_user_over_quota(),
+			'WP_Importer::is_user_over_quota returns false in the no-upload-quota harness state',
+			array( 'overQuota' => $importer->is_user_over_quota() )
+		);
+
+		$previous_wpdb = $wpdb ?? null;
+		$had_wpdb      = isset( $wpdb );
+		$wpdb          = new class() {
+			public $queries = array();
+		};
+		$wpdb->queries = array(
+			array( 'SELECT component fuzz', 0.1, 'component-fuzz' ),
+		);
+		$wp_actions = array(
+			'component_fuzz_import_action' => $ctx->int( 1, 5 ),
+		);
+
+		try {
+			$importer->stop_the_insanity();
+
+			self::collect_failure(
+				$failures,
+				array() === $wpdb->queries
+					&& array() === $wp_actions,
+				'WP_Importer::stop_the_insanity clears accumulated query logs and action counters',
+				array(
+					'queries'   => $wpdb->queries,
+					'wpActions' => $wp_actions,
+				)
+			);
+		} finally {
+			if ( $had_wpdb ) {
+				$wpdb = $previous_wpdb;
+			} else {
+				unset( $GLOBALS['wpdb'] );
+			}
+		}
+
+		return self::result( $ctx, 'import-diff.importer.base-helper-contracts', $failures );
 	}
 
 	private static function insert_imported_post_meta( string $importer_name, string $blog_id, string $permalink, string $label ): int {
