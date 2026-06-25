@@ -172,8 +172,9 @@ database, network requests, or a configured site.
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
   invalid UTF-8, malformed address structure, selected boundary lengths,
-  normalization-sensitive local parts, comment-author email filtering, and user
-  email lookup/duplicate behavior for accent-distinct local parts/domains plus
+  normalization-sensitive local parts, comment-author email filtering, REST user
+  email schema validation across Unicode/ASCII filter modes, and user email
+  lookup/duplicate behavior for accent-distinct local parts/domains plus
   password-reset Unicode recipient paths and clickable mailto rendering
   boundaries.
 - `environment-load`: no-network environment/load/compat helper coverage,
