@@ -28,6 +28,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_revision_field_filter_contracts( $ctx->fork( 'field-filters' ), $case );
 			$rows[] = self::check_revision_insert_lookup_predicates( $ctx->fork( 'predicates' ), $case );
 			$rows[] = self::check_save_restore_and_meta_helpers( $ctx->fork( 'restore-meta' ), $case );
+			$rows[] = self::check_revision_retention_pruning( $ctx->fork( 'retention-pruning' ), $case );
 			$rows[] = self::check_autosave_create_update_delete_and_locks( $ctx->fork( 'autosave-locks' ), $case );
 			$rows[] = self::check_revision_support_restore_edges_and_titles( $ctx->fork( 'support-restore-ui' ), $case );
 			$rows[] = self::check_revision_ui_payloads( $ctx->fork( 'ui' ), $case );
@@ -650,6 +651,251 @@ final class RevisionsAutosavesSurface {
 				'postId'        => $post_id,
 				'firstRevision' => $first_revision,
 				'thirdRevision' => $third_revision,
+			)
+		);
+	}
+
+	private static function check_revision_retention_pruning( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures            = array();
+		$author_id           = self::insert_author( $case, 'retention' );
+		$post_id             = self::insert_parent_post( $case, $author_id, 'retention' );
+		$revision_limit      = $ctx->int( 1, 3 );
+		$normal_save_count   = $revision_limit + $ctx->int( 2, 4 );
+		$normal_revision_ids = array();
+		$update_results      = array();
+		$autosave_id         = null;
+		$grant_caps          = self::grant_all_caps_filter( $author_id );
+
+		\wp_set_current_user( $author_id );
+
+		for ( $i = 0; $i < $normal_save_count; $i++ ) {
+			$step      = $i + 1;
+			$timestamp = self::offset_mysql_date( $case['dateFrom'], $step * 7 );
+
+			$update_results[] = \wp_update_post(
+				\wp_slash(
+					array(
+						'ID'                => $post_id,
+						'post_content'      => $case['contentFrom'] . "\nRetention normal {$step} {$case['token']}",
+						'post_date'         => $timestamp,
+						'post_date_gmt'     => $timestamp,
+						'post_excerpt'      => $case['excerptFrom'] . ' retention ' . $step,
+						'post_modified'     => $timestamp,
+						'post_modified_gmt' => $timestamp,
+						'post_title'        => $case['titleFrom'] . ' retention ' . $step,
+					)
+				),
+				true,
+				false
+			);
+
+			$revision_id = \wp_save_post_revision( $post_id );
+			if ( is_int( $revision_id ) ) {
+				$normal_revision_ids[] = $revision_id;
+			}
+
+			if ( 0 === $i ) {
+				\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+				try {
+					$autosave_id = \wp_create_post_autosave(
+						\wp_slash(
+							self::autosave_post_data(
+								$post_id,
+								$case,
+								$case['titleTo'] . ' retention autosave',
+								$case['contentTo'] . "\nRetention autosave {$case['token']}",
+								$case['excerptTo'] . ' retention autosave'
+							)
+						)
+					);
+				} finally {
+					\remove_filter( 'user_has_cap', $grant_caps, 10 );
+				}
+			}
+		}
+
+		$deleted_revisions      = array();
+		$deletion_candidate_ids = array();
+		$limit_filter           = static function ( int $num, \WP_Post $post ) use ( $post_id, $revision_limit ): int {
+			if ( (int) $post_id !== (int) $post->ID ) {
+				return $num;
+			}
+
+			return $revision_limit;
+		};
+		$deletion_filter        = static function ( array $revisions, int $seen_post_id ) use ( &$deletion_candidate_ids, $post_id ): array {
+			if ( (int) $post_id === (int) $seen_post_id ) {
+				$deletion_candidate_ids = array_map(
+					static function ( \WP_Post $revision ): int {
+						return (int) $revision->ID;
+					},
+					array_values( $revisions )
+				);
+			}
+
+			return $revisions;
+		};
+		$delete_recorder        = static function ( int $revision_id, \WP_Post $revision ) use ( &$deleted_revisions ): void {
+			$deleted_revisions[] = array(
+				'id'       => (int) $revision_id,
+				'parent'   => (int) $revision->post_parent,
+				'postName' => (string) $revision->post_name,
+			);
+		};
+		$final_timestamp        = self::offset_mysql_date( $case['dateFrom'], ( $normal_save_count + 1 ) * 7 );
+		$final_update           = \wp_update_post(
+			\wp_slash(
+				array(
+					'ID'                => $post_id,
+					'post_content'      => $case['contentTo'] . "\nRetention final {$case['token']}",
+					'post_date'         => $final_timestamp,
+					'post_date_gmt'     => $final_timestamp,
+					'post_excerpt'      => $case['excerptTo'] . ' retention final',
+					'post_modified'     => $final_timestamp,
+					'post_modified_gmt' => $final_timestamp,
+					'post_title'        => $case['titleTo'] . ' retention final',
+				)
+			),
+			true,
+			false
+		);
+
+		\add_filter( 'wp_revisions_to_keep', $limit_filter, 10, 2 );
+		\add_filter( 'wp_save_post_revision_revisions_before_deletion', $deletion_filter, 10, 2 );
+		\add_action( 'wp_delete_post_revision', $delete_recorder, 10, 2 );
+		try {
+			$final_revision = \wp_save_post_revision( $post_id );
+		} finally {
+			\remove_action( 'wp_delete_post_revision', $delete_recorder, 10 );
+			\remove_filter( 'wp_save_post_revision_revisions_before_deletion', $deletion_filter, 10 );
+			\remove_filter( 'wp_revisions_to_keep', $limit_filter, 10 );
+		}
+
+		$remaining_revisions = \wp_get_post_revisions(
+			$post_id,
+			array(
+				'check_enabled' => false,
+				'order'         => 'ASC',
+			)
+		);
+		$remaining_ids       = array_map( 'intval', array_keys( $remaining_revisions ) );
+		$normal_ids          = $normal_revision_ids;
+		if ( is_int( $final_revision ) ) {
+			$normal_ids[] = $final_revision;
+		}
+		$remaining_normal_ids = array_values( array_intersect( $normal_ids, $remaining_ids ) );
+		$delete_window        = max( 0, count( $deletion_candidate_ids ) - $revision_limit );
+		$delete_candidates    = array_slice( $deletion_candidate_ids, 0, $delete_window );
+		$autosave_int         = is_int( $autosave_id ) ? $autosave_id : 0;
+		$expected_deleted_ids = array_values(
+			array_filter(
+				$delete_candidates,
+				static function ( int $revision_id ) use ( $autosave_int ): bool {
+					return (int) $revision_id !== (int) $autosave_int;
+				}
+			)
+		);
+		$actual_deleted_ids   = array_map( 'intval', array_column( $deleted_revisions, 'id' ) );
+		$expected_remaining   = array_values( array_diff( $deletion_candidate_ids, $expected_deleted_ids ) );
+		$autosave_post        = is_int( $autosave_id ) ? \wp_get_post_revision( $autosave_id ) : null;
+		$updates_ok           = array() === array_filter(
+			$update_results,
+			static function ( $result ) use ( $post_id ): bool {
+				return ! is_int( $result ) || (int) $post_id !== (int) $result;
+			}
+		);
+		$deleted_parents_ok   = array() === array_filter(
+			$deleted_revisions,
+			static function ( array $row ) use ( $post_id ): bool {
+				return (int) $post_id !== (int) $row['parent'] || false !== strpos( $row['postName'], 'autosave' );
+			}
+		);
+
+		sort( $expected_deleted_ids );
+		sort( $actual_deleted_ids );
+		sort( $expected_remaining );
+		sort( $remaining_ids );
+
+		self::collect_failure(
+			$failures,
+			$updates_ok
+				&& count( $normal_revision_ids ) === $normal_save_count
+				&& is_int( $autosave_id )
+				&& (int) $post_id === \wp_is_post_autosave( $autosave_id ),
+			'bounded revision and autosave timeline is created before retention pruning',
+			array(
+				'postId'            => $post_id,
+				'normalSaveCount'   => $normal_save_count,
+				'normalRevisionIds' => $normal_revision_ids,
+				'autosaveId'        => self::error_summary( $autosave_id ),
+				'updates'           => array_map( array( self::class, 'error_summary' ), $update_results ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_int( $final_revision )
+				&& is_int( $final_update )
+				&& (int) $post_id === (int) $final_update
+				&& count( $deletion_candidate_ids ) === count( $normal_revision_ids ) + 2
+				&& in_array( (int) $autosave_int, $deletion_candidate_ids, true )
+				&& in_array( (int) $final_revision, $deletion_candidate_ids, true ),
+			'wp_save_post_revision retention filter sees normal revisions, autosaves, and the new revision before deletion',
+			array(
+				'finalUpdate'       => self::error_summary( $final_update ),
+				'finalRevision'     => self::error_summary( $final_revision ),
+				'candidateIds'      => $deletion_candidate_ids,
+				'autosaveId'        => self::error_summary( $autosave_id ),
+				'normalRevisionIds' => $normal_revision_ids,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_deleted_ids === $actual_deleted_ids
+				&& $expected_remaining === $remaining_ids
+				&& count( $remaining_normal_ids ) === $revision_limit
+				&& $autosave_post instanceof \WP_Post
+				&& $deleted_parents_ok,
+			'retention pruning deletes the oldest normal revisions, keeps the configured normal limit, and preserves autosaves',
+			array(
+				'revisionLimit'       => $revision_limit,
+				'deleteWindow'        => $delete_window,
+				'deleteCandidates'    => $delete_candidates,
+				'expectedDeletedIds'  => $expected_deleted_ids,
+				'actualDeletedIds'    => $actual_deleted_ids,
+				'expectedRemaining'   => $expected_remaining,
+				'remainingIds'        => $remaining_ids,
+				'remainingNormalIds'  => $remaining_normal_ids,
+				'autosave'            => self::post_summary( $autosave_post ),
+				'deletedRevisionRows' => $deleted_revisions,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'wp_revisions_to_keep', $limit_filter )
+				&& false === \has_filter( 'wp_save_post_revision_revisions_before_deletion', $deletion_filter )
+				&& false === \has_filter( 'wp_delete_post_revision', $delete_recorder ),
+			'retention pruning filters and deletion recorder are removed after the save',
+			array(
+				'wpRevisionsToKeep'       => \has_filter( 'wp_revisions_to_keep', $limit_filter ),
+				'beforeDeletionFilter'    => \has_filter( 'wp_save_post_revision_revisions_before_deletion', $deletion_filter ),
+				'deleteRevisionRecorder'  => \has_filter( 'wp_delete_post_revision', $delete_recorder ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.retention-pruning-preserves-autosaves',
+			$failures,
+			array(
+				'case'            => self::case_summary( $case ),
+				'postId'          => $post_id,
+				'revisionLimit'   => $revision_limit,
+				'normalSaveCount' => $normal_save_count,
+				'autosaveId'      => self::error_summary( $autosave_id ),
+				'finalRevision'   => self::error_summary( $final_revision ),
 			)
 		);
 	}
@@ -1590,6 +1836,8 @@ final class RevisionsAutosavesSurface {
 			&& false === \has_filter( 'wp_creating_autosave' )
 			&& false === \has_filter( 'wp_restore_post_revision' )
 			&& false === \has_filter( 'wp_revisions_to_keep' )
+			&& false === \has_filter( 'wp_save_post_revision_revisions_before_deletion' )
+			&& false === \has_filter( 'wp_delete_post_revision' )
 			&& false === \has_filter( "wp_{$case['postType']}_revisions_to_keep" )
 			&& false === \has_filter( 'get_the_terms', '_wp_preview_terms_filter' )
 			&& false === \has_filter( 'get_post_metadata', '_wp_preview_post_thumbnail_filter' )
@@ -1659,6 +1907,15 @@ final class RevisionsAutosavesSurface {
 		}
 
 		return substr( $value, 0, 260 );
+	}
+
+	private static function offset_mysql_date( string $mysql, int $minutes ): string {
+		$timestamp = strtotime( $mysql );
+		if ( false === $timestamp ) {
+			return $mysql;
+		}
+
+		return gmdate( 'Y-m-d H:i:s', $timestamp + ( $minutes * MINUTE_IN_SECONDS ) );
 	}
 
 	private static function diffs_contain( array $diffs, string $needle ): bool {
