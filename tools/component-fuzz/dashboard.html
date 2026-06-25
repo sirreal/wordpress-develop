@@ -212,7 +212,7 @@
 			<div class="note">Scope: broad WordPress component fuzzing with deterministic generators and explicit invariants.</div>
 		</div>
 		<div class="updated">
-			Updated: 2026-06-24<br>
+			Updated: 2026-06-25<br>
 			Branch: <code>component-fuzzers</code>
 		</div>
 	</header>
@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7982 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 7996 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, and <code>interactivity</code> at 1000 passed.</div>
+			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, and <code>ai-client</code> at 8000 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -276,6 +276,13 @@
 					<td>Main worktree; Ohm the 2nd review findings fixed in <code>343f3e03c1</code></td>
 					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 7953 passed, 62 skipped, 0 failed; direct global-restoration probe confirmed role and REST application-password globals restore absent-to-absent.</td>
 					<td>Application password lifecycle, chunk/hash, authentication API gates, success/failure hooks, email fallback, Basic Auth validation, recovery key/cookie services, paused-extension storage, and global/filter restoration.</td>
+				</tr>
+				<tr>
+					<td><code>ai-client</code></td>
+					<td><span class="status good">reviewed validation passed</span></td>
+					<td>Main worktree; Nietzsche the 3rd exploration plus Bohr the 3rd and Einstein the 3rd reviews found no actionable issues through <code>dccbad638c</code></td>
+					<td>Main focused run: 8000 passed, 0 skipped, 0 failed; prompt-builder PHPUnit: 179 tests and 456 assertions passed; latest broad run: 7996 passed, 66 skipped, 0 failed.</td>
+					<td>SDK DTOs and enums, provider registry isolation, provider/model collision selection, tuple and model-instance preferences, provider locks, prompt builder events/prevention, ability resolver integration, cache/event adapters, and deterministic in-memory generation.</td>
 				</tr>
 				<tr>
 					<td><code>email</code></td>
@@ -933,6 +940,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>688a716cc8</code> / <code>dccbad638c</code></td>
+					<td><code>ai-client</code></td>
+					<td>8000 passed, 0 skipped, 0 failed after model-selection collision coverage and review follow-up; prompt-builder PHPUnit passed 179 tests and 456 assertions.</td>
+					<td>7996 passed, 66 skipped, 0 failed at 2 iterations after shared-model collision, provider tuple, provider lock, model-instance preference, fallback, and reversed-registration checks.</td>
+				</tr>
 				<tr>
 					<td><code>8d7efd528c</code> / <code>4747a53d87</code></td>
 					<td><code>interactivity</code></td>
