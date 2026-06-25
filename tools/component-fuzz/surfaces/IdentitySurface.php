@@ -33,6 +33,7 @@ final class IdentitySurface {
 			self::exercise_identity_filter_contracts( $result, $rng );
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_user_contact_methods( $result, $rng );
+			self::exercise_wp_user_identity_fields( $result, $rng );
 			self::exercise_urls( $result, $rng );
 			self::exercise_avatar_helpers( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
@@ -293,6 +294,153 @@ final class IdentitySurface {
 				self::check( $result, 'wp_get_user_contact_methods.filter_restored', $before_filter === \has_filter( 'user_contactmethods', $filter ), $methods, $before_filter, \has_filter( 'user_contactmethods', $filter ) );
 			}
 		);
+	}
+
+	private static function exercise_wp_user_identity_fields( array &$result, array &$rng ): void {
+		if ( ! class_exists( 'WP_User' ) ) {
+			$result['skips'][] = 'wp_user_identity_fields:missing_class:WP_User';
+			return;
+		}
+
+		if ( ! self::have_functions( array( 'add_filter', 'clean_user_cache', 'esc_attr', 'esc_url', 'get_user_by', 'get_userdata', 'has_filter', 'remove_filter', 'sanitize_email', 'sanitize_title_with_dashes', 'sanitize_user', 'sanitize_user_field', 'update_user_caches' ), $result, 'wp_user_identity_fields' ) ) {
+			return;
+		}
+
+		$cases = self::wp_user_identity_cases( $rng );
+
+		self::run_case(
+			$result,
+			'wp_user_identity_fields',
+			static function () use ( &$result, $cases ): void {
+				$fields = array( 'ID', 'user_login', 'user_nicename', 'user_email', 'user_url', 'display_name', 'first_name', 'last_name', 'description' );
+
+				foreach ( $cases as $case ) {
+					$row  = $case['row'];
+					$user = self::fake_identity_user( $row );
+
+					try {
+						\clean_user_cache( $user );
+
+						$array = $user->to_array();
+						self::check( $result, 'wp_user.to_array_preserves_generated_identity_row', $row === $array, $case, $row, $array );
+						self::check( $result, 'wp_user.raw_field_getters_match_data_properties', self::wp_user_raw_fields_match( $user, $row, $fields ), $case, self::wp_user_field_expectation( $row, $fields ), self::wp_user_field_observation( $user, $fields ) );
+						self::check( $result, 'wp_user.exists_tracks_nonzero_generated_id', $user->exists() && (int) $row['ID'] === $user->ID, $case, array( 'exists' => true, 'ID' => $row['ID'] ), array( 'exists' => $user->exists(), 'ID' => $user->ID ) );
+
+						$user->filter = 'display';
+						$display_url  = $user->user_url;
+						$user->filter = 'attribute';
+						$attribute_url = $user->user_url;
+						$user->filter  = null;
+
+						self::check( $result, 'wp_user.user_url_contexts_use_public_escapers', \esc_url( $row['user_url'] ) === $display_url && \esc_attr( \esc_url( $row['user_url'] ) ) === $attribute_url, $case, array( 'display' => \esc_url( $row['user_url'] ), 'attribute' => \esc_attr( \esc_url( $row['user_url'] ) ) ), array( 'display' => $display_url, 'attribute' => $attribute_url ) );
+
+						\update_user_caches( $user );
+						$lookups = array(
+							'id'    => \get_userdata( $row['ID'] ),
+							'login' => \get_user_by( 'login', $row['user_login'] ),
+							'slug'  => \get_user_by( 'slug', $row['user_nicename'] ),
+							'email' => \get_user_by( 'email', $row['user_email'] ),
+						);
+
+						self::check( $result, 'wp_user.cache_seeded_public_lookups_round_trip_identity', self::wp_user_lookups_match_row( $lookups, $row ), $case, self::wp_user_lookup_expectation( $row ), self::wp_user_lookup_observation( $lookups ) );
+					} finally {
+						$user->filter = null;
+						\clean_user_cache( $user );
+					}
+				}
+
+				self::exercise_wp_user_field_filters( $result, $cases[0] );
+			}
+		);
+	}
+
+	private static function exercise_wp_user_field_filters( array &$result, array $case ): void {
+		$row     = $case['row'];
+		$user    = self::fake_identity_user( $row );
+		$token   = $case['token'];
+		$events  = array(
+			'displayName' => array(),
+			'userUrl'     => array(),
+			'nicename'    => array(),
+			'editName'    => array(),
+		);
+		$name    = 'Filtered <b>Display</b> ' . $token;
+		$url     = 'https://filtered.example.test/profile/' . rawurlencode( $token ) . '?a=1&b=two';
+		$slug    = 'filtered-nicename-' . $token;
+		$edit    = 'Edit "Display" <script>' . $token . '</script>';
+
+		$display_name_filter = static function ( $value, int $user_id, string $context ) use ( &$events, $name ): string {
+			$events['displayName'][] = array(
+				'value'   => $value,
+				'userId'  => $user_id,
+				'context' => $context,
+			);
+
+			return $name;
+		};
+		$user_url_filter     = static function ( $value, int $user_id, string $context ) use ( &$events, $url ): string {
+			$events['userUrl'][] = array(
+				'value'   => $value,
+				'userId'  => $user_id,
+				'context' => $context,
+			);
+
+			return $url;
+		};
+		$nicename_filter     = static function ( $value ) use ( &$events, $slug ): string {
+			$events['nicename'][] = $value;
+
+			return $slug;
+		};
+		$edit_name_filter    = static function ( $value, int $user_id ) use ( &$events, $edit ): string {
+			$events['editName'][] = array(
+				'value'  => $value,
+				'userId' => $user_id,
+			);
+
+			return $edit;
+		};
+
+		$before_filters = array(
+			'user_display_name'      => \has_filter( 'user_display_name', $display_name_filter ),
+			'user_url'               => \has_filter( 'user_url', $user_url_filter ),
+			'pre_user_nicename'      => \has_filter( 'pre_user_nicename', $nicename_filter ),
+			'edit_user_display_name' => \has_filter( 'edit_user_display_name', $edit_name_filter ),
+		);
+
+		\add_filter( 'user_display_name', $display_name_filter, 999, 3 );
+		\add_filter( 'user_url', $user_url_filter, 999, 3 );
+		\add_filter( 'pre_user_nicename', $nicename_filter, 999, 1 );
+		\add_filter( 'edit_user_display_name', $edit_name_filter, 999, 2 );
+
+		try {
+			$user->filter    = 'display';
+			$display_name    = $user->display_name;
+			$display_url     = $user->user_url;
+			$raw_name        = \sanitize_user_field( 'display_name', $row['display_name'], $row['ID'], 'raw' );
+			$db_nicename     = \sanitize_user_field( 'user_nicename', $row['user_nicename'], $row['ID'], 'db' );
+			$edit_name       = \sanitize_user_field( 'display_name', $row['display_name'], $row['ID'], 'edit' );
+			$user->filter    = null;
+		} finally {
+			$user->filter = null;
+			\remove_filter( 'user_display_name', $display_name_filter, 999 );
+			\remove_filter( 'user_url', $user_url_filter, 999 );
+			\remove_filter( 'pre_user_nicename', $nicename_filter, 999 );
+			\remove_filter( 'edit_user_display_name', $edit_name_filter, 999 );
+		}
+
+		$after_filters = array(
+			'user_display_name'      => \has_filter( 'user_display_name', $display_name_filter ),
+			'user_url'               => \has_filter( 'user_url', $user_url_filter ),
+			'pre_user_nicename'      => \has_filter( 'pre_user_nicename', $nicename_filter ),
+			'edit_user_display_name' => \has_filter( 'edit_user_display_name', $edit_name_filter ),
+		);
+
+		self::check( $result, 'wp_user.field_filters.display_name_filter_is_context_local', $name === $display_name && $row['display_name'] === $raw_name && 1 === count( $events['displayName'] ) && $row['display_name'] === $events['displayName'][0]['value'] && $row['ID'] === $events['displayName'][0]['userId'] && 'display' === $events['displayName'][0]['context'], $case, 'display filter once; raw context bypassed', array( 'displayName' => $display_name, 'rawName' => $raw_name, 'events' => $events['displayName'] ) );
+		self::check( $result, 'wp_user.field_filters.user_url_filter_is_escaped_after_override', \esc_url( $url ) === $display_url && 1 === count( $events['userUrl'] ) && $row['user_url'] === $events['userUrl'][0]['value'] && 'display' === $events['userUrl'][0]['context'], $case, \esc_url( $url ), array( 'displayUrl' => $display_url, 'events' => $events['userUrl'] ) );
+		self::check( $result, 'wp_user.field_filters.nicename_db_filter_is_prefix_scoped', $slug === $db_nicename && array( $row['user_nicename'] ) === $events['nicename'], $case, $slug, array( 'dbNicename' => $db_nicename, 'events' => $events['nicename'] ) );
+		self::check( $result, 'wp_user.field_filters.edit_display_name_escapes_filter_result', \esc_attr( $edit ) === $edit_name && 1 === count( $events['editName'] ) && $row['display_name'] === $events['editName'][0]['value'] && $row['ID'] === $events['editName'][0]['userId'], $case, \esc_attr( $edit ), array( 'editName' => $edit_name, 'events' => $events['editName'] ) );
+		self::check( $result, 'wp_user.field_filters.restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
 	}
 
 	private static function exercise_capability_keys( array &$result, array &$rng ): void {
@@ -936,6 +1084,153 @@ final class IdentitySurface {
 				}
 			);
 		}
+	}
+
+	private static function wp_user_identity_cases( array &$rng ): array {
+		$token          = substr( hash( 'sha256', self::rand_bytes( $rng, 16 ) ), 0, 10 );
+		$base_id        = 500000 + self::rand_int( $rng, 1, 500000 );
+		$display_values = array(
+			'Identity <b>User</b> ' . $token,
+			'Display "Quoted" & ' . substr( self::random_string( $rng, 32 ), 0, 32 ),
+			"Line\nName " . $token,
+			"Unicode snowman \xE2\x98\x83 " . $token,
+		);
+		$url_values     = array(
+			'https://example.test/users/' . $token . '?name=<b>x</b>&n=' . self::rand_int( $rng, 10, 99 ),
+			'example.test/profile/' . $token . ' with spaces',
+			'javascript:alert(1)',
+			'mailto:identity-' . $token . '@example.test',
+		);
+
+		$cases = array();
+		for ( $i = 0; $i < 4; ++$i ) {
+			$login = \sanitize_user( 'identity_' . $token . '_' . $i . '_' . self::rand_int( $rng, 100, 999 ), true );
+			if ( '' === $login ) {
+				$login = 'identity_' . $token . '_' . $i;
+			}
+
+			$nicename = \sanitize_title_with_dashes( $display_values[ $i ] . '-' . $login . '-' . substr( self::random_string( $rng, 20 ), 0, 20 ), '', 'save' );
+			if ( '' === $nicename ) {
+				$nicename = 'identity-' . $token . '-' . $i;
+			}
+
+			$email = \sanitize_email( 'identity-' . $token . '-' . $i . '@example.test' );
+			if ( '' === $email ) {
+				$email = 'identity-' . $token . '-' . $i . '@example.com';
+			}
+
+			$cases[] = array(
+				'label' => 'generated_identity_user_' . $i,
+				'token' => $token . '-' . $i,
+				'row'   => array(
+					'ID'                  => $base_id + $i,
+					'user_login'          => $login,
+					'user_pass'           => '',
+					'user_nicename'       => $nicename,
+					'user_email'          => $email,
+					'user_url'            => $url_values[ $i ],
+					'user_registered'     => sprintf( '2026-06-%02d 12:00:00', 20 + $i ),
+					'user_activation_key' => 'activation-' . $token . '-' . $i,
+					'user_status'         => '0',
+					'display_name'        => $display_values[ $i ],
+					'nickname'            => 'nick-' . $token . '-' . $i,
+					'first_name'          => 'First ' . $i,
+					'last_name'           => 'Last ' . $token,
+					'description'         => 'Profile <em>description</em> ' . substr( self::random_string( $rng, 32 ), 0, 32 ),
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function fake_identity_user( array $row ): \WP_User {
+		$reflection = new \ReflectionClass( 'WP_User' );
+		$user       = $reflection->newInstanceWithoutConstructor();
+		$user->ID   = (int) $row['ID'];
+		$user->data = (object) $row;
+		$user->filter = null;
+		$user->caps   = array();
+		$user->roles  = array();
+		$user->allcaps = array();
+
+		return $user;
+	}
+
+	private static function wp_user_raw_fields_match( \WP_User $user, array $row, array $fields ): bool {
+		foreach ( $fields as $field ) {
+			if ( ! $user->has_prop( $field ) ) {
+				return false;
+			}
+
+			if ( $row[ $field ] !== $user->get( $field ) ) {
+				return false;
+			}
+
+			if ( $row[ $field ] !== $user->$field ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_user_field_expectation( array $row, array $fields ): array {
+		$out = array();
+		foreach ( $fields as $field ) {
+			$out[ $field ] = array(
+				'hasProp'  => true,
+				'get'      => $row[ $field ],
+				'property' => $row[ $field ],
+			);
+		}
+
+		return $out;
+	}
+
+	private static function wp_user_field_observation( \WP_User $user, array $fields ): array {
+		$out = array();
+		foreach ( $fields as $field ) {
+			$out[ $field ] = array(
+				'hasProp'  => $user->has_prop( $field ),
+				'get'      => $user->get( $field ),
+				'property' => $user->$field,
+			);
+		}
+
+		return $out;
+	}
+
+	private static function wp_user_lookups_match_row( array $lookups, array $row ): bool {
+		$fields = array( 'ID', 'user_login', 'user_nicename', 'user_email', 'user_url', 'display_name', 'first_name', 'last_name', 'description' );
+
+		foreach ( $lookups as $lookup ) {
+			if ( ! $lookup instanceof \WP_User || ! self::wp_user_raw_fields_match( $lookup, $row, $fields ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_user_lookup_expectation( array $row ): array {
+		return array(
+			'ID'            => $row['ID'],
+			'user_login'    => $row['user_login'],
+			'user_nicename' => $row['user_nicename'],
+			'user_email'    => $row['user_email'],
+			'user_url'      => $row['user_url'],
+			'display_name'  => $row['display_name'],
+		);
+	}
+
+	private static function wp_user_lookup_observation( array $lookups ): array {
+		$out = array();
+		foreach ( $lookups as $key => $lookup ) {
+			$out[ $key ] = $lookup instanceof \WP_User ? self::wp_user_lookup_expectation( $lookup->to_array() ) : $lookup;
+		}
+
+		return $out;
 	}
 
 	private static function option_cases( array &$rng ): array {
