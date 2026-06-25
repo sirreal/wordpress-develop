@@ -39,6 +39,7 @@ final class TemplateLinksSurface {
 			self::reset_runtime( $ctx );
 
 			$rows[] = self::check_body_class_and_language_attributes( $ctx );
+			$rows[] = self::check_body_language_filter_ordering( $ctx );
 			$rows[] = self::check_document_title_helpers( $ctx );
 			$rows[] = self::check_resource_hints_and_preloads( $ctx );
 			$rows[] = self::check_page_and_paginate_links( $ctx );
@@ -297,6 +298,173 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.template.body-class-and-language-attributes',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_body_language_filter_ordering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$post            = self::current_post();
+		$marker          = strtolower( $ctx->identifier( 4, 10 ) );
+		$custom_classes  = array(
+			'cfz-custom-' . $marker,
+			'raw<script>' . $marker,
+		);
+		$early_body      = 'cfz-early-' . $marker;
+		$late_body       = 'cfz-late-' . $marker;
+		$unsafe_body     = 'cfz-unsafe<late>' . $marker;
+		$body_events     = array();
+		$language_events = array();
+
+		$body_filter_early = static function ( array $classes, array $css_class ) use (
+			&$body_events,
+			$custom_classes,
+			$early_body
+		): array {
+			$body_events[] = array(
+				'phase'                 => 'early',
+				'sawRawCustomArgument'  => $custom_classes === $css_class,
+				'sawEscapedCustomClass' => in_array( \esc_attr( $custom_classes[1] ), $classes, true ),
+			);
+			$classes[]      = $early_body;
+			$classes[]      = $early_body;
+			return $classes;
+		};
+
+		$body_filter_late = static function ( array $classes, array $css_class ) use (
+			&$body_events,
+			$custom_classes,
+			$early_body,
+			$late_body,
+			$unsafe_body
+		): array {
+			$body_events[] = array(
+				'phase'                => 'late',
+				'sawEarlyToken'        => in_array( $early_body, $classes, true ),
+				'sawRawCustomArgument' => $custom_classes === $css_class,
+			);
+			$classes[]      = $late_body;
+			$classes[]      = $unsafe_body;
+			return $classes;
+		};
+
+		$language_filter_early = static function ( string $output, string $doctype ) use (
+			&$language_events,
+			$marker
+		): string {
+			$language_events[] = 'early:' . $doctype;
+			return $output . ' data-cfz-early="' . \esc_attr( $marker . '<early>' ) . '"';
+		};
+
+		$language_filter_late = static function ( string $output, string $doctype ) use (
+			&$language_events,
+			$marker
+		): string {
+			$language_events[] = 'late:' . $doctype . ':' . ( str_contains( $output, 'data-cfz-early=' ) ? 'saw-early' : 'missing-early' );
+			return $output . ' data-cfz-late="' . \esc_attr( $doctype . '-' . $marker . '<late>' ) . '"';
+		};
+
+		$buffer_level = ob_get_level();
+		$body_classes = array();
+		$body_output  = '';
+		$html         = '';
+		$html_echo    = '';
+		$xhtml        = '';
+
+		\add_filter( 'body_class', $body_filter_early, 5, 2 );
+		\add_filter( 'body_class', $body_filter_late, 50, 2 );
+		\add_filter( 'language_attributes', $language_filter_early, 5, 2 );
+		\add_filter( 'language_attributes', $language_filter_late, 50, 2 );
+
+		try {
+			$body_classes = \get_body_class( $custom_classes );
+
+			ob_start();
+			\body_class( $custom_classes );
+			$body_output = (string) ob_get_clean();
+
+			$html = \get_language_attributes( 'html' );
+
+			ob_start();
+			\language_attributes( 'html' );
+			$html_echo = (string) ob_get_clean();
+
+			$xhtml = \get_language_attributes( 'xhtml' );
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'body_class', $body_filter_early, 5 );
+			\remove_filter( 'body_class', $body_filter_late, 50 );
+			\remove_filter( 'language_attributes', $language_filter_early, 5 );
+			\remove_filter( 'language_attributes', $language_filter_late, 50 );
+		}
+
+		$early_index = array_search( $early_body, $body_classes, true );
+		$late_index  = array_search( $late_body, $body_classes, true );
+
+		self::collect_failure(
+			$failures,
+			is_int( $early_index )
+				&& is_int( $late_index )
+				&& $early_index < $late_index
+				&& 1 === count( array_keys( $body_classes, $early_body, true ) )
+				&& in_array( \esc_attr( $custom_classes[1] ), $body_classes, true )
+				&& in_array( $unsafe_body, $body_classes, true )
+				&& $body_output === 'class="' . \esc_attr( implode( ' ', $body_classes ) ) . '"'
+				&& ! self::contains_raw_dangerous_html( $body_output )
+				&& array(
+					'early',
+					'late',
+					'early',
+					'late',
+				) === array_column( $body_events, 'phase' )
+				&& false === \has_filter( 'body_class', $body_filter_early, 5 )
+				&& false === \has_filter( 'body_class', $body_filter_late, 50 ),
+			'body class filters receive raw custom args, run by priority, deduplicate filtered tokens, and echo escaped output',
+			array(
+				'postId'      => $post->ID,
+				'classes'     => $body_classes,
+				'bodyOutput'  => $body_output,
+				'bodyEvents'  => $body_events,
+				'earlyIndex'  => $early_index,
+				'lateIndex'   => $late_index,
+				'unsafeToken' => $unsafe_body,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$html === $html_echo
+				&& str_contains( $html, 'lang="en-US"' )
+				&& str_contains( $xhtml, 'xml:lang="en-US"' )
+				&& str_contains( $html, 'data-cfz-early="' . \esc_attr( $marker . '<early>' ) . '"' )
+				&& str_contains( $html, 'data-cfz-late="' . \esc_attr( 'html-' . $marker . '<late>' ) . '"' )
+				&& str_contains( $xhtml, 'data-cfz-late="' . \esc_attr( 'xhtml-' . $marker . '<late>' ) . '"' )
+				&& array(
+					'early:html',
+					'late:html:saw-early',
+					'early:html',
+					'late:html:saw-early',
+					'early:xhtml',
+					'late:xhtml:saw-early',
+				) === $language_events
+				&& ! self::contains_raw_dangerous_html( $html . $xhtml )
+				&& false === \has_filter( 'language_attributes', $language_filter_early, 5 )
+				&& false === \has_filter( 'language_attributes', $language_filter_late, 50 ),
+			'language attribute filters receive doctype, run by priority, preserve echo/getter parity, and stay local',
+			array(
+				'html'           => $html,
+				'htmlEcho'       => $html_echo,
+				'xhtml'          => $xhtml,
+				'languageEvents' => $language_events,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.template.body-language-filter-ordering',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
