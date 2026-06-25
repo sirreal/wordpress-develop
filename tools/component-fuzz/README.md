@@ -93,7 +93,8 @@ database, network requests, or a configured site.
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
   fallbacks, content sanitization on update, form escaping, `the_widget()`
   display callback/action flow, registered control rendering, widgets block
-  editor support toggles, and sidebars widget mapping for block widget instances.
+  editor support toggles, widget ID parsing, unregistered-widget cleanup, and
+  sidebars widget mapping for block widget instances.
 - `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
   including in-memory link rows and link categories for `get_bookmark()`,
   `get_bookmarks()`, `wp_list_bookmarks()` and `_walk_bookmarks()` escaping,

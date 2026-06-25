@@ -33,6 +33,7 @@ final class BlockWidgetsSurface {
 			$rows[] = self::check_widgets_block_editor_support( $ctx->fork( 'support' ) );
 			$rows[] = self::check_the_widget_and_control_rendering( $ctx->fork( 'the-widget-control' ) );
 			$rows[] = self::check_sidebars_widget_mapping( $ctx->fork( 'mapping' ) );
+			$rows[] = self::check_widget_id_and_cleanup_matrix( $ctx->fork( 'id-cleanup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'block-widgets.surface-no-throw',
@@ -590,6 +591,76 @@ final class BlockWidgetsSurface {
 		);
 
 		return self::result( $ctx, 'block-widgets.sidebars.mapping-persistence-and-rendering', $failures );
+	}
+
+	private static function check_widget_id_and_cleanup_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			'block-' . $ctx->int( 2, 99 ) => array(
+				'id_base' => 'block',
+				'number'  => null,
+			),
+			'media_image-0007'            => array(
+				'id_base' => 'media_image',
+				'number'  => 7,
+			),
+			'dash-name-' . $ctx->int( 10, 99 ) => array(
+				'id_base' => 'dash-name',
+				'number'  => null,
+			),
+			'legacy_widget'               => array(
+				'id_base' => 'legacy_widget',
+			),
+			'no-number-' . $ctx->identifier( 3, 8 ) => array(
+				'id_base' => null,
+			),
+		);
+
+		foreach ( $cases as $widget_id => $expected ) {
+			$parsed = \wp_parse_widget_id( $widget_id );
+			if ( null === ( $expected['id_base'] ?? null ) ) {
+				$expected['id_base'] = $widget_id;
+			}
+			if ( array_key_exists( 'number', $expected ) && null === $expected['number'] ) {
+				$expected['number'] = (int) substr( $widget_id, strrpos( $widget_id, '-' ) + 1 );
+			}
+
+			self::collect_failure(
+				$failures,
+				$expected === $parsed,
+				'wp_parse_widget_id splits only trailing numeric instance IDs',
+				array(
+					'widgetId' => $widget_id,
+					'expected' => $expected,
+					'actual'   => $parsed,
+				)
+			);
+		}
+
+		$sidebars = array(
+			'primary'             => array( 'block-2', 'missing-1', 'text-7' ),
+			'wp_inactive_widgets' => array( 'legacy_widget', 'block-3' ),
+			'not-an-array'        => 'left-alone',
+		);
+		$allowed  = array( 'block-2', 'legacy_widget' );
+		$cleaned  = \_wp_remove_unregistered_widgets( $sidebars, $allowed );
+
+		self::collect_failure(
+			$failures,
+			array(
+				'primary'             => array( 'block-2' ),
+				'wp_inactive_widgets' => array( 'legacy_widget' ),
+				'not-an-array'        => 'left-alone',
+			) === $cleaned,
+			'_wp_remove_unregistered_widgets intersects array sidebars and leaves non-array slots untouched',
+			array(
+				'sidebars' => $sidebars,
+				'allowed'  => $allowed,
+				'cleaned'  => $cleaned,
+			)
+		);
+
+		return self::result( $ctx, 'block-widgets.sidebars.widget-id-and-cleanup-matrix', $failures );
 	}
 
 	private static function block_case( \ComponentFuzz\FuzzContext $ctx ): array {
