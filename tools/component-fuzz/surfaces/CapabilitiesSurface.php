@@ -33,6 +33,7 @@ final class CapabilitiesSurface {
 			$rows[] = self::check_role_registry_mutations( $ctx );
 			$rows[] = self::check_role_has_cap_filter( $ctx );
 			$rows[] = self::check_user_capability_aggregation( $ctx );
+			$rows[] = self::check_user_for_site_contracts( $ctx );
 			$rows[] = self::check_user_capability_mutations( $ctx );
 			$rows[] = self::check_user_has_cap_filter_contracts( $ctx );
 			$rows[] = self::check_meta_cap_mappings( $ctx );
@@ -498,6 +499,272 @@ final class CapabilitiesSurface {
 				'directCap' => $direct_grant,
 				'denyCap'   => $direct_deny,
 				'levelCap'  => $direct_level,
+			)
+		);
+	}
+
+	private static function check_user_for_site_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = array();
+		foreach (
+			array(
+				'current_user_can_for_site',
+				'user_can_for_site',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
+			$missing[] = 'class Component_Fuzz_WPDB_Stub';
+		}
+
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'capabilities.user.site-scoped-cap-keys',
+				'Site-scoped capability APIs or cache helpers are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures           = array();
+		$site_a             = 2 + $ctx->int( 0, 97 );
+		$site_b             = $site_a + 100 + $ctx->int( 0, 97 );
+		$site_a_cap         = self::cap_name( $ctx->fork( 'site-a-cap' ), 'site_a' );
+		$site_b_cap         = self::cap_name( $ctx->fork( 'site-b-cap' ), 'site_b' );
+		$shared_cap         = self::cap_name( $ctx->fork( 'site-shared-cap' ), 'site_shared' );
+		$user_data          = self::synthetic_user_data( $ctx->fork( 'site-user' ) );
+		$user_id            = (int) $user_data->ID;
+		$original_wpdb      = $GLOBALS['wpdb'] ?? null;
+		$had_wpdb           = array_key_exists( 'wpdb', $GLOBALS );
+		$original_blog_id   = $GLOBALS['blog_id'] ?? null;
+		$had_blog_id        = array_key_exists( 'blog_id', $GLOBALS );
+		$original_roles     = \wp_roles();
+		$original_role_site = $original_roles->get_site_id();
+		$cached_user        = \wp_cache_get( $user_id, 'users' );
+		$had_cached_user    = false !== $cached_user;
+		$meta_calls         = array();
+
+		$prefix_for = static function ( int $site_id ): string {
+			return $site_id <= 1 ? 'wp_' : 'wp_' . $site_id . '_';
+		};
+
+		$site_a_key = $prefix_for( $site_a ) . 'capabilities';
+		$site_b_key = $prefix_for( $site_b ) . 'capabilities';
+		$site_caps  = array(
+			$site_a_key => array(
+				'cfz_reader' => true,
+				$site_a_cap  => true,
+				$site_b_cap  => false,
+				$shared_cap  => false,
+			),
+			$site_b_key => array(
+				'cfz_author' => true,
+				$site_a_cap  => false,
+				$site_b_cap  => true,
+				$shared_cap  => true,
+			),
+		);
+
+		$get_metadata_filter = static function ( $value, int $object_id, string $meta_key, bool $single, string $meta_type ) use ( $user_id, $site_caps, &$meta_calls ) {
+			$meta_calls[] = array(
+				'objectId' => $object_id,
+				'metaKey'  => $meta_key,
+				'single'   => $single,
+				'metaType' => $meta_type,
+			);
+
+			if ( 'user' !== $meta_type || $user_id !== $object_id || ! array_key_exists( $meta_key, $site_caps ) ) {
+				return $value;
+			}
+
+			return array( $site_caps[ $meta_key ] );
+		};
+
+		try {
+			$GLOBALS['wpdb'] = new class() extends \Component_Fuzz_WPDB_Stub {
+				public function get_blog_prefix( $blog_id = null ) {
+					if ( null === $blog_id ) {
+						$blog_id = $GLOBALS['blog_id'] ?? 1;
+					}
+
+					$blog_id = \absint( $blog_id );
+					if ( $blog_id <= 1 ) {
+						return $this->base_prefix;
+					}
+
+					return $this->base_prefix . $blog_id . '_';
+				}
+			};
+
+			$GLOBALS['blog_id'] = $site_a;
+			\wp_cache_set( $user_id, $user_data, 'users' );
+			\add_filter( 'get_user_metadata', $get_metadata_filter, 10, 5 );
+
+			$user = new \WP_User( $user_data, '', $site_a );
+			$site_a_state = self::site_user_state( $user, $site_a_cap, $site_b_cap, $shared_cap );
+
+			$user->for_site( $site_b );
+			$site_b_state = self::site_user_state( $user, $site_a_cap, $site_b_cap, $shared_cap );
+
+			$GLOBALS['blog_id'] = $site_b;
+			$default_site_user  = new \WP_User( $user_data );
+			$default_state      = self::site_user_state( $default_site_user, $site_a_cap, $site_b_cap, $shared_cap );
+
+			$GLOBALS['blog_id'] = $site_a;
+			$current_user       = new \WP_User( $user_data, '', $site_a );
+			$GLOBALS['current_user'] = $current_user;
+
+			$user_can_default       = \user_can( $user_id, $site_a_cap );
+			$user_can_for_site_id   = \user_can_for_site( $user_id, $site_b, $site_a_cap );
+			$user_can_for_site_obj  = \user_can_for_site( $current_user, $site_b, $site_a_cap );
+			$user_can_invalid_sites = array(
+				'zero'     => \user_can_for_site( $user_id, 0, $site_a_cap ),
+				'negative' => \user_can_for_site( $user_id, -1 * $site_b, $site_a_cap ),
+				'string'   => \user_can_for_site( $user_id, 'not-a-site', $site_a_cap ),
+			);
+			$current_can_default    = \current_user_can( $site_a_cap );
+			$current_can_for_site   = \current_user_can_for_site( $site_b, $site_a_cap );
+			$blog_id_after_wrappers = $GLOBALS['blog_id'];
+			$current_after_wrappers = $GLOBALS['current_user'];
+
+			$original_roles->for_site( $site_a );
+			$site_a_role_shape = self::role_registry_shape( $original_roles );
+			$original_roles->for_site( $site_b );
+			$site_b_role_shape = self::role_registry_shape( $original_roles );
+
+			self::collect_failure(
+				$failures,
+				$site_a === $site_a_state['siteId']
+					&& $site_a_key === $site_a_state['capKey']
+					&& array( 'cfz_reader' ) === $site_a_state['roles']
+					&& true === $site_a_state['hasSiteA']
+					&& false === $site_a_state['hasSiteB']
+					&& false === $site_a_state['hasShared']
+					&& false === $site_a_state['canPublish'],
+				'WP_User::for_site loads generated site A cap key and direct overrides',
+				array(
+					'site'  => $site_a,
+					'key'   => $site_a_key,
+					'state' => $site_a_state,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$site_b === $site_b_state['siteId']
+					&& $site_b_key === $site_b_state['capKey']
+					&& array( 'cfz_author' ) === $site_b_state['roles']
+					&& false === $site_b_state['hasSiteA']
+					&& true === $site_b_state['hasSiteB']
+					&& true === $site_b_state['hasShared']
+					&& true === $site_b_state['canPublish'],
+				'WP_User::for_site loads generated site B cap key and role grants',
+				array(
+					'site'  => $site_b,
+					'key'   => $site_b_key,
+					'state' => $site_b_state,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$site_b === $default_state['siteId']
+					&& $site_b_key === $default_state['capKey']
+					&& true === $default_state['hasSiteB']
+					&& false === $default_state['hasSiteA'],
+				'WP_User defaults to current blog id when for_site receives no site',
+				array(
+					'blogId' => $GLOBALS['blog_id'],
+					'state'  => $default_state,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $user_can_default
+					&& $user_can_default === $user_can_for_site_id
+					&& $user_can_default === $user_can_for_site_obj
+					&& array( 'zero' => false, 'negative' => false, 'string' => false ) === $user_can_invalid_sites
+					&& true === $current_can_default
+					&& $current_can_default === $current_can_for_site
+					&& $site_a === $blog_id_after_wrappers
+					&& $current_after_wrappers === $current_user,
+				'user_can_for_site validates site IDs and single-site wrappers preserve current state',
+				array(
+					'userCanDefault'       => $user_can_default,
+					'userCanForSiteId'     => $user_can_for_site_id,
+					'userCanForSiteObject' => $user_can_for_site_obj,
+					'userCanInvalidSites'  => $user_can_invalid_sites,
+					'currentCanDefault'    => $current_can_default,
+					'currentCanForSite'    => $current_can_for_site,
+					'blogIdAfterWrappers'  => $blog_id_after_wrappers,
+					'currentSameObject'    => $current_after_wrappers === $current_user,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$site_a === $site_a_role_shape['siteId']
+					&& $site_a_key === str_replace( 'user_roles', 'capabilities', $site_a_role_shape['roleKey'] )
+					&& $site_b === $site_b_role_shape['siteId']
+					&& $site_b_key === str_replace( 'user_roles', 'capabilities', $site_b_role_shape['roleKey'] )
+					&& $site_a_role_shape['roleCount'] === $site_b_role_shape['roleCount'],
+				'WP_Roles::for_site uses generated blog prefixes without changing no-DB role maps',
+				array(
+					'siteA' => $site_a_role_shape,
+					'siteB' => $site_b_role_shape,
+				)
+			);
+		} finally {
+			\remove_filter( 'get_user_metadata', $get_metadata_filter, 10 );
+
+			if ( $had_cached_user ) {
+				\wp_cache_set( $user_id, $cached_user, 'users' );
+			} else {
+				\wp_cache_delete( $user_id, 'users' );
+			}
+
+			if ( $had_wpdb ) {
+				$GLOBALS['wpdb'] = $original_wpdb;
+			} else {
+				unset( $GLOBALS['wpdb'] );
+			}
+
+			if ( $had_blog_id ) {
+				$GLOBALS['blog_id'] = $original_blog_id;
+			} else {
+				unset( $GLOBALS['blog_id'] );
+			}
+
+			if ( isset( $GLOBALS['wp_roles'] ) && $GLOBALS['wp_roles'] instanceof \WP_Roles ) {
+				$GLOBALS['wp_roles']->for_site( $original_role_site );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'get_user_metadata', $get_metadata_filter ),
+			'get_user_metadata filter is removed from hook stack',
+			array( 'filter' => \has_filter( 'get_user_metadata', $get_metadata_filter ) )
+		);
+
+		return self::row(
+			$ctx,
+			'capabilities.user.site-scoped-cap-keys',
+			array() === $failures,
+			array(
+				'userId'    => $user_id,
+				'sites'     => array( $site_a, $site_b ),
+				'keys'      => array( $site_a_key, $site_b_key ),
+				'caps'      => array( $site_a_cap, $site_b_cap, $shared_cap ),
+				'metaCalls' => array_slice( $meta_calls, 0, 12 ),
+				'failures'  => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
@@ -1130,9 +1397,13 @@ final class CapabilitiesSurface {
 	}
 
 	private static function synthetic_user( \ComponentFuzz\FuzzContext $ctx ): \WP_User {
+		return new \WP_User( self::synthetic_user_data( $ctx ) );
+	}
+
+	private static function synthetic_user_data( \ComponentFuzz\FuzzContext $ctx ): \stdClass {
 		$id    = 70000 + $ctx->int( 0, 9999 );
 		$login = 'cap_user_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 12 );
-		$data  = (object) array(
+		return (object) array(
 			'ID'              => $id,
 			'user_login'      => $login,
 			'user_pass'       => 'cap-pass-' . hash( 'sha256', $login . '|' . $id ),
@@ -1144,8 +1415,6 @@ final class CapabilitiesSurface {
 			'user_status'     => 0,
 			'display_name'    => 'Capability User ' . $id,
 		);
-
-		return new \WP_User( $data );
 	}
 
 	private static function role_cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1245,6 +1514,21 @@ final class CapabilitiesSurface {
 			'roles'          => $role_keys,
 			'roleObjects'    => $role_object_keys,
 			'roleNames'      => $role_name_keys,
+		);
+	}
+
+	private static function site_user_state( \WP_User $user, string $site_a_cap, string $site_b_cap, string $shared_cap ): array {
+		return array(
+			'siteId'     => $user->get_site_id(),
+			'capKey'     => $user->cap_key,
+			'roles'      => $user->roles,
+			'caps'       => $user->caps,
+			'allcaps'    => $user->allcaps,
+			'hasSiteA'   => $user->has_cap( $site_a_cap ),
+			'hasSiteB'   => $user->has_cap( $site_b_cap ),
+			'hasShared'  => $user->has_cap( $shared_cap ),
+			'canRead'    => $user->has_cap( 'read' ),
+			'canPublish' => $user->has_cap( 'cfz_publish' ),
 		);
 	}
 

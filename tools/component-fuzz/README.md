@@ -110,9 +110,10 @@ database, network requests, or a configured site.
   restoration.
 - `capabilities`: no-DB role registry lifecycle and mutation idempotence,
   numeric/associative and boundary capability grants, `WP_User` role/direct cap
-  aggregation and mutators, role and user capability filter locality, generated
-  `map_meta_cap()` filter contexts, cheap meta-cap mappings, and primitive/meta
-  cap monotonicity.
+  aggregation and mutators, `WP_User::for_site()` cap-key isolation,
+  `user_can_for_site()` wrapper contracts, role and user capability filter
+  locality, generated `map_meta_cap()` filter contexts, cheap meta-cap
+  mappings, and primitive/meta cap monotonicity.
 - `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, feed/pagination canonicalization, redirect filter
