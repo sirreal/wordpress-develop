@@ -76,8 +76,9 @@ database, network requests, or a configured site.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
   sign-on and clear-auth-cookie actions with cookie sending short-circuited,
-  auth cookie validation hooks/default parsing, current-user and cookie global
-  restoration, and session token lifecycle operations.
+  generated auth-cookie scheme boundaries and filter payloads, auth cookie
+  validation hooks/default parsing, current-user and cookie global restoration,
+  and session token lifecycle operations.
 - `blocks`: block parser/serializer round trips, optimized block detection,
   dynamic render filters, block type metadata, variations, block hook insertion
   and ignored metadata, style, pattern/category, bindings, and supports
