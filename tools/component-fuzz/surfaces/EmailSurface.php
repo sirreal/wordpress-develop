@@ -47,6 +47,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_normalization_sensitive_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_author_email_filters( $ctx ) );
+			$rows = array_merge( $rows, self::check_rest_email_schema_filter_modes( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
 			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
@@ -1395,6 +1396,201 @@ final class EmailSurface {
 		return array(
 			$ctx->result(
 				'email.comment-author-email.filter-agreement',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_rest_email_schema_filter_modes( \ComponentFuzz\FuzzContext $ctx ): array {
+		foreach ( array( 'rest_validate_value_from_schema', 'rest_sanitize_value_from_schema' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return array(
+					$ctx->skip(
+						'email.rest-schema.email-format-filter-modes',
+						'Required REST schema APIs are unavailable.',
+						array( 'missing' => 'function ' . $function )
+					),
+				);
+			}
+		}
+
+		if ( ! class_exists( 'WP_REST_Users_Controller' ) ) {
+			return array(
+				$ctx->skip(
+					'email.rest-schema.email-format-filter-modes',
+					'WP_REST_Users_Controller is unavailable.'
+				),
+			);
+		}
+
+		$controller   = new \WP_REST_Users_Controller();
+		$item_schema  = $controller->get_item_schema();
+		$email_schema = $item_schema['properties']['email'] ?? null;
+
+		if (
+			! is_array( $email_schema ) ||
+			'string' !== ( $email_schema['type'] ?? null ) ||
+			'email' !== ( $email_schema['format'] ?? null )
+		) {
+			return array(
+				$ctx->result(
+					'email.rest-schema.email-format-filter-modes',
+					false,
+					array(
+						'emailSchema' => self::describe_value( $email_schema ),
+					)
+				),
+			);
+		}
+
+		$cases = array(
+			array(
+				'label'  => 'ascii',
+				'input'  => 'user@example.com',
+				'expect' => array(
+					'unicode' => true,
+					'ascii'   => true,
+				),
+			),
+			array(
+				'label'  => 'unicode-local',
+				'input'  => "jos\u{00E9}@example.com",
+				'expect' => array(
+					'unicode' => true,
+					'ascii'   => false,
+				),
+			),
+			array(
+				'label'  => 'invalid-unicode-local',
+				'input'  => "emoji\u{1F600}@example.com",
+				'expect' => array(
+					'unicode' => false,
+					'ascii'   => false,
+				),
+			),
+			array(
+				'label'  => 'fullwidth-at',
+				'input'  => "bad\u{FF20}example.com",
+				'expect' => array(
+					'unicode' => false,
+					'ascii'   => false,
+				),
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$cases[] = array(
+				'label'  => 'unicode-local-and-domain',
+				'input'  => "gr\u{00E5}@gr\u{00E5}.org",
+				'expect' => array(
+					'unicode' => true,
+					'ascii'   => false,
+				),
+			);
+		}
+
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			foreach ( array( 'unicode', 'ascii' ) as $mode ) {
+				self::install_email_filters( $mode );
+
+				foreach ( $cases as $case ) {
+					$expected_valid = $case['expect'][ $mode ];
+					$validate       = self::capture_warnings(
+						static fn() => \rest_validate_value_from_schema( $case['input'], $email_schema, 'email' )
+					);
+					$sanitize       = self::capture_warnings(
+						static fn() => \rest_sanitize_value_from_schema( $case['input'], $email_schema, 'email' )
+					);
+					$sanitized      = $sanitize['value'] ?? null;
+					$validate_sanitized = is_string( $sanitized )
+						? self::capture_warnings(
+							static fn() => \rest_validate_value_from_schema( $sanitized, $email_schema, 'email' )
+						)
+						: array(
+							'threw'    => false,
+							'value'    => null,
+							'warnings' => array(),
+						);
+					$is_email       = self::capture_warnings( static fn() => \is_email( $case['input'] ) );
+
+					$validation_result           = $validate['value'] ?? null;
+					$sanitized_validation_result = $validate_sanitized['value'] ?? null;
+					$is_email_result             = $is_email['value'] ?? null;
+					$validation_ok               = true === $validation_result;
+					$sanitized_validation_ok     = true === $sanitized_validation_result;
+					$is_email_ok                 = false !== $is_email_result;
+					$validation_error_ok         = $expected_valid || (
+						\is_wp_error( $validation_result ) &&
+						'rest_invalid_email' === $validation_result->get_error_code()
+					);
+					$sanitized_validation_error_ok = $expected_valid || (
+						\is_wp_error( $sanitized_validation_result ) &&
+						'rest_invalid_email' === $sanitized_validation_result->get_error_code()
+					);
+
+					$ok = ! $validate['threw']
+						&& ! $sanitize['threw']
+						&& ! $validate_sanitized['threw']
+						&& ! $is_email['threw']
+						&& array() === $validate['warnings']
+						&& array() === $sanitize['warnings']
+						&& array() === $validate_sanitized['warnings']
+						&& array() === $is_email['warnings']
+						&& $expected_valid === $validation_ok
+						&& $expected_valid === $sanitized_validation_ok
+						&& $expected_valid === $is_email_ok
+						&& $validation_error_ok
+						&& $sanitized_validation_error_ok
+						&& $case['input'] === $sanitized
+						&& ( ! $expected_valid || $case['input'] === $is_email_result );
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'mode'              => $mode,
+							'label'             => $case['label'],
+							'input'             => self::describe_string( $case['input'] ),
+							'expectedValid'     => $expected_valid,
+							'validate'          => self::describe_captured_call( $validate ),
+							'sanitize'          => self::describe_captured_call( $sanitize ),
+							'validateSanitized' => self::describe_captured_call( $validate_sanitized ),
+							'isEmail'           => self::describe_captured_call( $is_email ),
+						);
+					}
+
+					$observed[] = array(
+						'mode'              => $mode,
+						'label'             => $case['label'],
+						'input'             => self::describe_string( $case['input'] ),
+						'expectedValid'     => $expected_valid,
+						'validation'        => self::describe_value( $validation_result ),
+						'sanitized'         => self::describe_value( $sanitized ),
+						'sanitizedValid'    => self::describe_value( $sanitized_validation_result ),
+						'isEmail'           => self::describe_value( $is_email_result ),
+					);
+				}
+			}
+
+			if ( ! self::has_idn() ) {
+				$observed[] = array(
+					'label'  => 'unicode-local-and-domain',
+					'status' => 'skipped-idn-unavailable',
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.rest-schema.email-format-filter-modes',
 				array() === $failures,
 				array(
 					'observed' => $observed,
@@ -2908,6 +3104,13 @@ final class EmailSurface {
 	private static function describe_value( $value ) {
 		if ( is_string( $value ) ) {
 			return self::describe_string( $value );
+		}
+		if ( $value instanceof \WP_Error ) {
+			return array(
+				'code'    => $value->get_error_code(),
+				'message' => self::escape_bytes( $value->get_error_message() ),
+				'data'    => self::describe_value( $value->get_error_data() ),
+			);
 		}
 		if ( $value instanceof \WP_Email_Address ) {
 			return self::describe_address( $value );
