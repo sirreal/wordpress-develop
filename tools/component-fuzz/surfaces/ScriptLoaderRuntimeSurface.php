@@ -44,6 +44,7 @@ final class ScriptLoaderRuntimeSurface {
 			$rows[] = self::check_style_inlining_boundaries( $ctx, $case );
 			$rows[] = self::check_block_editor_loader_guards( $ctx, $case );
 			$rows[] = self::check_strategy_module_interactions( $ctx, $case );
+			$rows[] = self::check_classic_module_import_map_preloads( $ctx, $case );
 			$rows[] = self::check_jit_script_localization( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1039,6 +1040,250 @@ final class ScriptLoaderRuntimeSurface {
 		);
 	}
 
+	private static function check_classic_module_import_map_preloads( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		foreach (
+			array(
+				'wp_register_script_module',
+				'wp_enqueue_script_module',
+				'wp_script_modules',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				return $ctx->skip(
+					'script-loader-runtime.classic-module-import-map-preloads',
+					'Script Modules wrapper APIs are unavailable in this WordPress checkout.',
+					self::case_data( $case ) + array( 'missingFunction' => $function )
+				);
+			}
+		}
+
+		foreach (
+			array(
+				'print_enqueued_script_modules',
+				'print_import_map',
+				'print_script_module_preloads',
+			) as $method
+		) {
+			if ( ! method_exists( \wp_script_modules(), $method ) ) {
+				return $ctx->skip(
+					'script-loader-runtime.classic-module-import-map-preloads',
+					'Script Modules printer APIs are unavailable in this WordPress checkout.',
+					self::case_data( $case ) + array( 'missingMethod' => $method )
+				);
+			}
+		}
+
+		self::reset_scripts_global();
+		self::reset_script_modules_global();
+
+		$graph     = self::script_module_graph_for_context( $ctx->fork( 'classic-module-import-map-preloads' ), $case );
+		$classic   = $case['handles']['classicModuleHost'];
+		$src_calls = array();
+		$src_filter = static function ( $src, string $id ) use ( &$src_calls ) {
+			$src_calls[] = array(
+				'id'  => $id,
+				'src' => is_string( $src ) ? $src : gettype( $src ),
+			);
+			return $src;
+		};
+
+		\add_filter( 'script_module_loader_src', $src_filter, 10, 2 );
+
+		foreach ( $graph['modules'] as $id => $module ) {
+			\wp_register_script_module(
+				$id,
+				$module['src'],
+				$module['dependencies'],
+				$module['version'],
+				array( 'fetchpriority' => $module['fetchpriority'] )
+			);
+		}
+
+		\wp_register_script( $classic, 'runtime/classic-module-host.js', array(), '1.0.0' );
+		$classic_added = \wp_script_add_data( $classic, 'module_dependencies', $graph['classicDependencies'] );
+		\wp_enqueue_script( $classic );
+
+		foreach ( $graph['queue'] as $id ) {
+			\wp_enqueue_script_module( $id );
+		}
+
+		$import_map_print = self::capture_output( static fn() => \wp_script_modules()->print_import_map() );
+		$preload_print    = self::capture_output( static fn() => \wp_script_modules()->print_script_module_preloads() );
+		$module_print     = self::capture_output( static fn() => \wp_script_modules()->print_enqueued_script_modules() );
+
+		\remove_filter( 'script_module_loader_src', $src_filter, 10 );
+
+		$import_map_json = self::first_script_text_by_id( $import_map_print['output'], 'wp-importmap' );
+		$import_map      = is_string( $import_map_json ) ? json_decode( $import_map_json, true ) : null;
+		$actual_imports  = is_array( $import_map ) && isset( $import_map['imports'] ) && is_array( $import_map['imports'] )
+			? $import_map['imports']
+			: array();
+
+		$expected_imports = array();
+		foreach ( $graph['expectedImportIds'] as $id ) {
+			$expected_imports[ $id ] = self::expected_script_module_src( $graph['modules'][ $id ] );
+		}
+
+		$sorted_expected_imports = $expected_imports;
+		$sorted_actual_imports   = $actual_imports;
+		ksort( $sorted_expected_imports );
+		ksort( $sorted_actual_imports );
+
+		$preload_ids = self::element_ids( $preload_print['output'], 'link' );
+		$module_ids  = self::element_ids( $module_print['output'], 'script' );
+
+		$expected_preload_element_ids = array_map(
+			static fn( string $id ): string => "{$id}-js-modulepreload",
+			$graph['expectedPreloadIds']
+		);
+		$expected_module_element_ids  = array_map(
+			static fn( string $id ): string => "{$id}-js-module",
+			$graph['queue']
+		);
+
+		$sorted_preload_ids          = $preload_ids;
+		$sorted_expected_preload_ids = $expected_preload_element_ids;
+		$sorted_module_ids           = $module_ids;
+		$sorted_expected_module_ids  = $expected_module_element_ids;
+		sort( $sorted_preload_ids );
+		sort( $sorted_expected_preload_ids );
+		sort( $sorted_module_ids );
+		sort( $sorted_expected_module_ids );
+
+		$preload_failures = array();
+		foreach ( $graph['expectedPreloadIds'] as $id ) {
+			$module       = $graph['modules'][ $id ];
+			$tag          = self::link_tag_by_id( $preload_print['output'], "{$id}-js-modulepreload" );
+			$actual_high  = $graph['expectedPreloadFetchpriority'];
+			$expected_src = self::expected_printed_script_module_src( $module );
+			$expected_data = self::expected_original_fetchpriority_attribute(
+				$module['fetchpriority'],
+				$actual_high
+			);
+
+			if (
+				! is_string( $tag )
+				|| array( 'modulepreload' ) !== self::attribute_values( $tag, 'rel' )
+				|| array( $expected_src ) !== self::attribute_values( $tag, 'href' )
+				|| self::expected_attribute_values( $actual_high, 'auto' ) !== self::attribute_values( $tag, 'fetchpriority' )
+				|| self::expected_attribute_values( $expected_data, null ) !== self::attribute_values( $tag, 'data-wp-fetchpriority' )
+			) {
+				$preload_failures[] = array(
+					'id'           => $id,
+					'tag'          => self::preview( (string) $tag ),
+					'expectedSrc'  => $expected_src,
+					'expectedHigh' => $actual_high,
+					'expectedData' => $expected_data,
+				);
+			}
+		}
+
+		$module_failures = array();
+		foreach ( $graph['queue'] as $id ) {
+			$module       = $graph['modules'][ $id ];
+			$tag          = self::tag_by_id( $module_print['output'], "{$id}-js-module" );
+			$expected_src = self::expected_printed_script_module_src( $module );
+
+			if (
+				! is_string( $tag )
+				|| array( 'module' ) !== self::attribute_values( $tag, 'type' )
+				|| array( $expected_src ) !== self::attribute_values( $tag, 'src' )
+				|| self::expected_attribute_values( $module['fetchpriority'], 'auto' ) !== self::attribute_values( $tag, 'fetchpriority' )
+				|| array() !== self::attribute_values( $tag, 'data-wp-fetchpriority' )
+			) {
+				$module_failures[] = array(
+					'id'          => $id,
+					'tag'         => self::preview( (string) $tag ),
+					'expectedSrc' => $expected_src,
+					'priority'    => $module['fetchpriority'],
+				);
+			}
+		}
+
+		$negative_ids = array_merge(
+			$graph['expectedImportOnlyIds'],
+			array( $graph['ids']['queuedDynamic'] )
+		);
+		$negative_preloads_ok = true;
+		foreach ( $negative_ids as $id ) {
+			if ( in_array( "{$id}-js-modulepreload", $preload_ids, true ) ) {
+				$negative_preloads_ok = false;
+				break;
+			}
+		}
+
+		$queued_absent_from_import_map = array();
+		foreach ( $graph['queue'] as $id ) {
+			if ( isset( $actual_imports[ $id ] ) ) {
+				$queued_absent_from_import_map[] = $id;
+			}
+		}
+
+		$source_filter_ids = array_values( array_unique( array_column( $src_calls, 'id' ) ) );
+		$expected_src_ids  = array_values(
+			array_unique(
+				array_merge(
+					$graph['expectedImportIds'],
+					$graph['expectedPreloadIds'],
+					$graph['queue']
+				)
+			)
+		);
+		$missing_src_filter_ids = array_values( array_diff( $expected_src_ids, $source_filter_ids ) );
+
+		$preload_order_ok = self::attribute_position( $preload_print['output'], 'id', $graph['ids']['queuedLeaf'] . '-js-modulepreload' )
+			< self::attribute_position( $preload_print['output'], 'id', $graph['ids']['queuedShared'] . '-js-modulepreload' );
+		$module_order_ok  = self::contains_in_order(
+			$module_print['output'],
+			array(
+				$graph['ids']['queuedEntry'] . '-js-module',
+				$graph['ids']['queuedPeer'] . '-js-module',
+				$graph['ids']['queuedDirect'] . '-js-module',
+			)
+		);
+
+		$ok = ! $import_map_print['threw']
+			&& ! $preload_print['threw']
+			&& ! $module_print['threw']
+			&& true === $classic_added
+			&& $sorted_expected_imports === $sorted_actual_imports
+			&& $sorted_expected_preload_ids === $sorted_preload_ids
+			&& $sorted_expected_module_ids === $sorted_module_ids
+			&& array() === $preload_failures
+			&& array() === $module_failures
+			&& $negative_preloads_ok
+			&& array() === $queued_absent_from_import_map
+			&& array() === $missing_src_filter_ids
+			&& false === \has_filter( 'script_module_loader_src', $src_filter )
+			&& $preload_order_ok
+			&& $module_order_ok;
+
+		return $ctx->result(
+			'script-loader-runtime.classic-module-import-map-preloads',
+			$ok,
+			self::case_data( $case ) + array(
+				'classicHandle'             => $classic,
+				'classicAdded'              => $classic_added,
+				'expectedImportIds'         => $graph['expectedImportIds'],
+				'actualImportIds'           => array_keys( $actual_imports ),
+				'expectedPreloadIds'        => $expected_preload_element_ids,
+				'actualPreloadIds'          => $preload_ids,
+				'expectedModuleIds'         => $expected_module_element_ids,
+				'actualModuleIds'           => $module_ids,
+				'preloadFailures'           => array_slice( $preload_failures, 0, self::FAILURE_LIMIT ),
+				'moduleFailures'            => array_slice( $module_failures, 0, self::FAILURE_LIMIT ),
+				'queuedAbsentFromImportMap' => $queued_absent_from_import_map,
+				'missingSrcFilterIds'       => $missing_src_filter_ids,
+				'sourceFilterCalls'         => array_slice( $src_calls, 0, self::FAILURE_LIMIT ),
+				'preloadOrderOk'            => $preload_order_ok,
+				'moduleOrderOk'             => $module_order_ok,
+				'importMapPreview'          => self::preview( $import_map_print['output'] ),
+				'preloadPreview'            => self::preview( $preload_print['output'] ),
+				'modulePreview'             => self::preview( $module_print['output'] ),
+			)
+		);
+	}
+
 	private static function check_jit_script_localization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		if ( ! defined( 'AUTOSAVE_INTERVAL' ) ) {
 			return $ctx->skip(
@@ -1126,6 +1371,7 @@ final class ScriptLoaderRuntimeSurface {
 				'strategyEntry'      => "{$prefix}-strategy-entry",
 				'strategyInline'     => "{$prefix}-strategy-inline",
 				'strategyModules'    => "{$prefix}-strategy-modules",
+				'classicModuleHost'  => "{$prefix}-classic-module-host",
 			),
 		);
 	}
@@ -1307,6 +1553,35 @@ final class ScriptLoaderRuntimeSurface {
 		return null;
 	}
 
+	private static function link_tag_by_id( string $html, string $id ): ?string {
+		foreach ( self::opening_tags( $html, 'link' ) as $tag ) {
+			if ( self::attribute_position( $tag, 'id', $id ) !== false ) {
+				return $tag;
+			}
+		}
+
+		return null;
+	}
+
+	private static function element_ids( string $html, string $tag_name ): array {
+		$ids = array();
+		foreach ( self::opening_tags( $html, $tag_name ) as $tag ) {
+			$values = self::attribute_values( $tag, 'id' );
+			if ( array() !== $values ) {
+				$ids[] = $values[0];
+			}
+		}
+		return $ids;
+	}
+
+	private static function opening_tags( string $html, string $tag_name ): array {
+		if ( ! preg_match_all( '/<' . preg_quote( $tag_name, '/' ) . '\b[^>]*>/i', $html, $matches ) ) {
+			return array();
+		}
+
+		return $matches[0];
+	}
+
 	private static function attribute_values( string $html, string $attribute ): array {
 		if ( ! preg_match_all( '/\s' . preg_quote( $attribute, '/' ) . '\s*=\s*([\'"])(.*?)\1/i', $html, $matches ) ) {
 			return array();
@@ -1346,6 +1621,227 @@ final class ScriptLoaderRuntimeSurface {
 			$offset = $pos + strlen( $needle );
 		}
 		return true;
+	}
+
+	private static function script_module_graph_for_context( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$base = '@component-fuzz/runtime/' . $case['token'];
+		$ids  = array(
+			'classicEntry'         => "{$base}/classic-entry",
+			'classicStatic'        => "{$base}/classic-static",
+			'classicLeaf'          => "{$base}/classic-leaf",
+			'classicNestedDynamic' => "{$base}/classic-nested-dynamic",
+			'classicDirectDynamic' => "{$base}/classic-direct-dynamic",
+			'queuedEntry'          => "{$base}/queued-entry",
+			'queuedPeer'           => "{$base}/queued-peer",
+			'queuedDirect'         => "{$base}/queued-direct",
+			'queuedShared'         => "{$base}/queued-shared",
+			'queuedLeaf'           => "{$base}/queued-leaf",
+			'queuedDynamic'        => "{$base}/queued-dynamic",
+		);
+
+		$entry_is_high  = $ctx->bool();
+		$entry_priority = $entry_is_high ? 'high' : $ctx->choice( array( 'auto', 'low' ) );
+		$peer_priority  = $entry_is_high ? $ctx->choice( array( 'auto', 'low' ) ) : 'high';
+
+		$modules = array(
+			$ids['classicEntry']         => array(
+				'src'           => self::script_module_src( $case['prefix'], 'classic-entry', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(
+					self::script_module_dependency( $ids['classicStatic'], 'static', $ctx->bool() ),
+					self::script_module_dependency( $ids['classicNestedDynamic'], 'dynamic', true ),
+				),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['classicStatic']        => array(
+				'src'           => self::script_module_src( $case['prefix'], 'classic-static', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(
+					self::script_module_dependency( $ids['classicLeaf'], 'static', $ctx->bool() ),
+				),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['classicLeaf']          => array(
+				'src'           => self::script_module_src( $case['prefix'], 'classic-leaf', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['classicNestedDynamic'] => array(
+				'src'           => self::script_module_src( $case['prefix'], 'classic-nested-dynamic', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['classicDirectDynamic'] => array(
+				'src'           => self::script_module_src( $case['prefix'], 'classic-direct-dynamic', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['queuedEntry']          => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-entry', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(
+					self::script_module_dependency( $ids['queuedShared'], 'static', $ctx->bool() ),
+					self::script_module_dependency( $ids['queuedDynamic'], 'dynamic', true ),
+				),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $entry_priority,
+			),
+			$ids['queuedPeer']           => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-peer', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(
+					self::script_module_dependency( $ids['queuedShared'], 'static', $ctx->bool() ),
+				),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $peer_priority,
+			),
+			$ids['queuedDirect']         => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-direct', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+			$ids['queuedShared']         => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-shared', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(
+					self::script_module_dependency( $ids['queuedLeaf'], 'static', $ctx->bool() ),
+				),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low' ) ),
+			),
+			$ids['queuedLeaf']           => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-leaf', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low' ) ),
+			),
+			$ids['queuedDynamic']        => array(
+				'src'           => self::script_module_src( $case['prefix'], 'queued-dynamic', $ctx->int( 0, 3 ) ),
+				'dependencies'  => array(),
+				'version'       => self::script_module_version( $ctx ),
+				'fetchpriority' => $ctx->choice( array( 'auto', 'low', 'high' ) ),
+			),
+		);
+
+		return array(
+			'ids'                          => $ids,
+			'modules'                      => $modules,
+			'classicDependencies'          => array(
+				self::script_module_dependency( $ids['classicEntry'], 'static', $ctx->bool() ),
+				self::script_module_dependency( $ids['classicDirectDynamic'], 'dynamic', true ),
+			),
+			'queue'                        => array(
+				$ids['queuedEntry'],
+				$ids['queuedPeer'],
+				$ids['queuedDirect'],
+			),
+			'expectedImportIds'            => array(
+				$ids['classicEntry'],
+				$ids['classicDirectDynamic'],
+				$ids['classicStatic'],
+				$ids['classicLeaf'],
+				$ids['classicNestedDynamic'],
+				$ids['queuedShared'],
+				$ids['queuedLeaf'],
+				$ids['queuedDynamic'],
+			),
+			'expectedImportOnlyIds'        => array(
+				$ids['classicEntry'],
+				$ids['classicDirectDynamic'],
+				$ids['classicStatic'],
+				$ids['classicLeaf'],
+				$ids['classicNestedDynamic'],
+			),
+			'expectedPreloadIds'           => array(
+				$ids['queuedLeaf'],
+				$ids['queuedShared'],
+			),
+			'expectedPreloadFetchpriority' => self::highest_fetchpriority(
+				array(
+					$entry_priority,
+					$peer_priority,
+				)
+			),
+		);
+	}
+
+	private static function script_module_src( string $prefix, string $label, int $variant ): string {
+		$file = rawurlencode( "{$prefix}-{$label}" ) . '.js';
+		if ( 1 === $variant ) {
+			return "runtime/modules/{$file}?asset=" . rawurlencode( $label );
+		}
+		if ( 2 === $variant ) {
+			return "runtime/modules/{$file}#" . rawurlencode( $label );
+		}
+		if ( 3 === $variant ) {
+			return self::CONTENT_URL . "/component-fuzz/modules/{$file}?asset=absolute";
+		}
+		return "runtime/modules/{$file}";
+	}
+
+	private static function script_module_dependency( string $id, string $import, bool $as_array ) {
+		if ( 'static' === $import && ! $as_array ) {
+			return $id;
+		}
+
+		return array(
+			'id'     => $id,
+			'import' => $import,
+		);
+	}
+
+	private static function script_module_version( \ComponentFuzz\FuzzContext $ctx ) {
+		$choice = $ctx->int( 0, 2 );
+		if ( 0 === $choice ) {
+			return null;
+		}
+		if ( 1 === $choice ) {
+			return false;
+		}
+		return 'runtime-' . $ctx->int( 1, 999 );
+	}
+
+	private static function expected_script_module_src( array $module ): string {
+		$src     = $module['src'];
+		$version = $module['version'];
+
+		if ( '' === $src || null === $version ) {
+			return $src;
+		}
+
+		$ver = false === $version ? \get_bloginfo( 'version' ) : $version;
+		return \add_query_arg( 'ver', $ver, $src );
+	}
+
+	private static function expected_printed_script_module_src( array $module ): string {
+		return self::decode_html_attribute( \esc_url( self::expected_script_module_src( $module ) ) );
+	}
+
+	private static function highest_fetchpriority( array $priorities ): string {
+		$order         = array( 'low', 'auto', 'high' );
+		$highest_index = 0;
+		foreach ( $priorities as $priority ) {
+			$index = array_search( $priority, $order, true );
+			if ( false !== $index ) {
+				$highest_index = max( $highest_index, (int) $index );
+			}
+		}
+		return $order[ $highest_index ];
+	}
+
+	private static function expected_original_fetchpriority_attribute( string $original, string $actual ): ?string {
+		if ( $actual !== $original && 'auto' !== $original ) {
+			return $original;
+		}
+		return null;
+	}
+
+	private static function expected_attribute_values( ?string $value, ?string $empty_value ): array {
+		if ( $value === $empty_value || null === $value ) {
+			return array();
+		}
+		return array( $value );
 	}
 
 	private static function temp_path( string $filename ): string {

@@ -68,8 +68,8 @@ database, network requests, or a configured site.
   default script/style/module registrations, handle normalization, duplicate
   update behavior, inline/localized data placement, tag/settings escaping,
   script translations, emoji settings/styles, style inlining, block-loader
-  guards, strategy/fetchpriority/module interactions, and print side-effect
-  boundaries.
+  guards, strategy/fetchpriority/module interactions, generated classic-script
+  module import-map/modulepreload graphs, and print side-effect boundaries.
 - `appearance-media`: no-upload appearance media helper coverage, including
   custom background POST normalization, custom header default processing and
   selection, frontend header/background helpers, custom header video markup and
