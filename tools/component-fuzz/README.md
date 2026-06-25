@@ -515,9 +515,10 @@ database, network requests, or a configured site.
 - `template-hierarchy`: no-DB classic PHP template hierarchy coverage,
   including child/parent lookup priority, query-template filters, direct
   archive/page/search/404/embed helper filters and path confinement,
-  stylesheet/template root precedence, single template ordering,
-  `load_template()` include semantics, template-part hooks and args, and
-  guarded comments-template state handling.
+  stylesheet/template root precedence, single template ordering, generated
+  category/tag/taxonomy decoded-slug and term-ID ordering, `load_template()`
+  include semantics, template-part hooks and args, and guarded
+  comments-template state handling.
 - `template-links`: no-DB public template and link helpers, including body and
   language attributes and filter ordering/locality, document title stability,
   resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and

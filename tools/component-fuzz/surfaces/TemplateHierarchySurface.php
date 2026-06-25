@@ -33,6 +33,7 @@ final class TemplateHierarchySurface {
 			$rows[] = self::check_get_query_template_filters( $ctx->fork( 'query-template' ), $case );
 			$rows[] = self::check_direct_template_helpers_and_theme_paths( $ctx->fork( 'direct-templates' ), $case );
 			$rows[] = self::check_get_single_template_hierarchy( $ctx->fork( 'single-template' ), $case );
+			$rows[] = self::check_term_template_hierarchy_decoding( $ctx->fork( 'term-templates' ), $case );
 			$rows[] = self::check_load_template_include_semantics( $ctx->fork( 'load-template' ), $case );
 			$rows[] = self::check_get_template_part_hooks_and_args( $ctx->fork( 'template-part' ), $case );
 			$rows[] = self::check_comments_template_guard( $ctx->fork( 'comments-template' ), $case );
@@ -71,13 +72,17 @@ final class TemplateHierarchySurface {
 				'comments_template',
 				'get_404_template',
 				'get_archive_template',
+				'get_category_template',
 				'get_embed_template',
 				'get_page_template',
 				'get_query_template',
+				'get_queried_object',
 				'get_search_template',
 				'get_single_template',
 				'get_stylesheet',
 				'get_stylesheet_directory',
+				'get_tag_template',
+				'get_taxonomy_template',
 				'get_template',
 				'get_template_directory',
 				'get_template_part',
@@ -549,6 +554,146 @@ final class TemplateHierarchySurface {
 		);
 	}
 
+	private static function check_term_template_hierarchy_decoding( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_template_globals();
+
+		$failures = array();
+		$observed = array();
+		$filters  = array();
+
+		foreach ( array( 'category', 'tag', 'taxonomy' ) as $type ) {
+			$hierarchy_filter = static function ( array $templates ) use ( &$observed, $type ): array {
+				$observed[ $type ]['hierarchy'][] = $templates;
+				return $templates;
+			};
+			$template_filter  = static function ( string $template, string $seen_type, array $templates ) use ( &$observed, $type ): string {
+				$observed[ $type ]['template'][] = array(
+					'template'  => $template,
+					'type'      => $seen_type,
+					'templates' => $templates,
+				);
+				return $template;
+			};
+
+			\add_filter( "{$type}_template_hierarchy", $hierarchy_filter );
+			\add_filter( "{$type}_template", $template_filter, 10, 3 );
+			$filters[] = array( "{$type}_template_hierarchy", $hierarchy_filter );
+			$filters[] = array( "{$type}_template", $template_filter );
+		}
+
+		try {
+			$category_id      = $ctx->fork( 'category-id' )->int( 100, 999 );
+			$category_raw     = 'cat-' . self::safe_fragment( $ctx->fork( 'category-a' ), 5 ) . '%c3%a9-' . self::safe_fragment( $ctx->fork( 'category-b' ), 5 );
+			$category_decoded = urldecode( $category_raw );
+			self::write_template_file( $case['paths']['child'] . "/category-{$category_decoded}.php", 'category-decoded' );
+			self::write_template_file( $case['paths']['parent'] . "/category-{$category_raw}.php", 'category-raw' );
+			self::write_template_file( $case['paths']['parent'] . "/category-{$category_id}.php", 'category-id' );
+			self::write_template_file( $case['paths']['parent'] . '/category.php', 'category-fallback' );
+			self::set_queried_object(
+				(object) array(
+					'term_id'  => $category_id,
+					'slug'     => $category_raw,
+					'taxonomy' => 'category',
+				),
+				array( 'is_category' => true, 'is_archive' => true )
+			);
+			$category = \get_category_template();
+
+			$tag_id      = $ctx->fork( 'tag-id' )->int( 1000, 1999 );
+			$tag_raw     = 'tag-' . self::safe_fragment( $ctx->fork( 'tag-a' ), 5 ) . '%c3%a9-' . self::safe_fragment( $ctx->fork( 'tag-b' ), 5 );
+			$tag_decoded = urldecode( $tag_raw );
+			self::write_template_file( $case['paths']['child'] . "/tag-{$tag_raw}.php", 'tag-raw' );
+			self::write_template_file( $case['paths']['parent'] . "/tag-{$tag_id}.php", 'tag-id' );
+			self::write_template_file( $case['paths']['parent'] . '/tag.php', 'tag-fallback' );
+			self::set_queried_object(
+				(object) array(
+					'term_id'  => $tag_id,
+					'slug'     => $tag_raw,
+					'taxonomy' => 'post_tag',
+				),
+				array( 'is_tag' => true, 'is_archive' => true )
+			);
+			$tag = \get_tag_template();
+
+			$taxonomy      = 'genre-' . self::safe_fragment( $ctx->fork( 'taxonomy' ), 6 );
+			$taxonomy_id   = $ctx->fork( 'taxonomy-id' )->int( 2000, 2999 );
+			$taxonomy_raw  = 'topic-' . self::safe_fragment( $ctx->fork( 'tax-a' ), 5 ) . '%c3%a9-' . self::safe_fragment( $ctx->fork( 'tax-b' ), 5 );
+			$taxonomy_decoded = urldecode( $taxonomy_raw );
+			self::write_template_file( $case['paths']['child'] . "/taxonomy-{$taxonomy}-{$taxonomy_id}.php", 'taxonomy-id' );
+			self::write_template_file( $case['paths']['parent'] . "/taxonomy-{$taxonomy}.php", 'taxonomy-type' );
+			self::write_template_file( $case['paths']['parent'] . '/taxonomy.php', 'taxonomy-fallback' );
+			self::set_queried_object(
+				(object) array(
+					'term_id'  => $taxonomy_id,
+					'slug'     => $taxonomy_raw,
+					'taxonomy' => $taxonomy,
+				),
+				array( 'is_tax' => true, 'is_archive' => true )
+			);
+			$taxonomy_template = \get_taxonomy_template();
+		} finally {
+			foreach ( $filters as $filter ) {
+				\remove_filter( $filter[0], $filter[1], 10 );
+			}
+		}
+
+		$selected = array(
+			'category' => $category,
+			'tag'      => $tag,
+			'taxonomy' => $taxonomy_template,
+		);
+		$expected_basenames = array(
+			'category' => "category-{$category_decoded}.php",
+			'tag'      => "tag-{$tag_raw}.php",
+			'taxonomy' => "taxonomy-{$taxonomy}-{$taxonomy_id}.php",
+		);
+		self::collect_failure(
+			$failures,
+			$expected_basenames === self::path_basenames( $selected )
+				&& self::all_paths_in_theme_roots( $selected, $case ),
+			'term template helpers select decoded, raw, and term-ID templates in priority order',
+			array(
+				'selected' => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+				'expected' => $expected_basenames,
+			)
+		);
+
+		$expected_hierarchies = array(
+			'category' => array( "category-{$category_decoded}.php", "category-{$category_raw}.php", "category-{$category_id}.php", 'category.php' ),
+			'tag'      => array( "tag-{$tag_decoded}.php", "tag-{$tag_raw}.php", "tag-{$tag_id}.php", 'tag.php' ),
+			'taxonomy' => array( "taxonomy-{$taxonomy}-{$taxonomy_decoded}.php", "taxonomy-{$taxonomy}-{$taxonomy_raw}.php", "taxonomy-{$taxonomy}-{$taxonomy_id}.php", "taxonomy-{$taxonomy}.php", 'taxonomy.php' ),
+		);
+
+		foreach ( $expected_hierarchies as $type => $templates ) {
+			$hierarchy_seen = $observed[ $type ]['hierarchy'][0] ?? null;
+			$template_seen  = $observed[ $type ]['template'][0] ?? null;
+			self::collect_failure(
+				$failures,
+				$templates === $hierarchy_seen
+					&& is_array( $template_seen )
+					&& $type === $template_seen['type']
+					&& $templates === $template_seen['templates']
+					&& ( $selected[ $type ] ?? null ) === $template_seen['template'],
+				"{$type} term template filters receive decoded/raw/id hierarchy and selected path",
+				array(
+					'expected' => $templates,
+					'seen'     => array(
+						'hierarchy' => $hierarchy_seen,
+						'template'  => $template_seen,
+					),
+				)
+			);
+		}
+
+		return self::result(
+			'template-hierarchy.term-template-decoding-and-id-order',
+			$failures,
+			array(
+				'selected' => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+			)
+		);
+	}
+
 	private static function check_load_template_include_semantics( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		$file     = $case['paths']['child'] . '/load-probe-' . self::safe_fragment( $ctx->fork( 'file' ), 8 ) . '.php';
@@ -978,6 +1123,23 @@ PHP
 			unset( $GLOBALS['post'] );
 		}
 
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+	}
+
+	private static function set_queried_object( object $object, array $flags = array() ): void {
+		$query                 = new \WP_Query();
+		$query->query_vars     = array();
+		$query->queried_object = $object;
+		if ( isset( $object->term_id ) ) {
+			$query->queried_object_id = (int) $object->term_id;
+		}
+
+		foreach ( $flags as $flag => $value ) {
+			$query->{$flag} = $value;
+		}
+
+		unset( $GLOBALS['post'] );
 		$GLOBALS['wp_query']     = $query;
 		$GLOBALS['wp_the_query'] = $query;
 	}
