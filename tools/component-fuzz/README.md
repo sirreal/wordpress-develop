@@ -245,9 +245,10 @@ database, network requests, or a configured site.
   fail-closed behavior.
 - `interactivity`: server-side directive processing for context, bind, class,
   style, text, and each directives, explicit namespace/negation/length
-  evaluation, script-module router metadata, unsupported/unbalanced HTML
-  fallbacks, derived context/element helpers, and state/config merge
-  serialization.
+  evaluation, context namespace stack merge/sort/restoration, derived
+  state closure tracking and fail-closed errors, script-module router metadata,
+  unsupported/unbalanced HTML fallbacks, derived context/element helpers, and
+  state/config merge serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
   nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, wrapper agreement, protocol filtering, safe CSS,

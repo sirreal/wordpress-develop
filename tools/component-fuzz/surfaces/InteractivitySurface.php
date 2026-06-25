@@ -32,6 +32,8 @@ final class InteractivitySurface {
 			$rows[] = self::check_directive_processing( $ctx, $case );
 			$rows[] = self::check_namespaced_directive_evaluation( $ctx->fork( 'namespaced-directives' ), $case );
 			$rows[] = self::check_context_and_element_helpers( $ctx, $case );
+			$rows[] = self::check_context_namespace_stack_merge_sort_and_restore( $ctx->fork( 'context-stack' ), $case );
+			$rows[] = self::check_derived_state_stack_recovery( $ctx->fork( 'derived-stack' ), $case );
 			$rows[] = self::check_script_module_hooks( $ctx->fork( 'script-module-hooks' ), $case );
 			$rows[] = self::check_each_edge_cases( $ctx->fork( 'each-edge-cases' ), $case );
 			$rows[] = self::check_router_region( $ctx, $case );
@@ -78,6 +80,8 @@ final class InteractivitySurface {
 				'wp_interactivity_get_context',
 				'wp_interactivity_get_element',
 				'wp_json_encode',
+				'add_action',
+				'add_filter',
 				'get_self_link',
 				'esc_attr',
 				'esc_html',
@@ -333,6 +337,237 @@ final class InteractivitySurface {
 				'otherBody'      => $other_body,
 				'localBody'      => $local_body,
 				'lengthBody'     => $length_body,
+			)
+		);
+	}
+
+	private static function check_context_namespace_stack_merge_sort_and_restore(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		self::install_fresh_api();
+
+		$parent_context = array(
+			'outer'  => 'outer-' . self::safe_token( $ctx, 'outer' ),
+			'order'  => 'parent-' . self::safe_token( $ctx, 'order' ),
+			'nested' => array(
+				'keep'    => 'keep-' . self::safe_token( $ctx, 'keep' ),
+				'replace' => 'parent-replace-' . self::safe_token( $ctx, 'parent-replace' ),
+			),
+		);
+		$alpha_context  = array(
+			'order'  => 'alpha-' . self::safe_token( $ctx, 'alpha-order' ),
+			'nested' => array(
+				'replace' => 'alpha-replace-' . self::safe_token( $ctx, 'alpha-replace' ),
+				'added'   => 'alpha-added-' . self::safe_token( $ctx, 'alpha-added' ),
+			),
+		);
+		$omega_context  = array(
+			'order'  => 'omega-' . self::safe_token( $ctx, 'omega-order' ),
+			'nested' => array(
+				'replace' => 'omega-replace-' . self::safe_token( $ctx, 'omega-replace' ),
+			),
+		);
+		$other_context  = array(
+			'marker' => 'other-marker-' . self::safe_token( $ctx, 'other-marker' ),
+		);
+		$other_default  = array(
+			'local' => 'other-default-' . self::safe_token( $ctx, 'other-default' ),
+		);
+
+		$html = '<section data-wp-interactive="' . \esc_attr( \wp_json_encode( array( 'namespace' => $case['namespace'] ) ) ) . '" '
+			. \wp_interactivity_data_wp_context( $parent_context, $case['namespace'] )
+			. '>'
+			. '<span data-case="parent"'
+			. ' data-wp-bind--data-order="context.order"'
+			. ' data-wp-bind--data-keep="context.nested.keep"'
+			. ' data-wp-bind--data-added="context.nested.added"'
+			. '></span>'
+			. '<div data-case="merged"'
+			. ' ' . self::context_attribute( 'data-wp-context---omega', $omega_context )
+			. ' ' . self::context_attribute( 'data-wp-context---alpha', $alpha_context )
+			. ' ' . self::context_attribute( 'data-wp-context---other', $other_context, $case['otherNamespace'] )
+			. ' data-wp-bind--data-order="context.order"'
+			. ' data-wp-bind--data-keep="context.nested.keep"'
+			. ' data-wp-bind--data-replace="context.nested.replace"'
+			. ' data-wp-bind--data-added="context.nested.added"'
+			. ' data-wp-bind--data-other="' . \esc_attr( $case['otherNamespace'] . '::context.marker' ) . '"'
+			. '></div>'
+			. '<div data-wp-interactive="' . \esc_attr( $case['otherNamespace'] ) . '" '
+			. \wp_interactivity_data_wp_context( $other_default )
+			. '><span data-case="other-default"'
+			. ' data-wp-bind--data-local="context.local"'
+			. ' data-wp-bind--data-primary="' . \esc_attr( $case['namespace'] . '::context.order' ) . '"'
+			. '></span></div>'
+			. '<span data-case="after"'
+			. ' data-wp-bind--data-order="context.order"'
+			. ' data-wp-bind--data-replace="context.nested.replace"'
+			. ' data-wp-bind--data-added="context.nested.added"'
+			. ' data-wp-bind--data-other="' . \esc_attr( $case['otherNamespace'] . '::context.marker' ) . '"'
+			. '></span>'
+			. '</section>';
+
+		$processed     = \wp_interactivity_process_directives( $html );
+		$parent        = self::find_first_tag_by_attribute( $processed, 'data-case', 'parent' );
+		$merged        = self::find_first_tag_by_attribute( $processed, 'data-case', 'merged' );
+		$other_default_tag = self::find_first_tag_by_attribute( $processed, 'data-case', 'other-default' );
+		$after         = self::find_first_tag_by_attribute( $processed, 'data-case', 'after' );
+		$parent_attrs  = is_array( $parent ) ? $parent['attributes'] : array();
+		$merged_attrs  = is_array( $merged ) ? $merged['attributes'] : array();
+		$other_attrs   = is_array( $other_default_tag ) ? $other_default_tag['attributes'] : array();
+		$after_attrs   = is_array( $after ) ? $after['attributes'] : array();
+
+		$ok = $parent_context['order'] === ( $parent_attrs['data-order'] ?? null )
+			&& $parent_context['nested']['keep'] === ( $parent_attrs['data-keep'] ?? null )
+			&& ! array_key_exists( 'data-added', $parent_attrs )
+			&& $omega_context['order'] === ( $merged_attrs['data-order'] ?? null )
+			&& $parent_context['nested']['keep'] === ( $merged_attrs['data-keep'] ?? null )
+			&& $omega_context['nested']['replace'] === ( $merged_attrs['data-replace'] ?? null )
+			&& $alpha_context['nested']['added'] === ( $merged_attrs['data-added'] ?? null )
+			&& $other_context['marker'] === ( $merged_attrs['data-other'] ?? null )
+			&& $other_default['local'] === ( $other_attrs['data-local'] ?? null )
+			&& $parent_context['order'] === ( $other_attrs['data-primary'] ?? null )
+			&& $parent_context['order'] === ( $after_attrs['data-order'] ?? null )
+			&& $parent_context['nested']['replace'] === ( $after_attrs['data-replace'] ?? null )
+			&& ! array_key_exists( 'data-added', $after_attrs )
+			&& ! array_key_exists( 'data-other', $after_attrs );
+
+		return self::result(
+			$ctx,
+			'interactivity.context.namespace-stack-merge-sort-and-restore',
+			$ok,
+			array(
+				'namespace'      => $case['namespace'],
+				'otherNamespace' => $case['otherNamespace'],
+				'processed'      => self::preview( $processed ),
+				'parentAttrs'    => $parent_attrs,
+				'mergedAttrs'    => $merged_attrs,
+				'otherAttrs'     => $other_attrs,
+				'afterAttrs'     => $after_attrs,
+				'expected'       => array(
+					'parent'       => $parent_context,
+					'alpha'        => $alpha_context,
+					'omega'        => $omega_context,
+					'other'        => $other_context,
+					'otherDefault' => $other_default,
+				),
+			)
+		);
+	}
+
+	private static function check_derived_state_stack_recovery( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$api             = self::install_fresh_api();
+		$primary_context = array(
+			'local' => 'Primary context <' . self::safe_token( $ctx, 'primary-context' ) . '> & value',
+		);
+		$nested_context  = array(
+			'local' => 'Nested context <' . self::safe_token( $ctx, 'nested-context' ) . '> & value',
+		);
+		$primary_state   = 'primary-state-' . self::safe_token( $ctx, 'primary-state' );
+		$nested_state    = 'nested-state-' . self::safe_token( $ctx, 'nested-state' );
+
+		\wp_interactivity_state(
+			$case['namespace'],
+			array(
+				'label'       => $primary_state,
+				'description' => static function () {
+					$state   = \wp_interactivity_state();
+					$context = \wp_interactivity_get_context();
+					$element = \wp_interactivity_get_element();
+
+					return ( $state['label'] ?? '' )
+						. '|'
+						. ( $context['local'] ?? '' )
+						. '|'
+						. ( $element['attributes']['data-case'] ?? '' );
+				},
+				'broken'      => static function (): string {
+					throw new \Error( 'Component fuzz derived state failure.' );
+				},
+			)
+		);
+		\wp_interactivity_state(
+			$case['otherNamespace'],
+			array(
+				'label'       => $nested_state,
+				'description' => static function () {
+					$state   = \wp_interactivity_state();
+					$context = \wp_interactivity_get_context();
+					$element = \wp_interactivity_get_element();
+
+					return ( $state['label'] ?? '' )
+						. '|'
+						. ( $context['local'] ?? '' )
+						. '|'
+						. ( $element['attributes']['data-case'] ?? '' );
+				},
+			)
+		);
+
+		$interactive = \esc_attr( \wp_json_encode( array( 'namespace' => $case['namespace'] ) ) );
+		$html        = '<section data-wp-interactive="' . $interactive . '" '
+			. \wp_interactivity_data_wp_context( $primary_context, $case['namespace'] )
+			. '>'
+			. '<span data-case="outer-before" data-wp-text="state.description">outer before</span>'
+			. '<div data-wp-interactive="' . \esc_attr( $case['otherNamespace'] ) . '" '
+			. \wp_interactivity_data_wp_context( $nested_context, $case['otherNamespace'] )
+			. '><span data-case="nested" data-wp-text="state.description">nested old</span></div>'
+			. '<span data-case="outer-after" data-wp-text="state.description">outer after</span>'
+			. '<span data-case="broken" data-wp-text="state.broken">broken old</span>'
+			. '<span data-case="post-broken" data-wp-text="state.description">post broken old</span>'
+			. '</section>';
+
+		$capture     = self::capture_doing_it_wrong(
+			static function () use ( $html ): string {
+				return \wp_interactivity_process_directives( $html );
+			}
+		);
+		$processed   = is_string( $capture['value'] ?? null ) ? $capture['value'] : '';
+		$client_data = $api->filter_script_module_interactivity_data( array() );
+
+		$expected = array(
+			'outer-before' => $primary_state . '|' . $primary_context['local'] . '|outer-before',
+			'nested'       => $nested_state . '|' . $nested_context['local'] . '|nested',
+			'outer-after'  => $primary_state . '|' . $primary_context['local'] . '|outer-after',
+			'post-broken'  => $primary_state . '|' . $primary_context['local'] . '|post-broken',
+		);
+		$bodies   = array(
+			'outer-before' => self::find_element_body( $processed, 'span', 'data-case', 'outer-before' ),
+			'nested'       => self::find_element_body( $processed, 'span', 'data-case', 'nested' ),
+			'outer-after'  => self::find_element_body( $processed, 'span', 'data-case', 'outer-after' ),
+			'broken'       => self::find_element_body( $processed, 'span', 'data-case', 'broken' ),
+			'post-broken'  => self::find_element_body( $processed, 'span', 'data-case', 'post-broken' ),
+		);
+		$derived = $client_data['derivedStateClosures'] ?? array();
+
+		$warning_functions = array_column( $capture['warnings'], 'function' );
+		$ok                = false === ( $capture['threw'] ?? true )
+			&& \esc_html( $expected['outer-before'] ) === $bodies['outer-before']
+			&& \esc_html( $expected['nested'] ) === $bodies['nested']
+			&& \esc_html( $expected['outer-after'] ) === $bodies['outer-after']
+			&& '' === $bodies['broken']
+			&& \esc_html( $expected['post-broken'] ) === $bodies['post-broken']
+			&& array( 'state.description' ) === ( $derived[ $case['namespace'] ] ?? null )
+			&& array( 'state.description' ) === ( $derived[ $case['otherNamespace'] ] ?? null )
+			&& ! in_array( 'state.broken', $derived[ $case['namespace'] ] ?? array(), true )
+			&& in_array( 'WP_Interactivity_API::evaluate', $warning_functions, true )
+			&& false === \has_action( 'doing_it_wrong_run', $capture['listener'] ?? null )
+			&& false === \has_filter( 'doing_it_wrong_trigger_error', $capture['suppressor'] ?? null );
+
+		return self::result(
+			$ctx,
+			'interactivity.derived-state.stack-recovery-and-fail-closed',
+			$ok,
+			array(
+				'namespace'        => $case['namespace'],
+				'otherNamespace'   => $case['otherNamespace'],
+				'processed'        => self::preview( $processed ),
+				'bodies'           => $bodies,
+				'expected'         => $expected,
+				'derivedClosures'  => $derived,
+				'warningFunctions' => $warning_functions,
+				'warningCount'     => count( $capture['warnings'] ),
+				'captureThrew'     => $capture['threw'] ?? null,
 			)
 		);
 	}
@@ -777,6 +1012,13 @@ final class InteractivitySurface {
 		return in_array( $needle, preg_split( '/\s+/', trim( $class ), -1, PREG_SPLIT_NO_EMPTY ), true );
 	}
 
+	private static function context_attribute( string $attribute_name, array $context, string $namespace = '' ): string {
+		return $attribute_name . "='"
+			. ( '' === $namespace ? '' : $namespace . '::' )
+			. \wp_json_encode( $context, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP )
+			. "'";
+	}
+
 	private static function css_color( \ComponentFuzz\FuzzContext $ctx ): string {
 		return sprintf( '#%02x%02x%02x', $ctx->int( 0, 255 ), $ctx->int( 0, 255 ), $ctx->int( 0, 255 ) );
 	}
@@ -840,6 +1082,43 @@ final class InteractivitySurface {
 			'label'   => $label,
 			'details' => $details,
 		);
+	}
+
+	private static function capture_doing_it_wrong( callable $callback ): array {
+		$warnings  = array();
+		$listener  = static function ( $function_name, $message, $version ) use ( &$warnings ): void {
+			$warnings[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+		$suppressor = static function (): bool {
+			return false;
+		};
+
+		\add_action( 'doing_it_wrong_run', $listener, 10, 3 );
+		\add_filter( 'doing_it_wrong_trigger_error', $suppressor );
+		try {
+			return array(
+				'threw'      => false,
+				'value'      => $callback(),
+				'warnings'   => $warnings,
+				'listener'   => $listener,
+				'suppressor' => $suppressor,
+			);
+		} catch ( \Throwable $e ) {
+			return array(
+				'threw'      => true,
+				'throwable'  => self::describe_throwable( $e ),
+				'warnings'   => $warnings,
+				'listener'   => $listener,
+				'suppressor' => $suppressor,
+			);
+		} finally {
+			\remove_filter( 'doing_it_wrong_trigger_error', $suppressor );
+			\remove_action( 'doing_it_wrong_run', $listener, 10 );
+		}
 	}
 
 	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array() ): array {
