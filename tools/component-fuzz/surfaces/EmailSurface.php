@@ -6,6 +6,7 @@ final class EmailSurface {
 
 	private const GENERATED_CASES = 32;
 	private const GENERATED_VIEW_CASES = 10;
+	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -50,6 +51,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_rest_email_schema_filter_modes( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_indexes_canonical_domain_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
@@ -1843,6 +1845,308 @@ final class EmailSurface {
 					'inserted' => self::describe_value( $inserted ),
 					'lookups'  => self::describe_value( $lookups ),
 					'failures' => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function check_user_email_indexes_canonical_domain_aliases( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.canonical-domain-aliases',
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		if ( ! self::has_idn() ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.canonical-domain-aliases',
+					'idn_to_ascii() or idn_to_utf8() is unavailable.'
+				),
+			);
+		}
+
+		if ( ! function_exists( 'wp_update_user' ) ) {
+			return array(
+				$ctx->skip(
+					'email.user-email-indexes.canonical-domain-aliases',
+					'wp_update_user() is unavailable.'
+				),
+			);
+		}
+
+		$domain_aliases = array(
+			"gr\u{00E5}.org",
+			"b\u{00FC}cher.de",
+			"fa\u{00DF}.de",
+			"\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}",
+			"\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}",
+			"\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}",
+			"\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}",
+		);
+		$localparts     = array(
+			'mail',
+			'USER+tag',
+			"gr\u{00E5}",
+			"jose\u{0301}",
+			"\u{7528}\u{6237}",
+			"\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}",
+			"\u{3086}\u{3046}\u{3056}\u{3042}",
+		);
+		$alias_ctx      = $ctx->fork( 'user-email-canonical-domain-aliases' );
+		$cases          = array();
+		$failures       = array();
+		$observed       = array();
+		$mail_calls     = array();
+		$not_called     = static function (): array {
+			return array(
+				'threw'    => false,
+				'value'    => null,
+				'warnings' => array(),
+			);
+		};
+		$mail_filter    = static function ( $return, $atts ) use ( &$mail_calls ) {
+			$mail_calls[] = $atts;
+			return true;
+		};
+
+		for ( $i = 0; $i < self::GENERATED_DOMAIN_ALIAS_CASES; $i++ ) {
+			$unicode_domain = $alias_ctx->choice( $domain_aliases );
+			$ascii_domain   = idn_to_ascii( $unicode_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+			$decoded_domain = false === $ascii_domain
+				? false
+				: idn_to_utf8( $ascii_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+			$localpart      = $alias_ctx->choice( $localparts ) . $alias_ctx->int( 10, 99 );
+
+			if ( false === $ascii_domain || false === $decoded_domain ) {
+				$failures[] = array(
+					'label'  => 'idn-conversion-failed',
+					'domain' => self::describe_string( $unicode_domain ),
+				);
+				continue;
+			}
+
+			$unicode_input = $localpart . '@' . $decoded_domain;
+			$machine_input = $localpart . '@' . $ascii_domain;
+			$unicode_parse = self::call( static fn() => \WP_Email_Address::from_string( $unicode_input, 'unicode' ) );
+			$machine_parse = self::call( static fn() => \WP_Email_Address::from_string( $machine_input, 'unicode' ) );
+			$unicode_email = $unicode_parse['value'] ?? null;
+			$machine_email = $machine_parse['value'] ?? null;
+
+			if (
+				$unicode_parse['threw'] ||
+				$machine_parse['threw'] ||
+				! ( $unicode_email instanceof \WP_Email_Address ) ||
+				! ( $machine_email instanceof \WP_Email_Address ) ||
+				$unicode_email->get_ascii_address() !== $machine_email->get_ascii_address() ||
+				$unicode_email->get_unicode_address() !== $machine_email->get_unicode_address()
+			) {
+				$failures[] = array(
+					'label'        => 'alias-parse-mismatch',
+					'unicodeInput' => self::describe_string( $unicode_input ),
+					'machineInput' => self::describe_string( $machine_input ),
+					'unicodeParse' => self::describe_call( $unicode_parse ),
+					'machineParse' => self::describe_call( $machine_parse ),
+				);
+				continue;
+			}
+
+			$cases[] = array(
+				'label'     => 'generated-domain-alias-' . $i,
+				'canonical' => $unicode_email->get_unicode_address(),
+				'machine'   => $unicode_email->get_ascii_address(),
+				'domain'    => $unicode_email->get_unicode_domain(),
+				'ascii'     => $unicode_email->get_ascii_domain(),
+			);
+		}
+
+		$hook_snapshot = self::snapshot_hook_globals();
+
+		self::reset_stub_content();
+		try {
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+			\add_filter( 'pre_wp_mail', $mail_filter, 10, 2 );
+
+			foreach ( $cases as $index => $case ) {
+				self::reset_stub_content();
+
+				$canonical = $case['canonical'];
+				$machine   = $case['machine'];
+				$login     = 'cfz_alias_' . $ctx->iteration() . '_' . $index . '_' . substr( sha1( $canonical ), 0, 10 );
+				$other     = 'cfz_alias_other_' . $ctx->iteration() . '_' . $index . '_' . substr( sha1( $machine ), 0, 10 );
+				$other_email = 'other-' . substr( sha1( $canonical ), 0, 12 ) . '@example.org';
+				$mail_count_before = count( $mail_calls );
+
+				$canonical_sanitized = self::capture_warnings( static fn() => \sanitize_email( $canonical ) );
+				$machine_sanitized   = self::capture_warnings( static fn() => \sanitize_email( $machine ) );
+				$canonical_valid     = self::capture_warnings( static fn() => \is_email( $canonical ) );
+				$machine_valid       = self::capture_warnings( static fn() => \is_email( $machine ) );
+				$insert              = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $login,
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $machine,
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$user_id             = $insert['value'] ?? null;
+				$stored              = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
+				$exists              = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $canonical ) ) : $not_called();
+				$by_email            = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : $not_called();
+				$duplicate           = is_int( $user_id )
+					? self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => $login . '_duplicate',
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $canonical,
+								'role'       => 'subscriber',
+							)
+						)
+					)
+					: $not_called();
+				$self_update         = is_int( $user_id )
+					? self::capture_warnings(
+						static fn() => \wp_update_user(
+							array(
+								'ID'         => $user_id,
+								'user_email' => $canonical,
+							)
+						)
+					)
+					: $not_called();
+				$stored_after_update = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
+				$other_insert        = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $other,
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $other_email,
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$other_id            = $other_insert['value'] ?? null;
+				$collision_update    = is_int( $other_id )
+					? self::capture_warnings(
+						static fn() => \wp_update_user(
+							array(
+								'ID'         => $other_id,
+								'user_email' => $machine,
+							)
+						)
+					)
+					: $not_called();
+				$stored_user         = $stored['value'] ?? null;
+				$by_email_user       = $by_email['value'] ?? null;
+				$updated_user        = $stored_after_update['value'] ?? null;
+
+				$ok = ! $canonical_sanitized['threw']
+					&& ! $machine_sanitized['threw']
+					&& ! $canonical_valid['threw']
+					&& ! $machine_valid['threw']
+					&& ! $insert['threw']
+					&& ! $stored['threw']
+					&& ! $exists['threw']
+					&& ! $by_email['threw']
+					&& ! $duplicate['threw']
+					&& ! $self_update['threw']
+					&& ! $stored_after_update['threw']
+					&& ! $other_insert['threw']
+					&& ! $collision_update['threw']
+					&& array() === $canonical_sanitized['warnings']
+					&& array() === $machine_sanitized['warnings']
+					&& array() === $canonical_valid['warnings']
+					&& array() === $machine_valid['warnings']
+					&& array() === $insert['warnings']
+					&& array() === $stored['warnings']
+					&& array() === $exists['warnings']
+					&& array() === $by_email['warnings']
+					&& array() === $duplicate['warnings']
+					&& array() === $self_update['warnings']
+					&& array() === $stored_after_update['warnings']
+					&& array() === $other_insert['warnings']
+					&& array() === $collision_update['warnings']
+					&& $canonical === $canonical_sanitized['value']
+					&& $canonical === $machine_sanitized['value']
+					&& $canonical === $canonical_valid['value']
+					&& $canonical === $machine_valid['value']
+					&& is_int( $user_id )
+					&& $stored_user instanceof \WP_User
+					&& $canonical === $stored_user->user_email
+					&& $exists['value'] === $user_id
+					&& $by_email_user instanceof \WP_User
+					&& $by_email_user->ID === $user_id
+					&& $canonical === $by_email_user->user_email
+					&& \is_wp_error( $duplicate['value'] ?? null )
+					&& 'existing_user_email' === $duplicate['value']->get_error_code()
+					&& $self_update['value'] === $user_id
+					&& $updated_user instanceof \WP_User
+					&& $canonical === $updated_user->user_email
+					&& is_int( $other_id )
+					&& \is_wp_error( $collision_update['value'] ?? null )
+					&& 'existing_user_email' === $collision_update['value']->get_error_code()
+					&& count( $mail_calls ) === $mail_count_before;
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'              => $case['label'],
+						'canonical'          => self::describe_string( $canonical ),
+						'machine'            => self::describe_string( $machine ),
+						'canonicalSanitized' => self::describe_captured_call( $canonical_sanitized ),
+						'machineSanitized'   => self::describe_captured_call( $machine_sanitized ),
+						'canonicalValid'     => self::describe_captured_call( $canonical_valid ),
+						'machineValid'       => self::describe_captured_call( $machine_valid ),
+						'insert'             => self::describe_captured_call( $insert ),
+						'stored'             => self::describe_captured_call( $stored ),
+						'exists'             => self::describe_captured_call( $exists ),
+						'byEmail'            => self::describe_captured_call( $by_email ),
+						'duplicate'          => self::describe_captured_call( $duplicate ),
+						'selfUpdate'         => self::describe_captured_call( $self_update ),
+						'storedAfterUpdate'  => self::describe_captured_call( $stored_after_update ),
+						'otherInsert'        => self::describe_captured_call( $other_insert ),
+						'collisionUpdate'    => self::describe_captured_call( $collision_update ),
+						'mailCalls'          => self::describe_value( array_slice( $mail_calls, $mail_count_before ) ),
+					);
+				}
+
+				$observed[] = array(
+					'label'             => $case['label'],
+					'canonical'         => self::describe_string( $canonical ),
+					'machine'           => self::describe_string( $machine ),
+					'domain'            => self::describe_string( $case['domain'] ),
+					'asciiDomain'       => self::describe_string( $case['ascii'] ),
+					'userId'            => $user_id,
+					'otherId'           => $other_id,
+					'storedCanonical'   => $stored_user instanceof \WP_User && $canonical === $stored_user->user_email,
+					'duplicateRejected' => \is_wp_error( $duplicate['value'] ?? null ),
+					'collisionRejected' => \is_wp_error( $collision_update['value'] ?? null ),
+					'mailCalls'         => count( $mail_calls ) - $mail_count_before,
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				'email.user-email-indexes.canonical-domain-aliases',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
 				)
 			),
 		);
