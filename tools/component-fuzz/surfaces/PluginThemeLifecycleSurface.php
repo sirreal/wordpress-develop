@@ -34,6 +34,7 @@ final class PluginThemeLifecycleSurface {
 			$rows[] = self::check_plugin_header_path_hook_invariants( $ctx, $case );
 			$rows[] = self::check_plugin_validation_requirements( $ctx, $case );
 			$rows[] = self::check_plugin_activation_deactivation( $ctx, $case );
+			$rows[] = self::check_plugin_deactivation_scope_matrix( $ctx, $case );
 			$rows[] = self::check_plugin_network_delete_paths( $ctx, $case );
 			$rows[] = self::check_theme_root_stylesheet_template_normalization( $ctx, $case );
 			$rows[] = self::check_theme_enumeration_requirements( $ctx, $case );
@@ -509,6 +510,153 @@ final class PluginThemeLifecycleSurface {
 				'plugin'       => $plugin,
 				'outputPlugin' => $output_plugin,
 				'activeAfter'  => \get_option( 'active_plugins', array() ),
+			)
+		);
+	}
+
+	private static function check_plugin_deactivation_scope_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures        = array();
+		$site_plugins    = array(
+			$case['plugins']['good']['file'],
+			$case['plugins']['dependency']['file'],
+		);
+		$network_plugin  = $case['plugins']['network']['file'];
+		$tracked_plugins = array_merge( $site_plugins, array( $network_plugin ) );
+		$events          = array();
+
+		$before_callback = static function ( string $plugin, bool $network_deactivating ) use ( &$events ): void {
+			$events[] = array(
+				'hook'    => 'deactivate_plugin',
+				'plugin'  => $plugin,
+				'network' => $network_deactivating,
+			);
+		};
+		$after_callback  = static function ( string $plugin, bool $network_deactivating ) use ( &$events ): void {
+			$events[] = array(
+				'hook'    => 'deactivated_plugin',
+				'plugin'  => $plugin,
+				'network' => $network_deactivating,
+			);
+		};
+
+		$dynamic_callbacks = array();
+		foreach ( $tracked_plugins as $plugin ) {
+			$dynamic_callbacks[ $plugin ] = static function ( bool $network_deactivating ) use ( &$events, $plugin ): void {
+				$events[] = array(
+					'hook'    => 'deactivate_' . $plugin,
+					'plugin'  => $plugin,
+					'network' => $network_deactivating,
+				);
+			};
+		}
+
+		\add_action( 'deactivate_plugin', $before_callback, 10, 2 );
+		\add_action( 'deactivated_plugin', $after_callback, 10, 2 );
+		foreach ( $dynamic_callbacks as $plugin => $callback ) {
+			\add_action( 'deactivate_' . $plugin, $callback, 10, 1 );
+		}
+
+		try {
+			$unrelated_sitewide = array( $network_plugin => time() );
+			\update_option( 'active_plugins', $site_plugins );
+			\update_site_option( 'active_sitewide_plugins', $unrelated_sitewide );
+
+			\deactivate_plugins( $site_plugins, false, false );
+			$active_after_blog    = \get_option( 'active_plugins', array() );
+			$sitewide_after_blog  = \get_site_option( 'active_sitewide_plugins', array() );
+			$expected_blog_events = self::expected_deactivation_events( $site_plugins, false );
+
+			if (
+				in_array( $site_plugins[0], $active_after_blog, true )
+				|| in_array( $site_plugins[1], $active_after_blog, true )
+				|| $unrelated_sitewide !== $sitewide_after_blog
+				|| $expected_blog_events !== $events
+			) {
+				self::record_failure(
+					$failures,
+					'deactivate_plugins.blog-scope-array-removes-only-local-plugins-and-orders-hooks',
+					array(
+						'plugins'          => $site_plugins,
+						'activeAfter'      => $active_after_blog,
+						'sitewideExpected' => $unrelated_sitewide,
+						'sitewideAfter'    => $sitewide_after_blog,
+						'expectedEvents'   => $expected_blog_events,
+						'events'           => $events,
+					)
+				);
+			}
+
+			$events = array();
+			\update_option( 'active_plugins', $site_plugins );
+			\deactivate_plugins( $site_plugins, true, false );
+			$active_after_silent = \get_option( 'active_plugins', array() );
+			if (
+				array() !== $events
+				|| in_array( $site_plugins[0], $active_after_silent, true )
+				|| in_array( $site_plugins[1], $active_after_silent, true )
+			) {
+				self::record_failure(
+					$failures,
+					'deactivate_plugins.silent-blog-scope-mutates-state-without-hooks',
+					array(
+						'plugins'     => $site_plugins,
+						'activeAfter' => $active_after_silent,
+						'events'      => $events,
+					)
+				);
+			}
+
+			$network_case = 'single-site-skipped';
+			if ( \is_multisite() ) {
+				$events         = array();
+				$sitewide_shape = array( $network_plugin => time() - 1 );
+				\update_option( 'active_plugins', $site_plugins );
+				\update_site_option( 'active_sitewide_plugins', $sitewide_shape );
+
+				\deactivate_plugins( $network_plugin, false, true );
+				$active_after_network    = \get_option( 'active_plugins', array() );
+				$sitewide_after_network  = \get_site_option( 'active_sitewide_plugins', array() );
+				$expected_network_events = self::expected_deactivation_events( array( $network_plugin ), true );
+				$network_case            = 'multisite-exercised';
+
+				if (
+					isset( $sitewide_after_network[ $network_plugin ] )
+					|| $site_plugins !== array_values( $active_after_network )
+					|| $expected_network_events !== $events
+				) {
+					self::record_failure(
+						$failures,
+						'deactivate_plugins.network-scope-removes-only-sitewide-plugin-and-flags-hooks',
+						array(
+							'plugin'         => $network_plugin,
+							'activeExpected' => $site_plugins,
+							'activeAfter'    => $active_after_network,
+							'sitewideAfter'  => $sitewide_after_network,
+							'expectedEvents' => $expected_network_events,
+							'events'         => $events,
+						)
+					);
+				}
+			}
+		} finally {
+			\remove_action( 'deactivate_plugin', $before_callback, 10 );
+			\remove_action( 'deactivated_plugin', $after_callback, 10 );
+			foreach ( $dynamic_callbacks as $plugin => $callback ) {
+				\remove_action( 'deactivate_' . $plugin, $callback, 10 );
+			}
+			\update_option( 'active_plugins', array() );
+			\update_site_option( 'active_sitewide_plugins', array() );
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme-lifecycle.plugin.deactivation-scope-matrix-and-hook-payloads',
+			$failures,
+			array(
+				'sitePlugins'   => $site_plugins,
+				'networkPlugin' => $network_plugin,
+				'isMultisite'   => \is_multisite(),
+				'networkCase'   => $network_case,
 			)
 		);
 	}
@@ -1195,6 +1343,29 @@ final class PluginThemeLifecycleSurface {
 		}
 
 		return false;
+	}
+
+	private static function expected_deactivation_events( array $plugins, bool $network_deactivating ): array {
+		$events = array();
+		foreach ( $plugins as $plugin ) {
+			$events[] = array(
+				'hook'    => 'deactivate_plugin',
+				'plugin'  => $plugin,
+				'network' => $network_deactivating,
+			);
+			$events[] = array(
+				'hook'    => 'deactivate_' . $plugin,
+				'plugin'  => $plugin,
+				'network' => $network_deactivating,
+			);
+			$events[] = array(
+				'hook'    => 'deactivated_plugin',
+				'plugin'  => $plugin,
+				'network' => $network_deactivating,
+			);
+		}
+
+		return $events;
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {

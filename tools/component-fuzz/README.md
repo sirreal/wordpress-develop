@@ -367,10 +367,10 @@ database, network requests, or a configured site.
 - `plugin-theme-lifecycle`: no-network plugin/theme lifecycle coverage over
   generated temp fixtures, including plugin validation and requirement errors,
   dependency failure states, activation/deactivation success and output-failure
-  paths, active and sitewide-active option shapes, plugin/theme deletion
-  validation, theme enumeration and requirement checks, safe child-theme
-  switching, theme support/template globals, and read-only REST plugin/theme
-  controller paths.
+  paths, multi-plugin deactivation scope/action payload ordering, active and
+  sitewide-active option shapes, plugin/theme deletion validation, theme
+  enumeration and requirement checks, safe child-theme switching, theme
+  support/template globals, and read-only REST plugin/theme controller paths.
 - `update-install-upgrader`: no-network update/install/upgrader coverage,
   including generated core/plugin/theme update transient shapes, aggregate
   update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
