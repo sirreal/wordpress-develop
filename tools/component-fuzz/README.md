@@ -335,8 +335,9 @@ database, network requests, or a configured site.
 - `multisite`: no-DB multisite/network API coverage, including synthetic
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
   lookups, blog-switch stack/cache restoration, filter-backed network option
-  reads, stub-backed network option CRUD, pre-query-short-circuited site/network
-  queries, and current/switched URL helpers.
+  reads, stub-backed network option CRUD, large-network threshold/filter
+  contracts, pre-query-short-circuited site/network queries, and
+  current/switched URL helpers.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, current-tree
   parent/ancestor propagation, walker output, depth pruning,

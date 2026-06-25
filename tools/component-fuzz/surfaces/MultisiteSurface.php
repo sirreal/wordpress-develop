@@ -55,6 +55,7 @@ final class MultisiteSurface {
 			$rows[] = self::check_switch_stack_and_cache_context( $ctx );
 			$rows[] = self::check_blog_option_helpers( $ctx, $case );
 			$rows[] = self::check_network_option_helpers( $ctx );
+			$rows[] = self::check_large_network_helpers( $ctx, $case );
 			$rows[] = self::check_site_and_network_queries( $ctx );
 			$rows[] = self::check_path_lookup_helpers( $ctx, $case );
 			$rows[] = self::check_url_helpers( $ctx );
@@ -305,6 +306,7 @@ final class MultisiteSurface {
 				'get_admin_url',
 				'get_blog_option',
 				'get_blogs_of_user',
+				'get_blog_count',
 				'get_current_blog_id',
 				'get_network_by_path',
 				'get_network',
@@ -315,6 +317,7 @@ final class MultisiteSurface {
 				'get_site_option',
 				'get_site_url',
 				'get_sites',
+				'get_user_count',
 				'has_filter',
 				'is_multisite',
 				'network_home_url',
@@ -332,6 +335,8 @@ final class MultisiteSurface {
 				'wp_cache_get_multiple',
 				'wp_cache_init',
 				'wp_cache_set',
+				'wp_is_large_network',
+				'wp_is_large_user_count',
 				'wp_normalize_site_data',
 				'wp_upload_dir',
 				'wp_parse_id_list',
@@ -742,6 +747,129 @@ final class MultisiteSurface {
 				'readGone'       => self::describe_value( $read_gone ),
 			)
 		);
+	}
+
+	private static function check_large_network_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$network_id        = $case['networkId'];
+		$small_site_count  = $ctx->int( 1, 10000 );
+		$large_site_count  = 10001 + $ctx->int( 0, 7000 );
+		$forced_site_count = $ctx->int( 1, 9999 );
+		$small_user_count  = $ctx->int( 0, 10000 );
+		$large_user_count  = 10001 + $ctx->int( 0, 7000 );
+		$forced_user_count = $ctx->int( 1, 9999 );
+		$events            = array();
+
+		$network_filter = static function ( bool $is_large, string $component, int $count, int $filtered_network_id ) use ( &$events, $network_id, $forced_site_count ): bool {
+			$events[] = array(
+				'filter'    => 'wp_is_large_network',
+				'component' => $component,
+				'count'     => $count,
+				'networkId' => $filtered_network_id,
+				'incoming'  => $is_large,
+			);
+
+			if ( $filtered_network_id === $network_id && 'sites' === $component && $count === $forced_site_count ) {
+				return true;
+			}
+
+			return $is_large;
+		};
+		$user_filter    = static function ( bool $is_large, int $count, ?int $filtered_network_id ) use ( &$events, $network_id, $forced_user_count ): bool {
+			$events[] = array(
+				'filter'    => 'wp_is_large_user_count',
+				'component' => 'users',
+				'count'     => $count,
+				'networkId' => $filtered_network_id,
+				'incoming'  => $is_large,
+			);
+
+			if ( $filtered_network_id === $network_id && $count === $forced_user_count ) {
+				return true;
+			}
+
+			return $is_large;
+		};
+
+		\add_filter( 'wp_is_large_network', $network_filter, 10, 4 );
+		\add_filter( 'wp_is_large_user_count', $user_filter, 10, 3 );
+
+		try {
+			self::$network_options[ $network_id ]['blog_count'] = $small_site_count;
+			$sites_small = \wp_is_large_network( 'sites', $network_id );
+
+			self::$network_options[ $network_id ]['blog_count'] = $large_site_count;
+			$sites_large = \wp_is_large_network( 'sites', $network_id );
+
+			self::$network_options[ $network_id ]['blog_count'] = $forced_site_count;
+			$sites_forced = \wp_is_large_network( 'sites', $network_id );
+
+			self::$network_options[ $network_id ]['user_count'] = $small_user_count;
+			$users_small = \wp_is_large_network( 'users', $network_id );
+
+			self::$network_options[ $network_id ]['user_count'] = $large_user_count;
+			$users_large = \wp_is_large_network( 'users', $network_id );
+
+			self::$network_options[ $network_id ]['user_count'] = $forced_user_count;
+			$users_forced = \wp_is_large_network( 'users', $network_id );
+		} finally {
+			\remove_filter( 'wp_is_large_user_count', $user_filter, 10 );
+			\remove_filter( 'wp_is_large_network', $network_filter, 10 );
+		}
+
+		$ok = false === $sites_small
+			&& true === $sites_large
+			&& true === $sites_forced
+			&& false === $users_small
+			&& true === $users_large
+			&& true === $users_forced
+			&& self::large_network_event_seen( $events, 'wp_is_large_network', 'sites', $small_site_count, $network_id, false )
+			&& self::large_network_event_seen( $events, 'wp_is_large_network', 'sites', $large_site_count, $network_id, true )
+			&& self::large_network_event_seen( $events, 'wp_is_large_network', 'sites', $forced_site_count, $network_id, false )
+			&& self::large_network_event_seen( $events, 'wp_is_large_user_count', 'users', $small_user_count, $network_id, false )
+			&& self::large_network_event_seen( $events, 'wp_is_large_user_count', 'users', $large_user_count, $network_id, true )
+			&& self::large_network_event_seen( $events, 'wp_is_large_user_count', 'users', $forced_user_count, $network_id, false )
+			&& self::large_network_event_seen( $events, 'wp_is_large_network', 'users', $forced_user_count, $network_id, true );
+
+		return $ctx->result(
+			'multisite.large-network.thresholds-and-filter-payloads',
+			$ok,
+			array(
+				'counts'  => array(
+					'sitesSmall'  => $small_site_count,
+					'sitesLarge'  => $large_site_count,
+					'sitesForced' => $forced_site_count,
+					'usersSmall'  => $small_user_count,
+					'usersLarge'  => $large_user_count,
+					'usersForced' => $forced_user_count,
+				),
+				'results' => array(
+					'sitesSmall'  => $sites_small ?? null,
+					'sitesLarge'  => $sites_large ?? null,
+					'sitesForced' => $sites_forced ?? null,
+					'usersSmall'  => $users_small ?? null,
+					'usersLarge'  => $users_large ?? null,
+					'usersForced' => $users_forced ?? null,
+				),
+				'events'  => $events,
+			)
+		);
+	}
+
+	private static function large_network_event_seen( array $events, string $filter, string $component, int $count, int $network_id, bool $incoming ): bool {
+		foreach ( $events as $event ) {
+			if (
+				is_array( $event )
+				&& $filter === ( $event['filter'] ?? null )
+				&& $component === ( $event['component'] ?? null )
+				&& $count === (int) ( $event['count'] ?? -1 )
+				&& $network_id === (int) ( $event['networkId'] ?? 0 )
+				&& $incoming === ( $event['incoming'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function check_site_and_network_queries( \ComponentFuzz\FuzzContext $ctx ): array {
