@@ -501,7 +501,7 @@ final class ContentSurface {
 				}
 
 				$object_as_array = get_object_vars( $object_call['value'] );
-				if ( $array_call['value'] !== $object_as_array ) {
+				if ( self::normalize_field_map_order( $array_call['value'] ) !== self::normalize_field_map_order( $object_as_array ) ) {
 					$failures[] = array(
 						'name'    => 'sanitize-post-array-object-mismatch',
 						'message' => 'sanitize_post() produced different field values for equivalent array and object posts.',
@@ -583,34 +583,36 @@ final class ContentSurface {
 				}
 
 				if ( $can_probe_hooks ) {
-					$hook_probe = self::probe_sanitize_post_filter_hooks( $post, $context, $probe_fields );
-					++$hook_probe_cases;
-					if ( ! $hook_probe['call']['ok'] ) {
-						$failures[] = self::call_failure(
-							'sanitize-post-filter-probe-throwable',
-							'sanitize_post() threw during the filter locality probe.',
-							$hook_probe['call'],
-							array(
-								'case'    => $case['label'],
-								'context' => $context,
-							)
-						);
-						continue;
-					}
+					foreach ( array( 'array' => false, 'object' => true ) as $input_type => $as_object ) {
+						$hook_probe = self::probe_sanitize_post_filter_hooks( $post, $context, $probe_fields, $as_object );
+						++$hook_probe_cases;
+						if ( ! $hook_probe['call']['ok'] ) {
+							$failures[] = self::call_failure(
+								'sanitize-post-filter-probe-throwable',
+								'sanitize_post() threw during the filter locality probe.',
+								$hook_probe['call'],
+								array(
+									'case'      => $case['label'],
+									'context'   => $context,
+									'inputType' => $input_type,
+								)
+							);
+							continue;
+						}
 
-					$expected_hooks = self::sanitize_post_filter_hooks( array_keys( $expected_fields ), $context );
-					$actual_hooks   = $hook_probe['hooks'];
-					sort( $expected_hooks );
-					sort( $actual_hooks );
-					if ( $expected_hooks !== $actual_hooks ) {
-						$failures[] = array(
-							'name'     => 'sanitize-post-filter-locality-mismatch',
-							'message'  => 'sanitize_post() did not invoke the expected field filter hooks for the generated fields and context.',
-							'case'     => $case['label'],
-							'context'  => $context,
-							'expected' => $expected_hooks,
-							'actual'   => $actual_hooks,
-						);
+						$expected_hooks = self::sanitize_post_filter_hooks( array_keys( $expected_fields ), $context );
+						$actual_hooks   = $hook_probe['hooks'];
+						if ( $expected_hooks !== $actual_hooks ) {
+							$failures[] = array(
+								'name'      => 'sanitize-post-filter-locality-mismatch',
+								'message'   => 'sanitize_post() did not invoke the expected field filter hooks for the generated fields and context.',
+								'case'      => $case['label'],
+								'context'   => $context,
+								'inputType' => $input_type,
+								'expected'  => $expected_hooks,
+								'actual'    => $actual_hooks,
+							);
+						}
 					}
 				}
 			}
@@ -1138,23 +1140,30 @@ final class ContentSurface {
 		return array_values( array_unique( $fields ) );
 	}
 
-	private static function probe_sanitize_post_filter_hooks( array $post, string $context, array $probe_fields ): array {
+	private static function normalize_field_map_order( array $fields ): array {
+		ksort( $fields );
+		return $fields;
+	}
+
+	private static function probe_sanitize_post_filter_hooks( array $post, string $context, array $probe_fields, bool $as_object ): array {
 		$observed = array();
 		$callback = static function ( $value, ...$unused ) use ( &$observed ) {
 			unset( $unused );
 			$observed[] = \current_filter();
 			return $value;
 		};
-		$hooks    = array_values( array_unique( self::sanitize_post_filter_hooks( $probe_fields, $context ) ) );
+		$hooks    = self::sanitize_post_observable_filter_hooks( $probe_fields );
 
 		foreach ( $hooks as $hook ) {
 			\add_filter( $hook, $callback, PHP_INT_MAX, 3 );
 		}
 
+		$post_input = $as_object ? (object) $post : $post;
+
 		try {
 			$call = self::call_guarded(
-				static function () use ( $post, $context ) {
-					return \sanitize_post( $post, $context );
+				static function () use ( $post_input, $context ) {
+					return \sanitize_post( $post_input, $context );
 				}
 			);
 		} finally {
@@ -1170,10 +1179,26 @@ final class ContentSurface {
 	}
 
 	private static function sanitize_post_filter_hooks( array $fields, string $context ): array {
+		return self::sanitize_post_filter_hooks_for_fields( $fields, $context, false );
+	}
+
+	private static function sanitize_post_observable_filter_hooks( array $fields ): array {
+		$hooks = array();
+		foreach ( array( 'db', 'edit', 'display' ) as $context ) {
+			$hooks = array_merge(
+				$hooks,
+				self::sanitize_post_filter_hooks_for_fields( $fields, $context, true )
+			);
+		}
+
+		return array_values( array_unique( $hooks ) );
+	}
+
+	private static function sanitize_post_filter_hooks_for_fields( array $fields, string $context, bool $include_array_int_fields ): array {
 		$hooks = array();
 		foreach ( $fields as $field ) {
 			$field = (string) $field;
-			if ( 'raw' === $context || 'ancestors' === $field ) {
+			if ( 'raw' === $context || ( ! $include_array_int_fields && 'ancestors' === $field ) ) {
 				continue;
 			}
 
