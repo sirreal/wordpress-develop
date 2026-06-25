@@ -7,6 +7,7 @@ final class TranslationsSurface {
 	private const TEXT_CASES      = 12;
 	private const ENTRY_CASES     = 8;
 	private const FILE_CASES      = 4;
+	private const CONTROLLER_CASES = 3;
 	private const FAILURE_LIMIT   = 8;
 	private const MAX_TEXT_BYTES  = 144;
 	private const MAX_DOMAIN_LEN  = 48;
@@ -77,6 +78,7 @@ final class TranslationsSurface {
 				self::check_translation_entry_lookup( $ctx->fork( 'entries' ) ),
 				self::check_gettext_plural_rules( $ctx->fork( 'plural-rules' ) ),
 				self::check_pomo_file_round_trips( $ctx->fork( 'pomo-files' ) ),
+				self::check_translation_controller_isolation( $ctx->fork( 'translation-controller' ) ),
 				self::check_translation_api_metadata_updates( $ctx->fork( 'api-metadata-updates' ) ),
 				self::check_load_textdomain_paths( $ctx->fork( 'load-textdomain' ) ),
 				self::check_malformed_files_fail_closed( $ctx->fork( 'malformed-files' ) ),
@@ -550,6 +552,178 @@ final class TranslationsSurface {
 				'poRoundTrips'  => $po_roundtrips,
 				'samples'       => $samples,
 				'failures'      => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
+	private static function check_translation_controller_isolation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$temp_dir = self::make_temp_dir( $ctx, 'controller' );
+		$snapshot = self::snapshot_global_state();
+		$restored = false;
+		$cases    = array_slice( self::file_cases( $ctx ), 0, self::CONTROLLER_CASES );
+		$failures = array();
+		$samples  = array();
+
+		try {
+			$controller = \WP_Translation_Controller::get_instance();
+			$locales    = array( 'es_ES', 'fr_FR', 'de_DE', 'pt_BR' );
+
+			foreach ( $cases as $index => $case ) {
+				$other_case = $cases[ ( $index + 1 ) % count( $cases ) ];
+				$locale_a   = $locales[ $index % count( $locales ) ];
+				$locale_b   = $locales[ ( $index + 1 ) % count( $locales ) ];
+				$domain_a   = self::generated_safe_domain( $ctx->fork( 'controller-a-' . $index ), 'controller-a' );
+				$domain_b   = self::generated_safe_domain( $ctx->fork( 'controller-b-' . $index ), 'controller-b' );
+				$bad_domain = self::generated_safe_domain( $ctx->fork( 'controller-bad-' . $index ), 'controller-bad' );
+				$file_a     = $temp_dir . DIRECTORY_SEPARATOR . 'controller-' . $index . '-a.l10n.php';
+				$file_b     = $temp_dir . DIRECTORY_SEPARATOR . 'controller-' . $index . '-b.l10n.php';
+				$bad_file   = $temp_dir . DIRECTORY_SEPARATOR . 'controller-' . $index . '-bad.l10n.php';
+
+				if (
+					! self::write_php_translation_file( $file_a, $case, $locale_a )
+					|| ! self::write_php_translation_file( $file_b, $other_case, $locale_b )
+					|| false === file_put_contents( $bad_file, "<?php\nreturn 'not translation data';\n" )
+				) {
+					return $ctx->skip(
+						'translations.controller-locale-domain-isolation',
+						'Could not write temporary controller translation fixtures.',
+						array( 'dir' => self::preview_path( $temp_dir ) )
+					);
+				}
+
+				$missing_file  = $temp_dir . DIRECTORY_SEPARATOR . 'missing-' . $index . '.l10n.php';
+				$missing_load  = $controller->load_file( $missing_file, $domain_a, $locale_a );
+				$bad_load      = $controller->load_file( $bad_file, $bad_domain, $locale_a );
+				$bad_loaded    = $controller->is_textdomain_loaded( $bad_domain, $locale_a );
+				$bad_translate = $controller->translate( $case['source'], '', $bad_domain, $locale_a );
+				$load_a        = $controller->load_file( $file_a, $domain_a, $locale_a );
+				$repeat_load_a = $controller->load_file( $file_a, $domain_a, $locale_a );
+				$load_b_domain = $controller->load_file( $file_a, $domain_b, $locale_a );
+				$load_locale_b = $controller->load_file( $file_b, $domain_a, $locale_b );
+
+				self::sample_file_case( $samples, $case );
+
+				self::collect_failure(
+					$failures,
+					false === $missing_load
+						&& true === $bad_load
+						&& true === $bad_loaded
+						&& false === $bad_translate
+						&& true === $load_a
+						&& true === $repeat_load_a
+						&& true === $load_b_domain
+						&& true === $load_locale_b
+						&& ! $controller->is_textdomain_loaded( $bad_domain, $locale_a ),
+					"WP_Translation_Controller load_file accepts valid files and lazily evicts malformed files case {$index}",
+					array(
+						'missingLoad' => $missing_load,
+						'badLoad'     => $bad_load,
+						'badLoaded'   => $bad_loaded,
+						'badLookup'   => self::describe_value( $bad_translate ),
+						'badAfter'    => $controller->is_textdomain_loaded( $bad_domain, $locale_a ),
+						'loadA'       => $load_a,
+						'repeatLoadA' => $repeat_load_a,
+						'loadDomainB' => $load_b_domain,
+						'loadLocaleB' => $load_locale_b,
+					)
+				);
+
+				$controller->set_locale( $locale_a );
+				self::assert_controller_case(
+					$failures,
+					$controller,
+					$case,
+					$domain_a,
+					$locale_a,
+					"controller case {$index} locale A domain A"
+				);
+				self::assert_controller_case(
+					$failures,
+					$controller,
+					$case,
+					$domain_b,
+					$locale_a,
+					"controller case {$index} locale A domain B"
+				);
+
+				self::collect_failure(
+					$failures,
+					false === $controller->translate( $case['source'], '', $domain_a, $locale_b )
+						&& false === $controller->translate( $other_case['source'], '', $domain_b, $locale_b )
+						&& false === $controller->has_translation( $case['source'], $bad_domain, $locale_a ),
+					"WP_Translation_Controller keeps explicit locale/domain misses isolated case {$index}",
+					array(
+						'domainALocaleB' => self::describe_value( $controller->translate( $case['source'], '', $domain_a, $locale_b ) ),
+						'domainBLocaleB' => self::describe_value( $controller->translate( $other_case['source'], '', $domain_b, $locale_b ) ),
+						'badHasSource'   => $controller->has_translation( $case['source'], $bad_domain, $locale_a ),
+					)
+				);
+
+				$controller->set_locale( $locale_b );
+				self::assert_controller_case(
+					$failures,
+					$controller,
+					$other_case,
+					$domain_a,
+					$locale_b,
+					"controller case {$index} locale B domain A"
+				);
+
+				$unloaded_a = $controller->unload_file( $file_a, $domain_a, $locale_a );
+				$controller->set_locale( $locale_a );
+				self::collect_failure(
+					$failures,
+					true === $unloaded_a
+						&& ! $controller->is_textdomain_loaded( $domain_a, $locale_a )
+						&& $controller->is_textdomain_loaded( $domain_b, $locale_a )
+						&& $controller->is_textdomain_loaded( $domain_a, $locale_b )
+						&& $case['translation'] === $controller->translate( $case['source'], '', $domain_b, $locale_a )
+						&& $other_case['translation'] === $controller->translate( $other_case['source'], '', $domain_a, $locale_b ),
+					"WP_Translation_Controller unload_file is scoped to file, domain, and locale case {$index}",
+					array(
+						'unloadedA'      => $unloaded_a,
+						'domainALocaleA' => $controller->is_textdomain_loaded( $domain_a, $locale_a ),
+						'domainBLocaleA' => $controller->is_textdomain_loaded( $domain_b, $locale_a ),
+						'domainALocaleB' => $controller->is_textdomain_loaded( $domain_a, $locale_b ),
+					)
+				);
+
+				$unloaded_locale_b = $controller->unload_textdomain( $domain_a, $locale_b );
+				$unloaded_domain_b = $controller->unload_textdomain( $domain_b );
+				self::collect_failure(
+					$failures,
+					true === $unloaded_locale_b
+						&& true === $unloaded_domain_b
+						&& ! $controller->is_textdomain_loaded( $domain_a, $locale_b )
+						&& ! $controller->is_textdomain_loaded( $domain_b, $locale_a ),
+					"WP_Translation_Controller unload_textdomain clears requested locale or all locales case {$index}",
+					array(
+						'unloadedLocaleB' => $unloaded_locale_b,
+						'unloadedDomainB' => $unloaded_domain_b,
+						'domainALocaleB'  => $controller->is_textdomain_loaded( $domain_a, $locale_b ),
+						'domainBLocaleA'  => $controller->is_textdomain_loaded( $domain_b, $locale_a ),
+					)
+				);
+			}
+
+			self::restore_global_state( $snapshot );
+			$restored = true;
+		} catch ( \Throwable $e ) {
+			return self::throwable_row( $ctx, 'translations.controller-locale-domain-isolation', $e, array( 'cases' => count( $cases ) ) );
+		} finally {
+			if ( ! $restored ) {
+				self::restore_global_state( $snapshot );
+			}
+			self::remove_temp_dir( $temp_dir );
+		}
+
+		return $ctx->result(
+			'translations.controller-locale-domain-isolation',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'samples'  => $samples,
+				'failures' => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
 		);
 	}
@@ -1247,6 +1421,44 @@ final class TranslationsSurface {
 				array(
 					'expected' => $case['pluralRule']['expected'][ $count ],
 					'actual'   => $file->get_plural_form( $count ),
+				)
+			);
+		}
+	}
+
+	private static function assert_controller_case( array &$failures, \WP_Translation_Controller $controller, array $case, string $domain, string $locale, string $label ): void {
+		$expected_plural_index = $case['pluralRule']['expected'][2];
+		$headers               = $controller->get_headers( $domain );
+		$entries               = $controller->get_entries( $domain );
+		$checks                = array(
+			'locale'          => array( $controller->get_locale(), $locale ),
+			'loaded'          => array( $controller->is_textdomain_loaded( $domain, $locale ), true ),
+			'has-source'      => array( $controller->has_translation( $case['source'], $domain, $locale ), true ),
+			'has-missing'     => array( $controller->has_translation( $case['source'] . '-missing', $domain, $locale ), false ),
+			'translate'       => array( $controller->translate( $case['source'], '', $domain, $locale ), $case['translation'] ),
+			'context'         => array( $controller->translate( $case['contextSource'], $case['context'], $domain, $locale ), $case['contextTranslation'] ),
+			'plural'          => array(
+				$controller->translate_plural( array( $case['pluralSingular'], $case['pluralPlural'] ), 2, '', $domain, $locale ),
+				$case['pluralTranslations'][ $expected_plural_index ],
+			),
+			'context-plural'  => array(
+				$controller->translate_plural( array( $case['contextPluralSingular'], $case['contextPluralPlural'] ), 2, $case['context'], $domain, $locale ),
+				$case['contextPluralTranslations'][ $expected_plural_index ],
+			),
+			'plural-header'   => array( $headers['Plural-Forms'] ?? null, $case['pluralRule']['header'] ),
+			'entries-source'  => array( $entries[ $case['source'] ] ?? null, $case['translation'] ),
+			'entries-context' => array( $entries[ $case['context'] . "\4" . $case['contextSource'] ] ?? null, $case['contextTranslation'] ),
+		);
+
+		foreach ( $checks as $name => $pair ) {
+			list( $actual, $expected ) = $pair;
+			self::collect_failure(
+				$failures,
+				$actual === $expected,
+				"{$label} {$name}",
+				array(
+					'expected' => self::describe_value( $expected ),
+					'actual'   => self::describe_value( $actual ),
 				)
 			);
 		}

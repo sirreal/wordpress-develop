@@ -187,8 +187,9 @@ database, network requests, or a configured site.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,
-  installing/maintenance flags, request guard filters, HTTPS migration
-  short-circuits, and UTF-8 compatibility oracles with state restoration.
+  installing/maintenance flags, generated JSON/XML request media matrices,
+  request guard filters, HTTPS migration short-circuits, and UTF-8
+  compatibility oracles with state restoration.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
   storage, recovery key/cookie validation, recovery-link generation, filtered
@@ -289,8 +290,9 @@ database, network requests, or a configured site.
   trips, explicit plural-rule oracles, short-circuited translation API,
   available/installed language metadata, dropdown language normalization,
   guarded language-pack helpers, transient-backed translation update helpers,
-  textdomain load/unload cycles, helper agreement with loaded domain entries,
-  malformed-file closed failures, and state restoration across `$l10n`,
+  direct `WP_Translation_Controller` locale/domain/file isolation and lazy
+  malformed-file eviction, textdomain load/unload cycles, helper agreement with
+  loaded domain entries, malformed-file closed failures, and state restoration across `$l10n`,
   `$l10n_unloaded`, registry, controller, current-user, and filter globals.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
