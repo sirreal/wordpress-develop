@@ -158,7 +158,7 @@ database, network requests, or a configured site.
 - `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
   and next-scheduled filter contracts, duplicate single-event windows,
   scheduled-event lookup ordering/exactness, ready-job partitioning,
-  unscheduling and rescheduling contracts.
+  spawn request/lock boundaries, unscheduling and rescheduling contracts.
 - `default-widgets`: classic default widget subclass coverage, including
   constructor/options contracts, saved-instance callback lifecycles, update
   sanitization, form escaping, filtered rendering for text/custom
