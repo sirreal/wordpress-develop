@@ -26,6 +26,7 @@ final class BlocksSurface {
 			return array(
 				self::check_block_type_registry( $ctx ),
 				self::check_parser_detection_and_rendering( $ctx ),
+				self::check_nested_attribute_round_trips( $ctx ),
 				self::check_style_pattern_binding_registries( $ctx ),
 				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_hooks_insertion_and_metadata( $ctx ),
@@ -354,6 +355,67 @@ final class BlocksSurface {
 		return self::result(
 			$ctx,
 			'blocks.parser-detection-render-filters',
+			array() === $failures,
+			array(
+				'cases'    => self::CASES,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_nested_attribute_round_trips( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		foreach ( self::nested_attribute_cases( $ctx->fork( 'nested-attrs' ) ) as $index => $case ) {
+			$serialized      = \serialize_blocks( $case['blocks'] );
+			$parsed          = \parse_blocks( $serialized );
+			$reserialized    = \serialize_blocks( $parsed );
+			$reparsed        = \parse_blocks( $reserialized );
+			$serialized_last = \serialize_blocks( $reparsed );
+
+			$parsed_shape    = self::block_tree_shape( $parsed );
+			$reparsed_shape  = self::block_tree_shape( $reparsed );
+			$expected_attrs  = self::block_attrs_by_name( $case['blocks'] );
+			$parsed_attrs    = self::block_attrs_by_name( $parsed );
+			$reparsed_attrs  = self::block_attrs_by_name( $reparsed );
+			$parsed_root     = $parsed[0] ?? array();
+			$inner_blocks    = is_array( $parsed_root ) && is_array( $parsed_root['innerBlocks'] ?? null ) ? $parsed_root['innerBlocks'] : array();
+			$parsed_child    = $inner_blocks[0] ?? array();
+			$child_inner     = is_array( $parsed_child ) && is_array( $parsed_child['innerBlocks'] ?? null ) ? $parsed_child['innerBlocks'] : array();
+
+			self::collect_failure(
+				$failures,
+				$serialized === $reserialized
+					&& $reserialized === $serialized_last
+					&& $parsed_shape === $reparsed_shape
+					&& $expected_attrs === $parsed_attrs
+					&& $parsed_attrs === $reparsed_attrs
+					&& 1 === count( $parsed )
+					&& 1 === count( $inner_blocks )
+					&& 1 === count( $child_inner )
+					&& array( $case['childName'] ) === self::block_names( $inner_blocks )
+					&& array( $case['leafName'] ) === self::block_names( $child_inner )
+					&& ! str_contains( $serialized, $case['unsafeAttr'] )
+					&& isset( $parsed_attrs[ $case['rootName'] ]['unsafe'] )
+					&& $case['unsafeAttr'] === $parsed_attrs[ $case['rootName'] ]['unsafe'],
+				"nested parser attributes survive serialize/parse fixed points case {$index}",
+				array(
+					'names'             => array(
+						'root'  => $case['rootName'],
+						'child' => $case['childName'],
+						'leaf'  => $case['leafName'],
+					),
+					'serializedLength'  => strlen( $serialized ),
+					'unsafeAttr'        => $case['unsafeAttr'],
+					'attrsDifference'   => self::first_value_difference( $expected_attrs, $parsed_attrs ),
+					'reparseDifference' => self::first_value_difference( $parsed_shape, $reparsed_shape ),
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'blocks.parser.nested-attrs-round-trip',
 			array() === $failures,
 			array(
 				'cases'    => self::CASES,
@@ -1016,6 +1078,148 @@ final class BlocksSurface {
 		return $cases;
 	}
 
+	private static function nested_attribute_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+		for ( $i = 0; $i < self::CASES; ++$i ) {
+			$case        = $ctx->fork( 'nested-attrs-' . $i );
+			$token       = self::slug( $case, 'nested-token' );
+			$root_name   = 'component-fuzz/' . self::block_name_slug( $case->fork( 'root' ), 'nested-root' );
+			$child_name  = 'component-fuzz/' . self::block_name_slug( $case->fork( 'child' ), 'nested-child' );
+			$leaf_name   = 'component-fuzz/' . self::block_name_slug( $case->fork( 'leaf' ), 'nested-leaf' );
+			$unsafe_attr = '<!-- component-fuzz ' . $token . ' --> & "quoted" \\ slash';
+
+			$leaf = self::parsed_block(
+				$leaf_name,
+				array(
+					'token'  => $token,
+					'nested' => self::nested_attribute_value( $case->fork( 'leaf-attrs' ) ),
+				),
+				array(),
+				array(
+					'<span data-cfz-leaf="' . esc_attr( $token ) . '">Leaf ' . esc_html( $token ) . '</span>',
+				)
+			);
+
+			$child = self::parsed_block(
+				$child_name,
+				array(
+					'token'  => $token,
+					'nested' => self::nested_attribute_value( $case->fork( 'child-attrs' ) ),
+					'list'   => array(
+						self::nested_attribute_value( $case->fork( 'child-list-a' ), 1 ),
+						self::nested_attribute_value( $case->fork( 'child-list-b' ), 1 ),
+					),
+				),
+				array( $leaf ),
+				array(
+					'<div data-cfz-child="' . esc_attr( $token ) . '">',
+					null,
+					'</div>',
+				)
+			);
+
+			$root = self::parsed_block(
+				$root_name,
+				array(
+					'token'  => $token,
+					'unsafe' => $unsafe_attr,
+					'nested' => self::nested_attribute_value( $case->fork( 'root-attrs' ) ),
+					'object' => array(
+						'alpha' => self::nested_attribute_value( $case->fork( 'root-object-alpha' ), 1 ),
+						'beta'  => array(
+							'flag'  => $case->bool(),
+							'count' => $case->int( -50, 50 ),
+							'text'  => self::safe_attribute_text( $case->fork( 'root-object-text' ) ),
+						),
+					),
+				),
+				array( $child ),
+				array(
+					'<section data-cfz-root="' . esc_attr( $token ) . '">',
+					null,
+					'<p>Tail ' . esc_html( $token ) . '</p>',
+					'</section>',
+				)
+			);
+
+			$cases[] = array(
+				'rootName'   => $root_name,
+				'childName'  => $child_name,
+				'leafName'   => $leaf_name,
+				'unsafeAttr' => $unsafe_attr,
+				'blocks'     => array( $root ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function nested_attribute_value( \ComponentFuzz\FuzzContext $ctx, int $depth = 0 ) {
+		if ( $depth >= 3 ) {
+			return self::nested_attribute_scalar( $ctx );
+		}
+
+		$shape = $ctx->int( 0, 4 );
+		if ( 0 === $shape ) {
+			return self::nested_attribute_scalar( $ctx->fork( 'scalar' ) );
+		}
+
+		$count = $ctx->int( 1, 3 );
+		if ( $shape <= 2 ) {
+			$list = array();
+			for ( $i = 0; $i < $count; ++$i ) {
+				$list[] = self::nested_attribute_value( $ctx->fork( 'list-' . $depth . '-' . $i ), $depth + 1 );
+			}
+			return $list;
+		}
+
+		$object = array();
+		for ( $i = 0; $i < $count; ++$i ) {
+			$key            = 'k' . $i . '-' . self::slug( $ctx->fork( 'key-' . $depth . '-' . $i ), 'key' );
+			$object[ $key ] = self::nested_attribute_value( $ctx->fork( 'object-' . $depth . '-' . $i ), $depth + 1 );
+		}
+		return $object;
+	}
+
+	private static function nested_attribute_scalar( \ComponentFuzz\FuzzContext $ctx ) {
+		switch ( $ctx->int( 0, 5 ) ) {
+			case 0:
+				return null;
+			case 1:
+				return true;
+			case 2:
+				return false;
+			case 3:
+				return $ctx->int( -1000, 1000 );
+			case 4:
+				return self::safe_attribute_text( $ctx->fork( 'text' ) );
+			default:
+				return array(
+					'label' => self::slug( $ctx->fork( 'label' ), 'scalar-label' ),
+					'value' => self::safe_attribute_text( $ctx->fork( 'value' ) ),
+				);
+		}
+	}
+
+	private static function safe_attribute_text( \ComponentFuzz\FuzzContext $ctx ): string {
+		$text = str_replace(
+			array( "\r", "\n", "\t" ),
+			' ',
+			$ctx->ascii( 0, 18 )
+		);
+
+		return 'value-' . self::slug( $ctx, 'attr' ) . '-' . $text;
+	}
+
+	private static function block_name_slug( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
+		$slug = self::slug( $ctx, $label );
+		while ( str_contains( $slug, '--' ) ) {
+			$slug = str_replace( '--', '-', $slug );
+		}
+
+		return '' === $slug ? 'fuzz-' . dechex( $ctx->seed() & 0xffff ) : $slug;
+	}
+
 	private static function parsed_block( ?string $name, array $attrs, array $inner_blocks, array $inner_content ): array {
 		$inner_html = '';
 		foreach ( $inner_content as $chunk ) {
@@ -1339,6 +1543,25 @@ final class BlocksSurface {
 		}
 
 		return $shape;
+	}
+
+	private static function block_attrs_by_name( array $blocks ): array {
+		$attrs = array();
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+
+			$name = $block['blockName'] ?? null;
+			if ( is_string( $name ) ) {
+				$attrs[ $name ] = self::sort_value( is_array( $block['attrs'] ?? null ) ? $block['attrs'] : array() );
+			}
+
+			$attrs += self::block_attrs_by_name( is_array( $block['innerBlocks'] ?? null ) ? $block['innerBlocks'] : array() );
+		}
+
+		ksort( $attrs );
+		return $attrs;
 	}
 
 	private static function sort_value( $value ) {
