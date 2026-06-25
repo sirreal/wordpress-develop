@@ -38,6 +38,7 @@ final class NetworkMediaSurface {
 			self::exercise_path_apis( $rng, $result );
 			self::exercise_filename_apis( $rng, $result );
 			self::exercise_multisite_quota_apis( $rng, $result );
+			self::exercise_multisite_upload_policy_apis( $rng, $result );
 
 			if ( null === $temp_root ) {
 				self::skip_once( $result, 'temporary-files', 'Could not create an isolated directory under sys_get_temp_dir().' );
@@ -866,6 +867,139 @@ final class NetworkMediaSurface {
 				array(
 					'expected' => $expected['overQuota'],
 					'actual'   => $over_display['value'] ?? null,
+				)
+			);
+		}
+	}
+
+	private static function exercise_multisite_upload_policy_apis( array &$rng, array &$result ): void {
+		self::load_admin_multisite_helpers();
+
+		$required = array(
+			'check_upload_mimes',
+			'upload_is_file_too_big',
+			'add_filter',
+			'remove_filter',
+			'has_filter',
+		);
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				self::skip_once( $result, 'multisite-upload-policy', "Function {$function} is unavailable." );
+				return;
+			}
+		}
+
+		$mimes = array(
+			'jpg|jpeg|jpe'       => 'image/jpeg',
+			'png'                => 'image/png',
+			'gif'                => 'image/gif',
+			'webp'               => 'image/webp',
+			'pdf'                => 'application/pdf',
+			'txt|asc|c|cc|h'     => 'text/plain',
+			'tar|gz'             => 'application/gzip',
+			'component-fuzz-bin' => 'application/x-component-fuzz',
+		);
+
+		foreach ( self::upload_policy_cases( $rng ) as $case ) {
+			++$result['caseCount'];
+			self::feature( $result, 'multisite-upload-policy' );
+
+			$site_option_filter = static function ( $pre_site_option, string $option ) use ( $case ) {
+				unset( $pre_site_option );
+				if ( 'upload_filetypes' === $option ) {
+					return $case['uploadFiletypes'];
+				}
+				if ( 'upload_space_check_disabled' === $option ) {
+					return $case['disabled'];
+				}
+				if ( 'fileupload_maxk' === $option ) {
+					return $case['fileuploadMaxK'];
+				}
+
+				return false;
+			};
+			$before_filter      = \has_filter( 'pre_site_option', $site_option_filter );
+
+			\add_filter( 'pre_site_option', $site_option_filter, 10, 2 );
+			try {
+				$filtered_mimes = self::call_api(
+					$result,
+					'check_upload_mimes',
+					$case,
+					static function () use ( $mimes ) {
+						return check_upload_mimes( $mimes );
+					}
+				);
+
+				$upload = array(
+					'name' => $case['name'],
+					'type' => 'application/octet-stream',
+					'bits' => str_repeat( 'x', $case['bytes'] ),
+				);
+
+				$size_check = self::call_api(
+					$result,
+					'upload_is_file_too_big',
+					$case,
+					static function () use ( $upload ) {
+						return upload_is_file_too_big( $upload );
+					}
+				);
+
+				$non_array_check = self::call_api(
+					$result,
+					'upload_is_file_too_big.non-array',
+					$case['name'],
+					static function () use ( $case ) {
+						return upload_is_file_too_big( $case['name'] );
+					}
+				);
+			} finally {
+				\remove_filter( 'pre_site_option', $site_option_filter, 10 );
+			}
+
+			$expected_mimes = self::expected_upload_mimes( $mimes, $case['uploadFiletypes'] );
+			self::check_invariant(
+				$result,
+				$filtered_mimes['ok'] && $expected_mimes === $filtered_mimes['value'],
+				'multisite-upload-policy:check-upload-mimes-filters-by-network-filetypes',
+				$case,
+				array(
+					'expected' => $expected_mimes,
+					'actual'   => $filtered_mimes['value'] ?? null,
+				)
+			);
+
+			$max_bytes    = (int) $case['fileuploadMaxK'] * KB_IN_BYTES;
+			$should_block = ! (bool) $case['disabled'] && $case['bytes'] > $max_bytes;
+			self::check_invariant(
+				$result,
+				$size_check['ok']
+					&& (
+						$should_block
+							? ( is_string( $size_check['value'] ) && str_contains( $size_check['value'], (string) $case['fileuploadMaxK'] ) && str_ends_with( $size_check['value'], '<br />' ) )
+							: $upload === $size_check['value']
+					),
+				'multisite-upload-policy:upload-is-file-too-big-thresholds',
+				$case,
+				array(
+					'expectedBlocked' => $should_block,
+					'maxBytes'        => $max_bytes,
+					'actual'          => self::describe_value( $size_check['value'] ?? null ),
+				)
+			);
+
+			self::check_invariant(
+				$result,
+				$non_array_check['ok']
+					&& $case['name'] === $non_array_check['value']
+					&& $before_filter === \has_filter( 'pre_site_option', $site_option_filter ),
+				'multisite-upload-policy:state-and-non-array-bypass',
+				$case,
+				array(
+					'nonArray'     => $non_array_check['value'] ?? null,
+					'filterBefore' => $before_filter,
+					'filterAfter'  => \has_filter( 'pre_site_option', $site_option_filter ),
 				)
 			);
 		}
@@ -2070,6 +2204,72 @@ final class NetworkMediaSurface {
 		return $cases;
 	}
 
+	private static function upload_policy_cases( array &$rng ): array {
+		$cases = array(
+			array(
+				'label'           => 'default-image-types-allow-under-limit',
+				'uploadFiletypes' => 'jpg jpeg png gif',
+				'fileuploadMaxK'  => 4,
+				'bytes'           => 4 * KB_IN_BYTES,
+				'disabled'        => false,
+				'name'            => 'under-limit.jpg',
+			),
+			array(
+				'label'           => 'pdf-text-types-block-over-limit',
+				'uploadFiletypes' => 'pdf txt',
+				'fileuploadMaxK'  => 1,
+				'bytes'           => KB_IN_BYTES + 1,
+				'disabled'        => false,
+				'name'            => 'too-large.pdf',
+			),
+			array(
+				'label'           => 'disabled-size-check-allows-over-limit',
+				'uploadFiletypes' => 'webp gz',
+				'fileuploadMaxK'  => 1,
+				'bytes'           => 3 * KB_IN_BYTES,
+				'disabled'        => true,
+				'name'            => 'disabled.webp',
+			),
+			array(
+				'label'           => 'empty-network-types-allow-no-mimes',
+				'uploadFiletypes' => '',
+				'fileuploadMaxK'  => 8,
+				'bytes'           => 0,
+				'disabled'        => false,
+				'name'            => 'empty.bin',
+			),
+			array(
+				'label'           => 'substring-network-type-matches-patterns',
+				'uploadFiletypes' => 'g',
+				'fileuploadMaxK'  => 2,
+				'bytes'           => 2 * KB_IN_BYTES + 1,
+				'disabled'        => false,
+				'name'            => 'substring.gif',
+			),
+		);
+
+		$tokens = array( 'jpg', 'png', 'pdf', 'txt', 'component-fuzz', 'missing', 'gz', 'webp' );
+		for ( $i = 0; $i < 6; ++$i ) {
+			$allowed = array();
+			$count   = self::rng_int( $rng, 0, 4 );
+			for ( $j = 0; $j < $count; ++$j ) {
+				$allowed[] = self::rng_choice( $rng, $tokens );
+			}
+
+			$max_kb  = self::rng_int( $rng, 1, 12 );
+			$cases[] = array(
+				'label'           => 'generated-upload-policy-' . $i,
+				'uploadFiletypes' => implode( ' ', $allowed ),
+				'fileuploadMaxK'  => $max_kb,
+				'bytes'           => self::rng_int( $rng, 0, ( $max_kb + 2 ) * KB_IN_BYTES ),
+				'disabled'        => (bool) self::rng_int( $rng, 0, 1 ),
+				'name'            => 'generated-' . $i . '.' . self::rng_choice( $rng, array( 'jpg', 'pdf', 'webp', 'bin' ) ),
+			);
+		}
+
+		return $cases;
+	}
+
 	private static function check_upload_size_cases( array &$rng ): array {
 		$cases = array(
 			array(
@@ -2181,6 +2381,21 @@ final class NetworkMediaSurface {
 			'uploadLimit'    => $upload_limit,
 			'overQuota'      => $disabled ? false : ( ( $allowed_numeric - (int) $case['usedSpace'] ) < 0 ),
 		);
+	}
+
+	private static function expected_upload_mimes( array $mimes, string $upload_filetypes ): array {
+		$site_exts  = explode( ' ', $upload_filetypes );
+		$site_mimes = array();
+
+		foreach ( $site_exts as $ext ) {
+			foreach ( $mimes as $ext_pattern => $mime ) {
+				if ( '' !== $ext && str_contains( $ext_pattern, $ext ) ) {
+					$site_mimes[ $ext_pattern ] = $mime;
+				}
+			}
+		}
+
+		return $site_mimes;
 	}
 
 	private static function generated_unique_filename_cases( array &$rng ): array {

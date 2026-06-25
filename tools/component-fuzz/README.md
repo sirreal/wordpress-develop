@@ -360,8 +360,8 @@ database, network requests, or a configured site.
 - `network-media`: URL parsing/sanitization/validation, URL scheme
   normalization, path normalization, filename sanitization, filetype checks,
   unique filenames, sideload handling, multisite upload quota, remaining-space,
-  size-limit, `check_upload_size()` error/state behavior, and over-quota
-  helpers.
+  size-limit, network upload MIME allowlists, direct file-too-large checks,
+  `check_upload_size()` error/state behavior, and over-quota helpers.
 - `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
   for generated option values, including alloptions membership, notoptions
   transitions, raw serialized cache shape, default/pre/update filters, cache
