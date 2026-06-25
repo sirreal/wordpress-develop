@@ -305,7 +305,8 @@ database, network requests, or a configured site.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   registration argument edges, legacy callbacks, sanitize/auth/protected-meta
   filters, cache-backed lookup shape, filtered and in-memory CRUD cache
-  invalidation, mid-row helpers, cache priming, and lazyloader queue/reset
+  invalidation, by-mid short-circuit filter payloads and fail-closed inputs,
+  mid-row helpers, cache priming, and duplicate-aware lazyloader queue/reset
   behavior.
 - `multisite`: no-DB multisite/network API coverage, including synthetic
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
