@@ -55,6 +55,7 @@ final class PrivacySurface {
 			$rows[] = self::check_confirmation_messages( $ctx->fork( 'confirmation-messages' ) );
 			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
 			$rows[] = self::check_registry_filters( $ctx->fork( 'registry-filters' ) );
+			$rows[] = self::check_comment_privacy_callbacks( $ctx->fork( 'comment-privacy-callbacks' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
 			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
 			$rows[] = self::check_anonymization_helpers( $ctx->fork( 'anonymization' ) );
@@ -162,6 +163,7 @@ final class PrivacySurface {
 				'WP_Error',
 				'WP_User_Request',
 				'WP_Post',
+				'WP_Rewrite',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -178,6 +180,10 @@ final class PrivacySurface {
 				'esc_attr',
 				'esc_html',
 				'has_filter',
+				'get_comment',
+				'get_comment_link',
+				'get_comment_text',
+				'get_comments',
 				'get_post_meta',
 				'is_wp_error',
 				'remove_filter',
@@ -201,6 +207,11 @@ final class PrivacySurface {
 				'wp_user_request_action_description',
 				'wp_validate_user_request_key',
 				'wp_verify_fast_hash',
+				'wp_comments_personal_data_eraser',
+				'wp_comments_personal_data_exporter',
+				'wp_insert_comment',
+				'wp_register_comment_personal_data_eraser',
+				'wp_register_comment_personal_data_exporter',
 				'_wp_privacy_account_request_confirmed',
 				'_wp_privacy_account_request_confirmed_message',
 				'_wp_privacy_completed_request',
@@ -1235,6 +1246,202 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_comment_privacy_callbacks( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return self::skip(
+				$ctx,
+				'privacy.comments.exporter-eraser-callback-contracts',
+				'The wpdb content stub is unavailable for built-in comment privacy callback coverage.'
+			);
+		}
+
+		$failures = array();
+		$email    = 'privacy-comment-' . strtolower( $ctx->identifier( 4, 8 ) ) . '@example.test';
+		$had_wp_rewrite = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$wp_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
+
+		self::reset_db_content();
+		try {
+			if ( ! isset( $GLOBALS['wp_rewrite'] ) || ! $GLOBALS['wp_rewrite'] instanceof \WP_Rewrite ) {
+				$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			}
+
+			$post = self::post_record(
+				array(
+					'ID'          => 93500 + $ctx->int( 0, 199 ),
+					'post_name'   => 'privacy-comment-fixture-' . strtolower( $ctx->identifier( 4, 8 ) ),
+					'post_title'  => 'Privacy Comment Fixture',
+					'post_status' => 'publish',
+					'post_type'   => 'post',
+					'guid'        => 'https://example.test/privacy-comment-fixture',
+				)
+			);
+			self::seed_db_request_post( $post );
+
+			$target_comment_id = self::insert_privacy_comment(
+				array(
+					'comment_post_ID'      => (int) $post->ID,
+					'comment_author'       => 'Alice <Exporter> ' . $ctx->identifier( 3, 6 ),
+					'comment_author_email' => $email,
+					'comment_author_url'   => 'https://example.test/profile?x=' . rawurlencode( self::random_string( $ctx->fork( 'url' ), 8 ) ),
+					'comment_author_IP'    => '203.0.113.' . $ctx->int( 1, 254 ),
+					'comment_agent'        => 'ComponentFuzz/' . $ctx->int( 10, 99 ),
+					'comment_content'      => 'Export me <script>alert(1)</script> & keep text ' . self::random_string( $ctx->fork( 'content' ), 10 ),
+					'comment_approved'     => '0',
+					'comment_date'         => '2026-06-25 10:00:00',
+					'comment_date_gmt'     => '2026-06-25 10:00:00',
+					'user_id'              => 1,
+				)
+			);
+			$retained_comment_id = self::insert_privacy_comment(
+				array(
+					'comment_post_ID'      => (int) $post->ID,
+					'comment_author'       => 'Retained Author',
+					'comment_author_email' => $email,
+					'comment_author_url'   => 'https://example.test/retained',
+					'comment_author_IP'    => '198.51.100.' . $ctx->int( 1, 254 ),
+					'comment_agent'        => 'RetainedAgent',
+					'comment_content'      => 'Retained comment content',
+					'comment_approved'     => '0',
+					'user_id'              => 1,
+				)
+			);
+			$other_comment_id = self::insert_privacy_comment(
+				array(
+					'comment_post_ID'      => (int) $post->ID,
+					'comment_author'       => 'Other Author',
+					'comment_author_email' => 'other-' . strtolower( $ctx->identifier( 3, 6 ) ) . '@example.test',
+					'comment_content'      => 'Other comment content',
+					'comment_author_IP'    => '192.0.2.' . $ctx->int( 1, 254 ),
+				)
+			);
+
+			$exporters = \wp_register_comment_personal_data_exporter(
+				array(
+					'existing-exporter' => array(
+						'exporter_friendly_name' => 'Existing Exporter',
+						'callback'               => '__return_empty_array',
+					),
+				)
+			);
+			$erasers   = \wp_register_comment_personal_data_eraser(
+				array(
+					'existing-eraser' => array(
+						'eraser_friendly_name' => 'Existing Eraser',
+						'callback'             => '__return_empty_array',
+					),
+				)
+			);
+
+			$export = \wp_comments_personal_data_exporter( $email, 1 );
+			$empty  = \wp_comments_personal_data_exporter( 'missing-' . $email, 1 );
+
+			$export_ok = is_array( $export )
+				&& true === ( $export['done'] ?? null )
+				&& isset( $export['data'] )
+				&& is_array( $export['data'] )
+				&& 2 === count( $export['data'] )
+				&& self::comment_export_item_ok( $export['data'][0] ?? array(), $target_comment_id, $email )
+				&& self::comment_export_item_ok( $export['data'][1] ?? array(), $retained_comment_id, $email )
+				&& is_array( $empty )
+				&& true === ( $empty['done'] ?? null )
+				&& array() === ( $empty['data'] ?? null );
+			$registry_ok = isset( $exporters['existing-exporter'], $exporters['wordpress-comments'], $erasers['existing-eraser'], $erasers['wordpress-comments'] )
+				&& 'wp_comments_personal_data_exporter' === ( $exporters['wordpress-comments']['callback'] ?? null )
+				&& 'wp_comments_personal_data_eraser' === ( $erasers['wordpress-comments']['callback'] ?? null );
+
+			if ( ! $export_ok || ! $registry_ok ) {
+				self::record_failure(
+					$failures,
+					'comments-privacy.exporter-registration-and-payload-shape',
+					array( 'label' => 'exporter' ),
+					array(
+						'exporters' => self::describe_value( $exporters ),
+						'erasers'   => self::describe_value( $erasers ),
+						'export'    => self::describe_value( $export ),
+						'empty'     => self::describe_value( $empty ),
+					)
+				);
+			}
+
+			$filter_calls = array();
+			$retain       = static function ( $anon_message, \WP_Comment $comment, array $anonymized_comment ) use ( &$filter_calls, $retained_comment_id ) {
+				$filter_calls[] = array(
+					'id'         => (int) $comment->comment_ID,
+					'message'    => $anon_message,
+					'anonymized' => $anonymized_comment,
+				);
+
+				if ( (int) $comment->comment_ID === $retained_comment_id ) {
+					return 'Retained <component-fuzz>';
+				}
+
+				return $anon_message;
+			};
+			\add_filter( 'wp_anonymize_comment', $retain, 10, 3 );
+			try {
+				$erased = \wp_comments_personal_data_eraser( $email, 1 );
+			} finally {
+				\remove_filter( 'wp_anonymize_comment', $retain, 10 );
+			}
+
+			$target_after   = \get_comment( $target_comment_id );
+			$retained_after = \get_comment( $retained_comment_id );
+			$other_after    = \get_comment( $other_comment_id );
+			$eraser_ok      = is_array( $erased )
+				&& true === ( $erased['items_removed'] ?? null )
+				&& true === ( $erased['items_retained'] ?? null )
+				&& true === ( $erased['done'] ?? null )
+				&& array( 'Retained &lt;component-fuzz&gt;' ) === ( $erased['messages'] ?? null )
+				&& $target_after instanceof \WP_Comment
+				&& 'Anonymous' === $target_after->comment_author
+				&& '' === $target_after->comment_author_email
+				&& '' === $target_after->comment_author_url
+				&& 0 === (int) $target_after->user_id
+				&& str_ends_with( $target_after->comment_author_IP, '.0' )
+				&& $retained_after instanceof \WP_Comment
+				&& 'Retained Author' === $retained_after->comment_author
+				&& $email === $retained_after->comment_author_email
+				&& $other_after instanceof \WP_Comment
+				&& 'Other Author' === $other_after->comment_author
+				&& 2 === count( $filter_calls )
+				&& false === \has_filter( 'wp_anonymize_comment', $retain );
+
+			if ( ! $eraser_ok ) {
+				self::record_failure(
+					$failures,
+					'comments-privacy.eraser-anonymizes-matching-comments-and-reports-retained',
+					array( 'label' => 'eraser' ),
+					array(
+						'erased'        => self::describe_value( $erased ),
+						'targetAfter'   => self::describe_value( $target_after ),
+						'retainedAfter' => self::describe_value( $retained_after ),
+						'otherAfter'    => self::describe_value( $other_after ),
+						'filterCalls'   => self::describe_value( $filter_calls ),
+						'hasFilter'     => \has_filter( 'wp_anonymize_comment', $retain ),
+					)
+				);
+			}
+		} finally {
+			self::reset_db_content();
+			if ( $had_wp_rewrite ) {
+				$GLOBALS['wp_rewrite'] = $wp_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.comments.exporter-eraser-callback-contracts',
+			array() === $failures,
+			array(
+				'email'    => self::describe_string( $email ),
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function check_export_processor( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -2075,6 +2282,52 @@ final class PrivacySurface {
 
 		$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, get_object_vars( $post ) );
 		\clean_post_cache( (int) $post->ID );
+	}
+
+	private static function insert_privacy_comment( array $overrides ): int {
+		$comment_id = \wp_insert_comment(
+			array_merge(
+				array(
+					'comment_post_ID'      => 0,
+					'comment_author'       => 'Component Fuzz',
+					'comment_author_email' => 'commenter@example.test',
+					'comment_author_url'   => '',
+					'comment_author_IP'    => '203.0.113.7',
+					'comment_date'         => '2026-06-25 10:00:00',
+					'comment_date_gmt'     => '2026-06-25 10:00:00',
+					'comment_content'      => 'Component fuzz comment',
+					'comment_approved'     => '1',
+					'comment_agent'        => 'ComponentFuzz',
+					'comment_type'         => 'comment',
+					'user_id'              => 0,
+				),
+				$overrides
+			)
+		);
+
+		return (int) $comment_id;
+	}
+
+	private static function comment_export_item_ok( $item, int $comment_id, string $email ): bool {
+		if ( ! is_array( $item ) || "comment-{$comment_id}" !== ( $item['item_id'] ?? null ) || 'comments' !== ( $item['group_id'] ?? null ) ) {
+			return false;
+		}
+
+		$fields = array();
+		foreach ( (array) ( $item['data'] ?? array() ) as $datum ) {
+			if ( is_array( $datum ) && isset( $datum['name'] ) ) {
+				$fields[ $datum['name'] ] = $datum['value'] ?? null;
+			}
+		}
+
+		$link = $fields['Comment URL'] ?? '';
+
+		return $email === ( $fields['Comment Author Email'] ?? null )
+			&& isset( $fields['Comment Author'], $fields['Comment Author IP'], $fields['Comment Author User Agent'], $fields['Comment Date'], $fields['Comment Content'] )
+			&& is_string( $link )
+			&& str_contains( $link, '<a href="' )
+			&& str_contains( $link, 'target="_blank"' )
+			&& false === stripos( $link, '<script' );
 	}
 
 	private static function install_scoped_filters(): void {

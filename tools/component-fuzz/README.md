@@ -401,7 +401,8 @@ database, network requests, or a configured site.
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
   confirmation descriptions, request-key hash/expiration validation including
   missing-request and global-post fallback fail-closed behavior, export group
-  HTML escaping, exporter/eraser registry and processor shape contracts, export
+  HTML escaping, exporter/eraser registry and processor shape contracts,
+  built-in comments exporter/eraser payload and anonymization behavior, export
   directory/expiration cleanup filters, anonymization helpers, and privacy
   policy suggestion/default text without mail or network delivery.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
