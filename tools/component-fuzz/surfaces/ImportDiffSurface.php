@@ -68,6 +68,7 @@ final class ImportDiffSurface {
 			array(
 				'add_filter',
 				'get_importers',
+				'has_filter',
 				'remove_filter',
 				'register_importer',
 				'wp_import_upload_form',
@@ -535,18 +536,73 @@ final class ImportDiffSurface {
 			)
 		);
 
-		self::collect_failure(
-			$failures,
-			60 === $importer->bump_request_timeout( $ctx->int( 1, 30 ) ),
-			'WP_Importer::bump_request_timeout raises generated timeout values to the importer timeout',
-			array( 'timeout' => $importer->bump_request_timeout( $ctx->int( 1, 30 ) ) )
-		);
+		$timeout_inputs  = array( $ctx->int( 1, 30 ), 60, $ctx->int( 61, 120 ) );
+		$timeout_results = array();
+		foreach ( $timeout_inputs as $timeout_input ) {
+			$timeout_results[] = $importer->bump_request_timeout( $timeout_input );
+		}
 
 		self::collect_failure(
 			$failures,
-			false === $importer->is_user_over_quota(),
-			'WP_Importer::is_user_over_quota returns false in the no-upload-quota harness state',
-			array( 'overQuota' => $importer->is_user_over_quota() )
+			array( 60, 60, 60 ) === $timeout_results,
+			'WP_Importer::bump_request_timeout always returns the importer timeout for below, equal, and above-threshold inputs',
+			array(
+				'inputs'  => $timeout_inputs,
+				'results' => $timeout_results,
+			)
+		);
+
+		$quota_default = $importer->is_user_over_quota();
+		$quota_output  = '';
+		$quota_true    = null;
+		$option_filter = static function ( $pre, string $option ) {
+			if ( 'blog_upload_space' === $option ) {
+				return 1;
+			}
+			if ( 'upload_space_check_disabled' === $option ) {
+				return 0;
+			}
+
+			return $pre;
+		};
+		$allowed_filter = static function () {
+			return 1;
+		};
+		$used_filter    = static function () {
+			return 2;
+		};
+
+		\add_filter( 'pre_option_blog_upload_space', $allowed_filter );
+		\add_filter( 'pre_site_option', $option_filter, 10, 2 );
+		\add_filter( 'pre_get_space_used', $used_filter );
+		$buffer_level = ob_get_level();
+		try {
+			ob_start();
+			$quota_true   = $importer->is_user_over_quota();
+			$quota_output = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'pre_option_blog_upload_space', $allowed_filter );
+			\remove_filter( 'pre_site_option', $option_filter, 10 );
+			\remove_filter( 'pre_get_space_used', $used_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === $quota_default
+				&& true === $quota_true
+				&& '' !== $quota_output
+				&& false === \has_filter( 'pre_option_blog_upload_space', $allowed_filter )
+				&& false === \has_filter( 'pre_site_option', $option_filter )
+				&& false === \has_filter( 'pre_get_space_used', $used_filter ),
+			'WP_Importer::is_user_over_quota delegates to upload quota helpers for both default false and filtered true branches',
+			array(
+				'default' => $quota_default,
+				'true'    => $quota_true,
+				'output'  => self::preview( $quota_output ),
+			)
 		);
 
 		$previous_wpdb = $wpdb ?? null;
@@ -581,6 +637,16 @@ final class ImportDiffSurface {
 				unset( $GLOBALS['wpdb'] );
 			}
 		}
+
+		self::collect_failure(
+			$failures,
+			$had_wpdb ? $wpdb === $previous_wpdb : ! isset( $wpdb ),
+			'temporary WPDB stand-in is restored before importer helper case returns',
+			array(
+				'hadWpdb'  => $had_wpdb,
+				'restored' => $had_wpdb ? $wpdb === $previous_wpdb : ! isset( $wpdb ),
+			)
+		);
 
 		return self::result( $ctx, 'import-diff.importer.base-helper-contracts', $failures );
 	}
