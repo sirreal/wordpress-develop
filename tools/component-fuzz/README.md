@@ -260,7 +260,8 @@ database, network requests, or a configured site.
   unsupported/unbalanced HTML fallbacks, derived context/element helpers, and
   state/config merge serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
-  nested hook stack state, `current_filter()`, `doing_filter()`, `did_action()`.
+  nested and reentrant hook stack state, preinitialized hook normalization,
+  `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, wrapper agreement, protocol filtering, safe CSS,
   attribute/entity/comment handling, no-HTML filtering, custom context locality,
   strict/custom policy monotonicity, and filter/global restoration.

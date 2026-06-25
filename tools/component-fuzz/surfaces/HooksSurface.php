@@ -27,6 +27,8 @@ final class HooksSurface {
 			$rows[] = self::check_has_filter_priority_semantics( $ctx->fork( 'has-filter-priority' ) );
 			$rows[] = self::check_nested_dispatch_stack( $ctx->fork( 'nested-dispatch-stack' ) );
 			$rows[] = self::check_dispatch_mutation( $ctx->fork( 'dispatch-mutation' ) );
+			$rows[] = self::check_reentrant_iteration_mutation( $ctx->fork( 'reentrant-iteration-mutation' ) );
+			$rows[] = self::check_preinitialized_hook_normalization( $ctx->fork( 'preinitialized-hooks' ) );
 			$rows[] = self::check_remove_all_filters( $ctx->fork( 'remove-all-filters' ) );
 			$rows[] = self::check_action_and_filter_counters( $ctx->fork( 'counters' ) );
 			$rows[] = self::check_reference_and_object_payloads( $ctx->fork( 'reference-object-payloads' ) );
@@ -681,6 +683,589 @@ final class HooksSurface {
 		);
 	}
 
+	private static function check_reentrant_iteration_mutation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$tag                  = self::tag( $ctx, 'reentrant-mutation' );
+		$reentrant_priority   = $ctx->choice( array( -3, 0, 2, 5 ) );
+		$middle_priority      = $reentrant_priority + $ctx->int( 1, 3 );
+		$future_priority      = $middle_priority + $ctx->int( 1, 3 );
+		$removed_priority     = $future_priority + $ctx->int( 1, 3 );
+		$late_priority        = $removed_priority + $ctx->int( 1, 3 );
+		$base                 = 'base-' . $ctx->identifier( 3, 8 );
+		$outer_extra          = 'outer-' . $ctx->identifier( 3, 8 );
+		$inner_extra          = 'inner-' . $ctx->identifier( 3, 8 );
+		$events               = array();
+		$removed_future       = array();
+		$failures             = array();
+		$depth                = 0;
+		$expected_inner_value = null;
+
+		$record = static function ( string $phase ) use ( &$events, $tag ) {
+			$hook = $GLOBALS['wp_filter'][ $tag ] ?? null;
+
+			$events[] = array(
+				'phase'           => $phase,
+				'nestingLevel'    => $hook instanceof \WP_Hook ? self::wp_hook_nesting_level( $hook ) : null,
+				'currentPriority' => $hook instanceof \WP_Hook ? $hook->current_priority() : null,
+				'currentFilter'   => current_filter(),
+				'stack'           => self::current_filter_stack(),
+				'doingTag'        => doing_filter( $tag ),
+				'didFilter'       => did_filter( $tag ),
+			);
+		};
+		$scope  = static function () use ( $tag ): string {
+			return array( $tag, $tag ) === self::current_filter_stack() ? 'inner' : 'outer';
+		};
+
+		$same_added = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-same-added' );
+
+			return $value . '|' . $scope_name . '-same-added';
+		};
+		$future_added = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-future-added' );
+
+			return $value . '|' . $scope_name . '-future-added';
+		};
+		$same_neighbor = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-same-neighbor' );
+
+			return $value . '|' . $scope_name . '-same-neighbor';
+		};
+		$middle        = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-middle' );
+
+			return $value . '|' . $scope_name . '-middle';
+		};
+		$late_removed  = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-removed-late' );
+
+			return $value . '|' . $scope_name . '-removed-late';
+		};
+		$late_survivor = static function ( $value ) use ( $record, $scope ) {
+			$scope_name = $scope();
+			$record( $scope_name . '-late-survivor' );
+
+			return $value . '|' . $scope_name . '-late-survivor';
+		};
+		$reentrant     = static function ( $value, $extra = null ) use (
+			$tag,
+			&$depth,
+			&$expected_inner_value,
+			&$removed_future,
+			$record,
+			$same_added,
+			$future_added,
+			$late_removed,
+			$reentrant_priority,
+			$future_priority,
+			$removed_priority,
+			$inner_extra
+		) {
+			if ( 0 === $depth ) {
+				$record( 'outer-reentrant-before' );
+				add_filter( $tag, $same_added, $reentrant_priority, 1 );
+				add_filter( $tag, $future_added, $future_priority, 1 );
+				$removed_future[] = remove_filter( $tag, $late_removed, $removed_priority );
+
+				++$depth;
+				try {
+					$expected_inner_value = apply_filters( $tag, $value . '|enter-inner', $inner_extra );
+				} finally {
+					--$depth;
+				}
+
+				$record( 'outer-reentrant-after' );
+
+				return $expected_inner_value . '|outer-reentrant-after';
+			}
+
+			$record( 'inner-reentrant' );
+
+			return $value . '|inner-reentrant';
+		};
+
+		add_filter( $tag, $reentrant, $reentrant_priority, 2 );
+		add_filter( $tag, $same_neighbor, $reentrant_priority, 1 );
+		add_filter( $tag, $middle, $middle_priority, 1 );
+		add_filter( $tag, $late_removed, $removed_priority, 1 );
+		add_filter( $tag, $late_survivor, $late_priority, 1 );
+
+		$result = apply_filters( $tag, $base, $outer_extra );
+		$hook   = $GLOBALS['wp_filter'][ $tag ] ?? null;
+
+		$post_dispatch_state = array(
+			'nestingLevel'    => $hook instanceof \WP_Hook ? self::wp_hook_nesting_level( $hook ) : null,
+			'currentPriority' => $hook instanceof \WP_Hook ? $hook->current_priority() : null,
+			'currentFilter'   => current_filter(),
+			'stack'           => self::current_filter_stack(),
+			'doingTag'        => doing_filter( $tag ),
+			'doingAny'        => doing_filter(),
+			'didFilter'       => did_filter( $tag ),
+		);
+		$registry_state      = array(
+			'hasReentrant'   => has_filter( $tag, $reentrant ),
+			'hasSame'        => has_filter( $tag, $same_neighbor ),
+			'hasSameAdded'   => has_filter( $tag, $same_added ),
+			'hasMiddle'      => has_filter( $tag, $middle ),
+			'hasFutureAdded' => has_filter( $tag, $future_added ),
+			'hasLateRemoved' => has_filter( $tag, $late_removed ),
+			'hasLate'        => has_filter( $tag, $late_survivor ),
+		);
+
+		$expected_inner_value = $base
+			. '|enter-inner'
+			. '|inner-reentrant'
+			. '|inner-same-neighbor'
+			. '|inner-same-added'
+			. '|inner-middle'
+			. '|inner-future-added'
+			. '|inner-late-survivor';
+		$expected_result      = $expected_inner_value
+			. '|outer-reentrant-after'
+			. '|outer-same-neighbor'
+			. '|outer-middle'
+			. '|outer-future-added'
+			. '|outer-late-survivor';
+		$expected_event       = static function (
+			string $phase,
+			int $nesting_level,
+			$current_priority,
+			array $stack,
+			int $did_filter
+		) use ( $tag ): array {
+			return array(
+				'phase'           => $phase,
+				'nestingLevel'    => $nesting_level,
+				'currentPriority' => $current_priority,
+				'currentFilter'   => $tag,
+				'stack'           => $stack,
+				'doingTag'        => true,
+				'didFilter'       => $did_filter,
+			);
+		};
+		$expected_events      = array(
+			$expected_event( 'outer-reentrant-before', 1, $reentrant_priority, array( $tag ), 1 ),
+			$expected_event( 'inner-reentrant', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-same-neighbor', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-same-added', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-middle', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-future-added', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-late-survivor', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
+			$expected_event( 'outer-reentrant-after', 1, $reentrant_priority, array( $tag ), 2 ),
+			$expected_event( 'outer-same-neighbor', 1, $reentrant_priority, array( $tag ), 2 ),
+			$expected_event( 'outer-middle', 1, $middle_priority, array( $tag ), 2 ),
+			$expected_event( 'outer-future-added', 1, $future_priority, array( $tag ), 2 ),
+			$expected_event( 'outer-late-survivor', 1, $late_priority, array( $tag ), 2 ),
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_result === $result,
+			'Reentrant same-tag dispatch returns the exact inner result before resuming the outer iteration.',
+			array(
+				'expected' => $expected_result,
+				'actual'   => $result,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_events === $events,
+			'Same-tag reentrant dispatch preserves exact event order, nesting level, current priority, counters, and stack.',
+			array(
+				'expectedEvents' => $expected_events,
+				'actualEvents'   => $events,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array( true ) === $removed_future
+				&& array(
+					'hasReentrant'   => $reentrant_priority,
+					'hasSame'        => $reentrant_priority,
+					'hasSameAdded'   => $reentrant_priority,
+					'hasMiddle'      => $middle_priority,
+					'hasFutureAdded' => $future_priority,
+					'hasLateRemoved' => false,
+					'hasLate'        => $late_priority,
+				) === $registry_state,
+			'Mutation boundaries leave same-priority additions for nested dispatch, future additions for both active iterations, and removed future callbacks absent.',
+			array(
+				'removedFuture' => $removed_future,
+				'registryState' => $registry_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'nestingLevel'    => 0,
+				'currentPriority' => false,
+				'currentFilter'   => false,
+				'stack'           => array(),
+				'doingTag'        => false,
+				'doingAny'        => false,
+				'didFilter'       => 2,
+			) === $post_dispatch_state,
+			'Reentrant same-tag dispatch restores the hook iteration internals and global stack after unwinding.',
+			array(
+				'postDispatchState' => $post_dispatch_state,
+			)
+		);
+
+		$removed_all = remove_all_filters( $tag );
+		unset( $GLOBALS['wp_filters'][ $tag ] );
+
+		$cleanup_state = array(
+			'removedAll' => $removed_all,
+			'hasHook'    => isset( $GLOBALS['wp_filter'][ $tag ] ),
+			'hasCounter' => isset( $GLOBALS['wp_filters'][ $tag ] ),
+			'stack'      => self::current_filter_stack(),
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				'removedAll' => true,
+				'hasHook'    => false,
+				'hasCounter' => false,
+				'stack'      => array(),
+			) === $cleanup_state,
+			'Reentrant same-tag invariant cleans its hook registry and counter state.',
+			array(
+				'cleanupState' => $cleanup_state,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'hooks.same-tag-reentrant-iteration-mutation',
+			$failures,
+			array(
+				'tag'        => $tag,
+				'priorities' => array(
+					'reentrant' => $reentrant_priority,
+					'middle'    => $middle_priority,
+					'future'    => $future_priority,
+					'removed'   => $removed_priority,
+					'late'      => $late_priority,
+				),
+			)
+		);
+	}
+
+	private static function check_preinitialized_hook_normalization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$filter_tag       = self::tag( $ctx, 'preinit-filter' );
+		$action_tag       = self::tag( $ctx, 'preinit-action' );
+		$passthrough_tag  = self::tag( $ctx, 'preinit-passthrough' );
+		$first_priority   = $ctx->choice( array( -2, 0, 3, 6 ) );
+		$second_priority  = $first_priority + $ctx->int( 1, 4 );
+		$action_priority  = $second_priority + $ctx->int( 1, 4 );
+		$pass_priority    = $action_priority + $ctx->int( 1, 4 );
+		$extra            = 'extra-' . $ctx->identifier( 3, 8 );
+		$note             = 'note-' . $ctx->identifier( 3, 8 );
+		$filter_log       = array();
+		$action_log       = array();
+		$failures         = array();
+		$filter_zero      = static function () use ( &$filter_log, $filter_tag ) {
+			$filter_log[] = array(
+				'id'              => 'zero',
+				'count'           => 0,
+				'currentFilter'   => current_filter(),
+				'stack'           => self::current_filter_stack(),
+				'currentPriority' => $GLOBALS['wp_filter'][ $filter_tag ]->current_priority(),
+				'didFilter'       => did_filter( $filter_tag ),
+			);
+
+			return 'pre-zero';
+		};
+		$filter_two       = static function ( $value, $extra_arg ) use ( &$filter_log, $filter_tag ) {
+			$filter_log[] = array(
+				'id'              => 'two',
+				'count'           => 2,
+				'value'           => $value,
+				'extra'           => $extra_arg,
+				'currentFilter'   => current_filter(),
+				'stack'           => self::current_filter_stack(),
+				'currentPriority' => $GLOBALS['wp_filter'][ $filter_tag ]->current_priority(),
+				'didFilter'       => did_filter( $filter_tag ),
+			);
+
+			return $value . '|two:' . $extra_arg;
+		};
+		$filter_one       = static function ( $value ) use ( &$filter_log, $filter_tag ) {
+			$filter_log[] = array(
+				'id'              => 'one',
+				'count'           => 1,
+				'value'           => $value,
+				'currentFilter'   => current_filter(),
+				'stack'           => self::current_filter_stack(),
+				'currentPriority' => $GLOBALS['wp_filter'][ $filter_tag ]->current_priority(),
+				'didFilter'       => did_filter( $filter_tag ),
+			);
+
+			return $value . '|one';
+		};
+		$action_ref       = static function ( &$box, $note_arg ) use ( &$action_log, $action_tag, $filter_tag ) {
+			$action_log[] = array(
+				'count'           => 2,
+				'note'            => $note_arg,
+				'currentAction'   => current_action(),
+				'currentFilter'   => current_filter(),
+				'stack'           => self::current_filter_stack(),
+				'currentPriority' => $GLOBALS['wp_filter'][ $action_tag ]->current_priority(),
+				'doingAction'     => doing_action( $action_tag ),
+				'doingFilter'     => doing_filter( $filter_tag ),
+				'didAction'       => did_action( $action_tag ),
+			);
+			$box['count']++;
+			$box['trail'][] = $note_arg;
+		};
+		$passthrough      = static function ( $value ) {
+			return $value . '|passthrough';
+		};
+		$passthrough_hook = new \WP_Hook();
+		$passthrough_hook->add_filter( $passthrough_tag, $passthrough, $pass_priority, 1 );
+
+		$GLOBALS['wp_filter'][ $filter_tag ] = array(
+			$second_priority => array(
+				'two' => array(
+					'function'      => $filter_two,
+					'accepted_args' => 2,
+				),
+				'one' => array(
+					'function'      => $filter_one,
+					'accepted_args' => 1,
+				),
+			),
+			$first_priority  => array(
+				'zero' => array(
+					'function'      => $filter_zero,
+					'accepted_args' => 0,
+				),
+			),
+		);
+		$GLOBALS['wp_filter'][ $action_tag ]      = array(
+			$action_priority => array(
+				'action-ref' => array(
+					'function'      => $action_ref,
+					'accepted_args' => 2,
+				),
+			),
+		);
+		$GLOBALS['wp_filter'][ $passthrough_tag ] = $passthrough_hook;
+
+		$converted                             = \WP_Hook::build_preinitialized_hooks(
+			array(
+				$filter_tag      => $GLOBALS['wp_filter'][ $filter_tag ],
+				$action_tag      => $GLOBALS['wp_filter'][ $action_tag ],
+				$passthrough_tag => $GLOBALS['wp_filter'][ $passthrough_tag ],
+			)
+		);
+		$GLOBALS['wp_filter'][ $filter_tag ]      = $converted[ $filter_tag ];
+		$GLOBALS['wp_filter'][ $action_tag ]      = $converted[ $action_tag ];
+		$GLOBALS['wp_filter'][ $passthrough_tag ] = $converted[ $passthrough_tag ];
+
+		$filter_hook = $GLOBALS['wp_filter'][ $filter_tag ] ?? null;
+		$action_hook = $GLOBALS['wp_filter'][ $action_tag ] ?? null;
+		$pass_hook   = $GLOBALS['wp_filter'][ $passthrough_tag ] ?? null;
+
+		$conversion_state = array(
+			'filterIsHook'   => $filter_hook instanceof \WP_Hook,
+			'actionIsHook'   => $action_hook instanceof \WP_Hook,
+			'passThrough'    => $pass_hook === $passthrough_hook,
+			'filterShape'    => $filter_hook instanceof \WP_Hook ? self::describe_hook_accepted_args( $filter_hook ) : array(),
+			'actionShape'    => $action_hook instanceof \WP_Hook ? self::describe_hook_accepted_args( $action_hook ) : array(),
+			'passShape'      => $pass_hook instanceof \WP_Hook ? self::describe_hook_accepted_args( $pass_hook ) : array(),
+		);
+		$expected_shapes   = array(
+			'filter' => array(
+				$first_priority  => array( 0 ),
+				$second_priority => array( 2, 1 ),
+			),
+			'action' => array(
+				$action_priority => array( 2 ),
+			),
+			'pass'   => array(
+				$pass_priority => array( 1 ),
+			),
+		);
+
+		$has_state = array(
+			'zero'          => has_filter( $filter_tag, $filter_zero ),
+			'zeroExact'     => has_filter( $filter_tag, $filter_zero, $first_priority ),
+			'two'           => has_filter( $filter_tag, $filter_two ),
+			'twoExact'      => has_filter( $filter_tag, $filter_two, $second_priority ),
+			'one'           => has_filter( $filter_tag, $filter_one ),
+			'actionRef'     => has_action( $action_tag, $action_ref ),
+			'actionExact'   => has_action( $action_tag, $action_ref, $action_priority ),
+			'passthrough'   => has_filter( $passthrough_tag, $passthrough ),
+			'passExact'     => has_filter( $passthrough_tag, $passthrough, $pass_priority ),
+		);
+		$filtered  = apply_filters_ref_array( $filter_tag, array( 'pre-base', $extra, 'ignored' ) );
+		$box       = array(
+			'count' => 0,
+			'trail' => array(),
+		);
+		$args      = array( &$box, $note );
+		do_action_ref_array( $action_tag, $args );
+		$passed    = apply_filters( $passthrough_tag, 'pass-base' );
+
+		self::collect_failure(
+			$failures,
+			array(
+				'filterIsHook'   => true,
+				'actionIsHook'   => true,
+				'passThrough'    => true,
+				'filterShape'    => $expected_shapes['filter'],
+				'actionShape'    => $expected_shapes['action'],
+				'passShape'      => $expected_shapes['pass'],
+			) === $conversion_state,
+			'Preinitialized global hook arrays normalize to WP_Hook objects while preserving priority and accepted_args shape.',
+			array(
+				'expectedShapes'  => $expected_shapes,
+				'conversionState' => $conversion_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'zero'        => $first_priority,
+				'zeroExact'   => true,
+				'two'         => $second_priority,
+				'twoExact'    => true,
+				'one'         => $second_priority,
+				'actionRef'   => $action_priority,
+				'actionExact' => true,
+				'passthrough' => $pass_priority,
+				'passExact'   => true,
+			) === $has_state,
+			'Preinitialized callbacks are addressable through has_filter and has_action after conversion.',
+			array(
+				'hasState' => $has_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			'pre-zero|two:' . $extra . '|one' === $filtered
+				&& array(
+					array(
+						'id'              => 'zero',
+						'count'           => 0,
+						'currentFilter'   => $filter_tag,
+						'stack'           => array( $filter_tag ),
+						'currentPriority' => $first_priority,
+						'didFilter'       => 1,
+					),
+					array(
+						'id'              => 'two',
+						'count'           => 2,
+						'value'           => 'pre-zero',
+						'extra'           => $extra,
+						'currentFilter'   => $filter_tag,
+						'stack'           => array( $filter_tag ),
+						'currentPriority' => $second_priority,
+						'didFilter'       => 1,
+					),
+					array(
+						'id'              => 'one',
+						'count'           => 1,
+						'value'           => 'pre-zero|two:' . $extra,
+						'currentFilter'   => $filter_tag,
+						'stack'           => array( $filter_tag ),
+						'currentPriority' => $second_priority,
+						'didFilter'       => 1,
+					),
+				) === $filter_log,
+			'Converted preinitialized filters run in sorted priority order with exact accepted_args truncation.',
+			array(
+				'filtered'  => $filtered,
+				'filterLog' => $filter_log,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'count' => 1,
+				'trail' => array( $note ),
+			) === $box
+				&& array(
+					array(
+						'count'           => 2,
+						'note'            => $note,
+						'currentAction'   => $action_tag,
+						'currentFilter'   => $action_tag,
+						'stack'           => array( $action_tag ),
+						'currentPriority' => $action_priority,
+						'doingAction'     => true,
+						'doingFilter'     => false,
+						'didAction'       => 1,
+					),
+				) === $action_log
+				&& 'pass-base|passthrough' === $passed,
+			'Converted preinitialized actions preserve ref-array payloads, action state, and existing WP_Hook passthrough objects.',
+			array(
+				'box'       => $box,
+				'actionLog' => $action_log,
+				'passed'    => $passed,
+			)
+		);
+
+		remove_all_filters( $filter_tag );
+		remove_all_actions( $action_tag );
+		remove_all_filters( $passthrough_tag );
+		unset( $GLOBALS['wp_filters'][ $filter_tag ], $GLOBALS['wp_actions'][ $action_tag ], $GLOBALS['wp_filters'][ $passthrough_tag ] );
+
+		$cleanup_state = array(
+			'hasFilterHook' => isset( $GLOBALS['wp_filter'][ $filter_tag ] ),
+			'hasActionHook' => isset( $GLOBALS['wp_filter'][ $action_tag ] ),
+			'hasPassHook'   => isset( $GLOBALS['wp_filter'][ $passthrough_tag ] ),
+			'hasFilterDid'  => isset( $GLOBALS['wp_filters'][ $filter_tag ] ),
+			'hasActionDid'  => isset( $GLOBALS['wp_actions'][ $action_tag ] ),
+			'hasPassDid'    => isset( $GLOBALS['wp_filters'][ $passthrough_tag ] ),
+			'currentFilter' => current_filter(),
+			'stack'         => self::current_filter_stack(),
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				'hasFilterHook' => false,
+				'hasActionHook' => false,
+				'hasPassHook'   => false,
+				'hasFilterDid'  => false,
+				'hasActionDid'  => false,
+				'hasPassDid'    => false,
+				'currentFilter' => false,
+				'stack'         => array(),
+			) === $cleanup_state,
+			'Preinitialized hook invariant removes converted hooks and generated counters.',
+			array(
+				'cleanupState' => $cleanup_state,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'hooks.preinitialized-hook-normalization',
+			$failures,
+			array(
+				'filter'     => $filter_tag,
+				'action'     => $action_tag,
+				'passthrough' => $passthrough_tag,
+				'priorities' => array(
+					'first'  => $first_priority,
+					'second' => $second_priority,
+					'action' => $action_priority,
+					'pass'   => $pass_priority,
+				),
+			)
+		);
+	}
+
 	private static function check_remove_all_filters( \ComponentFuzz\FuzzContext $ctx ): array {
 		$tag      = self::tag( $ctx, 'remove-all' );
 		$failures = array();
@@ -1116,6 +1701,35 @@ final class HooksSurface {
 			},
 			$args
 		);
+	}
+
+	private static function describe_hook_accepted_args( \WP_Hook $hook ): array {
+		$shape = array();
+
+		foreach ( $hook->callbacks as $priority => $callbacks ) {
+			$shape[ (int) $priority ] = array_map(
+				static function ( array $callback ): int {
+					return (int) $callback['accepted_args'];
+				},
+				array_values( $callbacks )
+			);
+		}
+
+		return $shape;
+	}
+
+	private static function wp_hook_nesting_level( \WP_Hook $hook ): int {
+		return (int) self::wp_hook_private_property( $hook, 'nesting_level' );
+	}
+
+	private static function wp_hook_private_property( \WP_Hook $hook, string $property ) {
+		$reflection = new \ReflectionProperty( \WP_Hook::class, $property );
+
+		if ( PHP_VERSION_ID < 80100 && method_exists( $reflection, 'setAccessible' ) ) {
+			$reflection->setAccessible( true );
+		}
+
+		return $reflection->getValue( $hook );
 	}
 
 	private static function current_filter_stack(): array {
