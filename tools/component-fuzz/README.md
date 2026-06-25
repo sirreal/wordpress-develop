@@ -482,8 +482,8 @@ database, network requests, or a configured site.
 - `site-health`: no-DB Site Health/update/HTTPS helper coverage, including
   generated update transients and dismissed core update options, aggregate
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS
-  detection short-circuits, and selected direct `WP_Site_Health` tests without
-  remote requests.
+  detection short-circuits, generated `site_status_tests` registry/filter
+  behavior, and selected direct `WP_Site_Health` tests without remote requests.
 - `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
   formatting and diagnostic size helpers, including private field/section
   suppression, debug vs info labels, `debug_information` filter locality,

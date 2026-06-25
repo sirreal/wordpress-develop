@@ -10,6 +10,10 @@ final class SiteHealthSurface {
 	private static array $site_options    = array();
 	private static array $options         = array();
 	private static array $granted_caps    = array();
+	private static ?array $site_status_tests_case = null;
+	private static array $site_status_filter_seen = array();
+	private static array $site_status_result_filter_seen = array();
+	private static array $generated_test_calls = array();
 	private static ?\WP_Error $https_detection_error = null;
 	private static ?bool $replace_override           = null;
 	private static int $http_request_count           = 0;
@@ -43,6 +47,7 @@ final class SiteHealthSurface {
 			$rows[] = self::check_https_migration( $ctx, $case );
 			$rows[] = self::check_https_detection_short_circuit( $ctx, $case );
 			$rows[] = self::check_site_health_direct_tests( $ctx, $case );
+			$rows[] = self::check_site_status_test_registry( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'site-health.surface-no-throw',
@@ -131,6 +136,66 @@ final class SiteHealthSurface {
 		return null === self::$replace_override ? $should_replace : self::$replace_override;
 	}
 
+	public static function filter_site_status_tests( array $tests ): array {
+		if ( null === self::$site_status_tests_case ) {
+			return $tests;
+		}
+
+		self::$site_status_filter_seen[] = array(
+			'directKeys'                => array_keys( is_array( $tests['direct'] ?? null ) ? $tests['direct'] : array() ),
+			'asyncKeys'                 => array_keys( is_array( $tests['async'] ?? null ) ? $tests['async'] : array() ),
+			'hasAuthorizationHeader'    => isset( $tests['async']['authorization_header'] ),
+			'hasPageCache'              => isset( $tests['async']['page_cache'] ),
+			'hasPersistentObjectCache'  => isset( $tests['direct']['persistent_object_cache'] ),
+			'environmentType'           => \wp_get_environment_type(),
+			'basicAuthProtected'        => \wp_is_site_protected_by_basic_auth(),
+		);
+
+		$generated = self::generated_site_status_tests( self::$site_status_tests_case );
+		$mode      = self::$site_status_tests_case['mode'];
+
+		if ( 'append' === $mode ) {
+			$tests['direct'] = array_merge( $tests['direct'] ?? array(), $generated['direct'] );
+			$tests['async']  = array_merge( $tests['async'] ?? array(), $generated['async'] );
+			return $tests;
+		}
+
+		if ( 'direct-only' === $mode ) {
+			return array(
+				'direct' => $generated['direct'],
+			);
+		}
+
+		if ( 'async-only' === $mode ) {
+			return array(
+				'async' => $generated['async'],
+			);
+		}
+
+		return $generated;
+	}
+
+	public static function filter_site_status_test_result( array $result ): array {
+		if ( null === self::$site_status_tests_case ) {
+			return $result;
+		}
+
+		$test = $result['test'] ?? null;
+		if ( ! is_string( $test ) || ! isset( self::$site_status_tests_case['results'][ $test ] ) ) {
+			return $result;
+		}
+
+		$expected = self::$site_status_tests_case['results'][ $test ];
+
+		self::$site_status_result_filter_seen[] = $test;
+
+		$result['status']         = $expected['filteredStatus'];
+		$result['badge']['color'] = $expected['filteredBadgeColor'];
+		$result['actions']        = $expected['filteredActions'];
+
+		return $result;
+	}
+
 	public static function filter_false(): bool {
 		return false;
 	}
@@ -156,6 +221,7 @@ final class SiteHealthSurface {
 				'home_url',
 				'is_wp_error',
 				'remove_filter',
+				'rest_url',
 				'site_url',
 				'wp_cache_delete',
 				'wp_cache_set',
@@ -163,8 +229,10 @@ final class SiteHealthSurface {
 				'wp_get_https_detection_errors',
 				'wp_get_translation_updates',
 				'wp_get_update_data',
+				'wp_get_environment_type',
 				'wp_is_home_url_using_https',
 				'wp_is_site_url_using_https',
+				'wp_is_site_protected_by_basic_auth',
 				'wp_is_using_https',
 				'wp_parse_url',
 				'wp_replace_insecure_home_url',
@@ -191,6 +259,8 @@ final class SiteHealthSurface {
 		\add_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ), 10, 3 );
 		\add_filter( 'wp_should_replace_insecure_home_url', array( self::class, 'filter_should_replace_insecure_home_url' ) );
 		\add_filter( 'got_rewrite', array( self::class, 'filter_false' ) );
+		\add_filter( 'site_status_tests', array( self::class, 'filter_site_status_tests' ) );
+		\add_filter( 'site_status_test_result', array( self::class, 'filter_site_status_test_result' ) );
 
 		$GLOBALS['current_user'] = new \WP_User( 0 );
 	}
@@ -663,6 +733,117 @@ final class SiteHealthSurface {
 		);
 	}
 
+	private static function check_site_status_test_registry( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$registry    = $case['siteStatusTests'];
+		$site_health = self::site_health_without_constructor();
+
+		self::set_site_health_instance( $site_health );
+		self::apply_https_case( $case['https'] );
+		self::apply_basic_auth_protection( $registry['basicAuthProtected'] );
+
+		self::$site_status_tests_case          = $registry;
+		self::$site_status_filter_seen         = array();
+		self::$site_status_result_filter_seen  = array();
+		self::$generated_test_calls            = array();
+		self::$http_request_count              = 0;
+
+		$tests = \WP_Site_Health::get_tests();
+
+		self::collect_failure(
+			$failures,
+			is_array( $tests )
+				&& isset( $tests['direct'], $tests['async'] )
+				&& is_array( $tests['direct'] )
+				&& is_array( $tests['async'] ),
+			'WP_Site_Health::get_tests normalizes direct and async groups after filtering',
+			array(
+				'mode' => $registry['mode'],
+				'keys' => is_array( $tests ) ? array_keys( $tests ) : array(),
+			)
+		);
+
+		$seen = self::$site_status_filter_seen[0] ?? null;
+		self::collect_failure(
+			$failures,
+			1 === count( self::$site_status_filter_seen )
+				&& is_array( $seen )
+				&& ( ! $registry['basicAuthProtected'] ) === $seen['hasAuthorizationHeader']
+				&& ( 'production' === $seen['environmentType'] ) === $seen['hasPageCache']
+				&& ( 'production' === $seen['environmentType'] ) === $seen['hasPersistentObjectCache'],
+			'site_status_tests filter observes environment and basic-auth gated defaults',
+			array(
+				'mode'                  => $registry['mode'],
+				'basicAuthProtected'    => $registry['basicAuthProtected'],
+				'observationCount'      => count( self::$site_status_filter_seen ),
+				'observed'              => $seen,
+			)
+		);
+
+		if ( is_array( $tests ) && isset( $tests['direct'], $tests['async'] ) ) {
+			$expected_keys = self::expected_site_status_registry_keys( $registry, $seen );
+			$actual_keys   = array(
+				'direct' => array_keys( $tests['direct'] ),
+				'async'  => array_keys( $tests['async'] ),
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected_keys === $actual_keys,
+				'filtered Site Health test registry keys match generated mode',
+				array(
+					'mode'     => $registry['mode'],
+					'expected' => $expected_keys,
+					'actual'   => $actual_keys,
+				)
+			);
+
+			self::assert_generated_direct_tests( $failures, $site_health, $tests['direct'], $registry );
+			self::assert_generated_async_tests( $failures, $site_health, $tests['async'], $registry );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::expected_performed_site_status_tests( $registry ) === self::$site_status_result_filter_seen,
+			'site_status_test_result filter runs once for each performed generated test',
+			array(
+				'expected' => self::expected_performed_site_status_tests( $registry ),
+				'actual'   => self::$site_status_result_filter_seen,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::expected_generated_test_call_counts( $registry ) === self::$generated_test_calls,
+			'generated Site Health callbacks run exactly once when directly performed',
+			array(
+				'expected' => self::expected_generated_test_call_counts( $registry ),
+				'actual'   => self::$generated_test_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			0 === self::$http_request_count,
+			'Site Health test registry invariant does not make HTTP requests',
+			array( 'httpRequests' => self::$http_request_count )
+		);
+
+		self::$site_status_tests_case = null;
+
+		return $ctx->result(
+			'site-health.tests.registry-filter-direct-callbacks',
+			array() === $failures,
+			array(
+				'mode'         => $registry['mode'],
+				'directCount'  => count( $registry['direct'] ),
+				'asyncCount'   => count( $registry['async'] ),
+				'performed'    => self::expected_performed_site_status_tests( $registry ),
+				'failures'     => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		return array(
 			'updates'                 => self::updates_case( $ctx->fork( 'updates' ) ),
@@ -673,6 +854,7 @@ final class SiteHealthSurface {
 			'siteHealthUpdateHttpsCap' => $ctx->bool(),
 			'authorization'          => self::authorization_case( $ctx->fork( 'authorization' ) ),
 			'blogPublic'             => $ctx->bool() ? 1 : 0,
+			'siteStatusTests'        => self::site_status_tests_case( $ctx->fork( 'site-status-tests' ) ),
 		);
 	}
 
@@ -898,6 +1080,90 @@ final class SiteHealthSurface {
 		);
 	}
 
+	private static function site_status_tests_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$direct_ctx  = $ctx->fork( 'direct' );
+		$async_ctx   = $ctx->fork( 'async' );
+		$result_ctx  = $ctx->fork( 'results' );
+		$direct      = array();
+		$async       = array();
+		$results     = array();
+		$direct_count = $direct_ctx->int( 1, 3 );
+		$async_count = $async_ctx->int( 1, 3 );
+
+		for ( $i = 0; $i < $direct_count; ++$i ) {
+			$key            = 'component_fuzz_direct_' . strtolower( $direct_ctx->identifier( 4, 10 ) ) . '_' . $i;
+			$key            = preg_replace( '/[^a-z0-9_]+/', '_', $key );
+			$direct[ $key ] = array(
+				'label'    => 'Component Fuzz Direct ' . $i,
+				'skipCron' => $direct_ctx->bool(),
+			);
+			$results[ $key ] = self::site_status_result_case( $result_ctx->fork( $key ), $key, $direct[ $key ]['label'] );
+		}
+
+		for ( $i = 0; $i < $async_count; ++$i ) {
+			$key                  = 'component_fuzz_async_' . strtolower( $async_ctx->identifier( 4, 10 ) ) . '_' . $i;
+			$key                  = preg_replace( '/[^a-z0-9_]+/', '_', $key );
+			$has_rest             = $async_ctx->bool();
+			$has_async_direct     = 0 === $i || $async_ctx->bool( 65 );
+			$async[ $key ]        = array(
+				'label'              => 'Component Fuzz Async ' . $i,
+				'test'               => $has_rest
+					? '/wp-json/component-fuzz/v1/site-health/' . $key
+					: 'component_fuzz_ajax_' . $key,
+				'hasRest'            => $has_rest,
+				'headers'            => self::site_status_headers_case( $async_ctx->fork( 'headers-' . $i ) ),
+				'skipCron'           => $async_ctx->bool(),
+				'hasAsyncDirectTest' => $has_async_direct,
+			);
+			$results[ $key ] = self::site_status_result_case( $result_ctx->fork( $key ), $key, $async[ $key ]['label'] );
+		}
+
+		return array(
+			'mode'               => $ctx->choice( array( 'append', 'replace', 'direct-only', 'async-only' ) ),
+			'basicAuthProtected' => $ctx->bool(),
+			'direct'             => $direct,
+			'async'              => $async,
+			'results'            => $results,
+		);
+	}
+
+	private static function site_status_headers_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$headers = array();
+
+		if ( $ctx->bool( 70 ) ) {
+			$headers['X-Component-Fuzz'] = 'site-health-' . $ctx->int( 1, 999 );
+		}
+
+		if ( $ctx->bool( 45 ) ) {
+			$headers['Authorization'] = 'Basic ' . base64_encode( 'user-' . $ctx->int( 1, 9 ) . ':pwd-' . $ctx->int( 1, 9 ) );
+		}
+
+		if ( $ctx->bool( 35 ) ) {
+			$headers['Accept'] = $ctx->choice( array( 'application/json', 'application/problem+json' ) );
+		}
+
+		return $headers;
+	}
+
+	private static function site_status_result_case( \ComponentFuzz\FuzzContext $ctx, string $key, string $label ): array {
+		$statuses = array( 'good', 'recommended', 'critical' );
+		$colors   = array( 'blue', 'green', 'orange', 'red', 'purple' );
+
+		return array(
+			'label'              => $label,
+			'status'             => $ctx->choice( $statuses ),
+			'filteredStatus'     => $ctx->choice( $statuses ),
+			'badgeLabel'         => 'Generated',
+			'badgeColor'         => $ctx->choice( $colors ),
+			'filteredBadgeColor' => $ctx->choice( $colors ),
+			'description'        => '<p>Generated Site Health registry result for ' . $key . '.</p>',
+			'actions'            => '',
+			'filteredActions'    => $ctx->bool()
+				? '<p><a href="https://example.test/site-health/' . rawurlencode( $key ) . '">Generated action</a></p>'
+				: '',
+		);
+	}
+
 	private static function translation_cases( \ComponentFuzz\FuzzContext $ctx, int $count, string $type ): array {
 		$translations = array();
 		$used         = array();
@@ -1018,6 +1284,17 @@ final class SiteHealthSurface {
 		$_SERVER['PHP_AUTH_PW']   = $case['pass'];
 	}
 
+	private static function apply_basic_auth_protection( bool $protected ): void {
+		unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] );
+
+		if ( ! $protected ) {
+			return;
+		}
+
+		$_SERVER['PHP_AUTH_USER'] = 'component-fuzz-user';
+		$_SERVER['PHP_AUTH_PW']   = 'component-fuzz-password';
+	}
+
 	private static function expected_should_replace_insecure_home_url( array $case ): bool {
 		return 'https' === \wp_parse_url( $case['home'], PHP_URL_SCHEME )
 			&& 'https' === \wp_parse_url( $case['siteurl'], PHP_URL_SCHEME )
@@ -1059,6 +1336,19 @@ final class SiteHealthSurface {
 		return $reflection->newInstanceWithoutConstructor();
 	}
 
+	private static function site_health_instance() {
+		$reflection = new \ReflectionClass( \WP_Site_Health::class );
+		$property   = $reflection->getProperty( 'instance' );
+
+		return $property->getValue();
+	}
+
+	private static function set_site_health_instance( $instance ): void {
+		$reflection = new \ReflectionClass( \WP_Site_Health::class );
+		$property   = $reflection->getProperty( 'instance' );
+		$property->setValue( null, $instance );
+	}
+
 	private static function assert_site_health_result(
 		array &$failures,
 		$result,
@@ -1095,6 +1385,293 @@ final class SiteHealthSurface {
 				'expectedStatus' => $expected_status,
 				'actual'         => self::describe_value( $result ),
 			)
+		);
+	}
+
+	private static function generated_site_status_tests( array $registry ): array {
+		$tests = array(
+			'direct' => array(),
+			'async'  => array(),
+		);
+
+		foreach ( $registry['direct'] as $key => $entry ) {
+			$test_key                 = (string) $key;
+			$tests['direct'][ $key ] = array(
+				'label'     => $entry['label'],
+				'test'      => static function () use ( $test_key ): array {
+					return self::generated_site_status_test( $test_key );
+				},
+				'skip_cron' => $entry['skipCron'],
+			);
+		}
+
+		foreach ( $registry['async'] as $key => $entry ) {
+			$test_key                = (string) $key;
+			$tests['async'][ $key ] = array(
+				'label'     => $entry['label'],
+				'test'      => $entry['test'],
+				'has_rest'  => $entry['hasRest'],
+				'headers'   => $entry['headers'],
+				'skip_cron' => $entry['skipCron'],
+			);
+
+			if ( $entry['hasAsyncDirectTest'] ) {
+				$tests['async'][ $key ]['async_direct_test'] = static function () use ( $test_key ): array {
+					return self::generated_site_status_test( $test_key );
+				};
+			}
+		}
+
+		return $tests;
+	}
+
+	private static function generated_site_status_test( string $test ): array {
+		if ( ! isset( self::$generated_test_calls[ $test ] ) ) {
+			self::$generated_test_calls[ $test ] = 0;
+		}
+
+		++self::$generated_test_calls[ $test ];
+
+		$case = self::$site_status_tests_case['results'][ $test ] ?? array(
+			'label'       => 'Missing generated Site Health result',
+			'status'      => 'critical',
+			'badgeLabel'  => 'Generated',
+			'badgeColor'  => 'red',
+			'description' => '<p>Missing generated Site Health result.</p>',
+			'actions'     => '',
+		);
+
+		return array(
+			'label'       => $case['label'],
+			'status'      => $case['status'],
+			'badge'       => array(
+				'label' => $case['badgeLabel'],
+				'color' => $case['badgeColor'],
+			),
+			'description' => $case['description'],
+			'actions'     => $case['actions'],
+			'test'        => $test,
+		);
+	}
+
+	private static function expected_site_status_registry_keys( array $registry, ?array $seen ): array {
+		$generated_direct = array_keys( $registry['direct'] );
+		$generated_async  = array_keys( $registry['async'] );
+		$default_direct   = is_array( $seen ) ? $seen['directKeys'] : array();
+		$default_async    = is_array( $seen ) ? $seen['asyncKeys'] : array();
+
+		if ( 'append' === $registry['mode'] ) {
+			return array(
+				'direct' => array_merge( $default_direct, $generated_direct ),
+				'async'  => array_merge( $default_async, $generated_async ),
+			);
+		}
+
+		if ( 'direct-only' === $registry['mode'] ) {
+			return array(
+				'direct' => $generated_direct,
+				'async'  => array(),
+			);
+		}
+
+		if ( 'async-only' === $registry['mode'] ) {
+			return array(
+				'direct' => array(),
+				'async'  => $generated_async,
+			);
+		}
+
+		return array(
+			'direct' => $generated_direct,
+			'async'  => $generated_async,
+		);
+	}
+
+	private static function expected_performed_site_status_tests( array $registry ): array {
+		$performed = array();
+
+		if ( in_array( $registry['mode'], array( 'append', 'replace', 'direct-only' ), true ) ) {
+			$performed = array_merge( $performed, array_keys( $registry['direct'] ) );
+		}
+
+		if ( in_array( $registry['mode'], array( 'append', 'replace', 'async-only' ), true ) ) {
+			foreach ( $registry['async'] as $key => $entry ) {
+				if ( $entry['hasAsyncDirectTest'] ) {
+					$performed[] = $key;
+				}
+			}
+		}
+
+		return $performed;
+	}
+
+	private static function expected_generated_test_call_counts( array $registry ): array {
+		$counts = array();
+
+		foreach ( self::expected_performed_site_status_tests( $registry ) as $test ) {
+			$counts[ $test ] = 1;
+		}
+
+		return $counts;
+	}
+
+	private static function assert_generated_direct_tests(
+		array &$failures,
+		\WP_Site_Health $site_health,
+		array $tests,
+		array $registry
+	): void {
+		if ( ! in_array( $registry['mode'], array( 'append', 'replace', 'direct-only' ), true ) ) {
+			return;
+		}
+
+		foreach ( $registry['direct'] as $key => $expected ) {
+			$entry = $tests[ $key ] ?? null;
+
+			self::collect_failure(
+				$failures,
+				is_array( $entry )
+					&& ( $entry['label'] ?? null ) === $expected['label']
+					&& ( $entry['skip_cron'] ?? null ) === $expected['skipCron']
+					&& isset( $entry['test'] )
+					&& is_callable( $entry['test'] ),
+				"generated direct Site Health test {$key} is registered as callable metadata",
+				array(
+					'expected' => array(
+						'label'    => $expected['label'],
+						'skipCron' => $expected['skipCron'],
+					),
+					'actual'   => self::summarize_site_status_test_entry( $entry ),
+				)
+			);
+
+			if ( is_array( $entry ) && isset( $entry['test'] ) && is_callable( $entry['test'] ) ) {
+				$result = self::perform_site_health_test( $site_health, $entry['test'] );
+				self::assert_generated_site_status_result( $failures, $result, $key, $registry );
+			}
+		}
+	}
+
+	private static function assert_generated_async_tests(
+		array &$failures,
+		\WP_Site_Health $site_health,
+		array $tests,
+		array $registry
+	): void {
+		if ( ! in_array( $registry['mode'], array( 'append', 'replace', 'async-only' ), true ) ) {
+			return;
+		}
+
+		foreach ( $registry['async'] as $key => $expected ) {
+			$entry = $tests[ $key ] ?? null;
+
+			self::collect_failure(
+				$failures,
+				is_array( $entry )
+					&& ( $entry['label'] ?? null ) === $expected['label']
+					&& ( $entry['test'] ?? null ) === $expected['test']
+					&& ( $entry['has_rest'] ?? null ) === $expected['hasRest']
+					&& ( $entry['headers'] ?? array() ) === $expected['headers']
+					&& ( $entry['skip_cron'] ?? null ) === $expected['skipCron'],
+				"generated async Site Health test {$key} preserves REST/header/cron metadata",
+				array(
+					'expected' => array(
+						'label'    => $expected['label'],
+						'test'     => $expected['test'],
+						'hasRest'  => $expected['hasRest'],
+						'headers'  => $expected['headers'],
+						'skipCron' => $expected['skipCron'],
+					),
+					'actual'   => self::summarize_site_status_test_entry( $entry ),
+				)
+			);
+
+			if ( $expected['hasAsyncDirectTest'] ) {
+				self::collect_failure(
+					$failures,
+					is_array( $entry )
+						&& isset( $entry['async_direct_test'] )
+						&& is_callable( $entry['async_direct_test'] ),
+					"generated async Site Health test {$key} exposes callable async_direct_test",
+					array( 'actual' => self::summarize_site_status_test_entry( $entry ) )
+				);
+
+				if ( is_array( $entry ) && isset( $entry['async_direct_test'] ) && is_callable( $entry['async_direct_test'] ) ) {
+					$result = self::perform_site_health_test( $site_health, $entry['async_direct_test'] );
+					self::assert_generated_site_status_result( $failures, $result, $key, $registry );
+				}
+			} else {
+				self::collect_failure(
+					$failures,
+					is_array( $entry ) && empty( $entry['async_direct_test'] ),
+					"generated async Site Health test {$key} without direct callback remains metadata-only",
+					array( 'actual' => self::summarize_site_status_test_entry( $entry ) )
+				);
+			}
+		}
+	}
+
+	private static function assert_generated_site_status_result(
+		array &$failures,
+		$result,
+		string $key,
+		array $registry
+	): void {
+		$expected = $registry['results'][ $key ];
+
+		self::assert_site_health_result( $failures, $result, $key, $expected['filteredStatus'] );
+
+		self::collect_failure(
+			$failures,
+			is_array( $result )
+				&& ( $result['label'] ?? null ) === $expected['label']
+				&& ( $result['badge']['color'] ?? null ) === $expected['filteredBadgeColor']
+				&& ( $result['actions'] ?? null ) === $expected['filteredActions'],
+			"generated Site Health test {$key} result filter mutations are applied",
+			array(
+				'expected' => array(
+					'label'      => $expected['label'],
+					'status'     => $expected['filteredStatus'],
+					'badgeColor' => $expected['filteredBadgeColor'],
+					'actions'    => self::preview( $expected['filteredActions'] ),
+				),
+				'actual'   => self::summarize_site_health_result( $result ),
+			)
+		);
+	}
+
+	private static function perform_site_health_test( \WP_Site_Health $site_health, $callback ) {
+		$method = new \ReflectionMethod( \WP_Site_Health::class, 'perform_test' );
+
+		return $method->invoke( $site_health, $callback );
+	}
+
+	private static function summarize_site_status_test_entry( $entry ) {
+		if ( ! is_array( $entry ) ) {
+			return self::describe_value( $entry );
+		}
+
+		return array(
+			'label'          => $entry['label'] ?? null,
+			'test'           => isset( $entry['test'] ) && is_callable( $entry['test'] ) ? '[callable]' : ( $entry['test'] ?? null ),
+			'has_rest'       => $entry['has_rest'] ?? null,
+			'headers'        => $entry['headers'] ?? null,
+			'skip_cron'      => $entry['skip_cron'] ?? null,
+			'async_direct'   => isset( $entry['async_direct_test'] ) && is_callable( $entry['async_direct_test'] ),
+		);
+	}
+
+	private static function summarize_site_health_result( $result ) {
+		if ( ! is_array( $result ) ) {
+			return self::describe_value( $result );
+		}
+
+		return array(
+			'label'      => $result['label'] ?? null,
+			'status'     => $result['status'] ?? null,
+			'badgeColor' => $result['badge']['color'] ?? null,
+			'actions'    => self::preview( $result['actions'] ?? '' ),
+			'test'       => $result['test'] ?? null,
 		);
 	}
 
@@ -1178,8 +1755,10 @@ final class SiteHealthSurface {
 
 	private static function snapshot_state(): array {
 		$snapshot = array(
-			'timezone' => date_default_timezone_get(),
-			'globals'  => array(),
+			'timezone'          => date_default_timezone_get(),
+			'outputBufferLevel' => ob_get_level(),
+			'siteHealthInstance' => self::site_health_instance(),
+			'globals'           => array(),
 		);
 
 		$globals = array(
@@ -1206,6 +1785,11 @@ final class SiteHealthSurface {
 
 	private static function restore_state( array $snapshot ): void {
 		date_default_timezone_set( $snapshot['timezone'] );
+		self::set_site_health_instance( $snapshot['siteHealthInstance'] );
+
+		while ( ob_get_level() > $snapshot['outputBufferLevel'] ) {
+			ob_end_clean();
+		}
 
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
@@ -1218,6 +1802,14 @@ final class SiteHealthSurface {
 
 	private static function state_matches( array $snapshot ): bool {
 		if ( date_default_timezone_get() !== $snapshot['timezone'] ) {
+			return false;
+		}
+
+		if ( ob_get_level() !== $snapshot['outputBufferLevel'] ) {
+			return false;
+		}
+
+		if ( self::site_health_instance() !== $snapshot['siteHealthInstance'] ) {
 			return false;
 		}
 
@@ -1239,6 +1831,10 @@ final class SiteHealthSurface {
 		self::$site_options          = array();
 		self::$options               = array();
 		self::$granted_caps          = array();
+		self::$site_status_tests_case = null;
+		self::$site_status_filter_seen = array();
+		self::$site_status_result_filter_seen = array();
+		self::$generated_test_calls = array();
 		self::$https_detection_error = null;
 		self::$replace_override      = null;
 		self::$http_request_count    = 0;
