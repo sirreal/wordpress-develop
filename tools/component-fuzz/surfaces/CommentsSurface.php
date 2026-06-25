@@ -35,6 +35,7 @@ final class CommentsSurface {
 			$rows = array_merge( $rows, self::check_max_length_oracles( $ctx ) );
 			$rows = array_merge( $rows, self::check_separate_comments( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_cookies( $ctx, $cases ) );
+			$rows = array_merge( $rows, self::check_comment_permalink_pagination( $ctx ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'comments.surface-no-throw',
@@ -71,12 +72,22 @@ final class CommentsSurface {
 				'get_comment_author_url_link',
 				'get_comment_excerpt',
 				'get_comment_text',
+				'get_comment_link',
+				'get_page_of_comment',
 				'is_wp_error',
+				'wp_cache_delete',
+				'wp_cache_set',
 				'wp_trim_words',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
+			}
+		}
+
+		foreach ( array( 'WP_Comment', 'WP_Comment_Query', 'WP_Post', 'WP_Rewrite' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
 			}
 		}
 
@@ -754,6 +765,455 @@ final class CommentsSurface {
 		return $rows;
 	}
 
+	private static function check_comment_permalink_pagination( \ComponentFuzz\FuzzContext $ctx ): array {
+		$fixture      = self::comment_permalink_fixture( $ctx );
+		$query_events = array();
+		$options      = array(
+			'page_comments'          => 1,
+			'comments_per_page'      => 2,
+			'default_comments_page'  => 'newest',
+			'thread_comments'        => 1,
+			'thread_comments_depth'  => 5,
+			'permalink_structure'    => '',
+		);
+		$snapshot     = self::snapshot_globals();
+
+		try {
+			self::cache_comment_permalink_fixture( $fixture );
+			self::force_query_style_comment_links();
+			\remove_all_filters( 'comments_pre_query' );
+			\remove_all_filters( 'get_page_of_comment' );
+			\remove_all_filters( 'get_page_of_comment_query_args' );
+			\remove_all_filters( 'get_comment_link' );
+
+			foreach ( array_keys( $options ) as $option ) {
+				\add_filter(
+					'pre_option_' . $option,
+					static function () use ( &$options, $option ) {
+						return $options[ $option ];
+					},
+					10,
+					3
+				);
+			}
+
+			\add_filter(
+				'comments_pre_query',
+				static function ( $comment_data, \WP_Comment_Query $query ) use ( $fixture, &$query_events ) {
+					if ( empty( $query->query_vars['count'] ) ) {
+						return $comment_data;
+					}
+
+					$count          = self::count_permalink_fixture_comments( $fixture['comments'], $query->query_vars );
+					$query_events[] = array(
+						'postId' => (int) ( $query->query_vars['post_id'] ?? 0 ),
+						'type'   => (string) ( $query->query_vars['type'] ?? 'all' ),
+						'parent' => (string) ( $query->query_vars['parent'] ?? '' ),
+						'before' => self::query_date_before( $query->query_vars ),
+						'count'  => $count,
+					);
+
+					$query->found_comments = $count;
+					$query->max_num_pages  = $count;
+					return $count;
+				},
+				10,
+				2
+			);
+
+			$scenarios = array(
+				array(
+					'name'    => 'comment-type-counts-empty-and-comment-roots',
+					'comment' => 'middle-comment',
+					'args'    => array(
+						'type'      => 'comment',
+						'per_page'  => 2,
+						'max_depth' => 1,
+					),
+					'options' => array(
+						'default_comments_page' => 'newest',
+					),
+				),
+				array(
+					'name'    => 'pings-type-counts-pingback-and-trackback',
+					'comment' => 'first-trackback',
+					'args'    => array(
+						'type'      => 'pings',
+						'per_page'  => 1,
+						'max_depth' => 1,
+					),
+					'options' => array(
+						'default_comments_page' => 'newest',
+					),
+				),
+				array(
+					'name'    => 'threaded-child-resolves-to-top-level-parent-page',
+					'comment' => 'child-of-middle-comment',
+					'args'    => array(
+						'type'      => 'comment',
+						'per_page'  => 2,
+						'max_depth' => 5,
+					),
+					'options' => array(
+						'default_comments_page' => 'newest',
+					),
+				),
+				array(
+					'name'    => 'oldest-default-first-page-omits-cpage',
+					'comment' => 'first-empty-comment',
+					'args'    => array(
+						'type'      => 'comment',
+						'per_page'  => 2,
+						'max_depth' => 1,
+					),
+					'options' => array(
+						'default_comments_page' => 'oldest',
+					),
+				),
+			);
+
+			$scenario_results = array();
+			$base_options     = $options;
+			foreach ( $scenarios as $scenario ) {
+				$options         = array_merge( $base_options, $scenario['options'] );
+				$comment_id      = $fixture['aliases'][ $scenario['comment'] ];
+				$args            = $scenario['args'];
+				$expected_page   = self::expected_permalink_comment_page( $fixture['comments'], $comment_id, $args, $options );
+				$page_call       = self::call( static fn() => \get_page_of_comment( $comment_id, $args ) );
+				$link_call       = self::call( static fn() => \get_comment_link( $comment_id, $args ) );
+				$link            = ! $link_call['threw'] && is_string( $link_call['value'] ) ? $link_call['value'] : '';
+				$expects_cpage   = ! ( 'oldest' === $options['default_comments_page'] && 1 === $expected_page );
+				$scenario_results[] = array(
+					'name'          => $scenario['name'],
+					'commentId'     => $comment_id,
+					'expectedPage'  => $expected_page,
+					'actualPage'    => self::describe_call( $page_call ),
+					'link'          => self::describe_call( $link_call ),
+					'anchorOk'      => str_ends_with( $link, '#comment-' . $comment_id ),
+					'cpageOk'       => $expects_cpage ? self::comment_link_has_cpage( $link, $expected_page ) : ! self::comment_link_has_any_cpage( $link ),
+					'pageOk'        => ! $page_call['threw'] && $expected_page === $page_call['value'],
+					'linkNoThrow'   => ! $link_call['threw'] && is_string( $link_call['value'] ),
+					'expectedCpage' => $expects_cpage ? $expected_page : null,
+				);
+			}
+			$options = $base_options;
+
+			$invalid_args        = array(
+				'type'      => 'comment',
+				'per_page'  => 0,
+				'max_depth' => 1,
+			);
+			$invalid_comment_id  = $fixture['aliases']['last-comment'];
+			$invalid_page_call   = self::call( static fn() => \get_page_of_comment( $invalid_comment_id, $invalid_args ) );
+			$override_before     = count( $query_events );
+			$override_comment_id = $fixture['aliases']['last-comment'];
+			$override_call       = self::call(
+				static fn() => \get_comment_link(
+					$override_comment_id,
+					array(
+						'type'      => 'comment',
+						'per_page'  => 2,
+						'max_depth' => 1,
+						'cpage'     => 9,
+					)
+				)
+			);
+			$override_link       = ! $override_call['threw'] && is_string( $override_call['value'] ) ? $override_call['value'] : '';
+			$override_query_ok   = $override_before === count( $query_events );
+
+			$rows = array(
+				$ctx->result(
+					'comments.permalink.page-of-comment-link-contract',
+					self::all_permalink_scenarios_ok( $scenario_results ),
+					array(
+						'scenarios' => $scenario_results,
+						'queries'   => $query_events,
+					)
+				),
+				$ctx->result(
+					'comments.permalink.invalid-per-page-falls-back-to-first-page',
+					! $invalid_page_call['threw'] && 1 === $invalid_page_call['value'],
+					array(
+						'commentId' => $invalid_comment_id,
+						'args'      => $invalid_args,
+						'actual'    => self::describe_call( $invalid_page_call ),
+					)
+				),
+				$ctx->result(
+					'comments.permalink.explicit-cpage-overrides-page-query',
+					! $override_call['threw']
+						&& is_string( $override_call['value'] )
+						&& str_ends_with( $override_link, '#comment-' . $override_comment_id )
+						&& self::comment_link_has_cpage( $override_link, 9 )
+						&& $override_query_ok,
+					array(
+						'commentId'       => $override_comment_id,
+						'actual'          => self::describe_call( $override_call ),
+						'queryCountBefore' => $override_before,
+						'queryCountAfter' => count( $query_events ),
+					)
+				),
+			);
+		} finally {
+			self::clear_comment_permalink_fixture_cache( $fixture );
+			self::restore_globals( $snapshot );
+		}
+
+		return $rows;
+	}
+
+	private static function all_permalink_scenarios_ok( array $scenario_results ): bool {
+		foreach ( $scenario_results as $result ) {
+			if (
+				empty( $result['pageOk'] )
+				|| empty( $result['linkNoThrow'] )
+				|| empty( $result['anchorOk'] )
+				|| empty( $result['cpageOk'] )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function force_query_style_comment_links(): void {
+		if ( ! isset( $GLOBALS['wp_rewrite'] ) || ! is_object( $GLOBALS['wp_rewrite'] ) ) {
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+		}
+
+		if ( isset( $GLOBALS['wp_rewrite'] ) && is_object( $GLOBALS['wp_rewrite'] ) ) {
+			$GLOBALS['wp_rewrite']->permalink_structure         = '';
+			$GLOBALS['wp_rewrite']->comments_pagination_base    = 'comment-page';
+			$GLOBALS['wp_rewrite']->use_trailing_slashes        = false;
+		}
+	}
+
+	private static function comment_permalink_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base_id       = 910000 + ( $ctx->iteration() * 100 );
+		$post_id       = $base_id + 1;
+		$other_post_id = $base_id + 2;
+		$post          = self::permalink_post( $post_id, 'Comment Permalink Fixture ' . $ctx->iteration() );
+		$other_post    = self::permalink_post( $other_post_id, 'Other Comment Permalink Fixture ' . $ctx->iteration() );
+		$rows          = array(
+			'first-empty-comment'     => array( 11, $post_id, '', 0, '2026-06-01 00:00:01' ),
+			'first-comment'           => array( 12, $post_id, 'comment', 0, '2026-06-01 00:00:02' ),
+			'first-pingback'          => array( 13, $post_id, 'pingback', 0, '2026-06-01 00:00:03' ),
+			'first-trackback'         => array( 14, $post_id, 'trackback', 0, '2026-06-01 00:00:04' ),
+			'middle-comment'          => array( 15, $post_id, 'comment', 0, '2026-06-01 00:00:05' ),
+			'later-empty-comment'     => array( 16, $post_id, '', 0, '2026-06-01 00:00:06' ),
+			'last-comment'            => array( 17, $post_id, 'comment', 0, '2026-06-01 00:00:07' ),
+			'child-of-middle-comment' => array( 18, $post_id, 'comment', $base_id + 15, '2026-06-01 00:00:08' ),
+			'other-post-comment'      => array( 19, $other_post_id, 'comment', 0, '2026-06-01 00:00:00' ),
+		);
+		$comments      = array();
+		$aliases       = array();
+
+		foreach ( $rows as $alias => $row ) {
+			list( $offset, $comment_post_id, $type, $parent, $date ) = $row;
+			$comment_id            = $base_id + $offset;
+			$aliases[ $alias ]     = $comment_id;
+			$comments[ $comment_id ] = self::permalink_comment( $comment_id, $comment_post_id, $type, $parent, $date );
+		}
+
+		return array(
+			'posts'    => array( $post, $other_post ),
+			'comments' => $comments,
+			'aliases'  => $aliases,
+		);
+	}
+
+	private static function permalink_post( int $post_id, string $title ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $post_id,
+				'post_author'           => '0',
+				'post_date'             => '2026-06-01 00:00:00',
+				'post_date_gmt'         => '2026-06-01 00:00:00',
+				'post_content'          => 'Synthetic comment permalink fixture.',
+				'post_title'            => $title,
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'open',
+				'ping_status'           => 'open',
+				'post_password'         => '',
+				'post_name'             => 'comment-permalink-fixture-' . $post_id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-01 00:00:00',
+				'post_modified_gmt'     => '2026-06-01 00:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'https://example.test/?p=' . $post_id,
+				'menu_order'            => 0,
+				'post_type'             => 'post',
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	private static function permalink_comment( int $comment_id, int $post_id, string $type, int $parent, string $date ): \WP_Comment {
+		return new \WP_Comment(
+			(object) array(
+				'comment_ID'           => (string) $comment_id,
+				'comment_post_ID'      => (string) $post_id,
+				'comment_author'       => 'Commenter ' . $comment_id,
+				'comment_author_email' => 'commenter' . $comment_id . '@example.test',
+				'comment_author_url'   => 'https://example.test/commenter/' . $comment_id,
+				'comment_author_IP'    => '192.0.2.' . ( $comment_id % 250 ),
+				'comment_date'         => $date,
+				'comment_date_gmt'     => $date,
+				'comment_content'      => 'Comment permalink fixture ' . $comment_id,
+				'comment_karma'        => '0',
+				'comment_approved'     => '1',
+				'comment_agent'        => 'ComponentFuzz',
+				'comment_type'         => $type,
+				'comment_parent'       => (string) $parent,
+				'user_id'              => '0',
+			)
+		);
+	}
+
+	private static function cache_comment_permalink_fixture( array $fixture ): void {
+		foreach ( $fixture['posts'] as $post ) {
+			\wp_cache_set( (int) $post->ID, (object) $post->to_array(), 'posts' );
+		}
+
+		foreach ( $fixture['comments'] as $comment ) {
+			\wp_cache_set( (int) $comment->comment_ID, (object) $comment->to_array(), 'comment' );
+		}
+	}
+
+	private static function clear_comment_permalink_fixture_cache( array $fixture ): void {
+		foreach ( $fixture['posts'] as $post ) {
+			\wp_cache_delete( (int) $post->ID, 'posts' );
+		}
+
+		foreach ( $fixture['comments'] as $comment ) {
+			\wp_cache_delete( (int) $comment->comment_ID, 'comment' );
+		}
+	}
+
+	private static function expected_permalink_comment_page( array $comments, int $comment_id, array $args, array $options ): int {
+		if ( ! isset( $comments[ $comment_id ] ) ) {
+			return 1;
+		}
+
+		$comment  = $comments[ $comment_id ];
+		$per_page = $args['per_page'] ?? '';
+
+		if ( $options['page_comments'] && '' === $per_page ) {
+			$per_page = $options['comments_per_page'];
+		}
+
+		if ( empty( $per_page ) || (int) $per_page < 1 ) {
+			return 1;
+		}
+
+		$max_depth = $args['max_depth'] ?? '';
+		if ( '' === $max_depth ) {
+			$max_depth = $options['thread_comments'] ? $options['thread_comments_depth'] : -1;
+		}
+
+		if ( (int) $max_depth > 1 && '0' !== (string) $comment->comment_parent ) {
+			$parent_args              = $args;
+			$parent_args['max_depth'] = $max_depth;
+			return self::expected_permalink_comment_page( $comments, (int) $comment->comment_parent, $parent_args, $options );
+		}
+
+		$older = self::count_permalink_fixture_comments(
+			$comments,
+			array(
+				'type'       => $args['type'] ?? 'all',
+				'post_id'    => (int) $comment->comment_post_ID,
+				'parent'     => 0,
+				'date_query' => array(
+					array(
+						'before' => (string) $comment->comment_date_gmt,
+					),
+				),
+			)
+		);
+
+		return 0 === $older ? 1 : (int) ceil( ( $older + 1 ) / (int) $per_page );
+	}
+
+	private static function count_permalink_fixture_comments( array $comments, array $query_vars ): int {
+		$post_id = (int) ( $query_vars['post_id'] ?? 0 );
+		$type    = (string) ( $query_vars['type'] ?? 'all' );
+		$parent  = array_key_exists( 'parent', $query_vars ) ? (string) $query_vars['parent'] : '';
+		$before  = self::query_date_before( $query_vars );
+		$count   = 0;
+
+		foreach ( $comments as $comment ) {
+			if ( $post_id && (int) $comment->comment_post_ID !== $post_id ) {
+				continue;
+			}
+
+			if ( '' !== $parent && (string) $comment->comment_parent !== $parent ) {
+				continue;
+			}
+
+			if ( '' !== $before && strtotime( (string) $comment->comment_date_gmt . ' UTC' ) >= strtotime( $before . ' UTC' ) ) {
+				continue;
+			}
+
+			if ( ! self::comment_type_matches_query_type( (string) $comment->comment_type, $type ) ) {
+				continue;
+			}
+
+			++$count;
+		}
+
+		return $count;
+	}
+
+	private static function comment_type_matches_query_type( string $comment_type, string $query_type ): bool {
+		switch ( $query_type ) {
+			case '':
+			case 'all':
+				return true;
+			case 'comment':
+			case 'comments':
+				return '' === $comment_type || 'comment' === $comment_type;
+			case 'pings':
+				return 'pingback' === $comment_type || 'trackback' === $comment_type;
+			default:
+				return $comment_type === $query_type;
+		}
+	}
+
+	private static function query_date_before( array $query_vars ): string {
+		foreach ( (array) ( $query_vars['date_query'] ?? array() ) as $clause ) {
+			if ( is_array( $clause ) && isset( $clause['before'] ) ) {
+				return (string) $clause['before'];
+			}
+		}
+
+		return '';
+	}
+
+	private static function comment_link_has_cpage( string $link, int $page ): bool {
+		return str_contains( $link, 'cpage=' . $page )
+			|| str_contains( $link, 'cpage=' . rawurlencode( (string) $page ) )
+			|| str_contains( $link, self::comments_pagination_base() . '-' . $page );
+	}
+
+	private static function comment_link_has_any_cpage( string $link ): bool {
+		return str_contains( $link, 'cpage=' )
+			|| str_contains( $link, self::comments_pagination_base() . '-' );
+	}
+
+	private static function comments_pagination_base(): string {
+		if ( isset( $GLOBALS['wp_rewrite'] ) && is_object( $GLOBALS['wp_rewrite'] ) && isset( $GLOBALS['wp_rewrite']->comments_pagination_base ) ) {
+			return (string) $GLOBALS['wp_rewrite']->comments_pagination_base;
+		}
+
+		return 'comment-page';
+	}
+
 	private static function expected_sanitized_cookies( array $cookies, string $hash ): array {
 		$expected = $cookies;
 
@@ -1077,11 +1537,12 @@ final class CommentsSurface {
 				'wp_filters',
 				'wp_actions',
 				'wpdb',
+				'wp_rewrite',
 			) as $key
 		) {
 			$globals[ $key ] = array(
 				'exists' => array_key_exists( $key, $GLOBALS ),
-				'value'  => 'wp_filter' === $key && array_key_exists( $key, $GLOBALS ) ? self::clone_wp_filter( $GLOBALS[ $key ] ) : ( $GLOBALS[ $key ] ?? null ),
+				'value'  => array_key_exists( $key, $GLOBALS ) ? self::clone_global_value( $key, $GLOBALS[ $key ] ) : null,
 			);
 		}
 
@@ -1096,11 +1557,23 @@ final class CommentsSurface {
 
 		foreach ( $snapshot['globals'] as $key => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $key ] = 'wp_filter' === $key ? self::clone_wp_filter( $entry['value'] ) : $entry['value'];
+				$GLOBALS[ $key ] = self::clone_global_value( $key, $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $key ] );
 			}
 		}
+	}
+
+	private static function clone_global_value( string $key, $value ) {
+		if ( 'wp_filter' === $key ) {
+			return self::clone_wp_filter( $value );
+		}
+
+		if ( 'wp_rewrite' === $key && is_object( $value ) ) {
+			return clone $value;
+		}
+
+		return $value;
 	}
 
 	private static function clone_wp_filter( $wp_filter ) {
