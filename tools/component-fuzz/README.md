@@ -382,8 +382,9 @@ database, network requests, or a configured site.
   policy suggestion/default text without mail or network delivery.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
-  query-var parsing, `WP_Query` SQL execution shape, and deterministic global
-  restoration.
+  query-var parsing, seeded `WP_Query` execution/found-row result oracles,
+  cache-key/cache-hit determinism, user/comment pre-query short-circuits, and
+  deterministic global restoration.
 - `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
   `posts_pre_query` fixtures, including loop wrapper delegation,
   setup/reset postdata globals, single/page flag behavior, found/max-page coherence,

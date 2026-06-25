@@ -26,14 +26,19 @@ final class QuerySurface {
 		try {
 			self::install_scoped_globals();
 			self::register_scoped_taxonomies();
+			self::seed_query_fixture();
 
 			$rows = array_merge( $rows, self::check_meta_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_tax_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_date_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_execution( $ctx ) );
+			$rows = array_merge( $rows, self::check_wp_query_cache_keys( $ctx ) );
+			$rows = array_merge( $rows, self::check_wp_query_result_cache( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_query_pre_query( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_parsing( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_query_pre_query( $ctx ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'query.surface-no-throw',
@@ -57,6 +62,7 @@ final class QuerySurface {
 
 		foreach (
 			array(
+				'Component_Fuzz_WPDB_Stub',
 				'WP_Date_Query',
 				'WP_Meta_Query',
 				'WP_Tax_Query',
@@ -456,6 +462,52 @@ final class QuerySurface {
 				$ctx,
 				$case_index,
 				$case,
+				'query.wp-query.get-posts-result-window-coherent',
+				self::wp_query_result_window_is_coherent( $observation ),
+				array(
+					'postCount'    => $observation['postCount'],
+					'resultCount'  => $observation['resultCount'],
+					'postIds'      => $observation['postIds'],
+					'postsPerPage' => $observation['queryVars']['posts_per_page'] ?? null,
+					'nopaging'     => $observation['queryVars']['nopaging'] ?? null,
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-found-rows-contract',
+				self::wp_query_found_rows_contract_holds( $observation ),
+				array(
+					'foundPosts'          => $observation['foundPosts'],
+					'maxNumPages'         => $observation['maxNumPages'],
+					'foundRowsQueryCount' => $observation['foundRowsQueryCount'],
+					'queryCountDelta'     => $observation['queryCountDelta'],
+					'noFoundRows'         => $observation['queryVars']['no_found_rows'] ?? null,
+					'request'             => self::describe_value( $observation['request'] ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.get-posts-stub-result-oracle',
+				self::wp_query_stub_result_expectations_match( $observation, $case['expect'] ?? array() ),
+				array(
+					'expect'              => $case['expect'] ?? array(),
+					'postIds'             => $observation['postIds'],
+					'foundRowsQueryCount' => $observation['foundRowsQueryCount'],
+					'foundPosts'          => $observation['foundPosts'],
+					'maxNumPages'         => $observation['maxNumPages'],
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
 				'query.wp-query.get-posts-normalized-vars-safe',
 				self::query_vars_are_scalar_array_safe( $observation['queryVars'] )
 					&& self::wp_query_normalization_holds( $observation['queryVars'] )
@@ -504,6 +556,165 @@ final class QuerySurface {
 		}
 
 		return $rows;
+	}
+
+	private static function check_wp_query_cache_keys( \ComponentFuzz\FuzzContext $ctx ): array {
+		$sql         = "SELECT wp_posts.* FROM wp_posts WHERE 1=1 AND wp_posts.ID IN (3,7) AND wp_posts.post_status IN ('private','publish')";
+		$placeholder = $GLOBALS['wpdb']->placeholder_escape();
+		$base_args   = array(
+			'cache_results'          => true,
+			'fields'                 => 'ids',
+			'lazy_load_term_meta'    => false,
+			'no_found_rows'          => true,
+			'post__in'               => array( 7, '3', 7 ),
+			'post_status'            => array( 'publish', 'private' ),
+			'post_type'              => array( 'page', 'post' ),
+			'suppress_filters'       => false,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+		);
+		$equivalent  = array(
+			'no_found_rows'          => true,
+			'orderby'                => 'date',
+			'post__in'               => array( 3, 7 ),
+			'post_status'            => array( 'private', 'publish' ),
+			'post_type'              => array( 'post', 'page' ),
+			'update_post_meta_cache' => true,
+			'update_post_term_cache' => true,
+		);
+
+		$base_key        = self::wp_query_cache_key_for( $base_args, $sql );
+		$equivalent_key  = self::wp_query_cache_key_for( $equivalent, $sql );
+		$ignored_arg_key = self::wp_query_cache_key_for(
+			array_merge(
+				$base_args,
+				array(
+					'cache_results'          => false,
+					'fields'                 => '',
+					'lazy_load_term_meta'    => true,
+					'update_post_meta_cache' => true,
+					'update_post_term_cache' => true,
+				)
+			),
+			$sql
+		);
+		$different_sql_key = self::wp_query_cache_key_for( $base_args, str_replace( '3,7', '3,19', $sql ) );
+		$placeholder_key   = self::wp_query_cache_key_for(
+			array_merge( $base_args, array( 's' => '100' . $placeholder . ' match' ) ),
+			str_replace( 'wp_posts.ID IN (3,7)', "wp_posts.post_title LIKE '100{$placeholder} match'", $sql )
+		);
+		$raw_percent_key   = self::wp_query_cache_key_for(
+			array_merge( $base_args, array( 's' => '100% match' ) ),
+			str_replace( 'wp_posts.ID IN (3,7)', "wp_posts.post_title LIKE '100% match'", $sql )
+		);
+
+		$case = array( 'label' => 'wp-query-cache-key-normalization' );
+
+		return array(
+			self::case_result(
+				$ctx,
+				0,
+				$case,
+				'query.wp-query.cache-key-normalizes-equivalent-args',
+				$base_key === $equivalent_key && $base_key === $ignored_arg_key,
+				array(
+					'baseKey'       => $base_key,
+					'equivalentKey' => $equivalent_key,
+					'ignoredArgKey' => $ignored_arg_key,
+				)
+			),
+			self::case_result(
+				$ctx,
+				1,
+				$case,
+				'query.wp-query.cache-key-distinguishes-sql-shape',
+				$base_key !== $different_sql_key,
+				array(
+					'baseKey'         => $base_key,
+					'differentSqlKey' => $different_sql_key,
+				)
+			),
+			self::case_result(
+				$ctx,
+				2,
+				$case,
+				'query.wp-query.cache-key-placeholder-stable',
+				$placeholder_key === $raw_percent_key,
+				array(
+					'placeholderKey' => $placeholder_key,
+					'rawPercentKey'  => $raw_percent_key,
+				)
+			),
+		);
+	}
+
+	private static function check_wp_query_result_cache( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'wp_cache_supports' ) || ! function_exists( 'wp_cache_flush_group' ) || ! \wp_cache_supports( 'flush_group' ) ) {
+			return array(
+				$ctx->skip(
+					'query.wp-query.cache-hit-reuses-seeded-results',
+					'Object cache group flushing is unavailable.',
+					array( 'group' => 'post-queries' )
+				),
+			);
+		}
+
+		$case = array(
+			'label'     => 'seeded-wp-query-cache-hit',
+			'queryVars' => array(
+				'cache_results'          => true,
+				'fields'                 => 'ids',
+				'ignore_sticky_posts'    => true,
+				'lazy_load_term_meta'    => false,
+				'no_found_rows'          => true,
+				'post__in'               => array( 3, 7 ),
+				'post_status'            => 'publish',
+				'post_type'              => 'post',
+				'posts_per_page'         => 2,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			),
+			'expect'    => array(
+				'postIds' => array( 3, 7 ),
+			),
+		);
+
+		\wp_cache_flush_group( 'post-queries' );
+
+		$first = self::call_guarded(
+			static function () use ( $case ) {
+				return self::wp_query_execution_observation( $case );
+			}
+		);
+		$second = self::call_guarded(
+			static function () use ( $case ) {
+				return self::wp_query_execution_observation( $case );
+			}
+		);
+
+		$ok = $first['ok']
+			&& $second['ok']
+			&& self::is_wp_query_execution_observation( $first['value'] )
+			&& self::is_wp_query_execution_observation( $second['value'] )
+			&& array( 3, 7 ) === $first['value']['postIds']
+			&& array( 3, 7 ) === $second['value']['postIds']
+			&& $first['value']['queryCountDelta'] > 0
+			&& 0 === $second['value']['queryCountDelta']
+			&& self::wp_query_execution_observations_match( $first['value'], $second['value'] );
+
+		return array(
+			self::case_result(
+				$ctx,
+				0,
+				$case,
+				'query.wp-query.cache-hit-reuses-seeded-results',
+				$ok,
+				array(
+					'first'  => self::describe_call( $first ),
+					'second' => self::describe_call( $second ),
+				)
+			),
+		);
 	}
 
 	private static function check_user_query_parsing( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -571,6 +782,41 @@ final class QuerySurface {
 		return $rows;
 	}
 
+	private static function check_user_query_pre_query( \ComponentFuzz\FuzzContext $ctx ): array {
+		$case = array(
+			'label'     => 'user-pre-query-short-circuit',
+			'queryVars' => array(
+				'blog_id'       => 0,
+				'cache_results' => true,
+				'count_total'   => true,
+				'fields'        => 'ID',
+				'number'        => 2,
+				'orderby'       => 'ID',
+			),
+		);
+		$call = self::call_guarded(
+			static function () use ( $case ) {
+				return self::user_query_pre_query_observation( $case['queryVars'] );
+			}
+		);
+
+		return array(
+			self::case_result(
+				$ctx,
+				0,
+				$case,
+				'query.user-query.pre-query-short-circuits-db',
+				$call['ok']
+					&& is_array( $call['value'] )
+					&& 1 === $call['value']['filterHits']
+					&& 0 === $call['value']['queryCountDelta']
+					&& array( 41, 43 ) === $call['value']['results']
+					&& 2 === $call['value']['totalUsers'],
+				array( 'call' => self::describe_call( $call ) )
+			),
+		);
+	}
+
 	private static function check_comment_query_parsing( \ComponentFuzz\FuzzContext $ctx ): array {
 		$rows  = array();
 		$cases = self::comment_query_cases( $ctx );
@@ -623,6 +869,70 @@ final class QuerySurface {
 		}
 
 		return $rows;
+	}
+
+	private static function check_comment_query_pre_query( \ComponentFuzz\FuzzContext $ctx ): array {
+		$object_case = array(
+			'label'     => 'comment-pre-query-objects',
+			'queryVars' => array(
+				'cache_results'             => true,
+				'no_found_rows'             => false,
+				'number'                    => 2,
+				'orderby'                   => 'comment_ID',
+				'update_comment_meta_cache' => false,
+				'update_comment_post_cache' => false,
+			),
+		);
+		$count_case  = array(
+			'label'     => 'comment-pre-query-count',
+			'queryVars' => array(
+				'count'         => true,
+				'no_found_rows' => false,
+				'number'        => 5,
+				'status'        => 'approve',
+			),
+		);
+
+		$object_call = self::call_guarded(
+			static function () use ( $object_case ) {
+				return self::comment_query_pre_query_observation( $object_case['queryVars'], false );
+			}
+		);
+		$count_call  = self::call_guarded(
+			static function () use ( $count_case ) {
+				return self::comment_query_pre_query_observation( $count_case['queryVars'], true );
+			}
+		);
+
+		return array(
+			self::case_result(
+				$ctx,
+				0,
+				$object_case,
+				'query.comment-query.pre-query-short-circuits-db',
+				$object_call['ok']
+					&& is_array( $object_call['value'] )
+					&& 1 === $object_call['value']['filterHits']
+					&& 0 === $object_call['value']['queryCountDelta']
+					&& array( 301, 303 ) === $object_call['value']['commentIds']
+					&& array( 301, 303 ) === $object_call['value']['propertyCommentIds']
+					&& 2 === $object_call['value']['foundComments']
+					&& 1 === $object_call['value']['maxNumPages'],
+				array( 'call' => self::describe_call( $object_call ) )
+			),
+			self::case_result(
+				$ctx,
+				1,
+				$count_case,
+				'query.comment-query.pre-query-count-short-circuits-db',
+				$count_call['ok']
+					&& is_array( $count_call['value'] )
+					&& 1 === $count_call['value']['filterHits']
+					&& 0 === $count_call['value']['queryCountDelta']
+					&& 4 === $count_call['value']['countResult'],
+				array( 'call' => self::describe_call( $count_call ) )
+			),
+		);
 	}
 
 	private static function check_meta_parse_query_vars( \ComponentFuzz\FuzzContext $ctx, int $case_offset ): array {
@@ -1301,6 +1611,7 @@ final class QuerySurface {
 						'post_status'    => array( 'publish', 'private' ),
 						'post_type'      => 'post',
 						'posts_per_page' => 7,
+						's'              => 'alpha "quoted phrase" -excluded',
 						'tax_query'      => array(
 							array(
 								'taxonomy'         => self::TAXONOMY,
@@ -1312,7 +1623,7 @@ final class QuerySurface {
 					)
 				),
 				'expect'    => array(
-					'contains' => array( 'JOIN wp_postmeta', 'wp_term_relationships', 'post_date' ),
+					'contains' => array( 'JOIN wp_postmeta', 'wp_term_relationships', 'post_date', 'post_title' ),
 				),
 			),
 			array(
@@ -1329,6 +1640,60 @@ final class QuerySurface {
 				),
 				'expect'    => array(
 					'contains' => array( 'wp_posts.ID IN', 'FIELD(' ),
+					'postIds'  => array( 3, 7 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-post-in-ids-no-found',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'fields'         => 'ids',
+						'post__in'       => array( 3, 7, 23 ),
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'wp_posts.ID', 'FROM wp_posts' ),
+					'postIds'  => array( 3, 7, 23 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-offset-window-no-found',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'fields'         => 'ids',
+						'offset'         => 1,
+						'post__in'       => array( 3, 7, 23 ),
+						'post_type'      => 'post',
+						'posts_per_page' => 2,
+					)
+				),
+				'expect'    => array(
+					'contains' => array( 'LIMIT 1, 2' ),
+					'postIds'  => array( 7, 23 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-found-rows-stub-contract',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'fields'         => 'ids',
+						'no_found_rows'  => false,
+						'post__in'       => array( 3, 7, 23 ),
+						'post_type'      => 'post',
+						'posts_per_page' => 2,
+					)
+				),
+				'expect'    => array(
+					'contains'            => array( 'SQL_CALC_FOUND_ROWS', 'LIMIT 0, 2' ),
+					'foundPosts'          => 0,
+					'foundRowsQueryCount' => 1,
+					'maxNumPages'         => 0,
+					'postIds'             => array( 3, 7 ),
 				),
 			),
 			array(
@@ -1639,7 +2004,14 @@ final class QuerySurface {
 			'date_query'    => self::generated_date_query( $ctx->fork( 'wp-date' ), 0 ),
 			'tax_query'     => array( self::generated_tax_clause( $ctx->fork( 'wp-tax' ) ) ),
 			'meta_query'    => self::generated_meta_query( $ctx->fork( 'wp-meta' ), 0 ),
+			'cache_results' => false,
+			'fields'        => $ctx->choice( array( '', 'ids', 'id=>parent' ) ),
 			'no_found_rows' => true,
+			'offset'        => $ctx->int( 0, 3 ),
+			'order'         => $ctx->choice( array( 'ASC', 'DESC', 'sideways' ) ),
+			'orderby'       => $ctx->choice( array( 'date', 'ID', 'post__in', 'rand', 'meta_value_num' ) ),
+			'paged'         => $ctx->int( 0, 3 ),
+			'posts_per_page' => $ctx->choice( array( -1, 1, 3, '5' ) ),
 		);
 
 		if ( $ctx->bool( 30 ) ) {
@@ -1745,18 +2117,26 @@ final class QuerySurface {
 	}
 
 	private static function wp_query_execution_observation( array $case ): array {
-		$query_vars      = $case['queryVars'];
-		$global_snapshot = self::snapshot_globals();
-		$query           = new \WP_Query();
-		$posts           = $query->query( $query_vars );
-		$global_mismatches = self::globals_snapshot_mismatches( $global_snapshot );
+		$query_vars                  = $case['queryVars'];
+		$global_snapshot             = self::snapshot_globals();
+		$queries_before              = self::wpdb_recorded_queries();
+		$query                       = new \WP_Query();
+		$posts                       = $query->query( $query_vars );
+		$queries_after               = self::wpdb_recorded_queries();
+		$new_queries                 = array_slice( $queries_after, count( $queries_before ) );
+		$global_mismatches           = self::globals_snapshot_mismatches( $global_snapshot );
 		$unexpected_global_mismatches = array_values( array_diff( $global_mismatches, self::wp_query_allowed_global_mismatches() ) );
 
 		return array(
 			'request'                    => (string) $query->request,
-			'wpdbQueries'                => self::wpdb_recorded_queries(),
+			'wpdbQueries'                => $queries_after,
+			'wpdbNewQueries'             => $new_queries,
+			'queryCountDelta'            => count( $new_queries ),
+			'foundRowsQueryCount'        => self::found_rows_query_count( $new_queries ),
 			'foundPosts'                 => (int) $query->found_posts,
 			'maxNumPages'                => (int) $query->max_num_pages,
+			'postCount'                  => (int) $query->post_count,
+			'resultCount'                => is_array( $posts ) ? count( $posts ) : 0,
 			'postIds'                    => self::post_ids_from_results( $posts ),
 			'queryVars'                  => $query->query_vars,
 			'flags'                      => self::wp_query_summary( $query )['flags'],
@@ -1796,12 +2176,94 @@ final class QuerySurface {
 		);
 	}
 
+	private static function user_query_pre_query_observation( array $query_vars ): array {
+		$queries_before = self::wpdb_recorded_queries();
+		$filter_hits    = 0;
+		$callback       = static function ( $results, \WP_User_Query $query ) use ( &$filter_hits ) {
+			unset( $results );
+
+			++$filter_hits;
+			$query->total_users = 2;
+
+			return array( 41, 43 );
+		};
+
+		\add_filter( 'users_pre_query', $callback, 10, 2 );
+		try {
+			$query   = new \WP_User_Query( $query_vars );
+			$results = $query->get_results();
+			$total   = $query->get_total();
+		} finally {
+			\remove_filter( 'users_pre_query', $callback, 10 );
+		}
+
+		$queries_after = self::wpdb_recorded_queries();
+
+		return array(
+			'filterHits'      => $filter_hits,
+			'queryCountDelta' => count( $queries_after ) - count( $queries_before ),
+			'results'         => array_map( 'intval', (array) $results ),
+			'totalUsers'      => (int) $total,
+			'queryVars'       => $query->query_vars,
+		);
+	}
+
 	private static function comment_query_parse_observation( array $query_vars ): array {
 		$query = new \WP_Comment_Query();
 		$query->parse_query( $query_vars );
 
 		return array(
 			'queryVars' => $query->query_vars,
+		);
+	}
+
+	private static function comment_query_pre_query_observation( array $query_vars, bool $count ): array {
+		$queries_before = self::wpdb_recorded_queries();
+		$filter_hits    = 0;
+		$callback       = static function ( $comment_data, \WP_Comment_Query $query ) use ( &$filter_hits, $count ) {
+			unset( $comment_data );
+
+			++$filter_hits;
+			if ( $count ) {
+				return 4;
+			}
+
+			$query->found_comments = 2;
+			$query->max_num_pages  = 1;
+
+			return array(
+				(object) array(
+					'comment_ID'      => 301,
+					'comment_post_ID' => 3,
+					'comment_content' => 'seed alpha',
+				),
+				(object) array(
+					'comment_ID'      => 303,
+					'comment_post_ID' => 7,
+					'comment_content' => 'seed beta',
+				),
+			);
+		};
+
+		\add_filter( 'comments_pre_query', $callback, 10, 2 );
+		try {
+			$query  = new \WP_Comment_Query();
+			$result = $query->query( $query_vars );
+		} finally {
+			\remove_filter( 'comments_pre_query', $callback, 10 );
+		}
+
+		$queries_after = self::wpdb_recorded_queries();
+
+		return array(
+			'filterHits'         => $filter_hits,
+			'queryCountDelta'    => count( $queries_after ) - count( $queries_before ),
+			'commentIds'         => $count ? array() : self::comment_ids_from_results( $result ),
+			'propertyCommentIds' => self::comment_ids_from_results( $query->comments ),
+			'countResult'        => $count ? (int) $result : null,
+			'foundComments'      => (int) $query->found_comments,
+			'maxNumPages'        => (int) $query->max_num_pages,
+			'queryVars'          => $query->query_vars,
 		);
 	}
 
@@ -2141,8 +2603,13 @@ final class QuerySurface {
 		return is_array( $value )
 			&& is_string( $value['request'] ?? null )
 			&& is_array( $value['wpdbQueries'] ?? null )
+			&& is_array( $value['wpdbNewQueries'] ?? null )
+			&& is_int( $value['queryCountDelta'] ?? null )
+			&& is_int( $value['foundRowsQueryCount'] ?? null )
 			&& is_int( $value['foundPosts'] ?? null )
 			&& is_int( $value['maxNumPages'] ?? null )
+			&& is_int( $value['postCount'] ?? null )
+			&& is_int( $value['resultCount'] ?? null )
 			&& is_array( $value['postIds'] ?? null )
 			&& is_array( $value['queryVars'] ?? null )
 			&& is_array( $value['flags'] ?? null )
@@ -2176,6 +2643,10 @@ final class QuerySurface {
 			return false;
 		}
 
+		if ( array_key_exists( 'foundRowsQueryCount', $expect ) && (int) $expect['foundRowsQueryCount'] !== $observation['foundRowsQueryCount'] ) {
+			return false;
+		}
+
 		if ( array_key_exists( 'postIds', $expect ) && array_values( $expect['postIds'] ) !== $observation['postIds'] ) {
 			return false;
 		}
@@ -2187,6 +2658,86 @@ final class QuerySurface {
 		}
 
 		return true;
+	}
+
+	private static function wp_query_result_window_is_coherent( array $observation ): bool {
+		if ( $observation['postCount'] !== $observation['resultCount'] ) {
+			return false;
+		}
+
+		if ( count( $observation['postIds'] ) !== $observation['resultCount'] ) {
+			return false;
+		}
+
+		$query_vars = $observation['queryVars'];
+		$per_page   = (int) ( $query_vars['posts_per_page'] ?? 0 );
+		$nopaging   = (bool) ( $query_vars['nopaging'] ?? false );
+
+		if ( ! $nopaging && $per_page > 0 && $observation['resultCount'] > $per_page ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private static function wp_query_found_rows_contract_holds( array $observation ): bool {
+		$query_vars    = $observation['queryVars'];
+		$no_found_rows = (bool) ( $query_vars['no_found_rows'] ?? false );
+		$has_limits    = self::sql_has_limit_clause( $observation['request'] );
+
+		if ( $no_found_rows ) {
+			return 0 === $observation['foundRowsQueryCount']
+				&& 0 === $observation['foundPosts']
+				&& 0 === $observation['maxNumPages'];
+		}
+
+		if ( $has_limits && $observation['postCount'] > 0 && 0 === $observation['foundRowsQueryCount'] ) {
+			return false;
+		}
+
+		if ( ! $has_limits && $observation['foundPosts'] !== $observation['postCount'] ) {
+			return false;
+		}
+
+		if ( $has_limits ) {
+			$per_page          = max( 1, (int) ( $query_vars['posts_per_page'] ?? 1 ) );
+			$expected_max_page = (int) ceil( $observation['foundPosts'] / $per_page );
+
+			if ( $expected_max_page !== $observation['maxNumPages'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_stub_result_expectations_match( array $observation, array $expect ): bool {
+		foreach ( array( 'foundPosts', 'maxNumPages', 'foundRowsQueryCount' ) as $key ) {
+			if ( array_key_exists( $key, $expect ) && (int) $expect[ $key ] !== $observation[ $key ] ) {
+				return false;
+			}
+		}
+
+		if ( array_key_exists( 'postIds', $expect ) && array_values( $expect['postIds'] ) !== $observation['postIds'] ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private static function sql_has_limit_clause( string $sql ): bool {
+		return 1 === preg_match( '/\bLIMIT\s+\d+(?:\s*,\s*\d+)?\b/i', $sql );
+	}
+
+	private static function found_rows_query_count( array $queries ): int {
+		$count = 0;
+		foreach ( $queries as $query ) {
+			if ( is_string( $query ) && 1 === preg_match( '/^\s*SELECT\s+FOUND_ROWS\s*\(\s*\)/i', $query ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
 	}
 
 	private static function wp_query_execution_vars_hold( array $query_vars ): bool {
@@ -2222,7 +2773,19 @@ final class QuerySurface {
 			&& $first['flags'] === $second['flags']
 			&& $first['foundPosts'] === $second['foundPosts']
 			&& $first['maxNumPages'] === $second['maxNumPages']
+			&& $first['postCount'] === $second['postCount']
+			&& $first['resultCount'] === $second['resultCount']
 			&& $first['postIds'] === $second['postIds'];
+	}
+
+	private static function wp_query_cache_key_for( array $args, string $sql ): string {
+		$query = new class() extends \WP_Query {
+			public function component_fuzz_cache_key( array $args, string $sql ): string {
+				return $this->generate_cache_key( $args, $sql );
+			}
+		};
+
+		return $query->component_fuzz_cache_key( $args, $sql );
 	}
 
 	private static function post_ids_from_results( $posts ): array {
@@ -2242,7 +2805,28 @@ final class QuerySurface {
 		return $ids;
 	}
 
+	private static function comment_ids_from_results( $comments ): array {
+		if ( ! is_array( $comments ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $comments as $comment ) {
+			if ( is_object( $comment ) && isset( $comment->comment_ID ) ) {
+				$ids[] = (int) $comment->comment_ID;
+			} elseif ( is_numeric( $comment ) ) {
+				$ids[] = (int) $comment;
+			}
+		}
+
+		return $ids;
+	}
+
 	private static function wpdb_recorded_queries(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_queries' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_get_queries();
+		}
+
 		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && isset( $GLOBALS['wpdb']->queries ) && is_array( $GLOBALS['wpdb']->queries ) ) {
 			return $GLOBALS['wpdb']->queries;
 		}
@@ -2433,6 +3017,187 @@ final class QuerySurface {
 		);
 	}
 
+	private static function seed_query_fixture(): void {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'insert' ) ) {
+			return;
+		}
+
+		if ( method_exists( $wpdb, 'component_fuzz_reset_content' ) ) {
+			$wpdb->component_fuzz_reset_content();
+		}
+
+		$posts = array(
+			array(
+				'ID'                => 3,
+				'post_author'       => 41,
+				'post_date'         => '2020-01-15 10:00:00',
+				'post_modified'     => '2020-01-16 10:00:00',
+				'post_name'         => 'alpha-seed',
+				'post_status'       => 'publish',
+				'post_title'        => 'Alpha quoted phrase',
+				'post_type'         => 'post',
+				'comment_count'     => '2',
+			),
+			array(
+				'ID'                => 7,
+				'post_author'       => 43,
+				'post_date'         => '2020-02-20 11:30:00',
+				'post_modified'     => '2020-02-21 11:30:00',
+				'post_name'         => 'beta-seed',
+				'post_status'       => 'publish',
+				'post_title'        => 'Beta seed excluded',
+				'post_type'         => 'post',
+				'comment_count'     => '1',
+			),
+			array(
+				'ID'                => 11,
+				'post_author'       => 43,
+				'post_date'         => '2020-03-01 09:00:00',
+				'post_modified'     => '2020-03-02 09:00:00',
+				'post_name'         => 'draft-seed',
+				'post_status'       => 'draft',
+				'post_title'        => 'Draft seed',
+				'post_type'         => 'post',
+				'comment_count'     => '0',
+			),
+			array(
+				'ID'                => 13,
+				'post_author'       => 41,
+				'post_date'         => '2020-02-01 08:00:00',
+				'post_modified'     => '2020-02-01 08:00:00',
+				'post_name'         => 'page-seed',
+				'post_status'       => 'publish',
+				'post_title'        => 'Page seed',
+				'post_type'         => 'page',
+				'comment_count'     => '0',
+			),
+			array(
+				'ID'                => 19,
+				'post_author'       => 47,
+				'post_date'         => '2020-04-01 12:00:00',
+				'post_modified'     => '2020-04-02 12:00:00',
+				'post_name'         => 'private-seed',
+				'post_status'       => 'private',
+				'post_title'        => 'Private seed',
+				'post_type'         => 'post',
+				'comment_count'     => '0',
+			),
+			array(
+				'ID'                => 23,
+				'post_author'       => 41,
+				'post_date'         => '2020-05-05 13:00:00',
+				'post_modified'     => '2020-05-06 13:00:00',
+				'post_name'         => 'gamma-seed',
+				'post_status'       => 'publish',
+				'post_title'        => 'Gamma seed',
+				'post_type'         => 'post',
+				'comment_count'     => '3',
+			),
+		);
+
+		foreach ( $posts as $post ) {
+			$wpdb->insert( $wpdb->posts, $post );
+		}
+
+		$terms = array(
+			array(
+				'term_id' => 101,
+				'name'    => 'Alpha Term',
+				'slug'    => 'alpha-term',
+			),
+			array(
+				'term_id' => 103,
+				'name'    => 'Beta Term',
+				'slug'    => 'beta-term',
+			),
+		);
+		foreach ( $terms as $term ) {
+			$wpdb->insert( $wpdb->terms, $term );
+		}
+
+		$taxonomies = array(
+			array(
+				'term_taxonomy_id' => 5,
+				'term_id'          => 101,
+				'taxonomy'         => self::TAXONOMY,
+				'count'            => 2,
+			),
+			array(
+				'term_taxonomy_id' => 9,
+				'term_id'          => 103,
+				'taxonomy'         => self::TAXONOMY,
+				'count'            => 1,
+			),
+		);
+		foreach ( $taxonomies as $taxonomy ) {
+			$wpdb->insert( $wpdb->term_taxonomy, $taxonomy );
+		}
+
+		foreach (
+			array(
+				array( 'object_id' => 3, 'term_taxonomy_id' => 5 ),
+				array( 'object_id' => 7, 'term_taxonomy_id' => 9 ),
+				array( 'object_id' => 23, 'term_taxonomy_id' => 5 ),
+			) as $relationship
+		) {
+			$wpdb->insert( $wpdb->term_relationships, $relationship );
+		}
+
+		foreach (
+			array(
+				array( 'post_id' => 3, 'meta_key' => 'color', 'meta_value' => 'blue' ),
+				array( 'post_id' => 3, 'meta_key' => 'rating', 'meta_value' => '5' ),
+				array( 'post_id' => 7, 'meta_key' => 'color', 'meta_value' => 'red' ),
+				array( 'post_id' => 23, 'meta_key' => 'color', 'meta_value' => 'blue' ),
+			) as $meta
+		) {
+			$wpdb->insert( $wpdb->postmeta, $meta );
+		}
+
+		foreach (
+			array(
+				array(
+					'ID'              => 41,
+					'user_login'      => 'alpha',
+					'user_email'      => 'alpha@example.test',
+					'user_registered' => '2020-01-01 00:00:00',
+					'display_name'    => 'Alpha User',
+				),
+				array(
+					'ID'              => 43,
+					'user_login'      => 'beta',
+					'user_email'      => 'beta@example.test',
+					'user_registered' => '2020-02-01 00:00:00',
+					'display_name'    => 'Beta User',
+				),
+			) as $user
+		) {
+			$wpdb->insert( $wpdb->users, $user );
+		}
+
+		foreach (
+			array(
+				array(
+					'comment_ID'           => 301,
+					'comment_post_ID'      => 3,
+					'comment_author_email' => 'alpha@example.test',
+					'comment_content'      => 'seed alpha',
+					'comment_approved'     => '1',
+				),
+				array(
+					'comment_ID'           => 303,
+					'comment_post_ID'      => 7,
+					'comment_author_email' => 'beta@example.test',
+					'comment_content'      => 'seed beta',
+					'comment_approved'     => '0',
+				),
+			) as $comment
+		) {
+			$wpdb->insert( $wpdb->comments, $comment );
+		}
+	}
+
 	private static function register_scoped_taxonomies(): void {
 		if ( \taxonomy_exists( self::TAXONOMY ) ) {
 			return;
@@ -2453,6 +3218,15 @@ final class QuerySurface {
 	}
 
 	private static function new_wpdb_stub(): object {
+		if ( class_exists( '\Component_Fuzz_WPDB_Stub' ) ) {
+			return new \Component_Fuzz_WPDB_Stub(
+				array(
+					'home'    => 'http://example.test',
+					'siteurl' => 'http://example.test',
+				)
+			);
+		}
+
 		return new class() {
 			public $suppress_errors = false;
 			public $last_query = '';
