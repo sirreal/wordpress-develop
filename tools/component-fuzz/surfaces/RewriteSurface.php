@@ -145,6 +145,14 @@ final class RewriteSurface {
 		\remove_rewrite_tag( $removed_tag );
 		$removed = ! in_array( $removed_tag, $wp_rewrite->rewritecode, true );
 
+		$removed_default_tag = '%gone_' . $case['token'] . '%';
+		$removed_default_var = trim( $removed_default_tag, '%' );
+		\add_rewrite_tag( $removed_default_tag, '([^/]+)' );
+		$removed_default_var_registered = in_array( $removed_default_var, $wp->public_query_vars, true );
+		\remove_rewrite_tag( $removed_default_tag );
+		$removed_default_tag_absent = ! in_array( $removed_default_tag, $wp_rewrite->rewritecode, true );
+		$removed_default_var_retained = in_array( $removed_default_var, $wp->public_query_vars, true );
+
 		$ok = $invalid_noop
 			&& false !== $first_position
 			&& $first_position === $updated_position
@@ -153,6 +161,9 @@ final class RewriteSurface {
 			&& $updated_query_var . '=' === $wp_rewrite->queryreplace[ $updated_position ]
 			&& in_array( $default_var, $wp->public_query_vars, true )
 			&& $removed
+			&& $removed_default_var_registered
+			&& $removed_default_tag_absent
+			&& $removed_default_var_retained
 			&& self::rules_have_query_vars( $rules, array( $updated_query_var, $default_var ) )
 			&& ! self::rules_contain_any( $rules, array( $tag, $default_tag ) );
 
@@ -168,6 +179,9 @@ final class RewriteSurface {
 				'defaultQueryVars' => in_array( $default_var, $wp->public_query_vars, true ),
 				'removedTag'       => $removed_tag,
 				'removed'          => $removed,
+				'removedDefaultTag' => $removed_default_tag,
+				'removedDefaultTagAbsent' => $removed_default_tag_absent,
+				'removedDefaultVarRetained' => $removed_default_var_retained,
 				'ruleCount'        => count( $rules ),
 				'ruleSample'       => self::sample_assoc( $rules ),
 			)

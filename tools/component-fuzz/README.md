@@ -451,8 +451,9 @@ database, network requests, or a configured site.
   restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
-  build/parse helpers, URL parsing, home/site URL helpers, weird path fragments,
-  and cheap no-DB `url_to_postid()` paths.
+  build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
+  parsing, home/site URL helpers, weird path fragments, and cheap no-DB
+  `url_to_postid()` paths.
 - `security`: salts and HMACs, password and fast-hash verification, nonce
   generation/verification, nonce tick/lifetime boundaries, nonce URLs and
   hidden fields, admin/ajax referer paths, synthetic auth cookies and session
