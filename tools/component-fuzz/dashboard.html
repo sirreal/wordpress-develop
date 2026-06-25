@@ -226,12 +226,12 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 7996 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 8000 passed, 0 failed, 0 errored, 66 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, and <code>ai-client</code> at 8000 passed.</div>
+			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 12290 passed and 10 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, <code>ai-client</code> at 8000 passed, and <code>post-types</code> at 9000 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -692,10 +692,10 @@
 				</tr>
 				<tr>
 					<td><code>post-types</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 7853 passed, 64 skipped, 0 failed.</td>
-					<td>Post type/status registries, supports, capabilities, query/rewrite state, unregister cleanup, archive/feed link helpers and filters.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Harvey the 3rd findings fixed through <code>3ad9e6487b</code></td>
+					<td>Main focused run: 9000 passed, 0 skipped, 0 failed; latest broad run: 8000 passed, 66 skipped, 0 failed.</td>
+					<td>Post type/status registries, registration filters/actions and meta-box lifecycle, isolated REST route registration, support-gated revisions/autosaves, late route ordering, capabilities, query/rewrite state, unregister cleanup, archive/feed link helpers and filters.</td>
 				</tr>
 				<tr>
 					<td><code>style</code></td>
@@ -940,6 +940,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>263c82ef81</code> / <code>e3e1c64930</code> / <code>3ad9e6487b</code></td>
+					<td><code>post-types</code></td>
+					<td>9000 passed, 0 skipped, 0 failed after registration lifecycle and REST route coverage plus review fixes; related PHPUnit passed 94 tests and 406 assertions.</td>
+					<td>8000 passed, 66 skipped, 0 failed at 2 iterations after isolated post-type REST route registration, no-diagnostic route context, cron leak check, and explicit REST meta dependency coverage.</td>
+				</tr>
 				<tr>
 					<td><code>688a716cc8</code> / <code>dccbad638c</code></td>
 					<td><code>ai-client</code></td>
