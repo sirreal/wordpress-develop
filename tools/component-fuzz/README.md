@@ -227,8 +227,9 @@ database, network requests, or a configured site.
   local file adapter guards, no-network assertions, and state restoration.
 - `feed-rendering`: no-DB RSS2, Atom, and comments RSS2 feed template rendering
   over synthetic query loops, including feed item/entry counts, self links,
-  CDATA terminator escaping, excerpt/content mode switches, enclosure metadata,
-  comment feed escaping, and feed build date selection.
+  self-link request URI host/filter escaping, CDATA terminator escaping,
+  excerpt/content mode switches, enclosure metadata, comment feed escaping, and
+  feed build date selection.
 - `frontend-features`: no-DB frontend feature helper coverage for speculative
   loading and view transitions, including direct speculation rule validation,
   configuration eligibility, mode/eagerness filters, generated URL-pattern
@@ -729,7 +730,8 @@ surface avoids browser/admin-template or request-dispatch helpers such as
 The `feed-rendering` surface renders core feed templates through synthetic
 `WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
 headers, remote enclosures, DB-backed query execution, and arbitrary invalid
-bytes so XML structure and escaping remain useful oracles.
+bytes so XML structure and escaping remain useful oracles. Direct self-link
+helper coverage mutates `REQUEST_URI`/`HTTP_HOST` without dispatching requests.
 The `community-events` surface short-circuits `wp_remote_get()` through
 `pre_http_request`; it never contacts api.wordpress.org and limits coverage to
 request construction, response normalization, cache behavior, and local helper

@@ -35,6 +35,7 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_feed_template_hook_payloads( $ctx->fork( 'hook-payloads' ), $case );
 			$rows[] = self::check_content_mode_switches( $ctx->fork( 'content-modes' ), $case );
 			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
+			$rows[] = self::check_self_link_request_uri_oracles( $ctx->fork( 'self-link' ), $case );
 			$rows[] = self::check_feed_loop_helpers( $ctx->fork( 'helpers' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -93,6 +94,7 @@ final class FeedRenderingSurface {
 				'get_comment_link',
 				'get_feed_build_date',
 				'get_feed_link',
+				'get_option',
 				'get_post',
 				'get_post_comments_feed_link',
 				'get_self_link',
@@ -107,6 +109,7 @@ final class FeedRenderingSurface {
 				'rss_enclosure',
 				'sanitize_title_with_dashes',
 				'self_link',
+				'set_url_scheme',
 				'simplexml_load_string',
 				'the_category_rss',
 				'the_comment',
@@ -124,6 +127,7 @@ final class FeedRenderingSurface {
 				'wp_insert_post',
 				'wp_insert_user',
 				'wp_slash',
+				'wp_unslash',
 				'wp_title_rss',
 			) as $function
 		) {
@@ -786,6 +790,109 @@ final class FeedRenderingSurface {
 		return self::result( $ctx, 'feed-rendering.feed-link-helpers.alternate-links', $failures, $feed_links . $extra_links );
 	}
 
+	private static function check_self_link_request_uri_oracles( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures      = array();
+		$previous_home = (string) \get_option( 'home' );
+		$home_host     = 'feeds-' . $case['token'] . '.example.test';
+		$home_port     = $ctx->int( 8000, 8999 );
+		$home          = 'http://' . $home_host . ':' . $home_port . '/ignored/base';
+		$attacker_host = 'attacker-' . $case['token'] . '.invalid:9443';
+		$active_marker = '';
+		$filter_events = array();
+		$output        = '';
+		$self_filter   = static function ( string $feed_link ) use ( &$active_marker, &$filter_events ): string {
+			$filter_events[] = $feed_link;
+
+			return $feed_link . '&cfz-marker=' . rawurlencode( $active_marker );
+		};
+		$request_cases = array(
+			array(
+				'label' => 'encoded-query',
+				'value' => '/feed/' . rawurlencode( $case['token'] ) . '/?title=' . rawurlencode( 'A&B " <feed>' ) . '&view=' . rawurlencode( 'summary/value' ),
+				'slash' => false,
+			),
+			array(
+				'label' => 'slashed-superglobal',
+				'value' => '/comments/feed/?quote=\'single\'&path=folder\\name&token=' . rawurlencode( $case['token'] ),
+				'slash' => true,
+			),
+			array(
+				'label' => 'encoded-unicode-and-empty',
+				'value' => '/atom/?empty=&unicode=' . rawurlencode( 'cafe ' . $case['token'] ) . '&encoded=%E2%9C%93',
+				'slash' => false,
+			),
+		);
+
+		\update_option( 'home', $home );
+		$_SERVER['HTTP_HOST'] = $attacker_host;
+		unset( $_SERVER['HTTPS'] );
+		\add_filter( 'self_link', $self_filter, 10, 1 );
+		try {
+			foreach ( $request_cases as $index => $request_case ) {
+				$active_marker          = $request_case['label'] . '-' . self::safe_text( $ctx, 3, 10 );
+				$_SERVER['REQUEST_URI'] = $request_case['slash'] ? \wp_slash( $request_case['value'] ) : $request_case['value'];
+
+				$expected_raw      = \set_url_scheme( 'http://' . $home_host . ':' . $home_port . \wp_unslash( $_SERVER['REQUEST_URI'] ) );
+				$expected_filtered = \esc_url( $expected_raw . '&cfz-marker=' . rawurlencode( $active_marker ) );
+				$raw_self_link     = \get_self_link();
+				$rendered_self     = self::capture_output(
+					static function (): void {
+						\self_link();
+					}
+				);
+				$output           .= $raw_self_link . "\n" . $rendered_self . "\n";
+
+				self::collect_failure(
+					$failures,
+					$expected_raw === $raw_self_link
+						&& str_starts_with( $raw_self_link, 'http://' . $home_host . ':' . $home_port . '/' )
+						&& ! str_contains( $raw_self_link, $attacker_host )
+						&& ! str_contains( $raw_self_link, '/ignored/base' )
+						&& ( ! $request_case['slash'] || ! str_contains( $raw_self_link, "\\'" ) ),
+					'get_self_link() derives the feed URL from home host/port plus unslashed REQUEST_URI, not HTTP_HOST or home path',
+					array(
+						'index'       => $index,
+						'requestCase' => $request_case,
+						'requestUri'  => $_SERVER['REQUEST_URI'],
+						'expected'    => $expected_raw,
+						'actual'      => $raw_self_link,
+						'home'        => $home,
+						'httpHost'    => $attacker_host,
+					)
+				);
+				self::collect_failure(
+					$failures,
+					$expected_filtered === $rendered_self
+						&& ! str_contains( $rendered_self, '<feed>' )
+						&& ! str_contains( $rendered_self, '"' ),
+					'self_link() applies the self_link filter and escapes the rendered URL for feed attributes',
+					array(
+						'index'    => $index,
+						'expected' => $expected_filtered,
+						'actual'   => $rendered_self,
+						'marker'   => $active_marker,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'self_link', $self_filter, 10 );
+			\update_option( 'home', $previous_home );
+		}
+
+		self::collect_failure(
+			$failures,
+			count( $request_cases ) === count( $filter_events )
+				&& false === \has_filter( 'self_link', $self_filter ),
+			'self_link request URI oracle removes temporary filters after generated cases',
+			array(
+				'filterEvents' => $filter_events,
+				'hasFilter'    => \has_filter( 'self_link', $self_filter ),
+			)
+		);
+
+		return self::result( $ctx, 'feed-rendering.self-link.request-uri-host-filter-escaping', $failures, $output );
+	}
+
 	private static function check_feed_loop_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		self::set_posts_query( $case, 'rss2', false );
@@ -1173,7 +1280,7 @@ final class FeedRenderingSurface {
 		}
 
 		$server = array();
-		foreach ( array( 'REQUEST_URI' ) as $name ) {
+		foreach ( array( 'HTTP_HOST', 'HTTPS', 'REQUEST_URI' ) as $name ) {
 			$server[ $name ] = array(
 				'exists' => array_key_exists( $name, $_SERVER ),
 				'value'  => array_key_exists( $name, $_SERVER ) ? $_SERVER[ $name ] : null,
