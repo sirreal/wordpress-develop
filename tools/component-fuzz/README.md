@@ -48,11 +48,12 @@ database, network requests, or a configured site.
   bulk-action/month-dropdown helper contracts, and safe admin/AJAX nonce checks
   without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
-  for posts, media, comments, terms, users, plugins, themes, application
-  passwords, and guarded network sites/users, including columns/hidden/sortable/
-  default-primary logic, views, actions, bulk actions, row URL and HTML escaping,
-  pagination/counts, synthetic object/pre-query/user-meta fixtures, capability
-  gates, JS row templates, and state/filter restoration.
+  for posts, media, comments, terms, users, plugins, themes, network themes,
+  application passwords, and guarded network sites/users, including columns/
+  hidden/sortable/default-primary logic, views, actions, bulk actions, exact row
+  URL/nonce and HTML escaping, pagination/counts, synthetic object/pre-query/
+  user-meta/theme fixtures, capability gates, JS row templates, and state/filter
+  restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
@@ -579,8 +580,9 @@ or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list
 table API with synthetic items and referer helpers only where valid nonces or
 `stop=false` avoid exits. The `admin-list-tables` surface complements that base
 coverage by loading concrete `WP_*_List_Table` subclasses with synthetic rows,
-object-cache fixtures, temporary plugin/theme metadata, and `posts_pre_query`,
-`comments_pre_query`, `terms_pre_query`, `users_pre_query`, and
+object-cache fixtures, temporary plugin/theme/network-theme metadata, exact
+row-action nonce checks, and `posts_pre_query`, `comments_pre_query`,
+`terms_pre_query`, `users_pre_query`, and
 `sites_pre_query` short-circuits. It intentionally skips full admin dispatch,
 privacy request tables, install/update tables, destructive plugin/theme
 operations, real uploads, and true multisite write paths; network site/user
