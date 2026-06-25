@@ -6,6 +6,7 @@ final class HttpSurface {
 
 	private const GENERATED_RESPONSE_CASES     = 8;
 	private const GENERATED_ABSOLUTE_URL_CASES = 10;
+	private const GENERATED_CHUNK_CASES        = 6;
 
 	/** @var bool|null */
 	private static $proxy_override = null;
@@ -33,6 +34,8 @@ final class HttpSurface {
 
 			$rows[] = self::check_remote_retrieve_helpers( $ctx );
 			$rows[] = self::check_remote_request_wrappers( $ctx );
+			$rows[] = self::check_chunk_transfer_decode( $ctx );
+			$rows[] = self::check_request_normalization_no_network( $ctx );
 			$rows[] = self::check_response_objects( $ctx );
 			$rows[] = self::check_header_processing( $ctx );
 			$rows[] = self::check_cookie_parsing_and_headers( $ctx );
@@ -96,10 +99,12 @@ final class HttpSurface {
 		foreach (
 			array(
 				'absint',
+				'add_action',
 				'add_filter',
 				'apply_filters',
 				'home_url',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'wp_http_validate_url',
 				'wp_parse_url',
@@ -377,6 +382,277 @@ final class HttpSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_chunk_transfer_decode( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label'    => 'single-chunk-with-extension',
+				'body'     => "5;fuzz=alpha\r\nhello0\r\n",
+				'expected' => 'hello',
+			),
+			array(
+				'label'    => 'multiple-legacy-contiguous-chunks',
+				'body'     => "4\r\nWiki5;part=2\r\npedia0\r\n",
+				'expected' => 'Wikipedia',
+			),
+			array(
+				'label'    => 'binary-boundary',
+				'body'     => "7;bin=1\r\nA\x00B\r\nC\xff0\r\n",
+				'expected' => "A\x00B\r\nC\xff",
+			),
+			array(
+				'label'    => 'rfc-multichunk-separators-return-raw',
+				'body'     => "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n",
+				'expected' => "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n",
+			),
+			array(
+				'label'    => 'trailers-return-raw',
+				'body'     => "5\r\nhello0\r\nX-Fuzz-Trailer: yes\r\n\r\n",
+				'expected' => "5\r\nhello0\r\nX-Fuzz-Trailer: yes\r\n\r\n",
+			),
+			array(
+				'label'    => 'non-hex-return-raw',
+				'body'     => "g\r\nbody0\r\n",
+				'expected' => "g\r\nbody0\r\n",
+			),
+			array(
+				'label'    => 'leading-crlf-return-raw',
+				'body'     => "\r\n5\r\nhello0\r\n",
+				'expected' => "\r\n5\r\nhello0\r\n",
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_CHUNK_CASES; ++$i ) {
+			$chunks = array();
+			$count  = $ctx->int( 1, 3 );
+			for ( $j = 0; $j < $count; ++$j ) {
+				$chunks[] = $ctx->bytes( 1, 12 );
+			}
+
+			$cases[] = array(
+				'label'    => 'generated-legacy-contiguous-' . $i,
+				'body'     => self::legacy_chunk_transfer_body( $chunks, $ctx ),
+				'expected' => implode( '', $chunks ),
+			);
+		}
+
+		foreach ( $cases as $index => $case ) {
+			$actual = \WP_Http::chunkTransferDecode( $case['body'] );
+			self::collect_failure(
+				$failures,
+				$case['expected'] === $actual,
+				'chunkTransferDecode ' . $case['label'],
+				array(
+					'index'    => $index,
+					'input'    => self::describe_string( $case['body'] ),
+					'expected' => self::describe_string( $case['expected'] ),
+					'actual'   => self::describe_string( $actual ),
+				)
+			);
+		}
+
+		return $ctx->result(
+			'http.chunk-transfer-decode.legacy-success-and-malformed-raw',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_request_normalization_no_network( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures             = array();
+		$arg_events           = array();
+		$pre_events           = array();
+		$debug_events         = array();
+		$http                 = new \WP_Http();
+		$preempt_url          = 'https://api.example.test/component-fuzz/http/normalized/' . self::token( $ctx, 8 );
+		$invalid_url          = 'component-fuzz-no-scheme-' . self::token( $ctx, 8 );
+		$stream_url           = 'https://api.example.test/component-fuzz/http/stream/' . self::token( $ctx, 8 );
+		$filtered_redirection = $ctx->int( 1, 4 );
+		$filtered_timeout     = $ctx->choice( array( 0.5, 1.25, 3.75 ) );
+		$input_limit          = 64 + $ctx->int( 0, 128 );
+		$filtered_limit       = 512 + $ctx->int( 0, 1024 );
+		$invalid_limit        = 128 + $ctx->int( 0, 256 );
+		$stream_filename      = self::missing_stream_filename( $ctx );
+		$preempt_case         = array(
+			'status'      => 287,
+			'message'     => 'Preempted',
+			'body'        => 'request-preempt-' . self::token( $ctx, 8 ),
+			'contentType' => 'text/plain',
+			'tokenA'      => 'request',
+			'tokenB'      => 'normalization',
+			'cookieName'  => 'request_preempt',
+			'cookieValue' => self::token( $ctx, 6 ),
+		);
+		$preempt_response     = self::synthetic_response( $preempt_case );
+
+		$request_args_filter = static function ( array $parsed_args, string $url ) use ( &$arg_events, $preempt_url, $filtered_redirection, $filtered_timeout, $filtered_limit ): array {
+			$arg_events[] = array(
+				'url'  => $url,
+				'args' => $parsed_args,
+			);
+
+			if ( $preempt_url === $url ) {
+				$parsed_args['redirection'] = $filtered_redirection;
+				$parsed_args['timeout'] = $filtered_timeout;
+				$parsed_args['limit_response_size'] = $filtered_limit;
+				$parsed_args['headers']['X-Fuzz-Filtered'] = 'yes';
+			}
+
+			return $parsed_args;
+		};
+
+		$pre_http_request = static function ( $preempt, array $parsed_args, string $url ) use ( &$pre_events, $preempt_url, $preempt_response ) {
+			$pre_events[] = array(
+				'preempt' => $preempt,
+				'url'     => $url,
+				'args'    => $parsed_args,
+			);
+
+			if ( $preempt_url === $url ) {
+				return $preempt_response;
+			}
+
+			return $preempt;
+		};
+
+		$debug_action = static function ( $response, string $context, string $class, array $parsed_args, string $url ) use ( &$debug_events ): void {
+			$debug_events[] = array(
+				'url'      => $url,
+				'context'  => $context,
+				'class'    => $class,
+				'response' => $response,
+				'args'     => $parsed_args,
+			);
+		};
+
+		add_filter( 'http_request_args', $request_args_filter, 10, 2 );
+		add_filter( 'pre_http_request', $pre_http_request, 10, 3 );
+		add_action( 'http_api_debug', $debug_action, 10, 5 );
+		try {
+			$preempted_response = $http->request(
+				$preempt_url,
+				array(
+					'method'              => 'POST',
+					'headers'             => array( 'X-Fuzz-Input' => self::token( $ctx, 6 ) ),
+					'body'                => 'payload=' . rawurlencode( self::token( $ctx, 8 ) ),
+					'redirection'         => 9,
+					'limit_response_size' => $input_limit,
+				)
+			);
+
+			$invalid_response = $http->request(
+				$invalid_url,
+				array(
+					'headers'             => "X-Fuzz-Raw: one\r\nX-Fuzz-Raw: two",
+					'limit_response_size' => $invalid_limit,
+				)
+			);
+
+			$stream_response = $http->request(
+				$stream_url,
+				array(
+					'blocking' => false,
+					'filename' => $stream_filename,
+					'headers'  => 'X-Fuzz-Stream: raw',
+					'stream'   => true,
+				)
+			);
+		} finally {
+			remove_action( 'http_api_debug', $debug_action, 10 );
+			remove_filter( 'pre_http_request', $pre_http_request, 10 );
+			remove_filter( 'http_request_args', $request_args_filter, 10 );
+		}
+
+		$preempt_args_event = self::first_event_for_url( $arg_events, $preempt_url );
+		$preempt_event      = self::first_event_for_url( $pre_events, $preempt_url );
+		$invalid_event      = self::first_event_for_url( $pre_events, $invalid_url );
+		$invalid_debug      = self::first_event_for_url( $debug_events, $invalid_url );
+		$stream_event       = self::first_event_for_url( $pre_events, $stream_url );
+		$stream_debug       = self::first_event_for_url( $debug_events, $stream_url );
+
+		self::collect_failure(
+			$failures,
+			is_array( $preempt_args_event )
+				&& ! isset( $preempt_args_event['args']['_redirection'] )
+				&& 'POST' === ( $preempt_args_event['args']['method'] ?? null )
+				&& $input_limit === ( $preempt_args_event['args']['limit_response_size'] ?? null )
+				&& true === ( $preempt_args_event['args']['blocking'] ?? null )
+				&& true === ( $preempt_args_event['args']['decompress'] ?? null )
+				&& ! empty( $preempt_args_event['args']['sslcertificates'] )
+				&& is_array( $preempt_event )
+				&& false === $preempt_event['preempt']
+				&& $preempt_response === $preempted_response
+				&& $filtered_redirection === ( $preempt_event['args']['redirection'] ?? null )
+				&& $filtered_redirection === ( $preempt_event['args']['_redirection'] ?? null )
+				&& $filtered_timeout === ( $preempt_event['args']['timeout'] ?? null )
+				&& $filtered_limit === ( $preempt_event['args']['limit_response_size'] ?? null )
+				&& 'yes' === ( $preempt_event['args']['headers']['X-Fuzz-Filtered'] ?? null ),
+			'WP_Http::request merges defaults, applies http_request_args, copies _redirection, and preempts before transport',
+			array(
+				'httpRequestArgs' => self::event_summary( $preempt_args_event ),
+				'preHttpRequest'  => self::event_summary( $preempt_event ),
+				'response'        => self::describe_value( $preempted_response ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$invalid_response instanceof \WP_Error
+				&& 'http_request_failed' === $invalid_response->get_error_code()
+				&& is_array( $invalid_event )
+				&& false === $invalid_event['preempt']
+				&& is_array( $invalid_debug )
+				&& $invalid_debug['response'] instanceof \WP_Error
+				&& 'http_request_failed' === $invalid_debug['response']->get_error_code()
+				&& 'response' === ( $invalid_debug['context'] ?? null )
+				&& 'WpOrg\Requests\Requests' === ( $invalid_debug['class'] ?? null )
+				&& $invalid_limit === ( $invalid_debug['args']['limit_response_size'] ?? null ),
+			'WP_Http::request reports invalid URLs through http_api_debug after pre_http_request declines',
+			array(
+				'preHttpRequest' => self::event_summary( $invalid_event ),
+				'debug'          => self::event_summary( $invalid_debug ),
+				'response'       => self::describe_value( $invalid_response ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$stream_response instanceof \WP_Error
+				&& 'http_request_failed' === $stream_response->get_error_code()
+				&& is_array( $stream_event )
+				&& false === $stream_event['preempt']
+				&& false === ( $stream_event['args']['blocking'] ?? null )
+				&& is_array( $stream_debug )
+				&& $stream_debug['response'] instanceof \WP_Error
+				&& 'http_request_failed' === $stream_debug['response']->get_error_code()
+				&& true === ( $stream_debug['args']['stream'] ?? null )
+				&& true === ( $stream_debug['args']['blocking'] ?? null )
+				&& $stream_filename === ( $stream_debug['args']['filename'] ?? null )
+				&& 'X-Fuzz-Stream: raw' === ( $stream_debug['args']['headers'] ?? null ),
+			'WP_Http::request stream destination errors force blocking and expose debug payload without transport',
+			array(
+				'preHttpRequest' => self::event_summary( $stream_event ),
+				'debug'          => self::event_summary( $stream_debug ),
+				'response'       => self::describe_value( $stream_response ),
+				'filename'       => $stream_filename,
+			)
+		);
+
+		return $ctx->result(
+			'http.request.no-network-normalization-and-early-errors',
+			array() === $failures,
+			array(
+				'argEvents'   => count( $arg_events ),
+				'preEvents'   => count( $pre_events ),
+				'debugEvents' => count( $debug_events ),
+				'failures'    => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
@@ -1010,6 +1286,77 @@ final class HttpSurface {
 		);
 	}
 
+	private static function legacy_chunk_transfer_body( array $chunks, \ComponentFuzz\FuzzContext $ctx ): string {
+		$body = '';
+		foreach ( $chunks as $chunk ) {
+			$extension = $ctx->bool( 50 ) ? ';fuzz=' . self::token( $ctx, 4 ) : '';
+			if ( $ctx->bool( 25 ) ) {
+				$extension .= ';quoted="' . self::token( $ctx, 3 ) . '"';
+			}
+
+			$body .= dechex( strlen( $chunk ) ) . $extension . "\r\n" . $chunk;
+		}
+
+		return $body . "0\r\n";
+	}
+
+	private static function missing_stream_filename( \ComponentFuzz\FuzzContext $ctx ): string {
+		return rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
+			. DIRECTORY_SEPARATOR
+			. 'component-fuzz-http-missing-'
+			. getmypid()
+			. '-'
+			. $ctx->seed()
+			. '-'
+			. $ctx->iteration()
+			. '-'
+			. self::token( $ctx, 6 )
+			. DIRECTORY_SEPARATOR
+			. 'response.bin';
+	}
+
+	private static function first_event_for_url( array $events, string $url ): ?array {
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $url === ( $event['url'] ?? null ) ) {
+				return $event;
+			}
+		}
+
+		return null;
+	}
+
+	private static function event_summary( $event ): array {
+		if ( ! is_array( $event ) ) {
+			return array( 'event' => self::describe_value( $event ) );
+		}
+
+		$summary = array(
+			'url' => $event['url'] ?? null,
+		);
+
+		if ( array_key_exists( 'preempt', $event ) ) {
+			$summary['preempt'] = self::describe_value( $event['preempt'] );
+		}
+
+		if ( array_key_exists( 'context', $event ) ) {
+			$summary['context'] = $event['context'];
+		}
+
+		if ( array_key_exists( 'class', $event ) ) {
+			$summary['class'] = $event['class'];
+		}
+
+		if ( array_key_exists( 'response', $event ) ) {
+			$summary['response'] = self::describe_value( $event['response'] );
+		}
+
+		if ( isset( $event['args'] ) && is_array( $event['args'] ) ) {
+			$summary['args'] = self::request_arg_summary( $event['args'] );
+		}
+
+		return $summary;
+	}
+
 	private static function install_scoped_filters(): void {
 		add_filter( 'pre_option_home', array( __CLASS__, 'filter_home_option' ), 10, 3 );
 		add_filter( 'pre_option_siteurl', array( __CLASS__, 'filter_siteurl_option' ), 10, 3 );
@@ -1136,6 +1483,11 @@ final class HttpSurface {
 			'_redirection'        => $args['_redirection'] ?? null,
 			'timeout'             => $args['timeout'] ?? null,
 			'blocking'            => $args['blocking'] ?? null,
+			'stream'              => $args['stream'] ?? null,
+			'filename'            => $args['filename'] ?? null,
+			'decompress'          => $args['decompress'] ?? null,
+			'sslverify'           => $args['sslverify'] ?? null,
+			'sslcertificates'     => $args['sslcertificates'] ?? null,
 			'headers'             => self::describe_value( $args['headers'] ?? array() ),
 			'body'                => self::describe_value( $args['body'] ?? null ),
 			'limit_response_size' => $args['limit_response_size'] ?? null,
