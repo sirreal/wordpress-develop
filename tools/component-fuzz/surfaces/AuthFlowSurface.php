@@ -52,6 +52,7 @@ final class AuthFlowSurface {
 			$rows[] = self::check_clear_auth_cookie_without_headers( $ctx->fork( 'clear-cookie' ) );
 			$rows[] = self::check_cookie_authentication_paths( $ctx->fork( 'cookie-auth' ) );
 			$rows[] = self::check_auth_cookie_validation_events( $ctx->fork( 'cookie-events' ) );
+			$rows[] = self::check_generated_cookie_scheme_boundaries( $ctx->fork( 'cookie-schemes' ) );
 			$rows[] = self::check_session_token_lifecycle( $ctx->fork( 'session-lifecycle' ) );
 			$rows[] = self::check_current_user_cookie_restoration( $ctx->fork( 'restoration' ) );
 			$rows[] = self::check_parse_auth_cookie_generated_failures( $ctx->fork( 'parse-failures' ) );
@@ -99,6 +100,33 @@ final class AuthFlowSurface {
 		);
 
 		return self::$auth_cookie_lifetime;
+	}
+
+	public static function filter_auth_cookie( string $cookie, int $user_id, int $expiration, string $scheme, string $token ): string {
+		$parsed = \wp_parse_auth_cookie( $cookie, $scheme );
+
+		self::record_event(
+			'auth_cookie',
+			array(
+				'cookieSha1' => sha1( $cookie ),
+				'bytes'      => strlen( $cookie ),
+				'userId'     => $user_id,
+				'expiration' => $expiration,
+				'scheme'     => $scheme,
+				'tokenSha1'  => sha1( $token ),
+				'parsed'     => is_array( $parsed )
+					? array(
+						'username'   => $parsed['username'],
+						'expiration' => $parsed['expiration'],
+						'tokenSha1'  => sha1( $parsed['token'] ),
+						'hmacSha1'   => sha1( $parsed['hmac'] ),
+						'scheme'     => $parsed['scheme'],
+					)
+					: false,
+			)
+		);
+
+		return $cookie;
 	}
 
 	public static function filter_attach_session_information( array $session, int $user_id ): array {
@@ -825,6 +853,126 @@ final class AuthFlowSurface {
 		return self::row(
 			$ctx,
 			'auth-flow.auth-cookie-validation-events-and-defaults',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_generated_cookie_scheme_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_case_state();
+		self::clear_events();
+
+		$failures  = array();
+		$user_spec = self::user_spec( $ctx, 'schemes' );
+		$user      = self::insert_synthetic_user( $user_spec );
+		$manager   = \WP_Session_Tokens::get_instance( $user_spec['ID'] );
+		$expires   = time() + DAY_IN_SECONDS + $ctx->int( 1, 7200 );
+		$token     = $manager->create( $expires );
+		$schemes   = array( 'auth', 'secure_auth', 'logged_in' );
+		$cookies   = array();
+		$parsed    = array();
+		$validated = array();
+
+		\add_filter( 'auth_cookie', array( __CLASS__, 'filter_auth_cookie' ), 10, 5 );
+
+		try {
+			foreach ( $schemes as $scheme ) {
+				$cookies[ $scheme ]   = \wp_generate_auth_cookie( $user_spec['ID'], $expires, $scheme, $token );
+				$parsed[ $scheme ]    = \wp_parse_auth_cookie( $cookies[ $scheme ], $scheme );
+				$validated[ $scheme ] = array(
+					'matching'    => \wp_validate_auth_cookie( $cookies[ $scheme ], $scheme ),
+					'emptyScheme' => \wp_validate_auth_cookie( $cookies[ $scheme ], '' ),
+				);
+
+				foreach ( $schemes as $candidate_scheme ) {
+					if ( $candidate_scheme === $scheme ) {
+						continue;
+					}
+
+					$validated[ $scheme ][ $candidate_scheme ] = \wp_validate_auth_cookie( $cookies[ $scheme ], $candidate_scheme );
+				}
+			}
+
+			$filter_events         = self::events( 'auth_cookie' );
+			$parsed_checks         = array();
+			$validation_checks     = array();
+			$filter_payload_checks = array();
+			$hmacs                 = array();
+
+			foreach ( $schemes as $index => $scheme ) {
+				$parsed_cookie = $parsed[ $scheme ];
+				$event         = $filter_events[ $index ] ?? array();
+
+				$parsed_checks[ $scheme ] = is_array( $parsed_cookie )
+					&& $user_spec['user_login'] === $parsed_cookie['username']
+					&& (string) $expires === (string) $parsed_cookie['expiration']
+					&& $token === $parsed_cookie['token']
+					&& $scheme === $parsed_cookie['scheme']
+					&& '' !== $parsed_cookie['hmac'];
+
+				if ( is_array( $parsed_cookie ) ) {
+					$hmacs[ $scheme ] = $parsed_cookie['hmac'];
+				}
+
+				$cross_scheme_results = array();
+				foreach ( $schemes as $candidate_scheme ) {
+					if ( $candidate_scheme !== $scheme ) {
+						$cross_scheme_results[] = false === ( $validated[ $scheme ][ $candidate_scheme ] ?? null );
+					}
+				}
+
+				$validation_checks[ $scheme ] = $user_spec['ID'] === ( $validated[ $scheme ]['matching'] ?? null )
+					&& false === ( $validated[ $scheme ]['emptyScheme'] ?? null )
+					&& ! in_array( false, $cross_scheme_results, true );
+
+				$filter_payload_checks[ $scheme ] = isset( $event['cookieSha1'], $event['userId'], $event['expiration'], $event['scheme'], $event['tokenSha1'], $event['parsed'] )
+					&& sha1( $cookies[ $scheme ] ) === $event['cookieSha1']
+					&& $user_spec['ID'] === $event['userId']
+					&& $expires === $event['expiration']
+					&& $scheme === $event['scheme']
+					&& sha1( $token ) === $event['tokenSha1']
+					&& is_array( $event['parsed'] )
+					&& $scheme === $event['parsed']['scheme']
+					&& $user_spec['user_login'] === $event['parsed']['username']
+					&& (string) $expires === (string) $event['parsed']['expiration']
+					&& sha1( $token ) === $event['parsed']['tokenSha1'];
+			}
+
+			self::collect_failure(
+				$failures,
+				3 === count( array_unique( $cookies ) )
+					&& 3 === count( array_unique( $hmacs ) )
+					&& ! in_array( false, $parsed_checks, true )
+					&& ! in_array( false, $validation_checks, true ),
+				'generated auth cookies are scheme-bound and only validate for their generating scheme',
+				array(
+					'user'             => self::describe_user( $user ),
+					'cookieSha1s'      => array_map( 'sha1', $cookies ),
+					'hmacSha1s'        => array_map( 'sha1', $hmacs ),
+					'parsedChecks'     => $parsed_checks,
+					'validationChecks' => $validation_checks,
+					'validated'        => $validated,
+					'parsed'           => $parsed,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				3 === count( $filter_events )
+					&& ! in_array( false, $filter_payload_checks, true ),
+				'auth_cookie filter receives the generated cookie and matching user, expiration, scheme, and token payload',
+				array(
+					'filterEvents'  => $filter_events,
+					'payloadChecks' => $filter_payload_checks,
+				)
+			);
+		} finally {
+			\remove_filter( 'auth_cookie', array( __CLASS__, 'filter_auth_cookie' ), 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'auth-flow.generated-cookie-scheme-boundaries',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
