@@ -28,6 +28,7 @@ final class AdminScreenSurface {
 			$rows[] = self::check_screen_normalization( $ctx->fork( 'screen-normalization' ) );
 			$rows[] = self::check_help_tabs_and_screen_options( $ctx->fork( 'help-screen-options' ) );
 			$rows[] = self::check_screen_options_rendering( $ctx->fork( 'screen-options-rendering' ) );
+			$rows[] = self::check_screen_meta_rendering_lifecycle( $ctx->fork( 'screen-meta-rendering-lifecycle' ) );
 			$rows[] = self::check_column_headers( $ctx->fork( 'column-headers' ) );
 			$rows[] = self::check_settings_registry( $ctx->fork( 'settings-registry' ) );
 			$rows[] = self::check_settings_rendering( $ctx->fork( 'settings-rendering' ) );
@@ -645,6 +646,266 @@ final class AdminScreenSurface {
 		return self::row(
 			$ctx,
 			'admin-screen.screen-options.rendering-controls',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_screen_meta_rendering_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$screen   = \convert_to_screen( self::id( $ctx->fork( 'screen' ), 'cfz_screen_meta', 40 ) );
+
+		$reader_heading = \esc_html( 'Views <script>alert(1)</script> ' . self::fuzz_label( $ctx->fork( 'reader-heading' ) ) );
+		$reader_list    = \esc_html( 'List " onclick="bad ' . self::fuzz_label( $ctx->fork( 'reader-list' ) ) );
+		$reader_custom  = \esc_html( 'Custom reader ' . self::fuzz_label( $ctx->fork( 'reader-custom' ) ) );
+		$reader_content = array(
+			'heading_views' => $reader_heading,
+			'heading_list'  => $reader_list,
+			'cfz_custom'    => $reader_custom,
+		);
+
+		$screen->set_screen_reader_content( $reader_content );
+		$reader_after_set     = $screen->get_screen_reader_content();
+		$reader_heading_text  = $screen->get_screen_reader_text( 'heading_views' );
+		$reader_missing_text  = $screen->get_screen_reader_text( 'cfz_missing_reader' );
+		$reader_ob_level      = ob_get_level();
+		$reader_html          = '';
+		$missing_reader_html  = '';
+		$removed_reader_html  = '';
+		try {
+			ob_start();
+			$screen->render_screen_reader_content( 'heading_views', 'h3' );
+			$reader_html = (string) ob_get_clean();
+
+			ob_start();
+			$screen->render_screen_reader_content( 'cfz_missing_reader', 'h3' );
+			$missing_reader_html = (string) ob_get_clean();
+
+			$screen->remove_screen_reader_content();
+			$reader_after_remove      = $screen->get_screen_reader_content();
+			$reader_after_remove_text = $screen->get_screen_reader_text( 'heading_views' );
+
+			ob_start();
+			$screen->render_screen_reader_content( 'heading_views', 'h3' );
+			$removed_reader_html = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $reader_ob_level ) {
+				ob_end_clean();
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$reader_heading === ( $reader_after_set['heading_views'] ?? null )
+				&& $reader_list === ( $reader_after_set['heading_list'] ?? null )
+				&& $reader_custom === ( $reader_after_set['cfz_custom'] ?? null )
+				&& isset( $reader_after_set['heading_pagination'] )
+				&& $reader_heading === $reader_heading_text
+				&& null === $reader_missing_text
+				&& str_contains( $reader_html, "<h3 class='screen-reader-text'>" )
+				&& str_contains( $reader_html, $reader_heading )
+				&& '' === $missing_reader_html
+				&& array() === $reader_after_remove
+				&& null === $reader_after_remove_text
+				&& '' === $removed_reader_html
+				&& self::html_has_no_unsafe_raw_markup( $reader_html ),
+			'Screen reader content stores generated labels, renders requested keys, no-ops missing keys, and removes cleanly',
+			array(
+				'screen'                => self::describe_screen( $screen ),
+				'readerAfterSet'        => $reader_after_set,
+				'readerHtml'            => self::describe_string( $reader_html ),
+				'missingReaderHtml'     => self::describe_string( $missing_reader_html ),
+				'readerAfterRemove'     => $reader_after_remove,
+				'readerAfterRemoveText' => $reader_after_remove_text,
+				'removedReaderHtml'     => self::describe_string( $removed_reader_html ),
+			)
+		);
+
+		$primary_tab       = self::id( $ctx->fork( 'primary-tab' ), 'cfz_help_meta_primary', 32 );
+		$secondary_tab     = self::id( $ctx->fork( 'secondary-tab' ), 'cfz_help_meta_secondary', 32 );
+		$primary_title     = 'Primary <script>alert(2)</script> ' . self::fuzz_label( $ctx->fork( 'primary-title' ) );
+		$secondary_title   = 'Secondary " onclick="bad ' . self::fuzz_label( $ctx->fork( 'secondary-title' ) );
+		$primary_payload   = 'Primary body <script>alert(3)</script> ' . self::fuzz_label( $ctx->fork( 'primary-content' ) );
+		$secondary_payload = 'Secondary body " onclick="bad ' . self::fuzz_label( $ctx->fork( 'secondary-content' ) );
+		$callback_payload  = 'Callback body <script>alert(4)</script> ' . self::fuzz_label( $ctx->fork( 'callback-content' ) );
+		$sidebar_payload   = 'Sidebar body <script>alert(5)</script> ' . self::fuzz_label( $ctx->fork( 'sidebar-content' ) );
+		$primary_content   = '<p class="cfz-help-content" data-tab="' . \esc_attr( $primary_tab ) . '">' . \esc_html( $primary_payload ) . '</p>';
+		$secondary_content = '<p class="cfz-help-content" data-tab="' . \esc_attr( $secondary_tab ) . '">' . \esc_html( $secondary_payload ) . '</p>';
+		$sidebar_html      = '<aside class="cfz-help-sidebar" data-screen="' . \esc_attr( $screen->id ) . '">' . \esc_html( $sidebar_payload ) . '</aside>';
+		$callback_calls    = array();
+		$callback          = static function ( \WP_Screen $seen_screen, array $tab ) use ( &$callback_calls, $screen, $callback_payload ): void {
+			$callback_calls[] = array(
+				'sameScreen' => $seen_screen === $screen,
+				'id'         => $tab['id'] ?? null,
+				'title'      => $tab['title'] ?? null,
+			);
+			echo '<span class="cfz-help-callback" data-tab="' . \esc_attr( $tab['id'] ?? '' ) . '">';
+			echo \esc_html( $callback_payload );
+			echo '</span>';
+		};
+
+		$screen->add_help_tab(
+			array(
+				'id'       => $secondary_tab,
+				'title'    => $secondary_title,
+				'content'  => $secondary_content,
+				'priority' => 30,
+			)
+		);
+		$screen->add_help_tab(
+			array(
+				'id'       => $primary_tab,
+				'title'    => $primary_title,
+				'content'  => $primary_content,
+				'callback' => $callback,
+				'priority' => 5,
+			)
+		);
+		$screen->set_help_sidebar( $sidebar_html );
+
+		$per_page_option    = self::id( $ctx->fork( 'per-page-option' ), 'cfz_meta_per_page', 32 );
+		$default_per_page   = $ctx->int( 5, 40 );
+		$filtered_per_page  = $default_per_page + $ctx->int( 3, 25 );
+		$layout_columns_max = $ctx->int( 2, 5 );
+		$layout_default     = $ctx->int( 1, $layout_columns_max );
+		$layout_calls       = array();
+		$per_page_calls     = array();
+		$globals_snapshot   = self::snapshot_globals( array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) );
+		$meta_html          = '';
+		$columns_during     = null;
+
+		$layout_filter = static function ( array $columns, string $screen_id, \WP_Screen $seen_screen ) use ( &$layout_calls, $screen ): array {
+			$layout_calls[] = array(
+				'sameScreen' => $seen_screen === $screen,
+				'screenId'   => $screen_id,
+				'incoming'   => $columns,
+			);
+
+			return $columns;
+		};
+		$per_page_filter = static function ( int $per_page ) use ( &$per_page_calls, $filtered_per_page, $per_page_option ): int {
+			$per_page_calls[] = array(
+				'option'   => $per_page_option,
+				'incoming' => $per_page,
+			);
+
+			return $filtered_per_page;
+		};
+
+		\set_current_screen( $screen );
+		\add_screen_option(
+			'per_page',
+			array(
+				'label'   => 'Meta per page ' . \esc_html( self::fuzz_label( $ctx->fork( 'per-page-label' ) ) ),
+				'default' => $default_per_page,
+				'option'  => $per_page_option,
+			)
+		);
+		\add_screen_option(
+			'layout_columns',
+			array(
+				'max'     => $layout_columns_max,
+				'default' => $layout_default,
+			)
+		);
+
+		\add_filter( 'screen_layout_columns', $layout_filter, 10, 3 );
+		\add_filter( $per_page_option, $per_page_filter, 10, 1 );
+		$meta_ob_level = ob_get_level();
+		try {
+			ob_start();
+			$screen->render_screen_meta();
+			$meta_html      = (string) ob_get_clean();
+			$columns_during = $GLOBALS['screen_layout_columns'] ?? null;
+		} finally {
+			while ( ob_get_level() > $meta_ob_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'screen_options_show_submit', '__return_true' );
+			\remove_filter( $per_page_option, $per_page_filter, 10 );
+			\remove_filter( 'screen_layout_columns', $layout_filter, 10 );
+			self::restore_globals( $globals_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$sidebar_html === $screen->get_help_sidebar()
+				&& str_contains( $meta_html, 'id="screen-meta" class="metabox-prefs"' )
+				&& str_contains( $meta_html, 'id="contextual-help-wrap" class="hidden"' )
+				&& ! str_contains( $meta_html, 'no-sidebar' )
+				&& str_contains( $meta_html, 'class="contextual-help-tabs"' )
+				&& str_contains( $meta_html, 'id="tab-link-' . \esc_attr( $primary_tab ) . '" class="active"' )
+				&& str_contains( $meta_html, 'id="tab-panel-' . \esc_attr( $primary_tab ) . '" class="help-tab-content active"' )
+				&& str_contains( $meta_html, \esc_html( $primary_title ) )
+				&& str_contains( $meta_html, \esc_html( $secondary_title ) )
+				&& str_contains( $meta_html, 'class="contextual-help-sidebar"' )
+				&& str_contains( $meta_html, 'cfz-help-sidebar' )
+				&& str_contains( $meta_html, 'cfz-help-content' )
+				&& str_contains( $meta_html, 'cfz-help-callback' )
+				&& 1 === count( $callback_calls )
+				&& true === ( $callback_calls[0]['sameScreen'] ?? null )
+				&& $primary_tab === ( $callback_calls[0]['id'] ?? null )
+				&& str_contains( $meta_html, 'id="screen-options-wrap" class="hidden"' )
+				&& str_contains( $meta_html, "form id='adv-settings' method='post'" )
+				&& str_contains( $meta_html, 'name="screenoptionnonce"' )
+				&& str_contains( $meta_html, 'class="screen-options"' )
+				&& str_contains( $meta_html, 'id="' . \esc_attr( $per_page_option ) . '"' )
+				&& str_contains( $meta_html, 'value="' . \esc_attr( (string) $filtered_per_page ) . '"' )
+				&& str_contains( $meta_html, 'name="wp_screen_options[option]" value="' . \esc_attr( $per_page_option ) . '"' )
+				&& substr_count( $meta_html, "name='screen_columns'" ) === $layout_columns_max
+				&& str_contains( $meta_html, "value='" . \esc_attr( (string) $layout_default ) . "'" )
+				&& str_contains( $meta_html, 'id="screen-options-link-wrap"' )
+				&& str_contains( $meta_html, 'id="show-settings-link"' )
+				&& str_contains( $meta_html, 'aria-controls="screen-options-wrap"' )
+				&& str_contains( $meta_html, 'id="contextual-help-link-wrap"' )
+				&& str_contains( $meta_html, 'id="contextual-help-link"' )
+				&& str_contains( $meta_html, 'aria-controls="contextual-help-wrap"' )
+				&& self::html_has_no_unsafe_raw_markup( $meta_html ),
+			'WP_Screen::render_screen_meta() combines help tabs, sidebar, callbacks, screen options, and toggle links safely',
+			array(
+				'screen'          => self::describe_screen( $screen ),
+				'helpTabs'        => array_keys( $screen->get_help_tabs() ),
+				'callbackCalls'   => $callback_calls,
+				'options'         => $screen->get_options(),
+				'columnsDuring'   => $columns_during,
+				'metaHtml'        => self::describe_string( $meta_html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$layout_default === $columns_during
+				&& array(
+					array(
+						'sameScreen' => true,
+						'screenId'   => $screen->id,
+						'incoming'   => array(),
+					),
+				) === $layout_calls
+				&& array(
+					array(
+						'option'   => $per_page_option,
+						'incoming' => $default_per_page,
+					),
+				) === $per_page_calls
+				&& false === \has_filter( 'screen_layout_columns', $layout_filter )
+				&& false === \has_filter( $per_page_option, $per_page_filter )
+				&& self::globals_match( $globals_snapshot, array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) ),
+			'render_screen_meta() applies scoped option/layout filters, sets the legacy layout global, and restores filters/globals',
+			array(
+				'layoutDefault'       => $layout_default,
+				'columnsDuring'       => $columns_during,
+				'layoutCalls'         => $layout_calls,
+				'perPageCalls'        => $per_page_calls,
+				'layoutHasFilter'     => \has_filter( 'screen_layout_columns', $layout_filter ),
+				'perPageHasFilter'    => \has_filter( $per_page_option, $per_page_filter ),
+				'globalsRestored'     => self::globals_match( $globals_snapshot, array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-screen.screen-meta.rendering-lifecycle',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
