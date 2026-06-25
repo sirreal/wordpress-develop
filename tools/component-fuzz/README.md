@@ -510,7 +510,8 @@ database, network requests, or a configured site.
   registration, direct widget/control callbacks, generated sidebars, widget ID
   parsing, sidebar option cache/filter behavior, sidebar assignment
   moves/removals, inactive widget placement, render callback wrappers,
-  no-external-DB guards, and registry restoration.
+  `dynamic_sidebar()` action/filter ordering, no-external-DB guards, and
+  registry restoration.
 - `wpdb-sql`: no-connection real `wpdb` SQL formatting coverage, including
   placeholder count/type handling, `%i` identifier containment, literal percent
   and LIKE escaping, malformed placeholders, and captured insert/update/delete/

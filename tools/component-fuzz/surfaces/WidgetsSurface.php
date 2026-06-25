@@ -18,6 +18,9 @@ final class WidgetsSurface {
 	/** @var array<int,array<string,mixed>> */
 	private static array $direct_control_calls = array();
 
+	/** @var array<int,array<string,mixed>> */
+	private static array $dynamic_sidebar_events = array();
+
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
@@ -45,6 +48,7 @@ final class WidgetsSurface {
 			$rows[] = self::check_sidebar_assignment( $ctx );
 			$rows[] = self::check_sidebars_widgets_option_flow( $ctx );
 			$rows[] = self::check_widget_rendering( $ctx );
+			$rows[] = self::check_dynamic_sidebar_action_order( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -109,6 +113,16 @@ final class WidgetsSurface {
 		$id    = isset( $payload['id'] ) ? (string) $payload['id'] : 'cfz-direct-control';
 		$label = isset( $payload['label'] ) ? (string) $payload['label'] : '';
 		echo '<input id="' . \esc_attr( $id ) . '" name="' . \esc_attr( $id ) . '" value="' . \esc_attr( $label ) . '">';
+	}
+
+	public static function action_order_widget_callback( array $args, array $payload = array() ): void {
+		self::$dynamic_sidebar_events[] = array(
+			'type'      => 'callback',
+			'widgetId'  => isset( $args['widget_id'] ) ? (string) $args['widget_id'] : '',
+			'sidebarId' => isset( $args['id'] ) ? (string) $args['id'] : '',
+		);
+
+		self::direct_widget_callback( $args, $payload );
 	}
 
 	private static function missing_requirements(): array {
@@ -801,6 +815,229 @@ final class WidgetsSurface {
 		);
 	}
 
+	private static function check_dynamic_sidebar_action_order( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_registered_widgets;
+
+		$failures      = array();
+		$sidebar       = self::sidebar_case( $ctx->fork( 'ordered-sidebar' ), 'ordered' );
+		$empty_sidebar = self::sidebar_case( $ctx->fork( 'empty-sidebar' ), 'ordered_empty' );
+		$payload_a     = self::direct_widget_case( $ctx->fork( 'ordered-widget-a' ) );
+		$payload_b     = self::direct_widget_case( $ctx->fork( 'ordered-widget-b' ) );
+		$sidebar_id    = $sidebar['id'];
+		$empty_id      = $empty_sidebar['id'];
+		$widget_a      = $payload_a['id'];
+		$widget_b      = $payload_b['id'];
+		$class_a       = 'cfz-order-a_' . $payload_a['variantClass'];
+		$class_b       = 'cfz-order-b_' . $payload_b['variantClass'];
+		$sidebars      = array(
+			$sidebar_id            => array( $widget_a, $widget_b ),
+			$empty_id              => array(),
+			'wp_inactive_widgets'  => array(),
+		);
+		$active_checks = array();
+
+		$before_action = static function ( $index, $has_widgets ): void {
+			self::$dynamic_sidebar_events[] = array(
+				'type'       => 'before',
+				'index'      => (string) $index,
+				'hasWidgets' => (bool) $has_widgets,
+			);
+		};
+		$after_action  = static function ( $index, $has_widgets ): void {
+			self::$dynamic_sidebar_events[] = array(
+				'type'       => 'after',
+				'index'      => (string) $index,
+				'hasWidgets' => (bool) $has_widgets,
+			);
+		};
+		$params_filter = static function ( $params ) {
+			$widget_id  = is_array( $params ) && isset( $params[0]['widget_id'] ) ? (string) $params[0]['widget_id'] : '';
+			$sidebar_id = is_array( $params ) && isset( $params[0]['id'] ) ? (string) $params[0]['id'] : '';
+
+			self::$dynamic_sidebar_events[] = array(
+				'type'      => 'params',
+				'widgetId'  => $widget_id,
+				'sidebarId' => $sidebar_id,
+			);
+
+			if ( is_array( $params ) && isset( $params[0] ) && is_array( $params[0] ) ) {
+				$params[0]['before_title'] = '<h4 data-cfz-title="' . \esc_attr( $widget_id ) . '">';
+				$params[0]['after_title']  = '</h4>';
+			}
+
+			return $params;
+		};
+		$widget_action = static function ( $widget ): void {
+			self::$dynamic_sidebar_events[] = array(
+				'type'     => 'widget',
+				'widgetId' => is_array( $widget ) && isset( $widget['id'] ) ? (string) $widget['id'] : '',
+				'name'     => is_array( $widget ) && isset( $widget['name'] ) ? (string) $widget['name'] : '',
+			);
+		};
+		$has_filter    = static function ( $did_one, $index ) {
+			self::$dynamic_sidebar_events[] = array(
+				'type'   => 'has',
+				'index'  => (string) $index,
+				'didOne' => (bool) $did_one,
+			);
+			return $did_one;
+		};
+		$active_filter = static function ( $is_active, $index ) use ( &$active_checks ) {
+			$active_checks[] = array(
+				'index'    => (string) $index,
+				'isActive' => (bool) $is_active,
+			);
+			return $is_active;
+		};
+
+		\register_sidebar( $sidebar['args'] );
+		\register_sidebar( $empty_sidebar['args'] );
+		\wp_register_sidebar_widget(
+			$widget_a,
+			$payload_a['name'],
+			array( self::class, 'action_order_widget_callback' ),
+			array(
+				'classname'   => array( 'cfz-order-a', $payload_a['variantClass'] ),
+				'description' => $payload_a['description'],
+			),
+			$payload_a
+		);
+		\wp_register_sidebar_widget(
+			$widget_b,
+			$payload_b['name'],
+			array( self::class, 'action_order_widget_callback' ),
+			array(
+				'classname'   => array( 'cfz-order-b', $payload_b['variantClass'] ),
+				'description' => $payload_b['description'],
+			),
+			$payload_b
+		);
+		\wp_set_sidebars_widgets( $sidebars );
+		$GLOBALS['_wp_sidebars_widgets'] = $sidebars;
+		$GLOBALS['sidebars_widgets']     = $sidebars;
+
+		try {
+			\add_action( 'dynamic_sidebar_before', $before_action, 10, 2 );
+			\add_filter( 'dynamic_sidebar_params', $params_filter );
+			\add_action( 'dynamic_sidebar', $widget_action );
+			\add_action( 'dynamic_sidebar_after', $after_action, 10, 2 );
+			\add_filter( 'dynamic_sidebar_has_widgets', $has_filter, 10, 2 );
+			\add_filter( 'is_active_sidebar', $active_filter, 10, 2 );
+
+			$active_by_id = \is_active_sidebar( $sidebar_id );
+			$empty_active = \is_active_sidebar( $empty_id );
+
+			self::$direct_widget_calls     = array();
+			self::$dynamic_sidebar_events = array();
+			ob_start();
+			$active_result = \dynamic_sidebar( $sidebar_id );
+			$active_output = ob_get_clean();
+			$active_calls  = self::$direct_widget_calls;
+
+			self::$direct_widget_calls = array();
+			ob_start();
+			$empty_result = \dynamic_sidebar( $empty_id );
+			$empty_output = ob_get_clean();
+			$empty_calls  = self::$direct_widget_calls;
+			$events       = self::$dynamic_sidebar_events;
+		} finally {
+			\remove_action( 'dynamic_sidebar_before', $before_action, 10 );
+			\remove_filter( 'dynamic_sidebar_params', $params_filter );
+			\remove_action( 'dynamic_sidebar', $widget_action );
+			\remove_action( 'dynamic_sidebar_after', $after_action, 10 );
+			\remove_filter( 'dynamic_sidebar_has_widgets', $has_filter, 10 );
+			\remove_filter( 'is_active_sidebar', $active_filter, 10 );
+		}
+
+		$event_summary = array_map( array( self::class, 'dynamic_sidebar_event_label' ), $events );
+		$expected_events = array(
+			'before:' . $sidebar_id . ':1',
+			'params:' . $widget_a,
+			'widget:' . $widget_a,
+			'callback:' . $widget_a,
+			'params:' . $widget_b,
+			'widget:' . $widget_b,
+			'callback:' . $widget_b,
+			'after:' . $sidebar_id . ':1',
+			'has:' . $sidebar_id . ':1',
+			'before:' . $empty_id . ':0',
+			'after:' . $empty_id . ':0',
+			'has:' . $empty_id . ':0',
+		);
+		$expected_active_checks = array(
+			array(
+				'index'    => $sidebar_id,
+				'isActive' => true,
+			),
+			array(
+				'index'    => $empty_id,
+				'isActive' => false,
+			),
+		);
+		$first_widget_position  = strpos( $active_output, 'id="' . $widget_a . '"' );
+		$second_widget_position = strpos( $active_output, 'id="' . $widget_b . '"' );
+		$active_registered      = array_intersect_key( $wp_registered_widgets, array_flip( array( $widget_a, $widget_b ) ) );
+
+		self::collect_failure(
+			$failures,
+			true === $active_by_id
+				&& false === $empty_active
+				&& $expected_active_checks === $active_checks
+				&& true === $active_result
+				&& false === $empty_result
+				&& '' === $empty_output
+				&& array() === $empty_calls
+				&& $expected_events === $event_summary
+				&& 2 === count( $active_calls )
+				&& $widget_a === ( $active_calls[0]['args']['widget_id'] ?? null )
+				&& $widget_b === ( $active_calls[1]['args']['widget_id'] ?? null )
+				&& $payload_a['label'] === ( $active_calls[0]['payload']['label'] ?? null )
+				&& $payload_b['label'] === ( $active_calls[1]['payload']['label'] ?? null )
+				&& '<h4 data-cfz-title="' . $widget_a . '">' === ( $active_calls[0]['args']['before_title'] ?? null )
+				&& '<h4 data-cfz-title="' . $widget_b . '">' === ( $active_calls[1]['args']['before_title'] ?? null )
+				&& str_starts_with( $active_output, '<aside id="' . $sidebar_id . '" class="' . $sidebar['args']['class'] . '">' )
+				&& str_contains( $active_output, 'class="widget ' . $class_a . '"' )
+				&& str_contains( $active_output, 'class="widget ' . $class_b . '"' )
+				&& str_contains( $active_output, '<h4 data-cfz-title="' . $widget_a . '"><span class="cfz-direct-widget-label">' . \esc_html( $payload_a['label'] ) . '</span></h4>' )
+				&& str_contains( $active_output, '<h4 data-cfz-title="' . $widget_b . '"><span class="cfz-direct-widget-label">' . \esc_html( $payload_b['label'] ) . '</span></h4>' )
+				&& false !== $first_widget_position
+				&& false !== $second_widget_position
+				&& $first_widget_position < $second_widget_position
+				&& str_ends_with( $active_output, '</aside>' ),
+			'dynamic_sidebar preserves active/empty hook order, callback params, and rendered widget ordering',
+			array(
+				'sidebarId'      => $sidebar_id,
+				'emptySidebarId' => $empty_id,
+				'widgets'        => array( $widget_a, $widget_b ),
+				'registered'     => $active_registered,
+				'activeChecks'   => $active_checks,
+				'expectedEvents' => $expected_events,
+				'events'         => $events,
+				'eventSummary'   => $event_summary,
+				'activeResult'   => $active_result,
+				'emptyResult'    => $empty_result,
+				'activeOutput'   => self::describe_string( $active_output ),
+				'emptyOutput'    => self::describe_string( $empty_output ),
+				'activeCalls'    => $active_calls,
+				'emptyCalls'     => $empty_calls,
+			)
+		);
+
+		\wp_unregister_sidebar_widget( $widget_a );
+		\wp_unregister_sidebar_widget( $widget_b );
+		\unregister_sidebar( $sidebar_id );
+		\unregister_sidebar( $empty_id );
+		self::$direct_widget_calls     = array();
+		self::$dynamic_sidebar_events = array();
+
+		return self::row(
+			$ctx,
+			'widgets.dynamic-sidebar.actions-order-and-empty-state',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function widget_instance( string $id_base, array $case = array() ): \WP_Widget {
 		return new class( $id_base, $case ) extends \WP_Widget {
 			/** @var array<string,mixed> */
@@ -932,6 +1169,18 @@ final class WidgetsSurface {
 		return is_array( $last ) ? $last : array();
 	}
 
+	private static function dynamic_sidebar_event_label( array $event ): string {
+		if ( in_array( $event['type'] ?? '', array( 'before', 'after' ), true ) ) {
+			return $event['type'] . ':' . ( $event['index'] ?? '' ) . ':' . ( ! empty( $event['hasWidgets'] ) ? '1' : '0' );
+		}
+
+		if ( 'has' === ( $event['type'] ?? '' ) ) {
+			return 'has:' . ( $event['index'] ?? '' ) . ':' . ( ! empty( $event['didOne'] ) ? '1' : '0' );
+		}
+
+		return ( $event['type'] ?? '' ) . ':' . ( $event['widgetId'] ?? '' );
+	}
+
 	private static function id( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
 		return strtolower( substr( $prefix . '_' . hash( 'crc32b', (string) $ctx->seed() ), 0, 32 ) );
 	}
@@ -949,6 +1198,7 @@ final class WidgetsSurface {
 		self::$widget_calls                       = array();
 		self::$direct_widget_calls                = array();
 		self::$direct_control_calls               = array();
+		self::$dynamic_sidebar_events             = array();
 
 		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options(
@@ -1192,6 +1442,7 @@ final class WidgetsSurface {
 			'widgetCalls'        => self::$widget_calls,
 			'directWidgetCalls'  => self::$direct_widget_calls,
 			'directControlCalls' => self::$direct_control_calls,
+			'dynamicSidebarEvents' => self::$dynamic_sidebar_events,
 			'contentCounts'      => array(),
 			'options'            => null,
 			'globals'            => array(),
@@ -1238,6 +1489,7 @@ final class WidgetsSurface {
 		self::$widget_calls         = $snapshot['widgetCalls'];
 		self::$direct_widget_calls  = $snapshot['directWidgetCalls'];
 		self::$direct_control_calls = $snapshot['directControlCalls'];
+		self::$dynamic_sidebar_events = $snapshot['dynamicSidebarEvents'];
 
 		if ( null !== $snapshot['options'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
