@@ -1007,6 +1007,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			$rows = $this->component_fuzz_filter_users_by_search_like( $query, $rows );
+
 			$rows = $this->component_fuzz_apply_limit( $query, $rows );
 
 			if ( preg_match( '/SELECT\s+ID\b/i', $query ) ) {
@@ -1014,6 +1016,34 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_filter_users_by_search_like( $query, array $rows ) {
+			if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?(user_login|user_url|user_email|user_nicename|display_name)`?(?![A-Za-z0-9_])\s+LIKE\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				return $rows;
+			}
+
+			$patterns = array();
+			foreach ( $matches as $match ) {
+				$patterns[] = array(
+					'column'  => $match[1],
+					'pattern' => $this->component_fuzz_unquote_sql_value( $match[2] ),
+				);
+			}
+
+			return array_filter(
+				$rows,
+				function ( $row ) use ( $patterns ) {
+					foreach ( $patterns as $pattern ) {
+						$column = $pattern['column'];
+						if ( array_key_exists( $column, $row ) && $this->component_fuzz_sql_like_match( (string) $row[ $column ], (string) $pattern['pattern'] ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			);
 		}
 
 		private function component_fuzz_select_comments( $query ) {
@@ -1218,6 +1248,32 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					return false;
 				}
 			);
+		}
+
+		private function component_fuzz_sql_like_match( $value, $pattern ) {
+			$regex  = '';
+			$length = strlen( (string) $pattern );
+			for ( $i = 0; $i < $length; $i++ ) {
+				$char = $pattern[ $i ];
+				if ( '\\' === $char && $i + 1 < $length ) {
+					$regex .= preg_quote( $pattern[ ++$i ], '/' );
+					continue;
+				}
+
+				if ( '%' === $char ) {
+					$regex .= '.*';
+					continue;
+				}
+
+				if ( '_' === $char ) {
+					$regex .= '.';
+					continue;
+				}
+
+				$regex .= preg_quote( $char, '/' );
+			}
+
+			return 1 === preg_match( '/\A' . $regex . '\z/s', (string) $value );
 		}
 
 		private function component_fuzz_sort_link_rows( $query, array $rows ) {

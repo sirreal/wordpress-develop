@@ -2881,7 +2881,21 @@ final class EmailSurface {
 			\add_filter( 'pre_comment_author_email', 'trim' );
 			\add_filter( 'pre_comment_author_email', 'sanitize_email' );
 
-			\remove_all_filters( 'pre_wp_mail' );
+			foreach (
+				array(
+					'lostpassword_user_data',
+					'lostpassword_post',
+					'lostpassword_errors',
+					'send_retrieve_password_email',
+					'retrieve_password_title',
+					'retrieve_password_message',
+					'retrieve_password_notification_email',
+					'wp_mail',
+					'pre_wp_mail',
+				) as $password_reset_hook
+			) {
+				\remove_all_filters( $password_reset_hook );
+			}
 			\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
 
 			foreach ( $cases as $case_index => $case ) {
@@ -3110,13 +3124,23 @@ final class EmailSurface {
 				$confusable_where = is_array( $confusable_query['value'] ?? null ) ? (string) ( $confusable_query['value']['queryWhere'] ?? '' ) : '';
 				$ascii_likes      = self::sql_like_literals( $ascii_where, 'user_email' );
 				$confusable_likes = self::sql_like_literals( $confusable_where, 'user_email' );
+				$search_records   = array();
+				foreach ( $inserted as $entry ) {
+					if ( is_int( $entry['id'] ?? null ) && is_string( $entry['address'] ?? null ) ) {
+						$search_records[] = array(
+							'id'    => $entry['id'],
+							'email' => $entry['address'],
+						);
+					}
+				}
 				$result_probe     = self::probe_user_email_localpart_search_results(
 					$ctx,
 					array(
 						'label'          => $case['label'],
 						'unicodeAddress' => $case['confusableAddress'],
 						'foldedAddress'  => $case['asciiAddress'],
-					)
+					),
+					$search_records
 				);
 				$search_ok        = ! $ascii_query['threw']
 					&& array() === $ascii_query['warnings']
@@ -4654,69 +4678,100 @@ final class EmailSurface {
 		);
 	}
 
-	private static function probe_user_email_localpart_search_results( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+	private static function probe_user_email_localpart_search_results( \ComponentFuzz\FuzzContext $ctx, array $case, ?array $records = null ): array {
 		$unicode_local = self::email_localpart( $case['unicodeAddress'] );
 		$folded_local  = self::email_localpart( $case['foldedAddress'] );
-		$base_id        = 800000 + ( 2 * ( (int) sprintf( '%u', crc32( $case['label'] . '|' . $ctx->iteration() ) ) % 50000 ) );
-		$records        = array(
-			array(
-				'id'    => $base_id,
-				'email' => $case['unicodeAddress'],
-			),
-			array(
-				'id'    => $base_id + 1,
-				'email' => $case['foldedAddress'],
-			),
+		$seeded_ids     = array();
+		$seed_call      = array(
+			'threw'    => false,
+			'value'    => array(),
+			'warnings' => array(),
 		);
 
-		$seen   = array();
-		$filter = static function ( $results, \WP_User_Query $query ) use ( &$seen, $records ) {
-			$query_vars = $query->query_vars;
-			$columns    = array_values( (array) ( $query_vars['search_columns'] ?? array() ) );
-			if ( array( 'user_email' ) !== $columns || 'ID' !== ( $query_vars['fields'] ?? null ) ) {
-				return $results;
-			}
-
-			$search = trim( (string) ( $query_vars['search'] ?? '' ), '*' );
-			$ids    = array();
-			foreach ( $records as $record ) {
-				if ( str_contains( $record['email'], $search ) ) {
-					$ids[] = $record['id'];
-				}
-			}
-
-			$seen[] = array(
-				'search' => $search,
-				'ids'    => $ids,
+		if ( null === $records ) {
+			$base_id = 800000 + ( 2 * ( (int) sprintf( '%u', crc32( $case['label'] . '|' . $ctx->iteration() ) ) % 50000 ) );
+			$records = array(
+				array(
+					'id'    => $base_id,
+					'email' => $case['unicodeAddress'],
+				),
+				array(
+					'id'    => $base_id + 1,
+					'email' => $case['foldedAddress'],
+				),
 			);
 
-			return $ids;
-		};
+			$seed_call = self::capture_warnings(
+				static function () use ( $records, &$seeded_ids ): array {
+					if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) ) {
+						return array();
+					}
 
-		\add_filter( 'users_pre_query', $filter, 10, 2 );
+					foreach ( $records as $record ) {
+						$id    = (int) ( $record['id'] ?? 0 );
+						$email = (string) ( $record['email'] ?? '' );
+						if ( $id <= 0 || '' === $email ) {
+							continue;
+						}
+
+						$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->users, array( 'ID' => $id ) );
+						$GLOBALS['wpdb']->insert(
+							$GLOBALS['wpdb']->users,
+							array(
+								'ID'            => $id,
+								'user_login'    => 'cfz_search_probe_' . $id,
+								'user_pass'     => 'component-fuzz-pass',
+								'user_nicename' => 'cfz-search-probe-' . $id,
+								'user_email'    => $email,
+								'display_name'  => 'Component Fuzz Search Probe ' . $id,
+							)
+						);
+						self::delete_user_email_cache( $email );
+						$seeded_ids[] = $id;
+					}
+
+					return $seeded_ids;
+				}
+			);
+		} else {
+			$records = array_values( array_filter( $records, static fn( $record ) => is_array( $record ) ) );
+		}
+
+		$hook_snapshot = self::snapshot_hook_globals();
 		try {
+			\remove_all_filters( 'pre_user_query' );
+			\remove_all_filters( 'users_pre_query' );
 			$unicode_query = self::run_user_email_localpart_search_query( '*' . $unicode_local . '*' );
 			$folded_query  = self::run_user_email_localpart_search_query( '*' . $folded_local . '*' );
 		} finally {
-			\remove_filter( 'users_pre_query', $filter, 10 );
+			self::restore_hook_globals( $hook_snapshot );
+			foreach ( $seeded_ids as $seeded_id ) {
+				if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) ) {
+					$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->users, array( 'ID' => (int) $seeded_id ) );
+				}
+			}
 		}
 
 		$expected_unicode = self::expected_byte_preserving_email_search_ids( $records, $unicode_local );
 		$expected_folded  = self::expected_byte_preserving_email_search_ids( $records, $folded_local );
 		$actual_unicode   = self::captured_query_result_ids( $unicode_query );
 		$actual_folded    = self::captured_query_result_ids( $folded_query );
-		$filter_restored  = false === \has_filter( 'users_pre_query', $filter );
+		$used_query_path  = is_array( $unicode_query['value'] ?? null )
+			&& is_array( $folded_query['value'] ?? null )
+			&& str_contains( (string) ( $unicode_query['value']['queryWhere'] ?? '' ), 'LIKE' )
+			&& str_contains( (string) ( $folded_query['value']['queryWhere'] ?? '' ), 'LIKE' );
+		$seed_ok          = ! $seed_call['threw'] && array() === $seed_call['warnings'];
 
 		return array(
 			'ok'              => 2 === count( $records )
+				&& $seed_ok
 				&& ! $unicode_query['threw']
 				&& ! $folded_query['threw']
 				&& array() === $unicode_query['warnings']
 				&& array() === $folded_query['warnings']
 				&& $actual_unicode === $expected_unicode
 				&& $actual_folded === $expected_folded
-				&& 2 === count( $seen )
-				&& $filter_restored,
+				&& $used_query_path,
 			'unicode'         => array(
 				'search'   => self::describe_string( $unicode_local ),
 				'expected' => $expected_unicode,
@@ -4727,11 +4782,11 @@ final class EmailSurface {
 				'expected' => $expected_folded,
 				'actual'   => $actual_folded,
 			),
-			'seen'            => $seen,
+			'seed'            => self::describe_captured_call( $seed_call ),
 			'records'         => $records,
 			'unicodeQuery'    => self::describe_captured_call( $unicode_query ),
 			'foldedQuery'     => self::describe_captured_call( $folded_query ),
-			'filterRestored'  => $filter_restored,
+			'usedQueryPath'   => $used_query_path,
 		);
 	}
 
