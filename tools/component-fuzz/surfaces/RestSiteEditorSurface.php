@@ -2044,6 +2044,9 @@ final class RestSiteEditorSurface {
 			'globals'                    => self::snapshot_globals(
 				array(
 					'_wp_post_type_features',
+					'_wp_current_template_content',
+					'_wp_current_template_id',
+					'_wp_theme_features',
 					'authordata',
 					'current_user',
 					'id',
@@ -2063,6 +2066,15 @@ final class RestSiteEditorSurface {
 					'wp_rewrite',
 					'wp_taxonomies',
 					'wp_theme_directories',
+					'wp_stylesheet_path',
+					'wp_template_path',
+				)
+			),
+			'statics'                    => self::snapshot_static_properties(
+				array(
+					array( 'WP_Block_Templates_Registry', 'instance' ),
+					array( 'WP_Theme', 'persistently_cache' ),
+					array( 'WP_Theme', 'cache_expiration' ),
 				)
 			),
 			'server'                     => self::snapshot_server(
@@ -2093,6 +2105,9 @@ final class RestSiteEditorSurface {
 
 		self::restore_globals( $snapshot['globals'] );
 		self::restore_server( $snapshot['server'] );
+		foreach ( $snapshot['statics'] as $entry ) {
+			self::set_static_property( $entry['class'], $entry['property'], $entry['value'] );
+		}
 		if ( $snapshot['blockStyleRegistry'] instanceof \WP_Block_Styles_Registry ) {
 			self::set_object_property( $snapshot['blockStyleRegistry'], 'registered_block_styles', $snapshot['blockStyles'] );
 			if ( null !== $snapshot['blockStylesOutsideInitOnly'] ) {
@@ -2117,6 +2132,9 @@ final class RestSiteEditorSurface {
 					self::snapshot_globals(
 						array(
 							'_wp_post_type_features',
+							'_wp_current_template_content',
+							'_wp_current_template_id',
+							'_wp_theme_features',
 							'current_user',
 							'post_type_meta_caps',
 							'user_ID',
@@ -2128,6 +2146,8 @@ final class RestSiteEditorSurface {
 							'wp_rest_additional_fields',
 							'wp_taxonomies',
 							'wp_theme_directories',
+							'wp_stylesheet_path',
+							'wp_template_path',
 						)
 					)
 				)
@@ -2143,12 +2163,40 @@ final class RestSiteEditorSurface {
 				)
 			),
 			'wpdb'        => self::stable_hash( self::summarize_for_hash( self::snapshot_wpdb() ) ),
+			'statics'     => self::stable_hash(
+				self::summarize_for_hash(
+					self::snapshot_static_properties(
+						array(
+							array( 'WP_Block_Templates_Registry', 'instance' ),
+							array( 'WP_Theme', 'persistently_cache' ),
+							array( 'WP_Theme', 'cache_expiration' ),
+						)
+					)
+				)
+			),
 			'blockStyles' => self::stable_hash(
 				self::summarize_for_hash(
 					self::registry_property( 'WP_Block_Styles_Registry', 'registered_block_styles' )
 				)
 			),
 		);
+	}
+
+	private static function snapshot_static_properties( array $properties ): array {
+		$statics = array();
+		foreach ( $properties as $property ) {
+			if ( ! isset( $property[0], $property[1] ) || ! class_exists( $property[0] ) ) {
+				continue;
+			}
+
+			$statics[ $property[0] . '::' . $property[1] ] = array(
+				'class'    => $property[0],
+				'property' => $property[1],
+				'value'    => self::get_static_property( $property[0], $property[1] ),
+			);
+		}
+
+		return $statics;
 	}
 
 	private static function snapshot_globals( array $names ): array {
