@@ -196,9 +196,10 @@ database, network requests, or a configured site.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
   storage, recovery key/cookie validation, recovery-link generation, filtered
-  recovery email payloads without real mail, fatal-error handler formatting
-  oracles, protected-endpoint gates, and explicit skips for redirects,
-  loopbacks, real fatal dispatch, and process exits.
+  recovery email payloads and `handle_error()` protected-endpoint rate limiting
+  without real mail, fatal-error handler formatting oracles, protected-endpoint
+  gates, and explicit skips for redirects, loopbacks, real fatal dispatch, and
+  process exits.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,

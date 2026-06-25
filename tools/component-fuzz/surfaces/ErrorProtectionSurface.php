@@ -29,6 +29,7 @@ final class ErrorProtectionSurface {
 			$rows[] = self::check_recovery_cookie_validation( $ctx->fork( 'recovery-cookie-validation' ) );
 			$rows[] = self::check_recovery_link_generation( $ctx->fork( 'recovery-link-generation' ) );
 			$rows[] = self::check_recovery_email_payload( $ctx->fork( 'recovery-email-payload' ) );
+			$rows[] = self::check_recovery_mode_handle_error_gates( $ctx->fork( 'recovery-mode-handle-error' ) );
 			$rows[] = self::check_fatal_error_handler_oracles( $ctx->fork( 'fatal-error-handler' ) );
 			$rows[] = self::check_handler_and_endpoint_gates( $ctx->fork( 'handler-endpoint-gates' ) );
 			$rows[] = $ctx->skip(
@@ -759,6 +760,259 @@ final class ErrorProtectionSurface {
 			'error-protection.recovery-email.filterable-payload-no-real-mail',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_recovery_mode_handle_error_gates( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_theme_directories;
+
+		$failures       = array();
+		$state_snapshot = self::snapshot_state();
+		$state_restored = false;
+		$marker         = 'handle-' . self::token( $ctx->fork( 'marker' ), 8 );
+		$rate_limit     = DAY_IN_SECONDS + $ctx->int( 1, 3600 );
+		$plugin_slug    = 'handle-plugin-' . self::token( $ctx->fork( 'plugin' ), 8 );
+		$theme_slug     = 'handle-theme-' . self::token( $ctx->fork( 'theme' ), 8 );
+		$theme_root     = WP_CONTENT_DIR . '/themes';
+		$captured_mail  = array();
+		$captured_email = array();
+		$rate_calls     = array();
+		$endpoint_calls = array();
+
+		$non_admin_screen = new class() {
+			public function in_admin( $area = null ): bool {
+				unset( $area );
+				return false;
+			}
+		};
+
+		$rate_filter = static function ( int $default_rate_limit ) use ( $rate_limit, &$rate_calls ): int {
+			$rate_calls[] = $default_rate_limit;
+			return $rate_limit;
+		};
+
+		$endpoint_filter = static function ( bool $is_protected ) use ( &$endpoint_calls ): bool {
+			$endpoint_calls[] = $is_protected;
+			return true;
+		};
+
+		$email_filter = static function ( array $email, string $url ) use ( $marker, &$captured_email ): array {
+			$captured_email[] = array(
+				'email' => $email,
+				'url'   => $url,
+			);
+
+			$email['subject'] .= ' [' . $marker . ']';
+			$email['headers']  = array( 'X-Recovery-Handle-Error: ' . $marker );
+
+			return $email;
+		};
+
+		$pre_mail = static function ( $pre, array $atts ) use ( &$captured_mail ) {
+			unset( $pre );
+			$captured_mail[] = $atts;
+			return true;
+		};
+
+		try {
+			if ( ! is_dir( $theme_root ) ) {
+				mkdir( $theme_root, 0777, true );
+			}
+
+			$wp_theme_directories = array( $theme_root );
+
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\delete_option( 'recovery_keys' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+			if ( function_exists( 'wp_cache_flush' ) ) {
+				\wp_cache_flush();
+			}
+
+			self::set_recovery_mode_state( true, false, '' );
+
+			$GLOBALS['current_screen'] = $non_admin_screen;
+			$GLOBALS['pagenow']        = 'index.php';
+			$_GET                      = array();
+			$_POST                     = array();
+			$_COOKIE                   = array();
+			$_REQUEST                  = array( 'action' => 'component-fuzz-unprotected-' . $marker );
+
+			$_SERVER['HTTP_HOST']   = 'example.test';
+			$_SERVER['HTTPS']       = 'off';
+			$_SERVER['PHP_SELF']    = '/index.php';
+			$_SERVER['REQUEST_URI'] = '/component-fuzz/error-protection/' . rawurlencode( $marker );
+
+			$mode          = \wp_recovery_mode();
+			$plugin_error  = self::extension_error_case( $ctx->fork( 'plugin-error' ), WP_PLUGIN_DIR . '/' . $plugin_slug . '/main.php' );
+			$theme_error   = self::extension_error_case( $ctx->fork( 'theme-error' ), $theme_root . '/' . $theme_slug . '/functions.php' );
+			$outside_error = self::extension_error_case( $ctx->fork( 'outside-error' ), WP_CONTENT_DIR . '/uploads/' . $marker . '/fatal.php' );
+
+			$invalid_source               = $mode->handle_error( $outside_error );
+			$non_protected                = $mode->handle_error( $plugin_error );
+			$records_after_fail_closed    = self::recovery_key_records();
+			$rate_limit_after_fail_closed = \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false );
+
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $invalid_source, 'invalid_source' )
+					&& self::is_error_code( $non_protected, 'non_protected_endpoint' )
+					&& array() === $records_after_fail_closed
+					&& false === $rate_limit_after_fail_closed
+					&& array() === $captured_mail
+					&& array() === $captured_email
+					&& array() === \wp_paused_plugins()->get_all()
+					&& array() === \wp_paused_themes()->get_all(),
+				'handle_error fails closed for unrelated files and non-protected endpoints before email or pause storage side effects',
+				array(
+					'invalidSource'              => $invalid_source,
+					'nonProtected'               => $non_protected,
+					'recordsAfterFailClosed'     => $records_after_fail_closed,
+					'rateLimitAfterFailClosed'   => $rate_limit_after_fail_closed,
+					'capturedMailCount'          => count( $captured_mail ),
+					'capturedEmailCount'         => count( $captured_email ),
+					'pausedPluginsFailClosed'    => \wp_paused_plugins()->get_all(),
+					'pausedThemesFailClosed'     => \wp_paused_themes()->get_all(),
+				)
+			);
+
+			\add_filter( 'recovery_mode_email_rate_limit', $rate_filter );
+			\add_filter( 'is_protected_endpoint', $endpoint_filter );
+			\add_filter( 'recovery_mode_email', $email_filter, 10, 2 );
+			\add_filter( 'pre_wp_mail', $pre_mail, 10, 2 );
+
+			$before_protected        = time();
+			$protected_result        = $mode->handle_error( $plugin_error );
+			$records_after_email     = self::recovery_key_records();
+			$rate_limit_after_email  = \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false );
+			$active_after_email      = self::snapshot_recovery_mode_state();
+			$rate_limited_result     = $mode->handle_error( $theme_error );
+			$records_after_repeat    = self::recovery_key_records();
+			$rate_limit_after_repeat = \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false );
+			$rate_limit_email_time   = is_numeric( $rate_limit_after_email ) ? (int) $rate_limit_after_email : null;
+
+			$email_url = (string) ( $captured_email[0]['url'] ?? '' );
+			$url_parts = \wp_parse_url( $email_url );
+			$url_query = array();
+			if ( is_array( $url_parts ) && isset( $url_parts['query'] ) ) {
+				parse_str( $url_parts['query'], $url_query );
+			}
+
+			$url_token = (string) ( $url_query['rm_token'] ?? '' );
+			$url_key   = (string) ( $url_query['rm_key'] ?? '' );
+			$mail      = $captured_mail[0] ?? array();
+
+			self::collect_failure(
+				$failures,
+				true === $protected_result
+					&& 1 === count( $captured_mail )
+					&& 1 === count( $captured_email )
+					&& \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER === ( $url_query['action'] ?? null )
+					&& 22 === strlen( $url_token )
+					&& 22 === strlen( $url_key )
+					&& ctype_alnum( $url_token )
+					&& ctype_alnum( $url_key )
+					&& isset( $records_after_email[ $url_token ]['hashed_key'], $records_after_email[ $url_token ]['created_at'] )
+					&& null !== $rate_limit_email_time
+					&& $before_protected <= $rate_limit_email_time
+					&& time() >= $rate_limit_email_time
+					&& array( DAY_IN_SECONDS ) === array_slice( $rate_calls, 0, 1 )
+					&& array( false ) === array_slice( $endpoint_calls, 0, 1 )
+					&& str_contains( (string) ( $mail['subject'] ?? '' ), $marker )
+					&& str_contains( (string) ( $mail['message'] ?? '' ), $email_url )
+					&& str_contains( (string) ( $mail['message'] ?? '' ), $plugin_error['file'] )
+					&& in_array( 'X-Recovery-Handle-Error: ' . $marker, (array) ( $mail['headers'] ?? array() ), true )
+					&& true === $active_after_email['is_initialized']
+					&& false === $active_after_email['is_active']
+					&& '' === $active_after_email['session_id']
+					&& array() === \wp_paused_plugins()->get_all()
+					&& array() === \wp_paused_themes()->get_all(),
+				'handle_error on a protected inactive endpoint sends one intercepted recovery email with a stored link and does not pause extensions',
+				array(
+					'protectedResult'      => $protected_result,
+					'capturedMailCount'    => count( $captured_mail ),
+					'capturedEmailCount'   => count( $captured_email ),
+					'urlQuery'             => $url_query,
+					'recordsAfterEmail'    => $records_after_email,
+					'rateLimitAfterEmail'  => $rate_limit_after_email,
+					'rateCalls'            => $rate_calls,
+					'endpointCalls'        => $endpoint_calls,
+					'mail'                 => $mail,
+					'activeAfterEmail'     => $active_after_email,
+					'pausedPluginsAfter'   => \wp_paused_plugins()->get_all(),
+					'pausedThemesAfter'    => \wp_paused_themes()->get_all(),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $rate_limited_result, 'email_sent_already' )
+					&& 1 === count( $captured_mail )
+					&& 1 === count( $captured_email )
+					&& $records_after_email === $records_after_repeat
+					&& $rate_limit_after_email === $rate_limit_after_repeat
+					&& array( DAY_IN_SECONDS, DAY_IN_SECONDS ) === $rate_calls
+					&& array( false, false ) === $endpoint_calls
+					&& array() === \wp_paused_plugins()->get_all()
+					&& array() === \wp_paused_themes()->get_all(),
+				'handle_error rate limits subsequent protected-endpoint fatals without generating a second email or recovery key',
+				array(
+					'rateLimitedResult'     => $rate_limited_result,
+					'capturedMailCount'     => count( $captured_mail ),
+					'capturedEmailCount'    => count( $captured_email ),
+					'recordsAfterEmail'     => $records_after_email,
+					'recordsAfterRepeat'    => $records_after_repeat,
+					'rateLimitAfterEmail'   => $rate_limit_after_email,
+					'rateLimitAfterRepeat'  => $rate_limit_after_repeat,
+					'rateCalls'             => $rate_calls,
+					'endpointCalls'         => $endpoint_calls,
+					'pausedPluginsRepeat'   => \wp_paused_plugins()->get_all(),
+					'pausedThemesRepeat'    => \wp_paused_themes()->get_all(),
+				)
+			);
+		} finally {
+			\remove_filter( 'recovery_mode_email_rate_limit', $rate_filter );
+			\remove_filter( 'is_protected_endpoint', $endpoint_filter );
+			\remove_filter( 'recovery_mode_email', $email_filter, 10 );
+			\remove_filter( 'pre_wp_mail', $pre_mail, 10 );
+
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\delete_option( 'recovery_keys' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+
+			self::restore_state( $state_snapshot );
+			$state_restored = self::state_matches( $state_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored
+				&& false === \has_filter( 'recovery_mode_email_rate_limit', $rate_filter )
+				&& false === \has_filter( 'is_protected_endpoint', $endpoint_filter )
+				&& false === \has_filter( 'recovery_mode_email', $email_filter )
+				&& false === \has_filter( 'pre_wp_mail', $pre_mail ),
+			'handle_error invariant restores scoped filters, superglobals, globals, and recovery mode state',
+			array(
+				'stateRestored'       => $state_restored,
+				'rateFilter'          => \has_filter( 'recovery_mode_email_rate_limit', $rate_filter ),
+				'endpointFilter'      => \has_filter( 'is_protected_endpoint', $endpoint_filter ),
+				'emailFilter'         => \has_filter( 'recovery_mode_email', $email_filter ),
+				'preMailFilter'       => \has_filter( 'pre_wp_mail', $pre_mail ),
+				'capturedMailCount'   => count( $captured_mail ),
+				'capturedEmailCount'  => count( $captured_email ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'error-protection.recovery-mode.handle-error-gates-and-email-rate-limit',
+			array() === $failures,
+			array(
+				'rateLimit' => $rate_limit,
+				'marker'    => $marker,
+				'failures'  => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 
