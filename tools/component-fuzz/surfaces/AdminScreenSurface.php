@@ -729,18 +729,24 @@ final class AdminScreenSurface {
 		$secondary_payload = 'Secondary body " onclick="bad ' . self::fuzz_label( $ctx->fork( 'secondary-content' ) );
 		$callback_payload  = 'Callback body <script>alert(4)</script> ' . self::fuzz_label( $ctx->fork( 'callback-content' ) );
 		$sidebar_payload   = 'Sidebar body <script>alert(5)</script> ' . self::fuzz_label( $ctx->fork( 'sidebar-content' ) );
-		$primary_content   = '<p class="cfz-help-content" data-tab="' . \esc_attr( $primary_tab ) . '">' . \esc_html( $primary_payload ) . '</p>';
-		$secondary_content = '<p class="cfz-help-content" data-tab="' . \esc_attr( $secondary_tab ) . '">' . \esc_html( $secondary_payload ) . '</p>';
-		$sidebar_html      = '<aside class="cfz-help-sidebar" data-screen="' . \esc_attr( $screen->id ) . '">' . \esc_html( $sidebar_payload ) . '</aside>';
+		$escaped_payloads  = array(
+			'primary'   => \esc_html( $primary_payload ),
+			'secondary' => \esc_html( $secondary_payload ),
+			'callback'  => \esc_html( $callback_payload ),
+			'sidebar'   => \esc_html( $sidebar_payload ),
+		);
+		$primary_content   = '<p class="cfz-help-content" data-tab="' . \esc_attr( $primary_tab ) . '">' . $escaped_payloads['primary'] . '</p>';
+		$secondary_content = '<p class="cfz-help-content" data-tab="' . \esc_attr( $secondary_tab ) . '">' . $escaped_payloads['secondary'] . '</p>';
+		$sidebar_html      = '<aside class="cfz-help-sidebar" data-screen="' . \esc_attr( $screen->id ) . '">' . $escaped_payloads['sidebar'] . '</aside>';
 		$callback_calls    = array();
-		$callback          = static function ( \WP_Screen $seen_screen, array $tab ) use ( &$callback_calls, $screen, $callback_payload ): void {
+		$callback          = static function ( \WP_Screen $seen_screen, array $tab ) use ( &$callback_calls, $screen, $escaped_payloads ): void {
 			$callback_calls[] = array(
 				'sameScreen' => $seen_screen === $screen,
 				'id'         => $tab['id'] ?? null,
 				'title'      => $tab['title'] ?? null,
 			);
 			echo '<span class="cfz-help-callback" data-tab="' . \esc_attr( $tab['id'] ?? '' ) . '">';
-			echo \esc_html( $callback_payload );
+			echo $escaped_payloads['callback'];
 			echo '</span>';
 		};
 
@@ -770,9 +776,11 @@ final class AdminScreenSurface {
 		$layout_default     = $ctx->int( 1, $layout_columns_max );
 		$layout_calls       = array();
 		$per_page_calls     = array();
+		$submit_filter_before = \has_filter( 'screen_options_show_submit', '__return_true' );
 		$globals_snapshot   = self::snapshot_globals( array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) );
 		$meta_html          = '';
 		$columns_during     = null;
+		$globals_after_render = array();
 
 		$layout_filter = static function ( array $columns, string $screen_id, \WP_Screen $seen_screen ) use ( &$layout_calls, $screen ): array {
 			$layout_calls[] = array(
@@ -817,15 +825,24 @@ final class AdminScreenSurface {
 			$screen->render_screen_meta();
 			$meta_html      = (string) ob_get_clean();
 			$columns_during = $GLOBALS['screen_layout_columns'] ?? null;
+			$globals_after_render = array(
+				'currentScreenSame'   => ( $GLOBALS['current_screen'] ?? null ) === $screen,
+				'screenLayoutColumns' => $GLOBALS['screen_layout_columns'] ?? null,
+				'taxnow'              => $GLOBALS['taxnow'] ?? null,
+				'typenow'             => $GLOBALS['typenow'] ?? null,
+			);
 		} finally {
 			while ( ob_get_level() > $meta_ob_level ) {
 				ob_end_clean();
 			}
-			\remove_filter( 'screen_options_show_submit', '__return_true' );
+			if ( false === $submit_filter_before ) {
+				\remove_filter( 'screen_options_show_submit', '__return_true' );
+			}
 			\remove_filter( $per_page_option, $per_page_filter, 10 );
 			\remove_filter( 'screen_layout_columns', $layout_filter, 10 );
 			self::restore_globals( $globals_snapshot );
 		}
+		$globals_restored_after_cleanup = self::globals_match( $globals_snapshot, array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) );
 
 		self::collect_failure(
 			$failures,
@@ -842,6 +859,10 @@ final class AdminScreenSurface {
 				&& str_contains( $meta_html, 'cfz-help-sidebar' )
 				&& str_contains( $meta_html, 'cfz-help-content' )
 				&& str_contains( $meta_html, 'cfz-help-callback' )
+				&& str_contains( $meta_html, $escaped_payloads['primary'] )
+				&& str_contains( $meta_html, $escaped_payloads['secondary'] )
+				&& str_contains( $meta_html, $escaped_payloads['callback'] )
+				&& str_contains( $meta_html, $escaped_payloads['sidebar'] )
 				&& 1 === count( $callback_calls )
 				&& true === ( $callback_calls[0]['sameScreen'] ?? null )
 				&& $primary_tab === ( $callback_calls[0]['id'] ?? null )
@@ -868,6 +889,7 @@ final class AdminScreenSurface {
 				'callbackCalls'   => $callback_calls,
 				'options'         => $screen->get_options(),
 				'columnsDuring'   => $columns_during,
+				'escapedPayloads'  => $escaped_payloads,
 				'metaHtml'        => self::describe_string( $meta_html ),
 			)
 		);
@@ -875,6 +897,10 @@ final class AdminScreenSurface {
 		self::collect_failure(
 			$failures,
 			$layout_default === $columns_during
+				&& true === ( $globals_after_render['currentScreenSame'] ?? null )
+				&& $layout_default === ( $globals_after_render['screenLayoutColumns'] ?? null )
+				&& '' === ( $globals_after_render['taxnow'] ?? null )
+				&& '' === ( $globals_after_render['typenow'] ?? null )
 				&& array(
 					array(
 						'sameScreen' => true,
@@ -890,16 +916,20 @@ final class AdminScreenSurface {
 				) === $per_page_calls
 				&& false === \has_filter( 'screen_layout_columns', $layout_filter )
 				&& false === \has_filter( $per_page_option, $per_page_filter )
-				&& self::globals_match( $globals_snapshot, array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) ),
+				&& $submit_filter_before === \has_filter( 'screen_options_show_submit', '__return_true' )
+				&& $globals_restored_after_cleanup,
 			'render_screen_meta() applies scoped option/layout filters, sets the legacy layout global, and restores filters/globals',
 			array(
 				'layoutDefault'       => $layout_default,
 				'columnsDuring'       => $columns_during,
+				'globalsAfterRender'  => $globals_after_render,
 				'layoutCalls'         => $layout_calls,
 				'perPageCalls'        => $per_page_calls,
 				'layoutHasFilter'     => \has_filter( 'screen_layout_columns', $layout_filter ),
 				'perPageHasFilter'    => \has_filter( $per_page_option, $per_page_filter ),
-				'globalsRestored'     => self::globals_match( $globals_snapshot, array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) ),
+				'submitFilterBefore'  => $submit_filter_before,
+				'submitFilterAfter'   => \has_filter( 'screen_options_show_submit', '__return_true' ),
+				'globalsRestored'     => $globals_restored_after_cleanup,
 			)
 		);
 
