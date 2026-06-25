@@ -74,7 +74,7 @@ final class AdminDashboardSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Comment', 'WP_Post', 'WP_Query', 'WP_Screen', 'WP_User' ) as $class ) {
+		foreach ( array( 'WP_Comment', 'WP_Error', 'WP_Post', 'WP_Query', 'WP_Screen', 'WP_User' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -1018,37 +1018,77 @@ final class AdminDashboardSurface {
 		$loading_return = null;
 		$ajax_return    = null;
 		$cached_return  = null;
+		$loading         = '';
+		$loading_calls   = array();
+		$ajax            = '';
+		$cached          = '';
+		$cached_value    = false;
+		$cleaned_value   = null;
+		$http_requests   = array();
+		$http_filter     = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_requests ) {
+			$http_requests[] = array(
+				'url'    => $url,
+				'method' => $parsed_args['method'] ?? null,
+			);
 
-		\delete_transient( $cache_key );
-		$loading = self::capture_output(
-			static function () use ( $callback, $feeds, $feed_args, $widget_id, &$loading_return ): void {
-				$loading_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
-			}
-		);
-		$loading_calls = $calls;
-
-		$ajax_filter = static function (): bool {
-			return true;
+			return new \WP_Error( 'component_fuzz_unexpected_http', 'Component fuzz blocked an unexpected dashboard RSS HTTP request.' );
 		};
 
-		\add_filter( 'wp_doing_ajax', $ajax_filter );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
 		try {
-			$ajax = self::capture_output(
-				static function () use ( $callback, $feeds, $feed_args, $widget_id, &$ajax_return ): void {
-					$ajax_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+			\delete_transient( $cache_key );
+			$loading = self::capture_output(
+				static function () use ( $callback, $feeds, $feed_args, $widget_id, &$loading_return ): void {
+					$loading_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
 				}
 			);
+			$loading_calls = $calls;
+
+			$ajax_filter = static function (): bool {
+				return true;
+			};
+
+			\add_filter( 'wp_doing_ajax', $ajax_filter );
+			try {
+				$ajax = self::capture_output(
+					static function () use ( $callback, $feeds, $feed_args, $widget_id, &$ajax_return ): void {
+						$ajax_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+					}
+				);
+			} finally {
+				\remove_filter( 'wp_doing_ajax', $ajax_filter );
+			}
+
+			$cached_value = \get_transient( $cache_key );
+			$cached       = self::capture_output(
+				static function () use ( $callback, $feeds, $feed_args, $widget_id, &$cached_return ): void {
+					$cached_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
+				}
+			);
+			\delete_transient( $cache_key );
+			$cleaned_value = \get_transient( $cache_key );
 		} finally {
-			\remove_filter( 'wp_doing_ajax', $ajax_filter );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\delete_transient( $cache_key );
 		}
 
-		$cached_value = \get_transient( $cache_key );
-		$cached       = self::capture_output(
-			static function () use ( $callback, $feeds, $feed_args, $widget_id, &$cached_return ): void {
-				$cached_return = \wp_dashboard_cached_rss_widget( $widget_id, $callback, $feeds, $feed_args );
-			}
+		self::collect_failure(
+			$failures,
+			array() === $http_requests
+				&& false === \has_filter( 'pre_http_request', $http_filter ),
+			'cached dashboard RSS widget does not issue HTTP requests and removes the HTTP tripwire',
+			array(
+				'httpRequests' => $http_requests,
+				'filter'       => \has_filter( 'pre_http_request', $http_filter ),
+			)
 		);
-		\delete_transient( $cache_key );
+
+		self::collect_failure(
+			$failures,
+			false === $cleaned_value,
+			'cached dashboard RSS widget transient is explicitly cleaned after replay',
+			array( 'cleanedValue' => self::preview( $cleaned_value ) )
+		);
 
 		self::collect_failure(
 			$failures,
