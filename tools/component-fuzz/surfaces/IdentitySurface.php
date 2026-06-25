@@ -34,6 +34,7 @@ final class IdentitySurface {
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_user_contact_methods( $result, $rng );
 			self::exercise_wp_user_identity_fields( $result, $rng );
+			self::exercise_current_user_lifecycle( $result, $rng );
 			self::exercise_user_existence_helpers( $result, $rng );
 			self::exercise_urls( $result, $rng );
 			self::exercise_avatar_helpers( $result, $rng );
@@ -442,6 +443,109 @@ final class IdentitySurface {
 		self::check( $result, 'wp_user.field_filters.nicename_db_filter_is_prefix_scoped', $slug === $db_nicename && array( $row['user_nicename'] ) === $events['nicename'], $case, $slug, array( 'dbNicename' => $db_nicename, 'events' => $events['nicename'] ) );
 		self::check( $result, 'wp_user.field_filters.edit_display_name_escapes_filter_result', \esc_attr( $edit ) === $edit_name && 1 === count( $events['editName'] ) && $row['display_name'] === $events['editName'][0]['value'] && $row['ID'] === $events['editName'][0]['userId'], $case, \esc_attr( $edit ), array( 'editName' => $edit_name, 'events' => $events['editName'] ) );
 		self::check( $result, 'wp_user.field_filters.restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+	}
+
+	private static function exercise_current_user_lifecycle( array &$result, array &$rng ): void {
+		if ( ! class_exists( 'WP_User' ) ) {
+			$result['skips'][] = 'current_user_lifecycle:missing_class:WP_User';
+			return;
+		}
+
+		if ( ! self::have_functions( array( 'add_action', 'add_filter', 'clean_user_cache', 'get_current_user_id', 'get_userdata', 'has_filter', 'is_user_logged_in', 'remove_action', 'remove_filter', 'sanitize_email', 'sanitize_title_with_dashes', 'sanitize_user', 'update_user_caches', 'wp_get_current_user', 'wp_set_current_user' ), $result, 'current_user_lifecycle' ) ) {
+			return;
+		}
+
+		$cases = array_slice( self::wp_user_identity_cases( $rng ), 0, 3 );
+
+		self::run_case(
+			$result,
+			'current_user_lifecycle',
+			static function () use ( &$result, $cases ): void {
+				$users                 = array();
+				$user_global_snapshot  = self::snapshot_current_user_globals();
+				$hook_global_snapshot  = self::snapshot_hook_globals();
+				$set_current_user_hits = array();
+				$set_current_user_hook = static function () use ( &$set_current_user_hits ): void {
+					$set_current_user_hits[] = \get_current_user_id();
+				};
+				$thrown                = null;
+
+				try {
+					foreach ( $cases as $case ) {
+						$user    = self::fake_identity_user( $case['row'] );
+						$users[] = $user;
+						\update_user_caches( $user );
+					}
+
+					$before_action_filter = \has_filter( 'set_current_user', $set_current_user_hook );
+					\add_action( 'set_current_user', $set_current_user_hook, 999, 0 );
+
+					foreach ( $cases as $case ) {
+						$row             = $case['row'];
+						$before_hit_count = count( $set_current_user_hits );
+						$current         = \wp_set_current_user( $row['ID'] );
+						$fetched         = \wp_get_current_user();
+
+						self::check( $result, 'wp_set_current_user.cache_seeded_user_populates_current_identity', $current instanceof \WP_User && $fetched instanceof \WP_User && (int) $row['ID'] === $current->ID && $current === $fetched && $row['user_login'] === $current->user_login && $row['user_email'] === $current->user_email && (int) $row['ID'] === \get_current_user_id() && \is_user_logged_in(), $case, self::current_user_expectation( $row ), self::current_user_observation( $current ) );
+						self::check( $result, 'wp_set_current_user.setup_userdata_globals_match_current_identity', self::current_user_legacy_globals_match_row( $row ), $case, self::current_user_legacy_globals_expectation( $row ), self::current_user_legacy_globals_observation() );
+						self::check( $result, 'wp_set_current_user.set_current_user_action_fires_after_identity_is_current', count( $set_current_user_hits ) === $before_hit_count + 1 && (int) $row['ID'] === $set_current_user_hits[ $before_hit_count ], $case, array( 'newHit' => (int) $row['ID'] ), $set_current_user_hits );
+
+						$object_id_before_repeat = spl_object_id( $current );
+						$hit_count_before_repeat = count( $set_current_user_hits );
+						$repeat                  = \wp_set_current_user( $row['ID'] );
+						self::check( $result, 'wp_set_current_user.same_id_is_idempotent_and_does_not_refire_action', $repeat instanceof \WP_User && spl_object_id( $repeat ) === $object_id_before_repeat && count( $set_current_user_hits ) === $hit_count_before_repeat, $case, array( 'objectId' => $object_id_before_repeat, 'actionCount' => $hit_count_before_repeat ), array( 'objectId' => $repeat instanceof \WP_User ? spl_object_id( $repeat ) : null, 'actionCount' => count( $set_current_user_hits ) ) );
+					}
+
+					$before_clear_hits = count( $set_current_user_hits );
+					$cleared           = \wp_set_current_user( 0 );
+					self::check( $result, 'wp_set_current_user.zero_id_clears_logged_in_state', $cleared instanceof \WP_User && 0 === $cleared->ID && 0 === \get_current_user_id() && ! \is_user_logged_in() && count( $set_current_user_hits ) === $before_clear_hits + 1, $cases, 'logged out WP_User with action hit', array( 'ID' => $cleared instanceof \WP_User ? $cleared->ID : null, 'currentId' => \get_current_user_id(), 'loggedIn' => \is_user_logged_in(), 'actionCount' => count( $set_current_user_hits ) ) );
+					self::check( $result, 'wp_set_current_user.zero_id_resets_setup_userdata_globals', self::current_user_legacy_globals_are_logged_out(), $cases, self::current_user_logged_out_globals_expectation(), self::current_user_legacy_globals_observation() );
+
+					$upgrade_row                = $cases[1]['row'];
+					$GLOBALS['current_user']    = (object) array( 'ID' => $upgrade_row['ID'] );
+					$before_upgrade_hit_count   = count( $set_current_user_hits );
+					$upgraded                   = \wp_get_current_user();
+					self::check( $result, 'wp_get_current_user.upgrades_legacy_object_global_from_cache', $upgraded instanceof \WP_User && (int) $upgrade_row['ID'] === $upgraded->ID && $upgrade_row['user_login'] === $upgraded->user_login && count( $set_current_user_hits ) === $before_upgrade_hit_count + 1, $cases[1], self::current_user_expectation( $upgrade_row ), self::current_user_observation( $upgraded ) );
+
+					$determine_row      = $cases[2]['row'];
+					$determine_events   = array();
+					$determine_filter   = static function ( $user_id ) use ( &$determine_events, $determine_row ): int {
+						$determine_events[] = $user_id;
+
+						return (int) $determine_row['ID'];
+					};
+					$before_determine   = \has_filter( 'determine_current_user', $determine_filter );
+					$GLOBALS['current_user'] = null;
+					$_COOKIE            = array();
+					\add_filter( 'determine_current_user', $determine_filter, 999, 1 );
+					try {
+						$determined = \wp_get_current_user();
+					} finally {
+						\remove_filter( 'determine_current_user', $determine_filter, 999 );
+					}
+
+					$after_determine = \has_filter( 'determine_current_user', $determine_filter );
+
+					self::check( $result, 'wp_get_current_user.determine_current_user_filter_sets_generated_user', $determined instanceof \WP_User && (int) $determine_row['ID'] === $determined->ID && $determine_row['user_login'] === $determined->user_login && array( false ) === $determine_events, $cases[2], self::current_user_expectation( $determine_row ), array( 'user' => self::current_user_observation( $determined ), 'events' => $determine_events ) );
+					self::check( $result, 'wp_get_current_user.determine_current_user_filter_restored', $before_determine === $after_determine, 'determine_current_user', $before_determine, $after_determine );
+
+					\remove_action( 'set_current_user', $set_current_user_hook, 999 );
+					self::check( $result, 'wp_set_current_user.action_filter_restored', $before_action_filter === \has_filter( 'set_current_user', $set_current_user_hook ), 'set_current_user', $before_action_filter, \has_filter( 'set_current_user', $set_current_user_hook ) );
+				} catch ( \Throwable $e ) {
+					$thrown = $e;
+				} finally {
+					foreach ( $users as $user ) {
+						\clean_user_cache( $user );
+					}
+					self::restore_current_user_globals( $user_global_snapshot );
+					self::restore_hook_globals( $hook_global_snapshot );
+				}
+
+				if ( null !== $thrown ) {
+					throw $thrown;
+				}
+			}
+		);
 	}
 
 	private static function exercise_user_existence_helpers( array &$result, array &$rng ): void {
@@ -1257,6 +1361,83 @@ final class IdentitySurface {
 		return $user;
 	}
 
+	private static function current_user_expectation( array $row ): array {
+		return array(
+			'ID'         => (int) $row['ID'],
+			'user_login' => $row['user_login'],
+			'user_email' => $row['user_email'],
+			'loggedIn'   => 0 !== (int) $row['ID'],
+		);
+	}
+
+	private static function current_user_observation( $user ): array {
+		return array(
+			'class'      => is_object( $user ) ? get_class( $user ) : gettype( $user ),
+			'ID'         => $user instanceof \WP_User ? $user->ID : null,
+			'user_login' => $user instanceof \WP_User ? $user->user_login : null,
+			'user_email' => $user instanceof \WP_User ? $user->user_email : null,
+			'currentId'  => function_exists( 'get_current_user_id' ) ? \get_current_user_id() : null,
+			'loggedIn'   => function_exists( 'is_user_logged_in' ) ? \is_user_logged_in() : null,
+		);
+	}
+
+	private static function current_user_legacy_globals_match_row( array $row ): bool {
+		return (int) $row['ID'] === ( $GLOBALS['user_ID'] ?? null )
+			&& $row['user_login'] === ( $GLOBALS['user_login'] ?? null )
+			&& $row['user_email'] === ( $GLOBALS['user_email'] ?? null )
+			&& $row['user_url'] === ( $GLOBALS['user_url'] ?? null )
+			&& $row['display_name'] === ( $GLOBALS['user_identity'] ?? null )
+			&& isset( $GLOBALS['userdata'] )
+			&& $GLOBALS['userdata'] instanceof \WP_User
+			&& (int) $row['ID'] === $GLOBALS['userdata']->ID;
+	}
+
+	private static function current_user_legacy_globals_are_logged_out(): bool {
+		return 0 === ( $GLOBALS['user_ID'] ?? null )
+			&& 0 === ( $GLOBALS['user_level'] ?? null )
+			&& null === ( $GLOBALS['userdata'] ?? null )
+			&& '' === ( $GLOBALS['user_login'] ?? null )
+			&& '' === ( $GLOBALS['user_email'] ?? null )
+			&& '' === ( $GLOBALS['user_url'] ?? null )
+			&& '' === ( $GLOBALS['user_identity'] ?? null );
+	}
+
+	private static function current_user_legacy_globals_expectation( array $row ): array {
+		return array(
+			'user_ID'       => (int) $row['ID'],
+			'user_level'    => 0,
+			'user_login'    => $row['user_login'],
+			'user_email'    => $row['user_email'],
+			'user_url'      => $row['user_url'],
+			'user_identity' => $row['display_name'],
+			'userdataId'    => (int) $row['ID'],
+		);
+	}
+
+	private static function current_user_logged_out_globals_expectation(): array {
+		return array(
+			'user_ID'       => 0,
+			'user_level'    => 0,
+			'user_login'    => '',
+			'user_email'    => '',
+			'user_url'      => '',
+			'user_identity' => '',
+			'userdata'      => null,
+		);
+	}
+
+	private static function current_user_legacy_globals_observation(): array {
+		return array(
+			'user_ID'       => $GLOBALS['user_ID'] ?? null,
+			'user_level'    => $GLOBALS['user_level'] ?? null,
+			'user_login'    => $GLOBALS['user_login'] ?? null,
+			'user_email'    => $GLOBALS['user_email'] ?? null,
+			'user_url'      => $GLOBALS['user_url'] ?? null,
+			'user_identity' => $GLOBALS['user_identity'] ?? null,
+			'userdata'      => isset( $GLOBALS['userdata'] ) && $GLOBALS['userdata'] instanceof \WP_User ? self::current_user_observation( $GLOBALS['userdata'] ) : ( $GLOBALS['userdata'] ?? null ),
+		);
+	}
+
 	private static function wp_user_raw_fields_match( \WP_User $user, array $row, array $fields ): bool {
 		foreach ( $fields as $field ) {
 			if ( ! $user->has_prop( $field ) ) {
@@ -1901,7 +2082,7 @@ final class IdentitySurface {
 
 		if ( $include_filters ) {
 			$snapshot['wp_filter_exists'] = array_key_exists( 'wp_filter', $GLOBALS );
-			$snapshot['wp_filter']        = $GLOBALS['wp_filter'] ?? null;
+			$snapshot['wp_filter']        = self::clone_wp_filter_registry( $GLOBALS['wp_filter'] ?? null );
 		}
 
 		return $snapshot;
@@ -1930,6 +2111,85 @@ final class IdentitySurface {
 				unset( $GLOBALS['wp_filter'] );
 			}
 		}
+	}
+
+	private static function current_user_global_names(): array {
+		return array(
+			'current_user',
+			'userdata',
+			'user_login',
+			'user_level',
+			'user_ID',
+			'user_email',
+			'user_url',
+			'user_identity',
+		);
+	}
+
+	private static function snapshot_current_user_globals(): array {
+		$snapshot = array();
+		foreach ( self::current_user_global_names() as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => $GLOBALS[ $name ] ?? null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_current_user_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function snapshot_hook_globals(): array {
+		return array(
+			'wp_filter'         => array(
+				'exists' => array_key_exists( 'wp_filter', $GLOBALS ),
+				'value'  => self::clone_wp_filter_registry( $GLOBALS['wp_filter'] ?? null ),
+			),
+			'wp_actions'        => array(
+				'exists' => array_key_exists( 'wp_actions', $GLOBALS ),
+				'value'  => $GLOBALS['wp_actions'] ?? null,
+			),
+			'wp_filters'        => array(
+				'exists' => array_key_exists( 'wp_filters', $GLOBALS ),
+				'value'  => $GLOBALS['wp_filters'] ?? null,
+			),
+			'wp_current_filter' => array(
+				'exists' => array_key_exists( 'wp_current_filter', $GLOBALS ),
+				'value'  => $GLOBALS['wp_current_filter'] ?? null,
+			),
+		);
+	}
+
+	private static function restore_hook_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				$GLOBALS[ $name ] = 'wp_filter' === $name ? self::clone_wp_filter_registry( $entry['value'] ) : $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function clone_wp_filter_registry( $registry ) {
+		if ( ! is_array( $registry ) ) {
+			return $registry;
+		}
+
+		$clone = array();
+		foreach ( $registry as $hook_name => $hook ) {
+			$clone[ $hook_name ] = is_object( $hook ) ? clone $hook : $hook;
+		}
+
+		return $clone;
 	}
 
 	private static function check( array &$result, string $invariant, bool $ok, $input = null, $expected = null, $actual = null ): void {
