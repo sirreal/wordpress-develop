@@ -28,6 +28,7 @@ final class RegistriesSurface {
 				self::check_connector_registry_lifecycle( $ctx->fork( 'connectors-lifecycle' ) ),
 				self::check_connector_helpers( $ctx->fork( 'connectors-helpers' ) ),
 				self::check_icons_registry( $ctx->fork( 'icons-registry' ) ),
+				self::check_block_metadata_registry( $ctx->fork( 'block-metadata-registry' ) ),
 				self::check_speculation_helper_allowlists( $ctx->fork( 'speculation-helpers' ) ),
 				self::check_speculation_rule_matrix( $ctx->fork( 'speculation-rules' ) ),
 			);
@@ -48,6 +49,7 @@ final class RegistriesSurface {
 
 		foreach (
 			array(
+				'WP_Block_Metadata_Registry',
 				'WP_Connector_Registry',
 				'WP_Icons_Registry',
 				'WP_Speculation_Rules',
@@ -70,6 +72,7 @@ final class RegistriesSurface {
 				'wp_get_connectors',
 				'wp_is_connector_registered',
 				'wp_kses',
+				'wp_normalize_path',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -625,6 +628,125 @@ final class RegistriesSurface {
 		);
 	}
 
+	private static function check_block_metadata_registry( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures   = array();
+		$temp_files = array();
+		$token      = self::slug( $ctx, 'block-meta' );
+
+		$collection_path = WP_PLUGIN_DIR . '/cf-' . $token . '/blocks';
+		$normalized_path = rtrim( \wp_normalize_path( $collection_path ), '/' );
+		$sibling_path    = $normalized_path . '-sibling';
+		$block_names     = array(
+			self::slug( $ctx->fork( 'alpha' ), 'alpha' ),
+			self::slug( $ctx->fork( 'beta' ), 'beta' ),
+			self::slug( $ctx->fork( 'gamma' ), 'gamma' ),
+		);
+		$manifest_data   = array();
+
+		foreach ( $block_names as $index => $block_name ) {
+			$manifest_data[ $block_name ] = array(
+				'name'       => 'fuzz/' . $block_name,
+				'title'      => 'Fuzz Block ' . $index . ' ' . substr( hash( 'crc32b', $block_name ), 0, 6 ),
+				'category'   => $ctx->choice( array( 'widgets', 'text', 'media', 'design' ) ),
+				'attributes' => array(
+					'token' => array(
+						'type'    => 'string',
+						'default' => substr( hash( 'sha256', $block_name . ':' . $ctx->seed() ), 0, 16 ),
+					),
+				),
+			);
+		}
+
+		try {
+			$manifest_path = self::write_temp_manifest( $ctx, $manifest_data );
+			$temp_files[]  = $manifest_path;
+
+			self::set_static_property( 'WP_Block_Metadata_Registry', 'collections', array() );
+			self::set_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection', null );
+
+			$registered              = \WP_Block_Metadata_Registry::register_collection( $collection_path . '/', $manifest_path );
+			$after_register          = self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' );
+			$metadata_was_lazy       = isset( $after_register[ $normalized_path ] )
+				&& null === $after_register[ $normalized_path ]['metadata'];
+			$expected_metadata_files = array_map(
+				static fn( string $block_name ): string => $normalized_path . '/' . $block_name . '/block.json',
+				$block_names
+			);
+			$metadata_files          = \WP_Block_Metadata_Registry::get_collection_block_metadata_files( $collection_path . '/' );
+			$first_metadata          = \WP_Block_Metadata_Registry::get_metadata( $collection_path . '/' . $block_names[0] );
+			$second_metadata         = \WP_Block_Metadata_Registry::get_metadata( $collection_path . '/' . $block_names[1] . '/block.json' );
+			$missing_metadata        = \WP_Block_Metadata_Registry::get_metadata( $collection_path . '/missing-' . $token );
+			$sibling_metadata        = \WP_Block_Metadata_Registry::get_metadata( $sibling_path . '/' . $block_names[0] );
+			$sibling_has_metadata    = \WP_Block_Metadata_Registry::has_metadata( $sibling_path . '/' . $block_names[1] . '/block.json' );
+			$last_matched            = self::get_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection' );
+
+			self::collect_failure(
+				$failures,
+				true === $registered
+					&& $metadata_was_lazy
+					&& $expected_metadata_files === $metadata_files
+					&& $manifest_data[ $block_names[0] ] === $first_metadata
+					&& $manifest_data[ $block_names[1] ] === $second_metadata
+					&& null === $missing_metadata
+					&& null === $sibling_metadata
+					&& false === $sibling_has_metadata
+					&& $normalized_path === $last_matched,
+				'block metadata collection lookups normalize paths, cache metadata, and reject sibling path prefixes',
+				array(
+					'path'                  => $normalized_path,
+					'siblingPath'           => $sibling_path,
+					'blockNames'            => $block_names,
+					'metadataWasLazy'       => $metadata_was_lazy,
+					'expectedMetadataFiles' => $expected_metadata_files,
+					'metadataFiles'         => $metadata_files,
+					'firstMetadata'         => $first_metadata,
+					'secondMetadata'        => $second_metadata,
+					'siblingMetadata'       => $sibling_metadata,
+					'siblingHasMetadata'    => $sibling_has_metadata,
+					'lastMatched'           => $last_matched,
+				)
+			);
+
+			$before_invalid   = self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' );
+			$invalid_root     = self::capture_doing_it_wrong(
+				static fn() => \WP_Block_Metadata_Registry::register_collection( WP_PLUGIN_DIR, $manifest_path )
+			);
+			$missing_manifest = self::capture_doing_it_wrong(
+				static fn() => \WP_Block_Metadata_Registry::register_collection( $collection_path . '-missing', $manifest_path . '-missing' )
+			);
+
+			self::collect_failure(
+				$failures,
+				false === $invalid_root['value']
+					&& false === $missing_manifest['value']
+					&& self::has_warning( $invalid_root )
+					&& self::has_warning( $missing_manifest )
+					&& $before_invalid === self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' ),
+				'invalid block metadata collections warn and do not mutate the registry',
+				array(
+					'invalidRoot'     => $invalid_root,
+					'missingManifest' => $missing_manifest,
+				)
+			);
+		} finally {
+			foreach ( $temp_files as $temp_file ) {
+				if ( is_string( $temp_file ) && file_exists( $temp_file ) ) {
+					unlink( $temp_file );
+				}
+			}
+		}
+
+		return self::result(
+			$ctx,
+			'registries.block-metadata.collection-path-boundaries-and-cache',
+			array() === $failures,
+			array(
+				'blocks'   => count( $block_names ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_speculation_helper_allowlists( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -940,6 +1062,16 @@ final class RegistriesSurface {
 		return $path;
 	}
 
+	private static function write_temp_manifest( \ComponentFuzz\FuzzContext $ctx, array $metadata ): string {
+		$path = tempnam( sys_get_temp_dir(), 'cf-reg-blocks-' . substr( dechex( $ctx->seed() ), -4 ) . '-' );
+		if ( false === $path ) {
+			throw new \RuntimeException( 'Could not create temporary block metadata manifest.' );
+		}
+
+		file_put_contents( $path, '<?php return ' . var_export( $metadata, true ) . ';' );
+		return $path;
+	}
+
 	private static function icons_all_match_search( array $icons, string $search ): bool {
 		foreach ( $icons as $icon ) {
 			if ( ! is_array( $icon ) || ! isset( $icon['name'] ) || false === stripos( (string) $icon['name'], $search ) ) {
@@ -1027,6 +1159,11 @@ final class RegistriesSurface {
 			'registeredIcons'      => $icons_registry instanceof \WP_Icons_Registry
 				? self::get_object_property( $icons_registry, 'registered_icons' )
 				: null,
+			'blockMetadata'        => array(
+				'collections'            => self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' ),
+				'lastMatchedCollection'  => self::get_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection' ),
+				'defaultCollectionRoots' => self::get_static_property( 'WP_Block_Metadata_Registry', 'default_collection_roots' ),
+			),
 			'wpdbOptions'          => isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
 				? $GLOBALS['wpdb']->component_fuzz_get_options()
 				: null,
@@ -1049,6 +1186,10 @@ final class RegistriesSurface {
 		} else {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', null );
 		}
+
+		self::set_static_property( 'WP_Block_Metadata_Registry', 'collections', $snapshot['blockMetadata']['collections'] );
+		self::set_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection', $snapshot['blockMetadata']['lastMatchedCollection'] );
+		self::set_static_property( 'WP_Block_Metadata_Registry', 'default_collection_roots', $snapshot['blockMetadata']['defaultCollectionRoots'] );
 
 		if ( null !== $snapshot['wpdbOptions'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['wpdbOptions'] );

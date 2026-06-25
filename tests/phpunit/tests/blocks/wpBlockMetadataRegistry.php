@@ -43,6 +43,25 @@ class Tests_Blocks_WpBlockMetadataRegistry extends WP_UnitTestCase {
 		$this->assertNull( $retrieved_metadata );
 	}
 
+	public function test_get_metadata_ignores_sibling_paths_with_matching_prefix() {
+		$path          = WP_PLUGIN_DIR . '/prefix-plugin/blocks';
+		$sibling_path  = WP_PLUGIN_DIR . '/prefix-plugin/blocks-extra';
+		$manifest_data = array(
+			'test-block' => array(
+				'name'  => 'test-block',
+				'title' => 'Test Block',
+			),
+		);
+
+		file_put_contents( $this->temp_manifest_file, '<?php return ' . var_export( $manifest_data, true ) . ';' );
+
+		WP_Block_Metadata_Registry::register_collection( $path, $this->temp_manifest_file );
+
+		$this->assertSame( $manifest_data['test-block'], WP_Block_Metadata_Registry::get_metadata( $path . '/test-block' ) );
+		$this->assertNull( WP_Block_Metadata_Registry::get_metadata( $sibling_path . '/test-block' ) );
+		$this->assertFalse( WP_Block_Metadata_Registry::has_metadata( $sibling_path . '/test-block/block.json' ) );
+	}
+
 	public function test_has_metadata() {
 			$path          = WP_PLUGIN_DIR . '/another/test/path';
 			$manifest_data = array(

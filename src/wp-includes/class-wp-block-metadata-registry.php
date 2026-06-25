@@ -238,18 +238,31 @@ class WP_Block_Metadata_Registry {
 
 		// Check the last matched collection first, since block registration usually happens in batches per plugin or theme.
 		$path = rtrim( $file_or_folder, '/' );
-		if ( self::$last_matched_collection && str_starts_with( $path, self::$last_matched_collection ) ) {
+		if ( self::$last_matched_collection && self::is_in_collection( $path, self::$last_matched_collection ) ) {
 			return self::$last_matched_collection;
 		}
 
 		$collection_paths = array_keys( self::$collections );
 		foreach ( $collection_paths as $collection_path ) {
-			if ( str_starts_with( $path, $collection_path ) ) {
+			if ( self::is_in_collection( $path, $collection_path ) ) {
 				self::$last_matched_collection = $collection_path;
 				return $collection_path;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Checks whether a file or folder path belongs to a collection path.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $path            Normalized file or folder path.
+	 * @param string $collection_path Normalized collection path.
+	 * @return bool True if the path is the collection path or a child path, false otherwise.
+	 */
+	private static function is_in_collection( $path, $collection_path ) {
+		return $path === $collection_path || str_starts_with( $path, $collection_path . '/' );
 	}
 
 	/**
