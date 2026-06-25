@@ -72,10 +72,12 @@ database, network requests, or a configured site.
   filters, script modules, and printed tag escaping.
 - `script-loader-runtime`: server-side script-loader runtime helpers, including
   default script/style/module registrations, handle normalization, duplicate
-  update behavior, inline/localized data placement, tag/settings escaping,
-  script translations, emoji settings/styles, style inlining, block-loader
-  guards, strategy/fetchpriority/module interactions, generated classic-script
-  module import-map/modulepreload graphs, and print side-effect boundaries.
+  update behavior, inline/localized data placement, concatenated
+  load-scripts.php/load-styles.php URL construction and exclusion boundaries,
+  tag/settings escaping, script translations, emoji settings/styles, style
+  inlining, block-loader guards, strategy/fetchpriority/module interactions,
+  generated classic-script module import-map/modulepreload graphs, and print
+  side-effect boundaries.
 - `appearance-media`: no-upload appearance media helper coverage, including
   custom background POST normalization, custom header default processing and
   selection, frontend header/background helpers, custom header video markup and
@@ -590,11 +592,13 @@ and block-editor compatibility shims that would inspect installed plugins. The
 runtime helpers in `script-loader.php`, `functions.wp-scripts.php`, and
 `functions.wp-styles.php` without browser execution. It directly calls the emoji
 detection printer instead of the public static-once wrapper so iterations remain
-isolated, and it records an explicit skip for just-in-time autosave localization
-when the stripped no-DB bootstrap does not define `AUTOSAVE_INTERVAL`. It avoids
-admin/page dispatch, process exits, live HTTP, live DB-backed block queries, and
-browser module execution while still asserting restored globals, filters, and
-output buffers. The
+isolated, directly asserts concatenated loader query chunks and separate
+strategy/external asset tags under forced concat globals, and it records an
+explicit skip for just-in-time autosave localization when the stripped no-DB
+bootstrap does not define `AUTOSAVE_INTERVAL`. It avoids admin/page dispatch,
+process exits, live HTTP, live DB-backed block queries, and browser module
+execution while still asserting restored globals, filters, and output buffers.
+The
 Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` request
 dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
 or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list

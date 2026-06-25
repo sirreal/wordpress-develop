@@ -37,6 +37,7 @@ final class ScriptLoaderRuntimeSurface {
 			$rows[] = self::check_default_registrations( $ctx, $case );
 			$rows[] = self::check_handle_normalization_duplicate_updates( $ctx, $case );
 			$rows[] = self::check_dependency_order_print_boundaries( $ctx, $case );
+			$rows[] = self::check_concat_runtime_boundaries( $ctx, $case );
 			$rows[] = self::check_inline_localization_data( $ctx, $case );
 			$rows[] = self::check_tag_builders_dataset_helpers( $ctx, $case );
 			$rows[] = self::check_script_translations( $ctx, $case );
@@ -393,6 +394,196 @@ final class ScriptLoaderRuntimeSurface {
 				'headCall'         => self::describe_call( $head_print ),
 				'footerCall'       => self::describe_call( $footer_print ),
 				'styleCall'        => self::describe_call( $style_print ),
+			)
+		);
+	}
+
+	private static function check_concat_runtime_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_scripts_global();
+		self::reset_styles_global();
+
+		$script_ctx          = $ctx->fork( 'concat-runtime-scripts' );
+		$script_total        = $script_ctx->int( 5, 8 );
+		$script_concat_count = $script_total - 2;
+		$script_default_dir  = '/wp-admin/js/component-fuzz/';
+		$script_prefix       = $case['prefix'] . '-concat-script';
+		$script_base_url     = rtrim( self::BASE_URL, '/' );
+		$script_objects      = array();
+		$script_handles      = array();
+
+		$scripts                  = \wp_scripts();
+		$scripts->base_url        = $script_base_url;
+		$scripts->default_dirs    = array( $script_default_dir );
+		$scripts->do_concat       = true;
+		$GLOBALS['concatenate_scripts'] = true;
+		$GLOBALS['compress_scripts']    = false;
+
+		for ( $i = 0; $i < $script_concat_count; $i++ ) {
+			$handle           = "{$script_prefix}-{$i}";
+			$script_handles[] = $handle;
+			$script_objects[] = 'cfConcatScript' . str_replace( '-', '_', $case['token'] ) . "_{$i}";
+			$deps             = 0 === $i ? array() : array( $script_handles[ $i - 1 ] );
+
+			\wp_register_script( $handle, "{$script_default_dir}{$handle}.js", $deps, null );
+			\wp_localize_script(
+				$handle,
+				$script_objects[ $i ],
+				array(
+					'handle' => $handle,
+					'token'  => $case['token'],
+				)
+			);
+		}
+
+		$script_external = "{$script_prefix}-external";
+		$script_delayed  = "{$script_prefix}-delayed";
+		$strategy        = $script_ctx->choice( array( 'defer', 'async' ) );
+
+		\wp_register_script( $script_external, 'https://cdn.example.test/component-fuzz/' . rawurlencode( $script_external ) . '.js', array(), null );
+		\wp_register_script( $script_delayed, "{$script_default_dir}{$script_delayed}.js", array(), null, array( 'strategy' => $strategy ) );
+		$scripts->enqueue( array( $script_handles[ $script_concat_count - 1 ], $script_external, $script_delayed ) );
+
+		$script_print  = self::capture_output(
+			static function (): void {
+				\wp_print_scripts();
+				\_print_scripts();
+			}
+		);
+		$script_output = $script_print['output'];
+		$script_loader = self::loader_query_details( $script_output, 'script', 'src', '/wp-admin/load-scripts.php' );
+		$script_done   = $scripts->done;
+
+		$script_external_tag = self::tag_by_id( $script_output, "{$script_external}-js" );
+		$script_delayed_tag  = self::tag_by_id( $script_output, "{$script_delayed}-js" );
+		$script_expected_list = implode( ',', $script_handles );
+		$script_source_url    = rawurlencode( 'js-inline-concat-' . $script_expected_list );
+		$script_loader_pos    = strpos( $script_output, 'load-scripts.php' );
+		$script_source_pos    = strpos( $script_output, $script_source_url );
+
+		$style_ctx          = $ctx->fork( 'concat-runtime-styles' );
+		$style_total        = $style_ctx->int( 4, 8 );
+		$style_concat_count = $style_total - 2;
+		$style_default_dir  = '/wp-admin/css/component-fuzz/';
+		$style_prefix       = $case['prefix'] . '-concat-style';
+		$style_handles      = array();
+		$style_dir          = $style_ctx->choice( array( 'ltr', 'rtl' ) );
+
+		$styles                 = \wp_styles();
+		$styles->base_url       = rtrim( self::BASE_URL, '/' );
+		$styles->default_dirs   = array( $style_default_dir );
+		$styles->do_concat      = true;
+		$styles->text_direction = $style_dir;
+		$GLOBALS['concatenate_scripts'] = true;
+		$GLOBALS['compress_css']        = false;
+
+		for ( $i = 0; $i < $style_concat_count; $i++ ) {
+			$handle          = "{$style_prefix}-{$i}";
+			$style_handles[] = $handle;
+			$deps            = 0 === $i ? array() : array( $style_handles[ $i - 1 ] );
+
+			\wp_register_style( $handle, "{$style_default_dir}{$handle}.css", $deps, null );
+			\wp_add_inline_style( $handle, ".{$handle} { --cf-token: \"" . \esc_attr( $case['token'] ) . "\"; }" );
+		}
+
+		$style_external = "{$style_prefix}-external";
+		$style_alt      = "{$style_prefix}-alt";
+
+		\wp_register_style( $style_external, 'https://cdn.example.test/component-fuzz/' . rawurlencode( $style_external ) . '.css', array(), null, 'screen' );
+		\wp_add_inline_style( $style_external, ".{$style_external} { color: #123456; }" );
+		\wp_register_style( $style_alt, "{$style_default_dir}{$style_alt}.css", array(), null, 'print' );
+		\wp_style_add_data( $style_alt, 'alt', true );
+		\wp_style_add_data( $style_alt, 'title', 'Component fuzz concat alt' );
+		$styles->enqueue( array( $style_handles[ $style_concat_count - 1 ], $style_external, $style_alt ) );
+
+		$style_print  = self::capture_output(
+			static function (): void {
+				\wp_print_styles();
+				\_print_styles();
+			}
+		);
+		$style_output = $style_print['output'];
+		$style_loader = self::loader_query_details( $style_output, 'link', 'href', '/wp-admin/load-styles.php' );
+		$style_done   = $styles->done;
+
+		$style_external_tag        = self::link_tag_by_id( $style_output, "{$style_external}-css" );
+		$style_external_inline_tag = self::opening_tag_by_id( $style_output, 'style', "{$style_external}-inline-css" );
+		$style_alt_tag             = self::link_tag_by_id( $style_output, "{$style_alt}-css" );
+		$style_expected_list       = implode( ',', $style_handles );
+		$style_source_url          = rawurlencode( 'css-inline-concat-' . $style_expected_list );
+		$style_loader_pos          = strpos( $style_output, 'load-styles.php' );
+		$style_source_pos          = strpos( $style_output, $style_source_url );
+
+		self::reset_scripts_global();
+		self::reset_styles_global();
+		$local_cleanup = false === ( $GLOBALS['concatenate_scripts'] ?? null )
+			&& false === ( $GLOBALS['compress_scripts'] ?? null )
+			&& false === ( $GLOBALS['compress_css'] ?? null )
+			&& false === \wp_scripts()->do_concat
+			&& false === \wp_styles()->do_concat;
+
+		$script_checks = array(
+			'print-call'              => ! $script_print['threw'],
+			'loader-present'          => array() !== $script_loader,
+			'loader-path'             => '/wp-admin/load-scripts.php' === substr( (string) ( $script_loader['path'] ?? '' ), -strlen( '/wp-admin/load-scripts.php' ) ),
+			'loader-query'            => '0' === ( $script_loader['query']['c'] ?? null ) && self::DEFAULT_VERSION === ( $script_loader['query']['ver'] ?? null ),
+			'loader-chunks'           => str_split( $script_expected_list, 128 ) === $script_loader['chunks'],
+			'loader-handles'          => $script_handles === $script_loader['handles'],
+			'excluded-handles'        => array() === array_values( array_intersect( $script_loader['handles'], array( $script_external, $script_delayed ) ) ),
+			'separate-tags'           => is_string( $script_external_tag ) && is_string( $script_delayed_tag ),
+			'external-tag'            => is_string( $script_external_tag ) && str_contains( $script_external_tag, 'https://cdn.example.test/component-fuzz/' ),
+			'strategy-tag'            => is_string( $script_delayed_tag ) && str_contains( $script_delayed_tag, " {$strategy}" ) && str_contains( $script_delayed_tag, 'data-wp-strategy="' . $strategy . '"' ),
+			'concat-inline-sourceurl' => false !== $script_source_pos && false !== $script_loader_pos && $script_source_pos < $script_loader_pos,
+			'output-order'            => self::contains_in_order( $script_output, array_merge( $script_objects, array( 'load-scripts.php', "{$script_external}-js", "{$script_delayed}-js" ) ) ),
+			'done-order'              => array_merge( $script_handles, array( $script_external, $script_delayed ) ) === $script_done,
+		);
+		$script_ok     = ! in_array( false, $script_checks, true );
+
+		$style_checks = array(
+			'print-call'              => ! $style_print['threw'],
+			'loader-present'          => array() !== $style_loader,
+			'loader-path'             => '/wp-admin/load-styles.php' === substr( (string) ( $style_loader['path'] ?? '' ), -strlen( '/wp-admin/load-styles.php' ) ),
+			'loader-query'            => '0' === ( $style_loader['query']['c'] ?? null ) && $style_dir === ( $style_loader['query']['dir'] ?? null ) && self::DEFAULT_VERSION === ( $style_loader['query']['ver'] ?? null ),
+			'loader-chunks'           => str_split( $style_expected_list, 128 ) === $style_loader['chunks'],
+			'loader-handles'          => $style_handles === $style_loader['handles'],
+			'excluded-handles'        => array() === array_values( array_intersect( $style_loader['handles'], array( $style_external, $style_alt ) ) ),
+			'separate-tags'           => is_string( $style_external_tag ) && is_string( $style_external_inline_tag ) && is_string( $style_alt_tag ),
+			'external-media'          => is_string( $style_external_tag ) && array( 'screen' ) === self::attribute_values( $style_external_tag, 'media' ),
+			'alt-tag'                 => is_string( $style_alt_tag ) && array( 'alternate stylesheet' ) === self::attribute_values( $style_alt_tag, 'rel' ) && array( 'print' ) === self::attribute_values( $style_alt_tag, 'media' ),
+			'concat-inline-sourceurl' => false !== $style_source_pos && false !== $style_loader_pos && $style_loader_pos < $style_source_pos,
+			'output-order'            => self::contains_in_order( $style_output, array_merge( $style_handles, array( $style_source_url, "{$style_external}-css", "{$style_external}-inline-css", "{$style_alt}-css" ) ) ),
+			'done-order'              => array_merge( $style_handles, array( $style_external, $style_alt ) ) === $style_done,
+		);
+		$style_ok     = ! in_array( false, $style_checks, true );
+
+		return $ctx->result(
+			'script-loader-runtime.concat-runtime-boundaries',
+			$script_ok && $style_ok && $local_cleanup,
+			self::case_data( $case ) + array(
+				'scriptHandles'      => $script_handles,
+				'scriptExternal'     => $script_external,
+				'scriptDelayed'      => $script_delayed,
+				'scriptStrategy'     => $strategy,
+				'scriptDone'         => $script_done,
+				'scriptLoader'       => self::preview_array( $script_loader ),
+				'scriptExternalTag'  => self::preview( (string) $script_external_tag ),
+				'scriptDelayedTag'   => self::preview( (string) $script_delayed_tag ),
+				'scriptPreview'      => self::preview( $script_output ),
+				'scriptCall'         => self::describe_call( $script_print ),
+				'scriptChecks'       => $script_checks,
+				'scriptFailedChecks' => array_keys( array_filter( $script_checks, static fn( bool $ok ): bool => ! $ok ) ),
+				'styleHandles'       => $style_handles,
+				'styleExternal'      => $style_external,
+				'styleAlt'           => $style_alt,
+				'styleDirection'     => $style_dir,
+				'styleDone'          => $style_done,
+				'styleLoader'        => self::preview_array( $style_loader ),
+				'styleExternalTag'   => self::preview( (string) $style_external_tag ),
+				'styleAltTag'        => self::preview( (string) $style_alt_tag ),
+				'stylePreview'       => self::preview( $style_output ),
+				'styleCall'          => self::describe_call( $style_print ),
+				'styleChecks'        => $style_checks,
+				'styleFailedChecks'  => array_keys( array_filter( $style_checks, static fn( bool $ok ): bool => ! $ok ) ),
+				'localCleanup'       => $local_cleanup,
 			)
 		);
 	}
@@ -1563,6 +1754,16 @@ final class ScriptLoaderRuntimeSurface {
 		return null;
 	}
 
+	private static function opening_tag_by_id( string $html, string $tag_name, string $id ): ?string {
+		foreach ( self::opening_tags( $html, $tag_name ) as $tag ) {
+			if ( self::attribute_position( $tag, 'id', $id ) !== false ) {
+				return $tag;
+			}
+		}
+
+		return null;
+	}
+
 	private static function element_ids( string $html, string $tag_name ): array {
 		$ids = array();
 		foreach ( self::opening_tags( $html, $tag_name ) as $tag ) {
@@ -1580,6 +1781,49 @@ final class ScriptLoaderRuntimeSurface {
 		}
 
 		return $matches[0];
+	}
+
+	private static function loader_query_details( string $html, string $tag_name, string $attribute, string $path_suffix ): array {
+		foreach ( self::opening_tags( $html, $tag_name ) as $tag ) {
+			foreach ( self::attribute_values( $tag, $attribute ) as $url ) {
+				$parts = parse_url( $url );
+				if ( ! is_array( $parts ) || ! str_ends_with( (string) ( $parts['path'] ?? '' ), $path_suffix ) ) {
+					continue;
+				}
+
+				$query = array();
+				parse_str( (string) ( $parts['query'] ?? '' ), $query );
+
+				$chunks = array();
+				$load   = $query['load'] ?? array();
+				if ( is_array( $load ) ) {
+					uksort(
+						$load,
+						static function ( string $left, string $right ): int {
+							return (int) str_replace( 'chunk_', '', $left ) <=> (int) str_replace( 'chunk_', '', $right );
+						}
+					);
+					$chunks = array_values( array_map( 'strval', $load ) );
+				}
+
+				$handles = array_values(
+					array_filter(
+						explode( ',', implode( '', $chunks ) ),
+						static fn( string $handle ): bool => '' !== $handle
+					)
+				);
+
+				return array(
+					'url'     => $url,
+					'path'    => (string) ( $parts['path'] ?? '' ),
+					'query'   => $query,
+					'chunks'  => $chunks,
+					'handles' => $handles,
+				);
+			}
+		}
+
+		return array();
 	}
 
 	private static function attribute_values( string $html, string $attribute ): array {
