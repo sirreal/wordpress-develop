@@ -282,8 +282,9 @@ database, network requests, or a configured site.
   restoration.
 - `l10n`: translation fallbacks, escaped translation helpers, plural/nooped
   selection, textdomain load/unload state, translation path guards, locale and
-  user-locale switching, script translation helpers, malformed string
-  boundaries, localized numbers/dates, and filter/action restoration.
+  user-locale switching including generated stack/action payload matrices,
+  script translation helpers, malformed string boundaries, localized
+  numbers/dates, and filter/action restoration.
 - `translations`: no-DB POMO and translation-file parsing/loading coverage,
   including generated `Translation_Entry` lookup and merge behavior,
   `NOOP_Translations` identity contracts, MO/PO/PHP translation file round

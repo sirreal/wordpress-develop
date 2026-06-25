@@ -9,6 +9,7 @@ final class L10nSurface {
 	private const GENERATED_MALFORMED_CASES = 8;
 	private const GENERATED_NUMBER_CASES = 8;
 	private const GENERATED_DATE_CASES   = 8;
+	private const GENERATED_LOCALE_STACK_CASES = 5;
 	private const MAX_TEXT_BYTES         = 160;
 	private const MAX_DOMAIN_BYTES       = 64;
 	private const MAX_CONTEXT_BYTES      = 80;
@@ -87,6 +88,7 @@ final class L10nSurface {
 				self::check_wp_date( $ctx->fork( 'dates' ) ),
 				self::check_locale_behaviour( $ctx->fork( 'locale' ) ),
 				self::check_locale_switching( $ctx->fork( 'locale-switching' ) ),
+				self::check_generated_locale_switch_stack( $ctx->fork( 'locale-switch-stack' ) ),
 				self::check_textdomain_loading( $ctx->fork( 'textdomain-loading' ) ),
 				self::check_translation_path_guards( $ctx->fork( 'path-guards' ) ),
 				self::check_script_translation_helpers( $ctx->fork( 'script-translations' ) ),
@@ -985,6 +987,164 @@ final class L10nSurface {
 				'events'       => array_slice( $events, 0, self::FAILURE_LIMIT ),
 				'eventCount'   => count( $events ),
 				'failures'     => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
+	private static function check_generated_locale_switch_stack( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing_functions = self::missing_functions(
+			array(
+				'determine_locale',
+				'get_locale',
+				'is_locale_switched',
+				'add_action',
+				'remove_action',
+				'has_filter',
+			)
+		);
+		$missing_classes   = self::missing_classes(
+			array(
+				'WP_Locale',
+				'WP_Locale_Switcher',
+				'WP_Translation_Controller',
+			)
+		);
+
+		if ( $missing_functions || $missing_classes ) {
+			return $ctx->skip(
+				'l10n.locale-switch-generated-stack-matrix',
+				'Locale switcher stack APIs are unavailable.',
+				array(
+					'missingFunctions' => $missing_functions,
+					'missingClasses'   => $missing_classes,
+				)
+			);
+		}
+
+		$snapshot = self::snapshot_global_state();
+		$failures = array();
+		$events   = array();
+
+		$base_locale = 'en_US';
+		$locales     = self::generated_locale_stack( $ctx );
+		$user_ids    = array();
+		foreach ( $locales as $index => $locale ) {
+			$user_ids[] = 0 === $index % 2 ? false : 3000 + $ctx->fork( 'user-' . $index )->int( 1, 6000 );
+		}
+
+		$switch_action = static function ( $locale, $action_user_id ) use ( &$events ): void {
+			$events[] = array(
+				'action' => 'switch_locale',
+				'locale' => $locale,
+				'userId' => $action_user_id,
+			);
+		};
+		$restore_action = static function ( $locale, $previous_locale ) use ( &$events ): void {
+			$events[] = array(
+				'action'   => 'restore_previous_locale',
+				'locale'   => $locale,
+				'previous' => $previous_locale,
+			);
+		};
+		$change_action = static function ( $locale ) use ( &$events ): void {
+			$events[] = array(
+				'action' => 'change_locale',
+				'locale' => $locale,
+			);
+		};
+
+		try {
+			self::clear_filters(
+				array(
+					'locale',
+					'determine_locale',
+					'pre_determine_locale',
+					'switch_locale',
+					'restore_previous_locale',
+					'change_locale',
+				)
+			);
+
+			$GLOBALS['locale']        = $base_locale;
+			$GLOBALS['l10n']          = array();
+			$GLOBALS['l10n_unloaded'] = array();
+
+			$switcher = self::locale_switcher( $base_locale, array_merge( array( $base_locale ), $locales ) );
+			$switcher->init();
+			$GLOBALS['wp_locale_switcher'] = $switcher;
+			\WP_Translation_Controller::get_instance()->set_locale( $base_locale );
+
+			\add_action( 'switch_locale', $switch_action, 10, 2 );
+			\add_action( 'restore_previous_locale', $restore_action, 10, 2 );
+			\add_action( 'change_locale', $change_action, 10, 1 );
+
+			$expected_stack = array();
+			foreach ( $locales as $index => $locale ) {
+				$user_id          = $user_ids[ $index ];
+				$switched         = $switcher->switch_to_locale( $locale, $user_id );
+				$expected_stack[] = array(
+					'locale' => $locale,
+					'userId' => $user_id,
+				);
+
+				self::collect_expectation( $failures, "switch {$index} accepts generated locale", true, $switched );
+				self::assert_locale_switch_state( $failures, $switcher, $locale, $user_id, true, "after switch {$index}" );
+			}
+
+			$duplicate_rejected = $switcher->switch_to_locale( end( $locales ), 999999 );
+			self::collect_expectation( $failures, 'duplicate current generated locale is rejected without pushing stack', false, $duplicate_rejected );
+			self::assert_locale_switch_state( $failures, $switcher, end( $locales ), end( $user_ids ), true, 'after duplicate rejection' );
+
+			$restored = array();
+			for ( $index = count( $locales ) - 1; $index >= 0; --$index ) {
+				$expected_stack_after = array_slice( $expected_stack, 0, $index );
+				$expected_locale      = array() === $expected_stack_after ? $base_locale : $expected_stack_after[ count( $expected_stack_after ) - 1 ]['locale'];
+				$expected_user_id     = array() === $expected_stack_after ? false : $expected_stack_after[ count( $expected_stack_after ) - 1 ]['userId'];
+				$actual_restore       = $switcher->restore_previous_locale();
+				$restored[]           = $actual_restore;
+
+				self::collect_expectation( $failures, "restore {$index} returns previous generated locale", $expected_locale, $actual_restore );
+				self::assert_locale_switch_state(
+					$failures,
+					$switcher,
+					$expected_locale,
+					$expected_user_id,
+					$base_locale !== $expected_locale,
+					"after restore {$index}"
+				);
+			}
+
+			$empty_restore = $switcher->restore_previous_locale();
+			\remove_action( 'switch_locale', $switch_action, 10 );
+			\remove_action( 'restore_previous_locale', $restore_action, 10 );
+			\remove_action( 'change_locale', $change_action, 10 );
+
+			self::collect_expectation( $failures, 'empty generated stack restore returns false', false, $empty_restore );
+			self::collect_expectation( $failures, 'switch action removed after generated stack check', false, \has_filter( 'switch_locale', $switch_action ) );
+			self::collect_expectation( $failures, 'restore action removed after generated stack check', false, \has_filter( 'restore_previous_locale', $restore_action ) );
+			self::collect_expectation( $failures, 'change action removed after generated stack check', false, \has_filter( 'change_locale', $change_action ) );
+			self::collect_expectation(
+				$failures,
+				'generated switch event sequence matches locale/user stack and restore order',
+				self::expected_locale_switch_events( $base_locale, $expected_stack ),
+				$events
+			);
+		} catch ( \Throwable $e ) {
+			return self::throwable_row( $ctx, 'l10n.locale-switch-generated-stack-matrix', $e );
+		} finally {
+			self::restore_global_state( $snapshot );
+		}
+
+		return $ctx->result(
+			'l10n.locale-switch-generated-stack-matrix',
+			array() === $failures,
+			array(
+				'baseLocale' => $base_locale,
+				'locales'    => $locales,
+				'userIds'    => $user_ids,
+				'restored'   => $restored ?? array(),
+				'events'     => array_slice( $events, 0, self::FAILURE_LIMIT * 3 ),
+				'failures'   => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
 		);
 	}
@@ -2080,6 +2240,72 @@ final class L10nSurface {
 		return $switcher;
 	}
 
+	private static function generated_locale_stack( \ComponentFuzz\FuzzContext $ctx ): array {
+		$fallbacks = array( 'es_ES', 'de_DE', 'fr_FR', 'it_IT', 'pt_BR', 'nl_NL', 'ja_JP' );
+		$locales   = array();
+
+		for ( $i = 0; $i < self::GENERATED_LOCALE_STACK_CASES; ++$i ) {
+			$locale = 0 === $i % 2 ? self::generated_locale( $ctx->fork( 'generated-' . $i ) ) : $fallbacks[ $i % count( $fallbacks ) ];
+			if ( 'en_US' === $locale || in_array( $locale, $locales, true ) ) {
+				$locale = $fallbacks[ ( $i + 2 ) % count( $fallbacks ) ];
+			}
+			while ( 'en_US' === $locale || in_array( $locale, $locales, true ) ) {
+				$locale .= '_' . count( $locales );
+			}
+			$locales[] = $locale;
+		}
+
+		return $locales;
+	}
+
+	private static function assert_locale_switch_state( array &$failures, \WP_Locale_Switcher $switcher, string $expected_locale, $expected_user_id, bool $expected_switched, string $label ): void {
+		$controller_locale = \WP_Translation_Controller::get_instance()->get_locale();
+		$expectations      = array(
+			"{$label}:get_locale" => array( $expected_locale, \get_locale() ),
+			"{$label}:determine_locale" => array( $expected_locale, \determine_locale() ),
+			"{$label}:is_locale_switched" => array( $expected_switched, \is_locale_switched() ),
+			"{$label}:switcher_locale" => array( $expected_switched ? $expected_locale : false, $switcher->get_switched_locale() ),
+			"{$label}:switcher_user" => array( $expected_switched ? $expected_user_id : false, $switcher->get_switched_user_id() ),
+			"{$label}:translation_controller_locale" => array( $expected_locale, $controller_locale ),
+		);
+
+		foreach ( $expectations as $api => $pair ) {
+			self::collect_expectation( $failures, $api, $pair[0], $pair[1] );
+		}
+	}
+
+	private static function expected_locale_switch_events( string $base_locale, array $stack ): array {
+		$events = array();
+
+		foreach ( $stack as $entry ) {
+			$events[] = array(
+				'action' => 'change_locale',
+				'locale' => $entry['locale'],
+			);
+			$events[] = array(
+				'action' => 'switch_locale',
+				'locale' => $entry['locale'],
+				'userId' => $entry['userId'],
+			);
+		}
+
+		for ( $index = count( $stack ) - 1; $index >= 0; --$index ) {
+			$remaining = array_slice( $stack, 0, $index );
+			$locale    = array() === $remaining ? $base_locale : $remaining[ count( $remaining ) - 1 ]['locale'];
+			$events[]  = array(
+				'action' => 'change_locale',
+				'locale' => $locale,
+			);
+			$events[]  = array(
+				'action'   => 'restore_previous_locale',
+				'locale'   => $locale,
+				'previous' => $stack[ $index ]['locale'],
+			);
+		}
+
+		return $events;
+	}
+
 	private static function fake_wp_user( int $user_id, string $locale ): \WP_User {
 		$reflection = new \ReflectionClass( 'WP_User' );
 		$user       = $reflection->newInstanceWithoutConstructor();
@@ -2221,6 +2447,18 @@ final class L10nSurface {
 		$failures[] = array(
 			'api'      => $api,
 			'case'     => self::case_summary( $case ),
+			'expected' => self::describe_value( $expected ),
+			'actual'   => self::describe_value( $actual ),
+		);
+	}
+
+	private static function collect_expectation( array &$failures, string $api, $expected, $actual ): void {
+		if ( $expected === $actual || count( $failures ) >= self::FAILURE_LIMIT ) {
+			return;
+		}
+
+		$failures[] = array(
+			'api'      => $api,
 			'expected' => self::describe_value( $expected ),
 			'actual'   => self::describe_value( $actual ),
 		);
