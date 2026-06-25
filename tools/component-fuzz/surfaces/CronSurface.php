@@ -31,6 +31,7 @@ final class CronSurface {
 			$rows = array_merge( $rows, self::check_next_scheduled_filter( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_duplicate_single_event_windows( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_clear_and_reschedule_filters( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_scheduled_event_lookup_order( $ctx, $store ) );
 
 			foreach ( self::cases( $ctx ) as $case_index => $case ) {
 				$store = array( 'version' => 2 );
@@ -512,6 +513,83 @@ final class CronSurface {
 		);
 
 		return $rows;
+	}
+
+	private static function check_scheduled_event_lookup_order( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$store = array( 'version' => 2 );
+		$base  = time() + 2 * \HOUR_IN_SECONDS + $ctx->int( 0, 600 );
+		$hook  = 'component_fuzz_lookup_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$args  = array(
+			'group' => 'lookup',
+			'token' => self::safe_hook_fragment( $ctx->text( 0, 12 ) ),
+		);
+		$other_args = array_merge( $args, array( 'variant' => 1 ) );
+
+		$late_time  = $base + 2 * \HOUR_IN_SECONDS;
+		$early_time = $base;
+		$mid_time   = $base + \HOUR_IN_SECONDS;
+
+		$schedule_late  = self::call( static fn() => \wp_schedule_event( $late_time, 'daily', $hook, $args, true ) );
+		$schedule_early = self::call( static fn() => \wp_schedule_event( $early_time, 'hourly', $hook, $args, true ) );
+		$schedule_other = self::call( static fn() => \wp_schedule_event( $mid_time, 'twicedaily', $hook, $other_args, true ) );
+
+		$next_event   = self::call( static fn() => \wp_get_scheduled_event( $hook, $args ) );
+		$late_event   = self::call( static fn() => \wp_get_scheduled_event( $hook, $args, $late_time ) );
+		$wrong_args   = self::call( static fn() => \wp_get_scheduled_event( $hook, array_reverse( $args ), $early_time ) );
+		$wrong_time   = self::call( static fn() => \wp_get_scheduled_event( $hook, $args, $mid_time ) );
+		$unschedule   = self::call( static fn() => \wp_unschedule_event( $early_time, $hook, $args, true ) );
+		$after_next   = self::call( static fn() => \wp_get_scheduled_event( $hook, $args ) );
+		$other_event  = self::call( static fn() => \wp_get_scheduled_event( $hook, $other_args ) );
+		$cron_array   = self::call( static fn() => \_get_cron_array() );
+		$timestamps   = $cron_array['threw'] ? array() : self::event_timestamps( $cron_array['value'], $hook, $args );
+		$next_value   = $next_event['value'] ?? null;
+		$late_value   = $late_event['value'] ?? null;
+		$after_value  = $after_next['value'] ?? null;
+		$other_value  = $other_event['value'] ?? null;
+
+		return array(
+			$ctx->result(
+				'cron.scheduled-event-lookup-earliest-and-exactness',
+				! $schedule_late['threw']
+					&& true === $schedule_late['value']
+					&& ! $schedule_early['threw']
+					&& true === $schedule_early['value']
+					&& ! $schedule_other['threw']
+					&& true === $schedule_other['value']
+					&& $next_value instanceof \stdClass
+					&& $early_time === $next_value->timestamp
+					&& 'hourly' === $next_value->schedule
+					&& \HOUR_IN_SECONDS === $next_value->interval
+					&& $late_value instanceof \stdClass
+					&& $late_time === $late_value->timestamp
+					&& 'daily' === $late_value->schedule
+					&& ! $wrong_args['threw']
+					&& false === $wrong_args['value']
+					&& ! $wrong_time['threw']
+					&& false === $wrong_time['value']
+					&& ! $unschedule['threw']
+					&& true === $unschedule['value']
+					&& $after_value instanceof \stdClass
+					&& $late_time === $after_value->timestamp
+					&& $other_value instanceof \stdClass
+					&& $mid_time === $other_value->timestamp
+					&& array( $late_time ) === $timestamps,
+				array(
+					'scheduleLate'  => self::describe_call( $schedule_late ),
+					'scheduleEarly' => self::describe_call( $schedule_early ),
+					'scheduleOther' => self::describe_call( $schedule_other ),
+					'next'          => self::describe_call( $next_event ),
+					'late'          => self::describe_call( $late_event ),
+					'wrongArgs'     => self::describe_call( $wrong_args ),
+					'wrongTime'     => self::describe_call( $wrong_time ),
+					'unschedule'    => self::describe_call( $unschedule ),
+					'afterNext'     => self::describe_call( $after_next ),
+					'otherEvent'    => self::describe_call( $other_event ),
+					'timestamps'    => self::describe_value( $timestamps ),
+					'store'         => self::describe_cron_store( $store ),
+				)
+			),
+		);
 	}
 
 	private static function check_case( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, array &$store ): array {

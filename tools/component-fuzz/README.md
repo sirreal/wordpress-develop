@@ -145,7 +145,8 @@ database, network requests, or a configured site.
   spam/unspam restoration, and WP_Error failure paths without process exits.
 - `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
   and next-scheduled filter contracts, duplicate single-event windows,
-  ready-job partitioning, unscheduling and rescheduling contracts.
+  scheduled-event lookup ordering/exactness, ready-job partitioning,
+  unscheduling and rescheduling contracts.
 - `default-widgets`: classic default widget subclass coverage, including
   constructor/options contracts, saved-instance callback lifecycles, update
   sanitization, form escaping, filtered rendering for text/custom
