@@ -123,10 +123,11 @@ database, network requests, or a configured site.
   whole-post `sanitize_post()` object/array consistency and filter locality,
   `get_extended()` more-tag splitting, query variables, `WP_Date_Query`, and
   title/class/key sanitizers.
-- `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
-  lifecycles, including insert/update/read/delete round trips, duplicate and
-  invalid-input errors, sanitizer agreement, monotonic IDs, cheap hook ordering,
-  cache/count refresh behavior, and per-iteration state restoration.
+- `content-lifecycle`: in-memory wpdb-backed post, post-meta, term, user, and
+  comment CRUD lifecycles, including insert/update/read/delete round trips,
+  duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
+  metadata cache invalidation, cheap hook ordering, cache/count refresh
+  behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
   helpers, comment cookies, and permalink pagination contracts for
@@ -416,10 +417,10 @@ database, network requests, or a configured site.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, collection-param sanitization,
-  permission gates, REST links, invalid IDs/types, sanitized content/meta
-  fields, safe create/update/delete error paths, upload-no-data paths, and
-  deterministic state restoration without live uploads, remote requests, or a
-  live database.
+  permission gates, route registration/dispatch, REST links, invalid IDs/types,
+  sanitized content/meta fields, safe create/update/delete error paths,
+  upload-no-data paths, and deterministic state restoration without live
+  uploads, remote requests, or a live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
   global styles, template/template-part response shaping, template revisions
   and autosaves, navigation fallback, direct block-template ZIP export
@@ -617,7 +618,9 @@ paths and avoids install, update, remote lookup, and destructive REST delete
 methods.
 The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
-metadata lifecycle APIs; it is not a general SQL engine. Rich post-to-term
+metadata lifecycle APIs; it is not a general SQL engine. Post metadata coverage
+asserts add/read/update/delete, unique keys, serialized array values, cache
+invalidation, metadata hooks, and post-delete cleanup. Rich post-to-term
 relationship behavior is covered by `taxonomy-relationships`, still limited to
 the recognized term relationship SQL shapes emitted by the targeted core APIs.
 The `bookmark-links` surface extends that stub only for the `wp_links` shapes
